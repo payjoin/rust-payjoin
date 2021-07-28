@@ -1,0 +1,13 @@
+[package]
+name = "payjoin-client"
+version = "0.1.0"
+authors = ["Martin Habovstiak <martin.habovstiak@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bip78 = { path = "../bip78", features = ["sender"] }
+bitcoincore-rpc = "0.13.0"
+reqwest = { version = "0.11.4", features = ["blocking"] }
+base64 = "0.13.0"

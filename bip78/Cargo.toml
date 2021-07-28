@@ -1,0 +1,23 @@
+[package]
+name = "bip78"
+version = "0.1.0-preview"
+authors = ["Martin Habovstiak <martin.habovstiak@gmail.com>"]
+description = "Library implementing PayJoin (BIP78) protocol."
+homepage = "https://github.com/Kixunil/payjoin"
+repository = "https://github.com/Kixunil/payjoin"
+readme = "README.md"
+keywords = ["bip78", "payjoin", "bitcoin"]
+categories = ["api-bindings", "cryptography::cryptocurrencies", "network-programming"]
+license = "MITNFA"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+sender = []
+receiver = ["rand"]
+
+[dependencies]
+bitcoin = "0.26.2"
+base64 = "0.13.0"
+rand = { version = "0.8.4", optional = true }

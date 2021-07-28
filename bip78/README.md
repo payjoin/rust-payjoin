@@ -9,44 +9,47 @@ Please at least review the code that verifies there's no overpayment and let me 
 
 ### Development status
 
-- [ ] Sender
-      - [x] Basic logic
-      - [x] Most checks implemented
-      - [x] Documentation
-      - [x] Unit test with official test vectors passes
-      - [ ] Many unit tests
-      - [x] Fee contribution support
-      - [x] Example client using bitcoind
-      - [x] Tested and works with BTCPayServer
-      - [ ] Tested and works with WasabiWallet
-      - [ ] Minimum fee rate enforcement
-      - [ ] Independent review
-      - [ ] Independent testing
-- [ ] Receiver
-      - [ ] Basic logic
-      - [ ] Most checks implemented
-      - [ ] Documentation
-      - [ ] Unit test with official test vectors passes
-      - [ ] Many unit tests
-      - [ ] Fee contribution support
-      - [ ] Example client using bitcoind
-      - [ ] Tested and works with BTCPayServer (short of [BTCPayServer bug](https://github.com/btcpayserver/btcpayserver/issues/2677))
-      - [ ] Tested and works with WasabiWallet
-      - [ ] Tested and works with Blue Wallet
-      - [ ] Minimum fee rate enforcement
-      - [ ] Discount support
-      - [ ] Independent review
-      - [ ] Independent testing
-- [ ] Code quality
-      - [x] Idiomatic Rust code
-      - [x] Newtypes
-      - [x] Panic-free error handling
-      - [x] No `unsafe` code or well-tested/analyzed/proven/... `unsafe` code
-      - [ ] Warning-free
-      - [ ] CI
-      - [ ] Integration tests
-      - [ ] Fuzzing
-      - [ ] Coverage measurement
+#### Sender
+
+- [x] Basic logic
+- [x] Most checks implemented
+- [x] Documentation
+- [x] Unit test with official test vectors passes
+- [ ] Many unit tests
+- [x] Fee contribution support
+- [x] Example client using bitcoind
+- [x] Tested and works with BTCPayServer
+- [ ] Tested and works with WasabiWallet
+- [ ] Minimum fee rate enforcement
+- [ ] Independent review
+- [ ] Independent testing
+
+#### Receiver
+- [ ] Basic logic
+- [ ] Most checks implemented
+- [ ] Documentation
+- [ ] Unit test with official test vectors passes
+- [ ] Many unit tests
+- [ ] Fee contribution support
+- [ ] Example client using bitcoind
+- [ ] Tested and works with BTCPayServer (short of [BTCPayServer bug](https://github.com/btcpayserver/btcpayserver/issues/2677))
+- [ ] Tested and works with WasabiWallet
+- [ ] Tested and works with Blue Wallet
+- [ ] Minimum fee rate enforcement
+- [ ] Discount support
+- [ ] Independent review
+- [ ] Independent testing
+
+#### Code quality
+- [x] Idiomatic Rust code
+- [x] Newtypes
+- [x] Panic-free error handling
+- [x] No `unsafe` code or well-tested/analyzed/proven/... `unsafe` code
+- [ ] Warning-free
+- [ ] CI
+- [ ] Integration tests
+- [ ] Fuzzing
+- [ ] Coverage measurement
 
 ### Description
 

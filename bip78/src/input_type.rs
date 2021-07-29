@@ -2,6 +2,7 @@ use std::fmt;
 use std::convert::{TryFrom, TryInto};
 use bitcoin::blockdata::script::{Script, Instructions, Instruction};
 use bitcoin::blockdata::transaction::TxOut;
+use bitcoin::util::psbt::Input as PsbtInput;
 
 /// Takes the script out of script_sig assuming script_sig signs p2sh script
 fn unpack_p2sh(script_sig: &Script) -> Option<Script> {
@@ -21,7 +22,7 @@ pub(crate) enum InputType {
 }
 
 impl InputType {
-    pub(crate) fn from_spent_input(txout: &TxOut, txin: &bitcoin::util::psbt::Input) -> Result<Self, InputTypeError> {
+    pub(crate) fn from_spent_input(txout: &TxOut, txin: &PsbtInput) -> Result<Self, InputTypeError> {
         if txout.script_pubkey.is_p2pk() {
             Ok(InputType::P2Pk)
         } else if txout.script_pubkey.is_p2pkh() {

@@ -54,7 +54,7 @@ impl<'a> TryFrom<&'a str> for Uri<'a> {
         }
 
         let prefix = "bitcoin:";
-        if !s.chars().zip(prefix.chars()).all(|(left, right)| left.to_ascii_lowercase() == right) {
+        if !s.chars().zip(prefix.chars()).all(|(left, right)| left.to_ascii_lowercase() == right) || s.len() < 8 {
             return Err(InternalBip21Error::BadSchema(s.into()).into())
         }
         let uri_without_prefix = &s[prefix.len()..];
@@ -139,5 +139,19 @@ impl From<InternalBip21Error> for ParseUriError {
 impl From<InternalPjParseError> for ParseUriError {
     fn from(value: InternalPjParseError) -> Self {
         PjParseError(value).into()
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::Uri;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_short() {
+        assert!(Uri::from_str("").is_err());
+        assert!(Uri::from_str("bitcoin").is_err());
+        assert!(Uri::from_str("bitcoin:").is_err());
     }
 }

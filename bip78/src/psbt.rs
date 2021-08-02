@@ -1,34 +1,105 @@
 //! Utilities to make work with PSBTs easier
 
-use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
+use bitcoin::util::psbt::PartiallySignedTransaction as UncheckedPsbt;
 use bitcoin::{TxIn, TxOut};
-use bitcoin::util::psbt;
-use std::convert::TryInto;
+use bitcoin::util::{psbt, bip32};
+use std::convert::{TryFrom, TryInto};
+use std::collections::BTreeMap;
 use std::fmt;
 
-pub(crate) trait PsbtExt {
-    type Iterator;
-
-    fn input_pairs(self) -> Self::Iterator;
-    fn validate_input_utxos(self, treat_missing_as_error: bool) -> Result<(), PsbtInputsError>;
+#[derive(Debug)]
+pub(crate) enum InconsistentPsbt {
+    UnequalInputCounts { tx_ins: usize, psbt_ins: usize, },
+    UnequalOutputCounts { tx_outs: usize, psbt_outs: usize, },
 }
 
-impl<'a> PsbtExt for &'a Psbt {
-    type Iterator = std::iter::Map<std::iter::Zip<std::slice::Iter<'a, TxIn>, std::slice::Iter<'a, psbt::Input>>, fn((&'a TxIn, &'a psbt::Input)) -> InputPair<'a>>;
+impl fmt::Display for InconsistentPsbt {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            InconsistentPsbt::UnequalInputCounts { tx_ins, psbt_ins, } => write!(f, "The number of PSBT inputs ({}) doesn't equal to the number of unsigned transaction inputs ({})", psbt_ins, tx_ins),
+            InconsistentPsbt::UnequalOutputCounts { tx_outs, psbt_outs, } => write!(f, "The number of PSBT outputs ({}) doesn't equal to the number of unsigned transaction outputs ({})", psbt_outs, tx_outs),
+        }
+    }
+}
 
-    fn input_pairs(self) -> Self::Iterator {
-        assert_eq!(self.global.unsigned_tx.input.len(), self.inputs.len());
-        self.global.unsigned_tx.input.iter().zip(&self.inputs).map(|(txin, psbtin)| InputPair { txin, psbtin })
+impl std::error::Error for InconsistentPsbt {}
+
+/// Our Psbt type guarantees that length of psbt input matches that of unsigned_tx inputs and same
+/// thing for outputs.
+#[derive(Debug)]
+pub(crate) struct Psbt(UncheckedPsbt);
+
+impl Psbt {
+    pub fn inputs_mut(&mut self) -> &mut [psbt::Input] {
+        &mut self.0.inputs
     }
 
-    fn validate_input_utxos(self, treat_missing_as_error: bool) -> Result<(), PsbtInputsError> {
-        self
-            .input_pairs()
+    pub fn outputs_mut(&mut self) -> &mut [psbt::Output] {
+        &mut self.0.outputs
+    }
+
+    pub fn xpub_mut(&mut self) -> &mut BTreeMap<bip32::ExtendedPubKey, (bip32::Fingerprint, bip32::DerivationPath)> {
+        &mut self.0.global.xpub
+    }
+
+    pub fn proprietary_mut(&mut self) -> &mut BTreeMap<psbt::raw::ProprietaryKey, Vec<u8>> {
+        &mut self.0.global.proprietary
+    }
+
+    pub fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>> {
+        &mut self.0.global.unknown
+    }
+
+    pub fn input_pairs(&self) -> impl Iterator<Item=InputPair<'_>> + '_ {
+        self.global
+            .unsigned_tx
+            .input
+            .iter()
+            .zip(&self.inputs)
+            .map(|(txin, psbtin)| InputPair { txin, psbtin })
+    }
+
+    pub fn validate_input_utxos(&self, treat_missing_as_error: bool) -> Result<(), PsbtInputsError> {
+        self.input_pairs()
             .enumerate()
             .map(|(index, input)| input.validate_utxo(treat_missing_as_error).map_err(|error| PsbtInputsError { index, error, }))
             .collect()
     }
 }
+
+impl From<Psbt> for UncheckedPsbt {
+    fn from(value: Psbt) -> Self {
+        value.0
+    }
+}
+
+impl TryFrom<UncheckedPsbt> for Psbt {
+    type Error = InconsistentPsbt;
+
+    fn try_from(unchecked: UncheckedPsbt) -> Result<Self, Self::Error> {
+        let tx_ins = unchecked.global.unsigned_tx.input.len();
+        let psbt_ins = unchecked.inputs.len();
+        let tx_outs = unchecked.global.unsigned_tx.output.len();
+        let psbt_outs = unchecked.outputs.len();
+
+        if psbt_ins != tx_ins {
+            Err(InconsistentPsbt::UnequalInputCounts { tx_ins, psbt_ins, })
+        } else if psbt_outs != tx_outs {
+            Err(InconsistentPsbt::UnequalOutputCounts { tx_outs, psbt_outs, })
+        } else {
+            Ok(Psbt(unchecked))
+        }
+    }
+}
+
+impl std::ops::Deref for Psbt {
+    type Target = UncheckedPsbt;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 
 pub(crate) struct InputPair<'a> {
     pub txin: &'a TxIn,

@@ -2,6 +2,8 @@ use std::borrow::Cow;
 use std::convert::TryFrom;
 #[cfg(feature = "sender")]
 use crate::sender;
+#[cfg(feature = "sender")]
+use std::convert::TryInto;
 
 pub struct Uri<'a> {
     pub(crate) address: bitcoin::Address,
@@ -24,8 +26,12 @@ impl<'a> Uri<'a> {
     }
 
     #[cfg(feature = "sender")]
-    pub fn create_request(self, psbt: bitcoin::util::psbt::PartiallySignedTransaction, params: sender::Params) -> Result<(sender::Request, sender::Context), sender::CreateRequestError> {
-        sender::from_psbt_and_uri(psbt, self, params)
+    pub fn create_request(
+        self,
+        psbt: bitcoin::util::psbt::PartiallySignedTransaction,
+        params: sender::Params,
+    ) -> Result<(sender::Request, sender::Context), sender::CreateRequestError> {
+        sender::from_psbt_and_uri(psbt.try_into().map_err(sender::InternalCreateRequestError::InconsistentOriginalPsbt)?, self, params)
     }
 
     pub fn into_static(self) -> Uri<'static> {

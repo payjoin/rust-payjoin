@@ -344,19 +344,19 @@ fn clear_unneeded_fields(psbt: &mut Psbt) {
     }
 }
 
-fn check_fee_output_amount(output: &TxOut, amount: bitcoin::Amount, clamp_fee_contribution: bool) -> Result<bitcoin::Amount, InternalCreateRequestError> {
-    if output.value < amount.as_sat() {
+fn check_fee_output_amount(output: &TxOut, fee: bitcoin::Amount, clamp_fee_contribution: bool) -> Result<bitcoin::Amount, InternalCreateRequestError> {
+    if output.value < fee.as_sat() {
         if clamp_fee_contribution {
             Ok(bitcoin::Amount::from_sat(output.value))
         } else {
             Err(InternalCreateRequestError::FeeOutputValueLowerThanFeeContribution)
         }
     } else {
-        Ok(amount)
+        Ok(fee)
     }
 }
 
-fn find_change_index(psbt: &Psbt, payee: &Script, amount: bitcoin::Amount, clamp_fee_contribution: bool) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
+fn find_change_index(psbt: &Psbt, payee: &Script, fee: bitcoin::Amount, clamp_fee_contribution: bool) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
     match (psbt.global.unsigned_tx.output.len(), clamp_fee_contribution) {
         (0, _) => return Err(InternalCreateRequestError::NoOutputs),
         (1, false) if psbt.global.unsigned_tx.output[0].script_pubkey == *payee => return Err(InternalCreateRequestError::FeeOutputValueLowerThanFeeContribution),
@@ -371,23 +371,23 @@ fn find_change_index(psbt: &Psbt, payee: &Script, amount: bitcoin::Amount, clamp
         .find(|(_, output)| output.script_pubkey != *payee)
         .ok_or(InternalCreateRequestError::MultiplePayeeOutputs)?;
 
-    Ok(Some((check_fee_output_amount(output, amount, clamp_fee_contribution)?, index)))
+    Ok(Some((check_fee_output_amount(output, fee, clamp_fee_contribution)?, index)))
 }
 
-fn check_change_index(psbt: &Psbt, payee: &Script, amount: bitcoin::Amount, index: usize, clamp_fee_contribution: bool) -> Result<(bitcoin::Amount, usize), InternalCreateRequestError> {
+fn check_change_index(psbt: &Psbt, payee: &Script, fee: bitcoin::Amount, index: usize, clamp_fee_contribution: bool) -> Result<(bitcoin::Amount, usize), InternalCreateRequestError> {
     let output = psbt.global.unsigned_tx.output
         .get(index)
         .ok_or(InternalCreateRequestError::ChangeIndexOutOfBounds)?;
     if output.script_pubkey == *payee {
         return Err(InternalCreateRequestError::ChangeIndexPointsAtPayee);
     }
-    Ok((check_fee_output_amount(output, amount, clamp_fee_contribution)?, index))
+    Ok((check_fee_output_amount(output, fee, clamp_fee_contribution)?, index))
 }
 
 fn determine_fee_contribution(psbt: &Psbt, payee: &Script, params: &Params) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
     Ok(match params.fee_contribution {
-        Some((amount, None)) => find_change_index(psbt, payee, amount, params.clamp_fee_contribution)?,
-        Some((amount, Some(index))) => Some(check_change_index(psbt, payee, amount, index, params.clamp_fee_contribution)?),
+        Some((fee, None)) => find_change_index(psbt, payee, fee, params.clamp_fee_contribution)?,
+        Some((fee, Some(index))) => Some(check_change_index(psbt, payee, fee, index, params.clamp_fee_contribution)?),
         None => None,
     })
 }

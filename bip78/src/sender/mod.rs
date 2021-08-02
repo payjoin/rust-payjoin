@@ -14,12 +14,13 @@
 //! 8. Cancel the one-minute deadline and broadcast the resulting PSBT
 //!
 
-use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
+use bitcoin::util::psbt::PartiallySignedTransaction as UncheckedPsbt;
 use crate::input_type::InputType;
 use bitcoin::{TxOut, Script};
-use error::{InternalValidationError, InternalCreateRequestError};
+pub(crate) use error::{InternalValidationError, InternalCreateRequestError};
 use crate::weight::{Weight, ComputeWeight};
-use crate::psbt::PsbtExt;
+use crate::psbt::Psbt;
+use std::convert::TryInto;
 pub use error::{ValidationError, CreateRequestError};
 
 // See usize casts
@@ -140,7 +141,7 @@ macro_rules! ensure {
 fn load_psbt_from_base64(mut input: impl std::io::Read) -> Result<Psbt, bitcoin::consensus::encode::Error> {
     use bitcoin::consensus::Decodable;
     let reader = base64::read::DecoderReader::new(&mut input, base64::STANDARD);
-    Psbt::consensus_decode(reader)
+    Ok(UncheckedPsbt::consensus_decode(reader)?.try_into().expect("consensus_decode guarantees consistency"))
 }
 
 fn calculate_psbt_fee(psbt: &Psbt) -> bitcoin::Amount {
@@ -164,12 +165,12 @@ impl Context {
     /// Call this method with response from receiver to continue BIP78 flow. If the response is
     /// valid you will get appropriate PSBT that you should sign and broadcast.
     #[inline]
-    pub fn process_response(self, response: impl std::io::Read) -> Result<Psbt, ValidationError> {
+    pub fn process_response(self, response: impl std::io::Read) -> Result<UncheckedPsbt, ValidationError> {
         let proposal = load_psbt_from_base64(response)
             .map_err(InternalValidationError::Decode)?;
 
         // process in non-generic function
-        self.process_proposal(proposal).map_err(Into::into)
+        self.process_proposal(proposal).map(Into::into).map_err(Into::into)
     }
 
     fn process_proposal(self, proposal: Psbt) -> InternalResult<Psbt> {
@@ -329,15 +330,15 @@ fn check_single_payee(psbt: &Psbt, script_pubkey: &Script, amount: bitcoin::Amou
 }
 
 fn clear_unneeded_fields(psbt: &mut Psbt) {
-    psbt.global.xpub.clear();
-    psbt.global.proprietary.clear();
-    psbt.global.unknown.clear();
-    for input in &mut psbt.inputs {
+    psbt.xpub_mut().clear();
+    psbt.proprietary_mut().clear();
+    psbt.unknown_mut().clear();
+    for input in psbt.inputs_mut() {
         input.bip32_derivation.clear();
         input.proprietary.clear();
         input.unknown.clear();
     }
-    for output in &mut psbt.outputs {
+    for output in psbt.outputs_mut() {
         output.bip32_derivation.clear();
         output.proprietary.clear();
         output.unknown.clear();
@@ -471,13 +472,13 @@ mod tests {
         };
         let mut proposal = super::load_psbt_from_base64(&mut proposal).unwrap();
         eprintln!("proposal: {:#?}", proposal);
-        for output in &mut proposal.outputs {
+        for output in proposal.outputs_mut() {
             output.bip32_derivation.clear();
         }
-        for input in &mut proposal.inputs {
+        for input in proposal.inputs_mut() {
             input.bip32_derivation.clear();
         }
-        proposal.inputs[0].witness_utxo = None;
+        proposal.inputs_mut()[0].witness_utxo = None;
         ctx.process_proposal(proposal).unwrap();
     }
 }

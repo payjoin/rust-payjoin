@@ -134,6 +134,7 @@ pub struct CreateRequestError(InternalCreateRequestError);
 #[derive(Debug)]
 pub(crate) enum InternalCreateRequestError {
     InvalidOriginalInput(crate::psbt::PsbtInputsError),
+    InconsistentOriginalPsbt(crate::psbt::InconsistentPsbt),
     NoInputs,
     PayeeValueNotEqual,
     NoOutputs,
@@ -151,6 +152,7 @@ impl fmt::Display for CreateRequestError {
 
         match &self.0 {
             InvalidOriginalInput(_) => write!(f, "an input in the original transaction is invalid"),
+            InconsistentOriginalPsbt(_) => write!(f, "the original transaction is inconsistent"),
             NoInputs => write!(f, "the original transaction has no inputs"),
             PayeeValueNotEqual => write!(f, "the value in original transaction doesn't equal value requested in the payment link"),
             NoOutputs => write!(f, "the original transaction has no outputs"),
@@ -170,6 +172,7 @@ impl std::error::Error for CreateRequestError {
 
         match &self.0 {
             InvalidOriginalInput(error) => Some(error),
+            InconsistentOriginalPsbt(error) => Some(error),
             NoInputs => None,
             PayeeValueNotEqual => None,
             NoOutputs => None,

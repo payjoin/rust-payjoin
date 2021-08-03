@@ -1,0 +1,29 @@
+name: Test and Build
+
+on: [push, pull_request]
+
+jobs:
+
+  test:
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, nightly, 1.46.0]
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          override: true
+      - name: test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose --all --all-features --manifest-path bip78/Cargo.toml
+      - name: build payjoin example
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --manifest-path payjoin-client/Cargo.toml

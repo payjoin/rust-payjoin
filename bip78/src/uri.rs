@@ -5,6 +5,7 @@ use crate::sender;
 #[cfg(feature = "sender")]
 use std::convert::TryInto;
 
+#[derive(Debug, Eq, PartialEq)]
 pub struct Uri<'a> {
     pub(crate) address: bitcoin::Address,
     pub(crate) amount: bitcoin::Amount,
@@ -148,10 +149,13 @@ impl From<InternalPjParseError> for ParseUriError {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use crate::Uri;
+    use crate::bitcoin::util;
+    use crate::bitcoin::util::amount::ParseAmountError;
+    use crate::uri::{InternalBip21Error, InternalPjParseError, Bip21Error};
+    use crate::{ParseUriError, Uri};
+    use assert_matches::assert_matches;
     use std::str::FromStr;
 
     #[test]
@@ -160,4 +164,84 @@ mod tests {
         assert!(Uri::from_str("bitcoin").is_err());
         assert!(Uri::from_str("bitcoin:").is_err());
     }
+
+    #[ignore]
+    #[test]
+    fn test_todo_url_encoded() {
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao";
+        assert!(Uri::from_str(uri).is_err(), "pj url should be url encoded");
+    }
+
+    #[ignore]
+    #[test]
+    fn test_todo_valid_url() {
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=http://a";
+        assert!(Uri::from_str(uri).is_err(), "pj is not a valid url");
+    }
+
+    #[ignore]
+    #[test]
+    fn test_todo_missing_amount() {
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://testnet.demo.btcpayserver.org/BTC/pj";
+        assert!(Uri::from_str(uri).is_ok(), "missing amount should be ok");
+    }
+
+    #[ignore]
+    #[test]
+    fn test_todo_unencrypted() {
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=http://example.com";
+        assert!(Uri::from_str(uri).is_err(), "unencrypted connection");
+    }
+
+    #[test]
+    fn test_valid_uris() {
+        let https = "https://example.com";
+        let onion = "http://vjdpwgybvubne5hda6v4c5iaeeevhge6jvo3w2cl6eocbwwvwxp7b7qd.onion";
+
+        let base58 = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX";
+        let bech32_upper = "BITCOIN:TB1Q6D3A2W975YNY0ASUVD9A67NER4NKS58FF0Q8G4";
+        let bech32_lower = "bitcoin:tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
+
+        for address in [base58, bech32_upper, bech32_lower].iter() {
+            for pj in [https, onion].iter() {
+                // TODO add with and without amount
+                // TODO shuffle params
+                let uri = format!("{}?amount=1&pj={}", address, pj);
+                assert!(Uri::from_str(&uri).is_ok());
+            }
+        }
+    }
+
+    #[test]
+    fn test_errors() {
+        assert_matches!(
+            Uri::from_str("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX").unwrap_err(),
+            ParseUriError::PjNotPresent
+        );
+
+        let bitcoinz = "bitcoinz:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX";
+        let bitcoi = "bitcoi:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX";
+        for schema in [bitcoinz, bitcoi].iter() {
+            let uri = Uri::from_str(schema).unwrap_err();
+            let bad_schema = ParseUriError::from(InternalBip21Error::BadSchema(schema.to_string()));
+            assert_matches!(uri, bad_schema);
+        }
+
+        let uri = "bitcoin:175tWpb8K1S7NmH4Zx6rewF9WQrcZv245W?amount=20.3&label=Luke-Jr";
+        assert_matches!(Uri::from_str(uri).unwrap_err(), ParseUriError::Bip21(Bip21Error(InternalBip21Error::Address(_))));
+
+        let err = ParseUriError::from(InternalBip21Error::Amount(ParseAmountError::InvalidFormat));
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://example.com&amount=";
+        assert_matches!(Uri::from_str(uri).unwrap_err(), err);
+
+        let invalid_char = ParseAmountError::InvalidCharacter('B');
+        let err = ParseUriError::from(InternalBip21Error::Amount(invalid_char));
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://example.com&amount=1BTC";
+        assert_matches!(Uri::from_str(uri).unwrap_err(), err);
+
+        let err = ParseUriError::from(InternalBip21Error::Amount(ParseAmountError::TooBig));
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://example.com&amount=9999999999999999999";
+        assert_matches!(Uri::from_str(uri).unwrap_err(), err);
+    }
+
 }

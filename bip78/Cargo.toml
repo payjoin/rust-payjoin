@@ -21,3 +21,6 @@ receiver = ["rand"]
 bitcoin = "0.26.2"
 base64 = "0.13.0"
 rand = { version = "0.8.4", optional = true }
+
+[dev-dependencies]
+assert_matches = "1.5.0"

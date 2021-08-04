@@ -1,6 +1,5 @@
 use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::{Script, TxOut};
-use crate::psbt::PsbtExt;
 
 mod error;
 

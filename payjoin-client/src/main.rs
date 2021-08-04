@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use bip78::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
-use bitcoincore_rpc::RpcApi;
+use core_rpc as rpc;
+use core_rpc::RpcApi;
 
 fn main() {
     let mut args = std::env::args_os();
@@ -34,8 +35,8 @@ fn main() {
     let mut outputs = HashMap::with_capacity(1);
     outputs.insert(link.address().to_string(), link.amount().unwrap());
 
-    let client = bitcoincore_rpc::Client::new(format!("http://127.0.0.1:{}", port), bitcoincore_rpc::Auth::CookieFile(cookie_file.into())).unwrap();
-    let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
+    let client = rpc::Client::new(&format!("http://127.0.0.1:{}", port), rpc::Auth::CookieFile(cookie_file.into())).unwrap();
+    let options = rpc::json::WalletCreateFundedPsbtOptions {
         lock_unspent: Some(true),
         fee_rate: Some(bip78::bitcoin::Amount::from_sat(2000)),
         ..Default::default()

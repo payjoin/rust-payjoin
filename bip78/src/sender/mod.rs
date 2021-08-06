@@ -309,12 +309,14 @@ struct InputStats {
     total_weight: Weight,
 }
 
-fn check_single_payee(psbt: &Psbt, script_pubkey: &Script, amount: bitcoin::Amount) -> Result<(), InternalCreateRequestError> {
+fn check_single_payee(psbt: &Psbt, script_pubkey: &Script, amount: Option<bitcoin::Amount>) -> Result<(), InternalCreateRequestError> {
     let mut payee_found = false;
     for output in &psbt.global.unsigned_tx.output {
         if output.script_pubkey == *script_pubkey {
-            if output.value != amount.as_sat() {
-                return Err(InternalCreateRequestError::PayeeValueNotEqual)
+            if let Some(amount) = amount {
+                if output.value != amount.as_sat() {
+                    return Err(InternalCreateRequestError::PayeeValueNotEqual)
+                }
             }
             if payee_found {
                 return Err(InternalCreateRequestError::MultiplePayeeOutputs)

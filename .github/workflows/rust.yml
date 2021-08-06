@@ -4,12 +4,12 @@ on: [push, pull_request]
 
 jobs:
 
-  test:
+  test-lib:
     runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
       matrix:
-        rust: [stable, nightly, 1.46.0]
+        rust: [stable, nightly, 1.41.1]
 
     steps:
       - uses: actions/checkout@v2
@@ -21,7 +21,22 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --all --all-features --manifest-path bip78/Cargo.toml
+          args: --verbose --all-features --lib --manifest-path bip78/Cargo.toml
+
+  build-payjoin-client:
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [ stable, nightly, 1.46.0 ]
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          override: true
+      - run: cd payjoin-client
       - name: build payjoin example
         uses: actions-rs/cargo@v1
         with:

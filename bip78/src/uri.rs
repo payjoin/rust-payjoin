@@ -8,7 +8,7 @@ use std::convert::TryInto;
 #[derive(Debug, Eq, PartialEq)]
 pub struct Uri<'a> {
     pub(crate) address: bitcoin::Address,
-    pub(crate) amount: bitcoin::Amount,
+    pub(crate) amount: Option<bitcoin::Amount>,
     pub(crate) endpoint: Cow<'a, str>,
     pub(crate) disable_output_substitution: bool,
 }
@@ -18,7 +18,7 @@ impl<'a> Uri<'a> {
         &self.address
     }
 
-    pub fn amount(&self) -> bitcoin::Amount {
+    pub fn amount(&self) -> Option<bitcoin::Amount> {
         self.amount
     }
 
@@ -79,8 +79,7 @@ impl<'a> TryFrom<&'a str> for Uri<'a> {
 
         match (amount, endpoint, disable_pjos) {
             (_, None, None) => Err(ParseUriError::PjNotPresent),
-            (Some(amount), Some(endpoint), disable_pjos) => Ok(Uri { address, amount, endpoint: endpoint.into(), disable_output_substitution: disable_pjos.unwrap_or(false), }),
-            (None, Some(_), _) => Err(ParseUriError::PayJoin(PjParseError(InternalPjParseError::MissingAmount))),
+            (amount @ _, Some(endpoint), disable_pjos) => Ok(Uri { address, amount, endpoint: endpoint.into(), disable_output_substitution: disable_pjos.unwrap_or(false), }),
             (None, None, Some(_)) => Err(ParseUriError::PayJoin(PjParseError(InternalPjParseError::MissingAmountAndEndpoint))),
             (Some(_), None, Some(_)) => Err(ParseUriError::PayJoin(PjParseError(InternalPjParseError::MissingEndpoint))),
         }
@@ -179,9 +178,8 @@ mod tests {
         assert!(Uri::from_str(uri).is_err(), "pj is not a valid url");
     }
 
-    #[ignore]
     #[test]
-    fn test_todo_missing_amount() {
+    fn test_missing_amount() {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://testnet.demo.btcpayserver.org/BTC/pj";
         assert!(Uri::from_str(uri).is_ok(), "missing amount should be ok");
     }

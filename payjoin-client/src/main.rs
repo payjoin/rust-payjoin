@@ -25,10 +25,14 @@ fn main() {
         .into_string()
         .expect("bip21 is not UTF-8");
 
-
     let link = bip21.parse::<bip78::Uri>().unwrap();
+
+    if link.amount().is_none() {
+        panic!("please specify the amount in the Uri");
+    }
+
     let mut outputs = HashMap::with_capacity(1);
-    outputs.insert(link.address().to_string(), link.amount());
+    outputs.insert(link.address().to_string(), link.amount().unwrap());
 
     let client = bitcoincore_rpc::Client::new(format!("http://127.0.0.1:{}", port), bitcoincore_rpc::Auth::CookieFile(cookie_file.into())).unwrap();
     let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {

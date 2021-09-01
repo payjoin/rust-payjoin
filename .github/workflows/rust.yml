@@ -13,6 +13,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+      - uses: Swatinem/rust-cache@v1.2.0
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ matrix.rust }}
@@ -32,6 +33,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+      - uses: Swatinem/rust-cache@v1.2.0
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ matrix.rust }}

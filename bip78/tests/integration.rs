@@ -18,10 +18,8 @@ mod integration {
             .ok()
             .or_else(|| bitcoind::downloaded_exe_path())
             .expect("version feature or env BITCOIND_EXE is required for tests");
-        let conf = bitcoind::Conf {
-            view_stdout: log_enabled!(Level::Debug),
-            ..Default::default()
-        };
+        let mut conf = bitcoind::Conf::default();
+        conf.view_stdout = log_enabled!(Level::Debug);
         let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &conf).unwrap();
         let receiver = bitcoind.create_wallet("receiver").unwrap();
         let receiver_address = receiver.get_new_address(None, None).unwrap();

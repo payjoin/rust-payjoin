@@ -1,5 +1,7 @@
+#[derive(Debug)]
 pub struct RequestError(InternalRequestError);
 
+#[derive(Debug)]
 pub(crate) enum InternalRequestError {
     Decode(bitcoin::consensus::encode::Error),
     MissingHeader(&'static str),

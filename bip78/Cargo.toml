@@ -1,6 +1,6 @@
 [package]
 name = "bip78"
-version = "0.1.0-preview"
+version = "0.2.0-preview"
 authors = ["Martin Habovstiak <martin.habovstiak@gmail.com>"]
 description = "Library implementing PayJoin (BIP78) protocol."
 homepage = "https://github.com/Kixunil/payjoin"
@@ -18,12 +18,12 @@ sender = []
 receiver = ["rand"]
 
 [dependencies]
-bitcoin = "0.27.0"
+bitcoin = "0.27.1"
 base64 = "0.13.0"
 rand = { version = "0.8.4", optional = true }
 log = "0.4.14"
+bip21 = "0.1.1"
 
 [dev-dependencies]
-assert_matches = "1.5.0"
 bitcoind = { version = "0.18.0", features = ["0_21_1"] }
 env_logger = "0.9.0"

@@ -50,7 +50,7 @@ impl InputType {
         let next_instruction = instructions.next();
         match (witness_version, next_instruction) {
             (Instruction::PushBytes(bytes), _) if bytes.len() == 0 => Ok(InputType::SegWitV0 { ty: instructions.try_into()?, nested, }),
-            (Instruction::Op(bitcoin::blockdata::opcodes::all::OP_PUSHNUM_1), Some(Instruction::PushBytes(bytes))) if bytes.len() == 32 => Ok(InputType::Taproot),
+            (Instruction::Op(bitcoin::blockdata::opcodes::all::OP_PUSHNUM_1), Some(Ok(Instruction::PushBytes(bytes)))) if bytes.len() == 32 => Ok(InputType::Taproot),
             _ => Err(InputTypeError::UnknownInputType),
         }
     }

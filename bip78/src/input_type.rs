@@ -47,10 +47,15 @@ impl InputType {
     fn segwit_from_script(script: &Script, nested: bool) -> Result<Self, InputTypeError> {
         let mut instructions = script.instructions();
         let witness_version = instructions.next().ok_or(InputTypeError::UnknownInputType)?.map_err(|_| InputTypeError::UnknownInputType)?;
-        let next_instruction = instructions.next();
-        match (witness_version, next_instruction) {
-            (Instruction::PushBytes(bytes), _) if bytes.len() == 0 => Ok(InputType::SegWitV0 { ty: instructions.try_into()?, nested, }),
-            (Instruction::Op(bitcoin::blockdata::opcodes::all::OP_PUSHNUM_1), Some(Ok(Instruction::PushBytes(bytes)))) if bytes.len() == 32 => Ok(InputType::Taproot),
+        match witness_version {
+            Instruction::PushBytes(bytes) if bytes.len() == 0 => Ok(InputType::SegWitV0 { ty: instructions.try_into()?, nested, }),
+            Instruction::Op(bitcoin::blockdata::opcodes::all::OP_PUSHNUM_1) => {
+                let instruction = instructions.next().ok_or(InputTypeError::UnknownInputType)?.map_err(|_| InputTypeError::UnknownInputType)?;
+                match instruction {
+                    Instruction::PushBytes(bytes) if bytes.len() == 32 => Ok(InputType::Taproot),
+                    Instruction::PushBytes(_) | Instruction::Op(_) => Err(InputTypeError::UnknownInputType),
+                }
+            },
             _ => Err(InputTypeError::UnknownInputType),
         }
     }

@@ -47,9 +47,10 @@ impl InputType {
     fn segwit_from_script(script: &Script, nested: bool) -> Result<Self, InputTypeError> {
         let mut instructions = script.instructions();
         let witness_version = instructions.next().ok_or(InputTypeError::UnknownInputType)?.map_err(|_| InputTypeError::UnknownInputType)?;
-        match witness_version {
-            Instruction::PushBytes(bytes) if bytes.len() == 0 => Ok(InputType::SegWitV0 { ty: instructions.try_into()?, nested, }),
-            Instruction::Op(bitcoin::blockdata::opcodes::all::OP_PUSHNUM_1) => Ok(InputType::Taproot),
+        let next_instruction = instructions.next();
+        match (witness_version, next_instruction) {
+            (Instruction::PushBytes(bytes), _) if bytes.len() == 0 => Ok(InputType::SegWitV0 { ty: instructions.try_into()?, nested, }),
+            (Instruction::Op(bitcoin::blockdata::opcodes::all::OP_PUSHNUM_1), Some(Instruction::PushBytes(bytes))) if bytes.len() == 32 => Ok(InputType::Taproot),
             _ => Err(InputTypeError::UnknownInputType),
         }
     }
@@ -64,7 +65,7 @@ impl InputType {
             SegWitV0 { ty: SegWitV0Type::Pubkey, nested: false } => 68,
             SegWitV0 { ty: SegWitV0Type::Pubkey, nested: true } => 91,
             SegWitV0 { ty: SegWitV0Type::Script, nested: _ } => unimplemented!(),
-            Taproot => unimplemented!(),
+            Taproot => 58,
         })
     }
 }
@@ -172,4 +173,6 @@ mod tests {
         let input_type = InputType::from_spent_input(&TxOut { script_pubkey: Script::new_p2sh(&segwit_script_hash), value: 42, }, &PsbtInput { final_script_sig: Some(script_sig), ..Default::default() }).unwrap();
         assert_eq!(input_type, InputType::SegWitV0 { ty: SegWitV0Type::Script, nested: true, });
     }
+
+    // TODO: test p2tr
 }

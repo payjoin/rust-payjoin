@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use bip78::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
-use core_rpc as rpc;
-use core_rpc::RpcApi;
+use bitcoincore_rpc::RpcApi;
+use bip78::{UriExt, PjUriExt};
+use std::convert::TryFrom;
 
 fn main() {
     let mut args = std::env::args_os();
@@ -26,17 +27,19 @@ fn main() {
         .into_string()
         .expect("bip21 is not UTF-8");
 
-    let link = bip21.parse::<bip78::Uri>().unwrap();
+    let link = bip78::Uri::try_from(&*bip21).unwrap();
 
-    if link.amount().is_none() {
+    let link = link.check_pj_supported().unwrap_or_else(|_| panic!("The provided URI doesn't support payjoin (BIP78)"));
+
+    if link.amount.is_none() {
         panic!("please specify the amount in the Uri");
     }
 
     let mut outputs = HashMap::with_capacity(1);
-    outputs.insert(link.address().to_string(), link.amount().unwrap());
+    outputs.insert(link.address.to_string(), link.amount.unwrap());
 
-    let client = rpc::Client::new(&format!("http://127.0.0.1:{}", port), rpc::Auth::CookieFile(cookie_file.into())).unwrap();
-    let options = rpc::json::WalletCreateFundedPsbtOptions {
+    let client = bitcoincore_rpc::Client::new(&format!("http://127.0.0.1:{}", port), bitcoincore_rpc::Auth::CookieFile(cookie_file.into())).unwrap();
+    let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
         lock_unspent: Some(true),
         fee_rate: Some(bip78::bitcoin::Amount::from_sat(2000)),
         ..Default::default()
@@ -55,7 +58,7 @@ fn main() {
     let psbt = load_psbt_from_base64(psbt.as_bytes()).unwrap();
     println!("Original psbt: {:#?}", psbt);
     let pj_params = bip78::sender::Params::with_fee_contribution(bip78::bitcoin::Amount::from_sat(10000), None);
-    let (req, ctx) = link.create_request(psbt, pj_params).unwrap();
+    let (req, ctx) = link.create_pj_request(psbt, pj_params).unwrap();
     let response = reqwest::blocking::Client::new()
         .post(&req.url)
         .body(req.body)

@@ -420,11 +420,11 @@ fn serialize_psbt(psbt: &Psbt) -> Vec<u8> {
         .expect("Vec doesn't return errors in its write implementation")
 }
 
-pub(crate) fn from_psbt_and_uri(mut psbt: Psbt, uri: crate::Uri, params: Params) -> Result<(Request, Context), CreateRequestError> {
+pub(crate) fn from_psbt_and_uri(mut psbt: Psbt, uri: crate::uri::PjUri<'_>, params: Params) -> Result<(Request, Context), CreateRequestError> {
     psbt
         .validate_input_utxos(true)
         .map_err(InternalCreateRequestError::InvalidOriginalInput)?;
-    let disable_output_substitution = uri.disable_output_substitution || params.disable_output_substitution;
+    let disable_output_substitution = uri.extras.disable_output_substitution || params.disable_output_substitution;
     let payee = uri.address.script_pubkey();
     check_single_payee(&psbt, &payee, uri.amount)?;
     let fee_contribution = determine_fee_contribution(&psbt, &payee, &params)?;
@@ -435,7 +435,7 @@ pub(crate) fn from_psbt_and_uri(mut psbt: Psbt, uri: crate::Uri, params: Params)
     let sequence = zeroth_input.txin.sequence;
     let txout = zeroth_input.previous_txout().expect("We already checked this above");
     let input_type = InputType::from_spent_input(txout, &zeroth_input.psbtin).unwrap();
-    let url = serialize_url(uri.endpoint.into(), disable_output_substitution, fee_contribution);
+    let url = serialize_url(uri.extras.endpoint.into(), disable_output_substitution, fee_contribution);
     let body = serialize_psbt(&psbt);
     Ok((Request {
         url,

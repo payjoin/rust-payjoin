@@ -25,14 +25,15 @@ Please at least review the code that verifies there's no overpayment and let me 
 - [ ] Independent testing
 
 #### Receiver
+
 - [ ] Basic logic
 - [ ] Most checks implemented
 - [ ] Documentation
 - [ ] Unit test with official test vectors passes
 - [ ] Many unit tests
 - [ ] Fee contribution support
-- [ ] Example client using bitcoind
-- [ ] Tested and works with BTCPayServer (short of [BTCPayServer bug](https://github.com/btcpayserver/btcpayserver/issues/2677))
+- [ ] Example server using bitcoind
+- [ ] Tested and works with BTCPayServer
 - [ ] Tested and works with WasabiWallet
 - [ ] Tested and works with Blue Wallet
 - [ ] Minimum fee rate enforcement
@@ -41,12 +42,13 @@ Please at least review the code that verifies there's no overpayment and let me 
 - [ ] Independent testing
 
 #### Code quality
+
 - [x] Idiomatic Rust code
 - [x] Newtypes
 - [x] Panic-free error handling
 - [x] No `unsafe` code or well-tested/analyzed/proven/... `unsafe` code
 - [ ] Warning-free
-- [ ] CI
+- [x] CI
 - [ ] Integration tests
 - [ ] Fuzzing
 - [ ] Coverage measurement

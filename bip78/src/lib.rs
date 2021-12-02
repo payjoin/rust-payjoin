@@ -24,10 +24,14 @@ pub mod sender;
 #[cfg(feature = "receiver")]
 pub mod receiver;
 
+#[cfg(any(feature = "sender", feature = "receiver"))]
 pub(crate) mod input_type;
 mod uri;
+#[cfg(any(feature = "sender", feature = "receiver"))]
 pub(crate) mod weight;
+#[cfg(any(feature = "sender", feature = "receiver"))]
 pub(crate) mod fee_rate;
+#[cfg(any(feature = "sender", feature = "receiver"))]
 pub(crate) mod psbt;
 
 pub use uri::{Uri, PjUri, UriExt, PjUriExt, PjParseError};

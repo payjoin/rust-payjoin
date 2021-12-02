@@ -38,6 +38,7 @@ pub(crate) enum InternalValidationError {
     AbsoluteFeeDecreased,
     PayeeTookContributedFee,
     FeeContributionPaysOutputSizeIncrease,
+    FeeRateBelowMinimum,
 }
 
 impl From<InternalValidationError> for ValidationError {
@@ -84,6 +85,7 @@ impl fmt::Display for ValidationError {
             AbsoluteFeeDecreased => write!(f, "abslute fee of proposed transaction is lower than original"),
             PayeeTookContributedFee => write!(f, "payee tried to take fee contribution for himself"),
             FeeContributionPaysOutputSizeIncrease => write!(f, "fee contribution pays for additional outputs"),
+            FeeRateBelowMinimum =>  write!(f, "the fee rate of proposed transaction is below minimum"),
         }
     }
 }
@@ -119,6 +121,7 @@ impl std::error::Error for ValidationError {
             AbsoluteFeeDecreased => None,
             PayeeTookContributedFee => None,
             FeeContributionPaysOutputSizeIncrease => None,
+            FeeRateBelowMinimum => None,
         }
     }
 }

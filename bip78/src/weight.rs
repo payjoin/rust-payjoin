@@ -78,7 +78,7 @@ mod inner {
     }
 }
 
-fn witness_weight(witness: &Vec<Vec<u8>>) -> Weight {
+pub (crate) fn witness_weight(witness: &Vec<Vec<u8>>) -> Weight {
     if witness.is_empty() {
         return Weight::ZERO;
     }
@@ -99,7 +99,7 @@ pub(crate) trait ComputeSize {
     fn encoded_size(&self) -> u64;
 }
 
-fn varint_size(number: u64) -> u64 {
+pub(crate) fn varint_size(number: u64) -> u64 {
     match number {
         0..=0xfc => 1,
         0xfd..=0xffff => 3,

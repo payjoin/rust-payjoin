@@ -196,3 +196,58 @@ pub struct NewOutputOptions {
     set_as_fee_output: bool,
     subtract_fees_from_this: bool,
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    struct MockHeaders {
+        length: String,
+    }
+
+    impl MockHeaders {
+        #[cfg(test)]
+        fn new(length: u64) -> MockHeaders {
+            MockHeaders { length: length.to_string() }
+        }
+    }
+
+    impl Headers for MockHeaders {
+        fn get_header(&self, key: &str) -> Option<&str> {
+            match key {
+                "content-length" => Some(&self.length),
+                "content-type" => Some("text/plain"),
+                _ => None,
+            }
+        }
+    }
+
+    fn get_proposal_from_test_vector() -> Result<UncheckedProposal, RequestError> {
+
+        // OriginalPSBT Test Vector from BIP
+        // | InputScriptType | Orginal PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
+        // |-----------------|-----------------------|------------------------------|-------------------------|
+        // | P2SH-P2WPKH     |  2 sat/vbyte          | 0.00000182                   | 0                       |
+        let original_psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+
+        let body = original_psbt.as_bytes();
+        let headers = MockHeaders::new(body.len() as u64);
+        UncheckedProposal::from_request(body, "", headers)
+    }
+
+    #[test]
+    fn can_get_proposal_from_request() {
+        let proposal = get_proposal_from_test_vector();
+        assert!(proposal.is_ok(), "OriginalPSBT should be a valid request");
+    }
+
+    #[test]
+    fn unchecked_proposal_unlocks_after_checks() {
+        let proposal = get_proposal_from_test_vector().unwrap();
+        let unlocked = proposal
+            .assume_tested_and_scheduled_broadcast()
+            .assume_inputs_not_owned()
+            .assume_no_mixed_input_scripts()
+            .assume_no_inputs_seen_before();
+    }
+}

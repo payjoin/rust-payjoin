@@ -1,15 +1,16 @@
-use std::borrow::Cow;
-use std::convert::{TryFrom, TryInto};
 #[cfg(feature = "sender")]
 use crate::sender;
+use std::borrow::Cow;
+use std::convert::{TryFrom, TryInto};
+use url::Url;
 
 #[derive(Debug, Clone)]
-pub enum PayJoin<'a> {
-    Supported(PayJoinParams<'a>),
+pub enum PayJoin {
+    Supported(PayJoinParams),
     Unsupported,
 }
 
-impl<'a> PayJoin<'a> {
+impl PayJoin {
     pub fn pj_is_supported(&self) -> bool {
         match self {
             PayJoin::Supported(_) => true,
@@ -19,13 +20,13 @@ impl<'a> PayJoin<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct PayJoinParams<'a> {
-    pub(crate) endpoint: Cow<'a, str>,
+pub struct PayJoinParams {
+    pub(crate) endpoint: Url,
     pub(crate) disable_output_substitution: bool,
 }
 
-pub type Uri<'a> = bip21::Uri<'a, PayJoin<'a>>;
-pub type PjUri<'a> = bip21::Uri<'a, PayJoinParams<'a>>;
+pub type Uri<'a> = bip21::Uri<'a, PayJoin>;
+pub type PjUri<'a> = bip21::Uri<'a, PayJoinParams>;
 
 mod sealed {
     pub trait UriExt: Sized {}
@@ -81,23 +82,23 @@ impl<'a> UriExt<'a> for Uri<'a> {
     }
 }
 
-impl<'a> PayJoinParams<'a> {
+impl<'a> PayJoinParams {
     pub fn is_output_substitution_disabled(&self) -> bool {
         self.disable_output_substitution
     }
 }
 
-impl<'a> bip21::de::DeserializationError for PayJoin<'a> {
+impl<'a> bip21::de::DeserializationError for PayJoin {
     type Error = PjParseError;
 }
 
-impl<'a> bip21::de::DeserializeParams<'a> for PayJoin<'a> {
-    type DeserializationState = DeserializationState<'a>;
+impl<'a> bip21::de::DeserializeParams<'a> for PayJoin {
+    type DeserializationState = DeserializationState;
 }
 
 #[derive(Default)]
-pub struct DeserializationState<'a> {
-    pj: Option<Cow<'a, str>>,
+pub struct DeserializationState {
+    pj: Option<Url>,
     pjos: Option<bool>,
 }
 
@@ -110,9 +111,8 @@ impl From<InternalPjParseError> for PjParseError {
     }
 }
 
-
-impl<'a> bip21::de::DeserializationState<'a> for DeserializationState<'a> {
-    type Value = PayJoin<'a>;
+impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
+    type Value = PayJoin;
 
     fn is_param_known(&self, param: &str) -> bool {
         match param {
@@ -121,38 +121,28 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState<'a> {
         }
     }
 
-    fn deserialize_temp(&mut self, key: &str, value: bip21::Param<'_>) -> std::result::Result<bip21::de::ParamKind, <Self::Value as bip21::DeserializationError>::Error> {
+    fn deserialize_temp(
+        &mut self,
+        key: &str,
+        value: bip21::Param<'_>,
+    ) -> std::result::Result<
+        bip21::de::ParamKind,
+        <Self::Value as bip21::DeserializationError>::Error,
+    > {
         match key {
             "pj" if self.pj.is_none() => {
-                self.pj = Some(Cow::Owned(Cow::<'_, str>::try_from(value).map_err(InternalPjParseError::NotUtf8)?.into()));
-                Ok(bip21::de::ParamKind::Known)
-            },
-            "pj" => Err(InternalPjParseError::MultipleParams("pj").into()),
-            "pjos" if self.pjos.is_none() => {
-                match &*Cow::try_from(value).map_err(|_| InternalPjParseError::BadPjOs)? {
-                    "0" => self.pjos = Some(false),
-                    "1" => self.pjos = Some(true),
-                    _ => return Err(InternalPjParseError::BadPjOs.into())
-                }
+                let endpoint = Cow::try_from(value).map_err(InternalPjParseError::NotUtf8)?;
+                let url = Url::parse(&endpoint).map_err(InternalPjParseError::BadEndpoint)?;
+                self.pj = Some(url);
+
                 Ok(bip21::de::ParamKind::Known)
             }
-            "pjos" => Err(InternalPjParseError::MultipleParams("pjos").into()),
-            _ => Ok(bip21::de::ParamKind::Unknown),
-        }
-    }
-
-    fn deserialize_borrowed(&mut self, key: &'a str, value: bip21::Param<'a>) -> std::result::Result<bip21::de::ParamKind, <Self::Value as bip21::DeserializationError>::Error> {
-        match key {
-            "pj" if self.pj.is_none() => {
-                self.pj = Some(value.try_into().map_err(InternalPjParseError::NotUtf8)?);
-                Ok(bip21::de::ParamKind::Known)
-            },
             "pj" => Err(InternalPjParseError::MultipleParams("pj").into()),
             "pjos" if self.pjos.is_none() => {
                 match &*Cow::try_from(value).map_err(|_| InternalPjParseError::BadPjOs)? {
                     "0" => self.pjos = Some(false),
                     "1" => self.pjos = Some(true),
-                    _ => return Err(InternalPjParseError::BadPjOs.into())
+                    _ => return Err(InternalPjParseError::BadPjOs.into()),
                 }
                 Ok(bip21::de::ParamKind::Known)
             }
@@ -165,7 +155,18 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState<'a> {
         match (self.pj, self.pjos) {
             (None, None) => Ok(PayJoin::Unsupported),
             (None, Some(_)) => Err(PjParseError(InternalPjParseError::MissingEndpoint)),
-            (Some(endpoint), pjos) => Ok(PayJoin::Supported(PayJoinParams { endpoint, disable_output_substitution: pjos.unwrap_or(false), })),
+            (Some(endpoint), pjos) => {
+                if endpoint.scheme() == "https"
+                    || endpoint.scheme() == "http" && endpoint.domain().unwrap_or_default().ends_with(".onion")
+                {
+                    Ok(PayJoin::Supported(PayJoinParams {
+                        endpoint,
+                        disable_output_substitution: pjos.unwrap_or(false),
+                    }))
+                } else {
+                    Err(PjParseError(InternalPjParseError::UnsecureEndpoint))
+                }
+            }
         }
     }
 }
@@ -176,6 +177,8 @@ enum InternalPjParseError {
     MultipleParams(&'static str),
     MissingEndpoint,
     NotUtf8(core::str::Utf8Error),
+    BadEndpoint(url::ParseError),
+    UnsecureEndpoint,
 }
 
 #[cfg(test)]

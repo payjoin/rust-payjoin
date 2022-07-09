@@ -147,6 +147,7 @@ pub(crate) enum InternalCreateRequestError {
     AmbiguousChangeOutput,
     ChangeIndexOutOfBounds,
     ChangeIndexPointsAtPayee,
+    Url(url::ParseError),
 }
 
 impl fmt::Display for CreateRequestError {
@@ -165,6 +166,7 @@ impl fmt::Display for CreateRequestError {
             AmbiguousChangeOutput => write!(f, "can not determine which output is change because there's more than two outputs"),
             ChangeIndexOutOfBounds => write!(f, "fee output index is points out of bounds"),
             ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
+            Url(_) => write!(f, "cannot parse endpoint url"),
         }
     }
 }
@@ -185,6 +187,7 @@ impl std::error::Error for CreateRequestError {
             AmbiguousChangeOutput => None,
             ChangeIndexOutOfBounds => None,
             ChangeIndexPointsAtPayee => None,
+            Url(error) => Some(error)
         }
     }
 }

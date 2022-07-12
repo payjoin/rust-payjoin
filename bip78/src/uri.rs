@@ -200,10 +200,9 @@ mod tests {
         assert!(Uri::try_from(uri).is_err(), "pj url should be url encoded");
     }
 
-    #[ignore]
     #[test]
-    fn test_todo_valid_url() {
-        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=http://a";
+    fn test_valid_url() {
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=this_is_NOT_a_validURL";
         assert!(Uri::try_from(uri).is_err(), "pj is not a valid url");
     }
 
@@ -213,10 +212,12 @@ mod tests {
         assert!(Uri::try_from(uri).is_ok(), "missing amount should be ok");
     }
 
-    #[ignore]
     #[test]
-    fn test_todo_unencrypted() {
+    fn test_unencrypted() {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=http://example.com";
+        assert!(Uri::try_from(uri).is_err(), "unencrypted connection");
+
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=ftp://foo.onion";
         assert!(Uri::try_from(uri).is_err(), "unencrypted connection");
     }
 
@@ -241,6 +242,9 @@ mod tests {
 
     #[test]
     fn test_unsupported() {
-        assert!(!Uri::try_from("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX").unwrap().extras.pj_is_supported());
+        assert!(!Uri::try_from("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX")
+            .unwrap()
+            .extras
+            .pj_is_supported());
     }
 }

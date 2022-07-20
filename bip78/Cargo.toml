@@ -22,6 +22,7 @@ bitcoin = "0.27.1"
 base64 = "0.13.0"
 rand = { version = "0.8.4", optional = true }
 bip21 = "0.1.1"
+url = "2.2.2"
 
 [dev-dependencies]
 bitcoind = { version = "0.18.0", features = ["0_21_1"] }

@@ -60,7 +60,7 @@ fn main() {
     let pj_params = bip78::sender::Params::with_fee_contribution(bip78::bitcoin::Amount::from_sat(10000), None);
     let (req, ctx) = link.create_pj_request(psbt, pj_params).unwrap();
     let response = reqwest::blocking::Client::new()
-        .post(&req.url)
+        .post(req.url)
         .body(req.body)
         .header("Content-Type", "text/plain")
         .send()

@@ -22,6 +22,7 @@ use crate::weight::{Weight, ComputeWeight, varint_size};
 use crate::fee_rate::FeeRate;
 use crate::psbt::Psbt;
 use std::convert::TryInto;
+use url::Url;
 pub use error::{ValidationError, CreateRequestError};
 
 // See usize casts
@@ -108,7 +109,7 @@ pub struct Request {
     /// URL to send the request to.
     ///
     /// This is full URL with scheme etc - you can pass it right to `reqwest` or a similar library.
-    pub url: String,
+    pub url: Url,
 
     /// Bytes to be sent to the receiver.
     ///
@@ -439,21 +440,29 @@ fn determine_fee_contribution(psbt: &Psbt, payee: &Script, params: &Params) -> R
     })
 }
 
-fn serialize_url(endpoint: String, disable_output_substitution: bool, fee_contribution: Option<(bitcoin::Amount, usize)>, min_fee_rate: FeeRate) -> String {
-    use std::fmt::Write;
+fn serialize_url(
+    endpoint: String,
+    disable_output_substitution: bool,
+    fee_contribution: Option<(bitcoin::Amount, usize)>,
+    min_fee_rate: FeeRate,
+) -> Result<Url, url::ParseError> {
 
-    let mut url = endpoint;
-    url.push_str("?v=1");
+    let mut url = Url::parse(&endpoint)?;
+    url.query_pairs_mut()
+        .append_pair("v", "1");
     if disable_output_substitution {
-        url.push_str("&disableoutputsubstitution=1");
+        url.query_pairs_mut().append_pair("disableoutputsubstitution", "1");
     }
     if let Some((amount, index)) = fee_contribution {
-        write!(url, "&additionalfeeoutputindex={}&maxadditionalfeecontribution={}", index, amount.as_sat()).expect("writing to string doesn't fail");
+        url.query_pairs_mut()
+            .append_pair("additionalfeeoutputindex", &index.to_string())
+            .append_pair("maxadditionalfeecontribution", &amount.as_sat().to_string());
     }
     if min_fee_rate > FeeRate::ZERO {
-        write!(url, "&minfeerate={}", min_fee_rate.to_sat_per_vb()).expect("writing to string doesn't fail");
+        url.query_pairs_mut()
+            .append_pair("minfeerate", & min_fee_rate.to_sat_per_vb().to_string());
     }
-    url
+    Ok(url)
 }
 
 fn serialize_psbt(psbt: &Psbt) -> Vec<u8> {
@@ -481,7 +490,8 @@ pub(crate) fn from_psbt_and_uri(mut psbt: Psbt, uri: crate::uri::PjUri<'_>, para
     let sequence = zeroth_input.txin.sequence;
     let txout = zeroth_input.previous_txout().expect("We already checked this above");
     let input_type = InputType::from_spent_input(txout, &zeroth_input.psbtin).unwrap();
-    let url = serialize_url(uri.extras.endpoint.into(), disable_output_substitution, fee_contribution, params.min_fee_rate);
+    let url = serialize_url(uri.extras.endpoint.into(), disable_output_substitution, fee_contribution, params.min_fee_rate)
+        .map_err(InternalCreateRequestError::Url)?;
     let body = serialize_psbt(&psbt);
     Ok((Request {
         url,

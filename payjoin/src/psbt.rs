@@ -39,20 +39,19 @@ impl Psbt {
     }
 
     pub fn xpub_mut(&mut self) -> &mut BTreeMap<bip32::ExtendedPubKey, (bip32::Fingerprint, bip32::DerivationPath)> {
-        &mut self.0.global.xpub
+        &mut self.0.xpub
     }
 
     pub fn proprietary_mut(&mut self) -> &mut BTreeMap<psbt::raw::ProprietaryKey, Vec<u8>> {
-        &mut self.0.global.proprietary
+        &mut self.0.proprietary
     }
 
     pub fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>> {
-        &mut self.0.global.unknown
+        &mut self.0.unknown
     }
 
     pub fn input_pairs(&self) -> impl Iterator<Item=InputPair<'_>> + '_ {
-        self.global
-            .unsigned_tx
+        self.unsigned_tx
             .input
             .iter()
             .zip(&self.inputs)
@@ -77,9 +76,9 @@ impl TryFrom<UncheckedPsbt> for Psbt {
     type Error = InconsistentPsbt;
 
     fn try_from(unchecked: UncheckedPsbt) -> Result<Self, Self::Error> {
-        let tx_ins = unchecked.global.unsigned_tx.input.len();
+        let tx_ins = unchecked.unsigned_tx.input.len();
         let psbt_ins = unchecked.inputs.len();
-        let tx_outs = unchecked.global.unsigned_tx.output.len();
+        let tx_outs = unchecked.unsigned_tx.output.len();
         let psbt_outs = unchecked.outputs.len();
 
         if psbt_ins != tx_ins {

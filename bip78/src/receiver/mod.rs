@@ -19,7 +19,7 @@ impl UncheckedProposal {
         use crate::bitcoin::consensus::Decodable;
 
         let content_type = headers.get_header("content-type").ok_or(InternalRequestError::MissingHeader("Content-Type"))?;
-        if content_type != "text/plain" {
+        if !content_type.starts_with("text/plain") {
             return Err(InternalRequestError::InvalidContentType(content_type.to_owned()).into());
         }
         let content_length = headers

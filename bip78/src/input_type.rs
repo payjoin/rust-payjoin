@@ -147,20 +147,20 @@ mod tests {
 
     #[test]
     fn test_p2wpkh() {
-        let input_type = InputType::from_spent_input(&TxOut { script_pubkey: Script::new_v0_wpkh(&PublicKey::from_slice(b"\x02\x50\x86\x3A\xD6\x4A\x87\xAE\x8A\x2F\xE8\x3C\x1A\xF1\xA8\x40\x3C\xB5\x3F\x53\xE4\x86\xD8\x51\x1D\xAD\x8A\x04\x88\x7E\x5B\x23\x52").unwrap().wpubkey_hash().expect("WTF, the key is uncompressed")), value: 42, }, &Default::default()).unwrap();
+        let input_type = InputType::from_spent_input(&TxOut { script_pubkey: Script::new_v0_p2wpkh(&PublicKey::from_slice(b"\x02\x50\x86\x3A\xD6\x4A\x87\xAE\x8A\x2F\xE8\x3C\x1A\xF1\xA8\x40\x3C\xB5\x3F\x53\xE4\x86\xD8\x51\x1D\xAD\x8A\x04\x88\x7E\x5B\x23\x52").unwrap().wpubkey_hash().expect("WTF, the key is uncompressed")), value: 42, }, &Default::default()).unwrap();
         assert_eq!(input_type, InputType::SegWitV0 { ty: SegWitV0Type::Pubkey, nested: false, });
     }
 
     #[test]
     fn test_p2wsh() {
         let script = Script::new_op_return(&[42]);
-        let input_type = InputType::from_spent_input(&TxOut { script_pubkey: Script::new_v0_wsh(&script.wscript_hash()), value: 42, }, &PsbtInput { final_script_sig: Some(script), ..Default::default() }).unwrap();
+        let input_type = InputType::from_spent_input(&TxOut { script_pubkey: Script::new_v0_p2wsh(&script.wscript_hash()), value: 42, }, &PsbtInput { final_script_sig: Some(script), ..Default::default() }).unwrap();
         assert_eq!(input_type, InputType::SegWitV0 { ty: SegWitV0Type::Script, nested: false, });
     }
 
     #[test]
     fn test_p2sh_p2wpkh() {
-        let segwit_script = Script::new_v0_wpkh(&PublicKey::from_slice(b"\x02\x50\x86\x3A\xD6\x4A\x87\xAE\x8A\x2F\xE8\x3C\x1A\xF1\xA8\x40\x3C\xB5\x3F\x53\xE4\x86\xD8\x51\x1D\xAD\x8A\x04\x88\x7E\x5B\x23\x52").unwrap().wpubkey_hash().expect("WTF, the key is uncompressed"));
+        let segwit_script = Script::new_v0_p2wpkh(&PublicKey::from_slice(b"\x02\x50\x86\x3A\xD6\x4A\x87\xAE\x8A\x2F\xE8\x3C\x1A\xF1\xA8\x40\x3C\xB5\x3F\x53\xE4\x86\xD8\x51\x1D\xAD\x8A\x04\x88\x7E\x5B\x23\x52").unwrap().wpubkey_hash().expect("WTF, the key is uncompressed"));
         let segwit_script_hash = segwit_script.script_hash();
         let script_sig = wrap_p2sh_script(&segwit_script);
 
@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn test_p2sh_p2wsh() {
         let script = Script::new_op_return(&[42]);
-        let segwit_script = Script::new_v0_wsh(&script.wscript_hash());
+        let segwit_script = Script::new_v0_p2wsh(&script.wscript_hash());
         let segwit_script_hash = segwit_script.script_hash();
         let script_sig = wrap_p2sh_script(&segwit_script);
 

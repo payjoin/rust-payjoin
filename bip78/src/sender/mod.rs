@@ -16,7 +16,7 @@
 
 use bitcoin::util::psbt::PartiallySignedTransaction as UncheckedPsbt;
 use crate::input_type::InputType;
-use bitcoin::{TxOut, Script};
+use bitcoin::{TxOut, Script, Sequence};
 pub(crate) use error::{InternalValidationError, InternalCreateRequestError};
 use crate::weight::{Weight, ComputeWeight, varint_size};
 use crate::fee_rate::FeeRate;
@@ -129,7 +129,7 @@ pub struct Context {
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
     input_type: InputType,
-    sequence: u32,
+    sequence: Sequence,
     payee: Script,
 }
 
@@ -152,15 +152,15 @@ macro_rules! ensure {
 
 fn load_psbt_from_base64(mut input: impl std::io::Read) -> Result<Psbt, bitcoin::consensus::encode::Error> {
     use bitcoin::consensus::Decodable;
-    let reader = base64::read::DecoderReader::new(&mut input, base64::STANDARD);
-    Ok(UncheckedPsbt::consensus_decode(reader)?.try_into().expect("consensus_decode guarantees consistency"))
+    let mut reader = base64::read::DecoderReader::new(&mut input, base64::STANDARD);
+    Ok(UncheckedPsbt::consensus_decode(&mut reader)?.try_into().expect("consensus_decode guarantees consistency"))
 }
 
 fn calculate_psbt_fee(psbt: &Psbt) -> bitcoin::Amount {
     let mut total_outputs = bitcoin::Amount::ZERO;
     let mut total_inputs = bitcoin::Amount::ZERO;
 
-    for output in &psbt.global.unsigned_tx.output {
+    for output in &psbt.unsigned_tx.output {
         total_outputs += bitcoin::Amount::from_sat(output.value);
     }
 
@@ -201,7 +201,7 @@ impl Context {
         let original_fee = calculate_psbt_fee(&self.original_psbt);
         ensure!(original_fee <= proposed_psbt_fee, AbsoluteFeeDecreased);
         ensure!(out_stats.contributed_fee <= proposed_psbt_fee - original_fee, PayeeTookContributedFee);
-        let original_weight = self.original_psbt.global.unsigned_tx.weight();
+        let original_weight = Weight::manual_from_u64(self.original_psbt.unsigned_tx.weight() as u64);
         let original_fee_rate = original_fee / original_weight;
         ensure!(out_stats.contributed_fee <= original_fee_rate * self.input_type.expected_input_weight() * (proposal.inputs.len() - self.original_psbt.inputs.len()) as u64, FeeContributionPaysOutputSizeIncrease);
         if self.min_fee_rate > FeeRate::ZERO {
@@ -209,15 +209,15 @@ impl Context {
                 // version
                 4 +
                 // count variants
-                varint_size(proposal.global.unsigned_tx.input.len() as u64) +
-                varint_size(proposal.global.unsigned_tx.output.len() as u64) +
+                varint_size(proposal.unsigned_tx.input.len() as u64) +
+                varint_size(proposal.unsigned_tx.output.len() as u64) +
                 // lock time
                 4;
             let weight_without_witnesses = Weight::from_non_witness_data_size(non_input_output_size) + in_stats.total_weight + out_stats.total_weight;
             let total_weight = if in_stats.inputs_with_witnesses == 0 {
                 weight_without_witnesses
             } else {
-                weight_without_witnesses + Weight::manual_from_u64((proposal.global.unsigned_tx.input.len() - in_stats.inputs_with_witnesses + 2) as u64)
+                weight_without_witnesses + Weight::manual_from_u64((proposal.unsigned_tx.input.len() - in_stats.inputs_with_witnesses + 2) as u64)
             };
             ensure!(proposed_psbt_fee / total_weight >= self.min_fee_rate, FeeRateBelowMinimum);
         }
@@ -226,8 +226,8 @@ impl Context {
 
     // version and lock time
     fn basic_checks(&self, proposal: &Psbt) -> InternalResult<()> {
-        check_eq!(proposal.global.unsigned_tx.version, self.original_psbt.global.unsigned_tx.version, VersionsDontMatch);
-        check_eq!(proposal.global.unsigned_tx.lock_time, self.original_psbt.global.unsigned_tx.lock_time, LockTimesDontMatch);
+        check_eq!(proposal.unsigned_tx.version, self.original_psbt.unsigned_tx.version, VersionsDontMatch);
+        check_eq!(proposal.unsigned_tx.lock_time, self.original_psbt.unsigned_tx.lock_time, LockTimesDontMatch);
         Ok(())
     }
 
@@ -299,12 +299,12 @@ impl Context {
     }
 
     fn check_outputs(&self, proposal: &Psbt) -> InternalResult<OutputStats> {
-        let mut original_outputs = proposal.global.unsigned_tx.output.iter().enumerate().peekable();
+        let mut original_outputs = proposal.unsigned_tx.output.iter().enumerate().peekable();
         let mut total_value = bitcoin::Amount::ZERO;
         let mut contributed_fee = bitcoin::Amount::ZERO;
         let mut total_weight = Weight::ZERO;
 
-        for (proposed_txout, proposed_psbtout) in proposal.global.unsigned_tx.output.iter().zip(&proposal.outputs) {
+        for (proposed_txout, proposed_psbtout) in proposal.unsigned_tx.output.iter().zip(&proposal.outputs) {
             ensure!(proposed_psbtout.bip32_derivation.is_empty(), TxOutContainsKeyPaths);
             total_value += bitcoin::Amount::from_sat(proposed_txout.value);
             total_weight += proposed_txout.weight();
@@ -356,10 +356,10 @@ struct InputStats {
 
 fn check_single_payee(psbt: &Psbt, script_pubkey: &Script, amount: Option<bitcoin::Amount>) -> Result<(), InternalCreateRequestError> {
     let mut payee_found = false;
-    for output in &psbt.global.unsigned_tx.output {
+    for output in &psbt.unsigned_tx.output {
         if output.script_pubkey == *script_pubkey {
             if let Some(amount) = amount {
-                if output.value != amount.as_sat() {
+                if output.value != amount.to_sat() {
                     return Err(InternalCreateRequestError::PayeeValueNotEqual)
                 }
             }
@@ -393,7 +393,7 @@ fn clear_unneeded_fields(psbt: &mut Psbt) {
 }
 
 fn check_fee_output_amount(output: &TxOut, fee: bitcoin::Amount, clamp_fee_contribution: bool) -> Result<bitcoin::Amount, InternalCreateRequestError> {
-    if output.value < fee.as_sat() {
+    if output.value < fee.to_sat() {
         if clamp_fee_contribution {
             Ok(bitcoin::Amount::from_sat(output.value))
         } else {
@@ -405,15 +405,15 @@ fn check_fee_output_amount(output: &TxOut, fee: bitcoin::Amount, clamp_fee_contr
 }
 
 fn find_change_index(psbt: &Psbt, payee: &Script, fee: bitcoin::Amount, clamp_fee_contribution: bool) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
-    match (psbt.global.unsigned_tx.output.len(), clamp_fee_contribution) {
+    match (psbt.unsigned_tx.output.len(), clamp_fee_contribution) {
         (0, _) => return Err(InternalCreateRequestError::NoOutputs),
-        (1, false) if psbt.global.unsigned_tx.output[0].script_pubkey == *payee => return Err(InternalCreateRequestError::FeeOutputValueLowerThanFeeContribution),
-        (1, true) if psbt.global.unsigned_tx.output[0].script_pubkey == *payee => return Ok(None),
+        (1, false) if psbt.unsigned_tx.output[0].script_pubkey == *payee => return Err(InternalCreateRequestError::FeeOutputValueLowerThanFeeContribution),
+        (1, true) if psbt.unsigned_tx.output[0].script_pubkey == *payee => return Ok(None),
         (1, _) => return Err(InternalCreateRequestError::MissingPayeeOutput),
         (2, _) => (),
         _ => return Err(InternalCreateRequestError::AmbiguousChangeOutput),
     }
-    let (index, output) = psbt.global.unsigned_tx.output
+    let (index, output) = psbt.unsigned_tx.output
         .iter()
         .enumerate()
         .find(|(_, output)| output.script_pubkey != *payee)
@@ -423,7 +423,7 @@ fn find_change_index(psbt: &Psbt, payee: &Script, fee: bitcoin::Amount, clamp_fe
 }
 
 fn check_change_index(psbt: &Psbt, payee: &Script, fee: bitcoin::Amount, index: usize, clamp_fee_contribution: bool) -> Result<(bitcoin::Amount, usize), InternalCreateRequestError> {
-    let output = psbt.global.unsigned_tx.output
+    let output = psbt.unsigned_tx.output
         .get(index)
         .ok_or(InternalCreateRequestError::ChangeIndexOutOfBounds)?;
     if output.script_pubkey == *payee {
@@ -456,7 +456,7 @@ fn serialize_url(
     if let Some((amount, index)) = fee_contribution {
         url.query_pairs_mut()
             .append_pair("additionalfeeoutputindex", &index.to_string())
-            .append_pair("maxadditionalfeecontribution", &amount.as_sat().to_string());
+            .append_pair("maxadditionalfeecontribution", &amount.to_sat().to_string());
     }
     if min_fee_rate > FeeRate::ZERO {
         url.query_pairs_mut()
@@ -520,8 +520,8 @@ mod tests {
 
         let original_psbt = super::load_psbt_from_base64(&mut original_psbt).unwrap();
         eprintln!("original: {:#?}", original_psbt);
-        let payee = original_psbt.global.unsigned_tx.output[1].script_pubkey.clone();
-        let sequence = original_psbt.global.unsigned_tx.input[0].sequence;
+        let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
+        let sequence = original_psbt.unsigned_tx.input[0].sequence;
         let ctx = super::Context {
             original_psbt,
             disable_output_substitution: false,

@@ -69,12 +69,6 @@ The intention is to develop it further over time to support other backends (LND 
 
 Contributions welcome!
 
-## MSRV
-
-1.41.1
-
-This library will attempt to maintain MSRV 1.41.1 for as long as there is not a substatntial language feature or too many smaller features in whichever Rust version is available in Debian stable (1.48 in Bullseye at the time of writing) that this library would like to use. In case of MSRV bump we will do semver-breaking release.
-
 ## License
 
 MITNFA with disclaimer: if you use this library in production without review you agree to be publicly

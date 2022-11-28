@@ -1,3 +1,4 @@
+use bitcoin::{Sequence, PackedLockTime};
 use crate::input_type::{InputType, InputTypeError};
 use std::fmt;
 
@@ -16,8 +17,8 @@ pub(crate) enum InternalValidationError {
     InvalidInputType(InputTypeError),
     InvalidProposedInput(crate::psbt::PrevTxOutError),
     VersionsDontMatch { proposed: i32, original: i32, },
-    LockTimesDontMatch { proposed: u32, original: u32, },
-    SenderTxinSequenceChanged { proposed: u32, original: u32, },
+    LockTimesDontMatch { proposed: PackedLockTime, original: PackedLockTime, },
+    SenderTxinSequenceChanged { proposed: Sequence, original: Sequence, },
     SenderTxinContainsNonWitnessUtxo,
     SenderTxinContainsWitnessUtxo,
     SenderTxinContainsFinalScriptSig,

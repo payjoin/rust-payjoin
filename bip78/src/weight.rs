@@ -73,18 +73,18 @@ mod inner {
         type Output = FeeRate;
 
         fn div(self, rhs: Weight) -> Self::Output {
-            FeeRate::from_sat_per_wu(self.as_sat() / rhs.0)
+            FeeRate::from_sat_per_wu(self.to_sat() / rhs.0)
         }
     }
 }
 
-pub (crate) fn witness_weight(witness: &Vec<Vec<u8>>) -> Weight {
+pub (crate) fn witness_weight(witness: &bitcoin::Witness) -> Weight {
     if witness.is_empty() {
         return Weight::ZERO;
     }
     let mut size = varint_size(witness.len() as u64);
 
-    for item in witness {
+    for item in witness.iter() {
         size += varint_size(item.len() as u64) + item.len() as u64;
     }
 
@@ -134,6 +134,6 @@ impl ComputeWeight for OutPoint {
 
 impl ComputeWeight for Transaction {
     fn weight(&self) -> Weight {
-        Weight::manual_from_u64(self.get_weight() as u64)
+        Weight::manual_from_u64(self.weight() as u64)
     }
 }

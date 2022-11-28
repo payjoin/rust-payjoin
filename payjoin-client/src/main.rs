@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use bip78::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
-use bitcoincore_rpc::RpcApi;
+use bitcoincore_rpc::{RpcApi, bitcoin::Amount};
 use bip78::{UriExt, PjUriExt};
 use std::convert::TryFrom;
 
@@ -35,13 +35,14 @@ fn main() {
         panic!("please specify the amount in the Uri");
     }
 
+    let amount = Amount::from_sat(link.amount.unwrap().to_sat());
     let mut outputs = HashMap::with_capacity(1);
-    outputs.insert(link.address.to_string(), link.amount.unwrap());
+    outputs.insert(link.address.to_string(), amount);
 
     let client = bitcoincore_rpc::Client::new(&format!("http://127.0.0.1:{}", port), bitcoincore_rpc::Auth::CookieFile(cookie_file.into())).unwrap();
     let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
         lock_unspent: Some(true),
-        fee_rate: Some(bip78::bitcoin::Amount::from_sat(2000)),
+        fee_rate: Some(Amount::from_sat(2000)),
         ..Default::default()
     };
     let psbt = client.wallet_create_funded_psbt(
@@ -84,8 +85,8 @@ fn main() {
 fn load_psbt_from_base64(mut input: impl std::io::Read) -> Result<Psbt, bip78::bitcoin::consensus::encode::Error> {
     use bip78::bitcoin::consensus::Decodable;    
  
-    let reader = base64::read::DecoderReader::new(&mut input, base64::Config::new(base64::CharacterSet::Standard, true));
-    Psbt::consensus_decode(reader)    
+    let mut reader = base64::read::DecoderReader::new(&mut input, base64::Config::new(base64::CharacterSet::Standard, true));
+    Psbt::consensus_decode(&mut reader)
 }
 
 fn serialize_psbt(psbt: &Psbt) -> String {

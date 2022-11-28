@@ -4,7 +4,7 @@ mod integration {
     use bitcoind::bitcoincore_rpc::RpcApi;
     use bitcoind::bitcoincore_rpc;
     use bitcoin::Amount;
-    use bip78::Uri;
+    use bip78::{Uri, UriExt, PjUriExt};
     use std::str::FromStr;
     use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
     use log::{debug, log_enabled, Level};
@@ -16,7 +16,7 @@ mod integration {
         let _ = env_logger::try_init();
         let bitcoind_exe = std::env::var("BITCOIND_EXE")
             .ok()
-            .or_else(|| bitcoind::downloaded_exe_path())
+            .or_else(|| bitcoind::downloaded_exe_path().ok())
             .expect("version feature or env BITCOIND_EXE is required for tests");
         let mut conf = bitcoind::Conf::default();
         conf.view_stdout = log_enabled!(Level::Debug);
@@ -43,12 +43,13 @@ mod integration {
         // Receiver creates the payjoin URI
         let pj_receiver_address = receiver.get_new_address(None, None).unwrap();
         let amount = Amount::from_btc(1.0).unwrap();
-        let pj_uri_string = format!("{}?amount={}&pj=https://example.com", pj_receiver_address.to_qr_uri(), amount.as_btc());
+        let pj_uri_string = format!("{}?amount={}&pj=https://example.com", pj_receiver_address.to_qr_uri(), amount.to_btc());
         let pj_uri = Uri::from_str(&pj_uri_string).unwrap();
+        let pj_uri = pj_uri.check_pj_supported().expect("Bad Uri");
 
         // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
         let mut outputs = HashMap::with_capacity(1);
-        outputs.insert(pj_uri.address().to_string(), pj_uri.amount().unwrap());
+        outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap());
         debug!("outputs: {:?}", outputs);
         let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
             lock_unspent: Some(true),
@@ -69,11 +70,11 @@ mod integration {
         let psbt = load_psbt_from_base64(psbt.as_bytes()).unwrap();
         debug!("Original psbt: {:#?}", psbt);
         let pj_params = bip78::sender::Params::with_fee_contribution(bip78::bitcoin::Amount::from_sat(10000), None);
-        let (req, ctx) = pj_uri.create_request(psbt, pj_params).unwrap();
+        let (req, _ctx) = pj_uri.create_pj_request(psbt, pj_params).unwrap();
         let headers = HeaderMock::from_vec(&req.body);
 
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
-        let proposal = bip78::receiver::UncheckedProposal::from_request(req.body.as_slice(), "", headers).unwrap();
+        let _proposal = bip78::receiver::UncheckedProposal::from_request(req.body.as_slice(), "", headers).unwrap();
 
         // TODO
     }
@@ -99,7 +100,7 @@ mod integration {
     fn load_psbt_from_base64(mut input: impl std::io::Read) -> Result<Psbt, bip78::bitcoin::consensus::encode::Error> {
         use bip78::bitcoin::consensus::Decodable;
 
-        let reader = base64::read::DecoderReader::new(&mut input, base64::Config::new(base64::CharacterSet::Standard, true));
-        Psbt::consensus_decode(reader)
+        let mut reader = base64::read::DecoderReader::new(&mut input, base64::Config::new(base64::CharacterSet::Standard, true));
+        Psbt::consensus_decode(&mut reader)
     }
 }

@@ -19,8 +19,8 @@ Please at least review the code that verifies there's no overpayment and let me 
 - [x] Fee contribution support
 - [x] Example client using bitcoind
 - [x] Tested and works with BTCPayServer
-- [ ] Tested and works with WasabiWallet
-- [ ] Minimum fee rate enforcement
+- [ ] Tested and works with JoinMarket
+- [x] Minimum fee rate enforcement
 - [ ] Independent review
 - [ ] Independent testing
 

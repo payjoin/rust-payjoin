@@ -1,2 +1,2 @@
 [workspace]
-members = ["bip78", "payjoin-client"]
+members = ["bip78", "payjoin-client", "payjoind"]

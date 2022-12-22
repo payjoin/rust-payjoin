@@ -1,10 +1,10 @@
 [package]
-name = "bip78"
-version = "0.2.0-preview"
-authors = ["Martin Habovstiak <martin.habovstiak@gmail.com>"]
-description = "Library implementing PayJoin (BIP78) protocol."
-homepage = "https://github.com/Kixunil/payjoin"
-repository = "https://github.com/Kixunil/payjoin"
+name = "payjoin"
+version = "0.3.0-alpha"
+authors = ["Dan Gould <dan@chaincase.app>"]
+description = "PayJoin Library for the BIP78 Pay to Endpoint protocol."
+homepage = "https://github.com/chaincase-app/payjoin"
+repository = "https://github.com/chaincase-app/payjoin"
 readme = "README.md"
 keywords = ["bip78", "payjoin", "bitcoin"]
 categories = ["api-bindings", "cryptography::cryptocurrencies", "network-programming"]

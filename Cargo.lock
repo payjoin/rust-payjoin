@@ -72,20 +72,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bip78"
-version = "0.2.0-preview"
-dependencies = [
- "base64",
- "bip21",
- "bitcoin",
- "bitcoind",
- "env_logger",
- "log",
- "rand",
- "url",
-]
-
-[[package]]
 name = "bitcoin"
 version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -735,12 +721,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "payjoin"
+version = "0.3.0-alpha"
+dependencies = [
+ "base64",
+ "bip21",
+ "bitcoin",
+ "bitcoind",
+ "env_logger",
+ "log",
+ "rand",
+ "url",
+]
+
+[[package]]
 name = "payjoin-client"
 version = "0.1.0"
 dependencies = [
  "base64",
- "bip78",
  "bitcoincore-rpc",
+ "payjoin",
  "reqwest",
 ]
 

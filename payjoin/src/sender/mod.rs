@@ -1,9 +1,9 @@
-//! Sender side of BIP78
+//! Send a PayJoin
 //!
 //! This module contains types and methods used to implement sending via BIP78.
 //! Usage is prety simple:
 //!
-//! 1. Parse BIP21 as `bip78::Uri`
+//! 1. Parse BIP21 as `payjoin::Uri`
 //! 2. Create a finalized PSBT paying `.amount()` to `.address()`
 //! 3. Spawn a thread or async task that will broadcast the transaction after one minute unless
 //!    canceled

@@ -28,3 +28,6 @@ url = "2.2.2"
 bitcoind = { version = "0.27.1", features = ["0_21_1"] }
 env_logger = "0.9.0"
 log = "0.4.14"
+
+[package.metadata.docs.rs]
+features = ["sender"]

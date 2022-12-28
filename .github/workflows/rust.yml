@@ -22,7 +22,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --all-features --lib --manifest-path bip78/Cargo.toml
+          args: --verbose --all-features --lib --manifest-path payjoin/Cargo.toml
 
   build-payjoin-client:
     runs-on: ubuntu-20.04

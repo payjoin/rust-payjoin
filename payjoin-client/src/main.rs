@@ -1,7 +1,7 @@
 use std::collections::HashMap;
-use bip78::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
+use payjoin::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use bitcoincore_rpc::RpcApi;
-use bip78::{UriExt, PjUriExt};
+use payjoin::{UriExt, PjUriExt};
 use std::convert::TryFrom;
 
 fn main() {
@@ -27,7 +27,7 @@ fn main() {
         .into_string()
         .expect("bip21 is not UTF-8");
 
-    let link = bip78::Uri::try_from(&*bip21).unwrap();
+    let link = payjoin::Uri::try_from(&*bip21).unwrap();
 
     let link = link.check_pj_supported().unwrap_or_else(|_| panic!("The provided URI doesn't support payjoin (BIP78)"));
 
@@ -41,7 +41,7 @@ fn main() {
     let client = bitcoincore_rpc::Client::new(&format!("http://127.0.0.1:{}", port), bitcoincore_rpc::Auth::CookieFile(cookie_file.into())).unwrap();
     let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
         lock_unspent: Some(true),
-        fee_rate: Some(bip78::bitcoin::Amount::from_sat(2000)),
+        fee_rate: Some(payjoin::bitcoin::Amount::from_sat(2000)),
         ..Default::default()
     };
     let psbt = client.wallet_create_funded_psbt(
@@ -57,7 +57,7 @@ fn main() {
         .psbt;
     let psbt = load_psbt_from_base64(psbt.as_bytes()).unwrap();
     println!("Original psbt: {:#?}", psbt);
-    let pj_params = bip78::sender::Params::with_fee_contribution(bip78::bitcoin::Amount::from_sat(10000), None);
+    let pj_params = payjoin::sender::Params::with_fee_contribution(payjoin::bitcoin::Amount::from_sat(10000), None);
     let (req, ctx) = link.create_pj_request(psbt, pj_params).unwrap();
     let response = reqwest::blocking::Client::new()
         .post(req.url)
@@ -81,15 +81,15 @@ fn main() {
     client.send_raw_transaction(&tx).unwrap();
 }
 
-fn load_psbt_from_base64(mut input: impl std::io::Read) -> Result<Psbt, bip78::bitcoin::consensus::encode::Error> {
-    use bip78::bitcoin::consensus::Decodable;    
+fn load_psbt_from_base64(mut input: impl std::io::Read) -> Result<Psbt, payjoin::bitcoin::consensus::encode::Error> {
+    use payjoin::bitcoin::consensus::Decodable;    
  
     let reader = base64::read::DecoderReader::new(&mut input, base64::Config::new(base64::CharacterSet::Standard, true));
     Psbt::consensus_decode(reader)    
 }
 
 fn serialize_psbt(psbt: &Psbt) -> String {
-    use bip78::bitcoin::consensus::Encodable;
+    use payjoin::bitcoin::consensus::Encodable;
                                     
     let mut encoder = base64::write::EncoderWriter::new(Vec::new(), base64::STANDARD);
     psbt.consensus_encode(&mut encoder)

@@ -4,12 +4,12 @@ mod integration {
     use bitcoind::bitcoincore_rpc::RpcApi;
     use bitcoind::bitcoincore_rpc;
     use bitcoin::Amount;
-    use bip78::Uri;
+    use payjoin::Uri;
     use std::str::FromStr;
     use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
     use log::{debug, log_enabled, Level};
     use std::collections::HashMap;
-    use bip78::receiver::Headers;
+    use payjoin::receiver::Headers;
 
     #[test]
     fn integration_test() {
@@ -52,7 +52,7 @@ mod integration {
         debug!("outputs: {:?}", outputs);
         let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
             lock_unspent: Some(true),
-            fee_rate: Some(bip78::bitcoin::Amount::from_sat(2000)),
+            fee_rate: Some(payjoin::bitcoin::Amount::from_sat(2000)),
             ..Default::default()
         };
         let psbt = sender.wallet_create_funded_psbt(
@@ -68,12 +68,12 @@ mod integration {
             .psbt;
         let psbt = load_psbt_from_base64(psbt.as_bytes()).unwrap();
         debug!("Original psbt: {:#?}", psbt);
-        let pj_params = bip78::sender::Params::with_fee_contribution(bip78::bitcoin::Amount::from_sat(10000), None);
+        let pj_params = payjoin::sender::Params::with_fee_contribution(payjoin::bitcoin::Amount::from_sat(10000), None);
         let (req, ctx) = pj_uri.create_request(psbt, pj_params).unwrap();
         let headers = HeaderMock::from_vec(&req.body);
 
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
-        let proposal = bip78::receiver::UncheckedProposal::from_request(req.body.as_slice(), "", headers).unwrap();
+        let proposal = payjoin::receiver::UncheckedProposal::from_request(req.body.as_slice(), "", headers).unwrap();
 
         // TODO
     }
@@ -96,8 +96,8 @@ mod integration {
     }
 
 
-    fn load_psbt_from_base64(mut input: impl std::io::Read) -> Result<Psbt, bip78::bitcoin::consensus::encode::Error> {
-        use bip78::bitcoin::consensus::Decodable;
+    fn load_psbt_from_base64(mut input: impl std::io::Read) -> Result<Psbt, payjoin::bitcoin::consensus::encode::Error> {
+        use payjoin::bitcoin::consensus::Decodable;
 
         let reader = base64::read::DecoderReader::new(&mut input, base64::Config::new(base64::CharacterSet::Standard, true));
         Psbt::consensus_decode(reader)

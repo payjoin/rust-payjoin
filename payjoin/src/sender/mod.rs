@@ -1,15 +1,15 @@
 //! Send a PayJoin
 //!
 //! This module contains types and methods used to implement sending via BIP78.
-//! Usage is prety simple:
+//! Usage is pretty simple:
 //!
-//! 1. Parse BIP21 as `payjoin::Uri`
-//! 2. Create a finalized PSBT paying `.amount()` to `.address()`
+//! 1. Parse BIP21 as [`payjoin::Uri`](crate::Uri)
+//! 2. Create a finalized PSBT paying `.amount` to `.address`
 //! 3. Spawn a thread or async task that will broadcast the transaction after one minute unless
 //!    canceled
-//! 4. Call `.create_request()` with the PSBT and your parameters
+//! 4. Call [`PjUriExt::create_pj_request()`](crate::PjUriExt::create_pj_request()) with the PSBT and your parameters
 //! 5. Send the request and receive response
-//! 6. Feed the response to `.process_response()`
+//! 6. Feed the response to [`Context::process_response()`](crate::sender::Context::process_response())
 //! 7. Sign resulting PSBT
 //! 8. Cancel the one-minute deadline and broadcast the resulting PSBT
 //!
@@ -121,8 +121,8 @@ pub struct Request {
 
 /// Data required for validation of response.
 ///
-/// This type is used to process the response. It is returned from `Uri::create_request()` method
-/// and you only need to call `process_response()` on it to continue BIP78 flow.
+/// This type is used to process the response. It is returned from [`PjUriExt::create_pj_request()`](crate::PjUriExt::create_pj_request()) method
+/// and you only need to call [`.process_response()`](crate::sender::Context::process_response()) on it to continue BIP78 flow.
 pub struct Context {
     original_psbt: Psbt,
     disable_output_substitution: bool,

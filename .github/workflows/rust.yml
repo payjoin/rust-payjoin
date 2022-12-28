@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust: [stable, nightly, 1.41.1]
+        rust: [stable, nightly]
 
     steps:
       - uses: actions/checkout@v2
@@ -29,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust: [ stable, nightly, 1.46.0 ]
+        rust: [stable, nightly]
 
     steps:
       - uses: actions/checkout@v2

@@ -73,7 +73,7 @@ mod inner {
         type Output = FeeRate;
 
         fn div(self, rhs: Weight) -> Self::Output {
-            FeeRate::from_sat_per_wu(self.as_sat() / rhs.0)
+            FeeRate::from_sat_per_wu(self.to_sat() / rhs.0)
         }
     }
 }

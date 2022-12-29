@@ -49,8 +49,8 @@ impl UncheckedProposal {
 
         // enforce the limit
         let mut limited = body.take(content_length);
-        let reader = base64::read::DecoderReader::new(&mut limited, base64::STANDARD);
-        let psbt = Psbt::consensus_decode(reader).map_err(InternalRequestError::Decode)?;
+        let mut reader = base64::read::DecoderReader::new(&mut limited, base64::STANDARD);
+        let psbt = Psbt::consensus_decode(&mut reader).map_err(InternalRequestError::Decode)?;
 
         Ok(UncheckedProposal {
             psbt,

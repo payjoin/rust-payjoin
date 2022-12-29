@@ -17,7 +17,7 @@
 use bitcoin::hashes::hex::FromHex;
 use bitcoin::util::psbt::PartiallySignedTransaction as UncheckedPsbt;
 use crate::input_type::InputType;
-use bitcoin::{TxOut, Script};
+use bitcoin::{TxOut, Script, Sequence};
 pub(crate) use error::{InternalValidationError, InternalCreateRequestError};
 use crate::weight::{Weight, ComputeWeight, varint_size};
 use crate::fee_rate::FeeRate;
@@ -131,7 +131,7 @@ pub struct Context {
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
     input_type: InputType,
-    sequence: u32,
+    sequence: Sequence,
     payee: Script,
 }
 
@@ -361,7 +361,7 @@ fn check_single_payee(psbt: &Psbt, script_pubkey: &Script, amount: Option<bitcoi
     for output in &psbt.unsigned_tx.output {
         if output.script_pubkey == *script_pubkey {
             if let Some(amount) = amount {
-                if output.value != amount.as_sat() {
+                if output.value != amount.to_sat() {
                     return Err(InternalCreateRequestError::PayeeValueNotEqual)
                 }
             }
@@ -395,7 +395,7 @@ fn clear_unneeded_fields(psbt: &mut Psbt) {
 }
 
 fn check_fee_output_amount(output: &TxOut, fee: bitcoin::Amount, clamp_fee_contribution: bool) -> Result<bitcoin::Amount, InternalCreateRequestError> {
-    if output.value < fee.as_sat() {
+    if output.value < fee.to_sat() {
         if clamp_fee_contribution {
             Ok(bitcoin::Amount::from_sat(output.value))
         } else {
@@ -458,7 +458,7 @@ fn serialize_url(
     if let Some((amount, index)) = fee_contribution {
         url.query_pairs_mut()
             .append_pair("additionalfeeoutputindex", &index.to_string())
-            .append_pair("maxadditionalfeecontribution", &amount.as_sat().to_string());
+            .append_pair("maxadditionalfeecontribution", &amount.to_sat().to_string());
     }
     if min_fee_rate > FeeRate::ZERO {
         url.query_pairs_mut()
@@ -484,11 +484,7 @@ pub(crate) fn from_psbt_and_uri(mut psbt: Psbt, uri: crate::uri::PjUri<'_>, para
     let disable_output_substitution = uri.extras.disable_output_substitution || params.disable_output_substitution;
     let payee = uri.address.script_pubkey();
 
-    // the following patch supports bitcoin 0.28 crate where bip21 does not
-    let payee = bitcoin::Script::from_str(&payee.to_string()).map_err(|_| InternalCreateRequestError::MissingPayeeOutput)?;
-    let amount = uri.amount.and_then(|a| Some(bitcoin::Amount::from_sat(a.as_sat())));
-
-    check_single_payee(&psbt, &payee, amount)?;
+    check_single_payee(&psbt, &payee, uri.amount)?;
     let fee_contribution = determine_fee_contribution(&psbt, &payee, &params)?;
     clear_unneeded_fields(&mut psbt);
 

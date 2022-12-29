@@ -1,10 +1,12 @@
 
-#[cfg(all(feature = "sender", feature = "receiver"))]mod integration {
-    use bitcoind::bitcoincore_rpc::{RpcApi, bitcoin::Amount};
+#[cfg(all(feature = "sender", feature = "receiver"))]
+mod integration {
+    use bitcoind::bitcoincore_rpc::RpcApi;
     use bitcoind::bitcoincore_rpc;
     use payjoin::{Uri, UriExt, PjUriExt};
     use std::str::FromStr;
     use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
+    use bitcoin::Amount;
     use log::{debug, log_enabled, Level};
     use std::collections::HashMap;
     use payjoin::receiver::Headers;

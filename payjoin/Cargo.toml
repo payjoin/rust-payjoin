@@ -18,10 +18,10 @@ sender = []
 receiver = ["rand"]
 
 [dependencies]
-bitcoin = "0.28.1"
+bitcoin = "0.29.2"
 base64 = "0.13.0"
 rand = { version = "0.8.4", optional = true }
-bip21 = "0.1.1"
+bip21 = "0.2.0"
 url = "2.2.2"
 
 [dev-dependencies]

@@ -1,4 +1,6 @@
-use crate::input_type::{InputType, InputTypeError};
+use bitcoin::{PackedLockTime, Sequence};
+
+use crate::input_type::{InputType, InputTypeError,};
 use std::fmt;
 
 /// Error that may occur when the response from receiver is malformed.
@@ -16,8 +18,8 @@ pub(crate) enum InternalValidationError {
     InvalidInputType(InputTypeError),
     InvalidProposedInput(crate::psbt::PrevTxOutError),
     VersionsDontMatch { proposed: i32, original: i32, },
-    LockTimesDontMatch { proposed: u32, original: u32, },
-    SenderTxinSequenceChanged { proposed: u32, original: u32, },
+    LockTimesDontMatch { proposed: PackedLockTime, original: PackedLockTime, },
+    SenderTxinSequenceChanged { proposed: Sequence, original: Sequence, },
     SenderTxinContainsNonWitnessUtxo,
     SenderTxinContainsWitnessUtxo,
     SenderTxinContainsFinalScriptSig,

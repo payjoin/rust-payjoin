@@ -35,7 +35,7 @@ fn main() {
         panic!("please specify the amount in the Uri");
     }
 
-    let amount = Amount::from_sat(link.amount.unwrap().as_sat());
+    let amount = Amount::from_sat(link.amount.unwrap().to_sat());
     let mut outputs = HashMap::with_capacity(1);
     outputs.insert(link.address.to_string(), amount);
 

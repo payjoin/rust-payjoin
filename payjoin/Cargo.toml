@@ -1,6 +1,6 @@
 [package]
 name = "payjoin"
-version = "0.3.0-alpha"
+version = "0.4.0-alpha"
 authors = ["Dan Gould <dan@chaincase.app>"]
 description = "PayJoin Library for the BIP78 Pay to Endpoint protocol."
 homepage = "https://github.com/chaincase-app/payjoin"
@@ -18,7 +18,7 @@ sender = []
 receiver = ["rand"]
 
 [dependencies]
-bitcoin = "0.27.1"
+bitcoin = "0.28.2"
 base64 = "0.13.0"
 rand = { version = "0.8.4", optional = true }
 bip21 = "0.1.1"

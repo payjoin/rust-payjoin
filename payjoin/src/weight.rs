@@ -1,4 +1,4 @@
-use bitcoin::{Transaction, Script, TxOut, TxIn, OutPoint};
+use bitcoin::{Transaction, Script, TxOut, TxIn, OutPoint, Witness};
 
 pub(crate) use inner::Weight;
 
@@ -78,13 +78,13 @@ mod inner {
     }
 }
 
-pub (crate) fn witness_weight(witness: &Vec<Vec<u8>>) -> Weight {
+pub (crate) fn witness_weight(witness: &Witness) -> Weight {
     if witness.is_empty() {
         return Weight::ZERO;
     }
     let mut size = varint_size(witness.len() as u64);
 
-    for item in witness {
+    for item in witness.iter() {
         size += varint_size(item.len() as u64) + item.len() as u64;
     }
 
@@ -134,6 +134,6 @@ impl ComputeWeight for OutPoint {
 
 impl ComputeWeight for Transaction {
     fn weight(&self) -> Weight {
-        Weight::manual_from_u64(self.get_weight() as u64)
+        Weight::manual_from_u64(self.weight() as u64)
     }
 }

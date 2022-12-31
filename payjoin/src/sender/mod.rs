@@ -485,7 +485,7 @@ pub(crate) fn from_psbt_and_uri(mut psbt: Psbt, uri: crate::uri::PjUri<'_>, para
     let payee = uri.address.script_pubkey();
 
     // the following patch supports bitcoin 0.28 crate where bip21 does not
-    let payee = bitcoin::Script::from_str(&payee.to_string()).map_err(|_| InternalCreateRequestError::MissingPayeeOutput)?;
+    let payee = Script::from(payee.to_bytes());
     let amount = uri.amount.and_then(|a| Some(bitcoin::Amount::from_sat(a.as_sat())));
 
     check_single_payee(&psbt, &payee, amount)?;

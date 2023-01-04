@@ -1,5 +1,5 @@
 use crate::weight::Weight;
-use std::ops::{Mul, Div};
+use std::ops::{Div, Mul};
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub(crate) struct FeeRate(u64);

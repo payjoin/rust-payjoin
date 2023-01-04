@@ -41,7 +41,7 @@ pub trait PjUriExt: sealed::UriExt {
         self,
         psbt: bitcoin::util::psbt::PartiallySignedTransaction,
         params: sender::Params,
-    ) -> Result<(sender::Request, sender::Context), sender::CreateRequestError>; 
+    ) -> Result<(sender::Request, sender::Context), sender::CreateRequestError>;
 }
 
 pub trait UriExt<'a>: sealed::UriExt {
@@ -55,7 +55,12 @@ impl<'a> PjUriExt for PjUri<'a> {
         psbt: bitcoin::util::psbt::PartiallySignedTransaction,
         params: sender::Params,
     ) -> Result<(sender::Request, sender::Context), sender::CreateRequestError> {
-        sender::from_psbt_and_uri(psbt.try_into().map_err(sender::InternalCreateRequestError::InconsistentOriginalPsbt)?, self, params)
+        sender::from_psbt_and_uri(
+            psbt.try_into()
+                .map_err(sender::InternalCreateRequestError::InconsistentOriginalPsbt)?,
+            self,
+            params,
+        )
     }
 }
 
@@ -69,7 +74,7 @@ impl<'a> UriExt<'a> for Uri<'a> {
                 uri.message = self.message;
 
                 Ok(uri)
-            },
+            }
             PayJoin::Unsupported => {
                 let mut uri = bip21::Uri::new(self.address);
                 uri.amount = self.amount;
@@ -151,13 +156,16 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
         }
     }
 
-    fn finalize(self) -> std::result::Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
+    fn finalize(
+        self,
+    ) -> std::result::Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
         match (self.pj, self.pjos) {
             (None, None) => Ok(PayJoin::Unsupported),
             (None, Some(_)) => Err(PjParseError(InternalPjParseError::MissingEndpoint)),
             (Some(endpoint), pjos) => {
                 if endpoint.scheme() == "https"
-                    || endpoint.scheme() == "http" && endpoint.domain().unwrap_or_default().ends_with(".onion")
+                    || endpoint.scheme() == "http"
+                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
                 {
                     Ok(PayJoin::Supported(PayJoinParams {
                         endpoint,

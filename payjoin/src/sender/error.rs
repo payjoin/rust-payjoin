@@ -1,6 +1,6 @@
 use bitcoin::{PackedLockTime, Sequence};
 
-use crate::input_type::{InputType, InputTypeError,};
+use crate::input_type::{InputType, InputTypeError};
 use std::fmt;
 
 /// Error that may occur when the response from receiver is malformed.
@@ -17,9 +17,18 @@ pub(crate) enum InternalValidationError {
     Decode(bitcoin::consensus::encode::Error),
     InvalidInputType(InputTypeError),
     InvalidProposedInput(crate::psbt::PrevTxOutError),
-    VersionsDontMatch { proposed: i32, original: i32, },
-    LockTimesDontMatch { proposed: PackedLockTime, original: PackedLockTime, },
-    SenderTxinSequenceChanged { proposed: Sequence, original: Sequence, },
+    VersionsDontMatch {
+        proposed: i32,
+        original: i32,
+    },
+    LockTimesDontMatch {
+        proposed: PackedLockTime,
+        original: PackedLockTime,
+    },
+    SenderTxinSequenceChanged {
+        proposed: Sequence,
+        original: Sequence,
+    },
     SenderTxinContainsNonWitnessUtxo,
     SenderTxinContainsWitnessUtxo,
     SenderTxinContainsFinalScriptSig,
@@ -29,7 +38,10 @@ pub(crate) enum InternalValidationError {
     ReceiverTxinNotFinalized,
     ReceiverTxinMissingUtxoInfo,
     MixedSequence,
-    MixedInputTypes { proposed: InputType, original: InputType, },
+    MixedInputTypes {
+        proposed: InputType,
+        original: InputType,
+    },
     MissingOrShuffledInputs,
     TxOutContainsKeyPaths,
     FeeContributionExceedsMaximum,
@@ -45,9 +57,7 @@ pub(crate) enum InternalValidationError {
 
 impl From<InternalValidationError> for ValidationError {
     fn from(value: InternalValidationError) -> Self {
-        ValidationError {
-            internal: value,
-        }
+        ValidationError { internal: value }
     }
 }
 impl From<InputTypeError> for InternalValidationError {
@@ -100,9 +110,18 @@ impl std::error::Error for ValidationError {
             Decode(error) => Some(error),
             InvalidInputType(error) => Some(error),
             InvalidProposedInput(error) => Some(error),
-            VersionsDontMatch { proposed: _, original: _, } => None,
-            LockTimesDontMatch { proposed: _, original: _, } => None,
-            SenderTxinSequenceChanged { proposed: _, original: _, } => None,
+            VersionsDontMatch {
+                proposed: _,
+                original: _,
+            } => None,
+            LockTimesDontMatch {
+                proposed: _,
+                original: _,
+            } => None,
+            SenderTxinSequenceChanged {
+                proposed: _,
+                original: _,
+            } => None,
             SenderTxinContainsNonWitnessUtxo => None,
             SenderTxinContainsWitnessUtxo => None,
             SenderTxinContainsFinalScriptSig => None,
@@ -189,7 +208,7 @@ impl std::error::Error for CreateRequestError {
             AmbiguousChangeOutput => None,
             ChangeIndexOutOfBounds => None,
             ChangeIndexPointsAtPayee => None,
-            Url(error) => Some(error)
+            Url(error) => Some(error),
         }
     }
 }
@@ -199,5 +218,3 @@ impl From<InternalCreateRequestError> for CreateRequestError {
         CreateRequestError(value)
     }
 }
-
-

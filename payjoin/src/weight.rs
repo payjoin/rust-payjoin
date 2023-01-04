@@ -1,11 +1,11 @@
-use bitcoin::{Transaction, Script, TxOut, TxIn, OutPoint, Witness};
+use bitcoin::{OutPoint, Script, Transaction, TxIn, TxOut, Witness};
 
 pub(crate) use inner::Weight;
 
 // ensure explicit constructor
 mod inner {
-    use std::ops::{Add, Sub, AddAssign, SubAssign, Mul, Div};
     use crate::fee_rate::FeeRate;
+    use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
 
     /// Represents virtual transaction size
     #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -78,7 +78,7 @@ mod inner {
     }
 }
 
-pub (crate) fn witness_weight(witness: &Witness) -> Weight {
+pub(crate) fn witness_weight(witness: &Witness) -> Weight {
     if witness.is_empty() {
         return Weight::ZERO;
     }
@@ -116,19 +116,26 @@ impl ComputeSize for Script {
 
 impl ComputeWeight for TxOut {
     fn weight(&self) -> Weight {
-        Weight::from_non_witness_data_size(self.script_pubkey.encoded_size() + 8 /* bytes encoding u64 value */)
+        Weight::from_non_witness_data_size(
+            self.script_pubkey.encoded_size() + 8, /* bytes encoding u64 value */
+        )
     }
 }
 
 impl ComputeWeight for TxIn {
     fn weight(&self) -> Weight {
-        Weight::from_non_witness_data_size(self.script_sig.encoded_size() + 4 /* bytes encoding u32 sequence number */) + self.previous_output.weight() + witness_weight(&self.witness)
+        Weight::from_non_witness_data_size(
+            self.script_sig.encoded_size() + 4, /* bytes encoding u32 sequence number */
+        ) + self.previous_output.weight()
+            + witness_weight(&self.witness)
     }
 }
 
 impl ComputeWeight for OutPoint {
     fn weight(&self) -> Weight {
-        Weight::from_non_witness_data_size(32 /* bytes encoding previous hash */ + 4 /* bytes encoding u32 output index */)
+        Weight::from_non_witness_data_size(
+            32 /* bytes encoding previous hash */ + 4, /* bytes encoding u32 output index */
+        )
     }
 }
 

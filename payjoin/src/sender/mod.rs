@@ -18,13 +18,11 @@ use crate::fee_rate::FeeRate;
 use crate::input_type::InputType;
 use crate::psbt::Psbt;
 use crate::weight::{varint_size, ComputeWeight, Weight};
-use bitcoin::hashes::hex::FromHex;
 use bitcoin::util::psbt::PartiallySignedTransaction as UncheckedPsbt;
 use bitcoin::{Script, Sequence, TxOut};
 pub use error::{CreateRequestError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 use std::convert::TryInto;
-use std::str::FromStr;
 use url::Url;
 
 // See usize casts
@@ -651,7 +649,7 @@ pub(crate) fn from_psbt_and_uri(
     let txout = zeroth_input
         .previous_txout()
         .expect("We already checked this above");
-    let input_type = InputType::from_spent_input(txout, &zeroth_input.psbtin).unwrap();
+    let input_type = InputType::from_spent_input(txout, zeroth_input.psbtin).unwrap();
     let url = serialize_url(
         uri.extras.endpoint.into(),
         disable_output_substitution,

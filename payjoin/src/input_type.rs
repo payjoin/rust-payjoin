@@ -52,7 +52,7 @@ impl InputType {
             .ok_or(InputTypeError::UnknownInputType)?
             .map_err(|_| InputTypeError::UnknownInputType)?;
         match witness_version {
-            Instruction::PushBytes(bytes) if bytes.len() == 0 => Ok(InputType::SegWitV0 {
+            Instruction::PushBytes(bytes) if bytes.is_empty() => Ok(InputType::SegWitV0 {
                 ty: instructions.try_into()?,
                 nested,
             }),

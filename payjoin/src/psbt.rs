@@ -66,12 +66,11 @@ impl Psbt {
     ) -> Result<(), PsbtInputsError> {
         self.input_pairs()
             .enumerate()
-            .map(|(index, input)| {
+            .try_for_each(|(index, input)| {
                 input
                     .validate_utxo(treat_missing_as_error)
                     .map_err(|error| PsbtInputsError { index, error })
             })
-            .collect()
     }
 }
 
@@ -148,13 +147,13 @@ impl<'a> InputPair<'a> {
                         index: self.txin.previous_output.vout,
                     }
                 })?)
-                .ok_or(
+                .ok_or_else(|| {
                     PrevTxOutError::IndexOutOfBounds {
                         output_count: tx.output.len(),
                         index: self.txin.previous_output.vout,
                     }
-                    .into(),
-                )
+                    .into()
+                })
                 .map(drop),
             (Some(_), None) => Err(PsbtInputError::UnequalTxid),
             (None, Some(_)) => Ok(()),

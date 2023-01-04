@@ -1,4 +1,5 @@
-use bitcoin::{util::psbt::PartiallySignedTransaction as Psbt, AddressType, Script, TxOut};
+#![allow(dead_code)]
+use bitcoin::{util::psbt::PartiallySignedTransaction as Psbt, AddressType, Script};
 
 mod error;
 
@@ -28,7 +29,7 @@ pub struct MaybeInputsSeen {
 impl UncheckedProposal {
     pub fn from_request(
         body: impl std::io::Read,
-        query: &str,
+        _query: &str,
         headers: impl Headers,
     ) -> Result<Self, RequestError> {
         use crate::bitcoin::consensus::Decodable;
@@ -251,7 +252,7 @@ mod test {
     #[test]
     fn unchecked_proposal_unlocks_after_checks() {
         let proposal = get_proposal_from_test_vector().unwrap();
-        let unlocked = proposal
+        let _unlocked = proposal
             .assume_tested_and_scheduled_broadcast()
             .assume_inputs_not_owned()
             .assume_no_mixed_input_scripts()

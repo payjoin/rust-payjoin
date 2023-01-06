@@ -5,7 +5,7 @@ on: [push, pull_request]
 jobs:
 
   test-lib:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -25,7 +25,7 @@ jobs:
           args: --verbose --all-features --lib --manifest-path payjoin/Cargo.toml
 
   build-payjoin-client:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -44,3 +44,19 @@ jobs:
         with:
           command: build
           args: --manifest-path payjoin-client/Cargo.toml
+
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        rust: [stable]
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: Swatinem/rust-cache@v1.2.0
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          override: true
+      - run: cargo clippy -- -D warnings

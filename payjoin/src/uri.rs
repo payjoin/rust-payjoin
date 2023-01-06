@@ -89,11 +89,11 @@ impl<'a> UriExt<'a> for Uri<'a> {
     }
 }
 
-impl<'a> PayJoinParams {
+impl PayJoinParams {
     pub fn is_output_substitution_disabled(&self) -> bool { self.disable_output_substitution }
 }
 
-impl<'a> bip21::de::DeserializationError for PayJoin {
+impl bip21::de::DeserializationError for PayJoin {
     type Error = PjParseError;
 }
 
@@ -117,12 +117,7 @@ impl From<InternalPjParseError> for PjParseError {
 impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
     type Value = PayJoin;
 
-    fn is_param_known(&self, param: &str) -> bool {
-        match param {
-            "pj" | "pjos" => true,
-            _ => false,
-        }
-    }
+    fn is_param_known(&self, param: &str) -> bool { matches!(param, "pj" | "pjos") }
 
     fn deserialize_temp(
         &mut self,

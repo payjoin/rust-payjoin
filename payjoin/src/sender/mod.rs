@@ -14,18 +14,20 @@
 //! 8. Cancel the one-minute deadline and broadcast the resulting PSBT
 //!
 
-use bitcoin::hashes::hex::FromHex;
-use bitcoin::util::psbt::PartiallySignedTransaction as UncheckedPsbt;
-use crate::input_type::InputType;
-use bitcoin::{TxOut, Script, Sequence};
-pub(crate) use error::{InternalValidationError, InternalCreateRequestError};
-use crate::weight::{Weight, ComputeWeight, varint_size};
-use crate::fee_rate::FeeRate;
-use crate::psbt::Psbt;
 use std::convert::TryInto;
 use std::str::FromStr;
+
+use bitcoin::hashes::hex::FromHex;
+use bitcoin::util::psbt::PartiallySignedTransaction as UncheckedPsbt;
+use bitcoin::{Script, Sequence, TxOut};
+pub use error::{CreateRequestError, ValidationError};
+pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 use url::Url;
-pub use error::{ValidationError, CreateRequestError};
+
+use crate::fee_rate::FeeRate;
+use crate::input_type::InputType;
+use crate::psbt::Psbt;
+use crate::weight::{varint_size, ComputeWeight, Weight};
 
 // See usize casts
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -53,7 +55,10 @@ impl Params {
     ///
     /// `change_index` specifies which output can be used to pay fee. I `None` is provided, then
     /// the output is auto-detected unless the supplied transaction has more than two outputs.
-    pub fn with_fee_contribution(max_fee_contribution: bitcoin::Amount, change_index: Option<usize>) -> Self {
+    pub fn with_fee_contribution(
+        max_fee_contribution: bitcoin::Amount,
+        change_index: Option<usize>,
+    ) -> Self {
         Params {
             disable_output_substitution: false,
             fee_contribution: Some((max_fee_contribution, change_index)),
@@ -138,10 +143,11 @@ pub struct Context {
 macro_rules! check_eq {
     ($proposed:expr, $original:expr, $error:ident) => {
         match ($proposed, $original) {
-            (proposed, original) if proposed != original => return Err(InternalValidationError::$error { proposed, original, }),
+            (proposed, original) if proposed != original =>
+                return Err(InternalValidationError::$error { proposed, original }),
             _ => (),
         }
-    }
+    };
 }
 
 macro_rules! ensure {
@@ -149,13 +155,17 @@ macro_rules! ensure {
         if !($cond) {
             return Err(InternalValidationError::$error);
         }
-    }
+    };
 }
 
-fn load_psbt_from_base64(mut input: impl std::io::Read) -> Result<Psbt, bitcoin::consensus::encode::Error> {
+fn load_psbt_from_base64(
+    mut input: impl std::io::Read,
+) -> Result<Psbt, bitcoin::consensus::encode::Error> {
     use bitcoin::consensus::Decodable;
     let mut reader = base64::read::DecoderReader::new(&mut input, base64::STANDARD);
-    Ok(UncheckedPsbt::consensus_decode(&mut reader)?.try_into().expect("consensus_decode guarantees consistency"))
+    Ok(UncheckedPsbt::consensus_decode(&mut reader)?
+        .try_into()
+        .expect("consensus_decode guarantees consistency"))
 }
 
 fn calculate_psbt_fee(psbt: &Psbt) -> bitcoin::Amount {
@@ -179,9 +189,11 @@ impl Context {
     /// Call this method with response from receiver to continue BIP78 flow. If the response is
     /// valid you will get appropriate PSBT that you should sign and broadcast.
     #[inline]
-    pub fn process_response(self, response: impl std::io::Read) -> Result<UncheckedPsbt, ValidationError> {
-        let proposal = load_psbt_from_base64(response)
-            .map_err(InternalValidationError::Decode)?;
+    pub fn process_response(
+        self,
+        response: impl std::io::Read,
+    ) -> Result<UncheckedPsbt, ValidationError> {
+        let proposal = load_psbt_from_base64(response).map_err(InternalValidationError::Decode)?;
 
         // process in non-generic function
         self.process_proposal(proposal).map(Into::into).map_err(Into::into)
@@ -195,17 +207,32 @@ impl Context {
         Ok(proposal)
     }
 
-    fn check_fees(&self, proposal: &Psbt, in_stats: InputStats, out_stats: OutputStats) -> InternalResult<()> {
+    fn check_fees(
+        &self,
+        proposal: &Psbt,
+        in_stats: InputStats,
+        out_stats: OutputStats,
+    ) -> InternalResult<()> {
         if out_stats.total_value > in_stats.total_value {
             return Err(InternalValidationError::Inflation);
         }
         let proposed_psbt_fee = in_stats.total_value - out_stats.total_value;
         let original_fee = calculate_psbt_fee(&self.original_psbt);
         ensure!(original_fee <= proposed_psbt_fee, AbsoluteFeeDecreased);
-        ensure!(out_stats.contributed_fee <= proposed_psbt_fee - original_fee, PayeeTookContributedFee);
-        let original_weight = Weight::manual_from_u64(self.original_psbt.unsigned_tx.weight() as u64);
+        ensure!(
+            out_stats.contributed_fee <= proposed_psbt_fee - original_fee,
+            PayeeTookContributedFee
+        );
+        let original_weight =
+            Weight::manual_from_u64(self.original_psbt.unsigned_tx.weight() as u64);
         let original_fee_rate = original_fee / original_weight;
-        ensure!(out_stats.contributed_fee <= original_fee_rate * self.input_type.expected_input_weight() * (proposal.inputs.len() - self.original_psbt.inputs.len()) as u64, FeeContributionPaysOutputSizeIncrease);
+        ensure!(
+            out_stats.contributed_fee
+                <= original_fee_rate
+                    * self.input_type.expected_input_weight()
+                    * (proposal.inputs.len() - self.original_psbt.inputs.len()) as u64,
+            FeeContributionPaysOutputSizeIncrease
+        );
         if self.min_fee_rate > FeeRate::ZERO {
             let non_input_output_size =
                 // version
@@ -215,11 +242,18 @@ impl Context {
                 varint_size(proposal.unsigned_tx.output.len() as u64) +
                 // lock time
                 4;
-            let weight_without_witnesses = Weight::from_non_witness_data_size(non_input_output_size) + in_stats.total_weight + out_stats.total_weight;
+            let weight_without_witnesses =
+                Weight::from_non_witness_data_size(non_input_output_size)
+                    + in_stats.total_weight
+                    + out_stats.total_weight;
             let total_weight = if in_stats.inputs_with_witnesses == 0 {
                 weight_without_witnesses
             } else {
-                weight_without_witnesses + Weight::manual_from_u64((proposal.unsigned_tx.input.len() - in_stats.inputs_with_witnesses + 2) as u64)
+                weight_without_witnesses
+                    + Weight::manual_from_u64(
+                        (proposal.unsigned_tx.input.len() - in_stats.inputs_with_witnesses + 2)
+                            as u64,
+                    )
             };
             ensure!(proposed_psbt_fee / total_weight >= self.min_fee_rate, FeeRateBelowMinimum);
         }
@@ -228,8 +262,16 @@ impl Context {
 
     // version and lock time
     fn basic_checks(&self, proposal: &Psbt) -> InternalResult<()> {
-        check_eq!(proposal.unsigned_tx.version, self.original_psbt.unsigned_tx.version, VersionsDontMatch);
-        check_eq!(proposal.unsigned_tx.lock_time, self.original_psbt.unsigned_tx.lock_time, LockTimesDontMatch);
+        check_eq!(
+            proposal.unsigned_tx.version,
+            self.original_psbt.unsigned_tx.version,
+            VersionsDontMatch
+        );
+        check_eq!(
+            proposal.unsigned_tx.lock_time,
+            self.original_psbt.unsigned_tx.lock_time,
+            LockTimesDontMatch
+        );
         Ok(())
     }
 
@@ -246,12 +288,27 @@ impl Context {
             ensure!(proposed.psbtin.partial_sigs.is_empty(), ContainsPartialSigs);
             match original_inputs.peek() {
                 // our (sender)
-                Some(original) if proposed.txin.previous_output == original.txin.previous_output => {
-                    check_eq!(proposed.txin.sequence, original.txin.sequence, SenderTxinSequenceChanged);
-                    ensure!(proposed.psbtin.non_witness_utxo.is_none(), SenderTxinContainsNonWitnessUtxo);
+                Some(original)
+                    if proposed.txin.previous_output == original.txin.previous_output =>
+                {
+                    check_eq!(
+                        proposed.txin.sequence,
+                        original.txin.sequence,
+                        SenderTxinSequenceChanged
+                    );
+                    ensure!(
+                        proposed.psbtin.non_witness_utxo.is_none(),
+                        SenderTxinContainsNonWitnessUtxo
+                    );
                     ensure!(proposed.psbtin.witness_utxo.is_none(), SenderTxinContainsWitnessUtxo);
-                    ensure!(proposed.psbtin.final_script_sig.is_none(), SenderTxinContainsFinalScriptSig);
-                    ensure!(proposed.psbtin.final_script_witness.is_none(), SenderTxinContainsFinalScriptWitness);
+                    ensure!(
+                        proposed.psbtin.final_script_sig.is_none(),
+                        SenderTxinContainsFinalScriptSig
+                    );
+                    ensure!(
+                        proposed.psbtin.final_script_witness.is_none(),
+                        SenderTxinContainsFinalScriptWitness
+                    );
                     let prevout = original.previous_txout().expect("We've validated this before");
                     total_value += bitcoin::Amount::from_sat(prevout.value);
                     // We assume the signture will be the same size
@@ -263,7 +320,7 @@ impl Context {
                     }
 
                     original_inputs.next();
-                },
+                }
                 // theirs (receiver)
                 None | Some(_) => {
                     /* this seems to be wrong but not sure why/how
@@ -273,31 +330,41 @@ impl Context {
                         _ => return Err(InternalValidationError::ReceiverTxinNotFinalized)
                     }
                     */
-                    let sig = proposed.psbtin.final_script_sig.as_ref().ok_or(InternalValidationError::ReceiverTxinNotFinalized)?;
-                    total_weight += Weight::from_non_witness_data_size(32 + 4 + 4 + sig.encoded_size());
+                    let sig = proposed
+                        .psbtin
+                        .final_script_sig
+                        .as_ref()
+                        .ok_or(InternalValidationError::ReceiverTxinNotFinalized)?;
+                    total_weight +=
+                        Weight::from_non_witness_data_size(32 + 4 + 4 + sig.encoded_size());
 
                     match &proposed.psbtin.final_script_witness {
                         Some(witness) if !witness.is_empty() => {
                             inputs_with_witnesses += 1;
                             total_weight += crate::weight::witness_weight(witness);
-                        },
+                        }
                         _ => (),
                     }
-                    ensure!(proposed.psbtin.witness_utxo.is_some() || proposed.psbtin.non_witness_utxo.is_some(), ReceiverTxinMissingUtxoInfo);
+                    ensure!(
+                        proposed.psbtin.witness_utxo.is_some()
+                            || proposed.psbtin.non_witness_utxo.is_some(),
+                        ReceiverTxinMissingUtxoInfo
+                    );
                     ensure!(proposed.txin.sequence == self.sequence, MixedSequence);
-                    let txout = proposed.previous_txout()
+                    let txout = proposed
+                        .previous_txout()
                         .map_err(InternalValidationError::InvalidProposedInput)?;
                     total_value += bitcoin::Amount::from_sat(txout.value);
-                    check_eq!(InputType::from_spent_input(txout, proposed.psbtin)?, self.input_type, MixedInputTypes);
-                },
+                    check_eq!(
+                        InputType::from_spent_input(txout, proposed.psbtin)?,
+                        self.input_type,
+                        MixedInputTypes
+                    );
+                }
             }
         }
         ensure!(original_inputs.peek().is_none(), MissingOrShuffledInputs);
-        Ok(InputStats {
-            total_value,
-            total_weight,
-            inputs_with_witnesses,
-        })
+        Ok(InputStats { total_value, total_weight, inputs_with_witnesses })
     }
 
     fn check_outputs(&self, proposal: &Psbt) -> InternalResult<OutputStats> {
@@ -306,41 +373,54 @@ impl Context {
         let mut contributed_fee = bitcoin::Amount::ZERO;
         let mut total_weight = Weight::ZERO;
 
-        for (proposed_txout, proposed_psbtout) in proposal.unsigned_tx.output.iter().zip(&proposal.outputs) {
+        for (proposed_txout, proposed_psbtout) in
+            proposal.unsigned_tx.output.iter().zip(&proposal.outputs)
+        {
             ensure!(proposed_psbtout.bip32_derivation.is_empty(), TxOutContainsKeyPaths);
             total_value += bitcoin::Amount::from_sat(proposed_txout.value);
             total_weight += proposed_txout.weight();
             match (original_outputs.peek(), self.fee_contribution) {
                 // fee output
-                (Some((original_output_index, original_output)), Some((max_fee_contrib, fee_contrib_idx))) if proposed_txout.script_pubkey == original_output.script_pubkey && *original_output_index == fee_contrib_idx => {
+                (
+                    Some((original_output_index, original_output)),
+                    Some((max_fee_contrib, fee_contrib_idx)),
+                ) if proposed_txout.script_pubkey == original_output.script_pubkey
+                    && *original_output_index == fee_contrib_idx =>
+                {
                     if proposed_txout.value < original_output.value {
-                        contributed_fee = bitcoin::Amount::from_sat(original_output.value - proposed_txout.value);
+                        contributed_fee =
+                            bitcoin::Amount::from_sat(original_output.value - proposed_txout.value);
                         ensure!(contributed_fee < max_fee_contrib, FeeContributionExceedsMaximum);
                         //The remaining fee checks are done in the caller
                     }
                     original_outputs.next();
-                },
+                }
                 // payee output
-                (Some((_original_output_index, original_output)), _) if original_output.script_pubkey == self.payee => {
-                    ensure!(!self.disable_output_substitution || (proposed_txout.script_pubkey == original_output.script_pubkey && proposed_txout.value >= original_output.value), DisallowedOutputSubstitution);
+                (Some((_original_output_index, original_output)), _)
+                    if original_output.script_pubkey == self.payee =>
+                {
+                    ensure!(
+                        !self.disable_output_substitution
+                            || (proposed_txout.script_pubkey == original_output.script_pubkey
+                                && proposed_txout.value >= original_output.value),
+                        DisallowedOutputSubstitution
+                    );
                     original_outputs.next();
                 }
                 // our output
-                (Some((_original_output_index, original_output)), _) if proposed_txout.script_pubkey == original_output.script_pubkey => {
+                (Some((_original_output_index, original_output)), _)
+                    if proposed_txout.script_pubkey == original_output.script_pubkey =>
+                {
                     ensure!(proposed_txout.value >= original_output.value, OutputValueDecreased);
                     original_outputs.next();
-                },
+                }
                 // all original outputs processed, only additional outputs remain
                 _ => (),
             }
         }
 
         ensure!(original_outputs.peek().is_none(), MissingOrShuffledOutputs);
-        Ok(OutputStats {
-            total_value,
-            contributed_fee,
-            total_weight,
-        })
+        Ok(OutputStats { total_value, contributed_fee, total_weight })
     }
 }
 
@@ -356,17 +436,21 @@ struct InputStats {
     inputs_with_witnesses: usize,
 }
 
-fn check_single_payee(psbt: &Psbt, script_pubkey: &Script, amount: Option<bitcoin::Amount>) -> Result<(), InternalCreateRequestError> {
+fn check_single_payee(
+    psbt: &Psbt,
+    script_pubkey: &Script,
+    amount: Option<bitcoin::Amount>,
+) -> Result<(), InternalCreateRequestError> {
     let mut payee_found = false;
     for output in &psbt.unsigned_tx.output {
         if output.script_pubkey == *script_pubkey {
             if let Some(amount) = amount {
                 if output.value != amount.to_sat() {
-                    return Err(InternalCreateRequestError::PayeeValueNotEqual)
+                    return Err(InternalCreateRequestError::PayeeValueNotEqual);
                 }
             }
             if payee_found {
-                return Err(InternalCreateRequestError::MultiplePayeeOutputs)
+                return Err(InternalCreateRequestError::MultiplePayeeOutputs);
             }
             payee_found = true;
         }
@@ -394,7 +478,11 @@ fn clear_unneeded_fields(psbt: &mut Psbt) {
     }
 }
 
-fn check_fee_output_amount(output: &TxOut, fee: bitcoin::Amount, clamp_fee_contribution: bool) -> Result<bitcoin::Amount, InternalCreateRequestError> {
+fn check_fee_output_amount(
+    output: &TxOut,
+    fee: bitcoin::Amount,
+    clamp_fee_contribution: bool,
+) -> Result<bitcoin::Amount, InternalCreateRequestError> {
     if output.value < fee.to_sat() {
         if clamp_fee_contribution {
             Ok(bitcoin::Amount::from_sat(output.value))
@@ -406,16 +494,24 @@ fn check_fee_output_amount(output: &TxOut, fee: bitcoin::Amount, clamp_fee_contr
     }
 }
 
-fn find_change_index(psbt: &Psbt, payee: &Script, fee: bitcoin::Amount, clamp_fee_contribution: bool) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
+fn find_change_index(
+    psbt: &Psbt,
+    payee: &Script,
+    fee: bitcoin::Amount,
+    clamp_fee_contribution: bool,
+) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
     match (psbt.unsigned_tx.output.len(), clamp_fee_contribution) {
         (0, _) => return Err(InternalCreateRequestError::NoOutputs),
-        (1, false) if psbt.unsigned_tx.output[0].script_pubkey == *payee => return Err(InternalCreateRequestError::FeeOutputValueLowerThanFeeContribution),
+        (1, false) if psbt.unsigned_tx.output[0].script_pubkey == *payee =>
+            return Err(InternalCreateRequestError::FeeOutputValueLowerThanFeeContribution),
         (1, true) if psbt.unsigned_tx.output[0].script_pubkey == *payee => return Ok(None),
         (1, _) => return Err(InternalCreateRequestError::MissingPayeeOutput),
         (2, _) => (),
         _ => return Err(InternalCreateRequestError::AmbiguousChangeOutput),
     }
-    let (index, output) = psbt.unsigned_tx.output
+    let (index, output) = psbt
+        .unsigned_tx
+        .output
         .iter()
         .enumerate()
         .find(|(_, output)| output.script_pubkey != *payee)
@@ -424,8 +520,16 @@ fn find_change_index(psbt: &Psbt, payee: &Script, fee: bitcoin::Amount, clamp_fe
     Ok(Some((check_fee_output_amount(output, fee, clamp_fee_contribution)?, index)))
 }
 
-fn check_change_index(psbt: &Psbt, payee: &Script, fee: bitcoin::Amount, index: usize, clamp_fee_contribution: bool) -> Result<(bitcoin::Amount, usize), InternalCreateRequestError> {
-    let output = psbt.unsigned_tx.output
+fn check_change_index(
+    psbt: &Psbt,
+    payee: &Script,
+    fee: bitcoin::Amount,
+    index: usize,
+    clamp_fee_contribution: bool,
+) -> Result<(bitcoin::Amount, usize), InternalCreateRequestError> {
+    let output = psbt
+        .unsigned_tx
+        .output
         .get(index)
         .ok_or(InternalCreateRequestError::ChangeIndexOutOfBounds)?;
     if output.script_pubkey == *payee {
@@ -434,10 +538,15 @@ fn check_change_index(psbt: &Psbt, payee: &Script, fee: bitcoin::Amount, index: 
     Ok((check_fee_output_amount(output, fee, clamp_fee_contribution)?, index))
 }
 
-fn determine_fee_contribution(psbt: &Psbt, payee: &Script, params: &Params) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
+fn determine_fee_contribution(
+    psbt: &Psbt,
+    payee: &Script,
+    params: &Params,
+) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
     Ok(match params.fee_contribution {
         Some((fee, None)) => find_change_index(psbt, payee, fee, params.clamp_fee_contribution)?,
-        Some((fee, Some(index))) => Some(check_change_index(psbt, payee, fee, index, params.clamp_fee_contribution)?),
+        Some((fee, Some(index))) =>
+            Some(check_change_index(psbt, payee, fee, index, params.clamp_fee_contribution)?),
         None => None,
     })
 }
@@ -448,10 +557,8 @@ fn serialize_url(
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
 ) -> Result<Url, url::ParseError> {
-
     let mut url = Url::parse(&endpoint)?;
-    url.query_pairs_mut()
-        .append_pair("v", "1");
+    url.query_pairs_mut().append_pair("v", "1");
     if disable_output_substitution {
         url.query_pairs_mut().append_pair("disableoutputsubstitution", "1");
     }
@@ -461,8 +568,7 @@ fn serialize_url(
             .append_pair("maxadditionalfeecontribution", &amount.to_sat().to_string());
     }
     if min_fee_rate > FeeRate::ZERO {
-        url.query_pairs_mut()
-            .append_pair("minfeerate", & min_fee_rate.to_sat_per_vb().to_string());
+        url.query_pairs_mut().append_pair("minfeerate", &min_fee_rate.to_sat_per_vb().to_string());
     }
     Ok(url)
 }
@@ -473,15 +579,17 @@ fn serialize_psbt(psbt: &Psbt) -> Vec<u8> {
     let mut encoder = base64::write::EncoderWriter::new(Vec::new(), base64::STANDARD);
     psbt.consensus_encode(&mut encoder)
         .expect("Vec doesn't return errors in its write implementation");
-    encoder.finish()
-        .expect("Vec doesn't return errors in its write implementation")
+    encoder.finish().expect("Vec doesn't return errors in its write implementation")
 }
 
-pub(crate) fn from_psbt_and_uri(mut psbt: Psbt, uri: crate::uri::PjUri<'_>, params: Params) -> Result<(Request, Context), CreateRequestError> {
-    psbt
-        .validate_input_utxos(true)
-        .map_err(InternalCreateRequestError::InvalidOriginalInput)?;
-    let disable_output_substitution = uri.extras.disable_output_substitution || params.disable_output_substitution;
+pub(crate) fn from_psbt_and_uri(
+    mut psbt: Psbt,
+    uri: crate::uri::PjUri<'_>,
+    params: Params,
+) -> Result<(Request, Context), CreateRequestError> {
+    psbt.validate_input_utxos(true).map_err(InternalCreateRequestError::InvalidOriginalInput)?;
+    let disable_output_substitution =
+        uri.extras.disable_output_substitution || params.disable_output_substitution;
     let payee = uri.address.script_pubkey();
 
     check_single_payee(&psbt, &payee, uri.amount)?;
@@ -493,29 +601,34 @@ pub(crate) fn from_psbt_and_uri(mut psbt: Psbt, uri: crate::uri::PjUri<'_>, para
     let sequence = zeroth_input.txin.sequence;
     let txout = zeroth_input.previous_txout().expect("We already checked this above");
     let input_type = InputType::from_spent_input(txout, &zeroth_input.psbtin).unwrap();
-    let url = serialize_url(uri.extras.endpoint.into(), disable_output_substitution, fee_contribution, params.min_fee_rate)
-        .map_err(InternalCreateRequestError::Url)?;
-    let body = serialize_psbt(&psbt);
-    Ok((Request {
-        url,
-        body,
-    }, Context {
-        original_psbt: psbt,
+    let url = serialize_url(
+        uri.extras.endpoint.into(),
         disable_output_substitution,
         fee_contribution,
-        payee,
-        input_type,
-        sequence,
-        min_fee_rate: params.min_fee_rate,
-    }))
+        params.min_fee_rate,
+    )
+    .map_err(InternalCreateRequestError::Url)?;
+    let body = serialize_psbt(&psbt);
+    Ok((
+        Request { url, body },
+        Context {
+            original_psbt: psbt,
+            disable_output_substitution,
+            fee_contribution,
+            payee,
+            input_type,
+            sequence,
+            min_fee_rate: params.min_fee_rate,
+        },
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn official_vectors() {
-        use crate::input_type::{InputType, SegWitV0Type};
         use crate::fee_rate::FeeRate;
+        use crate::input_type::{InputType, SegWitV0Type};
 
         let mut original_psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=".as_bytes();
 
@@ -531,7 +644,7 @@ mod tests {
             fee_contribution: None,
             min_fee_rate: FeeRate::ZERO,
             payee,
-            input_type: InputType::SegWitV0 { ty: SegWitV0Type::Pubkey, nested: true, },
+            input_type: InputType::SegWitV0 { ty: SegWitV0Type::Pubkey, nested: true },
             sequence,
         };
         let mut proposal = super::load_psbt_from_base64(&mut proposal).unwrap();

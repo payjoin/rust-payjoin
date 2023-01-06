@@ -1,4 +1,5 @@
-use bitcoin::{util::psbt::PartiallySignedTransaction as Psbt, AddressType, Script, TxOut};
+use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
+use bitcoin::{AddressType, Script, TxOut};
 
 mod error;
 
@@ -33,7 +34,9 @@ impl UncheckedProposal {
     ) -> Result<Self, RequestError> {
         use crate::bitcoin::consensus::Decodable;
 
-        let content_type = headers.get_header("content-type").ok_or(InternalRequestError::MissingHeader("Content-Type"))?;
+        let content_type = headers
+            .get_header("content-type")
+            .ok_or(InternalRequestError::MissingHeader("Content-Type"))?;
         if !content_type.starts_with("text/plain") {
             return Err(InternalRequestError::InvalidContentType(content_type.to_owned()).into());
         }
@@ -52,9 +55,7 @@ impl UncheckedProposal {
         let mut reader = base64::read::DecoderReader::new(&mut limited, base64::STANDARD);
         let psbt = Psbt::consensus_decode(&mut reader).map_err(InternalRequestError::Decode)?;
 
-        Ok(UncheckedProposal {
-            psbt,
-        })
+        Ok(UncheckedProposal { psbt })
     }
 
     /// The Sender's Original PSBT
@@ -63,7 +64,7 @@ impl UncheckedProposal {
     }
 
     /// Call after checking that the Original PSBT can be broadcast.
-    /// 
+    ///
     /// Receiver MUST check that the Original PSBT from the sender
     /// can be broadcast, i.e. `testmempoolaccept` bitcoind rpc returns { "allowed": true,.. }
     /// for `get_transaction_to_check_broadcast()` before calling this method.
@@ -90,7 +91,7 @@ impl UncheckedProposal {
 
 impl MaybeInputsOwned {
     /// The receiver should not be able to sign for any of these Original PSBT inputs.
-    /// 
+    ///
     /// Check that none of them are owned by the receiver downstream before proceeding.
     pub fn iter_input_script_pubkeys(&self) -> Vec<Result<&Script, RequestError>> {
         todo!() // return impl '_ + Iterator<Item = Result<&Script, RequestError>>
@@ -129,7 +130,7 @@ impl MaybeInputsSeen {
     /// The receiver should not have sent to or received the Original PSBT's inputs before.
     ///
     /// Check that these are unknown, never before seen inputs before proceeding.
-    pub fn iter_input_outpoints(&self) -> impl '_ + Iterator<Item=&bitcoin::OutPoint> {
+    pub fn iter_input_outpoints(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
         self.psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
     }
 
@@ -148,15 +149,11 @@ pub struct UnlockedProposal {
 }
 
 impl UnlockedProposal {
-    pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item=&bitcoin::OutPoint> {
+    pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
         self.psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
     }
 
-    pub fn assume_locked(self) -> Proposal {
-        Proposal {
-            psbt: self.psbt,
-        }
-    }
+    pub fn assume_locked(self) -> Proposal { Proposal { psbt: self.psbt } }
 }
 
 /// Transaction that must be broadcasted.
@@ -207,9 +204,7 @@ mod test {
 
     impl MockHeaders {
         #[cfg(test)]
-        fn new(length: u64) -> MockHeaders {
-            MockHeaders { length: length.to_string() }
-        }
+        fn new(length: u64) -> MockHeaders { MockHeaders { length: length.to_string() } }
     }
 
     impl Headers for MockHeaders {
@@ -223,7 +218,6 @@ mod test {
     }
 
     fn get_proposal_from_test_vector() -> Result<UncheckedProposal, RequestError> {
-
         // OriginalPSBT Test Vector from BIP
         // | InputScriptType | Orginal PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
         // |-----------------|-----------------------|------------------------------|-------------------------|

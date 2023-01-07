@@ -1,8 +1,10 @@
-#[cfg(feature = "sender")]
-use crate::sender;
 use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
+
 use url::Url;
+
+#[cfg(feature = "sender")]
+use crate::sender;
 
 #[derive(Debug, Clone)]
 pub enum PayJoin {
@@ -41,7 +43,7 @@ pub trait PjUriExt: sealed::UriExt {
         self,
         psbt: bitcoin::util::psbt::PartiallySignedTransaction,
         params: sender::Params,
-    ) -> Result<(sender::Request, sender::Context), sender::CreateRequestError>; 
+    ) -> Result<(sender::Request, sender::Context), sender::CreateRequestError>;
 }
 
 pub trait UriExt<'a>: sealed::UriExt {
@@ -55,7 +57,12 @@ impl<'a> PjUriExt for PjUri<'a> {
         psbt: bitcoin::util::psbt::PartiallySignedTransaction,
         params: sender::Params,
     ) -> Result<(sender::Request, sender::Context), sender::CreateRequestError> {
-        sender::from_psbt_and_uri(psbt.try_into().map_err(sender::InternalCreateRequestError::InconsistentOriginalPsbt)?, self, params)
+        sender::from_psbt_and_uri(
+            psbt.try_into()
+                .map_err(sender::InternalCreateRequestError::InconsistentOriginalPsbt)?,
+            self,
+            params,
+        )
     }
 }
 
@@ -69,7 +76,7 @@ impl<'a> UriExt<'a> for Uri<'a> {
                 uri.message = self.message;
 
                 Ok(uri)
-            },
+            }
             PayJoin::Unsupported => {
                 let mut uri = bip21::Uri::new(self.address);
                 uri.amount = self.amount;
@@ -82,13 +89,11 @@ impl<'a> UriExt<'a> for Uri<'a> {
     }
 }
 
-impl<'a> PayJoinParams {
-    pub fn is_output_substitution_disabled(&self) -> bool {
-        self.disable_output_substitution
-    }
+impl PayJoinParams {
+    pub fn is_output_substitution_disabled(&self) -> bool { self.disable_output_substitution }
 }
 
-impl<'a> bip21::de::DeserializationError for PayJoin {
+impl bip21::de::DeserializationError for PayJoin {
     type Error = PjParseError;
 }
 
@@ -106,20 +111,13 @@ pub struct DeserializationState {
 pub struct PjParseError(InternalPjParseError);
 
 impl From<InternalPjParseError> for PjParseError {
-    fn from(value: InternalPjParseError) -> Self {
-        PjParseError(value)
-    }
+    fn from(value: InternalPjParseError) -> Self { PjParseError(value) }
 }
 
 impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
     type Value = PayJoin;
 
-    fn is_param_known(&self, param: &str) -> bool {
-        match param {
-            "pj" | "pjos" => true,
-            _ => false,
-        }
-    }
+    fn is_param_known(&self, param: &str) -> bool { matches!(param, "pj" | "pjos") }
 
     fn deserialize_temp(
         &mut self,
@@ -151,13 +149,16 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
         }
     }
 
-    fn finalize(self) -> std::result::Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
+    fn finalize(
+        self,
+    ) -> std::result::Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
         match (self.pj, self.pjos) {
             (None, None) => Ok(PayJoin::Unsupported),
             (None, Some(_)) => Err(PjParseError(InternalPjParseError::MissingEndpoint)),
             (Some(endpoint), pjos) => {
                 if endpoint.scheme() == "https"
-                    || endpoint.scheme() == "http" && endpoint.domain().unwrap_or_default().ends_with(".onion")
+                    || endpoint.scheme() == "http"
+                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
                 {
                     Ok(PayJoin::Supported(PayJoinParams {
                         endpoint,
@@ -183,8 +184,9 @@ enum InternalPjParseError {
 
 #[cfg(test)]
 mod tests {
-    use crate::Uri;
     use std::convert::TryFrom;
+
+    use crate::Uri;
 
     #[test]
     fn test_short() {

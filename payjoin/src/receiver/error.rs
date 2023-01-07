@@ -11,7 +11,5 @@ pub(crate) enum InternalRequestError {
 }
 
 impl From<InternalRequestError> for RequestError {
-    fn from(value: InternalRequestError) -> Self {
-        RequestError(value)
-    }
+    fn from(value: InternalRequestError) -> Self { RequestError(value) }
 }

@@ -56,9 +56,9 @@ impl fmt::Display for ValidationError {
         use InternalValidationError::*;
 
         match &self.internal {
-            Decode(_) => write!(f, "couldn't decode PSBT"),
-            InvalidInputType(_) => write!(f, "invalid transaction input type"),
-            InvalidProposedInput(_) => write!(f, "invalid proposed transaction input"),
+            Decode(e) => write!(f, "couldn't decode PSBT: {e:#?}"),
+            InvalidInputType(e) => write!(f, "invalid transaction input type: {e:#?}"),
+            InvalidProposedInput(e) => write!(f, "invalid proposed transaction input: {e:#?}"),
             VersionsDontMatch { proposed, original, } => write!(f, "proposed transaction version {} doesn't match the original {}", proposed, original),
             LockTimesDontMatch { proposed, original, } => write!(f, "proposed transaction lock time {} doesn't match the original {}", proposed, original),
             SenderTxinSequenceChanged { proposed, original, } => write!(f, "proposed transaction sequence number {} doesn't match the original {}", proposed, original),
@@ -152,8 +152,8 @@ impl fmt::Display for CreateRequestError {
         use InternalCreateRequestError::*;
 
         match &self.0 {
-            InvalidOriginalInput(_) => write!(f, "an input in the original transaction is invalid"),
-            InconsistentOriginalPsbt(_) => write!(f, "the original transaction is inconsistent"),
+            InvalidOriginalInput(e) => write!(f, "an input in the original transaction is invalid: {e:#?}"),
+            InconsistentOriginalPsbt(e) => write!(f, "the original transaction is inconsistent: {e:#?}"),
             NoInputs => write!(f, "the original transaction has no inputs"),
             PayeeValueNotEqual => write!(f, "the value in original transaction doesn't equal value requested in the payment link"),
             NoOutputs => write!(f, "the original transaction has no outputs"),
@@ -163,7 +163,7 @@ impl fmt::Display for CreateRequestError {
             AmbiguousChangeOutput => write!(f, "can not determine which output is change because there's more than two outputs"),
             ChangeIndexOutOfBounds => write!(f, "fee output index is points out of bounds"),
             ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
-            Url(_) => write!(f, "cannot parse endpoint url"),
+            Url(e) => write!(f, "cannot parse endpoint url: {e:#?}"),
         }
     }
 }

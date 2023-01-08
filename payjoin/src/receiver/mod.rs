@@ -153,7 +153,7 @@ impl UnlockedProposal {
         self.psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
     }
 
-    pub fn assume_locked(self) -> Proposal { Proposal { psbt: self.psbt } }
+    pub fn psbt(self) -> Psbt { self.psbt }
 }
 
 /// Transaction that must be broadcasted.
@@ -161,7 +161,7 @@ impl UnlockedProposal {
 pub struct MustBroadcast(pub bitcoin::Transaction);
 
 pub struct Proposal {
-    psbt: Psbt,
+    pub psbt: Psbt,
 }
 
 /*

@@ -151,12 +151,13 @@ impl MaybeInputsSeen {
     ///
     /// Call this after checking downstream.
     pub fn assume_no_inputs_seen_before(self) -> UnlockedProposal {
-        UnlockedProposal { psbt: self.psbt }
+        UnlockedProposal { psbt: self.psbt, params: self.params }
     }
 }
 
 pub struct UnlockedProposal {
     psbt: Psbt,
+    params: Params,
 }
 
 impl UnlockedProposal {
@@ -165,15 +166,15 @@ impl UnlockedProposal {
     }
 
     pub fn psbt(self) -> Psbt { self.psbt }
+
+    pub fn is_output_substitution_disabled(&self) -> bool {
+        self.params.disable_output_substitution
+    }
 }
 
 /// Transaction that must be broadcasted.
 #[must_use = "The transaction must be broadcasted to prevent abuse"]
 pub struct MustBroadcast(pub bitcoin::Transaction);
-
-pub struct Proposal {
-    pub psbt: Psbt,
-}
 
 /*
 impl Proposal {

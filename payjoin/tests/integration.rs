@@ -81,9 +81,12 @@ mod integration {
         let headers = HeaderMock::from_vec(&req.body);
 
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
-        let _proposal =
-            payjoin::receiver::UncheckedProposal::from_request(req.body.as_slice(), "", headers)
-                .unwrap();
+        let proposal = payjoin::receiver::UncheckedProposal::from_request(
+            req.body.as_slice(),
+            req.url.query().unwrap_or(""),
+            headers,
+        )
+        .unwrap();
 
         // TODO
     }

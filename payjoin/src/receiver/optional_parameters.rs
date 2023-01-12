@@ -1,6 +1,8 @@
 use std::borrow::Borrow;
 use std::fmt;
 
+use log::warn;
+
 use crate::fee_rate::FeeRate;
 
 #[derive(Debug)]
@@ -45,13 +47,28 @@ impl Params {
                         return Err(Error::UnknownVersion);
                     },
                 ("additionalfeeoutputindex", index) =>
-                    if let Ok(index) = index.parse::<usize>() {
-                        additional_fee_output_index = Some(index);
+                    additional_fee_output_index = match index.parse::<usize>() {
+                        Ok(index) => Some(index),
+                        Err(_error) => {
+                            warn!(
+                                "bad `additionalfeeoutputindex` query value '{}': {}",
+                                index, _error
+                            );
+                            None
+                        }
                     },
-                ("maxadditionalfeecontribution", fee) => {
+                ("maxadditionalfeecontribution", fee) =>
                     max_additional_fee_contribution =
-                        bitcoin::Amount::from_str_in(&fee, bitcoin::Denomination::Bitcoin).ok();
-                }
+                        match bitcoin::Amount::from_str_in(&fee, bitcoin::Denomination::Bitcoin) {
+                            Ok(contribution) => Some(contribution),
+                            Err(_error) => {
+                                warn!(
+                                    "bad `maxadditionalfeecontribution` query value '{}': {}",
+                                    fee, _error
+                                );
+                                None
+                            }
+                        },
                 ("minfeerate", feerate) =>
                     params.min_feerate = match feerate.parse::<u64>() {
                         Ok(rate) => FeeRate::from_sat_per_vb(rate),
@@ -62,10 +79,14 @@ impl Params {
                 _ => (),
             }
         }
-        if let (Some(amount), Some(index)) =
-            (max_additional_fee_contribution, additional_fee_output_index)
-        {
-            params.additional_fee_contribution = Some((amount, index));
+
+        match (max_additional_fee_contribution, additional_fee_output_index) {
+            (Some(amount), Some(index)) =>
+                params.additional_fee_contribution = Some((amount, index)),
+            (Some(_), None) | (None, Some(_)) => {
+                warn!("only one additional-fee parameter specified: {:?}", params);
+            }
+            _ => (),
         }
 
         Ok(params)

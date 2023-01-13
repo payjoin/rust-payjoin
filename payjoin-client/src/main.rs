@@ -22,6 +22,17 @@ fn main() {
     let bip21 =
         args.next().expect("Missing arguments: bip21").into_string().expect("bip21 is not UTF-8");
 
+    let client = bitcoincore_rpc::Client::new(
+        &format!("http://127.0.0.1:{}", port),
+        bitcoincore_rpc::Auth::CookieFile(cookie_file.into()),
+    )
+    .unwrap();
+
+    send_payjoin(bip21, client);
+
+}
+
+fn send_payjoin<'a>(bip21: String, client: bitcoincore_rpc::Client) -> bitcoincore_rpc::bitcoin::Txid { 
     let link = payjoin::Uri::try_from(&*bip21).unwrap();
 
     let link = link
@@ -36,11 +47,6 @@ fn main() {
     let mut outputs = HashMap::with_capacity(1);
     outputs.insert(link.address.to_string(), amount);
 
-    let client = bitcoincore_rpc::Client::new(
-        &format!("http://127.0.0.1:{}", port),
-        bitcoincore_rpc::Auth::CookieFile(cookie_file.into()),
-    )
-    .unwrap();
     let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
         lock_unspent: Some(true),
         fee_rate: Some(Amount::from_sat(2000)),
@@ -76,7 +82,7 @@ fn main() {
     println!("Proposed psbt: {:#?}", psbt);
     let psbt = client.wallet_process_psbt(&serialize_psbt(&psbt), None, None, None).unwrap().psbt;
     let tx = client.finalize_psbt(&psbt, Some(true)).unwrap().hex.expect("incomplete psbt");
-    client.send_raw_transaction(&tx).unwrap();
+    client.send_raw_transaction(&tx).unwrap()
 }
 
 fn load_psbt_from_base64(

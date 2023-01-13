@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-payjoin = { path = "../payjoin", features = ["sender"] }
+payjoin = { path = "../payjoin", features = ["sender", "receiver"] }
 bitcoincore-rpc = "0.14.0"
 reqwest = { version = "0.11.4", features = ["blocking"] }
 base64 = "0.13.0"

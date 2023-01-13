@@ -1,0 +1,19 @@
+[package]
+name = "payjoin-relay"
+version = "0.1.0"
+authors = ["Dan Gould <d@ngould.dev>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+payjoin = { path = "../payjoin", features = ["sender"] }
+bitcoincore-rpc = "0.14.0"
+reqwest = { version = "0.11.4", features = ["blocking"] }
+base64 = "0.13.0"
+turn = "0.6.1"
+webrtc-util = { version = "0.7.0", default-features = false, features = ["conn", "vnet"] }
+clap = "2.33.3"
+tokio = { version = "1.6.1", features = ["full"] }
+log = "0.4.14"
+env_logger = "0.9.0"

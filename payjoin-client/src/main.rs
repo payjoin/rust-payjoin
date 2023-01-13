@@ -1,15 +1,21 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::str::FromStr;
+use std::sync::Arc;
 
-
+use turn::client::*;
+use turn::Error;
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use clap::{App, AppSettings, Arg};
 use payjoin::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use payjoin::{PjUriExt, UriExt};
+use tokio::net::UdpSocket;
+use tokio::time::Duration;
+use webrtc_util::Conn;
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Error> {
     let mut app = App::new("payjoin-client")
         .version("0.1.0")
         .author("Dan Gould <d@ngould.dev>")
@@ -48,13 +54,13 @@ fn main() {
 
     if matches.is_present("FULLHELP") {
         app.print_long_help().unwrap();
-        return;
+        return Ok(());
     }
 
     let port = matches.value_of("port").unwrap();
     let cookie_file = matches.value_of("cookie_file").unwrap();
 
-    let client = bitcoincore_rpc::Client::new(
+    let bitcoind = bitcoincore_rpc::Client::new(
         &format!("http://127.0.0.1:{}", port),
         bitcoincore_rpc::Auth::CookieFile(cookie_file.into()),
     )
@@ -63,28 +69,150 @@ fn main() {
     if matches.is_present("relay") {
         let relay = matches.value_of("relay").unwrap();
         let amount = matches.value_of("amount").unwrap();
-        receive_payjoin(relay, amount, client);
+        // Ensure relay connection
+        // TURN client won't create a local listening socket by itself.
+        let conn = UdpSocket::bind("0.0.0.0:0").await?;
+
+        let turn_server_addr = relay.to_string();
+
+        let cfg = ClientConfig {
+            stun_serv_addr: turn_server_addr.clone(),
+            turn_serv_addr: turn_server_addr,
+            username: "test".to_string(),
+            password: "test".to_string(),
+            realm: "test".to_string(),
+            software: String::new(),
+            rto_in_ms: 0,
+            conn: Arc::new(conn),
+            vnet: None,
+        };
+
+        let client = Client::new(cfg).await?;
+
+        // Start listening on the conn provided.
+        client.listen().await?;
+
+        // Allocate a relay socket on the TURN server. On success, it
+        // will return a net.PacketConn which represents the remote
+        // socket.
+        let relay_conn = client.allocate().await?;
+
+        // The relayConn's local address is actually the transport
+        // address assigned on the TURN server.
+        println!("relayed-address={}", relay_conn.local_addr()?);
+
+        // If you provided `-ping`, perform a ping test agaist the
+        let ping = true;
+        // relayConn we have just allocated.
+        if ping {
+            do_ping_test(&client, relay_conn).await?;
+        }
+
+        receive_payjoin(relay, amount, bitcoind);
+
+        client.close().await?;
     } else {
         let bip21 = matches.value_of("bip21").unwrap().as_ref();
-        send_payjoin(bip21, client);
+        send_payjoin(bip21, bitcoind);
     }
+
+    Ok(())
 }
 
-fn receive_payjoin(relay: &str, amount: &str, client: bitcoincore_rpc::Client) -> bitcoincore_rpc::bitcoin::Txid {
-        // Ensure relay connection
+async fn do_ping_test(
+    client: &Client,
+    relay_conn: impl Conn + std::marker::Send + std::marker::Sync + 'static,
+) -> Result<(), Error> {
+    // Send BindingRequest to learn our external IP
+    let mapped_addr = client.send_binding_request().await?;
 
+    // Set up pinger socket (pingerConn)
+    //println!("bind...");
+    let pinger_conn_tx = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
+
+    // Punch a UDP hole for the relay_conn by sending a data to the mapped_addr.
+    // This will trigger a TURN client to generate a permission request to the
+    // TURN server. After this, packets from the IP address will be accepted by
+    // the TURN server.
+    //println!("relay_conn send hello to mapped_addr {}", mapped_addr);
+    relay_conn.send_to("Hello".as_bytes(), mapped_addr).await?;
+    let relay_addr = relay_conn.local_addr()?;
+
+    let pinger_conn_rx = Arc::clone(&pinger_conn_tx);
+
+    // Start read-loop on pingerConn
+    tokio::spawn(async move {
+        let mut buf = vec![0u8; 1500];
+        loop {
+            let (n, from) = match pinger_conn_rx.recv_from(&mut buf).await {
+                Ok((n, from)) => (n, from),
+                Err(_) => break,
+            };
+
+            let msg = match String::from_utf8(buf[..n].to_vec()) {
+                Ok(msg) => msg,
+                Err(_) => break,
+            };
+
+            println!("pingerConn read-loop: {} from {}", msg, from);
+            /*if sentAt, pingerErr := time.Parse(time.RFC3339Nano, msg); pingerErr == nil {
+                rtt := time.Since(sentAt)
+                log.Printf("%d bytes from from %s time=%d ms\n", n, from.String(), int(rtt.Seconds()*1000))
+            }*/
+        }
+    });
+
+    // Start read-loop on relay_conn
+    tokio::spawn(async move {
+        let mut buf = vec![0u8; 1500];
+        loop {
+            let (n, from) = match relay_conn.recv_from(&mut buf).await {
+                Err(_) => break,
+                Ok((n, from)) => (n, from),
+            };
+
+            println!("relay_conn read-loop: {:?} from {}", &buf[..n], from);
+
+            // Echo back
+            if relay_conn.send_to(&buf[..n], from).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    /*println!(
+        "pinger_conn_tx send 10 packets to relay addr {}...",
+        relay_addr
+    );*/
+    // Send 10 packets from relay_conn to the echo server
+    for _ in 0..2 {
+        let msg = "12345678910".to_owned(); //format!("{:?}", tokio::time::Instant::now());
+        println!("sending msg={} with size={}", msg, msg.as_bytes().len());
+        pinger_conn_tx.send_to(msg.as_bytes(), relay_addr).await?;
+
+        // For simplicity, this example does not wait for the pong (reply).
+        // Instead, sleep 1 second.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    Ok(())
+}
+
+fn receive_payjoin(relay: &str, amount: &str, client: bitcoincore_rpc::Client) {
+        
         // Receiver creates the bip21 payjoin URI
         let pj_receiver_address = client.get_new_address(None, None).unwrap();
         let amount = Amount::from_str(amount).unwrap();
         let pj_uri_string = format!(
             "{}?amount={}&pj={}&s=secret",
             pj_receiver_address.to_qr_uri(),
-            amount.to_btc(),
+            amount.as_btc(),
             relay,
         );
         let pj_uri = payjoin::Uri::from_str(&pj_uri_string).unwrap();
-        let pj_uri = pj_uri.check_pj_supported().expect("Bad Uri");
-
+        let _pj_uri = pj_uri.check_pj_supported().expect("Bad Uri");
 }
 
 fn send_payjoin<'a>(bip21: &str, client: bitcoincore_rpc::Client) -> bitcoincore_rpc::bitcoin::Txid { 

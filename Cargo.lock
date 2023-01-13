@@ -1011,6 +1011,9 @@ dependencies = [
  "clap",
  "payjoin",
  "reqwest",
+ "tokio",
+ "turn",
+ "webrtc-util",
 ]
 
 [[package]]

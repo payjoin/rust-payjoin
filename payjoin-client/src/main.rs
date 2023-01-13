@@ -31,8 +31,17 @@ fn main() {
             .short("b")
             .long("bip21")
             .help("The BIP21 URI to send to")
-            .takes_value(true)
-            .required(true));
+            .takes_value(true))
+        .arg(Arg::with_name("relay")
+            .short("r")
+            .long("relay")
+            .help("PayJoin relay to establish p2p networking")
+            .takes_value(true))
+        .arg(Arg::with_name("amount")
+            .short("a")
+            .long("amount")
+            .help("The amount to request in satoshis")
+            .takes_value(true));
 
     let matches = app.clone().get_matches();
 
@@ -43,7 +52,6 @@ fn main() {
 
     let port = matches.value_of("port").unwrap();
     let cookie_file = matches.value_of("cookie_file").unwrap();
-    let bip21 = matches.value_of("bip21").unwrap().as_ref();
 
     let client = bitcoincore_rpc::Client::new(
         &format!("http://127.0.0.1:{}", port),
@@ -51,8 +59,13 @@ fn main() {
     )
     .unwrap();
 
-    send_payjoin(bip21, client);
-
+    if matches.is_present("relay") {
+        println!("Configured to a receive via relay");
+        std::process::exit(0);
+    } else {
+        let bip21 = matches.value_of("bip21").unwrap().as_ref();
+        send_payjoin(bip21, client);
+    }
 }
 
 fn send_payjoin<'a>(bip21: &str, client: bitcoincore_rpc::Client) -> bitcoincore_rpc::bitcoin::Txid { 

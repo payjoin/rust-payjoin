@@ -73,7 +73,7 @@ mod integration {
         let psbt = sender.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
         let psbt = load_psbt_from_base64(psbt.as_bytes()).unwrap();
         debug!("Original psbt: {:#?}", psbt);
-        let pj_params = payjoin::sender::Params::with_fee_contribution(
+        let pj_params = payjoin::sender::Configuration::with_fee_contribution(
             payjoin::bitcoin::Amount::from_sat(10000),
             None,
         );
@@ -81,9 +81,12 @@ mod integration {
         let headers = HeaderMock::from_vec(&req.body);
 
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
-        let _proposal =
-            payjoin::receiver::UncheckedProposal::from_request(req.body.as_slice(), "", headers)
-                .unwrap();
+        let proposal = payjoin::receiver::UncheckedProposal::from_request(
+            req.body.as_slice(),
+            req.url.query().unwrap_or(""),
+            headers,
+        )
+        .unwrap();
 
         // TODO
     }

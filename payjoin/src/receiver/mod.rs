@@ -2,9 +2,11 @@ use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::{AddressType, Script, TxOut};
 
 mod error;
+mod optional_parameters;
 
 use error::InternalRequestError;
 pub use error::RequestError;
+use optional_parameters::Params;
 
 pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
@@ -12,18 +14,22 @@ pub trait Headers {
 
 pub struct UncheckedProposal {
     psbt: Psbt,
+    params: Params,
 }
 
 pub struct MaybeInputsOwned {
     psbt: Psbt,
+    params: Params,
 }
 
 pub struct MaybeMixedInputScripts {
     psbt: Psbt,
+    params: Params,
 }
 
 pub struct MaybeInputsSeen {
     psbt: Psbt,
+    params: Params,
 }
 
 impl UncheckedProposal {
@@ -55,7 +61,12 @@ impl UncheckedProposal {
         let mut reader = base64::read::DecoderReader::new(&mut limited, base64::STANDARD);
         let psbt = Psbt::consensus_decode(&mut reader).map_err(InternalRequestError::Decode)?;
 
-        Ok(UncheckedProposal { psbt })
+        let pairs = url::form_urlencoded::parse(query.as_bytes());
+        let params = Params::from_query_pairs(pairs).map_err(InternalRequestError::SenderParams)?;
+
+        // TODO check that params are valid for the request's Original PSBT
+
+        Ok(UncheckedProposal { psbt, params })
     }
 
     /// The Sender's Original PSBT
@@ -76,7 +87,7 @@ impl UncheckedProposal {
     ///
     /// Call this after checking downstream.
     pub fn assume_tested_and_scheduled_broadcast(self) -> MaybeInputsOwned {
-        MaybeInputsOwned { psbt: self.psbt }
+        MaybeInputsOwned { psbt: self.psbt, params: self.params }
     }
 
     /// Call this method if the only way to initiate a PayJoin with this receiver
@@ -85,7 +96,7 @@ impl UncheckedProposal {
     /// So-called "non-interactive" receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks.
     /// Those receivers call `get_transaction_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
     pub fn assume_interactive_receive_endpoint(self) -> MaybeInputsOwned {
-        MaybeInputsOwned { psbt: self.psbt }
+        MaybeInputsOwned { psbt: self.psbt, params: self.params }
     }
 }
 
@@ -103,7 +114,7 @@ impl MaybeInputsOwned {
     /// An attacker could try to spend receiver's own inputs. This check prevents that.
     /// Call this after checking downstream.
     pub fn assume_inputs_not_owned(self) -> MaybeMixedInputScripts {
-        MaybeMixedInputScripts { psbt: self.psbt }
+        MaybeMixedInputScripts { psbt: self.psbt, params: self.params }
     }
 }
 
@@ -122,7 +133,7 @@ impl MaybeMixedInputScripts {
     /// Note: mixed spends do not necessarily indicate distinct wallet fingerprints.
     /// This check is intended to prevent some types of wallet fingerprinting.
     pub fn assume_no_mixed_input_scripts(self) -> MaybeInputsSeen {
-        MaybeInputsSeen { psbt: self.psbt }
+        MaybeInputsSeen { psbt: self.psbt, params: self.params }
     }
 }
 
@@ -140,12 +151,13 @@ impl MaybeInputsSeen {
     ///
     /// Call this after checking downstream.
     pub fn assume_no_inputs_seen_before(self) -> UnlockedProposal {
-        UnlockedProposal { psbt: self.psbt }
+        UnlockedProposal { psbt: self.psbt, params: self.params }
     }
 }
 
 pub struct UnlockedProposal {
     psbt: Psbt,
+    params: Params,
 }
 
 impl UnlockedProposal {
@@ -153,16 +165,16 @@ impl UnlockedProposal {
         self.psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
     }
 
-    pub fn assume_locked(self) -> Proposal { Proposal { psbt: self.psbt } }
+    pub fn psbt(self) -> Psbt { self.psbt }
+
+    pub fn is_output_substitution_disabled(&self) -> bool {
+        self.params.disable_output_substitution
+    }
 }
 
 /// Transaction that must be broadcasted.
 #[must_use = "The transaction must be broadcasted to prevent abuse"]
 pub struct MustBroadcast(pub bitcoin::Transaction);
-
-pub struct Proposal {
-    psbt: Psbt,
-}
 
 /*
 impl Proposal {
@@ -226,7 +238,11 @@ mod test {
 
         let body = original_psbt.as_bytes();
         let headers = MockHeaders::new(body.len() as u64);
-        UncheckedProposal::from_request(body, "", headers)
+        UncheckedProposal::from_request(
+            body,
+            "?maxadditionalfeecontribution=0.00000182?additionalfeeoutputindex=0",
+            headers,
+        )
     }
 
     #[test]

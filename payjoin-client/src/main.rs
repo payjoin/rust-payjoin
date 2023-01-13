@@ -59,7 +59,7 @@ fn main() {
     let psbt = client.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
     let psbt = load_psbt_from_base64(psbt.as_bytes()).unwrap();
     println!("Original psbt: {:#?}", psbt);
-    let pj_params = payjoin::sender::Params::with_fee_contribution(
+    let pj_params = payjoin::sender::Configuration::with_fee_contribution(
         payjoin::bitcoin::Amount::from_sat(10000),
         None,
     );

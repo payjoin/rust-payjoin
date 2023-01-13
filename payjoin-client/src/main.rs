@@ -1,26 +1,49 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
+
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
+use clap::{App, AppSettings, Arg};
 use payjoin::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use payjoin::{PjUriExt, UriExt};
 
 fn main() {
-    let mut args = std::env::args_os();
-    let _program_name = args.next().expect("not even program name given");
-    let port = args
-        .next()
-        .expect("Missing arguments: port cookie_file bip21")
-        .into_string()
-        .expect("port is not UTF-8")
-        .parse::<u16>()
-        .expect("port must be a number");
+    let mut app = App::new("payjoin-client")
+        .version("0.1.0")
+        .author("Dan Gould <d@ngould.dev>")
+        .about("A simple payjoin client that can receive without hosting a secure endpoint using TURN")
+        .setting(AppSettings::DeriveDisplayOrder)
+        .setting(AppSettings::SubcommandsNegateReqs)
+        .arg(Arg::with_name("port")
+            .short("p")
+            .long("port")
+            .help("The bitcoind rpc port to connect to")
+            .takes_value(true)
+            .required(true))
+        .arg(Arg::with_name("cookie_file")
+            .short("c")
+            .long("cookie_file")
+            .help("The bitcoind rpc cookie file to use for authentication")
+            .takes_value(true)
+            .required(true))
+        .arg(Arg::with_name("bip21")
+            .short("b")
+            .long("bip21")
+            .help("The BIP21 URI to send to")
+            .takes_value(true)
+            .required(true));
 
-    let cookie_file = args.next().expect("Missing arguments: cookie_file bip21");
+    let matches = app.clone().get_matches();
 
-    let bip21 =
-        args.next().expect("Missing arguments: bip21").into_string().expect("bip21 is not UTF-8");
+    if matches.is_present("FULLHELP") {
+        app.print_long_help().unwrap();
+        return;
+    }
+
+    let port = matches.value_of("port").unwrap();
+    let cookie_file = matches.value_of("cookie_file").unwrap();
+    let bip21 = matches.value_of("bip21").unwrap().as_ref();
 
     let client = bitcoincore_rpc::Client::new(
         &format!("http://127.0.0.1:{}", port),
@@ -32,7 +55,7 @@ fn main() {
 
 }
 
-fn send_payjoin<'a>(bip21: String, client: bitcoincore_rpc::Client) -> bitcoincore_rpc::bitcoin::Txid { 
+fn send_payjoin<'a>(bip21: &str, client: bitcoincore_rpc::Client) -> bitcoincore_rpc::bitcoin::Txid { 
     let link = payjoin::Uri::try_from(&*bip21).unwrap();
 
     let link = link

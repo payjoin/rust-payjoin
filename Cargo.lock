@@ -1008,6 +1008,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "bitcoincore-rpc 0.14.0",
+ "clap",
  "payjoin",
  "reqwest",
 ]

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::str::FromStr;
 
 
 use bitcoincore_rpc::bitcoin::Amount;
@@ -60,12 +61,30 @@ fn main() {
     .unwrap();
 
     if matches.is_present("relay") {
-        println!("Configured to a receive via relay");
-        std::process::exit(0);
+        let relay = matches.value_of("relay").unwrap();
+        let amount = matches.value_of("amount").unwrap();
+        receive_payjoin(relay, amount, client);
     } else {
         let bip21 = matches.value_of("bip21").unwrap().as_ref();
         send_payjoin(bip21, client);
     }
+}
+
+fn receive_payjoin(relay: &str, amount: &str, client: bitcoincore_rpc::Client) -> bitcoincore_rpc::bitcoin::Txid {
+        // Ensure relay connection
+
+        // Receiver creates the bip21 payjoin URI
+        let pj_receiver_address = client.get_new_address(None, None).unwrap();
+        let amount = Amount::from_str(amount).unwrap();
+        let pj_uri_string = format!(
+            "{}?amount={}&pj={}&s=secret",
+            pj_receiver_address.to_qr_uri(),
+            amount.to_btc(),
+            relay,
+        );
+        let pj_uri = payjoin::Uri::from_str(&pj_uri_string).unwrap();
+        let pj_uri = pj_uri.check_pj_supported().expect("Bad Uri");
+
 }
 
 fn send_payjoin<'a>(bip21: &str, client: bitcoincore_rpc::Client) -> bitcoincore_rpc::bitcoin::Txid { 

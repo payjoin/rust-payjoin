@@ -34,15 +34,24 @@ async fn main() -> Result<(), Error> {
             .help("The bitcoind rpc cookie file to use for authentication")
             .takes_value(true)
             .required(true))
+            
         .arg(Arg::with_name("bip21")
             .short("b")
             .long("bip21")
             .help("The BIP21 URI to send to")
-            .takes_value(true))
+            .takes_value(true)
+            .group("send"))
+        .arg(Arg::with_name("endpoint")
+                .short("e")
+                .long("endpoint")
+                .help("The endpoint to send the payjoin to")
+                .takes_value(true)
+                .group("send"))
+
         .arg(Arg::with_name("relay")
             .short("r")
             .long("relay")
-            .help("PayJoin relay to establish p2p networking")
+            .help("PayJoin TURN server relay address to establish p2p networking")
             .takes_value(true))
         .arg(Arg::with_name("amount")
             .short("a")
@@ -68,127 +77,82 @@ async fn main() -> Result<(), Error> {
 
     if matches.is_present("relay") {
         let relay = matches.value_of("relay").unwrap();
-        let amount = matches.value_of("amount").unwrap();
-        // Ensure relay connection
-        // TURN client won't create a local listening socket by itself.
-        let conn = UdpSocket::bind("0.0.0.0:0").await?;
-
-        let turn_server_addr = relay.to_string();
-
-        let cfg = ClientConfig {
-            stun_serv_addr: turn_server_addr.clone(),
-            turn_serv_addr: turn_server_addr,
-            username: "test".to_string(),
-            password: "test".to_string(),
-            realm: "test".to_string(),
-            software: String::new(),
-            rto_in_ms: 0,
-            conn: Arc::new(conn),
-            vnet: None,
-        };
-
-        let client = Client::new(cfg).await?;
-
-        // Start listening on the conn provided.
-        client.listen().await?;
-
-        // Allocate a relay socket on the TURN server. On success, it
-        // will return a net.PacketConn which represents the remote
-        // socket.
-        let relay_conn = client.allocate().await?;
-
-        // The relayConn's local address is actually the transport
-        // address assigned on the TURN server.
-        println!("relayed-address={}", relay_conn.local_addr()?);
-
-        // If you provided `-ping`, perform a ping test agaist the
-        let ping = true;
-        // relayConn we have just allocated.
-        if ping {
-            do_ping_test(&client, relay_conn).await?;
-        }
-
-        receive_payjoin(relay, amount, bitcoind);
-
-        client.close().await?;
+        listen_receiver(relay).await?;
     } else {
-        let bip21 = matches.value_of("bip21").unwrap().as_ref();
-        send_payjoin(bip21, bitcoind);
+        //let bip21 = matches.value_of("bip21").unwrap().as_ref();
+        let endpoint = matches.value_of("endpoint").unwrap();
+        do_send(endpoint).await?;
+        //send_payjoin(bip21, bitcoind);
     }
 
     Ok(())
 }
 
-async fn do_ping_test(
+async fn listen_receiver(relay: &str) -> Result<(), Error> {
+    // 1. ConnectReceive
+    // Ensure relay connection
+    // TURN client won't create a local listening socket by itself.
+    let conn = UdpSocket::bind("0.0.0.0:0").await?;
+
+    let turn_server_addr = relay.to_string();
+
+    let cfg = ClientConfig {
+        stun_serv_addr: turn_server_addr.clone(),
+        turn_serv_addr: turn_server_addr,
+        username: "receiver".to_string(),
+        password: "test".to_string(),
+        realm: "test".to_string(),
+        software: String::new(),
+        rto_in_ms: 0,
+        conn: Arc::new(conn),
+        vnet: None,
+    };
+
+    let client = Client::new(cfg).await?;
+
+    // Start listening on the conn provided.
+    client.listen().await?;
+
+    // Allocate a relay socket on the TURN server. On success, it
+    // will return a net.PacketConn which represents the remote
+    // socket.
+    let relay_conn = client.allocate().await?;
+
+    // The relayConn's local address is actually the transport
+    // address assigned on the TURN server.
+    println!("relayed-address={}", relay_conn.local_addr()?);
+
+    let mapped_addr = client.send_binding_request().await?;
+    println!("mapped-address={}", mapped_addr.to_string());
+    // punch UDP hole. after this packets from the IP address will be accepted by the turn server
+    relay_conn.send_to("Hello".as_bytes(), mapped_addr).await?;
+
+    // 2. Recv
+    listen_for_original_psbt(&client, relay_conn).await?;
+    //receive_payjoin(relay, amount, bitcoind);
+
+    client.close().await?;
+    Ok(())
+}
+async fn listen_for_original_psbt(
     client: &Client,
     relay_conn: impl Conn + std::marker::Send + std::marker::Sync + 'static,
 ) -> Result<(), Error> {
-    // Send BindingRequest to learn our external IP
-    let mapped_addr = client.send_binding_request().await?;
+    let mut buf = [0u8; 1024];
+    let (n, addr) = relay_conn.recv_from(&mut buf).await?;
+    println!("received {} bytes from {}", n, addr);
+    println!("received {}", String::from_utf8_lossy(&buf[..n]));
+    Ok(())
+}
 
+async fn do_send(relay_addr: &str) -> Result<(), Error> {
     // Set up pinger socket (pingerConn)
     //println!("bind...");
     let pinger_conn_tx = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
-
-    // Punch a UDP hole for the relay_conn by sending a data to the mapped_addr.
-    // This will trigger a TURN client to generate a permission request to the
-    // TURN server. After this, packets from the IP address will be accepted by
-    // the TURN server.
-    //println!("relay_conn send hello to mapped_addr {}", mapped_addr);
-    relay_conn.send_to("Hello".as_bytes(), mapped_addr).await?;
-    let relay_addr = relay_conn.local_addr()?;
-
     let pinger_conn_rx = Arc::clone(&pinger_conn_tx);
 
-    // Start read-loop on pingerConn
-    tokio::spawn(async move {
-        let mut buf = vec![0u8; 1500];
-        loop {
-            let (n, from) = match pinger_conn_rx.recv_from(&mut buf).await {
-                Ok((n, from)) => (n, from),
-                Err(_) => break,
-            };
-
-            let msg = match String::from_utf8(buf[..n].to_vec()) {
-                Ok(msg) => msg,
-                Err(_) => break,
-            };
-
-            println!("pingerConn read-loop: {} from {}", msg, from);
-            /*if sentAt, pingerErr := time.Parse(time.RFC3339Nano, msg); pingerErr == nil {
-                rtt := time.Since(sentAt)
-                log.Printf("%d bytes from from %s time=%d ms\n", n, from.String(), int(rtt.Seconds()*1000))
-            }*/
-        }
-    });
-
-    // Start read-loop on relay_conn
-    tokio::spawn(async move {
-        let mut buf = vec![0u8; 1500];
-        loop {
-            let (n, from) = match relay_conn.recv_from(&mut buf).await {
-                Err(_) => break,
-                Ok((n, from)) => (n, from),
-            };
-
-            println!("relay_conn read-loop: {:?} from {}", &buf[..n], from);
-
-            // Echo back
-            if relay_conn.send_to(&buf[..n], from).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    /*println!(
-        "pinger_conn_tx send 10 packets to relay addr {}...",
-        relay_addr
-    );*/
-    // Send 10 packets from relay_conn to the echo server
     for _ in 0..2 {
-        let msg = "12345678910".to_owned(); //format!("{:?}", tokio::time::Instant::now());
+        let msg = "Original PSBT".to_owned(); //format!("{:?}", tokio::time::Instant::now());
         println!("sending msg={} with size={}", msg, msg.as_bytes().len());
         pinger_conn_tx.send_to(msg.as_bytes(), relay_addr).await?;
 
@@ -201,7 +165,7 @@ async fn do_ping_test(
 }
 
 fn receive_payjoin(relay: &str, amount: &str, client: bitcoincore_rpc::Client) {
-        
+        // register the payjoin endpoint with an allocation at the TURN relay
         // Receiver creates the bip21 payjoin URI
         let pj_receiver_address = client.get_new_address(None, None).unwrap();
         let amount = Amount::from_str(amount).unwrap();
@@ -290,4 +254,87 @@ fn serialize_psbt(psbt: &Psbt) -> String {
         encoder.finish().expect("Vec doesn't return errors in its write implementation"),
     )
     .unwrap()
+}
+
+// **
+
+async fn do_ping_test(
+    client: &Client,
+    relay_conn: impl Conn + std::marker::Send + std::marker::Sync + 'static,
+) -> Result<(), Error> {
+    // Send BindingRequest to learn our external IP
+    let mapped_addr = client.send_binding_request().await?;
+
+    // Set up pinger socket (pingerConn)
+    //println!("bind...");
+    let pinger_conn_tx = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
+
+    // Punch a UDP hole for the relay_conn by sending a data to the mapped_addr.
+    // This will trigger a TURN client to generate a permission request to the
+    // TURN server. After this, packets from the IP address will be accepted by
+    // the TURN server.
+    //println!("relay_conn send hello to mapped_addr {}", mapped_addr);
+    relay_conn.send_to("\"Original PSBT\"".as_bytes(), mapped_addr).await?;
+    let relay_addr = relay_conn.local_addr()?;
+
+    let pinger_conn_rx = Arc::clone(&pinger_conn_tx);
+
+    // Start read-loop on pingerConn
+    tokio::spawn(async move {
+        let mut buf = vec![0u8; 1500];
+        loop {
+            let (n, from) = match pinger_conn_rx.recv_from(&mut buf).await {
+                Ok((n, from)) => (n, from),
+                Err(_) => break,
+            };
+
+            let msg = match String::from_utf8(buf[..n].to_vec()) {
+                Ok(msg) => msg,
+                Err(_) => break,
+            };
+
+            println!("pingerConn read-loop: {} from {}", msg, from);
+            /*if sentAt, pingerErr := time.Parse(time.RFC3339Nano, msg); pingerErr == nil {
+                rtt := time.Since(sentAt)
+                log.Printf("%d bytes from from %s time=%d ms\n", n, from.String(), int(rtt.Seconds()*1000))
+            }*/
+        }
+    });
+
+    // Start read-loop on relay_conn
+    tokio::spawn(async move {
+        let mut buf = vec![0u8; 1500];
+        loop {
+            let (n, from) = match relay_conn.recv_from(&mut buf).await {
+                Err(_) => break,
+                Ok((n, from)) => (n, from),
+            };
+
+            println!("relay_conn read-loop: {:?} from {}", &buf[..n], from);
+
+            // Echo back
+            if relay_conn.send_to(&buf[..n], from).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    /*println!(
+        "pinger_conn_tx send 10 packets to relay addr {}...",
+        relay_addr
+    );*/
+    // Send 10 packets from relay_conn to the echo server
+    for _ in 0..2 {
+        let msg = "12345678910".to_owned(); //format!("{:?}", tokio::time::Instant::now());
+        println!("sending msg={} with size={}", msg, msg.as_bytes().len());
+        pinger_conn_tx.send_to(msg.as_bytes(), relay_addr).await?;
+
+        // For simplicity, this example does not wait for the pong (reply).
+        // Instead, sleep 1 second.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    Ok(())
 }

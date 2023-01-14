@@ -123,12 +123,11 @@ async fn listen_receiver(relay: &str) -> Result<(), Error> {
     println!("relayed-address={}", relay_conn.local_addr()?);
 
     let mapped_addr = client.send_binding_request().await?;
-    println!("mapped-address={}", mapped_addr.to_string());
     // punch UDP hole. after this packets from the IP address will be accepted by the turn server
     relay_conn.send_to("Hello".as_bytes(), mapped_addr).await?;
 
     // 2. Recv
-    listen_for_original_psbt(&client, relay_conn).await?;
+    listen_for_original_psbt(&client, relay_conn, mapped_addr).await?;
     //receive_payjoin(relay, amount, bitcoind);
 
     client.close().await?;
@@ -137,11 +136,16 @@ async fn listen_receiver(relay: &str) -> Result<(), Error> {
 async fn listen_for_original_psbt(
     client: &Client,
     relay_conn: impl Conn + std::marker::Send + std::marker::Sync + 'static,
+    mapped_addr: std::net::SocketAddr,
 ) -> Result<(), Error> {
     let mut buf = [0u8; 1024];
-    let (n, addr) = relay_conn.recv_from(&mut buf).await?;
-    println!("received {} bytes from {}", n, addr);
+    let (n, from) = relay_conn.recv_from(&mut buf).await?;
+    println!("received {} bytes from {}", n, from);
     println!("received {}", String::from_utf8_lossy(&buf[..n]));
+
+    relay_conn.send_to("PayJoin Proposal PSBT".as_bytes(), from).await?;
+    println!("sent PayJin Proposal");
+
     Ok(())
 }
 
@@ -151,16 +155,15 @@ async fn do_send(relay_addr: &str) -> Result<(), Error> {
     let pinger_conn_tx = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
     let pinger_conn_rx = Arc::clone(&pinger_conn_tx);
 
-    for _ in 0..2 {
-        let msg = "Original PSBT".to_owned(); //format!("{:?}", tokio::time::Instant::now());
-        println!("sending msg={} with size={}", msg, msg.as_bytes().len());
-        pinger_conn_tx.send_to(msg.as_bytes(), relay_addr).await?;
+    let msg = "Original PSBT".to_owned(); //format!("{:?}", tokio::time::Instant::now());
+    println!("sending msg={} with size={}", msg, msg.as_bytes().len());
+    pinger_conn_tx.send_to(msg.as_bytes(), relay_addr).await?;
 
-        // For simplicity, this example does not wait for the pong (reply).
-        // Instead, sleep 1 second.
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
+    let mut buf = [0u8; 1024];
 
+    let (n, from) = pinger_conn_rx.recv_from(&mut buf).await?;
+    let msg = String::from_utf8(buf[..n].to_vec()).unwrap();
+    println!("response: {} from {}", msg, from);
     Ok(())
 }
 

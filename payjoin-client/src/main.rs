@@ -1,8 +1,14 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::convert::TryInto;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use nkpsk0::consts::DHLEN;
+use nkpsk0::consts::MAC_LENGTH;
+use nkpsk0::types::Keypair;
+use nkpsk0::types::Psk;
+use nkpsk0::types::PublicKey;
 use turn::client::*;
 use turn::Error;
 use bitcoincore_rpc::bitcoin::Amount;
@@ -13,6 +19,8 @@ use payjoin::{PjUriExt, UriExt};
 use tokio::net::UdpSocket;
 use tokio::time::Duration;
 use webrtc_util::Conn;
+
+use nkpsk0::noisesession::NoiseSession;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -39,14 +47,17 @@ async fn main() -> Result<(), Error> {
             .short("b")
             .long("bip21")
             .help("The BIP21 URI to send to")
-            .takes_value(true)
-            .group("send"))
+            .takes_value(true))
         .arg(Arg::with_name("endpoint")
-                .short("e")
-                .long("endpoint")
-                .help("The endpoint to send the payjoin to")
-                .takes_value(true)
-                .group("send"))
+            .short("e")
+            .long("endpoint")
+            .help("The endpoint to send the payjoin to")
+            .takes_value(true))
+        .arg(Arg::with_name("rs")
+            .short("s")
+            .long("rs")
+            .help("The receiver's static public key")
+            .takes_value(true))
 
         .arg(Arg::with_name("relay")
             .short("r")
@@ -81,7 +92,8 @@ async fn main() -> Result<(), Error> {
     } else {
         //let bip21 = matches.value_of("bip21").unwrap().as_ref();
         let endpoint = matches.value_of("endpoint").unwrap();
-        do_send(endpoint).await?;
+        let rs = matches.value_of("rs").unwrap();
+        do_send(endpoint, rs).await?;
         //send_payjoin(bip21, bitcoind);
     }
 
@@ -118,29 +130,34 @@ async fn listen_receiver(relay: &str) -> Result<(), Error> {
     // socket.
     let relay_conn = client.allocate().await?;
 
+    let static_key = Keypair::default();
+    let s_base64 = base64::encode(static_key.get_public_key().as_bytes());
+    let psk = Psk::default(); // could derive psk from bip21 address
+    let mut noise = NoiseSession::init_session(false, &[], static_key, None, psk);
+
     // The relayConn's local address is actually the transport
     // address assigned on the TURN server.
-    println!("relayed-address={}", relay_conn.local_addr()?);
+    println!("--rs={} --endpoint={}", s_base64, relay_conn.local_addr()?);
 
     let mapped_addr = client.send_binding_request().await?;
     // punch UDP hole. after this packets from the IP address will be accepted by the turn server
     relay_conn.send_to("Hello".as_bytes(), mapped_addr).await?;
 
     // 2. Recv
-    listen_for_original_psbt(&client, relay_conn, mapped_addr).await?;
+    listen_for_original_psbt( relay_conn, &mut noise).await?;
     //receive_payjoin(relay, amount, bitcoind);
 
     client.close().await?;
     Ok(())
 }
 async fn listen_for_original_psbt(
-    client: &Client,
     relay_conn: impl Conn + std::marker::Send + std::marker::Sync + 'static,
-    mapped_addr: std::net::SocketAddr,
+    noise: &mut NoiseSession,
 ) -> Result<(), Error> {
     let mut buf = [0u8; 1024];
     let (n, from) = relay_conn.recv_from(&mut buf).await?;
     println!("received {} bytes from {}", n, from);
+    noise.recv_message(&mut buf[..n]).unwrap();
     println!("received {}", String::from_utf8_lossy(&buf[..n]));
 
     relay_conn.send_to("PayJoin Proposal PSBT".as_bytes(), from).await?;
@@ -149,15 +166,25 @@ async fn listen_for_original_psbt(
     Ok(())
 }
 
-async fn do_send(relay_addr: &str) -> Result<(), Error> {
+async fn do_send(relay_addr: &str, rs_base64: &str) -> Result<(), Error> {
+    let msg = "Original PSBT".to_owned(); //format!("{:?}", tokio::time::Instant::now());
+    println!("sending msg={} with size={}", msg, msg.as_bytes().len());
+
+    let s = Keypair::default();
+    let rs_bytes: [u8; DHLEN] = base64::decode(rs_base64).unwrap().try_into().unwrap();
+    let rs = PublicKey::from_bytes(rs_bytes).unwrap();
+    let psk = Psk::default(); // could use bitcoin address as psk, ⚠️ empty for demo
+    let mut noise = NoiseSession::init_session(true, &[], s, Some(rs), psk);
+    noise.set_ephemeral_keypair(Keypair::default());
     // Set up pinger socket (pingerConn)
     //println!("bind...");
     let pinger_conn_tx = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
     let pinger_conn_rx = Arc::clone(&pinger_conn_tx);
+    let mut msg = msg.into_bytes();
+    msg.resize(msg.len() + DHLEN + MAC_LENGTH, 0); // + buf + MAC_LENGTH + DH_LENGTH
+    noise.send_message(&mut msg).unwrap();
 
-    let msg = "Original PSBT".to_owned(); //format!("{:?}", tokio::time::Instant::now());
-    println!("sending msg={} with size={}", msg, msg.as_bytes().len());
-    pinger_conn_tx.send_to(msg.as_bytes(), relay_addr).await?;
+    pinger_conn_tx.send_to(msg.as_slice(), relay_addr).await?;
 
     let mut buf = [0u8; 1024];
 

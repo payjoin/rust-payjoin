@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use bitcoincore_rpc::bitcoin::util::psbt::PartiallySignedTransaction;
 use nkpsk0::consts::DHLEN;
 use nkpsk0::consts::MAC_LENGTH;
 use nkpsk0::types::Keypair;
@@ -94,11 +95,15 @@ async fn main() -> Result<(), Error> {
         let amount = Amount::from_sat(amount.parse::<u64>().unwrap());
         listen_receiver(relay, amount, bitcoind).await?;
     } else {
-        //let bip21 = matches.value_of("bip21").unwrap().as_ref();
+        let bip21 = matches.value_of("bip21").unwrap().as_ref();
         let endpoint = matches.value_of("endpoint").unwrap();
         let rs = matches.value_of("rs").unwrap();
-        do_send(endpoint, rs).await?;
-        //send_payjoin(bip21, bitcoind);
+        let (req, ctx) = create_pj_request(bip21, &bitcoind); //base64 request
+        let payjoin_psbt = do_send(req, ctx, endpoint, rs).await?;
+        let psbt = bitcoind.wallet_process_psbt(&serialize_psbt(&payjoin_psbt), None, None, None).unwrap().psbt;
+        let tx = bitcoind.finalize_psbt(&psbt, Some(true)).unwrap().hex.expect("incomplete psbt");
+        let txid = bitcoind.send_raw_transaction(&tx).unwrap();
+        println!("Sent tx: {}", txid);
     }
 
     Ok(())
@@ -142,7 +147,7 @@ async fn listen_receiver(relay: &str, amount: Amount, bitcoind: bitcoincore_rpc:
     // The relayConn's local address is actually the transport
     // address assigned on the TURN server.
     let relay_conn_endpoint = relay_conn.local_addr()?;
-    println!("--rs={} --endpoint={}", s_base64, relay_conn_endpoint);
+    print!("--rs={} --endpoint={} ", s_base64, relay_conn_endpoint);
 
     let mapped_addr = client.send_binding_request().await?;
     // punch UDP hole. after this packets from the IP address will be accepted by the turn server
@@ -150,7 +155,7 @@ async fn listen_receiver(relay: &str, amount: Amount, bitcoind: bitcoincore_rpc:
 
     // 2. Recv
     let pj_receiver_address = bitcoind.get_new_address(None, None).unwrap();
-    print_payjoin_uri(pj_receiver_address, amount, relay_conn_endpoint);
+    print_payjoin_uri(pj_receiver_address, amount);
     process_original_psbt(relay_conn, &mut noise, bitcoind).await?;
 
     client.close().await?;
@@ -221,9 +226,8 @@ async fn process_original_psbt(
     Ok(())
 }
 
-async fn do_send(relay_addr: &str, rs_base64: &str) -> Result<(), Error> {
-    let msg = "Original PSBT".to_owned(); //format!("{:?}", tokio::time::Instant::now());
-    println!("sending msg={} with size={}", msg, msg.as_bytes().len());
+async fn do_send(req: payjoin::sender::Request, ctx: payjoin::sender::Context, relay_addr: &str, rs_base64: &str) -> Result<Psbt, Error> {
+    let mut msg = req.body; //format!("{:?}", tokio::time::Instant::now());
 
     let s = Keypair::default();
     let rs_bytes: [u8; DHLEN] = base64::decode(rs_base64).unwrap().try_into().unwrap();
@@ -232,46 +236,51 @@ async fn do_send(relay_addr: &str, rs_base64: &str) -> Result<(), Error> {
     let mut noise = NoiseSession::init_session(true, &[], s, Some(rs), psk);
     noise.set_ephemeral_keypair(Keypair::default());
     // Set up pinger socket (pingerConn)
-    //println!("bind...");
+    // println!("bind...");
     let pinger_conn_tx = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
     let pinger_conn_rx = Arc::clone(&pinger_conn_tx);
-    let mut msg = msg.into_bytes();
     msg.resize(msg.len() + DHLEN + MAC_LENGTH, 0); // + buf + MAC_LENGTH + DH_LENGTH
     noise.send_message(&mut msg).unwrap();
-
     pinger_conn_tx.send_to(msg.as_slice(), relay_addr).await?;
-
+    
+    println!("len: {} < 1024?", msg.len());
     let mut buf = [0u8; 1024];
 
     let (n, from) = pinger_conn_rx.recv_from(&mut buf).await?;
-    let msg = String::from_utf8(buf[..n].to_vec()).unwrap();
-    println!("response: {} from {}", msg, from);
-    Ok(())
+    noise.recv_message(&mut buf[..n]).unwrap();
+    let proposal = ctx.process_response(&buf[..n]).unwrap();
+    println!("proposal: {:#?} from {}", proposal, from);
+    Ok(proposal)
 }
 
-fn print_payjoin_uri<'a>(address: Address, amount: Amount, endpoint: SocketAddr) {
+// get a valid BIP 21 URI for payjoin as defined in BIP 78
+// we have to use a mock endpoing because we are using udp not https
+fn print_payjoin_uri<'a>(address: Address, amount: Amount) {
         // Receiver creates the bip21 payjoin URI
+        let mock_endpoint = "https://example.com";
         let pj_uri_string = format!(
             "{}?amount={}&pj={}",
             address.to_qr_uri(),
             amount.as_btc(),
-            format!("udp://{}", endpoint)
+            mock_endpoint,
         );
-        println!("PayJoin URI: {}", pj_uri_string);
+        println!("--bip21=\"{}\"", pj_uri_string);
         let _pj_uri = payjoin::Uri::from_str(&pj_uri_string).unwrap(); // just validate the Uri
         // pj_uri.check_pj_supported().expect("Bad Uri"); ignore this because we are using udp not https and endpoint will fail
 }
 
-fn send_payjoin<'a>(bip21: &str, client: bitcoincore_rpc::Client) -> bitcoincore_rpc::bitcoin::Txid { 
+fn create_pj_request(bip21: &str, client: &bitcoincore_rpc::Client) -> (payjoin::sender::Request, payjoin::sender::Context) {
     let link = payjoin::Uri::try_from(&*bip21).unwrap();
-
-    let link = link
-        .check_pj_supported()
-        .unwrap_or_else(|_| panic!("The provided URI doesn't support payjoin (BIP78)"));
 
     if link.amount.is_none() {
         panic!("please specify the amount in the Uri");
     }
+
+    // ⚠️ we're hacking around this check by using a dummy endpoint. This is not a good idea in production
+    // We use a udp endpoint that would not support BIP 78 payjoin instead.
+    let link = link
+        .check_pj_supported()
+        .unwrap_or_else(|_| panic!("The provided URI doesn't support payjoin (BIP78)"));
 
     let amount = Amount::from_sat(link.amount.unwrap().to_sat());
     let mut outputs = HashMap::with_capacity(1);
@@ -295,11 +304,49 @@ fn send_payjoin<'a>(bip21: &str, client: bitcoincore_rpc::Client) -> bitcoincore
     let psbt = client.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
     let psbt = load_psbt_from_base64(psbt.as_bytes()).unwrap();
     println!("Original psbt: {:#?}", psbt);
-    let pj_params = payjoin::sender::Configuration::with_fee_contribution(
-        payjoin::bitcoin::Amount::from_sat(10000),
-        None,
-    );
+    let pj_params = payjoin::sender::Configuration::non_incentivizing();
+    link.create_pj_request(psbt, pj_params).unwrap()
+}
+
+fn send_payjoin<'a>(bip21: &str, client: bitcoincore_rpc::Client) -> bitcoincore_rpc::bitcoin::Txid { 
+    let link = payjoin::Uri::try_from(&*bip21).unwrap();
+    // ⚠️ we're hacking around this check by using a dummy endpoint. This is not a good idea in production
+    // We use a udp endpoint that would not support BIP 78 payjoin instead.
+    if link.amount.is_none() {
+        panic!("please specify the amount in the Uri");
+    }
+
+    // this check won't work because PayJoin v2 here uses udp not https or .onion
+    let link = link
+        .check_pj_supported()
+        .unwrap_or_else(|_| panic!("The provided URI doesn't support payjoin (BIP78)"));
+
+    let amount = Amount::from_sat(link.amount.unwrap().to_sat());
+    let mut outputs = HashMap::with_capacity(1);
+    outputs.insert(link.address.to_string(), amount);
+
+    let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
+        lock_unspent: Some(true),
+        fee_rate: Some(Amount::from_sat(2000)),
+        ..Default::default()
+    };
+    let psbt = client
+        .wallet_create_funded_psbt(
+            &[], // inputs
+            &outputs,
+            None, // locktime
+            Some(options),
+            None,
+        )
+        .expect("failed to create PSBT")
+        .psbt;
+    let psbt = client.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
+    let psbt = load_psbt_from_base64(psbt.as_bytes()).unwrap();
+    println!("Original psbt: {:#?}", psbt);
+    let pj_params = payjoin::sender::Configuration::non_incentivizing();
     let (req, ctx) = link.create_pj_request(psbt, pj_params).unwrap();
+
+    // *** send, receive using noise + TURN
     let response = reqwest::blocking::Client::new()
         .post(req.url)
         .body(req.body)
@@ -308,6 +355,10 @@ fn send_payjoin<'a>(bip21: &str, client: bitcoincore_rpc::Client) -> bitcoincore
         .expect("failed to communicate");
     //.error_for_status()
     //.unwrap();
+
+    // *** end send, receive using noise + TURN
+
+
     let psbt = ctx.process_response(response).unwrap();
     println!("Proposed psbt: {:#?}", psbt);
     let psbt = client.wallet_process_psbt(&serialize_psbt(&psbt), None, None, None).unwrap().psbt;

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::convert::TryInto;
+use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use nkpsk0::types::Psk;
 use nkpsk0::types::PublicKey;
 use turn::client::*;
 use turn::Error;
+use bitcoincore_rpc::bitcoin::Address;
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use clap::{App, AppSettings, Arg};
@@ -88,7 +90,9 @@ async fn main() -> Result<(), Error> {
 
     if matches.is_present("relay") {
         let relay = matches.value_of("relay").unwrap();
-        listen_receiver(relay).await?;
+        let amount = matches.value_of("amount").unwrap();
+        let amount = Amount::from_sat(amount.parse::<u64>().unwrap());
+        listen_receiver(relay, amount, bitcoind).await?;
     } else {
         //let bip21 = matches.value_of("bip21").unwrap().as_ref();
         let endpoint = matches.value_of("endpoint").unwrap();
@@ -100,7 +104,7 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn listen_receiver(relay: &str) -> Result<(), Error> {
+async fn listen_receiver(relay: &str, amount: Amount, bitcoind: bitcoincore_rpc::Client) -> Result<(), Error> {
     // 1. ConnectReceive
     // Ensure relay connection
     // TURN client won't create a local listening socket by itself.
@@ -137,30 +141,81 @@ async fn listen_receiver(relay: &str) -> Result<(), Error> {
 
     // The relayConn's local address is actually the transport
     // address assigned on the TURN server.
-    println!("--rs={} --endpoint={}", s_base64, relay_conn.local_addr()?);
+    let relay_conn_endpoint = relay_conn.local_addr()?;
+    println!("--rs={} --endpoint={}", s_base64, relay_conn_endpoint);
 
     let mapped_addr = client.send_binding_request().await?;
     // punch UDP hole. after this packets from the IP address will be accepted by the turn server
     relay_conn.send_to("Hello".as_bytes(), mapped_addr).await?;
 
     // 2. Recv
-    listen_for_original_psbt( relay_conn, &mut noise).await?;
-    //receive_payjoin(relay, amount, bitcoind);
+    let pj_receiver_address = bitcoind.get_new_address(None, None).unwrap();
+    print_payjoin_uri(pj_receiver_address, amount, relay_conn_endpoint);
+    process_original_psbt(relay_conn, &mut noise, bitcoind).await?;
 
     client.close().await?;
     Ok(())
 }
-async fn listen_for_original_psbt(
+
+async fn process_original_psbt(
     relay_conn: impl Conn + std::marker::Send + std::marker::Sync + 'static,
     noise: &mut NoiseSession,
+    receiver: bitcoincore_rpc::Client,
 ) -> Result<(), Error> {
+    use payjoin::bitcoin;
+    use payjoin::receiver::UncheckedProposal;
+    use payjoin::bitcoin::consensus;
+    use payjoin::bitcoin::blockdata::script::Script;
+    use payjoin::bitcoin::blockdata::transaction::TxOut;
+
     let mut buf = [0u8; 1024];
     let (n, from) = relay_conn.recv_from(&mut buf).await?;
-    println!("received {} bytes from {}", n, from);
+    println!("received {} bytes of supposed Original PSBT from {}", n, from);
     noise.recv_message(&mut buf[..n]).unwrap();
-    println!("received {}", String::from_utf8_lossy(&buf[..n]));
 
-    relay_conn.send_to("PayJoin Proposal PSBT".as_bytes(), from).await?;
+    // query, headers not passed by default udp
+    // We'll need to figure out how to pass query info at least.
+    let query = "";
+    let headers = MockHeaders::new(n);
+    let proposal = UncheckedProposal::from_request(&buf[..n], query, headers).unwrap();
+    let checked_proposal = proposal.assume_tested_and_scheduled_broadcast().assume_inputs_not_owned().assume_no_mixed_input_scripts().assume_no_inputs_seen_before();
+
+    let mut original_psbt = checked_proposal.psbt();
+    original_psbt.unsigned_tx.input.iter_mut().for_each(|txin| txin.script_sig = Script::default());
+
+    let mut payjoin_proposal_psbt = original_psbt.clone();
+    let receiver_vout = 0; // correct???
+                            //      TODO add selected receiver input utxo
+                            //      substitute receiver output
+    let receiver_substitute_address = receiver.get_new_address(None, None).unwrap();
+    let receiver_substitute_address = bitcoin::Address::from_str(&receiver_substitute_address.to_string()).unwrap();
+    let substitute_txout = TxOut {
+        value: payjoin_proposal_psbt.unsigned_tx.output[receiver_vout].value,
+        script_pubkey: receiver_substitute_address.script_pubkey(),
+    };
+    payjoin_proposal_psbt.unsigned_tx.output[receiver_vout] = substitute_txout;
+    payjoin_proposal_psbt
+        .outputs
+        .resize_with(payjoin_proposal_psbt.unsigned_tx.output.len(), Default::default);
+
+    // Sign payjoin psbt
+    let payjoin_base64_string = base64::encode(consensus::serialize(&payjoin_proposal_psbt));
+    let payjoin_proposal_psbt =
+        receiver.wallet_process_psbt(&payjoin_base64_string, None, None, None).unwrap().psbt;
+    let payjoin_proposal_psbt =
+        receiver.finalize_psbt(&payjoin_proposal_psbt, Some(false)).unwrap().psbt.unwrap();
+    let payjoin_proposal_psbt =
+        load_psbt_from_base64(payjoin_proposal_psbt.as_bytes()).unwrap();
+    println!("Receiver's PayJoin proposal PSBT: {:#?}", payjoin_proposal_psbt);
+
+    // Remove vestigial invalid signature data from the Original PSBT
+    let payjoin_proposal_psbt =
+        Psbt::from_unsigned_tx(payjoin_proposal_psbt.unsigned_tx.clone())
+            .expect("resetting tx failed");
+    let mut payjoin_proposal_psbt = consensus::serialize(&payjoin_proposal_psbt);
+    payjoin_proposal_psbt.resize(payjoin_proposal_psbt.len() + DHLEN + MAC_LENGTH, 0u8);
+    noise.send_message(&mut payjoin_proposal_psbt).unwrap();
+    relay_conn.send_to(payjoin_proposal_psbt.as_slice(), from).await?;
     println!("sent PayJin Proposal");
 
     Ok(())
@@ -194,19 +249,17 @@ async fn do_send(relay_addr: &str, rs_base64: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn receive_payjoin(relay: &str, amount: &str, client: bitcoincore_rpc::Client) {
-        // register the payjoin endpoint with an allocation at the TURN relay
+fn print_payjoin_uri<'a>(address: Address, amount: Amount, endpoint: SocketAddr) {
         // Receiver creates the bip21 payjoin URI
-        let pj_receiver_address = client.get_new_address(None, None).unwrap();
-        let amount = Amount::from_str(amount).unwrap();
         let pj_uri_string = format!(
-            "{}?amount={}&pj={}&s=secret",
-            pj_receiver_address.to_qr_uri(),
+            "{}?amount={}&pj={}",
+            address.to_qr_uri(),
             amount.as_btc(),
-            relay,
+            format!("udp://{}", endpoint)
         );
-        let pj_uri = payjoin::Uri::from_str(&pj_uri_string).unwrap();
-        let _pj_uri = pj_uri.check_pj_supported().expect("Bad Uri");
+        println!("PayJoin URI: {}", pj_uri_string);
+        let _pj_uri = payjoin::Uri::from_str(&pj_uri_string).unwrap(); // just validate the Uri
+        // pj_uri.check_pj_supported().expect("Bad Uri"); ignore this because we are using udp not https and endpoint will fail
 }
 
 fn send_payjoin<'a>(bip21: &str, client: bitcoincore_rpc::Client) -> bitcoincore_rpc::bitcoin::Txid { 
@@ -284,4 +337,22 @@ fn serialize_psbt(psbt: &Psbt) -> String {
         encoder.finish().expect("Vec doesn't return errors in its write implementation"),
     )
     .unwrap()
+}
+
+pub struct MockHeaders {
+    length: String,
+}
+
+impl MockHeaders {
+    fn new(length: usize) -> MockHeaders { MockHeaders { length: length.to_string() } }
+}
+
+impl payjoin::receiver::Headers for MockHeaders {
+    fn get_header(&self, key: &str) -> Option<&str> {
+        match key {
+            "content-length" => Some(&self.length),
+            "content-type" => Some("text/plain"),
+            _ => None,
+        }
+    }
 }

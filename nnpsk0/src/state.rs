@@ -198,7 +198,6 @@ impl SymmetricState {
 	pub(crate) fn encrypt_and_hash(&mut self, in_out: &mut [u8]) -> Result<(), NoiseError> {
 			let mut temp_mac: [u8; MAC_LENGTH] = [0u8;MAC_LENGTH];
 			let (plaintext, mac) = in_out.split_at_mut(in_out.len()-MAC_LENGTH);
-			println!("encrypt_and_hash: plaintext: {:?}", plaintext);
 			self.cs.encrypt_with_ad(&self.h.as_bytes()[..], plaintext, &mut temp_mac)?;
 			mac.copy_from_slice(&temp_mac[..]);
 			self.mix_hash(in_out);
@@ -264,20 +263,19 @@ impl HandshakeState {
 		self.e = e;
 	}
 
-	pub(crate) fn initialize_initiator(prologue: &[u8], s: Keypair, rs: PublicKey, psk: Psk) -> HandshakeState {
-		let protocol_name = b"Noise_NKpsk0_25519_ChaChaPoly_BLAKE2s";
+	pub(crate) fn initialize_initiator(prologue: &[u8], s: Keypair, psk: Psk) -> HandshakeState {
+		let protocol_name = b"Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s";
 		let mut ss: SymmetricState = SymmetricState::initialize_symmetric(&protocol_name[..]);
 		ss.mix_hash(prologue);
-		ss.mix_hash(&rs.as_bytes()[..]);
+		let rs = PublicKey::empty();
 		HandshakeState{ss, s, e: Keypair::new_empty(), rs, re: PublicKey::empty(), psk}
 	}
 
 	pub(crate) fn initialize_responder(prologue: &[u8], s: Keypair, psk: Psk) -> HandshakeState {
-		let protocol_name = b"Noise_NKpsk0_25519_ChaChaPoly_BLAKE2s";
+		let protocol_name = b"Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s";
 		let mut ss: SymmetricState = SymmetricState::initialize_symmetric(&protocol_name[..]);
 		ss.mix_hash(prologue);
 		let rs = PublicKey::empty();
-		ss.mix_hash(&s.get_public_key().as_bytes()[..]);
 		HandshakeState{ss, s, e: Keypair::new_empty(), rs, re: PublicKey::empty(), psk}
 	}
 	pub(crate) fn write_message_a(&mut self, in_out: &mut [u8]) -> Result<(), NoiseError> {
@@ -287,14 +285,11 @@ impl HandshakeState {
 		}
 		if self.e.is_empty() {
 			self.e = Keypair::default();
-			println!("e is empty, generating new keypair");
 		}
 		let (ne, in_out) = in_out.split_at_mut(DHLEN);
-		println!("in_out: {:?} this should be the payload + MAC", in_out);
 		ne.copy_from_slice(&self.e.get_public_key().as_bytes()[..]);
 		self.ss.mix_hash(ne);
 		self.ss.mix_key(&self.e.get_public_key().as_bytes());
-		self.ss.mix_key(&self.e.dh(&self.rs.as_bytes()));
 		self.ss.encrypt_and_hash(in_out)?;
 		Ok(())
 	}
@@ -325,13 +320,10 @@ impl HandshakeState {
 			return Err(NoiseError::MissingreError);
 		}
 		let (re, in_out) = in_out.split_at_mut(DHLEN);
-		println!("re: {:?}", re); // DH
 		self.re = PublicKey::from_bytes(from_slice_hashlen(re))?;
 		self.ss.mix_hash(&self.re.as_bytes()[..DHLEN]);
 		self.ss.mix_key(&self.re.as_bytes());
-		self.ss.mix_key(&self.s.dh(&self.re.as_bytes()));
 		self.ss.decrypt_and_hash(in_out)?;
-
 		Ok(())
 	}
 

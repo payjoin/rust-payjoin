@@ -15,4 +15,4 @@ clap = "2.33.3"
 turn = "0.6.1"
 tokio = { version = "1.6.1", features = ["full"] }
 webrtc-util = { version = "0.7.0", default-features = false, features = ["conn", "vnet"] }
-nkpsk0 = { path = "../nkpsk0" }
+noiseexplorer_nnpsk0 = { path = "../nnpsk0" }

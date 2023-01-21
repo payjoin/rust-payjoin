@@ -1,8 +1,6 @@
 /*
-NKpsk0:
-  <- s
-  ...
-  -> psk, e, es
+NNpsk0:
+  -> psk, e
   <- e, ee
   ->
   <-
@@ -24,40 +22,37 @@ pub mod error;
 pub mod noisesession;
 pub mod types;
 
-
 #[cfg(test)]
 mod test {
     use crate::consts::{MAC_LENGTH, DHLEN};
     use crate::noisesession::NoiseSession;
-    use crate::types::{Keypair, Psk, PublicKey};
+    use crate::types::{Keypair, Psk};
 
   #[test]
-  fn e2e_from_pj_sender() {
-    // <- s
-    let receiver_static = Keypair::default(); // s from responder aka payjoin receiver
-    let rs = receiver_static.get_public_key(); // rs from responder
-
+  fn e2e_noise_from_pj_sender() {    
+    let receiver_static = Keypair::new_empty(); // security does not depend on long-term static keys in NNpsk0. The interface still requires a Keypair, but it is not used.
+    // let receiver_static = Keypair::default(); // s from responder aka payjoin receiver
     // ...
-    let original_psbt = b"Original PSBT";
-    println!("original_psbt: {:?}", String::from_utf8(original_psbt.to_vec()));
+    let psk = Psk::from_bytes(new_256bit_key()); // pre-shared from responder symmetric key. // todo can use 128 bit?
     // ...
-
-    // Ready Message A -> psk, e, es
-
+    
+    // Ready Message A -> psk, e
+    
     //  from the initiator (payjoin sender)
-    let sender_static = Keypair::new_empty(); // the N in NK, should be nothing at all.
-    let psk = Psk::default(); // pre-shared (from WHO?) symmetric key. // TODO get from randomness, not default() emptyness
-    let mut initiator = NoiseSession::init_session(true, b"", sender_static, Some(rs), psk.clone());
+    let original_psbt = b"Original PSBT";
+    let sender_static = Keypair::new_empty(); // security does not depend on long-term static keys in NNpsk0. The interface still requires a Keypair, but it is not used.
+    let mut initiator = NoiseSession::init_session(true, b"", sender_static, psk.clone());
 
     let mut in_out: Vec<u8> = vec![0; DHLEN];
     in_out.append(&mut original_psbt.to_vec());
     let message_a_size = DHLEN + original_psbt.len() + MAC_LENGTH;
     in_out.resize(message_a_size, 0);
-    initiator.send_message(&mut in_out).unwrap(); // psk, e, es
+    initiator.send_message(&mut in_out).unwrap(); // psk, e
     let mut message_a = in_out;
     
     //  from the responder (payjoin receiver)
-    let mut responder = NoiseSession::init_session(false, b"", receiver_static, None, psk);
+
+    let mut responder = NoiseSession::init_session(false, b"", receiver_static, psk);
     //let mut message_a_received: Vec<u8> = Vec::with_capacity(message_a_size); // you would have to make a sized buffer in implementation
     responder.recv_message(&mut message_a).unwrap(); // es derived internally
     println!("message_a bytes:{:?}", message_a);
@@ -85,5 +80,15 @@ mod test {
 
   fn process_original_psbt(_original_psbt: &[u8]) -> &[u8] {
     b"Payjoin PSBT"
+  }
+
+  fn new_256bit_key() -> [u8; 32] {
+    use rand::RngCore;
+    use rand::thread_rng;
+
+    let mut rng = thread_rng();
+    let mut key = [0u8; 32];
+    rng.fill_bytes(&mut key);
+    key
   }
 }

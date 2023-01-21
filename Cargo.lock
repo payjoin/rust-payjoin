@@ -980,7 +980,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "nkpsk0"
+name = "nodrop"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72ef4a56884ca558e5ddb05a1d1e7e1bfd9a68d9ed024c21704cc98872dae1bb"
+
+[[package]]
+name = "noiseexplorer_nnpsk0"
 version = "1.0.3"
 dependencies = [
  "blake2-rfc",
@@ -990,12 +996,6 @@ dependencies = [
  "rand 0.6.5",
  "zeroize",
 ]
-
-[[package]]
-name = "nodrop"
-version = "0.1.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72ef4a56884ca558e5ddb05a1d1e7e1bfd9a68d9ed024c21704cc98872dae1bb"
 
 [[package]]
 name = "num_cpus"
@@ -1102,7 +1102,7 @@ dependencies = [
  "base64",
  "bitcoincore-rpc 0.14.0",
  "clap",
- "nkpsk0",
+ "noiseexplorer_nnpsk0",
  "payjoin",
  "reqwest",
  "tokio",

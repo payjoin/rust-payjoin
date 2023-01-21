@@ -6,11 +6,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use bitcoincore_rpc::bitcoin::util::psbt::PartiallySignedTransaction;
-use nkpsk0::consts::DHLEN;
-use nkpsk0::consts::MAC_LENGTH;
-use nkpsk0::types::Keypair;
-use nkpsk0::types::Psk;
-use nkpsk0::types::PublicKey;
 use payjoin::bitcoin::hashes::hex::ToHex;
 use turn::client::*;
 use turn::Error;
@@ -24,7 +19,6 @@ use tokio::net::UdpSocket;
 use tokio::time::Duration;
 use webrtc_util::Conn;
 
-use nkpsk0::noisesession::NoiseSession;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -98,6 +92,7 @@ async fn main() -> Result<(), Error> {
     } else {
         let bip21 = matches.value_of("bip21").unwrap().as_ref();
         let endpoint = matches.value_of("endpoint").unwrap();
+        let rs = matches.value_of("rs").unwrap();
         let (req, ctx) = create_pj_request(bip21, &bitcoind); //base64 request
         let payjoin_psbt = do_send(req, ctx, endpoint).await?;
         let psbt = bitcoind.wallet_process_psbt(&serialize_psbt(&payjoin_psbt), None, None, None).unwrap().psbt;
@@ -223,9 +218,7 @@ async fn process_original_psbt(
         Psbt::from_unsigned_tx(payjoin_proposal_psbt.unsigned_tx.clone())
             .expect("resetting tx failed");
     let payjoin_proposal_psbt = base64::encode(consensus::serialize(&payjoin_proposal_psbt));
-    //payjoin_proposal_psbt.resize(payjoin_proposal_psbt.len() + DHLEN + MAC_LENGTH, 0u8);
     relay_conn.send_to(payjoin_proposal_psbt.as_bytes(), from).await?;
-    println!("sent PayJoin Proposal");
 
     Ok(())
 }
@@ -236,6 +229,7 @@ async fn do_send(req: payjoin::sender::Request, ctx: payjoin::sender::Context, r
     // Set up pinger socket (pingerConn)
     let pinger_conn_tx = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
     let pinger_conn_rx = Arc::clone(&pinger_conn_tx);
+
     pinger_conn_tx.send_to(msg.as_slice(), relay_addr).await?;
     
     println!("len: {} < 1024?", msg.len());

@@ -103,12 +103,12 @@ impl NoiseSession {
 	/// - `initiator`: `bool` variable. To be set as `true` when initiating a handshake with a remote party, or `false` otherwise.
 	/// - `prologue`: `Message` object. Could optionally contain the name of the protocol to be used.
 	/// - `s`: `Keypair` object. Contains local party's static keypair.
-	/// - `rs`: `Option<PublicKey>`. Contains the remote party's static public key.	Tip: use `Some(rs_value)` in case a remote static key exists and `None` otherwise.
+	
 	/// - `psk`: `Psk` object. Contains the pre-shared key.
-	pub fn init_session(initiator: bool, prologue: &[u8], s: Keypair, rs: Option<PublicKey>, psk: Psk) -> NoiseSession {
+	pub fn init_session(initiator: bool, prologue: &[u8], s: Keypair, psk: Psk) -> NoiseSession {
 		if initiator {
 			NoiseSession{
-				hs: HandshakeState::initialize_initiator(prologue, s, rs.unwrap_or(PublicKey::empty()), psk),
+				hs: HandshakeState::initialize_initiator(prologue, s, psk),
 				mc: 0,
 				i: initiator,
 				cs1: CipherState::new(),
@@ -151,13 +151,10 @@ impl NoiseSession {
 			self.cs1 = temp.1;
 			self.cs2 = temp.2;
 			self.hs.clear();
-
 		} else if self.i {
 			self.cs1.write_message_regular(in_out)?;
-
 		} else {
 			self.cs2.write_message_regular(in_out)?;
-
 		}
 		self.mc += 1;
 		Ok(())
@@ -186,10 +183,8 @@ impl NoiseSession {
 				self.cs1 = temp.1;
 				self.cs2 = temp.2;
 				self.hs.clear();
-
 		} else if self.i {
 			self.cs2.read_message_regular(in_out)?;
-
 		} else {
 				self.cs1.read_message_regular(in_out)?;
 		}

@@ -1,5 +1,5 @@
 [package]
-name = "nkpsk0"
+name = "noiseexplorer_nnpsk0"
 version = "1.0.3"
 authors = ["Symbolic Software <georgio@symbolic.software>"]
 edition = "2018"

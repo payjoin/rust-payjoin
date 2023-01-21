@@ -198,6 +198,7 @@ impl SymmetricState {
 	pub(crate) fn encrypt_and_hash(&mut self, in_out: &mut [u8]) -> Result<(), NoiseError> {
 			let mut temp_mac: [u8; MAC_LENGTH] = [0u8;MAC_LENGTH];
 			let (plaintext, mac) = in_out.split_at_mut(in_out.len()-MAC_LENGTH);
+			println!("encrypt_and_hash: plaintext: {:?}", plaintext);
 			self.cs.encrypt_with_ad(&self.h.as_bytes()[..], plaintext, &mut temp_mac)?;
 			mac.copy_from_slice(&temp_mac[..]);
 			self.mix_hash(in_out);
@@ -286,8 +287,10 @@ impl HandshakeState {
 		}
 		if self.e.is_empty() {
 			self.e = Keypair::default();
+			println!("e is empty, generating new keypair");
 		}
 		let (ne, in_out) = in_out.split_at_mut(DHLEN);
+		println!("in_out: {:?} this should be the payload + MAC", in_out);
 		ne.copy_from_slice(&self.e.get_public_key().as_bytes()[..]);
 		self.ss.mix_hash(ne);
 		self.ss.mix_key(&self.e.get_public_key().as_bytes());
@@ -322,6 +325,7 @@ impl HandshakeState {
 			return Err(NoiseError::MissingreError);
 		}
 		let (re, in_out) = in_out.split_at_mut(DHLEN);
+		println!("re: {:?}", re); // DH
 		self.re = PublicKey::from_bytes(from_slice_hashlen(re))?;
 		self.ss.mix_hash(&self.re.as_bytes()[..DHLEN]);
 		self.ss.mix_key(&self.re.as_bytes());

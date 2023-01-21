@@ -50,24 +50,28 @@ mod test {
     //  from the sender
     let sender_static = Keypair::new_empty(); // the N in NK, should be nothing at all.
     let psk = Psk::default(); // pre-shared (from WHO?) symmetric key. // TODO get from randomness, not default() emptyness
-    let mut sender = NoiseSession::init_session(true, b"prologue", sender_static, Some(rs), psk.clone());
-    sender.set_ephemeral_keypair(Keypair::default()); // sender's e
+    let mut sender = NoiseSession::init_session(true, b"", sender_static, Some(rs), psk.clone());
 
-    let mut in_out: Vec<u8> = Vec::new();
-    in_out.extend(original_psbt);
+    let mut in_out: Vec<u8> = vec![0; DHLEN];
+    println!("in_out bytes DHLEN:                   {:?}", in_out);
+    in_out.append(&mut original_psbt.to_vec());
+    println!("in_out bytes DHLEN | msg:             {:?}", in_out);
     let message_a_size = original_psbt.len() + DHLEN + MAC_LENGTH;
     in_out.resize(message_a_size, 0);
+    println!("in_out bytes DHLEN + msg + MAC_LENGTH:{:?}", in_out);
+
+    println!("sender.is_transport() = {}", sender.is_transport());
     sender.send_message(&mut in_out).unwrap(); // psk, e, es
     let mut message_a = in_out;
     
     //  from the receiver
-    let mut receiver = NoiseSession::init_session(false, b"prologue", receiver_static, None, psk);
-    receiver.set_ephemeral_keypair(Keypair::default()); // receiver's e
+    let mut receiver = NoiseSession::init_session(false, b"", receiver_static, None, psk);
     //let mut message_a_received: Vec<u8> = Vec::with_capacity(message_a_size); // you would have to make a sized buffer in implementation
     receiver.recv_message(&mut message_a).unwrap(); // es derived internally
     println!("message_a bytes:{:?}", message_a);
-    let orig = &message_a[..original_psbt.len()];
-    println!("message_a decrypted:{:?}", String::from_utf8(orig.to_vec()));
+    let (_re, payload) = message_a.split_at_mut(DHLEN);
+    let (payload, _mac) = payload.split_at_mut(payload.len() - MAC_LENGTH);
+    println!("message_a decrypted:{:?}", String::from_utf8(payload.to_vec()));
 
     // Ready Message B <- e, ee
   }

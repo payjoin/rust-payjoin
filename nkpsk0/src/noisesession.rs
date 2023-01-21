@@ -143,7 +143,6 @@ impl NoiseSession {
 		}
 		if self.mc == 0 {
 			self.hs.write_message_a(in_out)?;
-
 		}
 		else if self.mc == 1 {
 			let temp = self.hs.write_message_b(in_out)?;

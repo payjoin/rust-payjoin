@@ -141,10 +141,8 @@ impl NoiseSession {
 		if in_out.len() < MAC_LENGTH || in_out.len() > MAX_MESSAGE {
 			return Err(NoiseError::UnsupportedMessageLengthError);
 		}
-		println!("a");
 		if self.mc == 0 {
 			self.hs.write_message_a(in_out)?;
-			println!("b");
 
 		}
 		else if self.mc == 1 {
@@ -154,15 +152,12 @@ impl NoiseSession {
 			self.cs1 = temp.1;
 			self.cs2 = temp.2;
 			self.hs.clear();
-			println!("c");
 
 		} else if self.i {
 			self.cs1.write_message_regular(in_out)?;
-			println!("d");
 
 		} else {
 			self.cs2.write_message_regular(in_out)?;
-			println!("e");
 
 		}
 		self.mc += 1;
@@ -182,10 +177,8 @@ impl NoiseSession {
 		if in_out.len() < MAC_LENGTH || in_out.len() > MAX_MESSAGE {
 			return Err(NoiseError::UnsupportedMessageLengthError);
 		}
-		println!("a");
 		if self.mc == 0 {
 			self.hs.read_message_a(in_out)?;
-			println!("b");
 		}
 		else if self.mc == 1 {
 			let temp = self.hs.read_message_b(in_out)?;
@@ -194,16 +187,12 @@ impl NoiseSession {
 				self.cs1 = temp.1;
 				self.cs2 = temp.2;
 				self.hs.clear();
-				println!("c");
 
 		} else if self.i {
 			self.cs2.read_message_regular(in_out)?;
-			println!("d");
 
 		} else {
 				self.cs1.read_message_regular(in_out)?;
-				println!("e");
-
 		}
 		self.mc += 1;
 		Ok(())

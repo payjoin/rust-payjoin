@@ -326,9 +326,7 @@ impl HandshakeState {
 		self.ss.mix_hash(&self.re.as_bytes()[..DHLEN]);
 		self.ss.mix_key(&self.re.as_bytes());
 		self.ss.mix_key(&self.s.dh(&self.re.as_bytes()));
-		println!("dec_&_hash");
 		self.ss.decrypt_and_hash(in_out)?;
-		println!("after dec_&_hash");
 
 		Ok(())
 	}

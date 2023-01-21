@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 payjoin = { path = "../payjoin", features = ["sender", "receiver"] }
 bitcoincore-rpc = "0.14.0"
+rand = "0.6.5"
 reqwest = { version = "0.11.4", features = ["blocking"] }
 base64 = "0.13.0"
 clap = "2.33.3"

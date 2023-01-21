@@ -1,11 +1,9 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::convert::TryInto;
-use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use bitcoincore_rpc::bitcoin::util::psbt::PartiallySignedTransaction;
 use payjoin::bitcoin::hashes::hex::ToHex;
 use turn::client::*;
 use turn::Error;
@@ -16,8 +14,10 @@ use clap::{App, AppSettings, Arg};
 use payjoin::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use payjoin::{PjUriExt, UriExt};
 use tokio::net::UdpSocket;
-use tokio::time::Duration;
 use webrtc_util::Conn;
+use noiseexplorer_nnpsk0::noisesession::NoiseSession;
+use noiseexplorer_nnpsk0::consts::{MAC_LENGTH, DHLEN};
+use noiseexplorer_nnpsk0::types::Keypair;
 
 
 #[tokio::main]
@@ -51,10 +51,10 @@ async fn main() -> Result<(), Error> {
             .long("endpoint")
             .help("The endpoint to send the payjoin to")
             .takes_value(true))
-        .arg(Arg::with_name("rs")
+        .arg(Arg::with_name("psk")
             .short("s")
-            .long("rs")
-            .help("The receiver's static public key")
+            .long("psk")
+            .help("The pre-shared symmetric key")
             .takes_value(true))
 
         .arg(Arg::with_name("relay")
@@ -92,9 +92,9 @@ async fn main() -> Result<(), Error> {
     } else {
         let bip21 = matches.value_of("bip21").unwrap().as_ref();
         let endpoint = matches.value_of("endpoint").unwrap();
-        let rs = matches.value_of("rs").unwrap();
+        let psk = matches.value_of("psk").unwrap();
         let (req, ctx) = create_pj_request(bip21, &bitcoind); //base64 request
-        let payjoin_psbt = do_send(req, ctx, endpoint).await?;
+        let payjoin_psbt = do_send(req, ctx, endpoint, psk).await?;
         let psbt = bitcoind.wallet_process_psbt(&serialize_psbt(&payjoin_psbt), None, None, None).unwrap().psbt;
         let tx = bitcoind.finalize_psbt(&psbt, Some(true)).unwrap().hex.expect("incomplete psbt");
         let txid = bitcoind.send_raw_transaction(&tx).unwrap();
@@ -137,7 +137,8 @@ async fn listen_receiver(relay: &str, amount: Amount, bitcoind: bitcoincore_rpc:
     // The relayConn's local address is actually the transport
     // address assigned on the TURN server.
     let relay_conn_endpoint = relay_conn.local_addr()?;
-    print!("--endpoint={} ", relay_conn_endpoint);
+    let psk = gen_psk();
+    print!("--endpoint={} --psk=\"{}\" ", relay_conn_endpoint, psk);
 
     let mapped_addr = client.send_binding_request().await?;
     // punch UDP hole. after this packets from the IP address will be accepted by the turn server
@@ -146,7 +147,7 @@ async fn listen_receiver(relay: &str, amount: Amount, bitcoind: bitcoincore_rpc:
     // 2. Recv
     let pj_receiver_address = bitcoind.get_new_address(None, Some(bitcoincore_rpc::json::AddressType::Bech32)).unwrap();
     print_payjoin_uri(pj_receiver_address, amount);
-    process_original_psbt(relay_conn,  bitcoind).await?;
+    process_original_psbt(relay_conn,  bitcoind, psk).await?;
 
     client.close().await?;
     Ok(())
@@ -155,6 +156,7 @@ async fn listen_receiver(relay: &str, amount: Amount, bitcoind: bitcoincore_rpc:
 async fn process_original_psbt(
     relay_conn: impl Conn + std::marker::Send + std::marker::Sync + 'static,
     receiver: bitcoincore_rpc::Client,
+    psk: String,
 ) -> Result<(), Error> {
     use payjoin::bitcoin;
     use payjoin::receiver::UncheckedProposal;
@@ -162,16 +164,24 @@ async fn process_original_psbt(
     use payjoin::bitcoin::blockdata::script::Script;
     use payjoin::bitcoin::blockdata::transaction::TxOut;
 
+    let psk: [u8; 32] = base64::decode(psk).unwrap().try_into().unwrap();
+    let psk = noiseexplorer_nnpsk0::types::Psk::from_bytes(psk);
+
     let mut buf = [0u8; 1024];
     let (n, from) = relay_conn.recv_from(&mut buf).await?;
     println!("received {} bytes of supposed Original PSBT from {}", n, from);
-
-    
+    println!("buf: {:?}", &buf[..n]);
+    // security does not depend on long-term static keys in NNpsk0. The interface still requires a Keypair, but it is not used.
+    let mut responder = NoiseSession::init_session(false, b"", Keypair::new_empty(), psk);
+    responder.recv_message(&mut buf[..n]).unwrap(); // es derived internally
+    let (_initiator_e, payload) = buf.split_at_mut(DHLEN);
+    let (payload, _mac) = payload.split_at_mut(payload.len() - MAC_LENGTH);
+    let n = payload.len(); // hopefully from_request can trim the padding, else we're gonna need to send the length on the wire as headers does
     // query, headers not passed by default udp
     // We'll need to figure out how to pass query info at least.
     let query = "";
     let headers = MockHeaders::new(n);
-    let proposal = UncheckedProposal::from_request(&buf[..n], query, headers).unwrap();
+    let proposal = UncheckedProposal::from_request(&payload[..n], query, headers).unwrap();
 
     // Receive Check 1: Is Broadcastable
     let original_tx = proposal.get_transaction_to_check_broadcast();
@@ -218,25 +228,54 @@ async fn process_original_psbt(
         Psbt::from_unsigned_tx(payjoin_proposal_psbt.unsigned_tx.clone())
             .expect("resetting tx failed");
     let payjoin_proposal_psbt = base64::encode(consensus::serialize(&payjoin_proposal_psbt));
-    relay_conn.send_to(payjoin_proposal_psbt.as_bytes(), from).await?;
+    
+    // noise handshake response
+    let mut in_out: Vec<u8> = vec![0; DHLEN];
+    let message_b_size = DHLEN + payjoin_proposal_psbt.len() + MAC_LENGTH;
+    in_out.append(&mut payjoin_proposal_psbt.as_bytes().to_vec());
+    in_out.resize(message_b_size, 0);
+    responder.send_message(&mut in_out).unwrap(); // e, ee
+    
+    relay_conn.send_to(in_out.as_slice(), from).await?;
 
     Ok(())
 }
 
-async fn do_send(req: payjoin::sender::Request, ctx: payjoin::sender::Context, relay_addr: &str) -> Result<Psbt, Error> {
-    let msg = req.body; //format!("{:?}", tokio::time::Instant::now());
+async fn do_send(req: payjoin::sender::Request, ctx: payjoin::sender::Context, relay_addr: &str, psk: &str) -> Result<Psbt, Error> {
+    let mut original_psbt = req.body.clone(); //format!("{:?}", tokio::time::Instant::now());
 
     // Set up pinger socket (pingerConn)
     let pinger_conn_tx = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
     let pinger_conn_rx = Arc::clone(&pinger_conn_tx);
 
-    pinger_conn_tx.send_to(msg.as_slice(), relay_addr).await?;
+    // do noise secure handshake
+    let psk: [u8; 32] = base64::decode(psk).unwrap().try_into().unwrap();
+    println!("psk: {:?}", base64::encode(psk));
+    let psk = noiseexplorer_nnpsk0::types::Psk::from_bytes(psk);
+
+    // security does not depend on long-term static keys in NNpsk0. The interface still requires a Keypair, but it is not used.
+    let mut initiator = NoiseSession::init_session(true, b"", Keypair::new_empty(), psk.clone());
+    let mut in_out: Vec<u8> = vec![0; DHLEN];
+    let message_a_size = DHLEN + original_psbt.len() + MAC_LENGTH;
+    in_out.append(&mut original_psbt);
+    in_out.resize(message_a_size, 0);
+    println!("sending in_out: {:?}", in_out);
+    initiator.send_message(&mut in_out).unwrap(); // psk, e
+    println!("sending message_a: {:?}", in_out);
+    pinger_conn_tx.send_to(in_out.as_slice(), relay_addr).await?;
+
     
-    println!("len: {} < 1024?", msg.len());
+    println!("len: {} < 1024?", req.body.len());
     let mut buf = [0u8; 1024];
 
     let (n, from) = pinger_conn_rx.recv_from(&mut buf).await?;
-    let proposal = ctx.process_response(&buf[..n]).unwrap();
+
+    // finish noise handshake
+    initiator.recv_message(&mut buf[..n]).unwrap();
+    let (_responder_e, payload) = buf.split_at_mut(DHLEN);
+    let (payload, _mac) = payload.split_at_mut(payload.len() - MAC_LENGTH);
+    let n = payload.len();
+    let proposal = ctx.process_response(&payload[..n]).unwrap();
     println!("proposal: {:#?} from {}", proposal, from);
     Ok(proposal)
 }
@@ -336,4 +375,14 @@ impl payjoin::receiver::Headers for MockHeaders {
             _ => None,
         }
     }
+}
+
+fn gen_psk() -> String {
+    use rand::RngCore;
+    use rand::thread_rng;
+
+    let mut rng = thread_rng();
+    let mut key = [0u8; 32];
+    rng.fill_bytes(&mut key);
+    base64::encode(&key)
 }

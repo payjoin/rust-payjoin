@@ -1104,6 +1104,7 @@ dependencies = [
  "clap",
  "noiseexplorer_nnpsk0",
  "payjoin",
+ "rand 0.6.5",
  "reqwest",
  "tokio",
  "turn",

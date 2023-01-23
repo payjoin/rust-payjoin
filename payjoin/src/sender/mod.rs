@@ -328,8 +328,8 @@ impl Context {
                         ReceiverTxinNotFinalized
                     );
                     if let Some(script_sig) = &proposed.psbtin.final_script_sig {
-                        /// The weight of the TxIn when it's included in a legacy transaction
-                        /// (i.e., a transaction having only legacy inputs).
+                        // The weight of the TxIn when it's included in a legacy transaction
+                        // (i.e., a transaction having only legacy inputs).
                         total_weight += Weight::from_non_witness_data_size(
                             32 /* txid */ + 4 /* vout */ + 4 /* sequence */ + script_sig.encoded_size(),
                         );

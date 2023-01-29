@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 
 use bitcoin::util::psbt::PartiallySignedTransaction as UncheckedPsbt;
-use bitcoin::{AddressType, Script, TxOut};
+use bitcoin::{AddressType, OutPoint, Script, TxOut};
 
 mod error;
 mod optional_parameters;
@@ -156,17 +156,40 @@ impl MaybeInputsSeen {
     /// proposes a PayJoin PSBT as a new Original PSBT for a new PayJoin.
     ///
     /// Call this after checking downstream.
-    pub fn assume_no_inputs_seen_before(self) -> UnlockedProposal {
-        UnlockedProposal { psbt: self.psbt, params: self.params }
+    pub fn assume_no_inputs_seen_before(self) -> PayjoinProposal {
+        PayjoinProposal::new(self.psbt, self.params)
     }
 }
 
-pub struct UnlockedProposal {
+pub struct PayjoinProposal {
     psbt: Psbt,
     params: Params,
+    owned_vout: usize,
 }
 
-impl UnlockedProposal {
+impl PayjoinProposal {
+    /// Initialize a Payjoin Proposal PSBT by clearing it for receiver contribution
+    fn new(mut original_psbt: Psbt, params: Params) -> Self {
+        // empty original_psbt signatures because we won't broadcast the original_psbt
+        // we already extracted a valid one past [`UncheckedProposal`]
+        original_psbt
+            .unsigned_tx
+            .input
+            .iter_mut()
+            .for_each(|txin| txin.script_sig = bitcoin::Script::default());
+        // Remove vestigial invalid signature data from the Original PSBT
+        // TODO test necessity
+        let unchecked_original_psbt =
+            UncheckedPsbt::from_unsigned_tx(original_psbt.unsigned_tx.clone())
+                .expect("resetting tx failed");
+        let original_psbt = Psbt::try_from(unchecked_original_psbt)
+            .expect("already checked in from_request. Should not fail.");
+
+        // TODO identify and maintain payment / transfer vout(s) or output(s)
+        // ⚠️ safety critical to replace this (just assume 0 for now) ⚠️
+        Self { psbt: original_psbt, params, owned_vout: 0 }
+    }
+
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
         self.psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
     }
@@ -175,6 +198,25 @@ impl UnlockedProposal {
 
     pub fn is_output_substitution_disabled(&self) -> bool {
         self.params.disable_output_substitution
+    }
+
+    pub fn contribute_new_input(&mut self, txo: TxOut, outpoint: OutPoint) {
+        // The payjoin proposal must not introduce mixed input sequence numbers
+        let original_sequence =
+            self.psbt.unsigned_tx.input.first().map(|input| input.sequence).unwrap_or_default();
+
+        // Add the value of new receiver input to receiver output
+        let txo_value = txo.value;
+        self.psbt.unsigned_tx.output[self.owned_vout].value += txo_value;
+
+        self.psbt
+            .inputs
+            .push(bitcoin::psbt::Input { witness_utxo: Some(txo), ..Default::default() });
+        self.psbt.unsigned_tx.input.push(bitcoin::TxIn {
+            previous_output: outpoint,
+            sequence: original_sequence,
+            ..Default::default()
+        });
     }
 }
 

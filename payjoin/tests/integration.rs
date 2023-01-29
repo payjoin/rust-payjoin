@@ -4,7 +4,6 @@ mod integration {
     use std::str::FromStr;
 
     use bitcoin::hashes::hex::ToHex;
-    use bitcoin::psbt::Input;
     use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
     use bitcoin::{consensus, Amount};
     use bitcoind::bitcoincore_rpc;
@@ -149,18 +148,10 @@ mod integration {
         let proposal = proposal.assume_tested_and_scheduled_broadcast();
 
         // ⚠️ TODO Receive checklist Original PSBT Checks ⚠️ shipping this is SAFETY CRITICAL to get out of alpha into beta
-        let unlocked = proposal
+        let mut payjoin = proposal
             .assume_inputs_not_owned()
             .assume_no_mixed_input_scripts()
             .assume_no_inputs_seen_before();
-
-        let mut original_psbt = unlocked.psbt();
-        // empty original_psbt signatures because we won't broadcast the original_psbt
-        original_psbt
-            .unsigned_tx
-            .input
-            .iter_mut()
-            .for_each(|txin| txin.script_sig = bitcoin::Script::default());
 
         // Select receiver payjoin inputs. TODO Lock them.
         let available_inputs = receiver.list_unspent(None, None, None, None, None).unwrap();
@@ -168,39 +159,24 @@ mod integration {
         // ⚠️ TODO Select to avoid Unecessary Input and other heuristics. ⚠️ shipping this is SAFETY CRITICAL to get out of alpha into beta
         // This Gist <https://gist.github.com/AdamISZ/4551b947789d3216bacfcb7af25e029e> explains how
 
-        // Update payjoin_psbt
-        // Remove vestigial invalid signature data from the Original PSBT
-        let original_sequence = original_psbt.unsigned_tx.input[0].sequence;
-        let original_psbt =
-            Psbt::from_unsigned_tx(original_psbt.unsigned_tx.clone()).expect("resetting tx failed");
-        let mut payjoin_proposal_psbt = original_psbt.clone();
-
         //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
-        payjoin_proposal_psbt.inputs.push(Input {
-            witness_utxo: Some(bitcoin::TxOut {
-                value: selected_utxo.amount.to_sat(),
-                script_pubkey: selected_utxo.script_pub_key.clone(),
-            }),
-            ..Default::default()
-        });
-        payjoin_proposal_psbt.unsigned_tx.input.push(bitcoin::TxIn {
-            previous_output: bitcoin::OutPoint {
-                txid: selected_utxo.txid,
-                vout: selected_utxo.vout,
-            },
-            sequence: original_sequence,
-            ..Default::default()
-        });
+        let txo_to_contribute = bitcoin::TxOut {
+            value: selected_utxo.amount.to_sat(),
+            script_pubkey: selected_utxo.script_pub_key.clone(),
+        };
+        let outpoint_to_contribute =
+            bitcoin::OutPoint { txid: selected_utxo.txid, vout: selected_utxo.vout };
+        payjoin.contribute_new_input(txo_to_contribute, outpoint_to_contribute);
         // *
         //      TODO add sender additionalfee to our output
+        let mut payjoin_proposal_psbt = payjoin.psbt().clone();
 
         let receiver_vout = 0; // correct???
                                //      TODO add selected receiver input utxo
                                //      substitute receiver output
         let receiver_substitute_address = receiver.get_new_address(None, None).unwrap();
         let substitute_txout = bitcoin::TxOut {
-            value: payjoin_proposal_psbt.unsigned_tx.output[receiver_vout].value
-                + selected_utxo.amount.to_sat(),
+            value: payjoin_proposal_psbt.unsigned_tx.output[receiver_vout].value,
             script_pubkey: receiver_substitute_address.script_pubkey(),
         };
         payjoin_proposal_psbt.unsigned_tx.output[receiver_vout] = substitute_txout;

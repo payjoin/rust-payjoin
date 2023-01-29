@@ -96,6 +96,10 @@ impl std::ops::Deref for Psbt {
     fn deref(&self) -> &Self::Target { &self.0 }
 }
 
+impl std::ops::DerefMut for Psbt {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
+}
+
 pub(crate) struct InputPair<'a> {
     pub txin: &'a TxIn,
     pub psbtin: &'a psbt::Input,

@@ -166,7 +166,7 @@ mod integration {
         };
         let outpoint_to_contribute =
             bitcoin::OutPoint { txid: selected_utxo.txid, vout: selected_utxo.vout };
-        payjoin.contribute_new_input(txo_to_contribute, outpoint_to_contribute);
+        payjoin.contribute_witness_input(txo_to_contribute, outpoint_to_contribute);
 
         let receiver_substitute_address = receiver.get_new_address(None, None).unwrap();
         payjoin.substitute_output_address(receiver_substitute_address);

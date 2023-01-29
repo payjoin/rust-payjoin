@@ -200,7 +200,7 @@ impl PayjoinProposal {
         self.params.disable_output_substitution
     }
 
-    pub fn contribute_new_input(&mut self, txo: TxOut, outpoint: OutPoint) {
+    pub fn contribute_witness_input(&mut self, txo: TxOut, outpoint: OutPoint) {
         // The payjoin proposal must not introduce mixed input sequence numbers
         let original_sequence =
             self.psbt.unsigned_tx.input.first().map(|input| input.sequence).unwrap_or_default();
@@ -212,6 +212,26 @@ impl PayjoinProposal {
         self.psbt
             .inputs
             .push(bitcoin::psbt::Input { witness_utxo: Some(txo), ..Default::default() });
+        self.psbt.unsigned_tx.input.push(bitcoin::TxIn {
+            previous_output: outpoint,
+            sequence: original_sequence,
+            ..Default::default()
+        });
+    }
+
+    pub fn contribute_non_witness_input(&mut self, tx: bitcoin::Transaction, outpoint: OutPoint) {
+        // The payjoin proposal must not introduce mixed input sequence numbers
+        let original_sequence =
+            self.psbt.unsigned_tx.input.first().map(|input| input.sequence).unwrap_or_default();
+
+        // Add the value of new receiver input to receiver output
+        let txo_value = tx.output[outpoint.vout as usize].value;
+        self.psbt.unsigned_tx.output[self.owned_vout].value += txo_value;
+
+        // Add the new input to the PSBT
+        self.psbt
+            .inputs
+            .push(bitcoin::psbt::Input { non_witness_utxo: Some(tx), ..Default::default() });
         self.psbt.unsigned_tx.input.push(bitcoin::TxIn {
             previous_output: outpoint,
             sequence: original_sequence,

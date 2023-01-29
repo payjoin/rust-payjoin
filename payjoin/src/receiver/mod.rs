@@ -218,6 +218,12 @@ impl PayjoinProposal {
             ..Default::default()
         });
     }
+
+    /// Just replace an output address with
+    pub fn substitute_output_address(&mut self, substitute_address: bitcoin::Address) {
+        self.psbt.unsigned_tx.output[self.owned_vout].script_pubkey =
+            substitute_address.script_pubkey();
+    }
 }
 
 /// Transaction that must be broadcasted.

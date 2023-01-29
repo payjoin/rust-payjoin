@@ -167,22 +167,11 @@ mod integration {
         let outpoint_to_contribute =
             bitcoin::OutPoint { txid: selected_utxo.txid, vout: selected_utxo.vout };
         payjoin.contribute_new_input(txo_to_contribute, outpoint_to_contribute);
-        // *
-        //      TODO add sender additionalfee to our output
-        let mut payjoin_proposal_psbt = payjoin.psbt().clone();
 
-        let receiver_vout = 0; // correct???
-                               //      TODO add selected receiver input utxo
-                               //      substitute receiver output
         let receiver_substitute_address = receiver.get_new_address(None, None).unwrap();
-        let substitute_txout = bitcoin::TxOut {
-            value: payjoin_proposal_psbt.unsigned_tx.output[receiver_vout].value,
-            script_pubkey: receiver_substitute_address.script_pubkey(),
-        };
-        payjoin_proposal_psbt.unsigned_tx.output[receiver_vout] = substitute_txout;
-        payjoin_proposal_psbt
-            .outputs
-            .resize_with(payjoin_proposal_psbt.unsigned_tx.output.len(), Default::default);
+        payjoin.substitute_output_address(receiver_substitute_address);
+
+        let payjoin_proposal_psbt = payjoin.psbt();
 
         //      TODO identify sender fee output if one exists and set the appropriate feerate
         //      let minRelayFeeRate =

@@ -11,6 +11,8 @@ pub(crate) enum InternalRequestError {
     SenderParams(super::optional_parameters::Error),
     /// The raw PSBT fails bip78-specific validation.
     Psbt(crate::psbt::InconsistentPsbt),
+    /// The Original PSBT has no output for the receiver.
+    MissingPayment,
 }
 
 impl From<InternalRequestError> for RequestError {

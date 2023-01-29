@@ -9,6 +9,7 @@ mod optional_parameters;
 use error::InternalRequestError;
 pub use error::RequestError;
 use optional_parameters::Params;
+use rand::seq::SliceRandom;
 
 use crate::psbt::Psbt;
 
@@ -156,38 +157,64 @@ impl MaybeInputsSeen {
     /// proposes a PayJoin PSBT as a new Original PSBT for a new PayJoin.
     ///
     /// Call this after checking downstream.
-    pub fn assume_no_inputs_seen_before(self) -> PayjoinProposal {
-        PayjoinProposal::new(self.psbt, self.params)
+    pub fn assume_no_inputs_seen_before(self) -> OutputsUnknown {
+        OutputsUnknown { psbt: self.psbt, params: self.params }
+    }
+}
+
+pub struct OutputsUnknown {
+    psbt: Psbt,
+    params: Params,
+}
+
+impl OutputsUnknown {
+    /// Find which outputs belong to the receiver
+    pub fn identify_receiver_outputs(
+        self,
+        is_receiver_output: impl Fn(&Script) -> bool,
+    ) -> Result<PayjoinProposal, RequestError> {
+        let owned_vouts: Vec<usize> = self
+            .psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .enumerate()
+            .filter_map(
+                |(vout, txo)| {
+                    if is_receiver_output(&txo.script_pubkey) {
+                        Some(vout)
+                    } else {
+                        None
+                    }
+                },
+            )
+            .collect();
+
+        if owned_vouts.len() < 1 {
+            return Err(RequestError::from(InternalRequestError::MissingPayment));
+        }
+
+        Ok(PayjoinProposal::new(self.psbt, self.params, owned_vouts))
     }
 }
 
 pub struct PayjoinProposal {
     psbt: Psbt,
     params: Params,
-    owned_vout: usize,
+    owned_vouts: Vec<usize>,
 }
 
 impl PayjoinProposal {
     /// Initialize a Payjoin Proposal PSBT by clearing it for receiver contribution
-    fn new(mut original_psbt: Psbt, params: Params) -> Self {
-        // empty original_psbt signatures because we won't broadcast the original_psbt
-        // we already extracted a valid one past [`UncheckedProposal`]
-        original_psbt
-            .unsigned_tx
-            .input
-            .iter_mut()
-            .for_each(|txin| txin.script_sig = bitcoin::Script::default());
+    fn new(original_psbt: Psbt, params: Params, owned_vouts: Vec<usize>) -> Self {
         // Remove vestigial invalid signature data from the Original PSBT
-        // TODO test necessity
         let unchecked_original_psbt =
             UncheckedPsbt::from_unsigned_tx(original_psbt.unsigned_tx.clone())
                 .expect("resetting tx failed");
         let original_psbt = Psbt::try_from(unchecked_original_psbt)
             .expect("already checked in from_request. Should not fail.");
 
-        // TODO identify and maintain payment / transfer vout(s) or output(s)
-        // ⚠️ safety critical to replace this (just assume 0 for now) ⚠️
-        Self { psbt: original_psbt, params, owned_vout: 0 }
+        Self { psbt: original_psbt, params, owned_vouts }
     }
 
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
@@ -207,7 +234,9 @@ impl PayjoinProposal {
 
         // Add the value of new receiver input to receiver output
         let txo_value = txo.value;
-        self.psbt.unsigned_tx.output[self.owned_vout].value += txo_value;
+        let vout_to_augment =
+            self.owned_vouts.choose(&mut rand::thread_rng()).expect("owned_vouts is empty");
+        self.psbt.unsigned_tx.output[*vout_to_augment].value += txo_value;
 
         self.psbt
             .inputs
@@ -226,7 +255,9 @@ impl PayjoinProposal {
 
         // Add the value of new receiver input to receiver output
         let txo_value = tx.output[outpoint.vout as usize].value;
-        self.psbt.unsigned_tx.output[self.owned_vout].value += txo_value;
+        let vout_to_augment =
+            self.owned_vouts.choose(&mut rand::thread_rng()).expect("owned_vouts is empty");
+        self.psbt.unsigned_tx.output[*vout_to_augment].value += txo_value;
 
         // Add the new input to the PSBT
         self.psbt
@@ -241,7 +272,7 @@ impl PayjoinProposal {
 
     /// Just replace an output address with
     pub fn substitute_output_address(&mut self, substitute_address: bitcoin::Address) {
-        self.psbt.unsigned_tx.output[self.owned_vout].script_pubkey =
+        self.psbt.unsigned_tx.output[self.owned_vouts[0]].script_pubkey =
             substitute_address.script_pubkey();
     }
 }
@@ -327,11 +358,19 @@ mod test {
 
     #[test]
     fn unchecked_proposal_unlocks_after_checks() {
+        use std::str::FromStr;
+
+        use bitcoin::{Address, Network};
+
         let proposal = get_proposal_from_test_vector().unwrap();
-        let unlocked = proposal
+        let _payjoin = proposal
             .assume_tested_and_scheduled_broadcast()
             .assume_inputs_not_owned()
             .assume_no_mixed_input_scripts()
-            .assume_no_inputs_seen_before();
+            .assume_no_inputs_seen_before()
+            .identify_receiver_outputs(|script| {
+                Address::from_script(script, Network::Bitcoin)
+                    == Address::from_str(&"3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+            }).unwrap();
     }
 }

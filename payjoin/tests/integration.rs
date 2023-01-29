@@ -151,7 +151,11 @@ mod integration {
         let mut payjoin = proposal
             .assume_inputs_not_owned()
             .assume_no_mixed_input_scripts()
-            .assume_no_inputs_seen_before();
+            .assume_no_inputs_seen_before()
+            .identify_receiver_outputs(|output_script| {
+                let address = bitcoin::Address::from_script(&output_script, bitcoin::Network::Regtest).unwrap();
+                receiver.get_address_info(&address).unwrap().is_mine.unwrap()
+            }).expect("Receiver should have at least one output");
 
         // Select receiver payjoin inputs. TODO Lock them.
         let available_inputs = receiver.list_unspent(None, None, None, None, None).unwrap();

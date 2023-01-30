@@ -65,6 +65,21 @@ impl Psbt {
                 .map_err(|error| PsbtInputsError { index, error })
         })
     }
+
+    pub fn calculate_fee(&self) -> bitcoin::Amount {
+        let mut total_outputs = bitcoin::Amount::ZERO;
+        let mut total_inputs = bitcoin::Amount::ZERO;
+
+        for output in &self.unsigned_tx.output {
+            total_outputs += bitcoin::Amount::from_sat(output.value);
+        }
+
+        for input in self.input_pairs() {
+            total_inputs += bitcoin::Amount::from_sat(input.previous_txout().unwrap().value);
+        }
+
+        total_inputs - total_outputs
+    }
 }
 
 impl From<Psbt> for UncheckedPsbt {

@@ -34,9 +34,9 @@ async fn main() -> Result<(), Error> {
             .help("The bitcoind rpc port to connect to")
             .takes_value(true)
             .required(true))
-        .arg(Arg::with_name("cookie_file")
+        .arg(Arg::with_name("cookie-file")
             .short("c")
-            .long("cookie_file")
+            .long("cookie-file")
             .help("The bitcoind rpc cookie file to use for authentication")
             .takes_value(true)
             .required(true))
@@ -76,7 +76,7 @@ async fn main() -> Result<(), Error> {
     }
 
     let port = matches.value_of("port").unwrap();
-    let cookie_file = matches.value_of("cookie_file").unwrap();
+    let cookie_file = matches.value_of("cookie-file").unwrap();
 
     let bitcoind = bitcoincore_rpc::Client::new(
         &format!("http://127.0.0.1:{}", port),

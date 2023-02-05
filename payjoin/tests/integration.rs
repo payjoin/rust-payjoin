@@ -4,6 +4,7 @@ mod integration {
     use std::str::FromStr;
 
     use bitcoin::hashes::hex::ToHex;
+    use bitcoin::psbt::Input;
     use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
     use bitcoin::{consensus, Amount};
     use bitcoind::bitcoincore_rpc;
@@ -161,21 +162,45 @@ mod integration {
             .iter_mut()
             .for_each(|txin| txin.script_sig = bitcoin::Script::default());
 
-        // TODO Select receiver payjoin inputs. Lock them.
-        // ⚠️ TODO Select to avoid Unecessary Input and other Heuristics. ⚠️ shipping this is SAFETY CRITICAL to get out of alpha into beta
+        // Select receiver payjoin inputs. TODO Lock them.
+        let available_inputs = receiver.list_unspent(None, None, None, None, None).unwrap();
+        let selected_utxo = available_inputs.first().unwrap(); // naive selection for now, avoid UIH next
+        // ⚠️ TODO Select to avoid Unecessary Input and other heuristics. ⚠️ shipping this is SAFETY CRITICAL to get out of alpha into beta
         // This Gist <https://gist.github.com/AdamISZ/4551b947789d3216bacfcb7af25e029e> explains how
 
+        // Update payjoin_psbt
+        // Remove vestigial invalid signature data from the Original PSBT
+        let original_sequence = original_psbt.unsigned_tx.input[0].sequence;
+        let original_psbt =
+            Psbt::from_unsigned_tx(original_psbt.unsigned_tx.clone()).expect("resetting tx failed");
+        let mut payjoin_proposal_psbt = original_psbt.clone();
+
         //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
+        payjoin_proposal_psbt.inputs.push(Input {
+            witness_utxo: Some(bitcoin::TxOut {
+                value: selected_utxo.amount.to_sat(),
+                script_pubkey: selected_utxo.script_pub_key.clone(),
+            }),
+            ..Default::default()
+        });
+        payjoin_proposal_psbt.unsigned_tx.input.push(bitcoin::TxIn {
+            previous_output: bitcoin::OutPoint {
+                txid: selected_utxo.txid,
+                vout: selected_utxo.vout,
+            },
+            sequence: original_sequence,
+            ..Default::default()
+        });
+        // *
         //      TODO add sender additionalfee to our output
 
-        // Update payjoin_psbt
-        let mut payjoin_proposal_psbt = original_psbt.clone();
         let receiver_vout = 0; // correct???
                                //      TODO add selected receiver input utxo
                                //      substitute receiver output
         let receiver_substitute_address = receiver.get_new_address(None, None).unwrap();
         let substitute_txout = bitcoin::TxOut {
-            value: payjoin_proposal_psbt.unsigned_tx.output[receiver_vout].value,
+            value: payjoin_proposal_psbt.unsigned_tx.output[receiver_vout].value
+                + selected_utxo.amount.to_sat(),
             script_pubkey: receiver_substitute_address.script_pubkey(),
         };
         payjoin_proposal_psbt.unsigned_tx.output[receiver_vout] = substitute_txout;
@@ -194,14 +219,17 @@ mod integration {
             receiver.wallet_process_psbt(&payjoin_base64_string, None, None, None).unwrap().psbt;
         let payjoin_proposal_psbt =
             receiver.finalize_psbt(&payjoin_proposal_psbt, Some(false)).unwrap().psbt.unwrap();
-        let payjoin_proposal_psbt =
+        let mut payjoin_proposal_psbt =
             load_psbt_from_base64(payjoin_proposal_psbt.as_bytes()).unwrap();
+
+        // clear keypaths
+        payjoin_proposal_psbt
+            .outputs
+            .iter_mut()
+            .for_each(|output| output.bip32_derivation = Default::default());
+
         debug!("Receiver's PayJoin proposal PSBT: {:#?}", payjoin_proposal_psbt);
 
-        // Remove vestigial invalid signature data from the Original PSBT
-        let payjoin_proposal_psbt =
-            Psbt::from_unsigned_tx(payjoin_proposal_psbt.unsigned_tx.clone())
-                .expect("resetting tx failed");
         base64::encode(consensus::serialize(&payjoin_proposal_psbt))
     }
 

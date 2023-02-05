@@ -321,28 +321,27 @@ impl Context {
                 }
                 // theirs (receiver)
                 None | Some(_) => {
-                    /* this seems to be wrong but not sure why/how
-                    match (&proposed.psbtin.final_script_sig, &proposed.psbtin.final_script_witness) {
-                        // TODO: use to compute weight correctly
-                        (Some(sig), Some(witness)) => (),
-                        _ => return Err(InternalValidationError::ReceiverTxinNotFinalized)
+                    // Verify the PSBT input is finalized
+                    ensure!(
+                        proposed.psbtin.final_script_sig.is_some()
+                            || proposed.psbtin.final_script_witness.is_some(),
+                        ReceiverTxinNotFinalized
+                    );
+                    if let Some(script_sig) = &proposed.psbtin.final_script_sig {
+                        // The weight of the TxIn when it's included in a legacy transaction
+                        // (i.e., a transaction having only legacy inputs).
+                        total_weight += Weight::from_non_witness_data_size(
+                            32 /* txid */ + 4 /* vout */ + 4 /* sequence */ + script_sig.encoded_size(),
+                        );
                     }
-                    */
-                    let sig = proposed
-                        .psbtin
-                        .final_script_sig
-                        .as_ref()
-                        .ok_or(InternalValidationError::ReceiverTxinNotFinalized)?;
-                    total_weight +=
-                        Weight::from_non_witness_data_size(32 + 4 + 4 + sig.encoded_size());
-
-                    match &proposed.psbtin.final_script_witness {
-                        Some(witness) if !witness.is_empty() => {
+                    if let Some(script_witness) = &proposed.psbtin.final_script_witness {
+                        if !script_witness.is_empty() {
                             inputs_with_witnesses += 1;
-                            total_weight += crate::weight::witness_weight(witness);
-                        }
-                        _ => (),
+                            total_weight += crate::weight::witness_weight(script_witness);
+                        };
                     }
+
+                    // Verify that non_witness_utxo or witness_utxo are filled in.
                     ensure!(
                         proposed.psbtin.witness_utxo.is_some()
                             || proposed.psbtin.non_witness_utxo.is_some(),

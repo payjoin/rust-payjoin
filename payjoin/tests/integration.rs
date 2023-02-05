@@ -175,12 +175,7 @@ mod integration {
         let receiver_substitute_address = receiver.get_new_address(None, None).unwrap();
         payjoin.substitute_output_address(receiver_substitute_address);
 
-        let payjoin_proposal_psbt = payjoin.psbt();
-
-        //      TODO identify sender fee output if one exists and set the appropriate feerate
-        //      let minRelayFeeRate =
-        //      TODO if additionalfee > Amount::ZERO { receiver, take it }
-        //          add new_change, new_change.amount = original_psbt change's + receiver_inputs.amount() - sender additionalfees
+        let payjoin_proposal_psbt = payjoin.extract_psbt(None).expect("failed to apply fees");
 
         // Sign payjoin psbt
         let payjoin_base64_string = base64::encode(consensus::serialize(&payjoin_proposal_psbt));

@@ -13,6 +13,8 @@ pub(crate) enum InternalRequestError {
     Psbt(crate::psbt::InconsistentPsbt),
     /// The Original PSBT has no output for the receiver.
     MissingPayment,
+    /// minimum is amount but additionalfeecontribution is (amount, index)
+    InsufficientFee(bitcoin::Amount, Option<(bitcoin::Amount, usize)>),
 }
 
 impl From<InternalRequestError> for RequestError {

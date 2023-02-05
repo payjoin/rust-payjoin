@@ -9,6 +9,8 @@ pub(crate) enum InternalRequestError {
     InvalidContentLength(std::num::ParseIntError),
     ContentLengthTooLarge(u64),
     SenderParams(super::optional_parameters::Error),
+    /// The raw PSBT fails bip78-specific validation.
+    Psbt(crate::psbt::InconsistentPsbt),
 }
 
 impl From<InternalRequestError> for RequestError {

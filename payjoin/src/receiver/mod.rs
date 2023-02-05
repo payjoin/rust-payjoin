@@ -1,4 +1,6 @@
-use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
+use std::convert::TryFrom;
+
+use bitcoin::util::psbt::PartiallySignedTransaction as UncheckedPsbt;
 use bitcoin::{AddressType, Script, TxOut};
 
 mod error;
@@ -7,6 +9,8 @@ mod optional_parameters;
 use error::InternalRequestError;
 pub use error::RequestError;
 use optional_parameters::Params;
+
+use crate::psbt::Psbt;
 
 pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
@@ -59,7 +63,9 @@ impl UncheckedProposal {
         // enforce the limit
         let mut limited = body.take(content_length);
         let mut reader = base64::read::DecoderReader::new(&mut limited, base64::STANDARD);
-        let psbt = Psbt::consensus_decode(&mut reader).map_err(InternalRequestError::Decode)?;
+        let unchecked_psbt =
+            UncheckedPsbt::consensus_decode(&mut reader).map_err(InternalRequestError::Decode)?;
+        let psbt = Psbt::try_from(unchecked_psbt).map_err(InternalRequestError::Psbt)?;
 
         let pairs = url::form_urlencoded::parse(query.as_bytes());
         let params = Params::from_query_pairs(pairs).map_err(InternalRequestError::SenderParams)?;
@@ -165,7 +171,7 @@ impl UnlockedProposal {
         self.psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
     }
 
-    pub fn psbt(self) -> Psbt { self.psbt }
+    pub fn psbt(self) -> UncheckedPsbt { self.psbt.into() }
 
     pub fn is_output_substitution_disabled(&self) -> bool {
         self.params.disable_output_substitution

@@ -135,17 +135,20 @@ mod integration {
         )
         .unwrap();
 
-        // Receive Check 1: Is Broadcastable
-        let original_tx = proposal.get_transaction_to_check_broadcast();
-        let tx_is_broadcastable = receiver
-            .test_mempool_accept(&[bitcoin::consensus::encode::serialize(&original_tx).to_hex()])
-            .unwrap()
-            .first()
-            .unwrap()
-            .allowed;
-        assert!(tx_is_broadcastable);
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
-        let proposal = proposal.assume_tested_and_scheduled_broadcast();
+        let _to_broadcast_in_failure_case = proposal.get_transaction_to_schedule_broadcast();
+
+        // Receive Check 1: Can Broadcast
+        let proposal = proposal
+            .check_can_broadcast(|tx| {
+                receiver
+                    .test_mempool_accept(&[bitcoin::consensus::encode::serialize(&tx).to_hex()])
+                    .unwrap()
+                    .first()
+                    .unwrap()
+                    .allowed
+            })
+            .expect("Payjoin proposal should be broadcastable");
 
         // ⚠️ TODO Receive checklist Original PSBT Checks ⚠️ shipping this is SAFETY CRITICAL to get out of alpha into beta
         let mut payjoin = proposal

@@ -80,7 +80,7 @@ impl UncheckedProposal {
     }
 
     /// The Sender's Original PSBT
-    pub fn get_transaction_to_check_broadcast(&self) -> bitcoin::Transaction {
+    pub fn get_transaction_to_schedule_broadcast(&self) -> bitcoin::Transaction {
         self.psbt.clone().extract_tx()
     }
 
@@ -96,8 +96,15 @@ impl UncheckedProposal {
     /// Broadcasting the Original PSBT after some time in the failure case makes incurs sender cost and prevents probing.
     ///
     /// Call this after checking downstream.
-    pub fn assume_tested_and_scheduled_broadcast(self) -> MaybeInputsOwned {
-        MaybeInputsOwned { psbt: self.psbt, params: self.params }
+    pub fn check_can_broadcast(
+        self,
+        can_broadcast: impl Fn(&bitcoin::Transaction) -> bool,
+    ) -> Result<MaybeInputsOwned, RequestError> {
+        if can_broadcast(&self.psbt.clone().extract_tx()) {
+            Ok(MaybeInputsOwned { psbt: self.psbt, params: self.params })
+        } else {
+            Err(RequestError::from(InternalRequestError::OriginalPsbtNotBroadcastable))
+        }
     }
 
     /// Call this method if the only way to initiate a PayJoin with this receiver
@@ -105,7 +112,7 @@ impl UncheckedProposal {
     ///
     /// So-called "non-interactive" receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks.
     /// Those receivers call `get_transaction_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
-    pub fn assume_interactive_receive_endpoint(self) -> MaybeInputsOwned {
+    pub fn assume_interactive_receiver(self) -> MaybeInputsOwned {
         MaybeInputsOwned { psbt: self.psbt, params: self.params }
     }
 }
@@ -409,7 +416,7 @@ mod test {
 
         let proposal = get_proposal_from_test_vector().unwrap();
         let payjoin = proposal
-            .assume_tested_and_scheduled_broadcast()
+            .assume_interactive_receiver()
             .assume_inputs_not_owned()
             .assume_no_mixed_input_scripts()
             .assume_no_inputs_seen_before()

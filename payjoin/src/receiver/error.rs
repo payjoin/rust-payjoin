@@ -15,6 +15,8 @@ pub(crate) enum InternalRequestError {
     MissingPayment,
     /// minimum is amount but additionalfeecontribution is (amount, index)
     InsufficientFee(bitcoin::Amount, Option<(bitcoin::Amount, usize)>),
+    /// The original PSBT transaction fails the broadcast check
+    OriginalPsbtNotBroadcastable,
 }
 
 impl From<InternalRequestError> for RequestError {

@@ -23,6 +23,8 @@ pub(crate) enum InternalRequestError {
     MixedInputScripts(crate::input_type::InputType, crate::input_type::InputType),
     /// Unrecognized input type
     InputType(crate::input_type::InputTypeError),
+    /// Original psbt input has been seen before. This is a bigger problem for "interactive" receivers
+    InputSeen(bitcoin::OutPoint),
 }
 
 impl From<InternalRequestError> for RequestError {

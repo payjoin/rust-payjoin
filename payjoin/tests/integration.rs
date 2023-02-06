@@ -162,9 +162,10 @@ mod integration {
         // Receive Check 3: receiver can't sign for proposal inputs
         let proposal = proposal.check_no_mixed_input_scripts().unwrap();
 
-        // ⚠️ TODO Receive checklist Original PSBT Checks ⚠️ shipping this is SAFETY CRITICAL to get out of alpha into beta
+        // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let mut payjoin = proposal
-            .assume_no_inputs_seen_before()
+            .check_no_inputs_seen_before(|_| false)
+            .unwrap()
             .identify_receiver_outputs(|output_script| {
                 let address =
                     bitcoin::Address::from_script(&output_script, bitcoin::Network::Regtest)

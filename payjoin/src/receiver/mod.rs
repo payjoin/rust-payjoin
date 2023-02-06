@@ -184,20 +184,20 @@ impl MaybeMixedInputScripts {
 }
 
 impl MaybeInputsSeen {
-    /// The receiver should not have sent to or received the Original PSBT's inputs before.
-    ///
-    /// Check that these are unknown, never before seen inputs before proceeding.
-    pub fn iter_input_outpoints(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
-        self.psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
-    }
-
     /// Make sure that the original transaction inputs have never been seen before.
     /// This prevents probing attacks. This prevents reentrant PayJoin, where a sender
     /// proposes a PayJoin PSBT as a new Original PSBT for a new PayJoin.
-    ///
-    /// Call this after checking downstream.
-    pub fn assume_no_inputs_seen_before(self) -> OutputsUnknown {
-        OutputsUnknown { psbt: self.psbt, params: self.params }
+    pub fn check_no_inputs_seen_before(
+        self,
+        is_known: impl Fn(&OutPoint) -> bool,
+    ) -> Result<OutputsUnknown, RequestError> {
+        let psbt: Psbt = Psbt::try_from(self.psbt.clone()).unwrap();
+        let mut input_scripts = psbt.input_pairs().map(|input| input.txin.previous_output);
+
+        if let Some(known_input) = input_scripts.find(|op| is_known(op)) {
+            return Err(RequestError::from(InternalRequestError::InputSeen(known_input.clone())));
+        }
+        Ok(OutputsUnknown { psbt: self.psbt, params: self.params })
     }
 }
 
@@ -450,7 +450,8 @@ mod test {
             .unwrap()
             .check_no_mixed_input_scripts()
             .unwrap()
-            .assume_no_inputs_seen_before()
+            .check_no_inputs_seen_before(|_| false)
+            .unwrap()
             .identify_receiver_outputs(|script| {
                 Address::from_script(script, Network::Bitcoin)
                     == Address::from_str(&"3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")

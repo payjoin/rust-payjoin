@@ -159,9 +159,11 @@ mod integration {
             })
             .expect("Receiver should not own any of the inputs");
 
+        // Receive Check 3: receiver can't sign for proposal inputs
+        let proposal = proposal.check_no_mixed_input_scripts().unwrap();
+
         // ⚠️ TODO Receive checklist Original PSBT Checks ⚠️ shipping this is SAFETY CRITICAL to get out of alpha into beta
         let mut payjoin = proposal
-            .assume_no_mixed_input_scripts()
             .assume_no_inputs_seen_before()
             .identify_receiver_outputs(|output_script| {
                 let address =

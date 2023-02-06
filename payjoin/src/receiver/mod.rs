@@ -145,21 +145,41 @@ impl MaybeInputsOwned {
 }
 
 impl MaybeMixedInputScripts {
-    /// If there is only 1 input type, the receiver should be able to produce the same
-    /// type.
-    ///
-    /// Check downstream before proceeding.
-    pub fn iter_input_script_types(&self) -> Vec<Result<&AddressType, RequestError>> {
-        todo!() // return Iterator<Item = Result<&AddressType, RequestError>>
-    }
-
     /// Verify the original transaction did not have mixed input types
     /// Call this after checking downstream.
     ///
     /// Note: mixed spends do not necessarily indicate distinct wallet fingerprints.
     /// This check is intended to prevent some types of wallet fingerprinting.
-    pub fn assume_no_mixed_input_scripts(self) -> MaybeInputsSeen {
-        MaybeInputsSeen { psbt: self.psbt, params: self.params }
+    pub fn check_no_mixed_input_scripts(self) -> Result<MaybeInputsSeen, RequestError> {
+        use crate::input_type::InputType;
+
+        let input_scripts = self
+            .psbt
+            .input_pairs()
+            .filter_map(|input| {
+                // `None` txouts should already be removed by the broadcast check, so filter them, don't error.
+                input
+                    .previous_txout()
+                    .ok()
+                    .map(|txout| InputType::from_spent_input(txout, &input.psbtin))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| RequestError::from(InternalRequestError::InputType(e)))?;
+
+        let first_input_script = input_scripts
+            .first()
+            .ok_or(RequestError::from(InternalRequestError::OriginalPsbtNotBroadcastable))?;
+
+        if let Some(mismatch) =
+            input_scripts.iter().find(|input_script| input_script != &first_input_script)
+        {
+            return Err(RequestError::from(InternalRequestError::MixedInputScripts(
+                *first_input_script,
+                *mismatch,
+            )));
+        }
+
+        Ok(MaybeInputsSeen { psbt: self.psbt, params: self.params })
     }
 }
 
@@ -428,7 +448,8 @@ mod test {
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| false)
             .unwrap()
-            .assume_no_mixed_input_scripts()
+            .check_no_mixed_input_scripts()
+            .unwrap()
             .assume_no_inputs_seen_before()
             .identify_receiver_outputs(|script| {
                 Address::from_script(script, Network::Bitcoin)

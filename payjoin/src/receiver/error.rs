@@ -19,6 +19,10 @@ pub(crate) enum InternalRequestError {
     OriginalPsbtNotBroadcastable,
     /// The sender is trying to spend the receiver input
     InputOwned(bitcoin::Script),
+    /// The original psbt has mixed input address types that could harm privacy
+    MixedInputScripts(crate::input_type::InputType, crate::input_type::InputType),
+    /// Unrecognized input type
+    InputType(crate::input_type::InputTypeError),
 }
 
 impl From<InternalRequestError> for RequestError {

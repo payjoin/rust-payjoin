@@ -166,21 +166,6 @@ fn load_psbt_from_base64(
         .expect("consensus_decode guarantees consistency"))
 }
 
-fn calculate_psbt_fee(psbt: &Psbt) -> bitcoin::Amount {
-    let mut total_outputs = bitcoin::Amount::ZERO;
-    let mut total_inputs = bitcoin::Amount::ZERO;
-
-    for output in &psbt.unsigned_tx.output {
-        total_outputs += bitcoin::Amount::from_sat(output.value);
-    }
-
-    for input in psbt.input_pairs() {
-        total_inputs += bitcoin::Amount::from_sat(input.previous_txout().unwrap().value);
-    }
-
-    total_inputs - total_outputs
-}
-
 impl Context {
     /// Decodes and validates the response.
     ///
@@ -215,7 +200,7 @@ impl Context {
             return Err(InternalValidationError::Inflation);
         }
         let proposed_psbt_fee = in_stats.total_value - out_stats.total_value;
-        let original_fee = calculate_psbt_fee(&self.original_psbt);
+        let original_fee = self.original_psbt.calculate_fee();
         ensure!(original_fee <= proposed_psbt_fee, AbsoluteFeeDecreased);
         ensure!(
             out_stats.contributed_fee <= proposed_psbt_fee - original_fee,

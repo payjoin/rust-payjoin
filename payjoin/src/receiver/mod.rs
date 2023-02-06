@@ -1,7 +1,8 @@
+use std::cmp::max;
 use std::convert::TryFrom;
 
 use bitcoin::util::psbt::PartiallySignedTransaction as UncheckedPsbt;
-use bitcoin::{AddressType, Script, TxOut};
+use bitcoin::{AddressType, OutPoint, Script, TxOut};
 
 mod error;
 mod optional_parameters;
@@ -9,8 +10,11 @@ mod optional_parameters;
 use error::InternalRequestError;
 pub use error::RequestError;
 use optional_parameters::Params;
+use rand::seq::SliceRandom;
 
+use crate::fee_rate::FeeRate;
 use crate::psbt::Psbt;
+use crate::weight::Weight;
 
 pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
@@ -156,25 +160,165 @@ impl MaybeInputsSeen {
     /// proposes a PayJoin PSBT as a new Original PSBT for a new PayJoin.
     ///
     /// Call this after checking downstream.
-    pub fn assume_no_inputs_seen_before(self) -> UnlockedProposal {
-        UnlockedProposal { psbt: self.psbt, params: self.params }
+    pub fn assume_no_inputs_seen_before(self) -> OutputsUnknown {
+        OutputsUnknown { psbt: self.psbt, params: self.params }
     }
 }
 
-pub struct UnlockedProposal {
+pub struct OutputsUnknown {
     psbt: Psbt,
     params: Params,
 }
 
-impl UnlockedProposal {
+impl OutputsUnknown {
+    /// Find which outputs belong to the receiver
+    pub fn identify_receiver_outputs(
+        self,
+        is_receiver_output: impl Fn(&Script) -> bool,
+    ) -> Result<PayjoinProposal, RequestError> {
+        let owned_vouts: Vec<usize> = self
+            .psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .enumerate()
+            .filter_map(
+                |(vout, txo)| {
+                    if is_receiver_output(&txo.script_pubkey) {
+                        Some(vout)
+                    } else {
+                        None
+                    }
+                },
+            )
+            .collect();
+
+        if owned_vouts.len() < 1 {
+            return Err(RequestError::from(InternalRequestError::MissingPayment));
+        }
+
+        Ok(PayjoinProposal { psbt: self.psbt, params: self.params, owned_vouts })
+    }
+}
+
+pub struct PayjoinProposal {
+    psbt: Psbt,
+    params: Params,
+    owned_vouts: Vec<usize>,
+}
+
+/// A mutable checked proposal that the receiver may contribute inputs to.
+impl PayjoinProposal {
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
         self.psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
     }
 
-    pub fn psbt(self) -> UncheckedPsbt { self.psbt.into() }
-
     pub fn is_output_substitution_disabled(&self) -> bool {
         self.params.disable_output_substitution
+    }
+
+    pub fn contribute_witness_input(&mut self, txo: TxOut, outpoint: OutPoint) {
+        // The payjoin proposal must not introduce mixed input sequence numbers
+        let original_sequence =
+            self.psbt.unsigned_tx.input.first().map(|input| input.sequence).unwrap_or_default();
+
+        // Add the value of new receiver input to receiver output
+        let txo_value = txo.value;
+        let vout_to_augment =
+            self.owned_vouts.choose(&mut rand::thread_rng()).expect("owned_vouts is empty");
+        self.psbt.unsigned_tx.output[*vout_to_augment].value += txo_value;
+
+        self.psbt
+            .inputs
+            .push(bitcoin::psbt::Input { witness_utxo: Some(txo), ..Default::default() });
+        self.psbt.unsigned_tx.input.push(bitcoin::TxIn {
+            previous_output: outpoint,
+            sequence: original_sequence,
+            ..Default::default()
+        });
+    }
+
+    pub fn contribute_non_witness_input(&mut self, tx: bitcoin::Transaction, outpoint: OutPoint) {
+        // The payjoin proposal must not introduce mixed input sequence numbers
+        let original_sequence =
+            self.psbt.unsigned_tx.input.first().map(|input| input.sequence).unwrap_or_default();
+
+        // Add the value of new receiver input to receiver output
+        let txo_value = tx.output[outpoint.vout as usize].value;
+        let vout_to_augment =
+            self.owned_vouts.choose(&mut rand::thread_rng()).expect("owned_vouts is empty");
+        self.psbt.unsigned_tx.output[*vout_to_augment].value += txo_value;
+
+        // Add the new input to the PSBT
+        self.psbt
+            .inputs
+            .push(bitcoin::psbt::Input { non_witness_utxo: Some(tx), ..Default::default() });
+        self.psbt.unsigned_tx.input.push(bitcoin::TxIn {
+            previous_output: outpoint,
+            sequence: original_sequence,
+            ..Default::default()
+        });
+    }
+
+    /// Just replace an output address with
+    pub fn substitute_output_address(&mut self, substitute_address: bitcoin::Address) {
+        self.psbt.unsigned_tx.output[self.owned_vouts[0]].script_pubkey =
+            substitute_address.script_pubkey();
+    }
+
+    /// Return a Payjoin Proposal PSBT that the sender will find acceptable.
+    ///
+    /// When the receiver is satisfied with their contributions, they can apply either their own
+    /// [`min_feerate`], specified here, or the sender's optional min_feerate, whichever is greater.
+    ///
+    /// This attempts to calculate any network fee owed by the receiver, subtract it from their output,
+    /// and return a PSBT that can produce a consensus-valid transaction that the sender will accept.
+    pub fn extract_psbt(
+        mut self,
+        min_feerate_sat_per_vb: Option<u64>,
+    ) -> Result<UncheckedPsbt, RequestError> {
+        let min_feerate = FeeRate::from_sat_per_vb(min_feerate_sat_per_vb.unwrap_or_default());
+        let min_feerate = max(min_feerate, self.params.min_feerate);
+
+        let provisional_fee = self.psbt.calculate_fee();
+        let provisional_weight = Weight::manual_from_u64(self.psbt.unsigned_tx.weight() as u64);
+        let min_additional_fee =
+            (min_feerate * provisional_weight).checked_sub(provisional_fee).unwrap_or_default();
+
+        if min_additional_fee > bitcoin::Amount::ZERO {
+            if let Some((max_additional_fee_contribution, additional_fee_output_index)) =
+                self.params.additional_fee_contribution
+            {
+                if max_additional_fee_contribution < min_additional_fee
+                    && !self.owned_vouts.contains(&additional_fee_output_index)
+                {
+                    // remove additional miner fee from the sender's specified output
+                    self.psbt.unsigned_tx.output[additional_fee_output_index].value -=
+                        min_additional_fee.to_sat();
+
+                    // There might be excess additional fee we can take
+                    // in the case a sender makes no change output
+                    let excess_fee = max_additional_fee_contribution - min_additional_fee;
+                    if excess_fee > bitcoin::Amount::ZERO {
+                        let vout_to_augment = self
+                            .owned_vouts
+                            .choose(&mut rand::thread_rng())
+                            .expect("owned_vouts is empty");
+                        self.psbt.unsigned_tx.output[*vout_to_augment].value += excess_fee.to_sat();
+                    }
+                } else {
+                    return Err(RequestError::from(InternalRequestError::InsufficientFee(
+                        min_additional_fee,
+                        self.params.additional_fee_contribution,
+                    )));
+                }
+            }
+        }
+
+        // the payjoin proposal psbt
+        let reset_psbt = UncheckedPsbt::from_unsigned_tx(self.psbt.unsigned_tx.clone())
+            .expect("resetting tx failed");
+        Ok(reset_psbt.into())
     }
 }
 
@@ -259,11 +403,22 @@ mod test {
 
     #[test]
     fn unchecked_proposal_unlocks_after_checks() {
+        use std::str::FromStr;
+
+        use bitcoin::{Address, Network};
+
         let proposal = get_proposal_from_test_vector().unwrap();
-        let unlocked = proposal
+        let payjoin = proposal
             .assume_tested_and_scheduled_broadcast()
             .assume_inputs_not_owned()
             .assume_no_mixed_input_scripts()
-            .assume_no_inputs_seen_before();
+            .assume_no_inputs_seen_before()
+            .identify_receiver_outputs(|script| {
+                Address::from_script(script, Network::Bitcoin)
+                    == Address::from_str(&"3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+            }).unwrap()
+            .extract_psbt(None);
+
+        assert!(payjoin.is_ok(), "Payjoin should be a valid PSBT");
     }
 }

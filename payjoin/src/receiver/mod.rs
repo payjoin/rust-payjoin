@@ -118,20 +118,29 @@ impl UncheckedProposal {
 }
 
 impl MaybeInputsOwned {
-    /// The receiver should not be able to sign for any of these Original PSBT inputs.
-    ///
-    /// Check that none of them are owned by the receiver downstream before proceeding.
-    pub fn iter_input_script_pubkeys(&self) -> Vec<Result<&Script, RequestError>> {
-        todo!() // return impl '_ + Iterator<Item = Result<&Script, RequestError>>
-    }
-
     /// Check that the Original PSBT has no receiver-owned inputs.
     /// Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
     ///
     /// An attacker could try to spend receiver's own inputs. This check prevents that.
-    /// Call this after checking downstream.
-    pub fn assume_inputs_not_owned(self) -> MaybeMixedInputScripts {
-        MaybeMixedInputScripts { psbt: self.psbt, params: self.params }
+    pub fn check_inputs_not_owned(
+        self,
+        is_owned: impl Fn(&Script) -> bool,
+    ) -> Result<MaybeMixedInputScripts, RequestError> {
+        let owned_script = self
+            .psbt
+            .input_pairs()
+            .filter_map(|input| {
+                // `None` txouts should already be removed by the broadcast check, so filter them, don't error.
+                input.previous_txout().ok().map(|txout| txout.script_pubkey.to_owned())
+            })
+            .filter(|script| is_owned(script))
+            .next();
+
+        match owned_script {
+            Some(owned_script) =>
+                Err(RequestError::from(InternalRequestError::InputOwned(owned_script))),
+            None => Ok(MaybeMixedInputScripts { psbt: self.psbt, params: self.params }),
+        }
     }
 }
 
@@ -417,7 +426,8 @@ mod test {
         let proposal = get_proposal_from_test_vector().unwrap();
         let payjoin = proposal
             .assume_interactive_receiver()
-            .assume_inputs_not_owned()
+            .check_inputs_not_owned(|_| false)
+            .unwrap()
             .assume_no_mixed_input_scripts()
             .assume_no_inputs_seen_before()
             .identify_receiver_outputs(|script| {

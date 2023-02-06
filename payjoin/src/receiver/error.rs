@@ -17,6 +17,8 @@ pub(crate) enum InternalRequestError {
     InsufficientFee(bitcoin::Amount, Option<(bitcoin::Amount, usize)>),
     /// The original PSBT transaction fails the broadcast check
     OriginalPsbtNotBroadcastable,
+    /// The sender is trying to spend the receiver input
+    InputOwned(bitcoin::Script),
 }
 
 impl From<InternalRequestError> for RequestError {

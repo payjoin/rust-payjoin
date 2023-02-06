@@ -150,9 +150,17 @@ mod integration {
             })
             .expect("Payjoin proposal should be broadcastable");
 
+        // Receive Check 2: receiver can't sign for proposal inputs
+        let proposal = proposal
+            .check_inputs_not_owned(|input| {
+                let address =
+                    bitcoin::Address::from_script(&input, bitcoin::Network::Regtest).unwrap();
+                receiver.get_address_info(&address).unwrap().is_mine.unwrap()
+            })
+            .expect("Receiver should not own any of the inputs");
+
         // ⚠️ TODO Receive checklist Original PSBT Checks ⚠️ shipping this is SAFETY CRITICAL to get out of alpha into beta
         let mut payjoin = proposal
-            .assume_inputs_not_owned()
             .assume_no_mixed_input_scripts()
             .assume_no_inputs_seen_before()
             .identify_receiver_outputs(|output_script| {

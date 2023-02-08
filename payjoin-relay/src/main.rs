@@ -72,10 +72,10 @@ async fn main() -> Result<(), Error> {
         )
         .arg(
             Arg::with_name("realm")
-                .default_value("webrtc.rs")
+                .default_value("pj.chaincase.app")
                 .takes_value(true)
                 .long("realm")
-                .help("Realm (defaults to \"webrtc.rs\")"),
+                .help("Realm (defaults to \"pj.chaincase.app\")"),
         )
         .arg(
             Arg::with_name("port")

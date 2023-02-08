@@ -117,7 +117,7 @@ async fn listen_receiver(relay: &str, amount: Amount, bitcoind: bitcoincore_rpc:
         turn_serv_addr: turn_server_addr,
         username: "receiver".to_string(),
         password: "test".to_string(),
-        realm: "test".to_string(),
+        realm: "pj.chaincase.app".to_string(),
         software: String::new(),
         rto_in_ms: 0,
         conn: Arc::new(conn),

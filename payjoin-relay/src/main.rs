@@ -1,5 +1,5 @@
 use turn::auth::*;
-use turn::relay::relay_static::*;
+use turn::relay::relay_range::RelayAddressGeneratorRanges;
 use turn::server::{config::*, *};
 use turn::Error;
 
@@ -116,8 +116,11 @@ async fn main() -> Result<(), Error> {
     let server = Server::new(ServerConfig {
         conn_configs: vec![ConnConfig {
             conn,
-            relay_addr_generator: Box::new(RelayAddressGeneratorStatic {
+            relay_addr_generator: Box::new(RelayAddressGeneratorRanges {
                 relay_address: IpAddr::from_str(public_ip)?,
+                min_port: 49152,
+                max_port: 65535,
+                max_retries: 10,
                 address: "0.0.0.0".to_owned(),
                 net: Arc::new(Net::new(None)),
             }),

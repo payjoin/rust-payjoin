@@ -153,13 +153,17 @@ mod integration {
             .assume_no_mixed_input_scripts()
             .assume_no_inputs_seen_before()
             .identify_receiver_outputs(|output_script| {
-                let address = bitcoin::Address::from_script(&output_script, bitcoin::Network::Regtest).unwrap();
+                let address =
+                    bitcoin::Address::from_script(&output_script, bitcoin::Network::Regtest)
+                        .unwrap();
                 receiver.get_address_info(&address).unwrap().is_mine.unwrap()
-            }).expect("Receiver should have at least one output");
+            })
+            .expect("Receiver should have at least one output");
 
         // Select receiver payjoin inputs. TODO Lock them.
         let available_inputs = receiver.list_unspent(None, None, None, None, None).unwrap();
         let selected_utxo = available_inputs.first().unwrap(); // naive selection for now, avoid UIH next
+
         // ⚠️ TODO Select to avoid Unecessary Input and other heuristics. ⚠️ shipping this is SAFETY CRITICAL to get out of alpha into beta
         // This Gist <https://gist.github.com/AdamISZ/4551b947789d3216bacfcb7af25e029e> explains how
 

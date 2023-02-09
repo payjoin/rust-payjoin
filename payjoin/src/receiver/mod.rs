@@ -416,7 +416,8 @@ mod test {
             .identify_receiver_outputs(|script| {
                 Address::from_script(script, Network::Bitcoin)
                     == Address::from_str(&"3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
-            }).unwrap()
+            })
+            .unwrap()
             .extract_psbt(None);
 
         assert!(payjoin.is_ok(), "Payjoin should be a valid PSBT");

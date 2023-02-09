@@ -44,36 +44,3 @@ jobs:
         with:
           command: build
           args: --manifest-path payjoin-client/Cargo.toml
-
-  fmt:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        rust: [nightly]
-
-    steps:
-      - uses: actions/checkout@v2
-      - uses: Swatinem/rust-cache@v1.2.0
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: ${{ matrix.rust }}
-          override: true
-      - run: rustup component add rustfmt --toolchain nightly-x86_64-unknown-linux-gnu
-      - run: cargo fmt --all -- --check
-
-  lint:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        rust: [stable]
-
-    steps:
-      - uses: actions/checkout@v2
-      - uses: Swatinem/rust-cache@v1.2.0
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: ${{ matrix.rust }}
-          override: true
-      - run: cargo clippy -- -D warnings

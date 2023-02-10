@@ -32,3 +32,20 @@ pub(crate) enum InternalRequestError {
 impl From<InternalRequestError> for RequestError {
     fn from(value: InternalRequestError) -> Self { RequestError(value) }
 }
+
+#[derive(Debug)]
+pub struct SelectionError(InternalSelectionError);
+
+#[derive(Debug)]
+pub(crate) enum InternalSelectionError {
+    /// No candidates available for selection
+    Empty,
+    /// Current privacy selection implementation only supports 2-output transactions
+    TooManyOutputs,
+    /// No selection candidates improve privacy
+    NotFound,
+}
+
+impl From<InternalSelectionError> for SelectionError {
+    fn from(value: InternalSelectionError) -> Self { SelectionError(value) }
+}

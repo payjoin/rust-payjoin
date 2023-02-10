@@ -5,7 +5,7 @@ mod integration {
 
     use bitcoin::hashes::hex::ToHex;
     use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
-    use bitcoin::{consensus, Amount};
+    use bitcoin::{consensus, Amount, OutPoint};
     use bitcoind::bitcoincore_rpc;
     use bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
     use bitcoind::bitcoincore_rpc::RpcApi;
@@ -176,10 +176,16 @@ mod integration {
 
         // Select receiver payjoin inputs. TODO Lock them.
         let available_inputs = receiver.list_unspent(None, None, None, None, None).unwrap();
-        let selected_utxo = available_inputs.first().unwrap(); // naive selection for now, avoid UIH next
+        let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
+            .iter()
+            .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
+            .collect();
 
-        // ⚠️ TODO Select to avoid Unecessary Input and other heuristics. ⚠️ shipping this is SAFETY CRITICAL to get out of alpha into beta
-        // This Gist <https://gist.github.com/AdamISZ/4551b947789d3216bacfcb7af25e029e> explains how
+        let selected_outpoint = payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
+        let selected_utxo = available_inputs
+            .iter()
+            .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
+            .unwrap();
 
         //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
         let txo_to_contribute = bitcoin::TxOut {

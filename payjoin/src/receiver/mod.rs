@@ -1,14 +1,15 @@
-use std::cmp::max;
+use std::cmp::{max, min};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 
 use bitcoin::util::psbt::PartiallySignedTransaction as UncheckedPsbt;
-use bitcoin::{AddressType, OutPoint, Script, TxOut};
+use bitcoin::{Amount, OutPoint, Script, TxOut};
 
 mod error;
 mod optional_parameters;
 
-use error::InternalRequestError;
-pub use error::RequestError;
+use error::{InternalRequestError, InternalSelectionError};
+pub use error::{RequestError, SelectionError};
 use optional_parameters::Params;
 use rand::seq::SliceRandom;
 
@@ -267,6 +268,70 @@ impl PayjoinProposal {
 
     pub fn is_output_substitution_disabled(&self) -> bool {
         self.params.disable_output_substitution
+    }
+
+    /// Select receiver input such that the payjoin avoids surveillance.
+    /// Return the input chosen that has been applied to the Proposal.
+    ///
+    /// Proper coin selection allows payjoin to resemble ordinary transactions.
+    /// To ensure the resemblence, a number of heuristics must be avoided.
+    ///
+    /// UIH "Unecessary input heuristic" is one class of them to avoid. We define
+    /// UIH1 and UIH2 according to the BlockSci practice
+    /// BlockSci UIH1 and UIH2:
+    // if min(out) < min(in) then UIH1 else UIH2
+    // https://eprint.iacr.org/2022/589.pdf
+    pub fn try_preserving_privacy(
+        &self,
+        candidate_inputs: HashMap<Amount, OutPoint>,
+    ) -> Result<OutPoint, SelectionError> {
+        if candidate_inputs.is_empty() {
+            return Err(SelectionError::from(InternalSelectionError::Empty));
+        }
+
+        if self.psbt.outputs.len() != 2 {
+            // Current UIH techniques only support many-input, two-output transactions.
+            return Err(SelectionError::from(InternalSelectionError::TooManyOutputs));
+        }
+
+        let min_original_out_sats = self
+            .psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .map(|output| output.value)
+            .min()
+            .unwrap_or(Amount::MAX_MONEY.to_sat());
+
+        let min_original_in_sats = self
+            .psbt
+            .input_pairs()
+            .filter_map(|input| input.previous_txout().ok().map(|txo| txo.value))
+            .min()
+            .unwrap_or(Amount::MAX_MONEY.to_sat());
+
+        // Assume many-input, two output to select the vout for now
+        let prior_payment_sats = self.psbt.unsigned_tx.output[self.owned_vouts[0]].value;
+        for candidate in candidate_inputs {
+            // TODO bound loop by timeout / iterations
+
+            let candidate_sats = candidate.0.to_sat();
+            let candidate_min_out = min(min_original_out_sats, prior_payment_sats + candidate_sats);
+            let candidate_min_in = min(min_original_in_sats, candidate_sats);
+
+            if candidate_min_out < candidate_min_in {
+                // The candidate avoids UIH2 but conforms to UIH1: Optimal change heuristic.
+                // It implies the smallest output is the sender's change address.
+                return Ok(candidate.1);
+            } else {
+                // The candidate conforms to UIH2: Unnecessary input
+                // and could be identified as a potential payjoin
+                continue;
+            }
+        }
+
+        // No suitable privacy preserving selection found
+        Err(SelectionError::from(InternalSelectionError::NotFound))
     }
 
     pub fn contribute_witness_input(&mut self, txo: TxOut, outpoint: OutPoint) {

@@ -126,15 +126,20 @@ impl MaybeInputsOwned {
         self,
         is_owned: impl Fn(&Script) -> bool,
     ) -> Result<MaybeMixedInputScripts, RequestError> {
+        let mut err = Ok(());
         let owned_script = self
             .psbt
             .input_pairs()
-            .filter_map(|input| {
-                // `None` txouts should already be removed by the broadcast check, so filter them, don't error.
-                input.previous_txout().ok().map(|txout| txout.script_pubkey.to_owned())
+            .scan(&mut err, |err, input| match input.previous_txout() {
+                Ok(txout) => Some(txout.script_pubkey.to_owned()),
+                Err(e) => {
+                    **err = Err(RequestError::from(InternalRequestError::PrevTxOut(e)));
+                    None
+                }
             })
             .filter(|script| is_owned(script))
             .next();
+        err?;
 
         match owned_script {
             Some(owned_script) =>

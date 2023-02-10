@@ -191,11 +191,10 @@ impl MaybeInputsSeen {
         self,
         is_known: impl Fn(&OutPoint) -> bool,
     ) -> Result<OutputsUnknown, RequestError> {
-        let psbt: Psbt = Psbt::try_from(self.psbt.clone()).unwrap();
-        let mut input_scripts = psbt.input_pairs().map(|input| input.txin.previous_output);
+        let mut input_scripts: Vec<_> = self.psbt.input_pairs().map(|input| input.txin.previous_output).collect();
 
-        if let Some(known_input) = input_scripts.find(|op| is_known(op)) {
-            return Err(RequestError::from(InternalRequestError::InputSeen(known_input.clone())));
+        if let Some(known_input) = input_scripts.iter_mut().find(|op| is_known(op)) {
+            return Err(RequestError::from(InternalRequestError::InputSeen(known_input.to_owned())));
         }
         Ok(OutputsUnknown { psbt: self.psbt, params: self.params })
     }

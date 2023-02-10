@@ -158,30 +158,37 @@ impl MaybeMixedInputScripts {
     pub fn check_no_mixed_input_scripts(self) -> Result<MaybeInputsSeen, RequestError> {
         use crate::input_type::InputType;
 
+        let mut err = Ok(());
         let input_scripts = self
             .psbt
             .input_pairs()
-            .filter_map(|input| {
-                // `None` txouts should already be removed by the broadcast check, so filter them, don't error.
-                input
-                    .previous_txout()
-                    .ok()
-                    .map(|txout| InputType::from_spent_input(txout, &input.psbtin))
+            .scan(&mut err, |err, input| match input.previous_txout() {
+                Ok(txout) => match InputType::from_spent_input(txout, &input.psbtin) {
+                    Ok(input_script) => Some(input_script),
+                    Err(e) => {
+                        **err = Err(RequestError::from(InternalRequestError::InputType(e)));
+                        None
+                    }
+                },
+                Err(e) => {
+                    **err = Err(RequestError::from(InternalRequestError::PrevTxOut(e)));
+                    None
+                }
             })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| RequestError::from(InternalRequestError::InputType(e)))?;
+            .collect::<Vec<_>>();
+        err?;
 
-        let first_input_script = input_scripts
-            .first()
-            .ok_or(RequestError::from(InternalRequestError::OriginalPsbtNotBroadcastable))?;
-
-        if let Some(mismatch) =
-            input_scripts.iter().find(|input_script| input_script != &first_input_script)
-        {
-            return Err(RequestError::from(InternalRequestError::MixedInputScripts(
-                *first_input_script,
-                *mismatch,
-            )));
+        if let Some(first) = input_scripts.first() {
+            input_scripts.iter().try_for_each(|input_type| {
+                if input_type != first {
+                    Err(RequestError::from(InternalRequestError::MixedInputScripts(
+                        *first,
+                        *input_type,
+                    )))
+                } else {
+                    Ok(())
+                }
+            })?;
         }
 
         Ok(MaybeInputsSeen { psbt: self.psbt, params: self.params })

@@ -80,7 +80,7 @@ impl UncheckedProposal {
     }
 
     /// The Sender's Original PSBT
-    pub fn get_transaction_to_check_broadcast(&self) -> bitcoin::Transaction {
+    pub fn get_transaction_to_schedule_broadcast(&self) -> bitcoin::Transaction {
         self.psbt.clone().extract_tx()
     }
 
@@ -96,8 +96,15 @@ impl UncheckedProposal {
     /// Broadcasting the Original PSBT after some time in the failure case makes incurs sender cost and prevents probing.
     ///
     /// Call this after checking downstream.
-    pub fn assume_tested_and_scheduled_broadcast(self) -> MaybeInputsOwned {
-        MaybeInputsOwned { psbt: self.psbt, params: self.params }
+    pub fn check_can_broadcast(
+        self,
+        can_broadcast: impl Fn(&bitcoin::Transaction) -> bool,
+    ) -> Result<MaybeInputsOwned, RequestError> {
+        if can_broadcast(&self.psbt.clone().extract_tx()) {
+            Ok(MaybeInputsOwned { psbt: self.psbt, params: self.params })
+        } else {
+            Err(RequestError::from(InternalRequestError::OriginalPsbtNotBroadcastable))
+        }
     }
 
     /// Call this method if the only way to initiate a PayJoin with this receiver
@@ -105,63 +112,92 @@ impl UncheckedProposal {
     ///
     /// So-called "non-interactive" receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks.
     /// Those receivers call `get_transaction_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
-    pub fn assume_interactive_receive_endpoint(self) -> MaybeInputsOwned {
+    pub fn assume_interactive_receiver(self) -> MaybeInputsOwned {
         MaybeInputsOwned { psbt: self.psbt, params: self.params }
     }
 }
 
 impl MaybeInputsOwned {
-    /// The receiver should not be able to sign for any of these Original PSBT inputs.
-    ///
-    /// Check that none of them are owned by the receiver downstream before proceeding.
-    pub fn iter_input_script_pubkeys(&self) -> Vec<Result<&Script, RequestError>> {
-        todo!() // return impl '_ + Iterator<Item = Result<&Script, RequestError>>
-    }
-
     /// Check that the Original PSBT has no receiver-owned inputs.
     /// Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
     ///
     /// An attacker could try to spend receiver's own inputs. This check prevents that.
-    /// Call this after checking downstream.
-    pub fn assume_inputs_not_owned(self) -> MaybeMixedInputScripts {
-        MaybeMixedInputScripts { psbt: self.psbt, params: self.params }
+    pub fn check_inputs_not_owned(
+        self,
+        is_owned: impl Fn(&Script) -> bool,
+    ) -> Result<MaybeMixedInputScripts, RequestError> {
+        let owned_script = self
+            .psbt
+            .input_pairs()
+            .filter_map(|input| {
+                // `None` txouts should already be removed by the broadcast check, so filter them, don't error.
+                input.previous_txout().ok().map(|txout| txout.script_pubkey.to_owned())
+            })
+            .filter(|script| is_owned(script))
+            .next();
+
+        match owned_script {
+            Some(owned_script) =>
+                Err(RequestError::from(InternalRequestError::InputOwned(owned_script))),
+            None => Ok(MaybeMixedInputScripts { psbt: self.psbt, params: self.params }),
+        }
     }
 }
 
 impl MaybeMixedInputScripts {
-    /// If there is only 1 input type, the receiver should be able to produce the same
-    /// type.
-    ///
-    /// Check downstream before proceeding.
-    pub fn iter_input_script_types(&self) -> Vec<Result<&AddressType, RequestError>> {
-        todo!() // return Iterator<Item = Result<&AddressType, RequestError>>
-    }
-
     /// Verify the original transaction did not have mixed input types
     /// Call this after checking downstream.
     ///
     /// Note: mixed spends do not necessarily indicate distinct wallet fingerprints.
     /// This check is intended to prevent some types of wallet fingerprinting.
-    pub fn assume_no_mixed_input_scripts(self) -> MaybeInputsSeen {
-        MaybeInputsSeen { psbt: self.psbt, params: self.params }
+    pub fn check_no_mixed_input_scripts(self) -> Result<MaybeInputsSeen, RequestError> {
+        use crate::input_type::InputType;
+
+        let input_scripts = self
+            .psbt
+            .input_pairs()
+            .filter_map(|input| {
+                // `None` txouts should already be removed by the broadcast check, so filter them, don't error.
+                input
+                    .previous_txout()
+                    .ok()
+                    .map(|txout| InputType::from_spent_input(txout, &input.psbtin))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| RequestError::from(InternalRequestError::InputType(e)))?;
+
+        let first_input_script = input_scripts
+            .first()
+            .ok_or(RequestError::from(InternalRequestError::OriginalPsbtNotBroadcastable))?;
+
+        if let Some(mismatch) =
+            input_scripts.iter().find(|input_script| input_script != &first_input_script)
+        {
+            return Err(RequestError::from(InternalRequestError::MixedInputScripts(
+                *first_input_script,
+                *mismatch,
+            )));
+        }
+
+        Ok(MaybeInputsSeen { psbt: self.psbt, params: self.params })
     }
 }
 
 impl MaybeInputsSeen {
-    /// The receiver should not have sent to or received the Original PSBT's inputs before.
-    ///
-    /// Check that these are unknown, never before seen inputs before proceeding.
-    pub fn iter_input_outpoints(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
-        self.psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
-    }
-
     /// Make sure that the original transaction inputs have never been seen before.
     /// This prevents probing attacks. This prevents reentrant PayJoin, where a sender
     /// proposes a PayJoin PSBT as a new Original PSBT for a new PayJoin.
-    ///
-    /// Call this after checking downstream.
-    pub fn assume_no_inputs_seen_before(self) -> OutputsUnknown {
-        OutputsUnknown { psbt: self.psbt, params: self.params }
+    pub fn check_no_inputs_seen_before(
+        self,
+        is_known: impl Fn(&OutPoint) -> bool,
+    ) -> Result<OutputsUnknown, RequestError> {
+        let psbt: Psbt = Psbt::try_from(self.psbt.clone()).unwrap();
+        let mut input_scripts = psbt.input_pairs().map(|input| input.txin.previous_output);
+
+        if let Some(known_input) = input_scripts.find(|op| is_known(op)) {
+            return Err(RequestError::from(InternalRequestError::InputSeen(known_input.clone())));
+        }
+        Ok(OutputsUnknown { psbt: self.psbt, params: self.params })
     }
 }
 
@@ -409,10 +445,13 @@ mod test {
 
         let proposal = get_proposal_from_test_vector().unwrap();
         let payjoin = proposal
-            .assume_tested_and_scheduled_broadcast()
-            .assume_inputs_not_owned()
-            .assume_no_mixed_input_scripts()
-            .assume_no_inputs_seen_before()
+            .assume_interactive_receiver()
+            .check_inputs_not_owned(|_| false)
+            .unwrap()
+            .check_no_mixed_input_scripts()
+            .unwrap()
+            .check_no_inputs_seen_before(|_| false)
+            .unwrap()
             .identify_receiver_outputs(|script| {
                 Address::from_script(script, Network::Bitcoin)
                     == Address::from_str(&"3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")

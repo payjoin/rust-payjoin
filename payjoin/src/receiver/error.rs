@@ -15,6 +15,16 @@ pub(crate) enum InternalRequestError {
     MissingPayment,
     /// minimum is amount but additionalfeecontribution is (amount, index)
     InsufficientFee(bitcoin::Amount, Option<(bitcoin::Amount, usize)>),
+    /// The original PSBT transaction fails the broadcast check
+    OriginalPsbtNotBroadcastable,
+    /// The sender is trying to spend the receiver input
+    InputOwned(bitcoin::Script),
+    /// The original psbt has mixed input address types that could harm privacy
+    MixedInputScripts(crate::input_type::InputType, crate::input_type::InputType),
+    /// Unrecognized input type
+    InputType(crate::input_type::InputTypeError),
+    /// Original psbt input has been seen before. This is a bigger problem for "interactive" receivers
+    InputSeen(bitcoin::OutPoint),
 }
 
 impl From<InternalRequestError> for RequestError {

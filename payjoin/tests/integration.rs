@@ -135,23 +135,37 @@ mod integration {
         )
         .unwrap();
 
-        // Receive Check 1: Is Broadcastable
-        let original_tx = proposal.get_transaction_to_check_broadcast();
-        let tx_is_broadcastable = receiver
-            .test_mempool_accept(&[bitcoin::consensus::encode::serialize(&original_tx).to_hex()])
-            .unwrap()
-            .first()
-            .unwrap()
-            .allowed;
-        assert!(tx_is_broadcastable);
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
-        let proposal = proposal.assume_tested_and_scheduled_broadcast();
+        let _to_broadcast_in_failure_case = proposal.get_transaction_to_schedule_broadcast();
 
-        // ⚠️ TODO Receive checklist Original PSBT Checks ⚠️ shipping this is SAFETY CRITICAL to get out of alpha into beta
+        // Receive Check 1: Can Broadcast
+        let proposal = proposal
+            .check_can_broadcast(|tx| {
+                receiver
+                    .test_mempool_accept(&[bitcoin::consensus::encode::serialize(&tx).to_hex()])
+                    .unwrap()
+                    .first()
+                    .unwrap()
+                    .allowed
+            })
+            .expect("Payjoin proposal should be broadcastable");
+
+        // Receive Check 2: receiver can't sign for proposal inputs
+        let proposal = proposal
+            .check_inputs_not_owned(|input| {
+                let address =
+                    bitcoin::Address::from_script(&input, bitcoin::Network::Regtest).unwrap();
+                receiver.get_address_info(&address).unwrap().is_mine.unwrap()
+            })
+            .expect("Receiver should not own any of the inputs");
+
+        // Receive Check 3: receiver can't sign for proposal inputs
+        let proposal = proposal.check_no_mixed_input_scripts().unwrap();
+
+        // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let mut payjoin = proposal
-            .assume_inputs_not_owned()
-            .assume_no_mixed_input_scripts()
-            .assume_no_inputs_seen_before()
+            .check_no_inputs_seen_before(|_| false)
+            .unwrap()
             .identify_receiver_outputs(|output_script| {
                 let address =
                     bitcoin::Address::from_script(&output_script, bitcoin::Network::Regtest)

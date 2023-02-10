@@ -126,15 +126,20 @@ impl MaybeInputsOwned {
         self,
         is_owned: impl Fn(&Script) -> bool,
     ) -> Result<MaybeMixedInputScripts, RequestError> {
+        let mut err = Ok(());
         let owned_script = self
             .psbt
             .input_pairs()
-            .filter_map(|input| {
-                // `None` txouts should already be removed by the broadcast check, so filter them, don't error.
-                input.previous_txout().ok().map(|txout| txout.script_pubkey.to_owned())
+            .scan(&mut err, |err, input| match input.previous_txout() {
+                Ok(txout) => Some(txout.script_pubkey.to_owned()),
+                Err(e) => {
+                    **err = Err(RequestError::from(InternalRequestError::PrevTxOut(e)));
+                    None
+                }
             })
             .filter(|script| is_owned(script))
             .next();
+        err?;
 
         match owned_script {
             Some(owned_script) =>
@@ -153,30 +158,37 @@ impl MaybeMixedInputScripts {
     pub fn check_no_mixed_input_scripts(self) -> Result<MaybeInputsSeen, RequestError> {
         use crate::input_type::InputType;
 
+        let mut err = Ok(());
         let input_scripts = self
             .psbt
             .input_pairs()
-            .filter_map(|input| {
-                // `None` txouts should already be removed by the broadcast check, so filter them, don't error.
-                input
-                    .previous_txout()
-                    .ok()
-                    .map(|txout| InputType::from_spent_input(txout, &input.psbtin))
+            .scan(&mut err, |err, input| match input.previous_txout() {
+                Ok(txout) => match InputType::from_spent_input(txout, &input.psbtin) {
+                    Ok(input_script) => Some(input_script),
+                    Err(e) => {
+                        **err = Err(RequestError::from(InternalRequestError::InputType(e)));
+                        None
+                    }
+                },
+                Err(e) => {
+                    **err = Err(RequestError::from(InternalRequestError::PrevTxOut(e)));
+                    None
+                }
             })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| RequestError::from(InternalRequestError::InputType(e)))?;
+            .collect::<Vec<_>>();
+        err?;
 
-        let first_input_script = input_scripts
-            .first()
-            .ok_or(RequestError::from(InternalRequestError::OriginalPsbtNotBroadcastable))?;
-
-        if let Some(mismatch) =
-            input_scripts.iter().find(|input_script| input_script != &first_input_script)
-        {
-            return Err(RequestError::from(InternalRequestError::MixedInputScripts(
-                *first_input_script,
-                *mismatch,
-            )));
+        if let Some(first) = input_scripts.first() {
+            input_scripts.iter().try_for_each(|input_type| {
+                if input_type != first {
+                    Err(RequestError::from(InternalRequestError::MixedInputScripts(
+                        *first,
+                        *input_type,
+                    )))
+                } else {
+                    Ok(())
+                }
+            })?;
         }
 
         Ok(MaybeInputsSeen { psbt: self.psbt, params: self.params })
@@ -191,11 +203,15 @@ impl MaybeInputsSeen {
         self,
         is_known: impl Fn(&OutPoint) -> bool,
     ) -> Result<OutputsUnknown, RequestError> {
-        let psbt: Psbt = Psbt::try_from(self.psbt.clone()).unwrap();
-        let mut input_scripts = psbt.input_pairs().map(|input| input.txin.previous_output);
-
-        if let Some(known_input) = input_scripts.find(|op| is_known(op)) {
-            return Err(RequestError::from(InternalRequestError::InputSeen(known_input.clone())));
+        let mut known_outpoint = None;
+        self.psbt.input_pairs().for_each(|input| {
+            if is_known(&input.txin.previous_output) {
+                known_outpoint = Some(input.txin.previous_output);
+                return;
+            }
+        });
+        if let Some(outpoint) = known_outpoint {
+            return Err(RequestError::from(InternalRequestError::InputSeen(outpoint)));
         }
         Ok(OutputsUnknown { psbt: self.psbt, params: self.params })
     }

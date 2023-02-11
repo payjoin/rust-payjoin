@@ -474,39 +474,6 @@ impl PayjoinProposal {
         Ok(reset_psbt.into())
     }
 }
-/// Transaction that must be broadcasted.
-#[must_use = "The transaction must be broadcasted to prevent abuse"]
-pub struct MustBroadcast(pub bitcoin::Transaction);
-
-/*
-impl Proposal {
-    pub fn replace_output_script(&mut self, new_output_script: Script, options: NewOutputOptions) -> Result<Self, OutputError> {
-    }
-
-    pub fn replace_output(&mut self, new_output: TxOut, options: NewOutputOptions) -> Result<Self, OutputError> {
-    }
-
-    pub fn insert_output(&mut self, new_output: TxOut, options: NewOutputOptions) -> Result<Self, OutputError> {
-    }
-
-    pub fn expected_missing_fee_for_replaced_output(&self, output_type: OutputType) -> bitcoin::Amount {
-    }
-}
-*/
-
-pub struct ReceiverOptions {
-    dust_limit: bitcoin::Amount,
-}
-
-pub enum BumpFeePolicy {
-    FailOnInsufficient,
-    SubtractOurFeeOutput,
-}
-
-pub struct NewOutputOptions {
-    set_as_fee_output: bool,
-    subtract_fees_from_this: bool,
-}
 
 #[cfg(test)]
 mod test {

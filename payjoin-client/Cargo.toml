@@ -11,3 +11,4 @@ payjoin = { path = "../payjoin", features = ["sender"] }
 bitcoincore-rpc = "0.14.0"
 reqwest = { version = "0.11.4", features = ["blocking"] }
 base64 = "0.13.0"
+clap = "4.1.4"

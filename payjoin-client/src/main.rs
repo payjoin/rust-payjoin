@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::path::PathBuf;
 
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
@@ -8,24 +9,26 @@ use payjoin::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use payjoin::{PjUriExt, UriExt};
 
 fn main() {
-    let mut args = std::env::args_os();
     let matches = cli().get_matches();
-    let _program_name = args.next().expect("not even program name given");
-    let port = matches
-        .get_one::<String>("PORT")
-        .expect("port is not UTF-8")
-        .parse::<u16>()
-        .expect("port must be a number");
-
-    let cookie_file =
-        matches.get_one::<String>("COOKIE_FILE").expect("Missing arguments: cookie_file bip21");
-
-    let bip21 = matches.get_one::<String>("BIP21").expect("Missing arguments: bip21");
-
-    send_payjoin(bip21, port, cookie_file.into())
+    match matches.subcommand() {
+        Some(("send", sub_matches)) => {
+            let port = sub_matches.get_one::<String>("PORT").unwrap();
+            let cookie_file = sub_matches.get_one::<String>("COOKIE_FILE").unwrap();
+            let bip21 = sub_matches.get_one::<String>("BIP21").unwrap();
+            send_payjoin(bip21, port.parse().unwrap(), cookie_file.into());
+        }
+        Some(("receive", sub_matches)) => {
+            let port = sub_matches.get_one::<String>("PORT").unwrap();
+            let cookie_file = sub_matches.get_one::<String>("COOKIE_FILE").unwrap();
+            let amount = sub_matches.get_one::<String>("AMOUNT").unwrap();
+            let endpoint = sub_matches.get_one::<String>("ENDPOINT").unwrap();
+            receive_payjoin(port.parse().unwrap(), cookie_file.into(), amount, endpoint);
+        }
+        _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
+    }
 }
 
-fn send_payjoin(bip21: &str, port: u16, cookie_file: std::path::PathBuf) {
+fn send_payjoin(bip21: &str, port: u16, cookie_file: PathBuf) {
     let link = payjoin::Uri::try_from(bip21).unwrap();
 
     let link = link
@@ -83,6 +86,10 @@ fn send_payjoin(bip21: &str, port: u16, cookie_file: std::path::PathBuf) {
     client.send_raw_transaction(&tx).unwrap();
 }
 
+fn receive_payjoin(_port: u16, _cookie_file: PathBuf, _amount_arg: &str, _endpoint_arg: &str) {
+    todo!();
+}
+
 fn load_psbt_from_base64(
     mut input: impl std::io::Read,
 ) -> Result<Psbt, payjoin::bitcoin::consensus::encode::Error> {
@@ -110,10 +117,24 @@ fn serialize_psbt(psbt: &Psbt) -> String {
 fn cli() -> Command {
     Command::new("payjoin")
         .about("Transfer bitcoin and preserve your privacy")
-        .arg(arg!(<PORT> "The port of the bitcoin node"))
-        .arg_required_else_help(true)
-        .arg(arg!(<COOKIE_FILE> "Path to the cookie file of the bitcoin node"))
-        .arg_required_else_help(true)
-        .arg(arg!(<BIP21> "The `bitcoin:...` payjoin uri to send to"))
-        .arg_required_else_help(true)
+        .subcommand_required(true)
+        .subcommand(
+            Command::new("send")
+                .arg(arg!(<PORT> "The port of the bitcoin node"))
+                .arg_required_else_help(true)
+                .arg(arg!(<COOKIE_FILE> "Path to the cookie file of the bitcoin node"))
+                .arg_required_else_help(true)
+                .arg(arg!(<BIP21> "The `bitcoin:...` payjoin uri to send to"))
+                .arg_required_else_help(true),
+        )
+        .subcommand(
+            Command::new("receive")
+                .arg(arg!(<PORT> "The port of the bitcoin node"))
+                .arg_required_else_help(true)
+                .arg(arg!(<COOKIE_FILE> "Path to the cookie file of the bitcoin node"))
+                .arg_required_else_help(true)
+                .arg(arg!(<AMOUNT> "The amount to receive in satoshis"))
+                .arg_required_else_help(true)
+                .arg(arg!(<ENDPOINT> "The `pj=` endpoint to receive the payjoin request")),
+        )
 }

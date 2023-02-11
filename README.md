@@ -25,7 +25,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 
 ### Development status
 
-#### Sender
+#### Sender (beta)
 
 - [x] Basic logic
 - [x] Most checks implemented
@@ -40,19 +40,20 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [ ] Independent review
 - [ ] Independent testing
 
-#### Receiver
+#### Receiver (alpha)
 
-- [ ] Basic logic
-- [ ] Most checks implemented
-- [ ] Documentation
-- [ ] Unit test with official test vectors passes
+- [x] Basic logic
+- [x] Most checks implemented
+- [x] Documentation
+- [x] Unit test with official test vectors passes
 - [ ] Many unit tests
-- [ ] Fee contribution support
-- [ ] Example server using bitcoind
+- [x] Fee contribution support
+- [x] Example server using bitcoind
 - [ ] Tested and works with BTCPayServer
 - [ ] Tested and works with WasabiWallet
 - [ ] Tested and works with Blue Wallet
-- [ ] Minimum fee rate enforcement
+- [ ] Tested and works with Sparrow
+- [x] Minimum fee rate enforcement
 - [ ] Discount support
 - [ ] Independent review
 - [ ] Independent testing
@@ -65,7 +66,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [x] No `unsafe` code or well-tested/analyzed/proven/... `unsafe` code
 - [ ] Warning-free
 - [x] CI
-- [ ] Integration tests
+- [x] Integration tests
 - [ ] Fuzzing
 - [ ] Coverage measurement
 

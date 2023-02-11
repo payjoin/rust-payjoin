@@ -1,6 +1,6 @@
 [package]
 name = "payjoin"
-version = "0.5.1-alpha"
+version = "0.6.0"
 authors = ["Dan Gould <dan@chaincase.app>"]
 description = "PayJoin Library for the BIP78 Pay to Endpoint protocol."
 homepage = "https://github.com/chaincase-app/payjoin"
@@ -30,4 +30,4 @@ bitcoind = { version = "0.27.1", features = ["0_21_1"] }
 env_logger = "0.9.0"
 
 [package.metadata.docs.rs]
-features = ["sender"]
+features = ["sender", "receiver"]

@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::str::FromStr;
 
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
-use clap::{arg, Command};
+use clap::{arg, Arg, Command};
 use payjoin::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use payjoin::{PjUriExt, UriExt};
 
@@ -19,7 +20,13 @@ fn main() {
     match matches.subcommand() {
         Some(("send", sub_matches)) => {
             let bip21 = sub_matches.get_one::<String>("BIP21").unwrap();
-            send_payjoin(bitcoind, bip21);
+            let danger_accept_invalid_certs =
+                match { sub_matches.get_one::<String>("DANGER_ACCEPT_INVALID_CERTS") } {
+                    Some(danger_accept_invalid_certs) =>
+                        bool::from_str(danger_accept_invalid_certs).unwrap_or(false),
+                    None => false,
+                };
+            send_payjoin(bitcoind, bip21, danger_accept_invalid_certs);
         }
         Some(("receive", sub_matches)) => {
             let amount = sub_matches.get_one::<String>("AMOUNT").unwrap();
@@ -30,7 +37,7 @@ fn main() {
     }
 }
 
-fn send_payjoin(bitcoind: bitcoincore_rpc::Client, bip21: &str) {
+fn send_payjoin(bitcoind: bitcoincore_rpc::Client, bip21: &str, danger_accept_invalid_certs: bool) {
     let link = payjoin::Uri::try_from(bip21).unwrap();
 
     let link = link
@@ -68,7 +75,11 @@ fn send_payjoin(bitcoind: bitcoincore_rpc::Client, bip21: &str) {
         None,
     );
     let (req, ctx) = link.create_pj_request(psbt, pj_params).unwrap();
-    let response = reqwest::blocking::Client::new()
+    let client = reqwest::blocking::Client::builder()
+        .danger_accept_invalid_certs(danger_accept_invalid_certs)
+        .build()
+        .unwrap();
+    let response = client
         .post(req.url)
         .body(req.body)
         .header("Content-Type", "text/plain")
@@ -84,8 +95,6 @@ fn send_payjoin(bitcoind: bitcoincore_rpc::Client, bip21: &str) {
 }
 
 fn receive_payjoin(bitcoind: bitcoincore_rpc::Client, amount_arg: &str, endpoint_arg: &str) {
-    use std::str::FromStr;
-
     use bitcoin::hashes::hex::ToHex;
     use bitcoin::OutPoint;
     use payjoin::Uri;
@@ -129,6 +138,7 @@ fn receive_payjoin(bitcoind: bitcoincore_rpc::Client, amount_arg: &str, endpoint
                     .allowed
             })
             .expect("Payjoin proposal should be broadcastable");
+        println!("check1");
 
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal
@@ -138,9 +148,10 @@ fn receive_payjoin(bitcoind: bitcoincore_rpc::Client, amount_arg: &str, endpoint
                 bitcoind.get_address_info(&address).unwrap().is_mine.unwrap()
             })
             .expect("Receiver should not own any of the inputs");
-
+        println!("check2");
         // Receive Check 3: receiver can't sign for proposal inputs
         let proposal = proposal.check_no_mixed_input_scripts().unwrap();
+        println!("check3");
 
         // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let mut payjoin = proposal
@@ -153,6 +164,7 @@ fn receive_payjoin(bitcoind: bitcoincore_rpc::Client, amount_arg: &str, endpoint
                 bitcoind.get_address_info(&address).unwrap().is_mine.unwrap()
             })
             .expect("Receiver should have at least one output");
+        println!("check4");
 
         // Select receiver payjoin inputs.
         let available_inputs = bitcoind.list_unspent(None, None, None, None, None).unwrap();
@@ -166,6 +178,7 @@ fn receive_payjoin(bitcoind: bitcoincore_rpc::Client, amount_arg: &str, endpoint
             .iter()
             .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
             .unwrap();
+        println!("selected utxo: {:#?}", selected_utxo);
 
         //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
         let txo_to_contribute = bitcoin::TxOut {
@@ -247,7 +260,8 @@ fn cli() -> Command {
         .subcommand(
             Command::new("send")
                 .arg_required_else_help(true)
-                .arg(arg!(<BIP21> "The `bitcoin:...` payjoin uri to send to")),
+                .arg(arg!(<BIP21> "The `bitcoin:...` payjoin uri to send to"))
+                .arg(Arg::new("DANGER_ACCEPT_INVALID_CERTS").hide(true).help("Wicked dangerous! Vulnerable to MITM attacks! Accept invalid certs for the payjoin endpoint")),
         )
         .subcommand(
             Command::new("receive")

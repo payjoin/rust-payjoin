@@ -22,7 +22,11 @@ fn main() {
     let bip21 =
         args.next().expect("Missing arguments: bip21").into_string().expect("bip21 is not UTF-8");
 
-    let link = payjoin::Uri::try_from(&*bip21).unwrap();
+    send_payjoin(bip21, port, cookie_file.into())
+}
+
+fn send_payjoin(bip21: String, port: u16, cookie_file: std::path::PathBuf) {
+    let link = payjoin::Uri::try_from(bip21).unwrap();
 
     let link = link
         .check_pj_supported()
@@ -38,7 +42,7 @@ fn main() {
 
     let client = bitcoincore_rpc::Client::new(
         &format!("http://127.0.0.1:{}", port),
-        bitcoincore_rpc::Auth::CookieFile(cookie_file.into()),
+        bitcoincore_rpc::Auth::CookieFile(cookie_file),
     )
     .unwrap();
     let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {

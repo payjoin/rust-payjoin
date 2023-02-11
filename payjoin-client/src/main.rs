@@ -83,8 +83,134 @@ fn send_payjoin(bitcoind: bitcoincore_rpc::Client, bip21: &str) {
     bitcoind.send_raw_transaction(&tx).unwrap();
 }
 
-fn receive_payjoin(_bitcoind: bitcoincore_rpc::Client, _amount_arg: &str, _endpoint_arg: &str) {
-    todo!();
+fn receive_payjoin(bitcoind: bitcoincore_rpc::Client, amount_arg: &str, endpoint_arg: &str) {
+    use std::str::FromStr;
+
+    use bitcoin::hashes::hex::ToHex;
+    use bitcoin::OutPoint;
+    use payjoin::Uri;
+    use rouille::Response;
+
+    let pj_receiver_address = bitcoind.get_new_address(None, None).unwrap();
+    let amount = Amount::from_sat(amount_arg.parse().unwrap());
+    let pj_uri_string = format!(
+        "{}?amount={}&pj={}",
+        pj_receiver_address.to_qr_uri(),
+        amount.to_btc(),
+        endpoint_arg
+    );
+    let pj_uri = Uri::from_str(&pj_uri_string).unwrap();
+    let _pj_uri = pj_uri.check_pj_supported().expect("Bad Uri");
+
+    println!("Awaiting payjoin at BIP 21 Payjoin Uri:");
+    println!("{}", pj_uri_string);
+    println!();
+
+    rouille::start_server("0.0.0.0:3000", move |req| {
+        let headers = Headers(req.headers());
+        let proposal = payjoin::receiver::UncheckedProposal::from_request(
+            req.data().unwrap(),
+            req.raw_query_string(),
+            headers,
+        )
+        .unwrap();
+
+        // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
+        let _to_broadcast_in_failure_case = proposal.get_transaction_to_schedule_broadcast();
+
+        // Receive Check 1: Can Broadcast
+        let proposal = proposal
+            .check_can_broadcast(|tx| {
+                bitcoind
+                    .test_mempool_accept(&[bitcoin::consensus::encode::serialize(&tx).to_hex()])
+                    .unwrap()
+                    .first()
+                    .unwrap()
+                    .allowed
+            })
+            .expect("Payjoin proposal should be broadcastable");
+
+        // Receive Check 2: receiver can't sign for proposal inputs
+        let proposal = proposal
+            .check_inputs_not_owned(|input| {
+                let address =
+                    bitcoin::Address::from_script(&input, bitcoin::Network::Regtest).unwrap();
+                bitcoind.get_address_info(&address).unwrap().is_mine.unwrap()
+            })
+            .expect("Receiver should not own any of the inputs");
+
+        // Receive Check 3: receiver can't sign for proposal inputs
+        let proposal = proposal.check_no_mixed_input_scripts().unwrap();
+
+        // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
+        let mut payjoin = proposal
+            .check_no_inputs_seen_before(|_| false)
+            .unwrap()
+            .identify_receiver_outputs(|output_script| {
+                let address =
+                    bitcoin::Address::from_script(&output_script, bitcoin::Network::Regtest)
+                        .unwrap();
+                bitcoind.get_address_info(&address).unwrap().is_mine.unwrap()
+            })
+            .expect("Receiver should have at least one output");
+
+        // Select receiver payjoin inputs.
+        let available_inputs = bitcoind.list_unspent(None, None, None, None, None).unwrap();
+        let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
+            .iter()
+            .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
+            .collect();
+
+        let selected_outpoint = payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
+        let selected_utxo = available_inputs
+            .iter()
+            .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
+            .unwrap();
+
+        //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
+        let txo_to_contribute = bitcoin::TxOut {
+            value: selected_utxo.amount.to_sat(),
+            script_pubkey: selected_utxo.script_pub_key.clone(),
+        };
+        let outpoint_to_contribute =
+            bitcoin::OutPoint { txid: selected_utxo.txid, vout: selected_utxo.vout };
+        payjoin.contribute_witness_input(txo_to_contribute, outpoint_to_contribute);
+
+        let receiver_substitute_address = bitcoind.get_new_address(None, None).unwrap();
+        payjoin.substitute_output_address(receiver_substitute_address);
+
+        let payjoin_proposal_psbt = payjoin.extract_psbt(None).expect("failed to apply fees");
+
+        // Sign payjoin psbt
+        let payjoin_base64_string =
+            base64::encode(bitcoin::consensus::serialize(&payjoin_proposal_psbt));
+        let payjoin_proposal_psbt =
+            bitcoind.wallet_process_psbt(&payjoin_base64_string, None, None, None).unwrap().psbt;
+        let payjoin_proposal_psbt =
+            bitcoind.finalize_psbt(&payjoin_proposal_psbt, Some(false)).unwrap().psbt.unwrap();
+        let mut payjoin_proposal_psbt =
+            load_psbt_from_base64(payjoin_proposal_psbt.as_bytes()).unwrap();
+
+        // clear keypaths
+        payjoin_proposal_psbt
+            .outputs
+            .iter_mut()
+            .for_each(|output| output.bip32_derivation = Default::default());
+
+        println!("Receiver's PayJoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
+
+        let payload = base64::encode(bitcoin::consensus::serialize(&payjoin_proposal_psbt));
+        println!("successful response");
+        Response::text(payload)
+    });
+}
+
+struct Headers<'a>(rouille::HeadersIter<'a>);
+impl payjoin::receiver::Headers for Headers<'_> {
+    fn get_header(&self, key: &str) -> Option<&str> {
+        let mut copy = self.0.clone(); // lol
+        copy.find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v)
+    }
 }
 
 fn load_psbt_from_base64(

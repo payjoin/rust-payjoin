@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::path::PathBuf;
 
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
@@ -10,25 +9,28 @@ use payjoin::{PjUriExt, UriExt};
 
 fn main() {
     let matches = cli().get_matches();
+    let port = matches.get_one::<String>("PORT").unwrap();
+    let cookie_file = matches.get_one::<String>("COOKIE_FILE").unwrap();
+    let bitcoind = bitcoincore_rpc::Client::new(
+        &format!("http://127.0.0.1:{}", port.parse::<u16>().unwrap()),
+        bitcoincore_rpc::Auth::CookieFile(cookie_file.into()),
+    )
+    .unwrap();
     match matches.subcommand() {
         Some(("send", sub_matches)) => {
-            let port = sub_matches.get_one::<String>("PORT").unwrap();
-            let cookie_file = sub_matches.get_one::<String>("COOKIE_FILE").unwrap();
             let bip21 = sub_matches.get_one::<String>("BIP21").unwrap();
-            send_payjoin(bip21, port.parse().unwrap(), cookie_file.into());
+            send_payjoin(bitcoind, bip21);
         }
         Some(("receive", sub_matches)) => {
-            let port = sub_matches.get_one::<String>("PORT").unwrap();
-            let cookie_file = sub_matches.get_one::<String>("COOKIE_FILE").unwrap();
             let amount = sub_matches.get_one::<String>("AMOUNT").unwrap();
             let endpoint = sub_matches.get_one::<String>("ENDPOINT").unwrap();
-            receive_payjoin(port.parse().unwrap(), cookie_file.into(), amount, endpoint);
+            receive_payjoin(bitcoind, amount, endpoint);
         }
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
 }
 
-fn send_payjoin(bip21: &str, port: u16, cookie_file: PathBuf) {
+fn send_payjoin(bitcoind: bitcoincore_rpc::Client, bip21: &str) {
     let link = payjoin::Uri::try_from(bip21).unwrap();
 
     let link = link
@@ -43,17 +45,12 @@ fn send_payjoin(bip21: &str, port: u16, cookie_file: PathBuf) {
     let mut outputs = HashMap::with_capacity(1);
     outputs.insert(link.address.to_string(), amount);
 
-    let client = bitcoincore_rpc::Client::new(
-        &format!("http://127.0.0.1:{}", port),
-        bitcoincore_rpc::Auth::CookieFile(cookie_file),
-    )
-    .unwrap();
     let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
         lock_unspent: Some(true),
         fee_rate: Some(Amount::from_sat(2000)),
         ..Default::default()
     };
-    let psbt = client
+    let psbt = bitcoind
         .wallet_create_funded_psbt(
             &[], // inputs
             &outputs,
@@ -63,7 +60,7 @@ fn send_payjoin(bip21: &str, port: u16, cookie_file: PathBuf) {
         )
         .expect("failed to create PSBT")
         .psbt;
-    let psbt = client.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
+    let psbt = bitcoind.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
     let psbt = load_psbt_from_base64(psbt.as_bytes()).unwrap();
     println!("Original psbt: {:#?}", psbt);
     let pj_params = payjoin::sender::Configuration::with_fee_contribution(
@@ -81,12 +78,12 @@ fn send_payjoin(bip21: &str, port: u16, cookie_file: PathBuf) {
     //.unwrap();
     let psbt = ctx.process_response(response).unwrap();
     println!("Proposed psbt: {:#?}", psbt);
-    let psbt = client.wallet_process_psbt(&serialize_psbt(&psbt), None, None, None).unwrap().psbt;
-    let tx = client.finalize_psbt(&psbt, Some(true)).unwrap().hex.expect("incomplete psbt");
-    client.send_raw_transaction(&tx).unwrap();
+    let psbt = bitcoind.wallet_process_psbt(&serialize_psbt(&psbt), None, None, None).unwrap().psbt;
+    let tx = bitcoind.finalize_psbt(&psbt, Some(true)).unwrap().hex.expect("incomplete psbt");
+    bitcoind.send_raw_transaction(&tx).unwrap();
 }
 
-fn receive_payjoin(_port: u16, _cookie_file: PathBuf, _amount_arg: &str, _endpoint_arg: &str) {
+fn receive_payjoin(_bitcoind: bitcoincore_rpc::Client, _amount_arg: &str, _endpoint_arg: &str) {
     todo!();
 }
 
@@ -117,21 +114,17 @@ fn serialize_psbt(psbt: &Psbt) -> String {
 fn cli() -> Command {
     Command::new("payjoin")
         .about("Transfer bitcoin and preserve your privacy")
+        .arg(arg!(<PORT> "The port of the bitcoin node"))
+        .arg_required_else_help(true)
+        .arg(arg!(<COOKIE_FILE> "Path to the cookie file of the bitcoin node"))
         .subcommand_required(true)
         .subcommand(
             Command::new("send")
-                .arg(arg!(<PORT> "The port of the bitcoin node"))
                 .arg_required_else_help(true)
-                .arg(arg!(<COOKIE_FILE> "Path to the cookie file of the bitcoin node"))
-                .arg_required_else_help(true)
-                .arg(arg!(<BIP21> "The `bitcoin:...` payjoin uri to send to"))
-                .arg_required_else_help(true),
+                .arg(arg!(<BIP21> "The `bitcoin:...` payjoin uri to send to")),
         )
         .subcommand(
             Command::new("receive")
-                .arg(arg!(<PORT> "The port of the bitcoin node"))
-                .arg_required_else_help(true)
-                .arg(arg!(<COOKIE_FILE> "Path to the cookie file of the bitcoin node"))
                 .arg_required_else_help(true)
                 .arg(arg!(<AMOUNT> "The amount to receive in satoshis"))
                 .arg_required_else_help(true)

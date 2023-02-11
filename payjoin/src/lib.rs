@@ -15,7 +15,8 @@
 //! The library currently only contains sender implementation but I want to add receiver too.
 //!
 //! To use this library as a sender (client, payer), you need to enable `sender` Cargo feature.
-//! To use this library as a receiver (server, payee), you need to implement it and send a PR.
+//!
+//! To use this library as a receiver (server, payee), you need to enable `receiver` Cargo feature.
 
 pub extern crate bitcoin;
 

@@ -1,3 +1,7 @@
+/// Error that may occur when the request from sender is malformed.
+///
+/// This is currently opaque type because we aren't sure which variants will stay.
+/// You can only display it.
 #[derive(Debug)]
 pub struct RequestError(InternalRequestError);
 
@@ -33,6 +37,10 @@ impl From<InternalRequestError> for RequestError {
     fn from(value: InternalRequestError) -> Self { RequestError(value) }
 }
 
+/// Error that may occur when coin selection fails.
+///
+/// This is currently opaque type because we aren't sure which variants will stay.
+/// You can only display it.
 #[derive(Debug)]
 pub struct SelectionError(InternalSelectionError);
 

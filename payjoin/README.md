@@ -1,6 +1,8 @@
 # PayJoin implementation in Rust
 
-This is a library for bitcoind implementing BIP78 PayJoin.
+## About
+
+This is a library and a client binary for bitcoind implementing BIP78 PayJoin.
 
 The library is perfectly IO-agnostic—in fact, it does no IO.
 The primary goal of such design is to be easy to unit test.
@@ -9,6 +11,9 @@ While not there yet, it already has infinitely more tests than the [PayJoin PR a
 It doesn't care whether you use `async`, blocking, `tokio`, `sync-std` `hyper`, `actix` or whatever.
 There are already too many frameworks in Rust so it's best avoiding directly introducing them into library code.
 The library currently only contains sender implementation and a partial receiver.
+
+The payjoin-client binary is currently quickly hacked together tool that performs PayJoin using Bitcoin Core wallet.
+The intention is to develop it further over time to support other backends [like LND internal wallet](https://github.com/chaincase-app/nolooking).
 
 ### Disclaimer ⚠️ WIP
 
@@ -20,7 +25,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 
 ### Development status
 
-#### Sender
+#### Sender (beta)
 
 - [x] Basic logic
 - [x] Most checks implemented
@@ -35,19 +40,20 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [ ] Independent review
 - [ ] Independent testing
 
-#### Receiver
+#### Receiver (alpha)
 
-- [ ] Basic logic
-- [ ] Most checks implemented
-- [ ] Documentation
-- [ ] Unit test with official test vectors passes
+- [x] Basic logic
+- [x] Most checks implemented
+- [x] Documentation
+- [x] Unit test with official test vectors passes
 - [ ] Many unit tests
-- [ ] Fee contribution support
-- [ ] Example server using bitcoind
+- [x] Fee contribution support
+- [x] Example server using bitcoind
 - [ ] Tested and works with BTCPayServer
 - [ ] Tested and works with WasabiWallet
 - [ ] Tested and works with Blue Wallet
-- [ ] Minimum fee rate enforcement
+- [ ] Tested and works with Sparrow
+- [x] Minimum fee rate enforcement
 - [ ] Discount support
 - [ ] Independent review
 - [ ] Independent testing
@@ -60,7 +66,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [x] No `unsafe` code or well-tested/analyzed/proven/... `unsafe` code
 - [ ] Warning-free
 - [x] CI
-- [ ] Integration tests
+- [x] Integration tests
 - [ ] Fuzzing
 - [ ] Coverage measurement
 

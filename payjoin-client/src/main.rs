@@ -18,6 +18,7 @@ use webrtc_util::Conn;
 use noiseexplorer_nnpsk0::noisesession::NoiseSession;
 use noiseexplorer_nnpsk0::consts::{MAC_LENGTH, DHLEN};
 use noiseexplorer_nnpsk0::types::Keypair;
+use magic_wormhole::Wormhole;
 
 
 #[tokio::main]
@@ -46,21 +47,15 @@ async fn main() -> Result<(), Error> {
             .long("bip21")
             .help("The BIP21 URI to send to")
             .takes_value(true))
-        .arg(Arg::with_name("endpoint")
-            .short("e")
-            .long("endpoint")
-            .help("The endpoint to send the payjoin to")
+        .arg(Arg::with_name("code")
+            .short("o")
+            .long("code")
+            .help("The magic wormhole code to send the payjoin to")
             .takes_value(true))
         .arg(Arg::with_name("psk")
             .short("s")
             .long("psk")
             .help("The pre-shared symmetric key")
-            .takes_value(true))
-
-        .arg(Arg::with_name("relay")
-            .short("r")
-            .long("relay")
-            .help("PayJoin TURN server relay address to establish p2p networking")
             .takes_value(true))
         .arg(Arg::with_name("amount")
             .short("a")
@@ -84,17 +79,16 @@ async fn main() -> Result<(), Error> {
     )
     .unwrap();
 
-    if matches.is_present("relay") {
-        let relay = matches.value_of("relay").unwrap();
+    if matches.is_present("amount") {
         let amount = matches.value_of("amount").unwrap();
         let amount = Amount::from_sat(amount.parse::<u64>().unwrap());
-        listen_receiver(relay, amount, bitcoind).await?;
+        listen_receiver(amount, bitcoind).await?;
     } else {
         let bip21 = matches.value_of("bip21").unwrap().as_ref();
-        let endpoint = matches.value_of("endpoint").unwrap();
+        let code = matches.value_of("code").unwrap();
         let psk = matches.value_of("psk").unwrap();
         let (req, ctx) = create_pj_request(bip21, &bitcoind); //base64 request
-        let payjoin_psbt = do_send(req, ctx, endpoint, psk).await?;
+        let payjoin_psbt = do_send(req, ctx, code, psk).await?;
         let psbt = bitcoind.wallet_process_psbt(&serialize_psbt(&payjoin_psbt), None, None, None).unwrap().psbt;
         let tx = bitcoind.finalize_psbt(&psbt, Some(true)).unwrap().hex.expect("incomplete psbt");
         let txid = bitcoind.send_raw_transaction(&tx).unwrap();
@@ -104,57 +98,23 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn listen_receiver(relay: &str, amount: Amount, bitcoind: bitcoincore_rpc::Client) -> Result<(), Error> {
-    // 1. ConnectReceive
-    // Ensure relay connection
-    // TURN client won't create a local listening socket by itself.
-    let conn = UdpSocket::bind("0.0.0.0:0").await?;
-
-    let turn_server_addr = relay.to_string();
-
-    let cfg = ClientConfig {
-        stun_serv_addr: turn_server_addr.clone(),
-        turn_serv_addr: turn_server_addr,
-        username: "receiver".to_string(),
-        password: "test".to_string(),
-        realm: "pj.chaincase.app".to_string(),
-        software: String::new(),
-        rto_in_ms: 0,
-        conn: Arc::new(conn),
-        vnet: None,
-    };
-
-    let client = Client::new(cfg).await?;
-
-    // Start listening on the conn provided.
-    client.listen().await?;
-
-    // Allocate a relay socket on the TURN server. On success, it
-    // will return a net.PacketConn which represents the remote
-    // socket.
-    let relay_conn = client.allocate().await?;
-
-    // The relayConn's local address is actually the transport
-    // address assigned on the TURN server.
-    let relay_conn_endpoint = relay_conn.local_addr()?;
+async fn listen_receiver(amount: Amount, bitcoind: bitcoincore_rpc::Client) -> Result<(), Error> {
     let psk = gen_psk();
-    print!("--endpoint={} --psk=\"{}\" ", relay_conn_endpoint, psk);
-
-    let mapped_addr = client.send_binding_request().await?;
-    // punch UDP hole. after this packets from the IP address will be accepted by the turn server
-    relay_conn.send_to("Hello".as_bytes(), mapped_addr).await?;
-
-    // 2. Recv
+    let (welcome, res) = Wormhole::connect_without_code(magic_wormhole::transfer::APP_CONFIG, 2).await.unwrap();
+    print!("--code={:?} --psk=\"{}\" ", welcome.code.0, psk);
     let pj_receiver_address = bitcoind.get_new_address(None, Some(bitcoincore_rpc::json::AddressType::Bech32)).unwrap();
     print_payjoin_uri(pj_receiver_address, amount);
-    process_original_psbt(relay_conn,  bitcoind, psk).await?;
 
-    client.close().await?;
+    // 2. Recv
+    let mut wormhole = res.await.unwrap();
+    process_original_psbt(&mut wormhole,  bitcoind, psk).await?;
+
+    wormhole.close().await.unwrap();
     Ok(())
 }
 
 async fn process_original_psbt(
-    relay_conn: impl Conn + std::marker::Send + std::marker::Sync + 'static,
+    wormhole: &mut Wormhole,
     receiver: bitcoincore_rpc::Client,
     psk: String,
 ) -> Result<(), Error> {
@@ -166,14 +126,13 @@ async fn process_original_psbt(
 
     let psk: [u8; 32] = base64::decode(psk).unwrap().try_into().unwrap();
     let psk = noiseexplorer_nnpsk0::types::Psk::from_bytes(psk);
-
-    let mut buf = [0u8; 1024];
-    let (n, from) = relay_conn.recv_from(&mut buf).await?;
-    println!("received {} bytes of supposed Original PSBT from {}", n, from);
-    println!("buf: {:?}", &buf[..n]);
+    
+    let mut buf = wormhole.receive().await.unwrap();
+    println!("received {} bytes of supposed Original PSBT", buf.len());
+    
     // security does not depend on long-term static keys in NNpsk0. The interface still requires a Keypair, but it is not used.
     let mut responder = NoiseSession::init_session(false, b"", Keypair::new_empty(), psk);
-    responder.recv_message(&mut buf[..n]).unwrap(); // es derived internally
+    responder.recv_message(&mut buf).unwrap(); // es derived internally
     let (_initiator_e, payload) = buf.split_at_mut(DHLEN);
     let (payload, _mac) = payload.split_at_mut(payload.len() - MAC_LENGTH);
     let n = payload.len(); // hopefully from_request can trim the padding, else we're gonna need to send the length on the wire as headers does
@@ -236,17 +195,16 @@ async fn process_original_psbt(
     in_out.resize(message_b_size, 0);
     responder.send_message(&mut in_out).unwrap(); // e, ee
     
-    relay_conn.send_to(in_out.as_slice(), from).await?;
+    wormhole.send(in_out).await.unwrap();
 
     Ok(())
 }
 
-async fn do_send(req: payjoin::sender::Request, ctx: payjoin::sender::Context, relay_addr: &str, psk: &str) -> Result<Psbt, Error> {
+async fn do_send(req: payjoin::sender::Request, ctx: payjoin::sender::Context, code: &str, psk: &str) -> Result<Psbt, Error> {
     let mut original_psbt = req.body.clone(); //format!("{:?}", tokio::time::Instant::now());
 
-    // Set up pinger socket (pingerConn)
-    let pinger_conn_tx = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
-    let pinger_conn_rx = Arc::clone(&pinger_conn_tx);
+    // Set up wormhole
+    let (_, mut wormhole) = Wormhole::connect_with_code(magic_wormhole::transfer::APP_CONFIG, magic_wormhole::Code(code.to_owned())).await.unwrap();
 
     // do noise secure handshake
     let psk: [u8; 32] = base64::decode(psk).unwrap().try_into().unwrap();
@@ -262,21 +220,18 @@ async fn do_send(req: payjoin::sender::Request, ctx: payjoin::sender::Context, r
     println!("sending in_out: {:?}", in_out);
     initiator.send_message(&mut in_out).unwrap(); // psk, e
     println!("sending message_a: {:?}", in_out);
-    pinger_conn_tx.send_to(in_out.as_slice(), relay_addr).await?;
+    wormhole.send(in_out).await.unwrap();
 
-    
-    println!("len: {} < 1024?", req.body.len());
-    let mut buf = [0u8; 1024];
 
-    let (n, from) = pinger_conn_rx.recv_from(&mut buf).await?;
+    let mut buf = wormhole.receive().await.unwrap();
 
     // finish noise handshake
-    initiator.recv_message(&mut buf[..n]).unwrap();
+    initiator.recv_message(&mut buf).unwrap();
     let (_responder_e, payload) = buf.split_at_mut(DHLEN);
     let (payload, _mac) = payload.split_at_mut(payload.len() - MAC_LENGTH);
     let n = payload.len();
     let proposal = ctx.process_response(&payload[..n]).unwrap();
-    println!("proposal: {:#?} from {}", proposal, from);
+    println!("proposal: {:#?}", proposal);
     Ok(proposal)
 }
 

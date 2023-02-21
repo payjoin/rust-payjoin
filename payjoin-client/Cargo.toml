@@ -11,10 +11,10 @@ payjoin = { path = "../payjoin", features = ["sender", "receiver"] }
 bitcoincore-rpc = "0.14.0"
 rand = "0.6.5"
 reqwest = { version = "0.11.4", features = ["blocking", "native-tls-vendored"] }
+hyper = "0.14.24"
 base64 = "0.13.0"
 clap = "2.33.3"
-turn = "0.6.1"
 tokio = { version = "1.6.1", features = ["full"] }
 webrtc-util = { version = "0.7.0", default-features = false, features = ["conn", "vnet"] }
 noiseexplorer_nnpsk0 = { path = "../nnpsk0" }
-magic-wormhole = "0.6.0"
+url = "2.2.2"

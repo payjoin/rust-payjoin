@@ -2,27 +2,23 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::str::FromStr;
-use std::sync::Arc;
 
+use http_relay::HrProxy;
 use payjoin::bitcoin::hashes::hex::ToHex;
-use turn::client::*;
-use turn::Error;
 use bitcoincore_rpc::bitcoin::Address;
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use clap::{App, AppSettings, Arg};
 use payjoin::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use payjoin::{PjUriExt, UriExt};
-use tokio::net::UdpSocket;
-use webrtc_util::Conn;
 use noiseexplorer_nnpsk0::noisesession::NoiseSession;
 use noiseexplorer_nnpsk0::consts::{MAC_LENGTH, DHLEN};
 use noiseexplorer_nnpsk0::types::Keypair;
-use magic_wormhole::Wormhole;
 
+mod http_relay;
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), std::io::Error> {
     let mut app = App::new("payjoin-client")
         .version("0.1.0")
         .author("Dan Gould <d@ngould.dev>")
@@ -47,10 +43,10 @@ async fn main() -> Result<(), Error> {
             .long("bip21")
             .help("The BIP21 URI to send to")
             .takes_value(true))
-        .arg(Arg::with_name("code")
+        .arg(Arg::with_name("endpoint")
             .short("o")
-            .long("code")
-            .help("The magic wormhole code to send the payjoin to")
+            .long("endpoint")
+            .help("The pj endpoint to send the payjoin to")
             .takes_value(true))
         .arg(Arg::with_name("psk")
             .short("s")
@@ -82,13 +78,13 @@ async fn main() -> Result<(), Error> {
     if matches.is_present("amount") {
         let amount = matches.value_of("amount").unwrap();
         let amount = Amount::from_sat(amount.parse::<u64>().unwrap());
-        listen_receiver(amount, bitcoind).await?;
+        listen_receiver(amount, bitcoind).await;
     } else {
         let bip21 = matches.value_of("bip21").unwrap().as_ref();
-        let code = matches.value_of("code").unwrap();
         let psk = matches.value_of("psk").unwrap();
+        let endpoint = matches.value_of("endpoint").unwrap();
         let (req, ctx) = create_pj_request(bip21, &bitcoind); //base64 request
-        let payjoin_psbt = do_send(req, ctx, code, psk).await?;
+        let payjoin_psbt = do_send(req, ctx, endpoint, psk).await;
         let psbt = bitcoind.wallet_process_psbt(&serialize_psbt(&payjoin_psbt), None, None, None).unwrap().psbt;
         let tx = bitcoind.finalize_psbt(&psbt, Some(true)).unwrap().hex.expect("incomplete psbt");
         let txid = bitcoind.send_raw_transaction(&tx).unwrap();
@@ -98,26 +94,23 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn listen_receiver(amount: Amount, bitcoind: bitcoincore_rpc::Client) -> Result<(), Error> {
+async fn listen_receiver(amount: Amount, bitcoind: bitcoincore_rpc::Client) {
     let psk = gen_psk();
-    let (welcome, res) = Wormhole::connect_without_code(magic_wormhole::transfer::APP_CONFIG, 2).await.unwrap();
-    print!("--code={:?} --psk=\"{}\" ", welcome.code.0, psk);
+    let relay = "http://localhost:8080/";
+    let proxy = crate::http_relay::HttpRelay::new(relay.to_string(), psk[0..8].to_owned()).proxy();
+    print!("--endpoint={:?} --psk=\"{}\" ", proxy.server_url(), psk);
     let pj_receiver_address = bitcoind.get_new_address(None, Some(bitcoincore_rpc::json::AddressType::Bech32)).unwrap();
     print_payjoin_uri(pj_receiver_address, amount);
 
     // 2. Recv
-    let mut wormhole = res.await.unwrap();
-    process_original_psbt(&mut wormhole,  bitcoind, psk).await?;
-
-    wormhole.close().await.unwrap();
-    Ok(())
+    process_original_psbt(proxy, bitcoind, psk).await;
 }
 
 async fn process_original_psbt(
-    wormhole: &mut Wormhole,
+    mut proxy: HrProxy,
     receiver: bitcoincore_rpc::Client,
     psk: String,
-) -> Result<(), Error> {
+) {
     use payjoin::bitcoin;
     use payjoin::receiver::UncheckedProposal;
     use payjoin::bitcoin::consensus;
@@ -127,7 +120,8 @@ async fn process_original_psbt(
     let psk: [u8; 32] = base64::decode(psk).unwrap().try_into().unwrap();
     let psk = noiseexplorer_nnpsk0::types::Psk::from_bytes(psk);
     
-    let mut buf = wormhole.receive().await.unwrap();
+    // TODO pull fallback psbt from relay
+    let mut buf = proxy.serve(Vec::new()).await;
     println!("received {} bytes of supposed Original PSBT", buf.len());
     
     // security does not depend on long-term static keys in NNpsk0. The interface still requires a Keypair, but it is not used.
@@ -195,16 +189,12 @@ async fn process_original_psbt(
     in_out.resize(message_b_size, 0);
     responder.send_message(&mut in_out).unwrap(); // e, ee
     
-    wormhole.send(in_out).await.unwrap();
-
-    Ok(())
+    proxy.serve(in_out).await;
 }
 
-async fn do_send(req: payjoin::sender::Request, ctx: payjoin::sender::Context, code: &str, psk: &str) -> Result<Psbt, Error> {
+async fn do_send(req: payjoin::sender::Request, ctx: payjoin::sender::Context, endpoint: &str, psk: &str) -> Psbt {
     let mut original_psbt = req.body.clone(); //format!("{:?}", tokio::time::Instant::now());
-
-    // Set up wormhole
-    let (_, mut wormhole) = Wormhole::connect_with_code(magic_wormhole::transfer::APP_CONFIG, magic_wormhole::Code(code.to_owned())).await.unwrap();
+    let w_secret = psk[0..8].to_owned();
 
     // do noise secure handshake
     let psk: [u8; 32] = base64::decode(psk).unwrap().try_into().unwrap();
@@ -220,10 +210,11 @@ async fn do_send(req: payjoin::sender::Request, ctx: payjoin::sender::Context, c
     println!("sending in_out: {:?}", in_out);
     initiator.send_message(&mut in_out).unwrap(); // psk, e
     println!("sending message_a: {:?}", in_out);
-    wormhole.send(in_out).await.unwrap();
 
+    let res = reqwest::Client::new().post(endpoint).header("HttpRelay-WSecret", w_secret).body(in_out).send().await.unwrap();
 
-    let mut buf = wormhole.receive().await.unwrap();
+    println!("res: {:?}", res);
+    let mut buf = res.bytes().await.unwrap().to_vec();
 
     // finish noise handshake
     initiator.recv_message(&mut buf).unwrap();
@@ -232,7 +223,7 @@ async fn do_send(req: payjoin::sender::Request, ctx: payjoin::sender::Context, c
     let n = payload.len();
     let proposal = ctx.process_response(&payload[..n]).unwrap();
     println!("proposal: {:#?}", proposal);
-    Ok(proposal)
+    proposal
 }
 
 // get a valid BIP 21 URI for payjoin as defined in BIP 78

@@ -127,6 +127,14 @@ fn receive_payjoin(bitcoind: bitcoincore_rpc::Client, amount_arg: &str, endpoint
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.get_transaction_to_schedule_broadcast();
 
+        // The network is used for checks later
+        let network = match bitcoind.get_blockchain_info().unwrap().chain.as_str() {
+            "main" => bitcoin::Network::Bitcoin,
+            "test" => bitcoin::Network::Testnet,
+            "regtest" => bitcoin::Network::Regtest,
+            _ => panic!("Unknown network"),
+        };
+
         // Receive Check 1: Can Broadcast
         let proposal = proposal
             .check_can_broadcast(|tx| {
@@ -143,8 +151,7 @@ fn receive_payjoin(bitcoind: bitcoincore_rpc::Client, amount_arg: &str, endpoint
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal
             .check_inputs_not_owned(|input| {
-                let address =
-                    bitcoin::Address::from_script(&input, bitcoin::Network::Regtest).unwrap();
+                let address = bitcoin::Address::from_script(&input, network).unwrap();
                 bitcoind.get_address_info(&address).unwrap().is_mine.unwrap()
             })
             .expect("Receiver should not own any of the inputs");
@@ -158,9 +165,7 @@ fn receive_payjoin(bitcoind: bitcoincore_rpc::Client, amount_arg: &str, endpoint
             .check_no_inputs_seen_before(|_| false)
             .unwrap()
             .identify_receiver_outputs(|output_script| {
-                let address =
-                    bitcoin::Address::from_script(&output_script, bitcoin::Network::Regtest)
-                        .unwrap();
+                let address = bitcoin::Address::from_script(&output_script, network).unwrap();
                 bitcoind.get_address_info(&address).unwrap().is_mine.unwrap()
             })
             .expect("Receiver should have at least one output");

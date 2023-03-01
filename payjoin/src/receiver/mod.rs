@@ -26,6 +26,7 @@ use error::{InternalRequestError, InternalSelectionError};
 pub use error::{RequestError, SelectionError};
 use optional_parameters::Params;
 use rand::seq::SliceRandom;
+use rand::Rng;
 
 use crate::fee_rate::FeeRate;
 use crate::psbt::Psbt;
@@ -381,14 +382,20 @@ impl PayjoinProposal {
             self.owned_vouts.choose(&mut rand::thread_rng()).expect("owned_vouts is empty");
         self.psbt.unsigned_tx.output[*vout_to_augment].value += txo_value;
 
+        // Insert contribution at random index for privacy
+        let mut rng = rand::thread_rng();
+        let index = rng.gen_range(0..=self.psbt.unsigned_tx.input.len());
         self.psbt
             .inputs
-            .push(bitcoin::psbt::Input { witness_utxo: Some(txo), ..Default::default() });
-        self.psbt.unsigned_tx.input.push(bitcoin::TxIn {
-            previous_output: outpoint,
-            sequence: original_sequence,
-            ..Default::default()
-        });
+            .insert(index, bitcoin::psbt::Input { witness_utxo: Some(txo), ..Default::default() });
+        self.psbt.unsigned_tx.input.insert(
+            index,
+            bitcoin::TxIn {
+                previous_output: outpoint,
+                sequence: original_sequence,
+                ..Default::default()
+            },
+        );
     }
 
     pub fn contribute_non_witness_input(&mut self, tx: bitcoin::Transaction, outpoint: OutPoint) {
@@ -402,15 +409,23 @@ impl PayjoinProposal {
             self.owned_vouts.choose(&mut rand::thread_rng()).expect("owned_vouts is empty");
         self.psbt.unsigned_tx.output[*vout_to_augment].value += txo_value;
 
+        // Insert contribution at random index for privacy
+        let mut rng = rand::thread_rng();
+        let index = rng.gen_range(0..=self.psbt.unsigned_tx.input.len());
+
         // Add the new input to the PSBT
-        self.psbt
-            .inputs
-            .push(bitcoin::psbt::Input { non_witness_utxo: Some(tx), ..Default::default() });
-        self.psbt.unsigned_tx.input.push(bitcoin::TxIn {
-            previous_output: outpoint,
-            sequence: original_sequence,
-            ..Default::default()
-        });
+        self.psbt.inputs.insert(
+            index,
+            bitcoin::psbt::Input { non_witness_utxo: Some(tx), ..Default::default() },
+        );
+        self.psbt.unsigned_tx.input.insert(
+            index,
+            bitcoin::TxIn {
+                previous_output: outpoint,
+                sequence: original_sequence,
+                ..Default::default()
+            },
+        );
     }
 
     /// Just replace an output address with

@@ -261,9 +261,13 @@ pub struct OutputsUnknown {
 
 impl OutputsUnknown {
     /// Find which outputs belong to the receiver
-    pub fn identify_receiver_outputs(
+    ///
+    /// In the case an invoice is being paid or a channel is being opeend,
+    /// there may be a minimum payment amount associated with a payjoin request.
+    pub fn find_receiver_outputs(
         self,
         is_receiver_output: impl Fn(&Script) -> bool,
+        min_payment: Option<Amount>,
     ) -> Result<PayjoinProposal, RequestError> {
         let owned_vouts: Vec<usize> = self
             .psbt
@@ -282,7 +286,12 @@ impl OutputsUnknown {
             )
             .collect();
 
-        if owned_vouts.len() < 1 {
+        let owned_amount =
+            owned_vouts.iter().map(|vout| self.psbt.unsigned_tx.output[*vout].value).sum::<u64>();
+
+        if owned_vouts.len() < 1
+            || (min_payment.is_some() && owned_amount < min_payment.unwrap().to_sat())
+        {
             return Err(RequestError::from(InternalRequestError::MissingPayment));
         }
 

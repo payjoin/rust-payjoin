@@ -202,10 +202,9 @@ fn receive_payjoin(bitcoind: bitcoincore_rpc::Client, amount_arg: &str, endpoint
         // Sign payjoin psbt
         let payjoin_base64_string =
             base64::encode(bitcoin::consensus::serialize(&payjoin_proposal_psbt));
+        // `wallet_process_psbt` adds available utxo data and finalizes
         let payjoin_proposal_psbt =
             bitcoind.wallet_process_psbt(&payjoin_base64_string, None, None, None).unwrap().psbt;
-        let payjoin_proposal_psbt =
-            bitcoind.finalize_psbt(&payjoin_proposal_psbt, Some(false)).unwrap().psbt.unwrap();
         let mut payjoin_proposal_psbt =
             load_psbt_from_base64(payjoin_proposal_psbt.as_bytes()).unwrap();
 

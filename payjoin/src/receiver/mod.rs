@@ -524,7 +524,7 @@ mod test {
         let headers = MockHeaders::new(body.len() as u64);
         UncheckedProposal::from_request(
             body,
-            "?maxadditionalfeecontribution=0.00000182?additionalfeeoutputindex=0",
+            "?maxadditionalfeecontribution=182?additionalfeeoutputindex=0",
             headers,
         )
     }

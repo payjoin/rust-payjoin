@@ -59,7 +59,7 @@ impl Params {
                     },
                 ("maxadditionalfeecontribution", fee) =>
                     max_additional_fee_contribution =
-                        match bitcoin::Amount::from_str_in(&fee, bitcoin::Denomination::Bitcoin) {
+                        match bitcoin::Amount::from_str_in(&fee, bitcoin::Denomination::Satoshi) {
                             Ok(contribution) => Some(contribution),
                             Err(_error) => {
                                 warn!(

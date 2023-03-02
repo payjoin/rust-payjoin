@@ -199,7 +199,7 @@ fn receive_payjoin(bitcoind: bitcoincore_rpc::Client, amount_arg: &str, endpoint
         payjoin.substitute_output_address(receiver_substitute_address);
 
         let payjoin_proposal_psbt = payjoin.extract_psbt(None).expect("failed to apply fees");
-
+        log::debug!("Extracted PSBT: {:#?}", payjoin_proposal_psbt);
         // Sign payjoin psbt
         let payjoin_base64_string =
             base64::encode(bitcoin::consensus::serialize(&payjoin_proposal_psbt));

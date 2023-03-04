@@ -29,8 +29,8 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 
 use crate::fee_rate::FeeRate;
+use crate::input_type::InputType;
 use crate::psbt::Psbt;
-use crate::weight::Weight;
 
 pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
@@ -104,9 +104,11 @@ impl UncheckedProposal {
         let unchecked_psbt =
             UncheckedPsbt::consensus_decode(&mut reader).map_err(InternalRequestError::Decode)?;
         let psbt = Psbt::try_from(unchecked_psbt).map_err(InternalRequestError::Psbt)?;
+        log::debug!("Received original psbt: {:?}", psbt);
 
         let pairs = url::form_urlencoded::parse(query.as_bytes());
         let params = Params::from_query_pairs(pairs).map_err(InternalRequestError::SenderParams)?;
+        log::debug!("Received request with params: {:?}", params);
 
         // TODO check that params are valid for the request's Original PSBT
 
@@ -190,8 +192,6 @@ impl MaybeMixedInputScripts {
     /// Note: mixed spends do not necessarily indicate distinct wallet fingerprints.
     /// This check is intended to prevent some types of wallet fingerprinting.
     pub fn check_no_mixed_input_scripts(self) -> Result<MaybeInputsSeen, RequestError> {
-        use crate::input_type::InputType;
-
         let mut err = Ok(());
         let input_scripts = self
             .psbt
@@ -287,7 +287,12 @@ impl OutputsUnknown {
             return Err(RequestError::from(InternalRequestError::MissingPayment));
         }
 
-        Ok(PayjoinProposal { psbt: self.psbt, params: self.params, owned_vouts })
+        Ok(PayjoinProposal {
+            psbt: self.psbt,
+            params: self.params,
+            owned_vouts,
+            contributions: Vec::new(),
+        })
     }
 }
 
@@ -296,6 +301,7 @@ pub struct PayjoinProposal {
     psbt: Psbt,
     params: Params,
     owned_vouts: Vec<usize>,
+    contributions: Vec<Script>,
 }
 
 impl PayjoinProposal {
@@ -385,9 +391,10 @@ impl PayjoinProposal {
         // Insert contribution at random index for privacy
         let mut rng = rand::thread_rng();
         let index = rng.gen_range(0..=self.psbt.unsigned_tx.input.len());
-        self.psbt
-            .inputs
-            .insert(index, bitcoin::psbt::Input { witness_utxo: Some(txo), ..Default::default() });
+        self.psbt.inputs.insert(
+            index,
+            bitcoin::psbt::Input { witness_utxo: Some(txo.clone()), ..Default::default() },
+        );
         self.psbt.unsigned_tx.input.insert(
             index,
             bitcoin::TxIn {
@@ -396,6 +403,7 @@ impl PayjoinProposal {
                 ..Default::default()
             },
         );
+        self.contributions.push(txo.script_pubkey.clone());
     }
 
     pub fn contribute_non_witness_input(&mut self, tx: bitcoin::Transaction, outpoint: OutPoint) {
@@ -416,7 +424,7 @@ impl PayjoinProposal {
         // Add the new input to the PSBT
         self.psbt.inputs.insert(
             index,
-            bitcoin::psbt::Input { non_witness_utxo: Some(tx), ..Default::default() },
+            bitcoin::psbt::Input { non_witness_utxo: Some(tx.clone()), ..Default::default() },
         );
         self.psbt.unsigned_tx.input.insert(
             index,
@@ -426,6 +434,7 @@ impl PayjoinProposal {
                 ..Default::default()
             },
         );
+        self.contributions.push(tx.output[outpoint.vout as usize].script_pubkey.clone());
     }
 
     /// Just replace an output address with
@@ -445,40 +454,37 @@ impl PayjoinProposal {
         mut self,
         min_feerate_sat_per_vb: Option<u64>,
     ) -> Result<UncheckedPsbt, RequestError> {
-        let min_feerate = FeeRate::from_sat_per_vb(min_feerate_sat_per_vb.unwrap_or_default());
+        let min_feerate =
+            FeeRate::from_sat_per_vb_unchecked(min_feerate_sat_per_vb.unwrap_or_default());
+        log::trace!("min_feerate: {:?}", min_feerate);
+        log::trace!("params.min_feerate: {:?}", self.params.min_feerate);
         let min_feerate = max(min_feerate, self.params.min_feerate);
+        log::debug!("min_feerate: {:?}", min_feerate);
 
-        let provisional_fee = self.psbt.calculate_fee();
-        let provisional_weight = Weight::manual_from_u64(self.psbt.unsigned_tx.weight() as u64);
-        let min_additional_fee =
-            (min_feerate * provisional_weight).checked_sub(provisional_fee).unwrap_or_default();
-
-        if min_additional_fee > bitcoin::Amount::ZERO {
-            if let Some((max_additional_fee_contribution, additional_fee_output_index)) =
+        let input_pair = self.psbt.input_pairs().next().unwrap();
+        let txo = input_pair.previous_txout().unwrap();
+        let input_type = InputType::from_spent_input(&txo, &self.psbt.inputs[0]).unwrap();
+        let contribution_weight = input_type.expected_input_weight();
+        log::trace!("contribution_weight: {}", contribution_weight);
+        let mut additional_fee = contribution_weight * min_feerate;
+        let max_additional_fee_contribution =
+            self.params.additional_fee_contribution.unwrap_or_default().0;
+        if additional_fee >= max_additional_fee_contribution {
+            // Cap fee at the sender's contribution to simplify this method
+            additional_fee = max_additional_fee_contribution;
+        }
+        log::debug!("additional_fee: {}", additional_fee);
+        if additional_fee > bitcoin::Amount::ZERO {
+            log::trace!(
+                "self.params.additional_fee_contribution: {:?}",
                 self.params.additional_fee_contribution
+            );
+            if let Some((_, additional_fee_output_index)) = self.params.additional_fee_contribution
             {
-                if max_additional_fee_contribution < min_additional_fee
-                    && !self.owned_vouts.contains(&additional_fee_output_index)
-                {
+                if !self.owned_vouts.contains(&additional_fee_output_index) {
                     // remove additional miner fee from the sender's specified output
                     self.psbt.unsigned_tx.output[additional_fee_output_index].value -=
-                        min_additional_fee.to_sat();
-
-                    // There might be excess additional fee we can take
-                    // in the case a sender makes no change output
-                    let excess_fee = max_additional_fee_contribution - min_additional_fee;
-                    if excess_fee > bitcoin::Amount::ZERO {
-                        let vout_to_augment = self
-                            .owned_vouts
-                            .choose(&mut rand::thread_rng())
-                            .expect("owned_vouts is empty");
-                        self.psbt.unsigned_tx.output[*vout_to_augment].value += excess_fee.to_sat();
-                    }
-                } else {
-                    return Err(RequestError::from(InternalRequestError::InsufficientFee(
-                        min_additional_fee,
-                        self.params.additional_fee_contribution,
-                    )));
+                        additional_fee.to_sat();
                 }
             }
         }
@@ -488,6 +494,17 @@ impl PayjoinProposal {
             .expect("resetting tx failed");
         Ok(reset_psbt.into())
     }
+}
+
+pub fn clear_utxo_from_non_final_inputs(mut psbt: UncheckedPsbt) -> UncheckedPsbt {
+    for input in psbt.inputs.iter_mut() {
+        if input.final_script_sig.is_none() && input.final_script_witness.is_none() {
+            // This is not our input, so we don't want to leak the UTXO
+            input.non_witness_utxo = None;
+            input.witness_utxo = None;
+        }
+    }
+    psbt
 }
 
 #[cfg(test)]

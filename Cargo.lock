@@ -1142,7 +1142,7 @@ dependencies = [
 
 [[package]]
 name = "payjoin-client"
-version = "0.1.0"
+version = "0.1.15"
 dependencies = [
  "base64",
  "bitcoin",

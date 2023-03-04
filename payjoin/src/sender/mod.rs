@@ -101,7 +101,7 @@ impl Configuration {
 
     /// Sets minimum fee rate required by the sender.
     pub fn min_fee_rate_sat_per_vb(mut self, fee_rate: u64) -> Self {
-        self.min_fee_rate = FeeRate::from_sat_per_vb(fee_rate);
+        self.min_fee_rate = FeeRate::from_sat_per_vb_unchecked(fee_rate);
         self
     }
 }
@@ -206,8 +206,7 @@ impl Context {
             out_stats.contributed_fee <= proposed_psbt_fee - original_fee,
             PayeeTookContributedFee
         );
-        let original_weight =
-            Weight::manual_from_u64(self.original_psbt.unsigned_tx.weight() as u64);
+        let original_weight = Weight::from_wu(self.original_psbt.unsigned_tx.weight() as u64);
         let original_fee_rate = original_fee / original_weight;
         ensure!(
             out_stats.contributed_fee
@@ -233,7 +232,7 @@ impl Context {
                 weight_without_witnesses
             } else {
                 weight_without_witnesses
-                    + Weight::manual_from_u64(
+                    + Weight::from_wu(
                         (proposal.unsigned_tx.input.len() - in_stats.inputs_with_witnesses + 2)
                             as u64,
                     )
@@ -550,7 +549,8 @@ fn serialize_url(
             .append_pair("maxadditionalfeecontribution", &amount.to_sat().to_string());
     }
     if min_fee_rate > FeeRate::ZERO {
-        url.query_pairs_mut().append_pair("minfeerate", &min_fee_rate.to_sat_per_vb().to_string());
+        url.query_pairs_mut()
+            .append_pair("minfeerate", &min_fee_rate.to_sat_per_vb_floor().to_string());
     }
     Ok(url)
 }

@@ -19,8 +19,6 @@ pub(crate) enum InternalRequestError {
     PrevTxOut(crate::psbt::PrevTxOutError),
     /// The Original PSBT has no output for the receiver.
     MissingPayment,
-    /// minimum is amount but additionalfeecontribution is (amount, index)
-    InsufficientFee(bitcoin::Amount, Option<(bitcoin::Amount, usize)>),
     /// The original PSBT transaction fails the broadcast check
     OriginalPsbtNotBroadcastable,
     /// The sender is trying to spend the receiver input

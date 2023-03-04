@@ -1,6 +1,6 @@
 [package]
 name = "payjoin-client"
-version = "0.1.0"
+version = "0.1.15"
 authors = ["Dan Gould <d@ngould.dev>", "Martin Habovstiak <martin.habovstiak@gmail.com>"]
 edition = "2018"
 

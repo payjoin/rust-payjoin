@@ -49,10 +49,10 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [ ] Many unit tests
 - [x] Fee contribution support
 - [x] Example server using bitcoind
-- [ ] Tested and works with BTCPayServer
-- [ ] Tested and works with WasabiWallet
+- [x] Tested and works with BTCPayServer
+- [x] Tested and works with WasabiWallet
 - [ ] Tested and works with Blue Wallet
-- [ ] Tested and works with Sparrow
+- [x] Tested and works with Sparrow
 - [x] Minimum fee rate enforcement
 - [ ] Discount support
 - [ ] Independent review

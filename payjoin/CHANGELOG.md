@@ -1,5 +1,14 @@
 # PayJoin Changelog
 
+## 0.7.0
+
+- Upgrade receiver to beta quality
+- Improve receiver SDK interface
+- Smoke test receiver with BTCPayServer, Wasabi, and Samourai
+- Add receiver inputs at random index
+- Improve and expand log calls
+- Apply additional fee contribution without estimating psbt size
+
 ## 0.6.0
 
 - Complete sender PSBT validation. Sender is now beta-quality.

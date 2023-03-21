@@ -1,10 +1,12 @@
 [package]
 name = "payjoin-client"
-version = "0.1.0"
+version = "0.1.15"
 authors = ["Dan Gould <d@ngould.dev>", "Martin Habovstiak <martin.habovstiak@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+native-tls-vendored = ["reqwest/native-tls-vendored"]
 
 [dependencies]
 bitcoin = "0.29.2"
@@ -14,3 +16,5 @@ reqwest = { version = "0.11.4", features = ["blocking"] }
 rouille = "3.6.1"
 base64 = "0.13.0"
 clap = "4.1.4"
+log = "0.4.7"
+env_logger = "0.9.0"

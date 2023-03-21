@@ -1,0 +1,33 @@
+# notes
+
+If try_preserving_privacy were self-contained, then the contribute input / outuputs could be removed as well as exposing input_type to the PayjoinProposal type.
+
+He payjoin proposal type is a bit less leaky that way, but the app *seems* less capabble.
+
+linux build ✅
+Insert additional inputs at random index ✅
+- [ ] Only problem is it depends on `rand` which does not work when `std` is not present. I should probably record this issue
+- [ ] ensure range DOES NOT INCLUDE = rng.gen_range(0..=self.psbt.unsigned_tx.input.len());
+wallet_process_psbt ✅
+Clear keypaths ✅
+Log✅
+Log Psbt✅
+Contribute additional fee in sats, not BTC ✅
+Use additional_fee instead of estimate
+- [ ] TXO clone is kind of BS and the txo contributioon should probably be saved. I think I optimized prematurely with the more than one contribution and additionoal fee based on estimation, and I'm going to have to roll that back. We also don't check if it matches the script type.
+- [ ] There are some unnecessary confused comments to rm
+- [ ] some log::debug! should be trace!
+- [ ] document clear path to using estimation rather than only the addtlfeecontribution
+- [ ] what is clear utxo  method for? @:507
+
+### Nostr update
+
+       •   git-format-patch(1) to prepare e-mail submission, if you adopt Linux kernel-style public forum workflow.
+
+       •   git-send-email(1) to send your e-mail submission without corruption by your MUA.
+
+       •   git-request-pull(1) to create a summary of changes for your upstream to pull.
+
+       ... but for nostr
+
+motion sick glasses

@@ -77,7 +77,8 @@ impl Psbt {
         for input in self.input_pairs() {
             total_inputs += bitcoin::Amount::from_sat(input.previous_txout().unwrap().value);
         }
-
+        log::debug!("  total_inputs:  {}", total_inputs);
+        log::debug!("- total_outputs: {}", total_outputs);
         total_inputs - total_outputs
     }
 }

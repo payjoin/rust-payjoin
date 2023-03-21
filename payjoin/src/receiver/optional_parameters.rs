@@ -59,7 +59,7 @@ impl Params {
                     },
                 ("maxadditionalfeecontribution", fee) =>
                     max_additional_fee_contribution =
-                        match bitcoin::Amount::from_str_in(&fee, bitcoin::Denomination::Bitcoin) {
+                        match bitcoin::Amount::from_str_in(&fee, bitcoin::Denomination::Satoshi) {
                             Ok(contribution) => Some(contribution),
                             Err(_error) => {
                                 warn!(
@@ -71,8 +71,9 @@ impl Params {
                         },
                 ("minfeerate", feerate) =>
                     params.min_feerate = match feerate.parse::<u64>() {
-                        Ok(rate) => FeeRate::from_sat_per_vb(rate),
-                        Err(e) => return Err(Error::FeeRate(e)),
+                        Ok(rate) => FeeRate::from_sat_per_vb(rate)
+                            .ok_or(Error::FeeRate(rate.to_string()))?,
+                        Err(e) => return Err(Error::FeeRate(e.to_string())),
                     },
                 ("disableoutputsubstitution", v) =>
                     params.disable_output_substitution = v == "true",
@@ -89,6 +90,7 @@ impl Params {
             _ => (),
         }
 
+        log::debug!("parsed optional parameters: {:?}", params);
         Ok(params)
     }
 }
@@ -96,7 +98,7 @@ impl Params {
 #[derive(Debug)]
 pub(crate) enum Error {
     UnknownVersion,
-    FeeRate(std::num::ParseIntError),
+    FeeRate(String),
 }
 
 impl fmt::Display for Error {
@@ -111,7 +113,6 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Error::FeeRate(error) => Some(error),
             _ => None,
         }
     }

@@ -288,7 +288,8 @@ impl OutputsUnknown {
         }
 
         Ok(PayjoinProposal {
-            psbt: self.psbt,
+            original_psbt: self.psbt.clone(),
+            payjoin_psbt: self.psbt,
             params: self.params,
             owned_vouts,
             contributions: Vec::new(),
@@ -298,7 +299,8 @@ impl OutputsUnknown {
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
 pub struct PayjoinProposal {
-    psbt: Psbt,
+    original_psbt: UncheckedPsbt,
+    payjoin_psbt: Psbt,
     params: Params,
     owned_vouts: Vec<usize>,
     contributions: Vec<Script>,
@@ -306,7 +308,7 @@ pub struct PayjoinProposal {
 
 impl PayjoinProposal {
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
-        self.psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
+        self.payjoin_psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
     }
 
     pub fn is_output_substitution_disabled(&self) -> bool {
@@ -332,13 +334,13 @@ impl PayjoinProposal {
             return Err(SelectionError::from(InternalSelectionError::Empty));
         }
 
-        if self.psbt.outputs.len() != 2 {
+        if self.payjoin_psbt.outputs.len() != 2 {
             // Current UIH techniques only support many-input, two-output transactions.
             return Err(SelectionError::from(InternalSelectionError::TooManyOutputs));
         }
 
         let min_original_out_sats = self
-            .psbt
+            .payjoin_psbt
             .unsigned_tx
             .output
             .iter()
@@ -347,14 +349,14 @@ impl PayjoinProposal {
             .unwrap_or(Amount::MAX_MONEY.to_sat());
 
         let min_original_in_sats = self
-            .psbt
+            .payjoin_psbt
             .input_pairs()
             .filter_map(|input| input.previous_txout().ok().map(|txo| txo.value))
             .min()
             .unwrap_or(Amount::MAX_MONEY.to_sat());
 
         // Assume many-input, two output to select the vout for now
-        let prior_payment_sats = self.psbt.unsigned_tx.output[self.owned_vouts[0]].value;
+        let prior_payment_sats = self.payjoin_psbt.unsigned_tx.output[self.owned_vouts[0]].value;
         for candidate in candidate_inputs {
             // TODO bound loop by timeout / iterations
 
@@ -379,23 +381,28 @@ impl PayjoinProposal {
 
     pub fn contribute_witness_input(&mut self, txo: TxOut, outpoint: OutPoint) {
         // The payjoin proposal must not introduce mixed input sequence numbers
-        let original_sequence =
-            self.psbt.unsigned_tx.input.first().map(|input| input.sequence).unwrap_or_default();
+        let original_sequence = self
+            .payjoin_psbt
+            .unsigned_tx
+            .input
+            .first()
+            .map(|input| input.sequence)
+            .unwrap_or_default();
 
         // Add the value of new receiver input to receiver output
         let txo_value = txo.value;
         let vout_to_augment =
             self.owned_vouts.choose(&mut rand::thread_rng()).expect("owned_vouts is empty");
-        self.psbt.unsigned_tx.output[*vout_to_augment].value += txo_value;
+        self.payjoin_psbt.unsigned_tx.output[*vout_to_augment].value += txo_value;
 
         // Insert contribution at random index for privacy
         let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0..=self.psbt.unsigned_tx.input.len());
-        self.psbt.inputs.insert(
+        let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
+        self.payjoin_psbt.inputs.insert(
             index,
             bitcoin::psbt::Input { witness_utxo: Some(txo.clone()), ..Default::default() },
         );
-        self.psbt.unsigned_tx.input.insert(
+        self.payjoin_psbt.unsigned_tx.input.insert(
             index,
             bitcoin::TxIn {
                 previous_output: outpoint,
@@ -408,25 +415,30 @@ impl PayjoinProposal {
 
     pub fn contribute_non_witness_input(&mut self, tx: bitcoin::Transaction, outpoint: OutPoint) {
         // The payjoin proposal must not introduce mixed input sequence numbers
-        let original_sequence =
-            self.psbt.unsigned_tx.input.first().map(|input| input.sequence).unwrap_or_default();
+        let original_sequence = self
+            .payjoin_psbt
+            .unsigned_tx
+            .input
+            .first()
+            .map(|input| input.sequence)
+            .unwrap_or_default();
 
         // Add the value of new receiver input to receiver output
         let txo_value = tx.output[outpoint.vout as usize].value;
         let vout_to_augment =
             self.owned_vouts.choose(&mut rand::thread_rng()).expect("owned_vouts is empty");
-        self.psbt.unsigned_tx.output[*vout_to_augment].value += txo_value;
+        self.payjoin_psbt.unsigned_tx.output[*vout_to_augment].value += txo_value;
 
         // Insert contribution at random index for privacy
         let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0..=self.psbt.unsigned_tx.input.len());
+        let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
 
         // Add the new input to the PSBT
-        self.psbt.inputs.insert(
+        self.payjoin_psbt.inputs.insert(
             index,
             bitcoin::psbt::Input { non_witness_utxo: Some(tx.clone()), ..Default::default() },
         );
-        self.psbt.unsigned_tx.input.insert(
+        self.payjoin_psbt.unsigned_tx.input.insert(
             index,
             bitcoin::TxIn {
                 previous_output: outpoint,
@@ -439,7 +451,7 @@ impl PayjoinProposal {
 
     /// Just replace an output address with
     pub fn substitute_output_address(&mut self, substitute_address: bitcoin::Address) {
-        self.psbt.unsigned_tx.output[self.owned_vouts[0]].script_pubkey =
+        self.payjoin_psbt.unsigned_tx.output[self.owned_vouts[0]].script_pubkey =
             substitute_address.script_pubkey();
     }
 
@@ -461,9 +473,9 @@ impl PayjoinProposal {
         let min_feerate = max(min_feerate, self.params.min_feerate);
         log::debug!("min_feerate: {:?}", min_feerate);
 
-        let input_pair = self.psbt.input_pairs().next().unwrap();
+        let input_pair = self.payjoin_psbt.input_pairs().next().unwrap();
         let txo = input_pair.previous_txout().unwrap();
-        let input_type = InputType::from_spent_input(&txo, &self.psbt.inputs[0]).unwrap();
+        let input_type = InputType::from_spent_input(&txo, &self.payjoin_psbt.inputs[0]).unwrap();
         let contribution_weight = input_type.expected_input_weight();
         log::trace!("contribution_weight: {}", contribution_weight);
         let mut additional_fee = contribution_weight * min_feerate;

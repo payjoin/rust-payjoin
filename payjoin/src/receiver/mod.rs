@@ -292,7 +292,6 @@ impl OutputsUnknown {
             payjoin_psbt: self.psbt,
             params: self.params,
             owned_vouts,
-            contributions: Vec::new(),
         })
     }
 }
@@ -303,7 +302,6 @@ pub struct PayjoinProposal {
     payjoin_psbt: Psbt,
     params: Params,
     owned_vouts: Vec<usize>,
-    contributions: Vec<Script>,
 }
 
 impl PayjoinProposal {
@@ -410,7 +408,6 @@ impl PayjoinProposal {
                 ..Default::default()
             },
         );
-        self.contributions.push(txo.script_pubkey.clone());
     }
 
     pub fn contribute_non_witness_input(&mut self, tx: bitcoin::Transaction, outpoint: OutPoint) {
@@ -446,7 +443,6 @@ impl PayjoinProposal {
                 ..Default::default()
             },
         );
-        self.contributions.push(tx.output[outpoint.vout as usize].script_pubkey.clone());
     }
 
     /// Just replace an output address with

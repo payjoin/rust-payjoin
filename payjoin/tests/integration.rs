@@ -203,19 +203,14 @@ mod integration {
 
         // Sign payjoin psbt
         let payjoin_base64_string = base64::encode(consensus::serialize(&payjoin_proposal_psbt));
+        let payjoin_proposal_psbt = receiver
+            .wallet_process_psbt(&payjoin_base64_string, None, None, Some(false))
+            .unwrap()
+            .psbt;
         let payjoin_proposal_psbt =
-            receiver.wallet_process_psbt(&payjoin_base64_string, None, None, None).unwrap().psbt;
-        let payjoin_proposal_psbt =
-            receiver.finalize_psbt(&payjoin_proposal_psbt, Some(false)).unwrap().psbt.unwrap();
-        let mut payjoin_proposal_psbt =
             load_psbt_from_base64(payjoin_proposal_psbt.as_bytes()).unwrap();
-
-        // clear keypaths
-        payjoin_proposal_psbt
-            .outputs
-            .iter_mut()
-            .for_each(|output| output.bip32_derivation = Default::default());
-
+        let payjoin_proposal_psbt =
+            payjoin::receiver::clear_utxo_from_non_final_inputs(payjoin_proposal_psbt);
         debug!("Receiver's PayJoin proposal PSBT: {:#?}", payjoin_proposal_psbt);
 
         base64::encode(consensus::serialize(&payjoin_proposal_psbt))

@@ -199,7 +199,7 @@ mod integration {
         let receiver_substitute_address = receiver.get_new_address(None, None).unwrap();
         payjoin.substitute_output_address(receiver_substitute_address);
 
-        let payjoin_proposal_psbt = payjoin.extract_psbt(None).expect("failed to apply fees");
+        let payjoin_proposal_psbt = payjoin.apply_fee(None).unwrap();
 
         // Sign payjoin psbt
         let payjoin_base64_string = base64::encode(consensus::serialize(&payjoin_proposal_psbt));
@@ -209,8 +209,8 @@ mod integration {
             .psbt;
         let payjoin_proposal_psbt =
             load_psbt_from_base64(payjoin_proposal_psbt.as_bytes()).unwrap();
-        let payjoin_proposal_psbt =
-            payjoin::receiver::clear_utxo_from_non_final_inputs(payjoin_proposal_psbt);
+
+        let payjoin_proposal_psbt = payjoin.prepare_psbt(payjoin_proposal_psbt).unwrap();
         debug!("Receiver's PayJoin proposal PSBT: {:#?}", payjoin_proposal_psbt);
 
         base64::encode(consensus::serialize(&payjoin_proposal_psbt))

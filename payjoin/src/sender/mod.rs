@@ -14,9 +14,7 @@
 //! 8. Cancel the one-minute deadline and broadcast the resulting PSBT
 //!
 
-use std::convert::TryInto;
-
-use bitcoin::util::psbt::PartiallySignedTransaction as UncheckedPsbt;
+use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::{Script, Sequence, TxOut};
 pub use error::{CreateRequestError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
@@ -24,7 +22,7 @@ use url::Url;
 
 use crate::fee_rate::FeeRate;
 use crate::input_type::InputType;
-use crate::psbt::Psbt;
+use crate::psbt::PsbtExt;
 use crate::weight::{varint_size, ComputeWeight, Weight};
 
 // See usize casts
@@ -161,9 +159,7 @@ fn load_psbt_from_base64(
 ) -> Result<Psbt, bitcoin::consensus::encode::Error> {
     use bitcoin::consensus::Decodable;
     let mut reader = base64::read::DecoderReader::new(&mut input, base64::STANDARD);
-    Ok(UncheckedPsbt::consensus_decode(&mut reader)?
-        .try_into()
-        .expect("consensus_decode guarantees consistency"))
+    Ok(Psbt::consensus_decode(&mut reader)?)
 }
 
 impl Context {
@@ -172,10 +168,7 @@ impl Context {
     /// Call this method with response from receiver to continue BIP78 flow. If the response is
     /// valid you will get appropriate PSBT that you should sign and broadcast.
     #[inline]
-    pub fn process_response(
-        self,
-        response: impl std::io::Read,
-    ) -> Result<UncheckedPsbt, ValidationError> {
+    pub fn process_response(self, response: impl std::io::Read) -> Result<Psbt, ValidationError> {
         let proposal = load_psbt_from_base64(response).map_err(InternalValidationError::Decode)?;
 
         // process in non-generic function
@@ -611,6 +604,7 @@ mod tests {
     fn official_vectors() {
         use crate::fee_rate::FeeRate;
         use crate::input_type::{InputType, SegWitV0Type};
+        use crate::psbt::PsbtExt;
 
         let mut original_psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=".as_bytes();
 

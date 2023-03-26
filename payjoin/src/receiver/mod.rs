@@ -13,10 +13,9 @@
 //!
 
 use std::cmp::{max, min};
-use std::collections::HashMap;
-use std::convert::TryFrom;
+use std::collections::{BTreeMap, HashMap};
 
-use bitcoin::util::psbt::PartiallySignedTransaction as UncheckedPsbt;
+use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::{Amount, OutPoint, Script, TxOut};
 
 mod error;
@@ -30,7 +29,7 @@ use rand::Rng;
 
 use crate::fee_rate::FeeRate;
 use crate::input_type::InputType;
-use crate::psbt::Psbt;
+use crate::psbt::PsbtExt;
 
 pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
@@ -102,8 +101,8 @@ impl UncheckedProposal {
         let mut limited = body.take(content_length);
         let mut reader = base64::read::DecoderReader::new(&mut limited, base64::STANDARD);
         let unchecked_psbt =
-            UncheckedPsbt::consensus_decode(&mut reader).map_err(InternalRequestError::Decode)?;
-        let psbt = Psbt::try_from(unchecked_psbt).map_err(InternalRequestError::Psbt)?;
+            Psbt::consensus_decode(&mut reader).map_err(InternalRequestError::Decode)?;
+        let psbt = unchecked_psbt.validate().map_err(InternalRequestError::Psbt)?;
         log::debug!("Received original psbt: {:?}", psbt);
 
         let pairs = url::form_urlencoded::parse(query.as_bytes());
@@ -298,7 +297,7 @@ impl OutputsUnknown {
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
 pub struct PayjoinProposal {
-    original_psbt: UncheckedPsbt,
+    original_psbt: Psbt,
     payjoin_psbt: Psbt,
     params: Params,
     owned_vouts: Vec<usize>,
@@ -461,7 +460,7 @@ impl PayjoinProposal {
     pub fn extract_psbt(
         mut self,
         min_feerate_sat_per_vb: Option<u64>,
-    ) -> Result<UncheckedPsbt, RequestError> {
+    ) -> Result<Psbt, RequestError> {
         let min_feerate =
             FeeRate::from_sat_per_vb_unchecked(min_feerate_sat_per_vb.unwrap_or_default());
         log::trace!("min_feerate: {:?}", min_feerate);
@@ -491,20 +490,20 @@ impl PayjoinProposal {
             {
                 if !self.owned_vouts.contains(&additional_fee_output_index) {
                     // remove additional miner fee from the sender's specified output
-                    self.psbt.unsigned_tx.output[additional_fee_output_index].value -=
+                    self.payjoin_psbt.unsigned_tx.output[additional_fee_output_index].value -=
                         additional_fee.to_sat();
                 }
             }
         }
 
         // the payjoin proposal psbt
-        let reset_psbt = UncheckedPsbt::from_unsigned_tx(self.psbt.unsigned_tx.clone())
+        let reset_psbt = Psbt::from_unsigned_tx(self.payjoin_psbt.unsigned_tx.clone())
             .expect("resetting tx failed");
         Ok(reset_psbt.into())
     }
 }
 
-pub fn clear_utxo_from_non_final_inputs(mut psbt: UncheckedPsbt) -> UncheckedPsbt {
+pub fn clear_utxo_from_non_final_inputs(mut psbt: Psbt) -> Psbt {
     for input in psbt.inputs.iter_mut() {
         if input.final_script_sig.is_none() && input.final_script_witness.is_none() {
             // This is not our input, so we don't want to leak the UTXO

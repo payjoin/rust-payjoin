@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 
 use url::Url;
 
@@ -57,12 +57,12 @@ impl<'a> PjUriExt for PjUri<'a> {
         psbt: bitcoin::util::psbt::PartiallySignedTransaction,
         params: sender::Configuration,
     ) -> Result<(sender::Request, sender::Context), sender::CreateRequestError> {
-        sender::from_psbt_and_uri(
-            psbt.try_into()
-                .map_err(sender::InternalCreateRequestError::InconsistentOriginalPsbt)?,
-            self,
-            params,
-        )
+        use crate::psbt::PsbtExt;
+
+        let valid_psbt = psbt
+            .validate()
+            .map_err(sender::InternalCreateRequestError::InconsistentOriginalPsbt)?;
+        sender::from_psbt_and_uri(valid_psbt, self, params)
     }
 }
 

@@ -1,10 +1,10 @@
 //! Utilities to make work with PSBTs easier
 
 use std::collections::BTreeMap;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::fmt;
 
-use bitcoin::util::psbt::PartiallySignedTransaction as UncheckedPsbt;
+use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::util::{bip32, psbt};
 use bitcoin::{TxIn, TxOut};
 
@@ -25,40 +25,66 @@ impl fmt::Display for InconsistentPsbt {
 
 impl std::error::Error for InconsistentPsbt {}
 
-/// Our Psbt type guarantees that length of psbt input matches that of unsigned_tx inputs and same
-/// thing for outputs.
-#[derive(Debug)]
-pub(crate) struct Psbt(UncheckedPsbt);
+/// Our Psbt type for validation and utilities
+pub(crate) trait PsbtExt: Sized {
+    fn inputs_mut(&mut self) -> &mut [psbt::Input];
+    fn outputs_mut(&mut self) -> &mut [psbt::Output];
+    fn xpub_mut(
+        &mut self,
+    ) -> &mut BTreeMap<bip32::ExtendedPubKey, (bip32::Fingerprint, bip32::DerivationPath)>;
+    fn proprietary_mut(&mut self) -> &mut BTreeMap<psbt::raw::ProprietaryKey, Vec<u8>>;
+    fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>>;
+    fn input_pairs(&self) -> Box<dyn Iterator<Item = InputPair<'_>> + '_>;
+    // guarantees that length of psbt input matches that of unsigned_tx inputs and same
+    /// thing for outputs.
+    fn validate(self) -> Result<Self, InconsistentPsbt>;
+    fn validate_input_utxos(&self, treat_missing_as_error: bool) -> Result<(), PsbtInputsError>;
+    fn calculate_fee(&self) -> bitcoin::Amount;
+}
 
-impl Psbt {
-    pub fn inputs_mut(&mut self) -> &mut [psbt::Input] { &mut self.0.inputs }
+impl PsbtExt for Psbt {
+    fn inputs_mut(&mut self) -> &mut [psbt::Input] { &mut self.inputs }
 
-    pub fn outputs_mut(&mut self) -> &mut [psbt::Output] { &mut self.0.outputs }
+    fn outputs_mut(&mut self) -> &mut [psbt::Output] { &mut self.outputs }
 
-    pub fn xpub_mut(
+    fn xpub_mut(
         &mut self,
     ) -> &mut BTreeMap<bip32::ExtendedPubKey, (bip32::Fingerprint, bip32::DerivationPath)> {
-        &mut self.0.xpub
+        &mut self.xpub
     }
 
-    pub fn proprietary_mut(&mut self) -> &mut BTreeMap<psbt::raw::ProprietaryKey, Vec<u8>> {
-        &mut self.0.proprietary
+    fn proprietary_mut(&mut self) -> &mut BTreeMap<psbt::raw::ProprietaryKey, Vec<u8>> {
+        &mut self.proprietary
     }
 
-    pub fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>> { &mut self.0.unknown }
+    fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>> { &mut self.unknown }
 
-    pub fn input_pairs(&self) -> impl Iterator<Item = InputPair<'_>> + '_ {
-        self.unsigned_tx
-            .input
-            .iter()
-            .zip(&self.inputs)
-            .map(|(txin, psbtin)| InputPair { txin, psbtin })
+    fn input_pairs(&self) -> Box<dyn Iterator<Item = InputPair<'_>> + '_> {
+        Box::new(
+            self.unsigned_tx
+                .input
+                .iter()
+                .zip(&self.inputs)
+                .map(|(txin, psbtin)| InputPair { txin, psbtin }),
+        )
     }
 
-    pub fn validate_input_utxos(
-        &self,
-        treat_missing_as_error: bool,
-    ) -> Result<(), PsbtInputsError> {
+    fn validate(self) -> Result<Self, InconsistentPsbt> {
+        let tx_ins = self.unsigned_tx.input.len();
+        let psbt_ins = self.inputs.len();
+        let tx_outs = self.unsigned_tx.output.len();
+        let psbt_outs = self.outputs.len();
+
+        if psbt_ins != tx_ins {
+            Err(InconsistentPsbt::UnequalInputCounts { tx_ins, psbt_ins })
+        } else if psbt_outs != tx_outs {
+            Err(InconsistentPsbt::UnequalOutputCounts { tx_outs, psbt_outs })
+        } else {
+            Ok(self)
+        }
+    }
+
+    fn validate_input_utxos(&self, treat_missing_as_error: bool) -> Result<(), PsbtInputsError> {
         self.input_pairs().enumerate().try_for_each(|(index, input)| {
             input
                 .validate_utxo(treat_missing_as_error)
@@ -66,7 +92,7 @@ impl Psbt {
         })
     }
 
-    pub fn calculate_fee(&self) -> bitcoin::Amount {
+    fn calculate_fee(&self) -> bitcoin::Amount {
         let mut total_outputs = bitcoin::Amount::ZERO;
         let mut total_inputs = bitcoin::Amount::ZERO;
 
@@ -81,39 +107,6 @@ impl Psbt {
         log::debug!("- total_outputs: {}", total_outputs);
         total_inputs - total_outputs
     }
-}
-
-impl From<Psbt> for UncheckedPsbt {
-    fn from(value: Psbt) -> Self { value.0 }
-}
-
-impl TryFrom<UncheckedPsbt> for Psbt {
-    type Error = InconsistentPsbt;
-
-    fn try_from(unchecked: UncheckedPsbt) -> Result<Self, Self::Error> {
-        let tx_ins = unchecked.unsigned_tx.input.len();
-        let psbt_ins = unchecked.inputs.len();
-        let tx_outs = unchecked.unsigned_tx.output.len();
-        let psbt_outs = unchecked.outputs.len();
-
-        if psbt_ins != tx_ins {
-            Err(InconsistentPsbt::UnequalInputCounts { tx_ins, psbt_ins })
-        } else if psbt_outs != tx_outs {
-            Err(InconsistentPsbt::UnequalOutputCounts { tx_outs, psbt_outs })
-        } else {
-            Ok(Psbt(unchecked))
-        }
-    }
-}
-
-impl std::ops::Deref for Psbt {
-    type Target = UncheckedPsbt;
-
-    fn deref(&self) -> &Self::Target { &self.0 }
-}
-
-impl std::ops::DerefMut for Psbt {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
 }
 
 pub(crate) struct InputPair<'a> {

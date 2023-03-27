@@ -463,9 +463,15 @@ impl PayjoinProposal {
         let min_feerate = max(min_feerate, self.params.min_feerate);
         log::debug!("min_feerate: {:?}", min_feerate);
 
-        let input_pair = self.payjoin_psbt.input_pairs().next().unwrap();
-        let txo = input_pair.previous_txout().unwrap();
-        let input_type = InputType::from_spent_input(&txo, &self.payjoin_psbt.inputs[0]).unwrap();
+        // this error should never happen. We check for at least one input in the constructor
+        let input_pair = self
+            .payjoin_psbt
+            .input_pairs()
+            .next()
+            .ok_or(InternalRequestError::OriginalPsbtNotBroadcastable)?;
+        let txo = input_pair.previous_txout().map_err(InternalRequestError::PrevTxOut)?;
+        let input_type = InputType::from_spent_input(&txo, &self.payjoin_psbt.inputs[0])
+            .map_err(InternalRequestError::InputType)?;
         let contribution_weight = input_type.expected_input_weight();
         log::trace!("contribution_weight: {}", contribution_weight);
         let mut additional_fee = contribution_weight * min_feerate;
@@ -593,16 +599,16 @@ mod test {
         let mut payjoin = proposal
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| false)
-            .unwrap()
+            .expect("No inputs should be owned")
             .check_no_mixed_input_scripts()
-            .unwrap()
+            .expect("No mixed input scripts")
             .check_no_inputs_seen_before(|_| false)
-            .unwrap()
+            .expect("No inputs should be seen before")
             .identify_receiver_outputs(|script| {
                 Address::from_script(script, Network::Bitcoin)
                     == Address::from_str(&"3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
             })
-            .unwrap();
+            .expect("Receiver output should be identified");
         let payjoin = payjoin.apply_fee(None);
 
         assert!(payjoin.is_ok(), "Payjoin should be a valid PSBT");

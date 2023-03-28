@@ -481,7 +481,7 @@ impl PayjoinProposal {
             // Cap fee at the sender's contribution to simplify this method
             additional_fee = max_additional_fee_contribution;
         }
-        log::debug!("additional_fee: {}", additional_fee);
+        log::trace!("additional_fee: {}", additional_fee);
         if additional_fee > bitcoin::Amount::ZERO {
             log::trace!(
                 "self.params.additional_fee_contribution: {:?}",
@@ -510,7 +510,7 @@ impl PayjoinProposal {
     /// wallet_process_psbt should sign and finalize receiver inputs
     pub fn prepare_psbt(mut self, processed_psbt: Psbt) -> Result<Psbt, RequestError> {
         self.payjoin_psbt = processed_psbt;
-        log::debug!("Preparing PSBT {:#?}", self.payjoin_psbt);
+        log::trace!("Preparing PSBT {:#?}", self.payjoin_psbt);
         for input in self.payjoin_psbt.inputs_mut() {
             input.bip32_derivation = BTreeMap::new();
             input.partial_sigs = BTreeMap::new();
@@ -521,7 +521,7 @@ impl PayjoinProposal {
         for (i, input) in self.payjoin_psbt.input_pairs().enumerate() {
             //input.psbtin.bip32_derivation = BTreeMap::new();
             if let Some(original) = original_inputs.peek() {
-                log::debug!(
+                log::trace!(
                     "match previous_output: {} == {}",
                     input.txin.previous_output,
                     original.txin.previous_output
@@ -534,7 +534,7 @@ impl PayjoinProposal {
         }
 
         for i in sender_input_indexes {
-            log::debug!("Clearing sender input {}", i);
+            log::trace!("Clearing sender input {}", i);
             self.payjoin_psbt.inputs[i].non_witness_utxo = None;
             self.payjoin_psbt.inputs[i].witness_utxo = None;
             self.payjoin_psbt.inputs[i].final_script_sig = None;

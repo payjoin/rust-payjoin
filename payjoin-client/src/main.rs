@@ -2,26 +2,31 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::str::FromStr;
 
+use anyhow::{Context, Result};
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use clap::{arg, Arg, Command};
 use payjoin::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use payjoin::{PjUriExt, UriExt};
 
-fn main() {
+fn main() -> Result<()> {
     env_logger::init();
 
     let matches = cli().get_matches();
-    let port = matches.get_one::<String>("PORT").unwrap();
-    let cookie_file = matches.get_one::<String>("COOKIE_FILE").unwrap();
+    let port = matches.get_one::<String>("PORT").context("Missing PORT argument")?;
+    let cookie_file =
+        matches.get_one::<String>("COOKIE_FILE").context("Missing COOKIE_FILE argument")?;
     let bitcoind = bitcoincore_rpc::Client::new(
-        &format!("http://127.0.0.1:{}", port.parse::<u16>().unwrap()),
+        &format!(
+            "http://127.0.0.1:{}",
+            port.parse::<u16>().context("Failed to parse PORT argument")?
+        ),
         bitcoincore_rpc::Auth::CookieFile(cookie_file.into()),
     )
-    .unwrap();
+    .context("Failed to connect to bitcoind")?;
     match matches.subcommand() {
         Some(("send", sub_matches)) => {
-            let bip21 = sub_matches.get_one::<String>("BIP21").unwrap();
+            let bip21 = sub_matches.get_one::<String>("BIP21").context("Missing BIP21 argument")?;
             let danger_accept_invalid_certs =
                 match { sub_matches.get_one::<String>("DANGER_ACCEPT_INVALID_CERTS") } {
                     Some(danger_accept_invalid_certs) =>
@@ -31,12 +36,16 @@ fn main() {
             send_payjoin(bitcoind, bip21, danger_accept_invalid_certs);
         }
         Some(("receive", sub_matches)) => {
-            let amount = sub_matches.get_one::<String>("AMOUNT").unwrap();
-            let endpoint = sub_matches.get_one::<String>("ENDPOINT").unwrap();
+            let amount =
+                sub_matches.get_one::<String>("AMOUNT").context("Missing AMOUNT argument")?;
+            let endpoint =
+                sub_matches.get_one::<String>("ENDPOINT").context("Missing ENDPOINT argument")?;
             receive_payjoin(bitcoind, amount, endpoint);
         }
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
+
+    Ok(())
 }
 
 fn send_payjoin(bitcoind: bitcoincore_rpc::Client, bip21: &str, danger_accept_invalid_certs: bool) {

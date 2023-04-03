@@ -172,6 +172,23 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
     }
 }
 
+impl std::fmt::Display for PjParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            InternalPjParseError::BadPjOs => write!(f, "Bad pjos parameter"),
+            InternalPjParseError::MultipleParams(param) => {
+                write!(f, "Multiple instances of parameter '{}'", param)
+            }
+            InternalPjParseError::MissingEndpoint => write!(f, "Missing payjoin endpoint"),
+            InternalPjParseError::NotUtf8(_) => write!(f, "Endpoint is not valid UTF-8"),
+            InternalPjParseError::BadEndpoint(_) => write!(f, "Endpoint is not valid"),
+            InternalPjParseError::UnsecureEndpoint => {
+                write!(f, "Endpoint scheme is not secure (https or onion)")
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 enum InternalPjParseError {
     BadPjOs,

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::str::FromStr;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use clap::{arg, Arg, Command};
@@ -33,7 +33,7 @@ fn main() -> Result<()> {
                         bool::from_str(danger_accept_invalid_certs).unwrap_or(false),
                     None => false,
                 };
-            send_payjoin(bitcoind, bip21, danger_accept_invalid_certs);
+            send_payjoin(bitcoind, bip21, danger_accept_invalid_certs)?;
         }
         Some(("receive", sub_matches)) => {
             let amount =
@@ -48,18 +48,22 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn send_payjoin(bitcoind: bitcoincore_rpc::Client, bip21: &str, danger_accept_invalid_certs: bool) {
-    let link = payjoin::Uri::try_from(bip21).unwrap();
+fn send_payjoin(
+    bitcoind: bitcoincore_rpc::Client,
+    bip21: &str,
+    danger_accept_invalid_certs: bool,
+) -> Result<()> {
+    let link = payjoin::Uri::try_from(bip21)
+        .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
 
     let link = link
         .check_pj_supported()
-        .unwrap_or_else(|_| panic!("The provided URI doesn't support payjoin (BIP78)"));
+        .map_err(|e| anyhow!("The provided URI doesn't support payjoin (BIP78): {}", e))?;
 
-    if link.amount.is_none() {
-        panic!("please specify the amount in the Uri");
-    }
-
-    let amount = Amount::from_sat(link.amount.unwrap().to_sat());
+    let amount = link
+        .amount
+        .ok_or(anyhow!("please specify the amount in the Uri"))
+        .map(|amt| Amount::from_sat(amt.to_sat()))?;
     let mut outputs = HashMap::with_capacity(1);
     outputs.insert(link.address.to_string(), amount);
 
@@ -76,33 +80,46 @@ fn send_payjoin(bitcoind: bitcoincore_rpc::Client, bip21: &str, danger_accept_in
             Some(options),
             None,
         )
-        .expect("failed to create PSBT")
+        .context("Failed to create PSBT")?
         .psbt;
-    let psbt = bitcoind.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
-    let psbt = load_psbt_from_base64(psbt.as_bytes()).unwrap();
+    let psbt = bitcoind
+        .wallet_process_psbt(&psbt, None, None, None)
+        .with_context(|| "Failed to process PSBT")?
+        .psbt;
+    let psbt = load_psbt_from_base64(psbt.as_bytes())
+        .with_context(|| "Failed to load PSBT from base64")?;
     log::debug!("Original psbt: {:#?}", psbt);
     let pj_params = payjoin::sender::Configuration::with_fee_contribution(
         payjoin::bitcoin::Amount::from_sat(10000),
         None,
     );
-    let (req, ctx) = link.create_pj_request(psbt, pj_params).unwrap();
+    let (req, ctx) = link
+        .create_pj_request(psbt, pj_params)
+        .with_context(|| "Failed to create payjoin request")?;
     let client = reqwest::blocking::Client::builder()
         .danger_accept_invalid_certs(danger_accept_invalid_certs)
         .build()
-        .unwrap();
+        .with_context(|| "Failed to build reqwest http client")?;
     let response = client
         .post(req.url)
         .body(req.body)
         .header("Content-Type", "text/plain")
         .send()
-        .expect("failed to communicate");
-    //.error_for_status()
-    //.unwrap();
-    let psbt = ctx.process_response(response).unwrap();
+        .with_context(|| "HTTP request failed")?;
+    // TODO display well-known errors and log::debug the rest
+    let psbt = ctx.process_response(response).with_context(|| "Failed to process response")?;
     log::debug!("Proposed psbt: {:#?}", psbt);
-    let psbt = bitcoind.wallet_process_psbt(&serialize_psbt(&psbt), None, None, None).unwrap().psbt;
-    let tx = bitcoind.finalize_psbt(&psbt, Some(true)).unwrap().hex.expect("incomplete psbt");
-    bitcoind.send_raw_transaction(&tx).unwrap();
+    let psbt = bitcoind
+        .wallet_process_psbt(&serialize_psbt(&psbt), None, None, None)
+        .with_context(|| "Failed to process PSBT")?
+        .psbt;
+    let tx = bitcoind
+        .finalize_psbt(&psbt, Some(true))
+        .with_context(|| "Failed to finalize PSBT")?
+        .hex
+        .ok_or_else(|| anyhow!("Incomplete PSBT"))?;
+    bitcoind.send_raw_transaction(&tx).with_context(|| "Failed to send raw transaction")?;
+    Ok(())
 }
 
 fn receive_payjoin(bitcoind: bitcoincore_rpc::Client, amount_arg: &str, endpoint_arg: &str) {

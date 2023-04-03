@@ -1,5 +1,5 @@
 use std::convert::{TryFrom, TryInto};
-use std::fmt;
+use std::fmt::{self, Display};
 
 use bitcoin::blockdata::script::{Instruction, Instructions, Script};
 use bitcoin::blockdata::transaction::TxOut;
@@ -84,6 +84,19 @@ impl InputType {
     }
 }
 
+impl fmt::Display for InputType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InputType::P2Pk => write!(f, "P2PK"),
+            InputType::P2Pkh => write!(f, "P2PKH"),
+            InputType::P2Sh => write!(f, "P2SH"),
+            InputType::SegWitV0 { ty, nested } =>
+                write!(f, "SegWitV0: type={}, nested={}", ty, nested),
+            InputType::Taproot => write!(f, "Taproot"),
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub(crate) enum SegWitV0Type {
     Pubkey,
@@ -107,6 +120,15 @@ impl TryFrom<Instructions<'_>> for SegWitV0Type {
             Instruction::PushBytes(bytes) if bytes.len() == 20 => Ok(SegWitV0Type::Pubkey),
             Instruction::PushBytes(bytes) if bytes.len() == 32 => Ok(SegWitV0Type::Script),
             Instruction::PushBytes(_) | Instruction::Op(_) => Err(InputTypeError::UnknownInputType),
+        }
+    }
+}
+
+impl fmt::Display for SegWitV0Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SegWitV0Type::Pubkey => write!(f, "pubkey"),
+            SegWitV0Type::Script => write!(f, "script"),
         }
     }
 }

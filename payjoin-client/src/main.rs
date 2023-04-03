@@ -122,22 +122,29 @@ fn send_payjoin(
     Ok(())
 }
 
-fn receive_payjoin(bitcoind: bitcoincore_rpc::Client, amount_arg: &str, endpoint_arg: &str) {
+fn receive_payjoin(
+    bitcoind: bitcoincore_rpc::Client,
+    amount_arg: &str,
+    endpoint_arg: &str,
+) -> Result<()> {
     use bitcoin::hashes::hex::ToHex;
     use bitcoin::OutPoint;
     use payjoin::Uri;
     use rouille::Response;
 
-    let pj_receiver_address = bitcoind.get_new_address(None, None).unwrap();
-    let amount = Amount::from_sat(amount_arg.parse().unwrap());
+    let pj_receiver_address = bitcoind.get_new_address(None, None)?;
+    let amount = Amount::from_sat(amount_arg.parse()?);
     let pj_uri_string = format!(
         "{}?amount={}&pj={}",
         pj_receiver_address.to_qr_uri(),
         amount.to_btc(),
         endpoint_arg
     );
-    let pj_uri = Uri::from_str(&pj_uri_string).unwrap();
-    let _pj_uri = pj_uri.check_pj_supported().expect("Bad Uri");
+    let pj_uri = Uri::from_str(&pj_uri_string)
+        .map_err(|e| anyhow!("Constructed a bad URI string from args: {}", e))?;
+    let _pj_uri = pj_uri
+        .check_pj_supported()
+        .map_err(|e| anyhow!("Constructed URI does not support payjoin: {}", e))?;
 
     println!("Awaiting payjoin at BIP 21 Payjoin Uri:");
     println!("{}", pj_uri_string);

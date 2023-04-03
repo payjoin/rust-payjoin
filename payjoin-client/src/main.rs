@@ -8,6 +8,7 @@ use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use clap::{arg, Arg, Command};
 use payjoin::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
+use payjoin::receiver::PayjoinProposal;
 use payjoin::{PjUriExt, UriExt};
 use rouille::{Request, Response};
 
@@ -173,7 +174,6 @@ fn handle_payjoin_request(
     bitcoind: &bitcoincore_rpc::Client,
 ) -> Result<Response, ReceiveError> {
     use bitcoin::hashes::hex::ToHex;
-    use bitcoin::OutPoint;
 
     let headers = Headers(req.headers());
     let proposal = payjoin::receiver::UncheckedProposal::from_request(
@@ -225,27 +225,8 @@ fn handle_payjoin_request(
     log::trace!("check4");
 
     // Select receiver payjoin inputs.
-    let available_inputs = bitcoind.list_unspent(None, None, None, None, None).unwrap();
-    let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
-        .iter()
-        .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
-        .collect();
-
-    let selected_outpoint = payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
-    let selected_utxo = available_inputs
-        .iter()
-        .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
-        .unwrap();
-    log::debug!("selected utxo: {:#?}", selected_utxo);
-
-    //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
-    let txo_to_contribute = bitcoin::TxOut {
-        value: selected_utxo.amount.to_sat(),
-        script_pubkey: selected_utxo.script_pub_key.clone(),
-    };
-    let outpoint_to_contribute =
-        bitcoin::OutPoint { txid: selected_utxo.txid, vout: selected_utxo.vout };
-    payjoin.contribute_witness_input(txo_to_contribute, outpoint_to_contribute);
+    _ = try_contributing_inputs(&mut payjoin, bitcoind)
+        .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
 
     let receiver_substitute_address = bitcoind.get_new_address(None, None)?;
     payjoin.substitute_output_address(receiver_substitute_address);
@@ -267,6 +248,38 @@ fn handle_payjoin_request(
     let payload = base64::encode(bitcoin::consensus::serialize(&payjoin_proposal_psbt));
     log::info!("successful response");
     Ok(Response::text(payload))
+}
+
+fn try_contributing_inputs(
+    payjoin: &mut PayjoinProposal,
+    bitcoind: &bitcoincore_rpc::Client,
+) -> Result<()> {
+    use bitcoin::OutPoint;
+
+    let available_inputs = bitcoind
+        .list_unspent(None, None, None, None, None)
+        .context("Failed to list unspent from bitcoind")?;
+    let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
+        .iter()
+        .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
+        .collect();
+
+    let selected_outpoint = payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
+    let selected_utxo = available_inputs
+        .iter()
+        .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
+        .context("This shouldn't happen. Failed to retrieve the privacy preserving utxo from those we provided to the seclector.")?;
+    log::debug!("selected utxo: {:#?}", selected_utxo);
+
+    //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
+    let txo_to_contribute = bitcoin::TxOut {
+        value: selected_utxo.amount.to_sat(),
+        script_pubkey: selected_utxo.script_pub_key.clone(),
+    };
+    let outpoint_to_contribute =
+        bitcoin::OutPoint { txid: selected_utxo.txid, vout: selected_utxo.vout };
+    payjoin.contribute_witness_input(txo_to_contribute, outpoint_to_contribute);
+    Ok(())
 }
 
 enum ReceiveError {

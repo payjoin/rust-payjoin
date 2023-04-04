@@ -9,6 +9,7 @@ edition = "2018"
 native-tls-vendored = ["reqwest/native-tls-vendored"]
 
 [dependencies]
+anyhow = "1.0.70"
 bitcoin = "0.29.2"
 payjoin = { path = "../payjoin", features = ["sender", "receiver"] }
 bitcoincore-rpc = "0.16.0"

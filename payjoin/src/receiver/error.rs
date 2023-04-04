@@ -1,3 +1,5 @@
+use std::fmt::{self, Display};
+
 /// Error that may occur when the request from sender is malformed.
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
@@ -33,6 +35,61 @@ pub(crate) enum InternalRequestError {
 
 impl From<InternalRequestError> for RequestError {
     fn from(value: InternalRequestError) -> Self { RequestError(value) }
+}
+
+impl fmt::Display for RequestError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fn write_error(f: &mut fmt::Formatter, code: &str, message: impl Display) -> fmt::Result {
+            write!(f, r#"{{ "errorCode": "{}", "message": "{}" }}"#, code, message)
+        }
+
+        match &self.0 {
+            InternalRequestError::Decode(e) => write_error(f, "decode-error", e),
+            InternalRequestError::MissingHeader(header) =>
+                write_error(f, "missing-header", &format!("Missing header: {}", header)),
+            InternalRequestError::InvalidContentType(content_type) => write_error(
+                f,
+                "invalid-content-type",
+                &format!("Invalid content type: {}", content_type),
+            ),
+            InternalRequestError::InvalidContentLength(e) =>
+                write_error(f, "invalid-content-length", e),
+            InternalRequestError::ContentLengthTooLarge(length) => write_error(
+                f,
+                "content-length-too-large",
+                &format!("Content length too large: {}.", length),
+            ),
+            InternalRequestError::SenderParams(e) => match e {
+                super::optional_parameters::Error::UnknownVersion => write_error(
+                    f,
+                    "version-unsupported",
+                    "This version of payjoin is not supported.",
+                ),
+                _ => write_error(f, "sender-params-error", e),
+            },
+            InternalRequestError::Psbt(e) => write_error(f, "original-psbt-rejected", e),
+            InternalRequestError::PrevTxOut(e) =>
+                write_error(f, "original-psbt-rejected", &format!("PrevTxOut Error: {}", e)),
+            InternalRequestError::MissingPayment =>
+                write_error(f, "original-psbt-rejected", "Missing payment."),
+            InternalRequestError::OriginalPsbtNotBroadcastable => write_error(
+                f,
+                "original-psbt-rejected",
+                "Can't broadcast. PSBT rejected by mempool.",
+            ),
+            InternalRequestError::InputOwned(_) =>
+                write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
+            InternalRequestError::MixedInputScripts(type_a, type_b) => write_error(
+                f,
+                "original-psbt-rejected",
+                &format!("Mixed input scripts: {}; {}.", type_a, type_b),
+            ),
+            InternalRequestError::InputType(e) =>
+                write_error(f, "original-psbt-rejected", &format!("Input Type Error: {}.", e)),
+            InternalRequestError::InputSeen(_) =>
+                write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
+        }
+    }
 }
 
 /// Error that may occur when coin selection fails.

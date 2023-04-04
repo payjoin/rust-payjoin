@@ -43,7 +43,12 @@ fn main() -> Result<()> {
                 sub_matches.get_one::<String>("AMOUNT").context("Missing AMOUNT argument")?;
             let endpoint =
                 sub_matches.get_one::<String>("ENDPOINT").context("Missing ENDPOINT argument")?;
-            receive_payjoin(bitcoind, amount, endpoint)?;
+            let sub_only = match { sub_matches.get_one::<String>("SUB_ONLY") } {
+                Some(danger_accept_invalid_certs) =>
+                    bool::from_str(danger_accept_invalid_certs).unwrap_or(false),
+                None => false,
+            };
+            receive_payjoin(bitcoind, amount, endpoint, sub_only)?;
         }
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
@@ -131,6 +136,7 @@ fn receive_payjoin(
     bitcoind: bitcoincore_rpc::Client,
     amount_arg: &str,
     endpoint_arg: &str,
+    sub_only: bool,
 ) -> Result<()> {
     use payjoin::Uri;
 
@@ -151,11 +157,15 @@ fn receive_payjoin(
     println!("Awaiting payjoin at BIP 21 Payjoin Uri:");
     println!("{}", pj_uri_string);
 
-    rouille::start_server("0.0.0.0:3000", move |req| handle_web_request(&req, &bitcoind));
+    rouille::start_server("0.0.0.0:3000", move |req| handle_web_request(&req, &bitcoind, sub_only));
 }
 
-fn handle_web_request(req: &Request, bitcoind: &bitcoincore_rpc::Client) -> Response {
-    handle_payjoin_request(req, bitcoind)
+fn handle_web_request(
+    req: &Request,
+    bitcoind: &bitcoincore_rpc::Client,
+    sub_only: bool,
+) -> Response {
+    handle_payjoin_request(req, bitcoind, sub_only)
         .map_err(|e| match e {
             ReceiveError::RequestError(e) => {
                 log::error!("Error handling request: {}", e);
@@ -172,6 +182,7 @@ fn handle_web_request(req: &Request, bitcoind: &bitcoincore_rpc::Client) -> Resp
 fn handle_payjoin_request(
     req: &Request,
     bitcoind: &bitcoincore_rpc::Client,
+    sub_only: bool,
 ) -> Result<Response, ReceiveError> {
     use bitcoin::hashes::hex::ToHex;
 
@@ -224,9 +235,11 @@ fn handle_payjoin_request(
         })?;
     log::trace!("check4");
 
-    // Select receiver payjoin inputs.
-    _ = try_contributing_inputs(&mut payjoin, bitcoind)
-        .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
+    if !sub_only {
+        // Select receiver payjoin inputs.
+        _ = try_contributing_inputs(&mut payjoin, bitcoind)
+            .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
+    }
 
     let receiver_substitute_address = bitcoind.get_new_address(None, None)?;
     payjoin.substitute_output_address(receiver_substitute_address);
@@ -360,6 +373,7 @@ fn cli() -> Command {
                 .arg_required_else_help(true)
                 .arg(arg!(<AMOUNT> "The amount to receive in satoshis"))
                 .arg_required_else_help(true)
-                .arg(arg!(<ENDPOINT> "The `pj=` endpoint to receive the payjoin request")),
+                .arg(arg!(<ENDPOINT> "The `pj=` endpoint to receive the payjoin request"))
+                .arg(arg!(<SUB_ONLY> "Use payjoin like a payment code, no hot wallet required. Only substitute outputs. Don't contribute inputs.")),
         )
 }

@@ -38,7 +38,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [ ] Tested and works with JoinMarket
 - [x] Minimum fee rate enforcement
 - [ ] Independent review
-- [ ] Independent testing
+- [x] Independent testing
 
 #### Receiver (beta)
 

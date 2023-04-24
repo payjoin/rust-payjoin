@@ -18,11 +18,8 @@ fn main() -> Result<()> {
     let matches = cli();
     let config = parse_config(&matches)?;
 
-    let bitcoind = bitcoincore_rpc::Client::new(
-        &format!("http://127.0.0.1:{}", config.bitcoind_rpc_port),
-        config.bitcoind_auth,
-    )
-    .context("Failed to connect to bitcoind")?;
+    let bitcoind = bitcoincore_rpc::Client::new(&config.bitcoind_rpchost, config.bitcoind_auth)
+        .context("Failed to connect to bitcoind")?;
     match matches.subcommand() {
         Some(("send", sub_matches)) => {
             let bip21 = sub_matches.get_one::<String>("BIP21").context("Missing BIP21 argument")?;
@@ -353,14 +350,14 @@ fn serialize_psbt(psbt: &Psbt) -> String {
 
 #[derive(Debug)]
 struct AppConfig {
+    bitcoind_rpchost: String,
     bitcoind_auth: bitcoincore_rpc::Auth,
-    bitcoind_rpc_port: u16,
 }
 
 fn cli() -> ArgMatches {
     Command::new("payjoin")
         .about("Transfer bitcoin and preserve your privacy")
-        .arg(arg!(<PORT> "The port of the bitcoin node"))
+        .arg(arg!(<RPCHOST> "The JSON rpc host of the bitcoin node"))
         .arg_required_else_help(true)
         .arg(arg!(<COOKIE_FILE> "Path to the cookie file of the bitcoin node"))
         .subcommand_required(true)
@@ -382,17 +379,13 @@ fn cli() -> ArgMatches {
 }
 
 fn parse_config(matches: &ArgMatches) -> Result<AppConfig> {
-    let port = matches.get_one::<String>("PORT").context("Missing PORT argument")?;
-    let bitcoind_rpc_port = port.parse::<u16>().context("Failed to parse PORT argument")?;
-    let rpc_user = matches
-        .get_one::<String>("BITCOIN_RPC_USER")
-        .context("Missing BITCOIN_RPC_USER argument")?;
-    let rpc_pass = matches
-        .get_one::<String>("BITCOIN_RPC_PASS")
-        .context("Missing BITCOIN_RPC_PASS argument")?;
+    let bitcoind_rpchost =
+        matches.get_one::<String>("RPCHOST").context("Missing BITCOIND_RPCHOST argument")?.clone();
+    let bitcoind_cookie =
+        matches.get_one::<String>("COOKIE_FILE").context("Missing COOKIE_FILE argument")?;
 
     Ok(AppConfig {
-        bitcoind_rpc_port,
-        bitcoind_auth: bitcoincore_rpc::Auth::UserPass(rpc_user.into(), rpc_pass.into()),
+        bitcoind_rpchost,
+        bitcoind_auth: bitcoincore_rpc::Auth::CookieFile(bitcoind_cookie.into()),
     })
 }

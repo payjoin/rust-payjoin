@@ -51,7 +51,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [x] Example server using bitcoind
 - [x] Tested and works with BTCPayServer
 - [x] Tested and works with WasabiWallet
-- [ ] Tested and works with Blue Wallet
+- [x] Tested and works with Blue Wallet
 - [x] Tested and works with Sparrow
 - [x] Minimum fee rate enforcement
 - [ ] Discount support

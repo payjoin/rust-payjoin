@@ -6,7 +6,7 @@ use std::str::FromStr;
 use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
-use clap::{arg, Arg, Command};
+use clap::{arg, Arg, ArgMatches, Command};
 use payjoin::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use payjoin::receiver::PayjoinProposal;
 use payjoin::{PjUriExt, UriExt};
@@ -15,16 +15,12 @@ use rouille::{Request, Response};
 fn main() -> Result<()> {
     env_logger::init();
 
-    let matches = cli().get_matches();
-    let port = matches.get_one::<String>("PORT").context("Missing PORT argument")?;
-    let cookie_file =
-        matches.get_one::<String>("COOKIE_FILE").context("Missing COOKIE_FILE argument")?;
+    let matches = cli();
+    let config = parse_config(&matches)?;
+
     let bitcoind = bitcoincore_rpc::Client::new(
-        &format!(
-            "http://127.0.0.1:{}",
-            port.parse::<u16>().context("Failed to parse PORT argument")?
-        ),
-        bitcoincore_rpc::Auth::CookieFile(cookie_file.into()),
+        &format!("http://127.0.0.1:{}", config.bitcoind_rpc_port),
+        config.bitcoind_auth,
     )
     .context("Failed to connect to bitcoind")?;
     match matches.subcommand() {
@@ -355,7 +351,13 @@ fn serialize_psbt(psbt: &Psbt) -> String {
     .unwrap()
 }
 
-fn cli() -> Command {
+#[derive(Debug)]
+struct AppConfig {
+    bitcoind_auth: bitcoincore_rpc::Auth,
+    bitcoind_rpc_port: u16,
+}
+
+fn cli() -> ArgMatches {
     Command::new("payjoin")
         .about("Transfer bitcoin and preserve your privacy")
         .arg(arg!(<PORT> "The port of the bitcoin node"))
@@ -376,4 +378,21 @@ fn cli() -> Command {
                 .arg(arg!(<ENDPOINT> "The `pj=` endpoint to receive the payjoin request"))
                 .arg(arg!(<SUB_ONLY> "Use payjoin like a payment code, no hot wallet required. Only substitute outputs. Don't contribute inputs.")),
         )
+        .get_matches()
+}
+
+fn parse_config(matches: &ArgMatches) -> Result<AppConfig> {
+    let port = matches.get_one::<String>("PORT").context("Missing PORT argument")?;
+    let bitcoind_rpc_port = port.parse::<u16>().context("Failed to parse PORT argument")?;
+    let rpc_user = matches
+        .get_one::<String>("BITCOIN_RPC_USER")
+        .context("Missing BITCOIN_RPC_USER argument")?;
+    let rpc_pass = matches
+        .get_one::<String>("BITCOIN_RPC_PASS")
+        .context("Missing BITCOIN_RPC_PASS argument")?;
+
+    Ok(AppConfig {
+        bitcoind_rpc_port,
+        bitcoind_auth: bitcoincore_rpc::Auth::UserPass(rpc_user.into(), rpc_pass.into()),
+    })
 }

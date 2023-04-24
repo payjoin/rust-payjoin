@@ -23,25 +23,18 @@ fn main() -> Result<()> {
     match matches.subcommand() {
         Some(("send", sub_matches)) => {
             let bip21 = sub_matches.get_one::<String>("BIP21").context("Missing BIP21 argument")?;
-            let danger_accept_invalid_certs =
-                match { sub_matches.get_one::<String>("DANGER_ACCEPT_INVALID_CERTS") } {
-                    Some(danger_accept_invalid_certs) =>
-                        bool::from_str(danger_accept_invalid_certs).unwrap_or(false),
-                    None => false,
-                };
-            send_payjoin(bitcoind, bip21, danger_accept_invalid_certs)?;
+            send_payjoin(bitcoind, bip21, config.danger_accept_invalid_certs)?;
         }
         Some(("receive", sub_matches)) => {
             let amount =
                 sub_matches.get_one::<String>("AMOUNT").context("Missing AMOUNT argument")?;
-            let endpoint =
-                sub_matches.get_one::<String>("ENDPOINT").context("Missing ENDPOINT argument")?;
-            let sub_only = match { sub_matches.get_one::<String>("SUB_ONLY") } {
-                Some(danger_accept_invalid_certs) =>
-                    bool::from_str(danger_accept_invalid_certs).unwrap_or(false),
-                None => false,
-            };
-            receive_payjoin(bitcoind, amount, endpoint, sub_only)?;
+            receive_payjoin(
+                bitcoind,
+                amount,
+                &config.pj_host,
+                &config.pj_endpoint,
+                config.sub_only,
+            )?;
         }
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
@@ -128,6 +121,7 @@ fn send_payjoin(
 fn receive_payjoin(
     bitcoind: bitcoincore_rpc::Client,
     amount_arg: &str,
+    pj_host: &str,
     endpoint_arg: &str,
     sub_only: bool,
 ) -> Result<()> {
@@ -150,7 +144,7 @@ fn receive_payjoin(
     println!("Awaiting payjoin at BIP 21 Payjoin Uri:");
     println!("{}", pj_uri_string);
 
-    rouille::start_server("0.0.0.0:3000", move |req| handle_web_request(&req, &bitcoind, sub_only));
+    rouille::start_server(pj_host, move |req| handle_web_request(&req, &bitcoind, sub_only));
 }
 
 fn handle_web_request(
@@ -352,40 +346,99 @@ fn serialize_psbt(psbt: &Psbt) -> String {
 struct AppConfig {
     bitcoind_rpchost: String,
     bitcoind_auth: bitcoincore_rpc::Auth,
+
+    // send-only
+    danger_accept_invalid_certs: bool,
+
+    // receive-only
+    pj_host: String,
+    pj_endpoint: String,
+    sub_only: bool,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            bitcoind_rpchost: "http://localhost:18443".into(),
+            bitcoind_auth: bitcoincore_rpc::Auth::UserPass(
+                "bitcoin".to_string(),
+                "".to_string().into(),
+            ),
+            danger_accept_invalid_certs: false,
+            pj_host: "0.0.0.0:3000".into(),
+            pj_endpoint: "https://localhost:3010".into(),
+            sub_only: false,
+        }
+    }
 }
 
 fn cli() -> ArgMatches {
     Command::new("payjoin")
         .about("Transfer bitcoin and preserve your privacy")
-        .arg(arg!(<RPCHOST> "The JSON rpc host of the bitcoin node"))
-        .arg_required_else_help(true)
-        .arg(arg!(<COOKIE_FILE> "Path to the cookie file of the bitcoin node"))
+        .arg(Arg::new("rpchost")
+            .long("rpchost")
+            .short('r')
+            .help("The port of the bitcoin node"))
+        .arg(Arg::new("cookie_file")
+            .long("cookie-file")
+            .short('c')
+            .help("Path to the cookie file of the bitcoin node"))
         .subcommand_required(true)
         .subcommand(
             Command::new("send")
                 .arg_required_else_help(true)
                 .arg(arg!(<BIP21> "The `bitcoin:...` payjoin uri to send to"))
-                .arg(Arg::new("DANGER_ACCEPT_INVALID_CERTS").hide(true).help("Wicked dangerous! Vulnerable to MITM attacks! Accept invalid certs for the payjoin endpoint")),
+                .arg(Arg::new("DANGER_ACCEPT_INVALID_CERTS").hide(true).help("Wicked dangerous! Vulnerable to MITM attacks! Accept invalid certs for the payjoin endpoint"))
         )
         .subcommand(
             Command::new("receive")
                 .arg_required_else_help(true)
                 .arg(arg!(<AMOUNT> "The amount to receive in satoshis"))
                 .arg_required_else_help(true)
-                .arg(arg!(<ENDPOINT> "The `pj=` endpoint to receive the payjoin request"))
-                .arg(arg!(<SUB_ONLY> "Use payjoin like a payment code, no hot wallet required. Only substitute outputs. Don't contribute inputs.")),
+                .arg(Arg::new("endpoint")
+                    .long("endpoint")
+                    .short('e')
+                    .help("The `pj=` endpoint to receive the payjoin request"))
+                //.arg(arg!(<SUB_ONLY> "Use payjoin like a payment code, no hot wallet required. Only substitute outputs. Don't contribute inputs.")),
+                .arg(Arg::new("sub_only")
+                    .long("sub-only")
+                    .short('s')
+                    .num_args(0)
+                    .required(false)
+                    .hide(true)
+                    .help("Use payjoin like a payment code, no hot wallet required. Only substitute outputs. Don't contribute inputs."))
         )
         .get_matches()
 }
 
 fn parse_config(matches: &ArgMatches) -> Result<AppConfig> {
-    let bitcoind_rpchost =
-        matches.get_one::<String>("RPCHOST").context("Missing BITCOIND_RPCHOST argument")?.clone();
-    let bitcoind_cookie =
-        matches.get_one::<String>("COOKIE_FILE").context("Missing COOKIE_FILE argument")?;
-
-    Ok(AppConfig {
-        bitcoind_rpchost,
-        bitcoind_auth: bitcoincore_rpc::Auth::CookieFile(bitcoind_cookie.into()),
-    })
+    let mut config = AppConfig::default();
+    if let Some(bitcoind_rpchost) = matches.get_one::<String>("rpchost") {
+        config.bitcoind_rpchost = bitcoind_rpchost.to_owned();
+    }
+    if let Some(cookie) = matches
+        .get_one::<String>("cookie_file")
+        .map(|cookie| bitcoincore_rpc::Auth::CookieFile(cookie.into()))
+    {
+        config.bitcoind_auth = cookie;
+    }
+    match matches.subcommand() {
+        Some(("send", matches)) => {
+            if let Some(danger_accept_invalid_certs) =
+                matches.get_one::<bool>("DANGER_ACCEPT_INVALID_CERTS")
+            {
+                config.danger_accept_invalid_certs = *danger_accept_invalid_certs;
+            }
+        }
+        Some(("receive", matches)) => {
+            if let Some(pj_endpoint) = matches.get_one::<String>("endpoint") {
+                config.pj_endpoint = pj_endpoint.to_owned();
+            }
+            if let Some(sub_only) = matches.get_one::<bool>("sub_only") {
+                config.sub_only = *sub_only;
+            }
+        }
+        _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
+    }
+    Ok(config)
 }

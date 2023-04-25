@@ -12,29 +12,31 @@ use payjoin::receiver::PayjoinProposal;
 use payjoin::{PjUriExt, UriExt};
 use rouille::{Request, Response};
 
+struct App {
+    config: AppConfig,
+    bitcoind: bitcoincore_rpc::Client,
+}
+
 fn main() -> Result<()> {
     env_logger::init();
 
     let matches = cli();
     let config = parse_config(&matches)?;
 
-    let bitcoind = bitcoincore_rpc::Client::new(&config.bitcoind_rpchost, config.bitcoind_auth)
-        .context("Failed to connect to bitcoind")?;
+    let bitcoind =
+        bitcoincore_rpc::Client::new(&config.bitcoind_rpchost, config.bitcoind_auth.clone())
+            .context("Failed to connect to bitcoind")?;
+    let app = App { config, bitcoind };
+
     match matches.subcommand() {
         Some(("send", sub_matches)) => {
             let bip21 = sub_matches.get_one::<String>("BIP21").context("Missing BIP21 argument")?;
-            send_payjoin(bitcoind, bip21, config.danger_accept_invalid_certs)?;
+            app.send_payjoin(bip21)?;
         }
         Some(("receive", sub_matches)) => {
             let amount =
                 sub_matches.get_one::<String>("AMOUNT").context("Missing AMOUNT argument")?;
-            receive_payjoin(
-                bitcoind,
-                amount,
-                &config.pj_host,
-                &config.pj_endpoint,
-                config.sub_only,
-            )?;
+            app.receive_payjoin(amount)?;
         }
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
@@ -42,212 +44,206 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn send_payjoin(
-    bitcoind: bitcoincore_rpc::Client,
-    bip21: &str,
-    danger_accept_invalid_certs: bool,
-) -> Result<()> {
-    let link = payjoin::Uri::try_from(bip21)
-        .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
+impl App {
+    fn send_payjoin(&self, bip21: &str) -> Result<()> {
+        let link = payjoin::Uri::try_from(bip21)
+            .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
 
-    let link = link
-        .check_pj_supported()
-        .map_err(|e| anyhow!("The provided URI doesn't support payjoin (BIP78): {}", e))?;
+        let link = link
+            .check_pj_supported()
+            .map_err(|e| anyhow!("The provided URI doesn't support payjoin (BIP78): {}", e))?;
 
-    let amount = link
-        .amount
-        .ok_or(anyhow!("please specify the amount in the Uri"))
-        .map(|amt| Amount::from_sat(amt.to_sat()))?;
-    let mut outputs = HashMap::with_capacity(1);
-    outputs.insert(link.address.to_string(), amount);
+        let amount = link
+            .amount
+            .ok_or(anyhow!("please specify the amount in the Uri"))
+            .map(|amt| Amount::from_sat(amt.to_sat()))?;
+        let mut outputs = HashMap::with_capacity(1);
+        outputs.insert(link.address.to_string(), amount);
 
-    let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
-        lock_unspent: Some(true),
-        fee_rate: Some(Amount::from_sat(2000)),
-        ..Default::default()
-    };
-    let psbt = bitcoind
-        .wallet_create_funded_psbt(
-            &[], // inputs
-            &outputs,
-            None, // locktime
-            Some(options),
+        let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
+            lock_unspent: Some(true),
+            fee_rate: Some(Amount::from_sat(2000)),
+            ..Default::default()
+        };
+        let psbt = self
+            .bitcoind
+            .wallet_create_funded_psbt(
+                &[], // inputs
+                &outputs,
+                None, // locktime
+                Some(options),
+                None,
+            )
+            .context("Failed to create PSBT")?
+            .psbt;
+        let psbt = self
+            .bitcoind
+            .wallet_process_psbt(&psbt, None, None, None)
+            .with_context(|| "Failed to process PSBT")?
+            .psbt;
+        let psbt = load_psbt_from_base64(psbt.as_bytes())
+            .with_context(|| "Failed to load PSBT from base64")?;
+        log::debug!("Original psbt: {:#?}", psbt);
+        let pj_params = payjoin::sender::Configuration::with_fee_contribution(
+            payjoin::bitcoin::Amount::from_sat(10000),
             None,
-        )
-        .context("Failed to create PSBT")?
-        .psbt;
-    let psbt = bitcoind
-        .wallet_process_psbt(&psbt, None, None, None)
-        .with_context(|| "Failed to process PSBT")?
-        .psbt;
-    let psbt = load_psbt_from_base64(psbt.as_bytes())
-        .with_context(|| "Failed to load PSBT from base64")?;
-    log::debug!("Original psbt: {:#?}", psbt);
-    let pj_params = payjoin::sender::Configuration::with_fee_contribution(
-        payjoin::bitcoin::Amount::from_sat(10000),
-        None,
-    );
-    let (req, ctx) = link
-        .create_pj_request(psbt, pj_params)
-        .with_context(|| "Failed to create payjoin request")?;
-    let client = reqwest::blocking::Client::builder()
-        .danger_accept_invalid_certs(danger_accept_invalid_certs)
-        .build()
-        .with_context(|| "Failed to build reqwest http client")?;
-    let response = client
-        .post(req.url)
-        .body(req.body)
-        .header("Content-Type", "text/plain")
-        .send()
-        .with_context(|| "HTTP request failed")?;
-    // TODO display well-known errors and log::debug the rest
-    let psbt = ctx.process_response(response).with_context(|| "Failed to process response")?;
-    log::debug!("Proposed psbt: {:#?}", psbt);
-    let psbt = bitcoind
-        .wallet_process_psbt(&serialize_psbt(&psbt), None, None, None)
-        .with_context(|| "Failed to process PSBT")?
-        .psbt;
-    let tx = bitcoind
-        .finalize_psbt(&psbt, Some(true))
-        .with_context(|| "Failed to finalize PSBT")?
-        .hex
-        .ok_or_else(|| anyhow!("Incomplete PSBT"))?;
-    let txid =
-        bitcoind.send_raw_transaction(&tx).with_context(|| "Failed to send raw transaction")?;
-    log::info!("Transaction sent: {}", txid);
-    Ok(())
-}
-
-fn receive_payjoin(
-    bitcoind: bitcoincore_rpc::Client,
-    amount_arg: &str,
-    pj_host: &str,
-    endpoint_arg: &str,
-    sub_only: bool,
-) -> Result<()> {
-    use payjoin::Uri;
-
-    let pj_receiver_address = bitcoind.get_new_address(None, None)?;
-    let amount = Amount::from_sat(amount_arg.parse()?);
-    let pj_uri_string = format!(
-        "{}?amount={}&pj={}",
-        pj_receiver_address.to_qr_uri(),
-        amount.to_btc(),
-        endpoint_arg
-    );
-    let pj_uri = Uri::from_str(&pj_uri_string)
-        .map_err(|e| anyhow!("Constructed a bad URI string from args: {}", e))?;
-    let _pj_uri = pj_uri
-        .check_pj_supported()
-        .map_err(|e| anyhow!("Constructed URI does not support payjoin: {}", e))?;
-
-    println!("Awaiting payjoin at BIP 21 Payjoin Uri:");
-    println!("{}", pj_uri_string);
-
-    rouille::start_server(pj_host, move |req| handle_web_request(&req, &bitcoind, sub_only));
-}
-
-fn handle_web_request(
-    req: &Request,
-    bitcoind: &bitcoincore_rpc::Client,
-    sub_only: bool,
-) -> Response {
-    handle_payjoin_request(req, bitcoind, sub_only)
-        .map_err(|e| match e {
-            ReceiveError::RequestError(e) => {
-                log::error!("Error handling request: {}", e);
-                Response::text(e.to_string()).with_status_code(400)
-            }
-            e => {
-                log::error!("Error handling request: {}", e);
-                Response::text(e.to_string()).with_status_code(500)
-            }
-        })
-        .unwrap_or_else(|err_resp| err_resp)
-}
-
-fn handle_payjoin_request(
-    req: &Request,
-    bitcoind: &bitcoincore_rpc::Client,
-    sub_only: bool,
-) -> Result<Response, ReceiveError> {
-    use bitcoin::hashes::hex::ToHex;
-
-    let headers = Headers(req.headers());
-    let proposal = payjoin::receiver::UncheckedProposal::from_request(
-        req.data().context("Failed to read request body")?,
-        req.raw_query_string(),
-        headers,
-    )?;
-
-    // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
-    let _to_broadcast_in_failure_case = proposal.get_transaction_to_schedule_broadcast();
-
-    // The network is used for checks later
-    let network = match bitcoind.get_blockchain_info()?.chain.as_str() {
-        "main" => bitcoin::Network::Bitcoin,
-        "test" => bitcoin::Network::Testnet,
-        "regtest" => bitcoin::Network::Regtest,
-        _ => return Err(ReceiveError::Other(anyhow!("Unknown network"))),
-    };
-
-    // Receive Check 1: Can Broadcast
-    let proposal = proposal.check_can_broadcast(|tx| {
-        bitcoind
-            .test_mempool_accept(&[bitcoin::consensus::encode::serialize(&tx).to_hex()])
-            .unwrap()
-            .first()
-            .unwrap()
-            .allowed
-    })?;
-    log::trace!("check1");
-
-    // Receive Check 2: receiver can't sign for proposal inputs
-    let proposal = proposal.check_inputs_not_owned(|input| {
-        let address = bitcoin::Address::from_script(&input, network).unwrap();
-        bitcoind.get_address_info(&address).unwrap().is_mine.unwrap()
-    })?;
-    log::trace!("check2");
-    // Receive Check 3: receiver can't sign for proposal inputs
-    let proposal = proposal.check_no_mixed_input_scripts()?;
-    log::trace!("check3");
-
-    // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
-    let mut payjoin = proposal
-        .check_no_inputs_seen_before(|_| false)
-        .unwrap()
-        .identify_receiver_outputs(|output_script| {
-            let address = bitcoin::Address::from_script(&output_script, network).unwrap();
-            bitcoind.get_address_info(&address).unwrap().is_mine.unwrap()
-        })?;
-    log::trace!("check4");
-
-    if !sub_only {
-        // Select receiver payjoin inputs.
-        _ = try_contributing_inputs(&mut payjoin, bitcoind)
-            .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
+        );
+        let (req, ctx) = link
+            .create_pj_request(psbt, pj_params)
+            .with_context(|| "Failed to create payjoin request")?;
+        let client = reqwest::blocking::Client::builder()
+            .danger_accept_invalid_certs(self.config.danger_accept_invalid_certs)
+            .build()
+            .with_context(|| "Failed to build reqwest http client")?;
+        let response = client
+            .post(req.url)
+            .body(req.body)
+            .header("Content-Type", "text/plain")
+            .send()
+            .with_context(|| "HTTP request failed")?;
+        // TODO display well-known errors and log::debug the rest
+        let psbt = ctx.process_response(response).with_context(|| "Failed to process response")?;
+        log::debug!("Proposed psbt: {:#?}", psbt);
+        let psbt = self
+            .bitcoind
+            .wallet_process_psbt(&serialize_psbt(&psbt), None, None, None)
+            .with_context(|| "Failed to process PSBT")?
+            .psbt;
+        let tx = self
+            .bitcoind
+            .finalize_psbt(&psbt, Some(true))
+            .with_context(|| "Failed to finalize PSBT")?
+            .hex
+            .ok_or_else(|| anyhow!("Incomplete PSBT"))?;
+        let txid = self
+            .bitcoind
+            .send_raw_transaction(&tx)
+            .with_context(|| "Failed to send raw transaction")?;
+        log::info!("Transaction sent: {}", txid);
+        Ok(())
     }
 
-    let receiver_substitute_address = bitcoind.get_new_address(None, None)?;
-    payjoin.substitute_output_address(receiver_substitute_address);
+    fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
+        use payjoin::Uri;
 
-    let payjoin_proposal_psbt = payjoin.apply_fee(Some(1))?;
+        let pj_receiver_address = self.bitcoind.get_new_address(None, None)?;
+        let amount = Amount::from_sat(amount_arg.parse()?);
+        let pj_uri_string = format!(
+            "{}?amount={}&pj={}",
+            pj_receiver_address.to_qr_uri(),
+            amount.to_btc(),
+            self.config.pj_endpoint
+        );
+        let pj_uri = Uri::from_str(&pj_uri_string)
+            .map_err(|e| anyhow!("Constructed a bad URI string from args: {}", e))?;
+        let _pj_uri = pj_uri
+            .check_pj_supported()
+            .map_err(|e| anyhow!("Constructed URI does not support payjoin: {}", e))?;
 
-    log::debug!("Extracted PSBT: {:#?}", payjoin_proposal_psbt);
-    // Sign payjoin psbt
-    let payjoin_base64_string =
-        base64::encode(bitcoin::consensus::serialize(&payjoin_proposal_psbt));
-    // `wallet_process_psbt` adds available utxo data and finalizes
-    let payjoin_proposal_psbt =
-        bitcoind.wallet_process_psbt(&payjoin_base64_string, None, None, Some(false))?.psbt;
-    let payjoin_proposal_psbt =
-        load_psbt_from_base64(payjoin_proposal_psbt.as_bytes()).context("Failed to parse PSBT")?;
-    let payjoin_proposal_psbt = payjoin.prepare_psbt(payjoin_proposal_psbt)?;
-    log::debug!("Receiver's PayJoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
+        println!("Awaiting payjoin at BIP 21 Payjoin Uri:");
+        println!("{}", pj_uri_string);
 
-    let payload = base64::encode(bitcoin::consensus::serialize(&payjoin_proposal_psbt));
-    log::info!("successful response");
-    Ok(Response::text(payload))
+        rouille::start_server(self.config.pj_host.clone(), move |req| {
+            self.handle_web_request(&req)
+        });
+    }
+
+    fn handle_web_request(&self, req: &Request) -> Response {
+        self.handle_payjoin_request(req)
+            .map_err(|e| match e {
+                ReceiveError::RequestError(e) => {
+                    log::error!("Error handling request: {}", e);
+                    Response::text(e.to_string()).with_status_code(400)
+                }
+                e => {
+                    log::error!("Error handling request: {}", e);
+                    Response::text(e.to_string()).with_status_code(500)
+                }
+            })
+            .unwrap_or_else(|err_resp| err_resp)
+    }
+
+    fn handle_payjoin_request(&self, req: &Request) -> Result<Response, ReceiveError> {
+        use bitcoin::hashes::hex::ToHex;
+
+        let headers = Headers(req.headers());
+        let proposal = payjoin::receiver::UncheckedProposal::from_request(
+            req.data().context("Failed to read request body")?,
+            req.raw_query_string(),
+            headers,
+        )?;
+
+        // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
+        let _to_broadcast_in_failure_case = proposal.get_transaction_to_schedule_broadcast();
+
+        // The network is used for checks later
+        let network = match self.bitcoind.get_blockchain_info()?.chain.as_str() {
+            "main" => bitcoin::Network::Bitcoin,
+            "test" => bitcoin::Network::Testnet,
+            "regtest" => bitcoin::Network::Regtest,
+            _ => return Err(ReceiveError::Other(anyhow!("Unknown network"))),
+        };
+
+        // Receive Check 1: Can Broadcast
+        let proposal = proposal.check_can_broadcast(|tx| {
+            self.bitcoind
+                .test_mempool_accept(&[bitcoin::consensus::encode::serialize(&tx).to_hex()])
+                .unwrap()
+                .first()
+                .unwrap()
+                .allowed
+        })?;
+        log::trace!("check1");
+
+        // Receive Check 2: receiver can't sign for proposal inputs
+        let proposal = proposal.check_inputs_not_owned(|input| {
+            let address = bitcoin::Address::from_script(&input, network).unwrap();
+            self.bitcoind.get_address_info(&address).unwrap().is_mine.unwrap()
+        })?;
+        log::trace!("check2");
+        // Receive Check 3: receiver can't sign for proposal inputs
+        let proposal = proposal.check_no_mixed_input_scripts()?;
+        log::trace!("check3");
+
+        // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
+        let mut payjoin = proposal
+            .check_no_inputs_seen_before(|_| false)
+            .unwrap()
+            .identify_receiver_outputs(|output_script| {
+                let address = bitcoin::Address::from_script(&output_script, network).unwrap();
+                self.bitcoind.get_address_info(&address).unwrap().is_mine.unwrap()
+            })?;
+        log::trace!("check4");
+
+        if !self.config.sub_only {
+            // Select receiver payjoin inputs.
+            _ = try_contributing_inputs(&mut payjoin, &self.bitcoind)
+                .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
+        }
+
+        let receiver_substitute_address = self.bitcoind.get_new_address(None, None)?;
+        payjoin.substitute_output_address(receiver_substitute_address);
+
+        let payjoin_proposal_psbt = payjoin.apply_fee(Some(1))?;
+
+        log::debug!("Extracted PSBT: {:#?}", payjoin_proposal_psbt);
+        // Sign payjoin psbt
+        let payjoin_base64_string =
+            base64::encode(bitcoin::consensus::serialize(&payjoin_proposal_psbt));
+        // `wallet_process_psbt` adds available utxo data and finalizes
+        let payjoin_proposal_psbt = self
+            .bitcoind
+            .wallet_process_psbt(&payjoin_base64_string, None, None, Some(false))?
+            .psbt;
+        let payjoin_proposal_psbt = load_psbt_from_base64(payjoin_proposal_psbt.as_bytes())
+            .context("Failed to parse PSBT")?;
+        let payjoin_proposal_psbt = payjoin.prepare_psbt(payjoin_proposal_psbt)?;
+        log::debug!("Receiver's PayJoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
+
+        let payload = base64::encode(bitcoin::consensus::serialize(&payjoin_proposal_psbt));
+        log::info!("successful response");
+        Ok(Response::text(payload))
+    }
 }
 
 fn try_contributing_inputs(

@@ -205,7 +205,26 @@ impl App {
         log::trace!("check3");
 
         // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
-        let payjoin = proposal.check_no_inputs_seen_before(|_| false)?;
+        let payjoin = proposal.check_no_inputs_seen_before(|input| {
+            let address = bitcoin::Address::from_script(input, network).unwrap();
+            let address_info = self.bitcoind.get_address_info(&address).unwrap();
+            if address_info.labels.contains(
+                &bitcoincore_rpc::bitcoincore_rpc_json::GetAddressInfoResultLabel::Simple(
+                    "input_seen_before".into(),
+                ),
+            ) {
+                log::info!(
+                    "Request contains an input we've seen before. Preventing possible probing attack: {}",
+                    address
+                );
+                true
+            } else {
+                self.bitcoind
+                    .import_address(&address, Some("input_seen_before"), Some(false))
+                    .unwrap();
+                false
+            }
+        })?;
         log::trace!("check4");
 
         let mut payjoin = payjoin.identify_receiver_outputs(|output_script| {

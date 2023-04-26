@@ -234,17 +234,26 @@ impl MaybeInputsSeen {
     /// proposes a PayJoin PSBT as a new Original PSBT for a new PayJoin.
     pub fn check_no_inputs_seen_before(
         self,
-        is_known: impl Fn(&OutPoint) -> bool,
+        is_known: impl Fn(&Script) -> bool,
     ) -> Result<OutputsUnknown, RequestError> {
-        let mut known_outpoint = None;
+        let mut known_script = None;
         self.psbt.input_pairs().for_each(|input| {
-            if is_known(&input.txin.previous_output) {
-                known_outpoint = Some(input.txin.previous_output);
+            let script = &input
+                .previous_txout()
+                // This error should already be handled by the first check
+                .unwrap_or_else(|e: crate::psbt::PrevTxOutError| {
+                    panic!("Unexpected error: {:?}", e)
+                })
+                // Once this closure returns a Result, we can use this instead:
+                //.map_err(|e| RequestError::from(InternalRequestError::PrevTxOut(e)))?.script_pubkey;
+                .script_pubkey;
+            if is_known(script) {
+                known_script = Some(script.clone());
                 return;
             }
         });
-        if let Some(outpoint) = known_outpoint {
-            return Err(RequestError::from(InternalRequestError::InputSeen(outpoint)));
+        if let Some(script) = known_script {
+            return Err(RequestError::from(InternalRequestError::InputSeen(script)));
         }
         Ok(OutputsUnknown { psbt: self.psbt, params: self.params })
     }

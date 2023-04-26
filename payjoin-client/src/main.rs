@@ -12,6 +12,9 @@ use payjoin::receiver::PayjoinProposal;
 use payjoin::{PjUriExt, UriExt};
 use rouille::{Request, Response};
 
+mod app_config;
+use app_config::AppConfig;
+
 struct App {
     config: AppConfig,
     bitcoind: bitcoincore_rpc::Client,
@@ -21,12 +24,8 @@ fn main() -> Result<()> {
     env_logger::init();
 
     let matches = cli();
-    let config = parse_config(&matches)?;
-
-    let bitcoind =
-        bitcoincore_rpc::Client::new(&config.bitcoind_rpchost, config.bitcoind_auth.clone())
-            .context("Failed to connect to bitcoind")?;
-    let app = App { config, bitcoind };
+    let config = AppConfig::new(&matches)?;
+    let app = App::new(config)?;
 
     match matches.subcommand() {
         Some(("send", sub_matches)) => {
@@ -244,6 +243,24 @@ impl App {
         log::info!("successful response");
         Ok(Response::text(payload))
     }
+
+    fn new(config: AppConfig) -> Result<Self> {
+        let bitcoind = match &config.bitcoind_cookie {
+            Some(cookie) => bitcoincore_rpc::Client::new(
+                &config.bitcoind_rpchost,
+                bitcoincore_rpc::Auth::CookieFile(cookie.into()),
+            ),
+            None => bitcoincore_rpc::Client::new(
+                &config.bitcoind_rpchost,
+                bitcoincore_rpc::Auth::UserPass(
+                    config.bitcoind_rpcuser.clone(),
+                    config.bitcoind_rpcpass.clone(),
+                ),
+            ),
+        }
+        .context("Failed to connect to bitcoind")?;
+        Ok(Self { config, bitcoind })
+    }
 }
 
 fn try_contributing_inputs(
@@ -338,36 +355,6 @@ fn serialize_psbt(psbt: &Psbt) -> String {
     .unwrap()
 }
 
-#[derive(Debug)]
-struct AppConfig {
-    bitcoind_rpchost: String,
-    bitcoind_auth: bitcoincore_rpc::Auth,
-
-    // send-only
-    danger_accept_invalid_certs: bool,
-
-    // receive-only
-    pj_host: String,
-    pj_endpoint: String,
-    sub_only: bool,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            bitcoind_rpchost: "http://localhost:18443".into(),
-            bitcoind_auth: bitcoincore_rpc::Auth::UserPass(
-                "bitcoin".to_string(),
-                "".to_string().into(),
-            ),
-            danger_accept_invalid_certs: false,
-            pj_host: "0.0.0.0:3000".into(),
-            pj_endpoint: "https://localhost:3010".into(),
-            sub_only: false,
-        }
-    }
-}
-
 fn cli() -> ArgMatches {
     Command::new("payjoin")
         .about("Transfer bitcoin and preserve your privacy")
@@ -395,7 +382,6 @@ fn cli() -> ArgMatches {
                     .long("endpoint")
                     .short('e')
                     .help("The `pj=` endpoint to receive the payjoin request"))
-                //.arg(arg!(<SUB_ONLY> "Use payjoin like a payment code, no hot wallet required. Only substitute outputs. Don't contribute inputs.")),
                 .arg(Arg::new("sub_only")
                     .long("sub-only")
                     .short('s')
@@ -405,36 +391,4 @@ fn cli() -> ArgMatches {
                     .help("Use payjoin like a payment code, no hot wallet required. Only substitute outputs. Don't contribute inputs."))
         )
         .get_matches()
-}
-
-fn parse_config(matches: &ArgMatches) -> Result<AppConfig> {
-    let mut config = AppConfig::default();
-    if let Some(bitcoind_rpchost) = matches.get_one::<String>("rpchost") {
-        config.bitcoind_rpchost = bitcoind_rpchost.to_owned();
-    }
-    if let Some(cookie) = matches
-        .get_one::<String>("cookie_file")
-        .map(|cookie| bitcoincore_rpc::Auth::CookieFile(cookie.into()))
-    {
-        config.bitcoind_auth = cookie;
-    }
-    match matches.subcommand() {
-        Some(("send", matches)) => {
-            if let Some(danger_accept_invalid_certs) =
-                matches.get_one::<bool>("DANGER_ACCEPT_INVALID_CERTS")
-            {
-                config.danger_accept_invalid_certs = *danger_accept_invalid_certs;
-            }
-        }
-        Some(("receive", matches)) => {
-            if let Some(pj_endpoint) = matches.get_one::<String>("endpoint") {
-                config.pj_endpoint = pj_endpoint.to_owned();
-            }
-            if let Some(sub_only) = matches.get_one::<bool>("sub_only") {
-                config.sub_only = *sub_only;
-            }
-        }
-        _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
-    }
-    Ok(config)
 }

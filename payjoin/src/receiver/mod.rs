@@ -235,21 +235,16 @@ impl MaybeInputsSeen {
         self,
         is_known: impl Fn(&Script) -> bool,
     ) -> Result<OutputsUnknown, RequestError> {
-        let mut known_script = None;
-        self.psbt.input_pairs().for_each(|input| {
-            let script = &input
-                .previous_txout()
-                // This error should already be handled by the first check
-                .unwrap_or_else(|e: crate::psbt::PrevTxOutError| {
-                    panic!("Unexpected error: {:?}", e)
-                })
-                // Once this closure returns a Result, we can use this instead:
-                //.map_err(|e| RequestError::from(InternalRequestError::PrevTxOut(e)))?.script_pubkey;
-                .script_pubkey;
-            if is_known(script) {
-                known_script = Some(script.clone());
-            }
+        let known_script = self.psbt.input_pairs().find_map(|input| {
+            input.previous_txout().ok().and_then(|txout| {
+                if is_known(&txout.script_pubkey) {
+                    Some(txout.script_pubkey.clone())
+                } else {
+                    None
+                }
+            })
         });
+
         if let Some(script) = known_script {
             return Err(RequestError::from(InternalRequestError::InputSeen(script)));
         }

@@ -141,12 +141,12 @@ mod integration {
         // Receive Check 1: Can Broadcast
         let proposal = proposal
             .check_can_broadcast(|tx| {
-                receiver
+                Ok(receiver
                     .test_mempool_accept(&[bitcoin::consensus::encode::serialize(&tx).to_hex()])
                     .unwrap()
                     .first()
                     .unwrap()
-                    .allowed
+                    .allowed)
             })
             .expect("Payjoin proposal should be broadcastable");
 
@@ -155,7 +155,7 @@ mod integration {
             .check_inputs_not_owned(|input| {
                 let address =
                     bitcoin::Address::from_script(&input, bitcoin::Network::Regtest).unwrap();
-                receiver.get_address_info(&address).unwrap().is_mine.unwrap()
+                Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
             })
             .expect("Receiver should not own any of the inputs");
 
@@ -164,13 +164,13 @@ mod integration {
 
         // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let mut payjoin = proposal
-            .check_no_inputs_seen_before(|_| false)
+            .check_no_inputs_seen_before(|_| Ok(false))
             .unwrap()
             .identify_receiver_outputs(|output_script| {
                 let address =
                     bitcoin::Address::from_script(&output_script, bitcoin::Network::Regtest)
                         .unwrap();
-                receiver.get_address_info(&address).unwrap().is_mine.unwrap()
+                Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
             })
             .expect("Receiver should have at least one output");
 

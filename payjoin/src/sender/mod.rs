@@ -159,7 +159,7 @@ fn load_psbt_from_base64(
 ) -> Result<Psbt, bitcoin::consensus::encode::Error> {
     use bitcoin::consensus::Decodable;
     let mut reader = base64::read::DecoderReader::new(&mut input, base64::STANDARD);
-    Ok(Psbt::consensus_decode(&mut reader)?)
+    Psbt::consensus_decode(&mut reader)
 }
 
 impl Context {

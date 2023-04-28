@@ -59,7 +59,7 @@ impl Params {
                     },
                 ("maxadditionalfeecontribution", fee) =>
                     max_additional_fee_contribution =
-                        match bitcoin::Amount::from_str_in(&fee, bitcoin::Denomination::Satoshi) {
+                        match bitcoin::Amount::from_str_in(fee, bitcoin::Denomination::Satoshi) {
                             Ok(contribution) => Some(contribution),
                             Err(_error) => {
                                 warn!(
@@ -72,7 +72,7 @@ impl Params {
                 ("minfeerate", feerate) =>
                     params.min_feerate = match feerate.parse::<u64>() {
                         Ok(rate) => FeeRate::from_sat_per_vb(rate)
-                            .ok_or(Error::FeeRate(rate.to_string()))?,
+                            .ok_or_else(|| Error::FeeRate(rate.to_string()))?,
                         Err(e) => return Err(Error::FeeRate(e.to_string())),
                     },
                 ("disableoutputsubstitution", v) =>
@@ -111,9 +111,5 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            _ => None,
-        }
-    }
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
 }

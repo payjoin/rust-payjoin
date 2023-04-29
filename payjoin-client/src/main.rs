@@ -54,7 +54,7 @@ impl App {
 
         let amount = link
             .amount
-            .ok_or(anyhow!("please specify the amount in the Uri"))
+            .ok_or_else(|| anyhow!("please specify the amount in the Uri"))
             .map(|amt| Amount::from_sat(amt.to_sat()))?;
         let mut outputs = HashMap::with_capacity(1);
         outputs.insert(link.address.to_string(), amount);
@@ -142,9 +142,7 @@ impl App {
         println!("Awaiting payjoin at BIP 21 Payjoin Uri:");
         println!("{}", pj_uri_string);
 
-        rouille::start_server(self.config.pj_host.clone(), move |req| {
-            self.handle_web_request(&req)
-        });
+        rouille::start_server(self.config.pj_host.clone(), move |req| self.handle_web_request(req));
     }
 
     fn handle_web_request(&self, req: &Request) -> Response {
@@ -196,7 +194,7 @@ impl App {
 
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal.check_inputs_not_owned(|input| {
-            let address = bitcoin::Address::from_script(&input, network).unwrap();
+            let address = bitcoin::Address::from_script(input, network).unwrap();
             self.bitcoind.get_address_info(&address).unwrap().is_mine.unwrap()
         })?;
         log::trace!("check2");
@@ -228,7 +226,7 @@ impl App {
         log::trace!("check4");
 
         let mut payjoin = payjoin.identify_receiver_outputs(|output_script| {
-            let address = bitcoin::Address::from_script(&output_script, network).unwrap();
+            let address = bitcoin::Address::from_script(output_script, network).unwrap();
             self.bitcoind.get_address_info(&address).unwrap().is_mine.unwrap()
         })?;
 

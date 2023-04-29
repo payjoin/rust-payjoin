@@ -172,8 +172,7 @@ impl MaybeInputsOwned {
                     None
                 }
             })
-            .filter(|script| is_owned(script))
-            .next();
+            .find(|script| is_owned(script));
         err?;
 
         match owned_script {
@@ -196,7 +195,7 @@ impl MaybeMixedInputScripts {
             .psbt
             .input_pairs()
             .scan(&mut err, |err, input| match input.previous_txout() {
-                Ok(txout) => match InputType::from_spent_input(txout, &input.psbtin) {
+                Ok(txout) => match InputType::from_spent_input(txout, input.psbtin) {
                     Ok(input_script) => Some(input_script),
                     Err(e) => {
                         **err = Err(RequestError::from(InternalRequestError::InputType(e)));
@@ -249,7 +248,6 @@ impl MaybeInputsSeen {
                 .script_pubkey;
             if is_known(script) {
                 known_script = Some(script.clone());
-                return;
             }
         });
         if let Some(script) = known_script {
@@ -291,7 +289,7 @@ impl OutputsUnknown {
             )
             .collect();
 
-        if owned_vouts.len() < 1 {
+        if owned_vouts.is_empty() {
             return Err(RequestError::from(InternalRequestError::MissingPayment));
         }
 
@@ -352,14 +350,14 @@ impl PayjoinProposal {
             .iter()
             .map(|output| output.value)
             .min()
-            .unwrap_or(Amount::MAX_MONEY.to_sat());
+            .unwrap_or_else(|| Amount::MAX_MONEY.to_sat());
 
         let min_original_in_sats = self
             .payjoin_psbt
             .input_pairs()
             .filter_map(|input| input.previous_txout().ok().map(|txo| txo.value))
             .min()
-            .unwrap_or(Amount::MAX_MONEY.to_sat());
+            .unwrap_or_else(|| Amount::MAX_MONEY.to_sat());
 
         // Assume many-input, two output to select the vout for now
         let prior_payment_sats = self.payjoin_psbt.unsigned_tx.output[self.owned_vouts[0]].value;
@@ -404,10 +402,9 @@ impl PayjoinProposal {
         // Insert contribution at random index for privacy
         let mut rng = rand::thread_rng();
         let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
-        self.payjoin_psbt.inputs.insert(
-            index,
-            bitcoin::psbt::Input { witness_utxo: Some(txo.clone()), ..Default::default() },
-        );
+        self.payjoin_psbt
+            .inputs
+            .insert(index, bitcoin::psbt::Input { witness_utxo: Some(txo), ..Default::default() });
         self.payjoin_psbt.unsigned_tx.input.insert(
             index,
             bitcoin::TxIn {
@@ -441,7 +438,7 @@ impl PayjoinProposal {
         // Add the new input to the PSBT
         self.payjoin_psbt.inputs.insert(
             index,
-            bitcoin::psbt::Input { non_witness_utxo: Some(tx.clone()), ..Default::default() },
+            bitcoin::psbt::Input { non_witness_utxo: Some(tx), ..Default::default() },
         );
         self.payjoin_psbt.unsigned_tx.input.insert(
             index,
@@ -479,7 +476,7 @@ impl PayjoinProposal {
             .next()
             .ok_or(InternalRequestError::OriginalPsbtNotBroadcastable)?;
         let txo = input_pair.previous_txout().map_err(InternalRequestError::PrevTxOut)?;
-        let input_type = InputType::from_spent_input(&txo, &self.payjoin_psbt.inputs[0])
+        let input_type = InputType::from_spent_input(txo, &self.payjoin_psbt.inputs[0])
             .map_err(InternalRequestError::InputType)?;
         let contribution_weight = input_type.expected_input_weight();
         log::trace!("contribution_weight: {}", contribution_weight);

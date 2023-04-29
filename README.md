@@ -64,7 +64,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [x] Newtypes
 - [x] Panic-free error handling
 - [x] No `unsafe` code or well-tested/analyzed/proven/... `unsafe` code
-- [ ] Warning-free
+- [x] Warning-free
 - [x] CI
 - [x] Integration tests
 - [ ] Fuzzing

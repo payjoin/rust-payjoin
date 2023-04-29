@@ -1,5 +1,5 @@
 use std::convert::{TryFrom, TryInto};
-use std::fmt::{self, Display};
+use std::fmt;
 
 use bitcoin::blockdata::script::{Instruction, Instructions, Script};
 use bitcoin::blockdata::transaction::TxOut;

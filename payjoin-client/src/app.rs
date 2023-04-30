@@ -146,21 +146,25 @@ impl App {
     }
 
     fn handle_web_request(&self, req: &Request) -> Response {
-        self.handle_payjoin_request(req)
-            .map_err(|e| match e {
-                Error::BadRequest(e) => {
-                    log::error!("Error handling request: {}", e);
-                    Response::text(e.to_string()).with_status_code(400)
-                }
-                e => {
-                    log::error!("Error handling request: {}", e);
-                    Response::text(e.to_string()).with_status_code(500)
-                }
-            })
-            .unwrap_or_else(|err_resp| err_resp)
+        match req.method() {
+            "POST" => self
+                .handle_payjoin_post(req)
+                .map_err(|e| match e {
+                    Error::BadRequest(e) => {
+                        log::error!("Error handling request: {}", e);
+                        Response::text(e.to_string()).with_status_code(400)
+                    }
+                    e => {
+                        log::error!("Error handling request: {}", e);
+                        Response::text(e.to_string()).with_status_code(500)
+                    }
+                })
+                .unwrap_or_else(|err_resp| err_resp),
+            _ => Response::empty_404(),
+        }
     }
 
-    fn handle_payjoin_request(&self, req: &Request) -> Result<Response, Error> {
+    fn handle_payjoin_post(&self, req: &Request) -> Result<Response, Error> {
         use bitcoin::hashes::hex::ToHex;
 
         let headers = Headers(req.headers());

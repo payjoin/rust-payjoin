@@ -12,6 +12,7 @@ native-tls-vendored = ["reqwest/native-tls-vendored"]
 anyhow = "1.0.70"
 base64 = "0.13.0"
 bitcoin = "0.29.2"
+bip21 = "0.2.0"
 bitcoincore-rpc = "0.16.0"
 clap = "4.1.4"
 config = "0.13.3"

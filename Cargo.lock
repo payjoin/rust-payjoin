@@ -1251,6 +1251,7 @@ version = "0.1.15"
 dependencies = [
  "anyhow",
  "base64",
+ "bip21",
  "bitcoin",
  "bitcoincore-rpc",
  "clap",

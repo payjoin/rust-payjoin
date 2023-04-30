@@ -146,8 +146,16 @@ impl App {
     }
 
     fn handle_web_request(&self, req: &Request) -> Response {
-        match req.method() {
-            "POST" => self
+        log::debug!("Received request: {:?}", req);
+        match (req.method(), req.url().as_ref()) {
+            ("GET", "/bip21") => {
+                log::debug!("{:?}, {:?}", req.method(), req.raw_query_string());
+                let amount = req.get_param("amount").map(|amt| {
+                    Amount::from_btc(amt.parse().expect("Failed to parse amount")).unwrap()
+                });
+                self.handle_get_bip21(amount)
+            }
+            ("POST", _) => self
                 .handle_payjoin_post(req)
                 .map_err(|e| match e {
                     Error::BadRequest(e) => {
@@ -162,6 +170,24 @@ impl App {
                 .unwrap_or_else(|err_resp| err_resp),
             _ => Response::empty_404(),
         }
+    }
+
+    fn handle_get_bip21(&self, amount: Option<Amount>) -> Response {
+        let address = self.bitcoind.get_new_address(None, None).unwrap();
+        let uri_string = if let Some(amount) = amount {
+            format!(
+                "{}?amount={}&pj={}",
+                address.to_qr_uri(),
+                amount.to_btc(),
+                self.config.pj_endpoint
+            )
+        } else {
+            format!("{}?pj={}", address.to_qr_uri(), self.config.pj_endpoint)
+        };
+        // TODO handle errors
+        let uri = payjoin::Uri::try_from(uri_string.clone()).unwrap();
+        let _ = uri.check_pj_supported().unwrap();
+        Response::text(uri_string)
     }
 
     fn handle_payjoin_post(&self, req: &Request) -> Result<Response, Error> {

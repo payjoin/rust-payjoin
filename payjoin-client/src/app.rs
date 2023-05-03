@@ -136,7 +136,10 @@ impl App {
             .check_pj_supported()
             .map_err(|e| anyhow!("Constructed URI does not support payjoin: {}", e))?;
 
-        println!("Awaiting payjoin at BIP 21 Payjoin Uri:");
+        println!(
+            "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
+            self.config.pj_host
+        );
         println!("{}", pj_uri_string);
 
         rouille::start_server(self.config.pj_host.clone(), move |req| self.handle_web_request(req));
@@ -327,32 +330,45 @@ impl AppConfig {
     pub(crate) fn new(matches: &ArgMatches) -> Result<Self> {
         let builder = Config::builder()
             .set_default("bitcoind_rpchost", "http://localhost:18443")?
-            .set_default("bitcoind_cookie", None::<String>)?
-            .set_default("bitcoind_rpcuser", "bitcoin")?
-            .set_default("bitcoind_rpcpass", "")?
-            .set_default("danger_accept_invalid_certs", false)?
-            .set_default("pj_host", "0.0.0.0:3000")?
-            .set_default("pj_endpoint", "https://localhost:3010")?
-            .set_default("sub_only", false)?
-            .add_source(File::new("config.toml", FileFormat::Toml))
             .set_override_option(
                 "bitcoind_rpchost",
                 matches.get_one::<String>("rpchost").map(|s| s.as_str()),
             )?
+            .set_default("bitcoind_cookie", None::<String>)?
             .set_override_option(
                 "bitcoind_cookie",
                 matches.get_one::<String>("cookie_file").map(|s| s.as_str()),
-            )?;
+            )?
+            .set_default("bitcoind_rpcuser", "bitcoin")?
+            .set_override_option(
+                "bitcoind_rpcuser",
+                matches.get_one::<String>("rpcuser").map(|s| s.as_str()),
+            )?
+            .set_default("bitcoind_rpcpass", "")?
+            .set_override_option(
+                "bitcoind_rpcpass",
+                matches.get_one::<String>("rpcpass").map(|s| s.as_str()),
+            )?
+            .add_source(File::new("config.toml", FileFormat::Toml));
+
         let builder = match matches.subcommand() {
-            Some(("send", matches)) => builder.set_override_option(
-                "danger_accept_invalid_certs",
-                matches.get_one::<bool>("DANGER_ACCEPT_INVALID_CERTS").copied(),
-            )?,
+            Some(("send", matches)) =>
+                builder.set_default("danger_accept_invalid_certs", false)?.set_override_option(
+                    "danger_accept_invalid_certs",
+                    matches.get_one::<bool>("DANGER_ACCEPT_INVALID_CERTS").copied(),
+                )?,
             Some(("receive", matches)) => builder
+                .set_default("pj_host", "0.0.0.0:3000")?
+                .set_override_option(
+                    "pj_host",
+                    matches.get_one::<String>("port").map(|port| format!("0.0.0.0:{}", port)),
+                )?
+                .set_default("pj_endpoint", "https://localhost:3010")?
                 .set_override_option(
                     "pj_endpoint",
                     matches.get_one::<String>("endpoint").map(|s| s.as_str()),
                 )?
+                .set_default("sub_only", false)?
                 .set_override_option("sub_only", matches.get_one::<bool>("sub_only").copied())?,
             _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
         };

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::fmt;
 use std::str::FromStr;
 
 use anyhow::{anyhow, Context, Result};
@@ -8,7 +7,7 @@ use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use clap::{arg, Arg, ArgMatches, Command};
 use payjoin::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
-use payjoin::receiver::PayjoinProposal;
+use payjoin::receiver::{Error, PayjoinProposal};
 use payjoin::{PjUriExt, UriExt};
 use rouille::{Request, Response};
 
@@ -148,7 +147,7 @@ impl App {
     fn handle_web_request(&self, req: &Request) -> Response {
         self.handle_payjoin_request(req)
             .map_err(|e| match e {
-                ReceiveError::RequestError(e) => {
+                Error::BadRequest(e) => {
                     log::error!("Error handling request: {}", e);
                     Response::text(e.to_string()).with_status_code(400)
                 }
@@ -160,12 +159,15 @@ impl App {
             .unwrap_or_else(|err_resp| err_resp)
     }
 
-    fn handle_payjoin_request(&self, req: &Request) -> Result<Response, ReceiveError> {
+    fn handle_payjoin_request(&self, req: &Request) -> Result<Response, Error> {
         use bitcoin::hashes::hex::ToHex;
 
         let headers = Headers(req.headers());
         let proposal = payjoin::receiver::UncheckedProposal::from_request(
-            req.data().context("Failed to read request body")?,
+            req.data().context("Failed to read request body").map_err(|e| {
+                log::warn!("Failed to read request body: {}", e);
+                Error::Server(e.into())
+            })?,
             req.raw_query_string(),
             headers,
         )?;
@@ -174,28 +176,45 @@ impl App {
         let _to_broadcast_in_failure_case = proposal.get_transaction_to_schedule_broadcast();
 
         // The network is used for checks later
-        let network = match self.bitcoind.get_blockchain_info()?.chain.as_str() {
+        let network = match self
+            .bitcoind
+            .get_blockchain_info()
+            .map_err(|e| Error::Server(e.into()))?
+            .chain
+            .as_str()
+        {
             "main" => bitcoin::Network::Bitcoin,
             "test" => bitcoin::Network::Testnet,
             "regtest" => bitcoin::Network::Regtest,
-            _ => return Err(ReceiveError::Other(anyhow!("Unknown network"))),
+            _ => return Err(Error::Server(anyhow!("Unknown network").into())),
         };
 
         // Receive Check 1: Can Broadcast
         let proposal = proposal.check_can_broadcast(|tx| {
-            self.bitcoind
-                .test_mempool_accept(&[bitcoin::consensus::encode::serialize(&tx).to_hex()])
-                .unwrap()
-                .first()
-                .unwrap()
-                .allowed
+            let raw_tx = bitcoin::consensus::encode::serialize(&tx).to_hex();
+            let mempool_results = self
+                .bitcoind
+                .test_mempool_accept(&[raw_tx])
+                .map_err(|e| Error::Server(e.into()))?;
+            match mempool_results.first() {
+                Some(result) => Ok(result.allowed),
+                None => Err(Error::Server(
+                    anyhow!("No mempool results returned on broadcast check").into(),
+                )),
+            }
         })?;
         log::trace!("check1");
 
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal.check_inputs_not_owned(|input| {
-            let address = bitcoin::Address::from_script(input, network).unwrap();
-            self.bitcoind.get_address_info(&address).unwrap().is_mine.unwrap()
+            if let Ok(address) = bitcoin::Address::from_script(input, network) {
+                self.bitcoind
+                    .get_address_info(&address)
+                    .map(|info| info.is_mine.unwrap_or(false))
+                    .map_err(|e| Error::Server(e.into()))
+            } else {
+                Ok(false)
+            }
         })?;
         log::trace!("check2");
         // Receive Check 3: receiver can't sign for proposal inputs
@@ -204,30 +223,38 @@ impl App {
 
         // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let payjoin = proposal.check_no_inputs_seen_before(|input| {
-            let address = bitcoin::Address::from_script(input, network).unwrap();
-            let address_info = self.bitcoind.get_address_info(&address).unwrap();
-            if address_info.labels.contains(
-                &bitcoincore_rpc::bitcoincore_rpc_json::GetAddressInfoResultLabel::Simple(
-                    "input_seen_before".into(),
-                ),
-            ) {
-                log::info!(
-                    "Request contains an input we've seen before. Preventing possible probing attack: {}",
-                    address
-                );
-                true
+            if let Ok(address) = bitcoin::Address::from_script(input, network) {
+                let address_info = self.bitcoind.get_address_info(&address).map_err(|e| Error::Server(e.into()))?;
+                if address_info.labels.contains(
+                    &bitcoincore_rpc::bitcoincore_rpc_json::GetAddressInfoResultLabel::Simple(
+                        "input_seen_before".into(),
+                    ),
+                ) {
+                    log::info!(
+                        "Request contains an input we've seen before. Preventing possible probing attack: {}",
+                        address
+                    );
+                    Ok(true)
+                } else {
+                    self.bitcoind
+                        .import_address(&address, Some("input_seen_before"), Some(false)).map_err(|e| Error::Server(e.into()))?;
+                    Ok(false)
+                }
             } else {
-                self.bitcoind
-                    .import_address(&address, Some("input_seen_before"), Some(false))
-                    .unwrap();
-                false
+                Ok(false)
             }
         })?;
         log::trace!("check4");
 
         let mut payjoin = payjoin.identify_receiver_outputs(|output_script| {
-            let address = bitcoin::Address::from_script(output_script, network).unwrap();
-            self.bitcoind.get_address_info(&address).unwrap().is_mine.unwrap()
+            if let Ok(address) = bitcoin::Address::from_script(output_script, network) {
+                self.bitcoind
+                    .get_address_info(&address)
+                    .map(|info| info.is_mine.unwrap_or(false))
+                    .map_err(|e| Error::Server(e.into()))
+            } else {
+                Ok(false)
+            }
         })?;
 
         if !self.config.sub_only {
@@ -236,7 +263,8 @@ impl App {
                 .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
         }
 
-        let receiver_substitute_address = self.bitcoind.get_new_address(None, None)?;
+        let receiver_substitute_address =
+            self.bitcoind.get_new_address(None, None).map_err(|e| Error::Server(e.into()))?;
         payjoin.substitute_output_address(receiver_substitute_address);
 
         let payjoin_proposal_psbt = payjoin.apply_fee(Some(1))?;
@@ -248,10 +276,12 @@ impl App {
         // `wallet_process_psbt` adds available utxo data and finalizes
         let payjoin_proposal_psbt = self
             .bitcoind
-            .wallet_process_psbt(&payjoin_base64_string, None, None, Some(false))?
+            .wallet_process_psbt(&payjoin_base64_string, None, None, Some(false))
+            .map_err(|e| Error::Server(e.into()))?
             .psbt;
         let payjoin_proposal_psbt = load_psbt_from_base64(payjoin_proposal_psbt.as_bytes())
-            .context("Failed to parse PSBT")?;
+            .context("Failed to parse PSBT")
+            .map_err(|e| Error::Server(e.into()))?;
         let payjoin_proposal_psbt = payjoin.prepare_psbt(payjoin_proposal_psbt)?;
         log::debug!("Receiver's PayJoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
 
@@ -309,34 +339,6 @@ fn try_contributing_inputs(
         bitcoin::OutPoint { txid: selected_utxo.txid, vout: selected_utxo.vout };
     payjoin.contribute_witness_input(txo_to_contribute, outpoint_to_contribute);
     Ok(())
-}
-
-enum ReceiveError {
-    RequestError(payjoin::receiver::RequestError),
-    BitcoinRpc(bitcoincore_rpc::Error),
-    Other(anyhow::Error),
-}
-
-impl fmt::Display for ReceiveError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ReceiveError::RequestError(e) => write!(f, "RequestError: {}", e),
-            ReceiveError::BitcoinRpc(e) => write!(f, "BitcoinRpc: {}", e),
-            ReceiveError::Other(e) => write!(f, "Other: {}", e),
-        }
-    }
-}
-
-impl From<payjoin::receiver::RequestError> for ReceiveError {
-    fn from(e: payjoin::receiver::RequestError) -> Self { ReceiveError::RequestError(e) }
-}
-
-impl From<bitcoincore_rpc::Error> for ReceiveError {
-    fn from(e: bitcoincore_rpc::Error) -> Self { ReceiveError::BitcoinRpc(e) }
-}
-
-impl From<anyhow::Error> for ReceiveError {
-    fn from(e: anyhow::Error) -> Self { ReceiveError::Other(e) }
 }
 
 struct Headers<'a>(rouille::HeadersIter<'a>);

@@ -21,8 +21,8 @@ use bitcoin::{Amount, OutPoint, Script, TxOut};
 mod error;
 mod optional_parameters;
 
+pub use error::{Error, RequestError, SelectionError};
 use error::{InternalRequestError, InternalSelectionError};
-pub use error::{RequestError, SelectionError};
 use optional_parameters::Params;
 use rand::seq::SliceRandom;
 use rand::Rng;
@@ -133,12 +133,12 @@ impl UncheckedProposal {
     /// Call this after checking downstream.
     pub fn check_can_broadcast(
         self,
-        can_broadcast: impl Fn(&bitcoin::Transaction) -> bool,
-    ) -> Result<MaybeInputsOwned, RequestError> {
-        if can_broadcast(&self.psbt.clone().extract_tx()) {
+        can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, Error>,
+    ) -> Result<MaybeInputsOwned, Error> {
+        if can_broadcast(&self.psbt.clone().extract_tx())? {
             Ok(MaybeInputsOwned { psbt: self.psbt, params: self.params })
         } else {
-            Err(RequestError::from(InternalRequestError::OriginalPsbtNotBroadcastable))
+            Err(Error::BadRequest(InternalRequestError::OriginalPsbtNotBroadcastable.into()))
         }
     }
 
@@ -159,27 +159,31 @@ impl MaybeInputsOwned {
     /// An attacker could try to spend receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         self,
-        is_owned: impl Fn(&Script) -> bool,
-    ) -> Result<MaybeMixedInputScripts, RequestError> {
+        is_owned: impl Fn(&Script) -> Result<bool, Error>,
+    ) -> Result<MaybeMixedInputScripts, Error> {
         let mut err = Ok(());
-        let owned_script = self
+        if let Some(e) = self
             .psbt
             .input_pairs()
             .scan(&mut err, |err, input| match input.previous_txout() {
                 Ok(txout) => Some(txout.script_pubkey.to_owned()),
                 Err(e) => {
-                    **err = Err(RequestError::from(InternalRequestError::PrevTxOut(e)));
+                    **err = Err(Error::BadRequest(InternalRequestError::PrevTxOut(e).into()));
                     None
                 }
             })
-            .find(|script| is_owned(script));
+            .find_map(|script| match is_owned(&script) {
+                Ok(false) => None,
+                Ok(true) =>
+                    Some(Error::BadRequest(InternalRequestError::InputOwned(script).into())),
+                Err(e) => Some(Error::Server(e.into())),
+            })
+        {
+            return Err(e);
+        }
         err?;
 
-        match owned_script {
-            Some(owned_script) =>
-                Err(RequestError::from(InternalRequestError::InputOwned(owned_script))),
-            None => Ok(MaybeMixedInputScripts { psbt: self.psbt, params: self.params }),
-        }
+        Ok(MaybeMixedInputScripts { psbt: self.psbt, params: self.params })
     }
 }
 
@@ -233,26 +237,19 @@ impl MaybeInputsSeen {
     /// proposes a PayJoin PSBT as a new Original PSBT for a new PayJoin.
     pub fn check_no_inputs_seen_before(
         self,
-        is_known: impl Fn(&Script) -> bool,
-    ) -> Result<OutputsUnknown, RequestError> {
-        let mut known_script = None;
-        self.psbt.input_pairs().for_each(|input| {
-            let script = &input
-                .previous_txout()
-                // This error should already be handled by the first check
-                .unwrap_or_else(|e: crate::psbt::PrevTxOutError| {
-                    panic!("Unexpected error: {:?}", e)
-                })
-                // Once this closure returns a Result, we can use this instead:
-                //.map_err(|e| RequestError::from(InternalRequestError::PrevTxOut(e)))?.script_pubkey;
-                .script_pubkey;
-            if is_known(script) {
-                known_script = Some(script.clone());
-            }
-        });
-        if let Some(script) = known_script {
-            return Err(RequestError::from(InternalRequestError::InputSeen(script)));
-        }
+        is_known: impl Fn(&Script) -> Result<bool, Error>,
+    ) -> Result<OutputsUnknown, Error> {
+        self.psbt.input_pairs().try_for_each(|input| match input.previous_txout() {
+            Ok(txo) => match is_known(&txo.script_pubkey) {
+                Ok(false) => Ok::<(), Error>(()),
+                Ok(true) => Err(Error::BadRequest(
+                    InternalRequestError::InputSeen(txo.script_pubkey.clone()).into(),
+                ))?,
+                Err(e) => Err(Error::Server(e.into()))?,
+            },
+            Err(e) => Err(Error::BadRequest(InternalRequestError::PrevTxOut(e).into()))?,
+        })?;
+
         Ok(OutputsUnknown { psbt: self.psbt, params: self.params })
     }
 }
@@ -270,27 +267,23 @@ impl OutputsUnknown {
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
         self,
-        is_receiver_output: impl Fn(&Script) -> bool,
-    ) -> Result<PayjoinProposal, RequestError> {
+        is_receiver_output: impl Fn(&Script) -> Result<bool, Error>,
+    ) -> Result<PayjoinProposal, Error> {
         let owned_vouts: Vec<usize> = self
             .psbt
             .unsigned_tx
             .output
             .iter()
             .enumerate()
-            .filter_map(
-                |(vout, txo)| {
-                    if is_receiver_output(&txo.script_pubkey) {
-                        Some(vout)
-                    } else {
-                        None
-                    }
-                },
-            )
-            .collect();
+            .filter_map(|(vout, txo)| match is_receiver_output(&txo.script_pubkey) {
+                Ok(true) => Some(Ok(vout)),
+                Ok(false) => None,
+                Err(e) => Some(Err(e)),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         if owned_vouts.is_empty() {
-            return Err(RequestError::from(InternalRequestError::MissingPayment));
+            return Err(Error::BadRequest(InternalRequestError::MissingPayment.into()));
         }
 
         Ok(PayjoinProposal {
@@ -604,15 +597,15 @@ mod test {
         let proposal = get_proposal_from_test_vector().unwrap();
         let mut payjoin = proposal
             .assume_interactive_receiver()
-            .check_inputs_not_owned(|_| false)
+            .check_inputs_not_owned(|_| Ok(false))
             .expect("No inputs should be owned")
             .check_no_mixed_input_scripts()
             .expect("No mixed input scripts")
-            .check_no_inputs_seen_before(|_| false)
+            .check_no_inputs_seen_before(|_| Ok(false))
             .expect("No inputs should be seen before")
             .identify_receiver_outputs(|script| {
-                Address::from_script(script, Network::Bitcoin)
-                    == Address::from_str(&"3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+                Ok(Address::from_script(script, Network::Bitcoin)
+                    == Address::from_str(&"3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM"))
             })
             .expect("Receiver output should be identified");
         let payjoin = payjoin.apply_fee(None);

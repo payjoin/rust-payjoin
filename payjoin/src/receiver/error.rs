@@ -1,4 +1,35 @@
+use std::error;
 use std::fmt::{self, Display};
+
+#[derive(Debug)]
+pub enum Error {
+    /// To be returned as HTTP 400
+    BadRequest(RequestError),
+    // To be returned as HTTP 500
+    Server(Box<dyn error::Error>),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self {
+            Self::BadRequest(e) => e.fmt(f),
+            Self::Server(e) => write!(f, "Internal Server Error: {}", e),
+        }
+    }
+}
+
+impl error::Error for Error {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match &self {
+            Self::BadRequest(_) => None,
+            Self::Server(e) => Some(e.as_ref()),
+        }
+    }
+}
+
+impl From<RequestError> for Error {
+    fn from(e: RequestError) -> Self { Error::BadRequest(e) }
+}
 
 /// Error that may occur when the request from sender is malformed.
 ///

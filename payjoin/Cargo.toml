@@ -14,20 +14,20 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-sender = []
-receiver = ["rand"]
+send = []
+receive = ["rand"]
 
 [dependencies]
 bitcoin = "0.29.2"
 base64 = "0.13.0"
-rand = { version = "0.8.4", optional = true }
 bip21 = "0.2.0"
-url = "2.2.2"
 log = { version = "0.4.14"}
+rand = { version = "0.8.4", optional = true }
+url = "2.2.2"
 
 [dev-dependencies]
-bitcoind = { version = "0.27.1", features = ["0_21_1"] }
 env_logger = "0.9.0"
+bitcoind = { version = "0.27.1", features = ["0_21_1"] }
 
 [package.metadata.docs.rs]
-features = ["sender", "receiver"]
+features = ["send", "receive"]

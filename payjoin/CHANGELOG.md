@@ -1,5 +1,9 @@
 # PayJoin Changelog
 
+# ???
+
+- Rename `sender`, `receiver` features `send`, `receive`
+
 ## 0.7.0
 
 - Upgrade receiver to beta quality

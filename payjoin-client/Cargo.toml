@@ -10,14 +10,14 @@ native-tls-vendored = ["reqwest/native-tls-vendored"]
 
 [dependencies]
 anyhow = "1.0.70"
+base64 = "0.13.0"
 bitcoin = "0.29.2"
-payjoin = { path = "../payjoin", features = ["sender", "receiver"] }
 bitcoincore-rpc = "0.16.0"
+clap = "4.1.4"
+config = "0.13.3"
+env_logger = "0.9.0"
+log = "0.4.7"
+payjoin = { path = "../payjoin", features = ["send", "receive"] }
 reqwest = { version = "0.11.4", features = ["blocking"] }
 rouille = "3.6.1"
-base64 = "0.13.0"
-clap = "4.1.4"
-log = "0.4.7"
-env_logger = "0.9.0"
-config = "0.13.3"
 serde = { version = "1.0.160", features = ["derive"] }

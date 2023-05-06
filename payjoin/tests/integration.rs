@@ -1,4 +1,4 @@
-#[cfg(all(feature = "sender", feature = "receiver"))]
+#[cfg(all(feature = "send", feature = "receive"))]
 mod integration {
     use std::collections::HashMap;
     use std::str::FromStr;
@@ -10,8 +10,8 @@ mod integration {
     use bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
     use bitcoind::bitcoincore_rpc::RpcApi;
     use log::{debug, log_enabled, Level};
-    use payjoin::receiver::Headers;
-    use payjoin::sender::Request;
+    use payjoin::receive::Headers;
+    use payjoin::send::Request;
     use payjoin::{PjUriExt, Uri, UriExt};
 
     #[test]
@@ -76,7 +76,7 @@ mod integration {
         let psbt = sender.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
         let psbt = load_psbt_from_base64(psbt.as_bytes()).unwrap();
         debug!("Original psbt: {:#?}", psbt);
-        let pj_params = payjoin::sender::Configuration::with_fee_contribution(
+        let pj_params = payjoin::send::Configuration::with_fee_contribution(
             payjoin::bitcoin::Amount::from_sat(10000),
             None,
         );
@@ -128,7 +128,7 @@ mod integration {
         receiver: bitcoincore_rpc::Client,
     ) -> String {
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
-        let proposal = payjoin::receiver::UncheckedProposal::from_request(
+        let proposal = payjoin::receive::UncheckedProposal::from_request(
             req.body.as_slice(),
             req.url.query().unwrap_or(""),
             headers,

@@ -12,28 +12,27 @@
 //!
 //! Additional advantage is it doesn't care whether you use `async`, blocking, `tokio`, `sync-std` `hyper`, `actix` or whatever.
 //! There are already too many frameworks in Rust so it's best avoiding directly introducing them into library code.
-//! The library currently only contains sender implementation but I want to add receiver too.
 //!
-//! To use this library as a sender (client, payer), you need to enable `sender` Cargo feature.
+//! To use this library as a sender (client, payer), you need to enable `send` Cargo feature.
 //!
-//! To use this library as a receiver (server, payee), you need to enable `receiver` Cargo feature.
+//! To use this library as a receiver (server, payee), you need to enable `receive` Cargo feature.
 
 pub extern crate bitcoin;
 
-#[cfg(feature = "receiver")]
-pub mod receiver;
-pub use crate::receiver::Error;
-#[cfg(feature = "sender")]
-pub mod sender;
+#[cfg(feature = "receive")]
+pub mod receive;
+pub use crate::receive::Error;
+#[cfg(feature = "send")]
+pub mod send;
 
-#[cfg(any(feature = "sender", feature = "receiver"))]
+#[cfg(any(feature = "send", feature = "receive"))]
 pub(crate) mod fee_rate;
-#[cfg(any(feature = "sender", feature = "receiver"))]
+#[cfg(any(feature = "send", feature = "receive"))]
 pub(crate) mod input_type;
-#[cfg(any(feature = "sender", feature = "receiver"))]
+#[cfg(any(feature = "send", feature = "receive"))]
 pub(crate) mod psbt;
 mod uri;
-#[cfg(any(feature = "sender", feature = "receiver"))]
+#[cfg(any(feature = "send", feature = "receive"))]
 pub(crate) mod weight;
 
 pub use uri::{PjParseError, PjUri, PjUriExt, Uri, UriExt};

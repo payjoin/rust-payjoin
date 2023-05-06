@@ -28,7 +28,7 @@ impl Default for Params {
 }
 
 impl Params {
-    #[cfg(feature = "receiver")]
+    #[cfg(feature = "receive")]
     pub fn from_query_pairs<K, V, I>(pairs: I) -> Result<Self, Error>
     where
         I: Iterator<Item = (K, V)>,

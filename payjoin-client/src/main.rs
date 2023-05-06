@@ -7,7 +7,7 @@ use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use clap::{arg, Arg, ArgMatches, Command};
 use payjoin::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
-use payjoin::receiver::{Error, PayjoinProposal};
+use payjoin::receive::{Error, PayjoinProposal};
 use payjoin::{PjUriExt, UriExt};
 use rouille::{Request, Response};
 
@@ -82,7 +82,7 @@ impl App {
         let psbt = load_psbt_from_base64(psbt.as_bytes())
             .with_context(|| "Failed to load PSBT from base64")?;
         log::debug!("Original psbt: {:#?}", psbt);
-        let pj_params = payjoin::sender::Configuration::with_fee_contribution(
+        let pj_params = payjoin::send::Configuration::with_fee_contribution(
             payjoin::bitcoin::Amount::from_sat(10000),
             None,
         );
@@ -163,7 +163,7 @@ impl App {
         use bitcoin::hashes::hex::ToHex;
 
         let headers = Headers(req.headers());
-        let proposal = payjoin::receiver::UncheckedProposal::from_request(
+        let proposal = payjoin::receive::UncheckedProposal::from_request(
             req.data().context("Failed to read request body").map_err(|e| {
                 log::warn!("Failed to read request body: {}", e);
                 Error::Server(e.into())
@@ -342,7 +342,7 @@ fn try_contributing_inputs(
 }
 
 struct Headers<'a>(rouille::HeadersIter<'a>);
-impl payjoin::receiver::Headers for Headers<'_> {
+impl payjoin::receive::Headers for Headers<'_> {
     fn get_header(&self, key: &str) -> Option<&str> {
         let mut copy = self.0.clone(); // lol
         copy.find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v)

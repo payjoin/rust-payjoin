@@ -3,8 +3,8 @@ use std::convert::TryFrom;
 
 use url::Url;
 
-#[cfg(feature = "sender")]
-use crate::sender;
+#[cfg(feature = "send")]
+use crate::send;
 
 #[derive(Debug, Clone)]
 pub enum PayJoin {
@@ -38,12 +38,12 @@ mod sealed {
 }
 
 pub trait PjUriExt: sealed::UriExt {
-    #[cfg(feature = "sender")]
+    #[cfg(feature = "send")]
     fn create_pj_request(
         self,
         psbt: bitcoin::util::psbt::PartiallySignedTransaction,
-        params: sender::Configuration,
-    ) -> Result<(sender::Request, sender::Context), sender::CreateRequestError>;
+        params: send::Configuration,
+    ) -> Result<(send::Request, send::Context), send::CreateRequestError>;
 }
 
 pub trait UriExt<'a>: sealed::UriExt {
@@ -51,18 +51,17 @@ pub trait UriExt<'a>: sealed::UriExt {
 }
 
 impl<'a> PjUriExt for PjUri<'a> {
-    #[cfg(feature = "sender")]
+    #[cfg(feature = "send")]
     fn create_pj_request(
         self,
         psbt: bitcoin::util::psbt::PartiallySignedTransaction,
-        params: sender::Configuration,
-    ) -> Result<(sender::Request, sender::Context), sender::CreateRequestError> {
+        params: send::Configuration,
+    ) -> Result<(send::Request, send::Context), send::CreateRequestError> {
         use crate::psbt::PsbtExt;
 
-        let valid_psbt = psbt
-            .validate()
-            .map_err(sender::InternalCreateRequestError::InconsistentOriginalPsbt)?;
-        sender::from_psbt_and_uri(valid_psbt, self, params)
+        let valid_psbt =
+            psbt.validate().map_err(send::InternalCreateRequestError::InconsistentOriginalPsbt)?;
+        send::from_psbt_and_uri(valid_psbt, self, params)
     }
 }
 

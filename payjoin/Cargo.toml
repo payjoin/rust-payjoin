@@ -14,8 +14,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-sender = []
-receiver = ["rand"]
+send = []
+receive = ["rand"]
 
 [dependencies]
 bitcoin = "0.29.2"
@@ -30,4 +30,4 @@ env_logger = "0.9.0"
 bitcoind = { version = "0.27.1", features = ["0_21_1"] }
 
 [package.metadata.docs.rs]
-features = ["sender", "receiver"]
+features = ["send", "receive"]

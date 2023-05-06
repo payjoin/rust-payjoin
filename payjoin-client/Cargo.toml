@@ -17,7 +17,7 @@ clap = "4.1.4"
 config = "0.13.3"
 env_logger = "0.9.0"
 log = "0.4.7"
-payjoin = { path = "../payjoin", features = ["sender", "receiver"] }
+payjoin = { path = "../payjoin", features = ["send", "receive"] }
 reqwest = { version = "0.11.4", features = ["blocking"] }
 rouille = "3.6.1"
 serde = { version = "1.0.160", features = ["derive"] }

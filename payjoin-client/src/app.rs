@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::bitcoin::Amount;
+use bitcoincore_rpc::jsonrpc::serde_json;
 use bitcoincore_rpc::RpcApi;
 use clap::ArgMatches;
 use config::{Config, File, FileFormat};
@@ -36,7 +37,7 @@ impl App {
             ),
         }
         .context("Failed to connect to bitcoind")?;
-        let seen_inputs = Arc::new(Mutex::new(SeenInputs::new()));
+        let seen_inputs = Arc::new(Mutex::new(SeenInputs::new()?));
         Ok(Self { config, bitcoind, seen_inputs })
     }
 
@@ -219,8 +220,9 @@ impl App {
         log::trace!("check3");
 
         // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
-        let payjoin = proposal
-            .check_no_inputs_seen_before(|input| Ok(!self.insert_input_seen_before(*input)))?;
+        let payjoin = proposal.check_no_inputs_seen_before(|input| {
+            Ok(!self.insert_input_seen_before(*input).map_err(|e| Error::Server(e.into()))?)
+        })?;
         log::trace!("check4");
 
         let mut payjoin = payjoin.identify_receiver_outputs(|output_script| {
@@ -267,20 +269,42 @@ impl App {
         Ok(Response::text(payload))
     }
 
-    fn insert_input_seen_before(&self, input: bitcoin::OutPoint) -> bool {
-        self.seen_inputs.lock().unwrap().insert(input)
+    fn insert_input_seen_before(&self, input: bitcoin::OutPoint) -> Result<bool> {
+        self.seen_inputs.lock().expect("mutex lock failed").insert(input)
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
 struct SeenInputs {
-    set: HashSet<bitcoin::OutPoint>,
+    set: OutPointSet,
+    file: std::fs::File,
 }
 
 impl SeenInputs {
-    fn new() -> Self { Self { set: HashSet::new() } }
+    fn new() -> Result<Self> {
+        // read from file
+        let mut file =
+            OpenOptions::new().write(true).read(true).create(true).open("seen_inputs.json")?;
+        let set = serde_json::from_reader(&mut file).unwrap_or_else(|_| OutPointSet::new());
+        Ok(Self { set, file })
+    }
 
-    fn insert(&mut self, input: bitcoin::OutPoint) -> bool { self.set.insert(input) }
+    fn insert(&mut self, input: bitcoin::OutPoint) -> Result<bool> {
+        use std::io::Write;
+
+        let unseen = self.set.insert(input);
+        let serialized = serde_json::to_string(&self.set)?;
+        self.file.write_all(serialized.as_bytes())?;
+        Ok(unseen)
+    }
+}
+#[derive(Debug, Serialize, Deserialize)]
+struct OutPointSet(HashSet<bitcoin::OutPoint>);
+
+use std::fs::OpenOptions;
+impl OutPointSet {
+    fn new() -> Self { Self(HashSet::new()) }
+
+    fn insert(&mut self, input: bitcoin::OutPoint) -> bool { self.0.insert(input) }
 }
 
 #[derive(Debug, Deserialize)]

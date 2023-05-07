@@ -62,9 +62,7 @@ pub(crate) enum InternalRequestError {
     InputType(crate::input_type::InputTypeError),
     /// Original PSBT input has been seen before. Only automatic receivers, aka "interactive" in the spec
     /// look out for these to prevent probing attacks.
-    ///
-    /// Save Script insetad of OutPoint because both would hurt privacy and the former can be re-used.
-    InputSeen(bitcoin::Script),
+    InputSeen(bitcoin::OutPoint),
 }
 
 impl From<InternalRequestError> for RequestError {

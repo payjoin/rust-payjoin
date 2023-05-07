@@ -237,17 +237,19 @@ impl MaybeInputsSeen {
     /// proposes a PayJoin PSBT as a new Original PSBT for a new PayJoin.
     pub fn check_no_inputs_seen_before(
         self,
-        is_known: impl Fn(&Script) -> Result<bool, Error>,
+        is_known: impl Fn(&OutPoint) -> Result<bool, Error>,
     ) -> Result<OutputsUnknown, Error> {
-        self.psbt.input_pairs().try_for_each(|input| match input.previous_txout() {
-            Ok(txo) => match is_known(&txo.script_pubkey) {
+        self.psbt.input_pairs().try_for_each(|input| {
+            match is_known(&input.txin.previous_output) {
                 Ok(false) => Ok::<(), Error>(()),
-                Ok(true) => Err(Error::BadRequest(
-                    InternalRequestError::InputSeen(txo.script_pubkey.clone()).into(),
-                ))?,
+                Ok(true) =>  {
+                    log::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
+                    Err(Error::BadRequest(
+                        InternalRequestError::InputSeen(input.txin.previous_output).into(),
+                    ))?
+                },
                 Err(e) => Err(Error::Server(e.into()))?,
-            },
-            Err(e) => Err(Error::BadRequest(InternalRequestError::PrevTxOut(e).into()))?,
+            }
         })?;
 
         Ok(OutputsUnknown { psbt: self.psbt, params: self.params })

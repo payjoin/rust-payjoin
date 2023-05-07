@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::bitcoin::Amount;
@@ -16,7 +17,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct App {
     config: AppConfig,
     bitcoind: bitcoincore_rpc::Client,
-    seen_inputs: SeenInputs,
+    seen_inputs: Arc<Mutex<SeenInputs>>,
 }
 
 impl App {
@@ -35,7 +36,7 @@ impl App {
             ),
         }
         .context("Failed to connect to bitcoind")?;
-        let seen_inputs = SeenInputs::new();
+        let seen_inputs = Arc::new(Mutex::new(SeenInputs::new()));
         Ok(Self { config, bitcoind, seen_inputs })
     }
 
@@ -218,28 +219,8 @@ impl App {
         log::trace!("check3");
 
         // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
-        let payjoin = proposal.check_no_inputs_seen_before(|input| {
-            if let Ok(address) = bitcoin::Address::from_script(input, network) {
-                let address_info = self.bitcoind.get_address_info(&address).map_err(|e| Error::Server(e.into()))?;
-                if address_info.labels.contains(
-                    &bitcoincore_rpc::bitcoincore_rpc_json::GetAddressInfoResultLabel::Simple(
-                        "input_seen_before".into(),
-                    ),
-                ) {
-                    log::info!(
-                        "Request contains an input we've seen before. Preventing possible probing attack: {}",
-                        address
-                    );
-                    Ok(true)
-                } else {
-                    self.bitcoind
-                        .import_address(&address, Some("input_seen_before"), Some(false)).map_err(|e| Error::Server(e.into()))?;
-                    Ok(false)
-                }
-            } else {
-                Ok(false)
-            }
-        })?;
+        let payjoin = proposal
+            .check_no_inputs_seen_before(|input| Ok(!self.insert_input_seen_before(*input)))?;
         log::trace!("check4");
 
         let mut payjoin = payjoin.identify_receiver_outputs(|output_script| {
@@ -285,6 +266,10 @@ impl App {
         log::info!("successful response");
         Ok(Response::text(payload))
     }
+
+    fn insert_input_seen_before(&self, input: bitcoin::OutPoint) -> bool {
+        self.seen_inputs.lock().unwrap().insert(input)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -295,7 +280,7 @@ struct SeenInputs {
 impl SeenInputs {
     fn new() -> Self { Self { set: HashSet::new() } }
 
-    fn insert(&mut self, input: &bitcoin::TxIn) -> bool { self.set.insert(input.previous_output) }
+    fn insert(&mut self, input: bitcoin::OutPoint) -> bool { self.set.insert(input) }
 }
 
 #[derive(Debug, Deserialize)]

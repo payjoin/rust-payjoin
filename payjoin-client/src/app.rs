@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::str::FromStr;
 
@@ -11,11 +11,12 @@ use payjoin::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use payjoin::receive::{Error, PayjoinProposal};
 use payjoin::{PjUriExt, UriExt};
 use rouille::{Request, Response};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub(crate) struct App {
     config: AppConfig,
     bitcoind: bitcoincore_rpc::Client,
+    seen_inputs: SeenInputs,
 }
 
 impl App {
@@ -34,7 +35,8 @@ impl App {
             ),
         }
         .context("Failed to connect to bitcoind")?;
-        Ok(Self { config, bitcoind })
+        let seen_inputs = SeenInputs::new();
+        Ok(Self { config, bitcoind, seen_inputs })
     }
 
     pub fn send_payjoin(&self, bip21: &str) -> Result<()> {
@@ -283,6 +285,17 @@ impl App {
         log::info!("successful response");
         Ok(Response::text(payload))
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SeenInputs {
+    set: HashSet<bitcoin::OutPoint>,
+}
+
+impl SeenInputs {
+    fn new() -> Self { Self { set: HashSet::new() } }
+
+    fn insert(&mut self, input: &bitcoin::TxIn) -> bool { self.set.insert(input.previous_output) }
 }
 
 #[derive(Debug, Deserialize)]

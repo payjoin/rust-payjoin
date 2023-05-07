@@ -43,6 +43,24 @@ fn main() -> Result<()> {
 }
 
 impl App {
+    fn new(config: AppConfig) -> Result<Self> {
+        let bitcoind = match &config.bitcoind_cookie {
+            Some(cookie) => bitcoincore_rpc::Client::new(
+                &config.bitcoind_rpchost,
+                bitcoincore_rpc::Auth::CookieFile(cookie.into()),
+            ),
+            None => bitcoincore_rpc::Client::new(
+                &config.bitcoind_rpchost,
+                bitcoincore_rpc::Auth::UserPass(
+                    config.bitcoind_rpcuser.clone(),
+                    config.bitcoind_rpcpass.clone(),
+                ),
+            ),
+        }
+        .context("Failed to connect to bitcoind")?;
+        Ok(Self { config, bitcoind })
+    }
+
     fn send_payjoin(&self, bip21: &str) -> Result<()> {
         let link = payjoin::Uri::try_from(bip21)
             .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
@@ -288,24 +306,6 @@ impl App {
         let payload = base64::encode(bitcoin::consensus::serialize(&payjoin_proposal_psbt));
         log::info!("successful response");
         Ok(Response::text(payload))
-    }
-
-    fn new(config: AppConfig) -> Result<Self> {
-        let bitcoind = match &config.bitcoind_cookie {
-            Some(cookie) => bitcoincore_rpc::Client::new(
-                &config.bitcoind_rpchost,
-                bitcoincore_rpc::Auth::CookieFile(cookie.into()),
-            ),
-            None => bitcoincore_rpc::Client::new(
-                &config.bitcoind_rpchost,
-                bitcoincore_rpc::Auth::UserPass(
-                    config.bitcoind_rpcuser.clone(),
-                    config.bitcoind_rpcpass.clone(),
-                ),
-            ),
-        }
-        .context("Failed to connect to bitcoind")?;
-        Ok(Self { config, bitcoind })
     }
 }
 

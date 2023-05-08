@@ -387,26 +387,27 @@ impl AppConfig {
                 "bitcoind_rpcpass",
                 matches.get_one::<String>("rpcpass").map(|s| s.as_str()),
             )?
+            // Subcommand defaults without which file serialization fails.
+            .set_default("danger_accept_invalid_certs", false)?
+            .set_default("pj_host", "0.0.0.0:3000")?
+            .set_default("pj_endpoint", "https://localhost:3010")?
+            .set_default("sub_only", false)?
             .add_source(File::new("config.toml", FileFormat::Toml));
 
         let builder = match matches.subcommand() {
-            Some(("send", matches)) =>
-                builder.set_default("danger_accept_invalid_certs", false)?.set_override_option(
-                    "danger_accept_invalid_certs",
-                    matches.get_one::<bool>("DANGER_ACCEPT_INVALID_CERTS").copied(),
-                )?,
+            Some(("send", matches)) => builder.set_override_option(
+                "danger_accept_invalid_certs",
+                matches.get_one::<bool>("DANGER_ACCEPT_INVALID_CERTS").copied(),
+            )?,
             Some(("receive", matches)) => builder
-                .set_default("pj_host", "0.0.0.0:3000")?
                 .set_override_option(
                     "pj_host",
                     matches.get_one::<String>("port").map(|port| format!("0.0.0.0:{}", port)),
                 )?
-                .set_default("pj_endpoint", "https://localhost:3010")?
                 .set_override_option(
                     "pj_endpoint",
                     matches.get_one::<String>("endpoint").map(|s| s.as_str()),
                 )?
-                .set_default("sub_only", false)?
                 .set_override_option("sub_only", matches.get_one::<bool>("sub_only").copied())?,
             _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
         };

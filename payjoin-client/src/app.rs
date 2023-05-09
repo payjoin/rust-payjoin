@@ -146,21 +146,59 @@ impl App {
     }
 
     fn handle_web_request(&self, req: &Request) -> Response {
-        self.handle_payjoin_request(req)
-            .map_err(|e| match e {
-                Error::BadRequest(e) => {
-                    log::error!("Error handling request: {}", e);
-                    Response::text(e.to_string()).with_status_code(400)
-                }
-                e => {
-                    log::error!("Error handling request: {}", e);
-                    Response::text(e.to_string()).with_status_code(500)
-                }
-            })
-            .unwrap_or_else(|err_resp| err_resp)
+        log::debug!("Received request: {:?}", req);
+        match (req.method(), req.url().as_ref()) {
+            ("GET", "/bip21") => {
+                log::debug!("{:?}, {:?}", req.method(), req.raw_query_string());
+                let amount = req.get_param("amount").map(|amt| {
+                    Amount::from_btc(amt.parse().expect("Failed to parse amount")).unwrap()
+                });
+                self.handle_get_bip21(amount)
+                    .map_err(|e| {
+                        log::error!("Error handling request: {}", e);
+                        Response::text(e.to_string()).with_status_code(500)
+                    })
+                    .unwrap_or_else(|err_resp| err_resp)
+            }
+            ("POST", _) => self
+                .handle_payjoin_post(req)
+                .map_err(|e| match e {
+                    Error::BadRequest(e) => {
+                        log::error!("Error handling request: {}", e);
+                        Response::text(e.to_string()).with_status_code(400)
+                    }
+                    e => {
+                        log::error!("Error handling request: {}", e);
+                        Response::text(e.to_string()).with_status_code(500)
+                    }
+                })
+                .unwrap_or_else(|err_resp| err_resp),
+            _ => Response::empty_404(),
+        }
     }
 
-    fn handle_payjoin_request(&self, req: &Request) -> Result<Response, Error> {
+    fn handle_get_bip21(&self, amount: Option<Amount>) -> Result<Response, Error> {
+        let address =
+            self.bitcoind.get_new_address(None, None).map_err(|e| Error::Server(e.into()))?;
+        let uri_string = if let Some(amount) = amount {
+            format!(
+                "{}?amount={}&pj={}",
+                address.to_qr_uri(),
+                amount.to_btc(),
+                self.config.pj_endpoint
+            )
+        } else {
+            format!("{}?pj={}", address.to_qr_uri(), self.config.pj_endpoint)
+        };
+        let uri = payjoin::Uri::try_from(uri_string.clone())
+            .map_err(|_| Error::Server(anyhow!("Could not parse payjoin URI string.").into()))?;
+        let _ = uri
+            .check_pj_supported()
+            .map_err(|_| Error::Server(anyhow!("Created bip21 with invalid &pj=.").into()))?;
+        Ok(Response::text(uri_string))
+    }
+
+    fn handle_payjoin_post(&self, req: &Request) -> Result<Response, Error> {
         use bitcoin::hashes::hex::ToHex;
 
         let headers = Headers(req.headers());
@@ -349,26 +387,27 @@ impl AppConfig {
                 "bitcoind_rpcpass",
                 matches.get_one::<String>("rpcpass").map(|s| s.as_str()),
             )?
+            // Subcommand defaults without which file serialization fails.
+            .set_default("danger_accept_invalid_certs", false)?
+            .set_default("pj_host", "0.0.0.0:3000")?
+            .set_default("pj_endpoint", "https://localhost:3010")?
+            .set_default("sub_only", false)?
             .add_source(File::new("config.toml", FileFormat::Toml));
 
         let builder = match matches.subcommand() {
-            Some(("send", matches)) =>
-                builder.set_default("danger_accept_invalid_certs", false)?.set_override_option(
-                    "danger_accept_invalid_certs",
-                    matches.get_one::<bool>("DANGER_ACCEPT_INVALID_CERTS").copied(),
-                )?,
+            Some(("send", matches)) => builder.set_override_option(
+                "danger_accept_invalid_certs",
+                matches.get_one::<bool>("DANGER_ACCEPT_INVALID_CERTS").copied(),
+            )?,
             Some(("receive", matches)) => builder
-                .set_default("pj_host", "0.0.0.0:3000")?
                 .set_override_option(
                     "pj_host",
                     matches.get_one::<String>("port").map(|port| format!("0.0.0.0:{}", port)),
                 )?
-                .set_default("pj_endpoint", "https://localhost:3010")?
                 .set_override_option(
                     "pj_endpoint",
                     matches.get_one::<String>("endpoint").map(|s| s.as_str()),
                 )?
-                .set_default("sub_only", false)?
                 .set_override_option("sub_only", matches.get_one::<bool>("sub_only").copied())?,
             _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
         };

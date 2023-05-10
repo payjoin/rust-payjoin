@@ -49,7 +49,9 @@ fn cli() -> ArgMatches {
             Command::new("send")
                 .arg_required_else_help(true)
                 .arg(arg!(<BIP21> "The `bitcoin:...` payjoin uri to send to"))
-                .arg(Arg::new("DANGER_ACCEPT_INVALID_CERTS").hide(true).help("Wicked dangerous! Vulnerable to MITM attacks! Accept invalid certs for the payjoin endpoint"))
+                .arg(Arg::new("DANGER_ACCEPT_INVALID_CERTS")
+                    .hide(true)
+                    .help("Wicked dangerous! Vulnerable to MITM attacks! Accept invalid certs for the payjoin endpoint"))
         )
         .subcommand(
             Command::new("receive")

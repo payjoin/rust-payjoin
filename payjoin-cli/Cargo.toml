@@ -1,8 +1,12 @@
 [package]
-name = "payjoin-client"
-version = "0.1.15"
+name = "payjoin-cli"
+version = "0.0.1"
 authors = ["Dan Gould <d@ngould.dev>", "Martin Habovstiak <martin.habovstiak@gmail.com>"]
 edition = "2018"
+
+[[bin]]
+name = "payjoin"
+path = "src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]

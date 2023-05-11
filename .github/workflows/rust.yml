@@ -24,7 +24,7 @@ jobs:
           command: test
           args: --verbose --all-features --lib --manifest-path payjoin/Cargo.toml
 
-  build-payjoin-client:
+  build-payjoin-cli:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -38,12 +38,12 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
           override: true
-      - run: cd payjoin-client
+      - run: cd payjoin-cli
       - name: build payjoin example
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --manifest-path payjoin-client/Cargo.toml
+          args: --manifest-path payjoin-cli/Cargo.toml
 
   fmt:
     runs-on: ubuntu-latest

@@ -12,7 +12,7 @@ It doesn't care whether you use `async`, blocking, `tokio`, `sync-std` `hyper`, 
 There are already too many frameworks in Rust so it's best avoiding directly introducing them into library code.
 The library currently only contains sender implementation and a partial receiver.
 
-The payjoin-client binary performs no-frills PayJoin using Bitcoin Core wallet.
+The payjoin-cli binary performs no-frills PayJoin using Bitcoin Core wallet.
 The payjoin crate also supports other wallet software [like LND](https://github.com/chaincase-app/nolooking).
 
 ### Disclaimer ⚠️ WIP

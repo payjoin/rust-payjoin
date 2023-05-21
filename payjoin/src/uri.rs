@@ -23,7 +23,7 @@ impl Payjoin {
 
 #[derive(Debug, Clone)]
 pub struct PayjoinParams {
-    pub(crate) endpoint: Url,
+    pub(crate) _endpoint: Url,
     pub(crate) disable_output_substitution: bool,
 }
 
@@ -160,7 +160,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
                         && endpoint.domain().unwrap_or_default().ends_with(".onion")
                 {
                     Ok(Payjoin::Supported(PayjoinParams {
-                        endpoint,
+                        _endpoint: endpoint,
                         disable_output_substitution: pjos.unwrap_or(false),
                     }))
                 } else {

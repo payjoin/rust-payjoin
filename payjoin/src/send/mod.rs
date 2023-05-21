@@ -704,7 +704,7 @@ pub(crate) fn from_psbt_and_uri(
     let txout = zeroth_input.previous_txout().expect("We already checked this above");
     let input_type = InputType::from_spent_input(txout, zeroth_input.psbtin).unwrap();
     let url = serialize_url(
-        uri.extras.endpoint.into(),
+        uri.extras._endpoint.into(),
         disable_output_substitution,
         fee_contribution,
         params.min_fee_rate,

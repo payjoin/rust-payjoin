@@ -21,7 +21,9 @@ pub extern crate bitcoin;
 
 #[cfg(feature = "receive")]
 pub mod receive;
+#[cfg(feature = "receive")]
 pub use crate::receive::Error;
+
 #[cfg(feature = "send")]
 pub mod send;
 

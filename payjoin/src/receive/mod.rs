@@ -125,7 +125,7 @@ impl UncheckedProposal {
     /// can be broadcast, i.e. `testmempoolaccept` bitcoind rpc returns { "allowed": true,.. }
     /// for `get_transaction_to_check_broadcast()` before calling this method.
     ///
-    /// Do this check if you generate bitcoin uri to receive PayJoin on sender request without manual human approval, like a payment processor.
+    /// Do this check if you generate bitcoin uri to receive Payjoin on sender request without manual human approval, like a payment processor.
     /// Such so called "non-interactive" receivers are otherwise vulnerable to probing attacks.
     /// If a sender can make requests at will, they can learn which bitcoin the receiver owns at no cost.
     /// Broadcasting the Original PSBT after some time in the failure case makes incurs sender cost and prevents probing.
@@ -142,7 +142,7 @@ impl UncheckedProposal {
         }
     }
 
-    /// Call this method if the only way to initiate a PayJoin with this receiver
+    /// Call this method if the only way to initiate a Payjoin with this receiver
     /// requires manual intervention, as in most consumer wallets.
     ///
     /// So-called "non-interactive" receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks.
@@ -233,8 +233,8 @@ impl MaybeMixedInputScripts {
 
 impl MaybeInputsSeen {
     /// Make sure that the original transaction inputs have never been seen before.
-    /// This prevents probing attacks. This prevents reentrant PayJoin, where a sender
-    /// proposes a PayJoin PSBT as a new Original PSBT for a new PayJoin.
+    /// This prevents probing attacks. This prevents reentrant Payjoin, where a sender
+    /// proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
     pub fn check_no_inputs_seen_before(
         self,
         is_known: impl Fn(&OutPoint) -> Result<bool, Error>,

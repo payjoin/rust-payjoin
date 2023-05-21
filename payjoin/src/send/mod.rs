@@ -1,4 +1,4 @@
-//! Send a PayJoin
+//! Send a Payjoin
 //!
 //! This module contains types and methods used to implement sending via BIP78.
 //! Usage is pretty simple:
@@ -35,7 +35,7 @@ type InternalResult<T> = Result<T, InternalValidationError>;
 
 /// Builder for sender-side payjoin parameters
 ///
-/// These parameters define how client wants to handle PayJoin.
+/// These parameters define how client wants to handle Payjoin.
 pub struct Configuration {
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
@@ -63,7 +63,7 @@ impl Configuration {
         }
     }
 
-    /// Perform PayJoin without incentivizing the payee to cooperate.
+    /// Perform Payjoin without incentivizing the payee to cooperate.
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.

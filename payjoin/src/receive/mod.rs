@@ -5,7 +5,7 @@
 //!
 //! 1. Generate a pj_uri BIP21 using [`payjoin::Uri`](crate::Uri)::from_str
 //! 2. Listen for an original PSBT on the endpoint specified in the URI
-//! 3. Parse the request using [`UncheckedProposal::from_request()`](crate::receiver::UncheckedProposal::from_request())
+//! 3. Parse the request using [`UncheckedProposal::from_request()`](crate::receive::UncheckedProposal::from_request())
 //! 4. Validate the proposal using the `check` methods to guide you.
 //! 5. Assuming the proposal is valid, augment it into a payjoin with the available `try_preserving_privacy` and `contribute` methods
 //! 6. Extract the payjoin PSBT and sign it
@@ -38,7 +38,7 @@ pub trait Headers {
 /// The sender's original PSBT and optional parameters
 ///
 /// This type is used to proces the request. It is returned by
-/// [`UncheckedProposal::from_request()`](crate::receiver::UncheckedProposal::from_request()).
+/// [`UncheckedProposal::from_request()`](crate::receive::UncheckedProposal::from_request()).
 ///
 /// If you are implementing an interactive payment processor, you should get extract the original
 /// transaction with get_transaction_to_schedule_broadcast() and schedule, followed by checking
@@ -51,7 +51,7 @@ pub struct UncheckedProposal {
 
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
-/// Call [`UncheckedProposal::check_no_receiver_owned_inputs()`](crate::receiver::UncheckedProposal::check_no_receiver_owned_inputs()) to proceed.
+/// Call [`check_no_receiver_owned_inputs()`](struct.UncheckedProposal.html#method.check_no_receiver_owned_inputs) to proceed.
 pub struct MaybeInputsOwned {
     psbt: Psbt,
     params: Params,
@@ -59,7 +59,7 @@ pub struct MaybeInputsOwned {
 
 /// Typestate to validate that the Original PSBT has no mixed input types.
 ///
-/// Call [`UncheckedProposal::check_no_mixed_input_types()`](crate::receiver::UncheckedProposal::check_no_mixed_input_types()) to proceed.
+/// Call [`check_no_mixed_input_types`](struct.UncheckedProposal.html#method.check_no_mixed_input_scripts) to proceed.
 pub struct MaybeMixedInputScripts {
     psbt: Psbt,
     params: Params,
@@ -67,7 +67,7 @@ pub struct MaybeMixedInputScripts {
 
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
-/// Call [`UncheckedProposal::check_no_inputs_seen()`](crate::receiver::UncheckedProposal::check_no_inputs_seen()) to proceed.
+/// Call [`check_no_inputs_seen`](struct.MaybeInputsSeen.html#method.check_no_inputs_seen_before) to proceed.
 pub struct MaybeInputsSeen {
     psbt: Psbt,
     params: Params,
@@ -453,6 +453,8 @@ impl PayjoinProposal {
 
     /// Apply additional fee contribution now that the receiver has contributed input
     /// this is kind of a "build_proposal" step before we sign and finalize and extract
+    ///
+    /// WARNING: DO NOT ALTER INPUTS OR OUTPUTS AFTER THIS STEP
     pub fn apply_fee(
         &mut self,
         min_feerate_sat_per_vb: Option<u64>,
@@ -502,9 +504,6 @@ impl PayjoinProposal {
 
     /// Return a Payjoin Proposal PSBT that the sender will find acceptable.
     ///
-    /// When the receiver is satisfied with their contributions, they can apply either their own
-    /// [`min_feerate`], specified here, or the sender's optional min_feerate, whichever is greater.
-    ///
     /// This attempts to calculate any network fee owed by the receiver, subtract it from their output,
     /// and return a PSBT that can produce a consensus-valid transaction that the sender will accept.
     ///
@@ -520,7 +519,6 @@ impl PayjoinProposal {
         let mut original_inputs = self.original_psbt.input_pairs().peekable();
         let mut sender_input_indexes = vec![];
         for (i, input) in self.payjoin_psbt.input_pairs().enumerate() {
-            //input.psbtin.bip32_derivation = BTreeMap::new();
             if let Some(original) = original_inputs.peek() {
                 log::trace!(
                     "match previous_output: {} == {}",

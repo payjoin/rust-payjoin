@@ -9,7 +9,7 @@
 //!    canceled
 //! 4. Call [`PjUriExt::create_pj_request()`](crate::PjUriExt::create_pj_request()) with the PSBT and your parameters
 //! 5. Send the request and receive response
-//! 6. Feed the response to [`Context::process_response()`](crate::sender::Context::process_response())
+//! 6. Feed the response to [`Context::process_response()`](crate::send::Context::process_response())
 //! 7. Sign resulting PSBT
 //! 8. Cancel the one-minute deadline and broadcast the resulting PSBT
 //!
@@ -125,7 +125,7 @@ pub struct Request {
 /// Data required for validation of response.
 ///
 /// This type is used to process the response. It is returned from [`PjUriExt::create_pj_request()`](crate::PjUriExt::create_pj_request()) method
-/// and you only need to call [`.process_response()`](crate::sender::Context::process_response()) on it to continue BIP78 flow.
+/// and you only need to call [`.process_response()`](crate::send::Context::process_response()) on it to continue BIP78 flow.
 pub struct Context {
     original_psbt: Psbt,
     disable_output_substitution: bool,

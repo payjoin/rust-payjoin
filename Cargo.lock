@@ -1241,7 +1241,6 @@ dependencies = [
  "bitcoind",
  "env_logger",
  "log",
- "rand",
  "url",
 ]
 
@@ -1637,6 +1636,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9512ffd81e3a3503ed401f79c33168b9148c75038956039166cd750eaa037c3"
 dependencies = [
  "bitcoin_hashes",
+ "rand",
  "secp256k1-sys",
  "serde",
 ]

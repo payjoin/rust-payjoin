@@ -21,11 +21,11 @@ use bitcoin::{Amount, OutPoint, Script, TxOut};
 mod error;
 mod optional_parameters;
 
+use bitcoin::secp256k1::rand::seq::SliceRandom;
+use bitcoin::secp256k1::rand::{self, Rng};
 pub use error::{Error, RequestError, SelectionError};
 use error::{InternalRequestError, InternalSelectionError};
 use optional_parameters::Params;
-use rand::seq::SliceRandom;
-use rand::Rng;
 
 use crate::fee_rate::FeeRate;
 use crate::input_type::InputType;

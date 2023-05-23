@@ -18,7 +18,7 @@ send = []
 receive = ["rand"]
 
 [dependencies]
-bitcoin = "0.29.2"
+bitcoin = { version = "0.29.2", default-features = false }
 base64 = "0.13.0"
 bip21 = "0.2.0"
 log = { version = "0.4.14"}

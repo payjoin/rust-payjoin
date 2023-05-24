@@ -1,18 +1,145 @@
-//! Send a PayJoin
+//! Send a Payjoin
 //!
-//! This module contains types and methods used to implement sending via BIP78.
+//! This module contains types and methods used to implement sending via [BIP 78 Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki).
 //! Usage is pretty simple:
 //!
 //! 1. Parse BIP21 as [`payjoin::Uri`](crate::Uri)
-//! 2. Create a finalized PSBT paying `.amount` to `.address`
-//! 3. Spawn a thread or async task that will broadcast the transaction after one minute unless
-//!    canceled
-//! 4. Call [`PjUriExt::create_pj_request()`](crate::PjUriExt::create_pj_request()) with the PSBT and your parameters
+//! 2. Construct URI request parameters, a finalized “Original PSBT” paying .amount to .address
+//! 3. (optional) Spawn a thread or async task that will broadcast the original PSBT fallback after delay (e.g. 1 minute) unless canceled
+//! 4. Construct the request [`PjUriExt::create_pj_request()`](crate::PjUriExt::create_pj_request()) with the PSBT and your parameters
 //! 5. Send the request and receive response
-//! 6. Feed the response to [`Context::process_response()`](crate::send::Context::process_response())
-//! 7. Sign resulting PSBT
-//! 8. Cancel the one-minute deadline and broadcast the resulting PSBT
+//! 6. Process the response with [`Context::process_response()`](crate::send::Context::process_response())
+//! 7. Sign and finalize the Payjoin Proposal PSBT
+//! 8. Broadcast the Payjoin Transaction (and cancel the optional fallback broadcast)
 //!
+//! This crate is runtime-agnostic. Data persistence, chain interactions, and networking may be provided by custom implementations or copy the reference [`payjoin-cli`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli) for bitcoind, [`nolooking`](https://github.com/chaincase-app/nolooking) for LND, or [`bitmask-core`](https://github.com/diba-io/bitmask-core) BDK integration. Bring your own wallet and http client.
+//!
+//! ## Send a Payjoin
+//!
+//! The `sender` feature provides the check methods and PSBT data manipulation necessary to send payjoins. Just connect your wallet and an HTTP client. The reference implementation uses [`reqwest`](https://docs.rs/reqwest/latest/reqwest/) and Bitcoin Core RPC.
+//!
+//! ### 1. Parse BIP21 as [`payjoin::Uri`](crate::Uri)
+//!
+//! Start by parsing a valid BIP 21 uri having the `pj` parameter. This is the [`bip21`](https://crates.io/crates/bip21) crate under the hood.
+//!
+//! ```
+//! let link = payjoin::Uri::try_from(bip21)
+//!     .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
+//!
+//! let link = link
+//!     .check_pj_supported()
+//!     .map_err(|e| anyhow!("The provided URI doesn't support payjoin (BIP78): {}", e))?;
+//! ```
+//!
+//! ### 2. Construct URI request parameters, a finalized "Original PSBT" paying `.amount` to `.address`
+//!
+//! ```
+//! let mut outputs = HashMap::with_capacity(1);
+//! outputs.insert(link.address.to_string(), amount);
+//!
+//! let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
+//!     lock_unspent: Some(true),
+//!     fee_rate: Some(Amount::from_sat(2000)), // SPECIFY YOUR USER'S FEE RATE
+//!     ..Default::default()
+//! };
+//! // in payjoin-cli, bitcoind is set up as a client from the config file
+//! let psbt = bitcoind
+//!     .wallet_create_funded_psbt(
+//!         &[], // inputs
+//!         &outputs,
+//!         None, // locktime
+//!         Some(options),
+//!         None,
+//!     )
+//!     .context("Failed to create PSBT")?
+//!     .psbt;
+//! let psbt = bitcoind
+//!     .wallet_process_psbt(&psbt, None, None, None)
+//!     .with_context(|| "Failed to process PSBT")?
+//!     .psbt;
+//! let psbt = load_psbt_from_base64(psbt.as_bytes()) // SHOULD BE PROVIDED BY CRATE AS HELPER USING rust-bitcoin base64 feature
+//!     .with_context(|| "Failed to load PSBT from base64")?;
+//! log::debug!("Original psbt: {:#?}", psbt);
+//! let pj_params = payjoin::sender::Configuration::with_fee_contribution(
+//!     payjoin::bitcoin::Amount::from_sat(10000),
+//!     None,
+//! );
+//! ```
+//!
+//! ### 3. (optional) Spawn a thread or async task that will broadcast the transaction after delay (e.g. 1 minute) unless canceled
+//!
+//! This was written in the original docs, but it should be clarified: In case the payjoin goes through but you still want to pay by default. This is missing from the `payjoin-cli`.
+//!
+//! Writing this, I think of [Signal's contributing guidelines](https://github.com/signalapp/Signal-iOS/blob/main/CONTRIBUTING.md#development-ideology):
+//! > "The answer is not more options. If you feel compelled to add a preference that's exposed to the user, it's very possible you've made a wrong turn somewhere."
+//!
+//! ### 4. Construct the request with the PSBT and parameters
+//!
+//! ```
+//! let (req, ctx) = link
+//!     .create_pj_request(psbt, pj_params)
+//!     .with_context(|| "Failed to create payjoin request")?;
+//! ```
+//!
+//! ### 5. Send the request and receive response
+//!
+//! Senders request a payjoin from the receiver with a payload containing the Original PSBT  and optional parameters. They require a secure endpoint for authentication and message secrecy to prevent that transaction from being modified by a malicious third party during transit or being snooped on. Only https and .onion endpoints are spec-compatible payjoin endpoints.
+//!
+//! Avoiding the secure endpoint requirement is convenient for testing.
+//!
+//! ```
+//! let client = reqwest::blocking::Client::builder()
+//!     .danger_accept_invalid_certs(danger_accept_invalid_certs)
+//!     .build()
+//!     .with_context(|| "Failed to build reqwest http client")?;
+//! let response = client
+//!     .post(req.url)
+//!     .body(req.body)
+//!     .header("Content-Type", "text/plain")
+//!     .send()
+//!     .with_context(|| "HTTP request failed")?;
+//! ```
+//!
+//! ### 6. Process the response
+//!
+//! An `Ok` response should include a Payjoin Proposal PSBT. Check that it's signed, following protocol, not trying to steal or otherwise error.
+//!
+//! ```
+//! // TODO display well-known errors and log::debug the rest
+//! // ctx is the context returned from create_pj_request in step 4.
+//! let psbt = ctx.process_response(response).with_context(|| "Failed to process response")?;
+//! log::debug!("Proposed psbt: {:#?}", psbt);
+//! ```
+//!
+//! Payjoin response errors (called [receiver's errors in spec](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#receivers-well-known-errors)) come from a remote server and can be used "maliciously to phish a non technical user." Only those "well-known" errors according to spec should be displayed with preset messages to prevent phishing.
+//!
+//! ### 7. Sign and finalize the Payjoin Proposal PSBT
+//!
+//! Most software can handle adding the last signatures to a PSBT without issue.
+//!
+//! ```
+//! let psbt = bitcoind
+//!     .wallet_process_psbt(&serialize_psbt(&psbt), None, None, None)
+//!     .with_context(|| "Failed to process PSBT")?
+//!     .psbt;
+//! let tx = bitcoind
+//!     .finalize_psbt(&psbt, Some(true))
+//!     .with_context(|| "Failed to finalize PSBT")?
+//!     .hex
+//!     .ok_or_else(|| anyhow!("Incomplete PSBT"))?;
+//! ```
+//!
+//! ### 8. Broadcast the Payjoin Transaction
+//!
+//! In order to preserve privacy between the transaction and the IP address from which it originates, transaction broadcasting should be done using Tor, a VPN, or proxy.
+//!
+//! ```
+//! let txid =
+//!     bitcoind.send_raw_transaction(&tx).with_context(|| "Failed to send raw transaction")?;
+//! log::info!("Transaction sent: {}", txid);
+//! ```
+//!
+//! 📤 Sending payjoin is just that simple.
 
 use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::{Script, Sequence, TxOut};
@@ -35,7 +162,7 @@ type InternalResult<T> = Result<T, InternalValidationError>;
 
 /// Builder for sender-side payjoin parameters
 ///
-/// These parameters define how client wants to handle PayJoin.
+/// These parameters define how client wants to handle Payjoin.
 pub struct Configuration {
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
@@ -49,7 +176,7 @@ impl Configuration {
     /// These parameters will allow the receiver to take `max_fee_contribution` from given change
     /// output to pay for additional inputs. The recommended fee is `size_of_one_input * fee_rate`.
     ///
-    /// `change_index` specifies which output can be used to pay fee. I `None` is provided, then
+    /// `change_index` specifies which output can be used to pay fee. If `None` is provided, then
     /// the output is auto-detected unless the supplied transaction has more than two outputs.
     pub fn with_fee_contribution(
         max_fee_contribution: bitcoin::Amount,
@@ -63,7 +190,7 @@ impl Configuration {
         }
     }
 
-    /// Perform PayJoin without incentivizing the payee to cooperate.
+    /// Perform Payjoin without incentivizing the payee to cooperate.
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
@@ -577,7 +704,7 @@ pub(crate) fn from_psbt_and_uri(
     let txout = zeroth_input.previous_txout().expect("We already checked this above");
     let input_type = InputType::from_spent_input(txout, zeroth_input.psbtin).unwrap();
     let url = serialize_url(
-        uri.extras.endpoint.into(),
+        uri.extras._endpoint.into(),
         disable_output_substitution,
         fee_contribution,
         params.min_fee_rate,

@@ -303,7 +303,7 @@ impl App {
             .context("Failed to parse PSBT")
             .map_err(|e| Error::Server(e.into()))?;
         let payjoin_proposal_psbt = payjoin.prepare_psbt(payjoin_proposal_psbt)?;
-        log::debug!("Receiver's PayJoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
+        log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
 
         let payload = base64::encode(bitcoin::consensus::serialize(&payjoin_proposal_psbt));
         log::info!("successful response");

@@ -7,28 +7,28 @@ use url::Url;
 use crate::send;
 
 #[derive(Debug, Clone)]
-pub enum PayJoin {
-    Supported(PayJoinParams),
+pub enum Payjoin {
+    Supported(PayjoinParams),
     Unsupported,
 }
 
-impl PayJoin {
+impl Payjoin {
     pub fn pj_is_supported(&self) -> bool {
         match self {
-            PayJoin::Supported(_) => true,
-            PayJoin::Unsupported => false,
+            Payjoin::Supported(_) => true,
+            Payjoin::Unsupported => false,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct PayJoinParams {
-    pub(crate) endpoint: Url,
+pub struct PayjoinParams {
+    pub(crate) _endpoint: Url,
     pub(crate) disable_output_substitution: bool,
 }
 
-pub type Uri<'a> = bip21::Uri<'a, PayJoin>;
-pub type PjUri<'a> = bip21::Uri<'a, PayJoinParams>;
+pub type Uri<'a> = bip21::Uri<'a, Payjoin>;
+pub type PjUri<'a> = bip21::Uri<'a, PayjoinParams>;
 
 mod sealed {
     pub trait UriExt: Sized {}
@@ -68,7 +68,7 @@ impl<'a> PjUriExt for PjUri<'a> {
 impl<'a> UriExt<'a> for Uri<'a> {
     fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>> {
         match self.extras {
-            PayJoin::Supported(payjoin) => {
+            Payjoin::Supported(payjoin) => {
                 let mut uri = bip21::Uri::with_extras(self.address, payjoin);
                 uri.amount = self.amount;
                 uri.label = self.label;
@@ -76,7 +76,7 @@ impl<'a> UriExt<'a> for Uri<'a> {
 
                 Ok(uri)
             }
-            PayJoin::Unsupported => {
+            Payjoin::Unsupported => {
                 let mut uri = bip21::Uri::new(self.address);
                 uri.amount = self.amount;
                 uri.label = self.label;
@@ -88,15 +88,15 @@ impl<'a> UriExt<'a> for Uri<'a> {
     }
 }
 
-impl PayJoinParams {
+impl PayjoinParams {
     pub fn is_output_substitution_disabled(&self) -> bool { self.disable_output_substitution }
 }
 
-impl bip21::de::DeserializationError for PayJoin {
+impl bip21::de::DeserializationError for Payjoin {
     type Error = PjParseError;
 }
 
-impl<'a> bip21::de::DeserializeParams<'a> for PayJoin {
+impl<'a> bip21::de::DeserializeParams<'a> for Payjoin {
     type DeserializationState = DeserializationState;
 }
 
@@ -114,7 +114,7 @@ impl From<InternalPjParseError> for PjParseError {
 }
 
 impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
-    type Value = PayJoin;
+    type Value = Payjoin;
 
     fn is_param_known(&self, param: &str) -> bool { matches!(param, "pj" | "pjos") }
 
@@ -152,15 +152,15 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
         self,
     ) -> std::result::Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
         match (self.pj, self.pjos) {
-            (None, None) => Ok(PayJoin::Unsupported),
+            (None, None) => Ok(Payjoin::Unsupported),
             (None, Some(_)) => Err(PjParseError(InternalPjParseError::MissingEndpoint)),
             (Some(endpoint), pjos) => {
                 if endpoint.scheme() == "https"
                     || endpoint.scheme() == "http"
                         && endpoint.domain().unwrap_or_default().ends_with(".onion")
                 {
-                    Ok(PayJoin::Supported(PayJoinParams {
-                        endpoint,
+                    Ok(Payjoin::Supported(PayjoinParams {
+                        _endpoint: endpoint,
                         disable_output_substitution: pjos.unwrap_or(false),
                     }))
                 } else {

@@ -1,9 +1,10 @@
-# PayJoin Changelog
+# Payjoin Changelog
 
 ## 0.8.0
 
 - Test receiver compatibility with BlueWallet
 - Rename `sender`, `receiver` features `send`, `receive`
+- Rename `PayJoin` `Payjoin`
 - introduce `receive::Error` for fallable checklist items [#59](https://github.com/payjoin/rust-payjoin/pull/59)
 - Display receiver errors, RequestErrors with JSON (https://github.com/payjoin/rust-payjoin/pull/49)
 

@@ -1,18 +1,18 @@
-# PayJoin implementation in Rust
+# Payjoin implementation in Rust
 
 ## About
 
-This is a library and a client binary for bitcoind implementing BIP78 PayJoin.
+This is a library and a client binary for bitcoind implementing BIP78 Payjoin.
 
 The library is perfectly IO-agnostic—in fact, it does no IO.
 The primary goal of such design is to be easy to unit test.
-While not there yet, it already has infinitely more tests than the [PayJoin PR against Electrum](https://github.com/spesmilo/electrum/pull/6804). :P
+While not there yet, it already has infinitely more tests than the [Payjoin PR against Electrum](https://github.com/spesmilo/electrum/pull/6804). :P
 
 It doesn't care whether you use `async`, blocking, `tokio`, `sync-std` `hyper`, `actix` or whatever.
 There are already too many frameworks in Rust so it's best avoiding directly introducing them into library code.
 The library currently only contains sender implementation and a partial receiver.
 
-The payjoin-client binary performs no-frills PayJoin using Bitcoin Core wallet.
+The payjoin-cli binary performs no-frills Payjoin using Bitcoin Core wallet.
 The payjoin crate also supports other wallet software [like LND](https://github.com/chaincase-app/nolooking).
 
 ### Disclaimer ⚠️ WIP

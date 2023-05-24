@@ -99,7 +99,7 @@ mod integration {
             sender.wallet_process_psbt(&payjoin_base64_string, None, None, None).unwrap().psbt;
         let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false)).unwrap().psbt.unwrap();
         let payjoin_psbt = load_psbt_from_base64(payjoin_psbt.as_bytes()).unwrap();
-        debug!("Sender's PayJoin PSBT: {:#?}", payjoin_psbt);
+        debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
 
         let payjoin_tx = payjoin_psbt.extract_tx();
         bitcoind.client.send_raw_transaction(&payjoin_tx).unwrap().first().unwrap();
@@ -211,7 +211,7 @@ mod integration {
             load_psbt_from_base64(payjoin_proposal_psbt.as_bytes()).unwrap();
 
         let payjoin_proposal_psbt = payjoin.prepare_psbt(payjoin_proposal_psbt).unwrap();
-        debug!("Receiver's PayJoin proposal PSBT: {:#?}", payjoin_proposal_psbt);
+        debug!("Receiver's Payjoin proposal PSBT: {:#?}", payjoin_proposal_psbt);
 
         base64::encode(consensus::serialize(&payjoin_proposal_psbt))
     }

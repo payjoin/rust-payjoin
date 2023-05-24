@@ -13,7 +13,7 @@
 //!
 
 use std::cmp::{max, min};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::{Amount, OutPoint, Script, TxOut};
@@ -327,9 +327,10 @@ impl PayjoinProposal {
     // https://eprint.iacr.org/2022/589.pdf
     pub fn try_preserving_privacy(
         &self,
-        candidate_inputs: HashMap<Amount, OutPoint>,
+        candidate_inputs: impl IntoIterator<Item = (Amount, OutPoint)>,
     ) -> Result<OutPoint, SelectionError> {
-        if candidate_inputs.is_empty() {
+        let mut candidate_inputs = candidate_inputs.into_iter().peekable();
+        if candidate_inputs.peek().is_none() {
             return Err(SelectionError::from(InternalSelectionError::Empty));
         }
 

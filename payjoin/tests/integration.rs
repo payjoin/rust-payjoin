@@ -3,16 +3,16 @@ mod integration {
     use std::collections::HashMap;
     use std::str::FromStr;
 
-    use bitcoin::hashes::hex::ToHex;
-    use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
-    use bitcoin::{consensus, Amount, OutPoint};
+    use bitcoin::psbt::Psbt;
+    use bitcoin::{Amount, OutPoint};
     use bitcoind::bitcoincore_rpc;
-    use bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
+    use bitcoind::bitcoincore_rpc::core_rpc_json::AddressType;
     use bitcoind::bitcoincore_rpc::RpcApi;
     use log::{debug, log_enabled, Level};
+    use payjoin::bitcoin::base64;
     use payjoin::receive::Headers;
     use payjoin::send::Request;
-    use payjoin::{PjUriExt, Uri, UriExt};
+    use payjoin::{bitcoin, PjUriExt, Uri, UriExt};
 
     #[test]
     fn integration_test() {
@@ -25,9 +25,11 @@ mod integration {
         conf.view_stdout = log_enabled!(Level::Debug);
         let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &conf).unwrap();
         let receiver = bitcoind.create_wallet("receiver").unwrap();
-        let receiver_address = receiver.get_new_address(None, Some(AddressType::Bech32)).unwrap();
+        let receiver_address =
+            receiver.get_new_address(None, Some(AddressType::Bech32)).unwrap().assume_checked();
         let sender = bitcoind.create_wallet("sender").unwrap();
-        let sender_address = sender.get_new_address(None, Some(AddressType::Bech32)).unwrap();
+        let sender_address =
+            sender.get_new_address(None, Some(AddressType::Bech32)).unwrap().assume_checked();
         bitcoind.client.generate_to_address(1, &receiver_address).unwrap();
         bitcoind.client.generate_to_address(101, &sender_address).unwrap();
 
@@ -44,14 +46,14 @@ mod integration {
         );
 
         // Receiver creates the payjoin URI
-        let pj_receiver_address = receiver.get_new_address(None, None).unwrap();
+        let pj_receiver_address = receiver.get_new_address(None, None).unwrap().assume_checked();
         let amount = Amount::from_btc(1.0).unwrap();
         let pj_uri_string = format!(
             "{}?amount={}&pj=https://example.com",
             pj_receiver_address.to_qr_uri(),
             amount.to_btc()
         );
-        let pj_uri = Uri::from_str(&pj_uri_string).unwrap();
+        let pj_uri = Uri::from_str(&pj_uri_string).unwrap().assume_checked();
         let pj_uri = pj_uri.check_pj_supported().expect("Bad Uri");
 
         // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
@@ -74,7 +76,7 @@ mod integration {
             .expect("failed to create PSBT")
             .psbt;
         let psbt = sender.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
-        let psbt = load_psbt_from_base64(psbt.as_bytes()).unwrap();
+        let psbt = Psbt::from_str(&psbt).unwrap();
         debug!("Original psbt: {:#?}", psbt);
         let pj_params = payjoin::send::Configuration::with_fee_contribution(
             payjoin::bitcoin::Amount::from_sat(10000),
@@ -92,17 +94,16 @@ mod integration {
         // **********************
         // Inside the Sender:
         // Sender checks, signs, finalizes, extracts, and broadcasts
-        let checked_payjoin_proposal_psbt = ctx.process_response(response.as_bytes()).unwrap();
-        let payjoin_base64_string =
-            base64::encode(consensus::serialize(&checked_payjoin_proposal_psbt));
+        let checked_payjoin_proposal_psbt = ctx.process_response(&mut response.as_bytes()).unwrap();
+        let payjoin_base64_string = base64::encode(&checked_payjoin_proposal_psbt.serialize());
         let payjoin_psbt =
             sender.wallet_process_psbt(&payjoin_base64_string, None, None, None).unwrap().psbt;
         let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false)).unwrap().psbt.unwrap();
-        let payjoin_psbt = load_psbt_from_base64(payjoin_psbt.as_bytes()).unwrap();
+        let payjoin_psbt = Psbt::from_str(&payjoin_psbt).unwrap();
         debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
 
         let payjoin_tx = payjoin_psbt.extract_tx();
-        bitcoind.client.send_raw_transaction(&payjoin_tx).unwrap().first().unwrap();
+        bitcoind.client.send_raw_transaction(&payjoin_tx).unwrap();
     }
 
     struct HeaderMock(HashMap<String, String>);
@@ -142,7 +143,7 @@ mod integration {
         let proposal = proposal
             .check_can_broadcast(|tx| {
                 Ok(receiver
-                    .test_mempool_accept(&[bitcoin::consensus::encode::serialize(&tx).to_hex()])
+                    .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
                     .unwrap()
                     .first()
                     .unwrap()
@@ -196,35 +197,23 @@ mod integration {
             bitcoin::OutPoint { txid: selected_utxo.txid, vout: selected_utxo.vout };
         payjoin.contribute_witness_input(txo_to_contribute, outpoint_to_contribute);
 
-        let receiver_substitute_address = receiver.get_new_address(None, None).unwrap();
+        let receiver_substitute_address =
+            receiver.get_new_address(None, None).unwrap().assume_checked();
         payjoin.substitute_output_address(receiver_substitute_address);
 
         let payjoin_proposal_psbt = payjoin.apply_fee(None).unwrap();
 
         // Sign payjoin psbt
-        let payjoin_base64_string = base64::encode(consensus::serialize(&payjoin_proposal_psbt));
+        let payjoin_base64_string = base64::encode(&payjoin_proposal_psbt.serialize());
         let payjoin_proposal_psbt = receiver
             .wallet_process_psbt(&payjoin_base64_string, None, None, Some(false))
             .unwrap()
             .psbt;
-        let payjoin_proposal_psbt =
-            load_psbt_from_base64(payjoin_proposal_psbt.as_bytes()).unwrap();
+        let payjoin_proposal_psbt = Psbt::from_str(&payjoin_proposal_psbt).unwrap();
 
         let payjoin_proposal_psbt = payjoin.prepare_psbt(payjoin_proposal_psbt).unwrap();
         debug!("Receiver's Payjoin proposal PSBT: {:#?}", payjoin_proposal_psbt);
 
-        base64::encode(consensus::serialize(&payjoin_proposal_psbt))
-    }
-
-    fn load_psbt_from_base64(
-        mut input: impl std::io::Read,
-    ) -> Result<Psbt, payjoin::bitcoin::consensus::encode::Error> {
-        use payjoin::bitcoin::consensus::Decodable;
-
-        let mut reader = base64::read::DecoderReader::new(
-            &mut input,
-            base64::Config::new(base64::CharacterSet::Standard, true),
-        );
-        Psbt::consensus_decode(&mut reader)
+        base64::encode(&payjoin_proposal_psbt.serialize())
     }
 }

@@ -220,5 +220,5 @@ impl ComputeWeight for OutPoint {
 }
 
 impl ComputeWeight for Transaction {
-    fn weight(&self) -> Weight { Weight::from_wu(self.weight() as u64) }
+    fn weight(&self) -> Weight { Weight::from_wu(u64::from(self.weight())) }
 }

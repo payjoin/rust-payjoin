@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 use std::convert::TryFrom;
 
+use bitcoin::address::{Error, NetworkChecked, NetworkUnchecked};
+use bitcoin::Network;
 use url::Url;
 
 #[cfg(feature = "send")]
@@ -27,21 +29,32 @@ pub struct PayjoinParams {
     pub(crate) disable_output_substitution: bool,
 }
 
-pub type Uri<'a> = bip21::Uri<'a, Payjoin>;
-pub type PjUri<'a> = bip21::Uri<'a, PayjoinParams>;
+pub type Uri<'a, NetworkValidation> = bip21::Uri<'a, NetworkValidation, Payjoin>;
+pub type PjUri<'a> = bip21::Uri<'a, NetworkChecked, PayjoinParams>;
 
 mod sealed {
+    use bitcoin::address::{NetworkChecked, NetworkUnchecked};
+
     pub trait UriExt: Sized {}
 
-    impl<'a> UriExt for super::Uri<'a> {}
+    impl<'a> UriExt for super::Uri<'a, NetworkChecked> {}
     impl<'a> UriExt for super::PjUri<'a> {}
+
+    pub trait UriExtNetworkUnchecked: Sized {}
+
+    impl<'a> UriExtNetworkUnchecked for super::Uri<'a, NetworkUnchecked> {}
+}
+pub trait UriExtNetworkUnchecked<'a>: sealed::UriExtNetworkUnchecked {
+    fn require_network(self, network: Network) -> Result<Uri<'a, NetworkChecked>, Error>;
+
+    fn assume_checked(self) -> Uri<'a, NetworkChecked>;
 }
 
 pub trait PjUriExt: sealed::UriExt {
     #[cfg(feature = "send")]
     fn create_pj_request(
         self,
-        psbt: bitcoin::util::psbt::PartiallySignedTransaction,
+        psbt: bitcoin::psbt::Psbt,
         params: send::Configuration,
     ) -> Result<(send::Request, send::Context), send::CreateRequestError>;
 }
@@ -50,11 +63,31 @@ pub trait UriExt<'a>: sealed::UriExt {
     fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>>;
 }
 
+impl<'a> UriExtNetworkUnchecked<'a> for Uri<'a, NetworkUnchecked> {
+    fn require_network(self, network: Network) -> Result<Uri<'a, NetworkChecked>, Error> {
+        let checked_address = self.address.require_network(network)?;
+        let mut uri = bip21::Uri::with_extras(checked_address, self.extras);
+        uri.amount = self.amount;
+        uri.label = self.label;
+        uri.message = self.message;
+        Ok(uri)
+    }
+
+    fn assume_checked(self) -> Uri<'a, NetworkChecked> {
+        let checked_address = self.address.assume_checked();
+        let mut uri = bip21::Uri::with_extras(checked_address, self.extras);
+        uri.amount = self.amount;
+        uri.label = self.label;
+        uri.message = self.message;
+        uri
+    }
+}
+
 impl<'a> PjUriExt for PjUri<'a> {
     #[cfg(feature = "send")]
     fn create_pj_request(
         self,
-        psbt: bitcoin::util::psbt::PartiallySignedTransaction,
+        psbt: bitcoin::psbt::Psbt,
         params: send::Configuration,
     ) -> Result<(send::Request, send::Context), send::CreateRequestError> {
         use crate::psbt::PsbtExt;
@@ -65,8 +98,9 @@ impl<'a> PjUriExt for PjUri<'a> {
     }
 }
 
-impl<'a> UriExt<'a> for Uri<'a> {
+impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
     fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>> {
+        //let checked_address = self.address.assume_checked();
         match self.extras {
             Payjoin::Supported(payjoin) => {
                 let mut uri = bip21::Uri::with_extras(self.address, payjoin);

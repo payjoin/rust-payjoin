@@ -57,7 +57,7 @@
 //!     .wallet_process_psbt(&psbt, None, None, None)
 //!     .with_context(|| "Failed to process PSBT")?
 //!     .psbt;
-//! let psbt = load_psbt_from_base64(psbt.as_bytes()) // SHOULD BE PROVIDED BY CRATE AS HELPER USING rust-bitcoin base64 feature
+//! let psbt = Psbt::from_str(&psbt) // SHOULD BE PROVIDED BY CRATE AS HELPER USING rust-bitcoin base64 feature
 //!     .with_context(|| "Failed to load PSBT from base64")?;
 //! log::debug!("Original psbt: {:#?}", psbt);
 //! let pj_params = payjoin::sender::Configuration::with_fee_contribution(
@@ -141,8 +141,10 @@
 //!
 //! 📤 Sending payjoin is just that simple.
 
-use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
-use bitcoin::{Script, Sequence, TxOut};
+use std::str::FromStr;
+
+use bitcoin::psbt::Psbt;
+use bitcoin::{Script, ScriptBuf, Sequence, TxOut};
 pub use error::{CreateRequestError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 use url::Url;
@@ -260,7 +262,7 @@ pub struct Context {
     min_fee_rate: FeeRate,
     input_type: InputType,
     sequence: Sequence,
-    payee: Script,
+    payee: ScriptBuf,
 }
 
 macro_rules! check_eq {
@@ -281,22 +283,19 @@ macro_rules! ensure {
     };
 }
 
-fn load_psbt_from_base64(
-    mut input: impl std::io::Read,
-) -> Result<Psbt, bitcoin::consensus::encode::Error> {
-    use bitcoin::consensus::Decodable;
-    let mut reader = base64::read::DecoderReader::new(&mut input, base64::STANDARD);
-    Psbt::consensus_decode(&mut reader)
-}
-
 impl Context {
     /// Decodes and validates the response.
     ///
     /// Call this method with response from receiver to continue BIP78 flow. If the response is
     /// valid you will get appropriate PSBT that you should sign and broadcast.
     #[inline]
-    pub fn process_response(self, response: impl std::io::Read) -> Result<Psbt, ValidationError> {
-        let proposal = load_psbt_from_base64(response).map_err(InternalValidationError::Decode)?;
+    pub fn process_response(
+        self,
+        response: &mut impl std::io::Read,
+    ) -> Result<Psbt, ValidationError> {
+        let mut res_str = String::new();
+        response.read_to_string(&mut res_str).map_err(InternalValidationError::Io)?;
+        let proposal = Psbt::from_str(&res_str).map_err(InternalValidationError::Psbt)?;
 
         // process in non-generic function
         self.process_proposal(proposal).map(Into::into).map_err(Into::into)
@@ -326,7 +325,7 @@ impl Context {
             out_stats.contributed_fee <= proposed_psbt_fee - original_fee,
             PayeeTookContributedFee
         );
-        let original_weight = Weight::from_wu(self.original_psbt.unsigned_tx.weight() as u64);
+        let original_weight = Weight::from_wu(u64::from(self.original_psbt.unsigned_tx.weight()));
         let original_fee_rate = original_fee / original_weight;
         ensure!(
             out_stats.contributed_fee
@@ -479,7 +478,7 @@ impl Context {
         {
             ensure!(proposed_psbtout.bip32_derivation.is_empty(), TxOutContainsKeyPaths);
             total_value += bitcoin::Amount::from_sat(proposed_txout.value);
-            total_weight += proposed_txout.weight();
+            total_weight += Weight::from_wu(proposed_txout.weight() as u64);
             match (original_outputs.peek(), self.fee_contribution) {
                 // fee output
                 (
@@ -676,12 +675,8 @@ fn serialize_url(
 }
 
 fn serialize_psbt(psbt: &Psbt) -> Vec<u8> {
-    use bitcoin::consensus::Encodable;
-
-    let mut encoder = base64::write::EncoderWriter::new(Vec::new(), base64::STANDARD);
-    psbt.consensus_encode(&mut encoder)
-        .expect("Vec doesn't return errors in its write implementation");
-    encoder.finish().expect("Vec doesn't return errors in its write implementation")
+    let bytes = psbt.serialize();
+    bitcoin::base64::encode(bytes).into_bytes()
 }
 
 pub(crate) fn from_psbt_and_uri(
@@ -729,15 +724,19 @@ pub(crate) fn from_psbt_and_uri(
 mod tests {
     #[test]
     fn official_vectors() {
+        use std::str::FromStr;
+
+        use bitcoin::psbt::Psbt;
+
         use crate::fee_rate::FeeRate;
         use crate::input_type::{InputType, SegWitV0Type};
         use crate::psbt::PsbtExt;
 
-        let mut original_psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=".as_bytes();
+        let original_psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
 
-        let mut proposal = "cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAQEgqBvXBQAAAAAXqRTeTh6QYcpZE1sDWtXm1HmQRUNU0IcBBBYAFMeKRXJTVYKNVlgHTdUmDV/LaYUwIgYDFZrAGqDVh1TEtNi300ntHt/PCzYrT2tVEGcjooWPhRYYSFzWUDEAAIABAACAAAAAgAEAAAAAAAAAAAEBIICEHgAAAAAAF6kUyPLL+cphRyyI5GTUazV0hF2R2NWHAQcXFgAUX4BmVeWSTJIEwtUb5TlPS/ntohABCGsCRzBEAiBnu3tA3yWlT0WBClsXXS9j69Bt+waCs9JcjWtNjtv7VgIge2VYAaBeLPDB6HGFlpqOENXMldsJezF9Gs5amvDQRDQBIQJl1jz1tBt8hNx2owTm+4Du4isx0pmdKNMNIjjaMHFfrQABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUIgICygvBWB5prpfx61y1HDAwo37kYP3YRJBvAjtunBAur3wYSFzWUDEAAIABAACAAAAAgAEAAAABAAAAAAA=".as_bytes();
+        let proposal = "cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAQEgqBvXBQAAAAAXqRTeTh6QYcpZE1sDWtXm1HmQRUNU0IcBBBYAFMeKRXJTVYKNVlgHTdUmDV/LaYUwIgYDFZrAGqDVh1TEtNi300ntHt/PCzYrT2tVEGcjooWPhRYYSFzWUDEAAIABAACAAAAAgAEAAAAAAAAAAAEBIICEHgAAAAAAF6kUyPLL+cphRyyI5GTUazV0hF2R2NWHAQcXFgAUX4BmVeWSTJIEwtUb5TlPS/ntohABCGsCRzBEAiBnu3tA3yWlT0WBClsXXS9j69Bt+waCs9JcjWtNjtv7VgIge2VYAaBeLPDB6HGFlpqOENXMldsJezF9Gs5amvDQRDQBIQJl1jz1tBt8hNx2owTm+4Du4isx0pmdKNMNIjjaMHFfrQABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUIgICygvBWB5prpfx61y1HDAwo37kYP3YRJBvAjtunBAur3wYSFzWUDEAAIABAACAAAAAgAEAAAABAAAAAAA=";
 
-        let original_psbt = super::load_psbt_from_base64(&mut original_psbt).unwrap();
+        let original_psbt = Psbt::from_str(original_psbt).unwrap();
         eprintln!("original: {:#?}", original_psbt);
         let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
         let sequence = original_psbt.unsigned_tx.input[0].sequence;
@@ -750,7 +749,7 @@ mod tests {
             input_type: InputType::SegWitV0 { ty: SegWitV0Type::Pubkey, nested: true },
             sequence,
         };
-        let mut proposal = super::load_psbt_from_base64(&mut proposal).unwrap();
+        let mut proposal = Psbt::from_str(proposal).unwrap();
         eprintln!("proposal: {:#?}", proposal);
         for output in proposal.outputs_mut() {
             output.bip32_derivation.clear();

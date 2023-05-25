@@ -249,7 +249,7 @@
 //! let payjoin_proposal_psbt =
 //!     bitcoind.wallet_process_psbt(&payjoin_base64_string, sign: None, sighash_type: None, bip32derivs: Some(false))?.psbt;
 //! let payjoin_proposal_psbt =
-//!     load_psbt_from_base64(payjoin_proposal_psbt.as_bytes()).context("Failed to parse PSBT")?;
+//!     Psbt::from_str(&payjoin_proposal_psbt).with_context(|| "Failed to parse PSBT")?;
 //! ```
 //!
 //! ### 7. Respond to the sender's http request with the signed PSBT as payload
@@ -269,7 +269,7 @@
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashMap};
 
-use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
+use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, OutPoint, Script, TxOut};
 
 mod error;
@@ -329,12 +329,10 @@ pub struct MaybeInputsSeen {
 
 impl UncheckedProposal {
     pub fn from_request(
-        body: impl std::io::Read,
+        mut body: impl std::io::Read,
         query: &str,
         headers: impl Headers,
     ) -> Result<Self, RequestError> {
-        use crate::bitcoin::consensus::Decodable;
-
         let content_type = headers
             .get_header("content-type")
             .ok_or(InternalRequestError::MissingHeader("Content-Type"))?;
@@ -352,11 +350,12 @@ impl UncheckedProposal {
         }
 
         // enforce the limit
-        let mut limited = body.take(content_length);
-        let mut reader = base64::read::DecoderReader::new(&mut limited, base64::STANDARD);
-        let unchecked_psbt =
-            Psbt::consensus_decode(&mut reader).map_err(InternalRequestError::Decode)?;
-        let psbt = unchecked_psbt.validate().map_err(InternalRequestError::Psbt)?;
+        let mut buf = vec![0; content_length as usize]; // 4_000_000 * 4 / 3 fits in u32
+        body.read_exact(&mut buf).map_err(InternalRequestError::Io)?;
+        let base64 = bitcoin::base64::decode(&buf).map_err(InternalRequestError::Base64)?;
+        let unchecked_psbt = Psbt::deserialize(&base64).map_err(InternalRequestError::Psbt)?;
+
+        let psbt = unchecked_psbt.validate().map_err(InternalRequestError::InconsistentPsbt)?;
         log::debug!("Received original psbt: {:?}", psbt);
 
         let pairs = url::form_urlencoded::parse(query.as_bytes());
@@ -858,8 +857,11 @@ mod test {
             .check_no_inputs_seen_before(|_| Ok(false))
             .expect("No inputs should be seen before")
             .identify_receiver_outputs(|script| {
-                Ok(Address::from_script(script, Network::Bitcoin)
-                    == Address::from_str(&"3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM"))
+                let network = Network::Bitcoin;
+                Ok(Address::from_script(script, network)
+                    == Address::from_str(&"3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+                        .unwrap()
+                        .require_network(network))
             })
             .expect("Receiver output should be identified");
         let payjoin = payjoin.apply_fee(None);

@@ -17,6 +17,26 @@
 //!
 //! To use this library as a receiver (server, payee), you need to enable `receive` Cargo feature.
 
+#![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
+
+#[macro_use]
+extern crate alloc;
+
+// May depend on crate features and we don't want to bother with it
+#[allow(unused)]
+#[cfg(feature = "std")]
+use std::error::Error as StdError;
+#[cfg(feature = "std")]
+use std::io;
+
+#[allow(unused)]
+#[cfg(not(feature = "std"))]
+use core2::error::Error as StdError;
+#[cfg(not(feature = "std"))]
+use core2::io;
+
+// use core::{borrow, fmt};
+
 pub extern crate bitcoin;
 
 #[cfg(feature = "receive")]
@@ -36,3 +56,24 @@ mod uri;
 pub(crate) mod weight;
 
 pub use uri::{PjParseError, PjUri, PjUriExt, Uri, UriExt};
+
+#[rustfmt::skip]
+mod prelude {
+    #[cfg(all(not(feature = "std"), not(test)))]
+    pub use alloc::{string::{String, ToString}, vec::Vec, boxed::Box, borrow::{Borrow, Cow, ToOwned}, slice, rc};
+
+    #[cfg(all(not(feature = "std"), not(test), any(not(rust_v_1_60), target_has_atomic = "ptr")))]
+    pub use alloc::sync;
+
+    #[cfg(any(feature = "std", test))]
+    pub use std::{string::{String, ToString}, vec::Vec, boxed::Box, borrow::{Borrow, Cow, ToOwned}, slice, rc, sync};
+
+    #[cfg(all(not(feature = "std"), not(test)))]
+    pub use alloc::collections::{BTreeMap, BTreeSet, btree_map, BinaryHeap};
+
+    #[cfg(any(feature = "std", test))]
+    pub use std::collections::{BTreeMap, BTreeSet, btree_map, BinaryHeap};
+
+    #[cfg(feature = "std")]
+    pub use std::io::sink;
+}

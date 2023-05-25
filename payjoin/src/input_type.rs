@@ -1,5 +1,5 @@
-use std::convert::{TryFrom, TryInto};
-use std::fmt;
+use core::convert::{TryFrom, TryInto};
+use core::fmt;
 
 use bitcoin::blockdata::script::{Instruction, Instructions, Script};
 use bitcoin::blockdata::transaction::TxOut;
@@ -148,7 +148,7 @@ impl fmt::Display for InputTypeError {
     }
 }
 
-impl std::error::Error for InputTypeError {}
+impl crate::StdError for InputTypeError {}
 
 #[cfg(test)]
 mod tests {

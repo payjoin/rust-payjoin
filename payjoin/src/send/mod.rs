@@ -22,7 +22,9 @@ use url::Url;
 
 use crate::fee_rate::FeeRate;
 use crate::input_type::InputType;
+use crate::io;
 use crate::psbt::PsbtExt;
+use crate::prelude::*;
 use crate::weight::{varint_size, ComputeWeight, Weight};
 
 // See usize casts
@@ -155,11 +157,15 @@ macro_rules! ensure {
 }
 
 fn load_psbt_from_base64(
-    mut input: impl std::io::Read,
+    mut input: impl io::Read,
 ) -> Result<Psbt, bitcoin::consensus::encode::Error> {
     use bitcoin::consensus::Decodable;
-    let mut reader = base64::read::DecoderReader::new(&mut input, base64::STANDARD);
-    Psbt::consensus_decode(&mut reader)
+    let mut data = Vec::new();
+    input.read_to_end(&mut data)?;
+
+    let decoded_data = base64::decode(&data)?;
+    let mut cursor = io::Cursor::new(decoded_data);
+    Psbt::consensus_decode(&mut cursor)
 }
 
 impl Context {
@@ -168,7 +174,7 @@ impl Context {
     /// Call this method with response from receiver to continue BIP78 flow. If the response is
     /// valid you will get appropriate PSBT that you should sign and broadcast.
     #[inline]
-    pub fn process_response(self, response: impl std::io::Read) -> Result<Psbt, ValidationError> {
+    pub fn process_response(self, response: impl io::Read) -> Result<Psbt, ValidationError> {
         let proposal = load_psbt_from_base64(response).map_err(InternalValidationError::Decode)?;
 
         // process in non-generic function

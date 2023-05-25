@@ -16,6 +16,12 @@ checksum = "aae1277d39aeec15cb388266ecc24b11c80469deae6067e17a1a7aa9e5c1f234"
 
 [[package]]
 name = "ahash"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8fd72866655d1904d6b0997d0b07ba561047d070fbe29de039031c641b61217"
+
+[[package]]
+name = "ahash"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fcb51a0695d8f838b1ee009b3fbf66bda078cd64590202a864a8f3e8c4315c47"
@@ -143,6 +149,8 @@ checksum = "0694ea59225b0c5f3cb405ff3f670e4828358ed26aec49dc352f730f0cb1a8a3"
 dependencies = [
  "bech32",
  "bitcoin_hashes",
+ "core2",
+ "hashbrown 0.8.2",
  "secp256k1",
  "serde",
 ]
@@ -153,6 +161,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90064b8dee6815a6470d60bad07bbbaee885c0e12d04177138fa3291a01b7bc4"
 dependencies = [
+ "core2",
  "serde",
 ]
 
@@ -412,6 +421,15 @@ name = "core-foundation-sys"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5827cebf4670468b8772dd191856768aedcb1b0278a04f989f7766351917b9dc"
+
+[[package]]
+name = "core2"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "239fa3ae9b63c2dc74bd3fa852d4792b8b305ae64eeede946265b6af62f1fff3"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "cpufeatures"
@@ -728,11 +746,21 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e91b62f79061a0bc2e046024cb7ba44b08419ed238ecbd9adbd787434b9e8c25"
+dependencies = [
+ "ahash 0.3.8",
+ "autocfg",
+]
+
+[[package]]
+name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
 dependencies = [
- "ahash",
+ "ahash 0.7.6",
 ]
 
 [[package]]
@@ -888,7 +916,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1885e79c1fc4b10f0e172c475f458b7f7b93061064d98c3293e98c5ba0c8b399"
 dependencies = [
  "autocfg",
- "hashbrown",
+ "hashbrown 0.12.3",
 ]
 
 [[package]]
@@ -1216,7 +1244,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccd746e37177e1711c20dd619a1620f34f5c8b569c53590a72dedd5344d8924a"
 dependencies = [
  "dlv-list",
- "hashbrown",
+ "hashbrown 0.12.3",
 ]
 
 [[package]]
@@ -1239,6 +1267,7 @@ dependencies = [
  "bip21",
  "bitcoin",
  "bitcoind",
+ "core2",
  "env_logger",
  "log",
  "url",

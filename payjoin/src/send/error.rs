@@ -1,4 +1,4 @@
-use std::fmt;
+use core::fmt;
 
 use bitcoin::{PackedLockTime, Sequence};
 
@@ -15,7 +15,7 @@ pub struct ValidationError {
 
 #[derive(Debug)]
 pub(crate) enum InternalValidationError {
-    Decode(bitcoin::consensus::encode::Error),
+    Decode(base64::DecodeError),
     InvalidInputType(InputTypeError),
     InvalidProposedInput(crate::psbt::PrevTxOutError),
     VersionsDontMatch { proposed: i32, original: i32 },
@@ -87,8 +87,8 @@ impl fmt::Display for ValidationError {
     }
 }
 
-impl std::error::Error for ValidationError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl crate::StdError for ValidationError {
+    fn source(&self) -> Option<&(dyn crate::StdError + 'static)> {
         use InternalValidationError::*;
 
         match &self.internal {
@@ -168,8 +168,8 @@ impl fmt::Display for CreateRequestError {
     }
 }
 
-impl std::error::Error for CreateRequestError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl crate::StdError for CreateRequestError {
+    fn source(&self) -> Option<&(dyn crate::StdError + 'static)> {
         use InternalCreateRequestError::*;
 
         match &self.0 {

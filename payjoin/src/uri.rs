@@ -1,6 +1,8 @@
-use std::borrow::Cow;
-use std::convert::TryFrom;
+//use bitcoincore::borrow::Cow;
+use core::fmt;
+use core::convert::TryFrom;
 
+use alloc::borrow::Cow;
 use url::Url;
 
 #[cfg(feature = "send")]
@@ -122,7 +124,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
         &mut self,
         key: &str,
         value: bip21::Param<'_>,
-    ) -> std::result::Result<
+    ) -> Result<
         bip21::de::ParamKind,
         <Self::Value as bip21::DeserializationError>::Error,
     > {
@@ -150,7 +152,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
 
     fn finalize(
         self,
-    ) -> std::result::Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
+    ) -> Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
         match (self.pj, self.pjos) {
             (None, None) => Ok(PayJoin::Unsupported),
             (None, Some(_)) => Err(PjParseError(InternalPjParseError::MissingEndpoint)),
@@ -171,8 +173,8 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
     }
 }
 
-impl std::fmt::Display for PjParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for PjParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
             InternalPjParseError::BadPjOs => write!(f, "Bad pjos parameter"),
             InternalPjParseError::MultipleParams(param) => {
@@ -200,7 +202,7 @@ enum InternalPjParseError {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryFrom;
+    use core::convert::TryFrom;
 
     use crate::Uri;
 

@@ -1,12 +1,13 @@
-use std::error;
-use std::fmt::{self, Display};
+use core::fmt;
+
+use crate::prelude::*;
 
 #[derive(Debug)]
 pub enum Error {
     /// To be returned as HTTP 400
     BadRequest(RequestError),
     // To be returned as HTTP 500
-    Server(Box<dyn error::Error>),
+    Server(Box<dyn crate::StdError >),
 }
 
 impl fmt::Display for Error {
@@ -18,8 +19,8 @@ impl fmt::Display for Error {
     }
 }
 
-impl error::Error for Error {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+impl crate::StdError for Error {
+    fn source(&self) -> Option<&(dyn crate::StdError  + 'static)> {
         match &self {
             Self::BadRequest(_) => None,
             Self::Server(e) => Some(e.as_ref()),
@@ -43,7 +44,7 @@ pub(crate) enum InternalRequestError {
     Decode(bitcoin::consensus::encode::Error),
     MissingHeader(&'static str),
     InvalidContentType(String),
-    InvalidContentLength(std::num::ParseIntError),
+    InvalidContentLength(core::num::ParseIntError),
     ContentLengthTooLarge(u64),
     SenderParams(super::optional_parameters::Error),
     /// The raw PSBT fails bip78-specific validation.
@@ -71,7 +72,7 @@ impl From<InternalRequestError> for RequestError {
 
 impl fmt::Display for RequestError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fn write_error(f: &mut fmt::Formatter, code: &str, message: impl Display) -> fmt::Result {
+        fn write_error(f: &mut fmt::Formatter, code: &str, message: impl fmt::Display) -> fmt::Result {
             write!(f, r#"{{ "errorCode": "{}", "message": "{}" }}"#, code, message)
         }
 

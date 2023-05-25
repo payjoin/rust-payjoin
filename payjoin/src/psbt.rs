@@ -1,12 +1,14 @@
 //! Utilities to make work with PSBTs easier
 
-use std::collections::BTreeMap;
-use std::convert::TryInto;
-use std::fmt;
+use alloc::collections::BTreeMap;
+use core::convert::TryInto;
+use core::fmt;
 
 use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::util::{bip32, psbt};
 use bitcoin::{TxIn, TxOut};
+
+use crate::prelude::*;
 
 #[derive(Debug)]
 pub(crate) enum InconsistentPsbt {
@@ -23,7 +25,7 @@ impl fmt::Display for InconsistentPsbt {
     }
 }
 
-impl std::error::Error for InconsistentPsbt {}
+impl crate::StdError for InconsistentPsbt {}
 
 /// Our Psbt type for validation and utilities
 pub(crate) trait PsbtExt: Sized {
@@ -199,7 +201,7 @@ impl fmt::Display for PrevTxOutError {
     }
 }
 
-impl std::error::Error for PrevTxOutError {}
+impl crate::StdError for PrevTxOutError {}
 
 #[derive(Debug)]
 pub(crate) enum PsbtInputError {
@@ -219,8 +221,8 @@ impl fmt::Display for PsbtInputError {
     }
 }
 
-impl std::error::Error for PsbtInputError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl crate::StdError for PsbtInputError {
+    fn source(&self) -> Option<&(dyn crate::StdError + 'static)> {
         match self {
             PsbtInputError::PrevTxOut(error) => Some(error),
             PsbtInputError::UnequalTxid => None,
@@ -245,6 +247,6 @@ impl fmt::Display for PsbtInputsError {
     }
 }
 
-impl std::error::Error for PsbtInputsError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { Some(&self.error) }
+impl crate::StdError for PsbtInputsError {
+    fn source(&self) -> Option<&(dyn crate::StdError + 'static)> { Some(&self.error) }
 }

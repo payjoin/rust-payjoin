@@ -12,8 +12,8 @@
 //! 7. Respond to the sender's http request with the signed PSBT as payload.
 //!
 
-use std::cmp::{max, min};
-use std::collections::BTreeMap;
+use core::cmp::{max, min};
+use alloc::collections::{BTreeMap};
 
 use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::{Amount, OutPoint, Script, TxOut};
@@ -23,12 +23,15 @@ mod optional_parameters;
 
 use bitcoin::secp256k1::rand::seq::SliceRandom;
 use bitcoin::secp256k1::rand::{self, Rng};
+use core2::io::Read;
 pub use error::{Error, RequestError, SelectionError};
 use error::{InternalRequestError, InternalSelectionError};
 use optional_parameters::Params;
 
 use crate::fee_rate::FeeRate;
 use crate::input_type::InputType;
+use crate::io;
+use crate::prelude::*;
 use crate::psbt::PsbtExt;
 
 pub trait Headers {
@@ -75,7 +78,7 @@ pub struct MaybeInputsSeen {
 
 impl UncheckedProposal {
     pub fn from_request(
-        body: impl std::io::Read,
+        body: impl io::Read,
         query: &str,
         headers: impl Headers,
     ) -> Result<Self, RequestError> {
@@ -99,9 +102,12 @@ impl UncheckedProposal {
 
         // enforce the limit
         let mut limited = body.take(content_length);
-        let mut reader = base64::read::DecoderReader::new(&mut limited, base64::STANDARD);
+        let mut data = Vec::new();
+        limited.read_to_end(&mut data).unwrap();
+        //let mut data = base64::decode(&data[..]).unwrap();
+        //let mut reader = base64::read::DecoderReader::new(&mut data, base64::STANDARD);
         let unchecked_psbt =
-            Psbt::consensus_decode(&mut reader).map_err(InternalRequestError::Decode)?;
+            Psbt::consensus_decode(&mut data).map_err(InternalRequestError::Decode)?;
         let psbt = unchecked_psbt.validate().map_err(InternalRequestError::Psbt)?;
         log::debug!("Received original psbt: {:?}", psbt);
 

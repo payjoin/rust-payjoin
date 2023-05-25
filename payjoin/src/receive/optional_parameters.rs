@@ -1,9 +1,10 @@
-use std::borrow::Borrow;
-use std::fmt;
+use alloc::borrow::Borrow;
+use core::fmt;
 
 use log::warn;
 
 use crate::fee_rate::FeeRate;
+use crate::prelude::*;
 
 #[derive(Debug)]
 pub(crate) struct Params {
@@ -110,6 +111,6 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
+impl crate::StdError for Error {
+    fn source(&self) -> Option<&(dyn crate::StdError + 'static)> { None }
 }

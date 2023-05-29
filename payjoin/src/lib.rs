@@ -28,8 +28,6 @@ pub use crate::receive::Error;
 pub mod send;
 
 #[cfg(any(feature = "send", feature = "receive"))]
-pub(crate) mod fee_rate;
-#[cfg(any(feature = "send", feature = "receive"))]
 pub(crate) mod input_type;
 #[cfg(any(feature = "send", feature = "receive"))]
 pub(crate) mod psbt;

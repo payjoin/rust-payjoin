@@ -73,10 +73,10 @@ impl InputType {
         }
     }
 
-    pub(crate) fn expected_input_weight(&self) -> crate::weight::Weight {
+    pub(crate) fn expected_input_weight(&self) -> bitcoin::Weight {
         use InputType::*;
 
-        crate::weight::Weight::from_non_witness_data_size(match self {
+        bitcoin::Weight::from_non_witness_data_size(match self {
             P2Pk => unimplemented!(),
             P2Pkh => 148,
             P2Sh => unimplemented!(),

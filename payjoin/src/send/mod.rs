@@ -144,15 +144,14 @@
 use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
-use bitcoin::{Script, ScriptBuf, Sequence, TxOut};
+use bitcoin::{FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
 pub use error::{CreateRequestError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 use url::Url;
 
-use crate::fee_rate::FeeRate;
 use crate::input_type::InputType;
 use crate::psbt::PsbtExt;
-use crate::weight::{varint_size, ComputeWeight, Weight};
+use crate::weight::{varint_size, ComputeWeight};
 
 // See usize casts
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -727,8 +726,8 @@ mod tests {
         use std::str::FromStr;
 
         use bitcoin::psbt::Psbt;
+        use bitcoin::FeeRate;
 
-        use crate::fee_rate::FeeRate;
         use crate::input_type::{InputType, SegWitV0Type};
         use crate::psbt::PsbtExt;
 

@@ -270,7 +270,7 @@ use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashMap};
 
 use bitcoin::psbt::Psbt;
-use bitcoin::{Amount, OutPoint, Script, TxOut};
+use bitcoin::{Amount, FeeRate, OutPoint, Script, TxOut};
 
 mod error;
 mod optional_parameters;
@@ -281,7 +281,6 @@ use optional_parameters::Params;
 use rand::seq::SliceRandom;
 use rand::Rng;
 
-use crate::fee_rate::FeeRate;
 use crate::input_type::InputType;
 use crate::psbt::PsbtExt;
 

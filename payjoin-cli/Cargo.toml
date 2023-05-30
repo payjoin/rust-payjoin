@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-#reelay = ["tungstenite"]
+reelay = ["tungstenite", "url"]
 native-tls-vendored = ["reqwest/native-tls-vendored"]
 
 [dependencies]
@@ -26,6 +26,5 @@ payjoin = { path = "../payjoin", features = ["send", "receive"] }
 reqwest = { version = "0.11.4", features = ["blocking"] }
 rouille = "3.6.1"
 serde = { version = "1.0.160", features = ["derive"] }
-#tungstenite = { version = "0.19.0", optional = true }
-url = "2.3.1"
-tungstenite = "0.19.0"
+tungstenite = { version = "0.19.0", optional = true }
+url = {version= "2.3.1", optional = true}

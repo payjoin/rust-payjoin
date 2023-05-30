@@ -120,6 +120,7 @@ impl App {
         Ok(())
     }
 
+    #[cfg(not(feature = "reelay"))]
     pub fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
         use payjoin::Uri;
 
@@ -463,3 +464,27 @@ impl payjoin::receive::Headers for Headers<'_> {
 }
 
 fn serialize_psbt(psbt: &Psbt) -> String { base64::encode(&psbt.serialize()) }
+
+#[cfg(feature = "reelay")]
+use tungstenite::{connect, Message};
+use url::Url;
+
+impl App {
+    pub fn reeceive_payjoin(self, amount_arg: &str) -> Result<()> {
+        println!("REElay");
+        let (mut socket, response) =
+            connect(Url::parse("ws://localhost:3012/socket").unwrap()).expect("Can't connect");
+
+        println!("Connected to the server");
+        println!("Response HTTP code: {}", response.status());
+        println!("Response contains the following headers:");
+        for (ref header, _value) in response.headers() {
+            println!("* {}", header);
+        }
+        socket.write_message(Message::Text("Hello WebSocket".into())).unwrap();
+        loop {
+            let msg = socket.read_message().expect("Error reading message");
+            println!("Received: {}", msg);
+        }
+    }
+}

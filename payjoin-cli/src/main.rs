@@ -3,6 +3,8 @@ use clap::{arg, Arg, ArgMatches, Command};
 
 mod app;
 use app::{App, AppConfig};
+use tungstenite::{connect, Message};
+use url::Url;
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -17,9 +19,29 @@ fn main() -> Result<()> {
             app.send_payjoin(bip21)?;
         }
         Some(("receive", sub_matches)) => {
+
+
             let amount =
                 sub_matches.get_one::<String>("AMOUNT").context("Missing AMOUNT argument")?;
-            app.receive_payjoin(amount)?;
+            if *sub_matches.get_one::<bool>("reelay").context("Missing REELAY argument")? {
+                println!("REElay");
+                let (mut socket, response) =
+                    connect(Url::parse("ws://localhost:3012/socket").unwrap()).expect("Can't connect");
+
+                println!("Connected to the server");
+                println!("Response HTTP code: {}", response.status());
+                println!("Response contains the following headers:");
+                for (ref header, _value) in response.headers() {
+                    println!("* {}", header);
+                }
+                socket.write_message(Message::Text("Hello WebSocket".into())).unwrap();
+                loop {
+                    let msg = socket.read_message().expect("Error reading message");
+                    println!("Received: {}", msg);
+                }
+            } else {
+                app.receive_payjoin(amount)?;
+            }
         }
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
@@ -66,6 +88,14 @@ fn cli() -> ArgMatches {
                     .long("endpoint")
                     .short('e')
                     .help("The `pj=` endpoint to receive the payjoin request"))
+                .arg(Arg::new("reelay")
+                    .long("reelay")
+                    .short('r')
+                    .required(false)
+                    .value_parser(clap::value_parser!(bool))
+                    .num_args(0..=1)
+                    .default_missing_value("false")
+                    .help("Have a REElay host the payjoin endpoint on our behalf 😡"))
                 .arg(Arg::new("sub_only")
                     .long("sub-only")
                     .short('s')

@@ -1,2 +1,5 @@
 /target
 *config.toml
+*seen_inputs.json
+.vscode/
+.DS_Store

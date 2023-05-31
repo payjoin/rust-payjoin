@@ -1,9 +1,8 @@
 use std::borrow::Borrow;
 use std::fmt;
 
+use bitcoin::FeeRate;
 use log::warn;
-
-use crate::fee_rate::FeeRate;
 
 #[derive(Debug)]
 pub(crate) struct Params {

@@ -1,6 +1,7 @@
 use std::fmt;
 
-use bitcoin::{PackedLockTime, Sequence};
+use bitcoin::locktime::absolute::LockTime;
+use bitcoin::Sequence;
 
 use crate::input_type::{InputType, InputTypeError};
 
@@ -15,11 +16,12 @@ pub struct ValidationError {
 
 #[derive(Debug)]
 pub(crate) enum InternalValidationError {
-    Decode(bitcoin::consensus::encode::Error),
+    Psbt(bitcoin::psbt::PsbtParseError),
+    Io(std::io::Error),
     InvalidInputType(InputTypeError),
     InvalidProposedInput(crate::psbt::PrevTxOutError),
     VersionsDontMatch { proposed: i32, original: i32 },
-    LockTimesDontMatch { proposed: PackedLockTime, original: PackedLockTime },
+    LockTimesDontMatch { proposed: LockTime, original: LockTime },
     SenderTxinSequenceChanged { proposed: Sequence, original: Sequence },
     SenderTxinContainsNonWitnessUtxo,
     SenderTxinContainsWitnessUtxo,
@@ -56,7 +58,8 @@ impl fmt::Display for ValidationError {
         use InternalValidationError::*;
 
         match &self.internal {
-            Decode(e) => write!(f, "couldn't decode PSBT: {e:#?}"),
+            Psbt(e) => write!(f, "couldn't decode PSBT: {e:#?}"),
+            Io(e) => write!(f, "couldn't read PSBT: {e:#?}"),
             InvalidInputType(e) => write!(f, "invalid transaction input type: {e:#?}"),
             InvalidProposedInput(e) => write!(f, "invalid proposed transaction input: {e:#?}"),
             VersionsDontMatch { proposed, original, } => write!(f, "proposed transaction version {} doesn't match the original {}", proposed, original),
@@ -92,7 +95,8 @@ impl std::error::Error for ValidationError {
         use InternalValidationError::*;
 
         match &self.internal {
-            Decode(error) => Some(error),
+            Psbt(error) => Some(error),
+            Io(error) => Some(error),
             InvalidInputType(error) => Some(error),
             InvalidProposedInput(error) => Some(error),
             VersionsDontMatch { proposed: _, original: _ } => None,

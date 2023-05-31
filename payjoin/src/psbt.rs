@@ -4,9 +4,8 @@ use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::fmt;
 
-use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
-use bitcoin::util::{bip32, psbt};
-use bitcoin::{TxIn, TxOut};
+use bitcoin::psbt::Psbt;
+use bitcoin::{bip32, psbt, TxIn, TxOut};
 
 #[derive(Debug)]
 pub(crate) enum InconsistentPsbt {

@@ -40,14 +40,16 @@ pub struct RequestError(InternalRequestError);
 
 #[derive(Debug)]
 pub(crate) enum InternalRequestError {
-    Decode(bitcoin::consensus::encode::Error),
+    Psbt(bitcoin::psbt::Error),
+    Base64(bitcoin::base64::DecodeError),
+    Io(std::io::Error),
     MissingHeader(&'static str),
     InvalidContentType(String),
     InvalidContentLength(std::num::ParseIntError),
     ContentLengthTooLarge(u64),
     SenderParams(super::optional_parameters::Error),
     /// The raw PSBT fails bip78-specific validation.
-    Psbt(crate::psbt::InconsistentPsbt),
+    InconsistentPsbt(crate::psbt::InconsistentPsbt),
     /// The prevtxout is missing
     PrevTxOut(crate::psbt::PrevTxOutError),
     /// The Original PSBT has no output for the receiver.
@@ -55,7 +57,7 @@ pub(crate) enum InternalRequestError {
     /// The original PSBT transaction fails the broadcast check
     OriginalPsbtNotBroadcastable,
     /// The sender is trying to spend the receiver input
-    InputOwned(bitcoin::Script),
+    InputOwned(bitcoin::ScriptBuf),
     /// The original psbt has mixed input address types that could harm privacy
     MixedInputScripts(crate::input_type::InputType, crate::input_type::InputType),
     /// Unrecognized input type
@@ -76,7 +78,9 @@ impl fmt::Display for RequestError {
         }
 
         match &self.0 {
-            InternalRequestError::Decode(e) => write_error(f, "decode-error", e),
+            InternalRequestError::Psbt(e) => write_error(f, "psbt-error", e),
+            InternalRequestError::Base64(e) => write_error(f, "base64-decode-error", e),
+            InternalRequestError::Io(e) => write_error(f, "io-error", e),
             InternalRequestError::MissingHeader(header) =>
                 write_error(f, "missing-header", &format!("Missing header: {}", header)),
             InternalRequestError::InvalidContentType(content_type) => write_error(
@@ -99,7 +103,8 @@ impl fmt::Display for RequestError {
                 ),
                 _ => write_error(f, "sender-params-error", e),
             },
-            InternalRequestError::Psbt(e) => write_error(f, "original-psbt-rejected", e),
+            InternalRequestError::InconsistentPsbt(e) =>
+                write_error(f, "original-psbt-rejected", e),
             InternalRequestError::PrevTxOut(e) =>
                 write_error(f, "original-psbt-rejected", &format!("PrevTxOut Error: {}", e)),
             InternalRequestError::MissingPayment =>

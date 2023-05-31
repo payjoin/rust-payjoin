@@ -9,9 +9,9 @@ use bitcoincore_rpc::jsonrpc::serde_json;
 use bitcoincore_rpc::RpcApi;
 use clap::ArgMatches;
 use config::{Config, File, FileFormat};
-use payjoin::bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
+use payjoin::bitcoin::psbt::Psbt;
 use payjoin::receive::{Error, PayjoinProposal};
-use payjoin::{PjUriExt, UriExt};
+use payjoin::{bitcoin, PjUriExt, UriExt};
 use rouille::{Request, Response};
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +46,7 @@ impl App {
             .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
 
         let link = link
+            .assume_checked()
             .check_pj_supported()
             .map_err(|e| anyhow!("The provided URI doesn't support payjoin (BIP78): {}", e))?;
 
@@ -77,8 +78,7 @@ impl App {
             .wallet_process_psbt(&psbt, None, None, None)
             .with_context(|| "Failed to process PSBT")?
             .psbt;
-        let psbt = load_psbt_from_base64(psbt.as_bytes())
-            .with_context(|| "Failed to load PSBT from base64")?;
+        let psbt = Psbt::from_str(&psbt).with_context(|| "Failed to load PSBT from base64")?;
         log::debug!("Original psbt: {:#?}", psbt);
         let pj_params = payjoin::send::Configuration::with_fee_contribution(
             payjoin::bitcoin::Amount::from_sat(10000),
@@ -91,14 +91,15 @@ impl App {
             .danger_accept_invalid_certs(self.config.danger_accept_invalid_certs)
             .build()
             .with_context(|| "Failed to build reqwest http client")?;
-        let response = client
+        let mut response = client
             .post(req.url)
             .body(req.body)
             .header("Content-Type", "text/plain")
             .send()
             .with_context(|| "HTTP request failed")?;
         // TODO display well-known errors and log::debug the rest
-        let psbt = ctx.process_response(response).with_context(|| "Failed to process response")?;
+        let psbt =
+            ctx.process_response(&mut response).with_context(|| "Failed to process response")?;
         log::debug!("Proposed psbt: {:#?}", psbt);
         let psbt = self
             .bitcoind
@@ -122,7 +123,7 @@ impl App {
     pub fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
         use payjoin::Uri;
 
-        let pj_receiver_address = self.bitcoind.get_new_address(None, None)?;
+        let pj_receiver_address = self.bitcoind.get_new_address(None, None)?.assume_checked();
         let amount = Amount::from_sat(amount_arg.parse()?);
         let pj_uri_string = format!(
             "{}?amount={}&pj={}",
@@ -133,6 +134,7 @@ impl App {
         let pj_uri = Uri::from_str(&pj_uri_string)
             .map_err(|e| anyhow!("Constructed a bad URI string from args: {}", e))?;
         let _pj_uri = pj_uri
+            .assume_checked()
             .check_pj_supported()
             .map_err(|e| anyhow!("Constructed URI does not support payjoin: {}", e))?;
 
@@ -178,8 +180,11 @@ impl App {
     }
 
     fn handle_get_bip21(&self, amount: Option<Amount>) -> Result<Response, Error> {
-        let address =
-            self.bitcoind.get_new_address(None, None).map_err(|e| Error::Server(e.into()))?;
+        let address = self
+            .bitcoind
+            .get_new_address(None, None)
+            .map_err(|e| Error::Server(e.into()))?
+            .assume_checked();
         let uri_string = if let Some(amount) = amount {
             format!(
                 "{}?amount={}&pj={}",
@@ -193,14 +198,13 @@ impl App {
         let uri = payjoin::Uri::try_from(uri_string.clone())
             .map_err(|_| Error::Server(anyhow!("Could not parse payjoin URI string.").into()))?;
         let _ = uri
+            .assume_checked() // we just got it from bitcoind above
             .check_pj_supported()
             .map_err(|_| Error::Server(anyhow!("Created bip21 with invalid &pj=.").into()))?;
         Ok(Response::text(uri_string))
     }
 
     fn handle_payjoin_post(&self, req: &Request) -> Result<Response, Error> {
-        use bitcoin::hashes::hex::ToHex;
-
         let headers = Headers(req.headers());
         let proposal = payjoin::receive::UncheckedProposal::from_request(
             req.data().context("Failed to read request body").map_err(|e| {
@@ -230,7 +234,7 @@ impl App {
 
         // Receive Check 1: Can Broadcast
         let proposal = proposal.check_can_broadcast(|tx| {
-            let raw_tx = bitcoin::consensus::encode::serialize(&tx).to_hex();
+            let raw_tx = bitcoin::consensus::encode::serialize_hex(&tx);
             let mempool_results = self
                 .bitcoind
                 .test_mempool_accept(&[raw_tx])
@@ -283,29 +287,31 @@ impl App {
                 .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
         }
 
-        let receiver_substitute_address =
-            self.bitcoind.get_new_address(None, None).map_err(|e| Error::Server(e.into()))?;
+        let receiver_substitute_address = self
+            .bitcoind
+            .get_new_address(None, None)
+            .map_err(|e| Error::Server(e.into()))?
+            .assume_checked();
         payjoin.substitute_output_address(receiver_substitute_address);
 
         let payjoin_proposal_psbt = payjoin.apply_fee(Some(1))?;
 
         log::debug!("Extracted PSBT: {:#?}", payjoin_proposal_psbt);
         // Sign payjoin psbt
-        let payjoin_base64_string =
-            base64::encode(bitcoin::consensus::serialize(&payjoin_proposal_psbt));
+        let payjoin_base64_string = base64::encode(&payjoin_proposal_psbt.serialize());
         // `wallet_process_psbt` adds available utxo data and finalizes
         let payjoin_proposal_psbt = self
             .bitcoind
             .wallet_process_psbt(&payjoin_base64_string, None, None, Some(false))
             .map_err(|e| Error::Server(e.into()))?
             .psbt;
-        let payjoin_proposal_psbt = load_psbt_from_base64(payjoin_proposal_psbt.as_bytes())
+        let payjoin_proposal_psbt = Psbt::from_str(&payjoin_proposal_psbt)
             .context("Failed to parse PSBT")
             .map_err(|e| Error::Server(e.into()))?;
         let payjoin_proposal_psbt = payjoin.prepare_psbt(payjoin_proposal_psbt)?;
         log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
 
-        let payload = base64::encode(bitcoin::consensus::serialize(&payjoin_proposal_psbt));
+        let payload = base64::encode(&payjoin_proposal_psbt.serialize());
         log::info!("successful response");
         Ok(Response::text(payload))
     }
@@ -456,26 +462,4 @@ impl payjoin::receive::Headers for Headers<'_> {
     }
 }
 
-fn load_psbt_from_base64(
-    mut input: impl std::io::Read,
-) -> Result<Psbt, payjoin::bitcoin::consensus::encode::Error> {
-    use payjoin::bitcoin::consensus::Decodable;
-
-    let mut reader = base64::read::DecoderReader::new(
-        &mut input,
-        base64::Config::new(base64::CharacterSet::Standard, true),
-    );
-    Psbt::consensus_decode(&mut reader)
-}
-
-fn serialize_psbt(psbt: &Psbt) -> String {
-    use payjoin::bitcoin::consensus::Encodable;
-
-    let mut encoder = base64::write::EncoderWriter::new(Vec::new(), base64::STANDARD);
-    psbt.consensus_encode(&mut encoder)
-        .expect("Vec doesn't return errors in its write implementation");
-    String::from_utf8(
-        encoder.finish().expect("Vec doesn't return errors in its write implementation"),
-    )
-    .unwrap()
-}
+fn serialize_psbt(psbt: &Psbt) -> String { base64::encode(&psbt.serialize()) }

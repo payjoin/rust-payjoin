@@ -1,5 +1,11 @@
 # Payjoin Changelog
 
+## 0.8.1
+
+- Bump `bitcoin-0.30.0`
+- Bump `bip21-0.3.1`
+- Swap `base64-0.13.0` for `bitcoin`'s `base64` feature export
+
 ## 0.8.0
 
 - Test receiver compatibility with BlueWallet

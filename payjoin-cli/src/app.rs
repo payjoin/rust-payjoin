@@ -122,22 +122,8 @@ impl App {
 
     #[cfg(not(feature = "reelay"))]
     pub fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
-        use payjoin::Uri;
-
-        let pj_receiver_address = self.bitcoind.get_new_address(None, None)?.assume_checked();
         let amount = Amount::from_sat(amount_arg.parse()?);
-        let pj_uri_string = format!(
-            "{}?amount={}&pj={}",
-            pj_receiver_address.to_qr_uri(),
-            amount.to_btc(),
-            self.config.pj_endpoint
-        );
-        let pj_uri = Uri::from_str(&pj_uri_string)
-            .map_err(|e| anyhow!("Constructed a bad URI string from args: {}", e))?;
-        let _pj_uri = pj_uri
-            .assume_checked()
-            .check_pj_supported()
-            .map_err(|e| anyhow!("Constructed URI does not support payjoin: {}", e))?;
+        let pj_uri_string = self.make_pj_uri_string(amount)?;
 
         println!(
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
@@ -146,6 +132,25 @@ impl App {
         println!("{}", pj_uri_string);
 
         rouille::start_server(self.config.pj_host.clone(), move |req| self.handle_web_request(req));
+    }
+
+    fn make_pj_uri_string(&self, amount: Amount) -> Result<String> {
+        use payjoin::Uri;
+
+        let address = self.bitcoind.get_new_address(None, None)?.assume_checked();
+        let pj_uri_string = format!(
+            "{}?amount={}&pj={}",
+            address.to_qr_uri(),
+            amount.to_btc(),
+            self.config.pj_endpoint
+        );
+        let pj_uri = Uri::from_str(&pj_uri_string)
+        .map_err(|e| anyhow!("Constructed a bad URI string from args: {}", e))?;
+        let _pj_uri = pj_uri
+            .assume_checked()
+            .check_pj_supported()
+            .map_err(|e| anyhow!("Constructed URI does not support payjoin: {}", e))?;
+        Ok(pj_uri_string)
     }
 
     fn handle_web_request(&self, req: &Request) -> Response {
@@ -467,10 +472,12 @@ fn serialize_psbt(psbt: &Psbt) -> String { base64::encode(&psbt.serialize()) }
 
 #[cfg(feature = "reelay")]
 use tungstenite::{connect, Message};
-use url::Url;
+#[cfg(feature = "reelay")]
 
+use url::Url;
+#[cfg(feature = "reelay")]
 impl App {
-    pub fn reeceive_payjoin(self, amount_arg: &str) -> Result<()> {
+    pub fn reeceive_payjoin(self, amount: Amount) -> Result<()> {
         println!("REElay");
         let (mut socket, response) =
             connect(Url::parse("ws://localhost:3012/socket").unwrap()).expect("Can't connect");

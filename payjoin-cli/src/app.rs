@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::str::FromStr;
@@ -87,6 +88,7 @@ impl App {
         let (req, ctx) = link
             .create_pj_request(psbt, pj_params)
             .with_context(|| "Failed to create payjoin request")?;
+        log::debug!("Sending payjoin request body: {:#?}", req.body);
         let client = reqwest::blocking::Client::builder()
             .danger_accept_invalid_certs(self.config.danger_accept_invalid_certs)
             .build()
@@ -168,19 +170,26 @@ impl App {
                     })
                     .unwrap_or_else(|err_resp| err_resp)
             }
-            ("POST", _) => self
-                .handle_payjoin_post(req)
-                .map_err(|e| match e {
-                    Error::BadRequest(e) => {
-                        log::error!("Error handling request: {}", e);
-                        Response::text(e.to_string()).with_status_code(400)
-                    }
-                    e => {
-                        log::error!("Error handling request: {}", e);
-                        Response::text(e.to_string()).with_status_code(500)
-                    }
-                })
-                .unwrap_or_else(|err_resp| err_resp),
+            ("POST", _) =>  {
+                let headers = RouilleHeaders(req.headers());
+                let body = req.data().context("Failed to read request body").map_err(|e| {
+                    log::warn!("Failed to read request body: {}", e);
+                    Error::Server(e.into())
+                }).unwrap(); // return Response::text(e.to_string()).with_status_code(500)
+                self
+                    .handle_payjoin_post(body, req.raw_query_string(), headers)
+                    .map_err(|e| match e {
+                        Error::BadRequest(e) => {
+                            log::error!("Error handling request: {}", e);
+                            Response::text(e.to_string()).with_status_code(400)
+                        }
+                        e => {
+                            log::error!("Error handling request: {}", e);
+                            Response::text(e.to_string()).with_status_code(500)
+                        }
+                    })
+                    .unwrap_or_else(|err_resp| err_resp)
+            }
             _ => Response::empty_404(),
         }
     }
@@ -210,17 +219,10 @@ impl App {
         Ok(Response::text(uri_string))
     }
 
-    fn handle_payjoin_post(&self, req: &Request) -> Result<Response, Error> {
-        let headers = Headers(req.headers());
-        let proposal = payjoin::receive::UncheckedProposal::from_request(
-            req.data().context("Failed to read request body").map_err(|e| {
-                log::warn!("Failed to read request body: {}", e);
-                Error::Server(e.into())
-            })?,
-            req.raw_query_string(),
-            headers,
-        )?;
-
+    fn handle_payjoin_post(&self, body: impl std::io::Read, query: &str, headers: impl payjoin::receive::Headers) -> Result<Response, Error> {
+        log::debug!("handle_payjoin_post");
+        let proposal = payjoin::receive::UncheckedProposal::from_request(body, query, headers)?;
+        
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.get_transaction_to_schedule_broadcast();
 
@@ -460,8 +462,8 @@ fn try_contributing_inputs(
     Ok(())
 }
 
-struct Headers<'a>(rouille::HeadersIter<'a>);
-impl payjoin::receive::Headers for Headers<'_> {
+struct RouilleHeaders<'a>(rouille::HeadersIter<'a>);
+impl payjoin::receive::Headers for RouilleHeaders<'_> {
     fn get_header(&self, key: &str) -> Option<&str> {
         let mut copy = self.0.clone(); // lol
         copy.find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v)
@@ -477,10 +479,25 @@ use tungstenite::{connect, Message};
 use url::Url;
 #[cfg(feature = "reelay")]
 impl App {
-    pub fn reeceive_payjoin(self, amount: Amount) -> Result<()> {
+    pub fn reeceive_payjoin(self, amount_arg: &str) -> Result<()> {
+        use std::io::Read;
+        use payjoin::relay;
+
+        let amount = Amount::from_sat(amount_arg.parse()?);
+        let pj_uri_string = self.make_pj_uri_string(amount)?;
+
+        println!("{}", pj_uri_string);
+        let ws_uri = "ws://localhost:3012/socket";
+        println!(
+            "Listening via relay at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
+            self.config.pj_host
+        );
+        println!("{}", pj_uri_string);
+
+        // listen for incoming payjoin requests at ws
         println!("REElay");
         let (mut socket, response) =
-            connect(Url::parse("ws://localhost:3012/socket").unwrap()).expect("Can't connect");
+            connect(Url::parse(ws_uri).unwrap()).expect("Can't connect");
 
         println!("Connected to the server");
         println!("Response HTTP code: {}", response.status());
@@ -488,10 +505,59 @@ impl App {
         for (ref header, _value) in response.headers() {
             println!("* {}", header);
         }
+ 
         socket.write_message(Message::Text("Hello WebSocket".into())).unwrap();
-        loop {
-            let msg = socket.read_message().expect("Error reading message");
-            println!("Received: {}", msg);
-        }
+        println!("Waiting for messages...");
+        let msg = socket.read_message().expect("Error reading message");
+        println!("Received Request, deserializing: {}", msg);
+        // for a production protocol bhttp would make more sense than json
+        let req: relay::Request = serde_json::from_str(&msg.to_text().unwrap()).unwrap();
+        println!("Deserialized request: {:?}", req);
+        //let body = req.body
+        println!("desrialized headers: {:?}", req.headers);
+        let headers = HyperHeaders(req.headers);
+        let body = std::io::Cursor::new(req.body);
+        println!("deserialized body: {:?}", body);
+        println!("Handling relayed payjoin POST request");
+        // do receive
+        let res = self.handle_payjoin_post(body, &req.query, headers)
+            .map_err(|e| match e {
+                Error::BadRequest(e) => {
+                    log::error!("Error handling request: {}", e);
+                    Response::text(e.to_string()).with_status_code(400)
+                }
+                e => {
+                    log::error!("Error handling request: {}", e);
+                    Response::text(e.to_string()).with_status_code(500)
+                }
+            })
+            .unwrap_or_else(|err_resp| err_resp);
+        println!("Serializing response");
+        let (mut reader, _usize) = res.data.into_reader_and_size();
+        let mut body = Vec::<u8>::new();
+        reader.read_to_end(&mut body).unwrap();
+        println!("read body into buffer");
+        let headers = relay::VecHeaders::new(res.headers);
+        let res =  relay::Response {
+            body,
+            headers,
+            status_code: res.status_code,
+        };
+        let res = serde_json::to_string(&res).unwrap();
+        println!("serialized res: {:#?}", res);
+        socket.write_message(Message::Text(res)).unwrap();
+        socket.close(None).unwrap();
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "reelay")]
+#[derive(Debug)]
+struct HyperHeaders(reqwest::header::HeaderMap);
+#[cfg(feature = "reelay")]
+impl payjoin::receive::Headers for HyperHeaders {
+    fn get_header(&self, key: &str) -> Option<&str> {
+        self.0.get(key).and_then(|v| v.to_str().ok())
     }
 }

@@ -24,6 +24,9 @@ pub mod receive;
 #[cfg(feature = "receive")]
 pub use crate::receive::Error;
 
+#[cfg(feature = "relay")]
+pub mod relay;
+
 #[cfg(feature = "send")]
 pub mod send;
 

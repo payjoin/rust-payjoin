@@ -7,7 +7,10 @@ edition = "2021"
 
 [dependencies]
 futures = "0.3.28"
-hyper = { version = "0.14.26", features = ["server"] }
+hyper = { version = "0.14.26", features = ["full"] }
+hyper_serde = "0.13.0"
+payjoin = { path = "../payjoin", features = ["relay"] }
+serde = { version = "1.0.160", features = ["derive"] }
+serde_json = "1.0.96"
 tokio = { version = "1.28.2", features = ["full"] }
 tungstenite = "0.19.0"
-tokio-tungstenite = "*"

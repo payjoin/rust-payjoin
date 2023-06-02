@@ -15,6 +15,7 @@ edition = "2018"
 [features]
 send = []
 receive = ["rand"]
+relay = ["receive", "hyper/server", "hyper_serde", "serde/derive", "serde_json"]
 
 [dependencies]
 bitcoin = { version = "0.30.0", features = ["base64"] }
@@ -22,6 +23,12 @@ bip21 = "0.3.1"
 log = { version = "0.4.14"}
 rand = { version = "0.8.4", optional = true }
 url = "2.2.2"
+
+# relay dependencies
+hyper = { version = "0.14.26", features = ["server"], optional = true }
+hyper_serde = { version = "0.13.0", optional = true }
+serde = { version = "1.0.160", features = ["derive"], optional = true }
+serde_json = { version = "1.0.96", optional = true }
 
 [dev-dependencies]
 env_logger = "0.9.0"

@@ -332,9 +332,11 @@ impl UncheckedProposal {
         query: &str,
         headers: impl Headers,
     ) -> Result<Self, RequestError> {
+        log::debug!("from_request");
         let content_type = headers
             .get_header("content-type")
             .ok_or(InternalRequestError::MissingHeader("Content-Type"))?;
+        log::debug!("Content-Type: {}", content_type);
         if !content_type.starts_with("text/plain") {
             return Err(InternalRequestError::InvalidContentType(content_type.to_owned()).into());
         }

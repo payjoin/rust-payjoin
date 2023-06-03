@@ -24,7 +24,7 @@
  Determine the RPC port specified in your bitcoind's "bitcoin.conf"
  file. Mine was 18443. Look for:
  ```toml
- rpcport=[rpcport]
+ rpcport= # rpc port
  ```
  Run the following command from the payjoin-cli directory, where "boom"
  is the receiving wallet, 18443 is the rpc port, and you wish to

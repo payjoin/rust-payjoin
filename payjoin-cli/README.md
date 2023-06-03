@@ -13,7 +13,7 @@
 > bitcoind_cookie = "\[bitcoind cookie file location\]" \# mine was:
 > \"/tmp/regtest1/bitcoind/regtest/.cookie\" \
 > bitcoind_rpchost = "\[rpcport/wallet/wallet name\]" \# mine was:
-> \"http://localhost:18443/wallet/boom\"
+> \"http://localhost:18443/wallet/boom"\
 >
 > **Receive Payjoin**\
 > Set up 2 local regtest wallets and fund them. In my case, I funded a

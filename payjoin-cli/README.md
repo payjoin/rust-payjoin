@@ -65,7 +65,7 @@ local-ssl-proxy --source 3010 --target 3000
  Using the previously generated bip21 URI, run the following command
  from the sender directory:
 ```console
- RUST_LOG=debug cargo run \-- send "\[BIP21 URI\]"
+ RUST_LOG=debug cargo run -- send "[BIP21 URI]"
 ```
  You should see the payjoin transaction occur and be able to verify the
  Partially Signed Bitcoin Transaction (PSBT), inputs, and Unspent

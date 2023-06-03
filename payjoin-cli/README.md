@@ -11,8 +11,8 @@
 >
 > \# config.toml\
 > bitcoind_cookie = "\[bitcoind cookie file location\]" \# mine was:
-> \"/tmp/regtest1/bitcoind/regtest/.cookie\" bitcoind_rpchost = "\[rpc
-> port/wallet/wallet name\]" \# mine was:
+> \"/tmp/regtest1/bitcoind/regtest/.cookie\" \
+> bitcoind_rpchost = "\[rpcport/wallet/wallet name\]" \# mine was:
 > \"http://localhost:18443/wallet/boom\"
 >
 > **Receive Payjoin**\

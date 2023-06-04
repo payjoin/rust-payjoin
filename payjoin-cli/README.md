@@ -1,8 +1,8 @@
-# **payjoin-cli README**
+# payjoin-cli
 
  ## A command-line payjoin client for bitcoind in rust
 
-### **Install payjoin-cli**
+### Install payjoin-cli
  \
  Get a list of commands and options:
  ```console
@@ -16,7 +16,7 @@
  bitcoind_rpchost = "[rpcport/wallet/wallet name]" # mine was: "http://localhost:18443/wallet/boom"
  ```
 
-### **Receive Payjoin**
+### Receive Payjoin
  Set up 2 local regtest wallets and fund them. In my case, I funded a
  regtest wallet "boom" with 158 coins and another wallet "ocean" with
  .8 coins.
@@ -50,10 +50,11 @@
 ```console
 local-ssl-proxy --source 3010 --target 3000
 ```
-###  **Send Payjoin**
+###  Send Payjoin
 
- **cd** into the "sender" directory within payjoin-cli. Create another
- config.toml file in this directory and configure it as you did
+ Open a new terminal window and navigate to the  the "sender" directory within payjoin-cli. 
+ Note: A wallet cannot payjoin with itself, need separate wallets.
+ Create another config.toml file in this directory and configure it as you did
  previously, except replace the receiver wallet name with the sender
  wallet name ("ocean" for me).
 

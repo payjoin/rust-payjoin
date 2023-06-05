@@ -52,7 +52,7 @@ local-ssl-proxy --source 3010 --target 3000
 ```
 ###  Send Payjoin
 
- Open a new terminal window and navigate to the  the "sender" directory within payjoin-cli. 
+ Create a "sender" directory within payjoin-cli. Open a new terminal window and navigate to this directory.
  Note: A wallet cannot payjoin with itself, need separate wallets.
  Create another config.toml file in this directory and configure it as you did
  previously, except replace the receiver wallet name with the sender

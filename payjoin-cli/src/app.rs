@@ -484,7 +484,7 @@ impl App {
         use payjoin::relay;
 
         let amount = Amount::from_sat(amount_arg.parse()?);
-        let pj_uri_string = self.make_pj_uri_string(amount)?;
+        let pj_uri_string = self.make_pj_uri_string(amount)? + "&pjos=0";
 
         println!("{}", pj_uri_string);
         let ws_uri = "ws://localhost:3012/socket";

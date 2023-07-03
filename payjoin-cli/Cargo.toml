@@ -11,7 +11,7 @@ path = "src/main.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 native-tls-vendored = ["reqwest/native-tls-vendored"]
-https = ["rcgen", "rouille/ssl"]
+local-https = ["rcgen", "rouille/ssl"]
 
 [dependencies]
 anyhow = "1.0.70"

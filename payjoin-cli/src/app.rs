@@ -143,8 +143,30 @@ impl App {
             self.config.pj_host
         );
         println!("{}", pj_uri_string);
+        #[cfg(any(feature = "https"))]
+        let server = {
+            let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+            let cert_ser = cert.serialize_pem().unwrap().into_bytes();
+            let skey_ser = cert.serialize_private_key_pem().into_bytes();
+            rouille::Server::new_ssl(
+                self.config.pj_host.clone(),
+                move |req| self.handle_web_request(req),
+                cert_ser,
+                skey_ser,
+            )
+            .unwrap()
+        };
 
-        rouille::start_server(self.config.pj_host.clone(), move |req| self.handle_web_request(req));
+        #[cfg(not(any(feature = "https")))]
+        let server = {
+            rouille::Server::new(self.config.pj_host.clone(), move |req| {
+                self.handle_web_request(req)
+            })
+            .unwrap()
+        };
+
+        server.run();
+        Ok(())
     }
 
     fn handle_web_request(&self, req: &Request) -> Response {

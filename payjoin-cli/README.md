@@ -25,8 +25,8 @@ Your configuration details will vary, but you may use this as a template.
 
  Set up 2 local regtest wallets and fund them. This example uses "boom" and "ocean"
 
-Determine the RPC port specified in your bitcoind's "bitcoin.conf"
-file. Mine was 18443. This can be set in `bitcoin.conf` like so:
+Determine the RPC port specified in your bitcoind's `bitcoin.conf`
+file. 18443 is the default. This can be set like so:
 
 ```conf
 rpcport = 18443
@@ -35,27 +35,16 @@ rpcport = 18443
 From the `payjoin-cli directory, where "boom" is the receiving wallet, 18443 is the rpc port, and you wish to request 10,000 sats run:
 
 ```console
-RUST_LOG=debug cargo run -- -r "http://localhost:18443/wallet/boom" receive 10000
+RUST_LOG=debug cargo run --features=local-https -- -r "http://localhost:18443/wallet/boom" receive 10000
 ```
+
+The default configuration listens for payjoin requests at `http://localhost:3000` and expects you to proxy https requests there.
+Payjoin requires a secure endpoint, either https and .onion are valid. In order to receive payjoin in a local testing environment one may enable the  `local-https` feature which will provision a self-signed certificate and host the `https://localhost:3000` endpoint. Emphasis on HTTP**S**.
 
 This will generate a payjoin capable bip21 URI with which to accept payjoin:
 
 ```console
-BITCOIN:BCRT1QCJ4X75DUNY4X5NAWLM3CR8MALM9YAUYWWEWKWL?amount=0.00010&pj=https://localhost:3010
-```
-
-Default configuration listens for payjoin requests at
-`http://localhost:3000` and lists server as `https://localhost:3010`.
-
-Download and install [`local-ssl-proxy`](https://github.com/cameronhunter/local-ssl-proxy)
-
-The default configuration listens for payjoin requests at `http://localhost:3000` and lists the server as
-`https://localhost:3010`. Payjoin requires a secure endpoint, either https and .onion are valid. Therefore, in order to receive
-payjoin, one must also host an https reverse proxy to marshall https requests from localhost:3010 to
-localhost:3000.To do this, run:
-
-```console
-local-ssl-proxy --source 3010 --target 3000
+BITCOIN:BCRT1QCJ4X75DUNY4X5NAWLM3CR8MALM9YAUYWWEWKWL?amount=0.00010&pj=https://localhost:3000
 ```
 
 ### Send Payjoin
@@ -66,7 +55,7 @@ Create another config.toml file in this directory and configure it as you did
 previously, except replace the receiver wallet name with the sender
 wallet name ("ocean" for me).
 
-If you are testing locally, add the following line to the
+If you are testing locally using a self-signed certificate as with the `local-https` feature, add the following line to the
 configuration file:
 
 danger_accept_invalid_certs = true
@@ -81,3 +70,5 @@ from the sender directory:
 You should see the payjoin transaction occur and be able to verify the
 Partially Signed Bitcoin Transaction (PSBT), inputs, and Unspent
 Transaction Outputs (UTXOs).
+
+Congrats, you've payjoined!

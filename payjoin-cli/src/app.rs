@@ -144,7 +144,30 @@ impl App {
         );
         println!("{}", pj_uri_string);
 
-        rouille::start_server(self.config.pj_host.clone(), move |req| self.handle_web_request(req));
+        #[cfg(feature = "local-https")]
+        let server = {
+            let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
+            let cert_ser = cert.serialize_pem()?;
+            let skey_ser = cert.serialize_private_key_pem().into_bytes();
+            rouille::Server::new_ssl(
+                self.config.pj_host.clone(),
+                move |req| self.handle_web_request(req),
+                cert_ser.into_bytes(),
+                skey_ser,
+            )
+            .map_err(|e| anyhow!("Failed to create HTTPS server: {}", e))?
+        };
+
+        #[cfg(not(feature = "local-https"))]
+        let server = {
+            rouille::Server::new(self.config.pj_host.clone(), move |req| {
+                self.handle_web_request(req)
+            })
+            .map_err(|e| anyhow!("Failed to create HTTP server: {}", e))?
+        };
+
+        server.run();
+        Ok(())
     }
 
     fn handle_web_request(&self, req: &Request) -> Response {
@@ -396,7 +419,7 @@ impl AppConfig {
             // Subcommand defaults without which file serialization fails.
             .set_default("danger_accept_invalid_certs", false)?
             .set_default("pj_host", "0.0.0.0:3000")?
-            .set_default("pj_endpoint", "https://localhost:3010")?
+            .set_default("pj_endpoint", "https://localhost:3000")?
             .set_default("sub_only", false)?
             .add_source(File::new("config.toml", FileFormat::Toml));
 

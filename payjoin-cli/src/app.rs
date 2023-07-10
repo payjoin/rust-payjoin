@@ -242,18 +242,10 @@ impl App {
         let _to_broadcast_in_failure_case = proposal.get_transaction_to_schedule_broadcast();
 
         // The network is used for checks later
-        let network = match self
-            .bitcoind
-            .get_blockchain_info()
-            .map_err(|e| Error::Server(e.into()))?
-            .chain
-            .as_str()
-        {
-            "main" => bitcoin::Network::Bitcoin,
-            "test" => bitcoin::Network::Testnet,
-            "regtest" => bitcoin::Network::Regtest,
-            _ => return Err(Error::Server(anyhow!("Unknown network").into())),
-        };
+        let network =
+            self.bitcoind.get_blockchain_info().map_err(|e| Error::Server(e.into())).and_then(
+                |info| bitcoin::Network::from_str(&info.chain).map_err(|e| Error::Server(e.into())),
+            )?;
 
         // Receive Check 1: Can Broadcast
         let proposal = proposal.check_can_broadcast(|tx| {

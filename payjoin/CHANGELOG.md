@@ -1,6 +1,14 @@
 # Payjoin Changelog
 
-## 0.8.1
+## 0.9.0
+
+Bumping `bitcoin` and other crates was a breaking api change. This is a 0.8.1 semver re-release.
+
+- Bump `bitcoin-0.30.0`
+- Bump `bip21-0.3.1`
+- Swap `base64-0.13.0` for `bitcoin`'s `base64` feature export
+
+## 0.8.1 (yanked)
 
 - Bump `bitcoin-0.30.0`
 - Bump `bip21-0.3.1`

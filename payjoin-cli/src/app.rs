@@ -42,6 +42,8 @@ impl App {
     }
 
     pub fn send_payjoin(&self, bip21: &str) -> Result<()> {
+        use payjoin::send::Configuration;
+
         let link = payjoin::Uri::try_from(bip21)
             .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
 
@@ -50,16 +52,16 @@ impl App {
             .check_pj_supported()
             .map_err(|e| anyhow!("The provided URI doesn't support payjoin (BIP78): {}", e))?;
 
-        let amount = link
-            .amount
-            .ok_or_else(|| anyhow!("please specify the amount in the Uri"))
-            .map(|amt| Amount::from_sat(amt.to_sat()))?;
+        let amount = link.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
+
+        // wallet_create_funded_psbt requires a HashMap<address: String, Amount>
         let mut outputs = HashMap::with_capacity(1);
         outputs.insert(link.address.to_string(), amount);
 
+        let fee_per_kvb = Amount::from_sat(2000);
         let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
             lock_unspent: Some(true),
-            fee_rate: Some(Amount::from_sat(2000)),
+            fee_rate: Some(fee_per_kvb),
             ..Default::default()
         };
         let psbt = self
@@ -80,10 +82,40 @@ impl App {
             .psbt;
         let psbt = Psbt::from_str(&psbt).with_context(|| "Failed to load PSBT from base64")?;
         log::debug!("Original psbt: {:#?}", psbt);
-        let pj_params = payjoin::send::Configuration::with_fee_contribution(
-            payjoin::bitcoin::Amount::from_sat(10000),
-            None,
-        );
+
+        log::debug!("uri script_pubkey: {}", link.address.script_pubkey());
+        let additional_fee_index = psbt
+            .unsigned_tx
+            .output
+            .clone()
+            .into_iter()
+            .enumerate()
+            .find(|(_, txo)| txo.script_pubkey != link.address.script_pubkey())
+            .map(|(i, _)| i);
+        log::debug!("Additional fee index: {:?}", additional_fee_index);
+        let pj_params = match additional_fee_index {
+            Some(index) => {
+                let amount_available = psbt
+                    .clone()
+                    .unsigned_tx
+                    .output
+                    .get(index)
+                    .map(|o| Amount::from_sat(o.value))
+                    .unwrap_or_default();
+                const P2TR_INPUT_WEIGHT: u64 = 58; // bitmask is taproot only TODO payjoin-cli is not!
+                let recommended_fee = fee_per_kvb * P2TR_INPUT_WEIGHT;
+                let max_additional_fee = std::cmp::min(
+                    recommended_fee,
+                    amount_available, // offer amount available if recommendation is not
+                );
+
+                // TODO enforce min_fee_rate_sat_per_vb() if recommendation is available
+                Configuration::with_fee_contribution(max_additional_fee, Some(index))
+                    .clamp_fee_contribution(true)
+            }
+            None => Configuration::non_incentivizing(),
+        };
+
         let (req, ctx) = link
             .create_pj_request(psbt, pj_params)
             .with_context(|| "Failed to create payjoin request")?;

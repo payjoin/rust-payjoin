@@ -1,1 +1,3 @@
-# Genesis 1:3 payjoin-ffi
+# payjoin-ffi
+
+A simplified Payjoin library built using [PDK](https://payjoindevkit.org/) .

@@ -1,9 +1,12 @@
 pub mod send;
 pub mod bitcoind;
+pub mod error;
+pub mod receive;
+pub mod transaction;
 use std::{ sync::Mutex, collections::HashSet, fs::OpenOptions, str::FromStr };
 
-use bitcoin::{ Amount, psbt::PsbtParseError };
-use payjoin::bitcoin::psbt;
+use bitcoin::{ Amount, psbt::{ PsbtParseError, self } };
+
 use serde::{ Deserialize, Serialize };
 
 pub struct CachedOutputs {
@@ -103,19 +106,5 @@ impl From<&Input> for bitcoincore_rpc::json::CreateRawTransactionInput {
             vout: value.vout,
             sequence: value.sequence,
         }
-    }
-}
-
-pub struct PartiallySignedTransaction {
-    pub(crate) internal: Mutex<psbt::PartiallySignedTransaction>,
-}
-impl PartiallySignedTransaction {
-    pub(crate) fn new(psbt_base64: String) -> Result<Self, PsbtParseError> {
-        let psbt: psbt::PartiallySignedTransaction = psbt::PartiallySignedTransaction::from_str(
-            &psbt_base64
-        )?;
-        Ok(PartiallySignedTransaction {
-            internal: Mutex::new(psbt),
-        })
     }
 }

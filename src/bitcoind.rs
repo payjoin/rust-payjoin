@@ -1,4 +1,4 @@
-use std::{ sync::{ Mutex, Arc, MutexGuard }, collections::HashMap };
+use std::{ sync::{ Mutex, Arc, MutexGuard }, collections::HashMap, str::FromStr };
 
 use bitcoin::Amount;
 use serde::{ Deserialize, Serialize };
@@ -123,5 +123,33 @@ impl BitcoindClient {
             Ok(e) => Ok(e.assume_checked().to_string()),
             Err(e) => panic!("{:?}", e),
         }
+    }
+}
+
+pub struct Txid {
+    pub internal: String,
+}
+impl From<bitcoin::hash_types::Txid> for Txid {
+    fn from(value: bitcoin::hash_types::Txid) -> Self {
+        Txid { internal: value.to_string() }
+    }
+}
+impl From<Txid> for bitcoin::hash_types::Txid {
+    fn from(value: Txid) -> Self {
+        bitcoin::hash_types::Txid::from_str(value.internal.as_str()).expect("Invalid Txid")
+    }
+}
+pub struct OutPoint {
+    pub txid: Txid,
+    pub vout: u32,
+}
+impl OutPoint {
+    pub fn new(txid: Txid, vout: u32) -> Self {
+        Self { txid: txid, vout: vout }
+    }
+}
+impl From<OutPoint> for bitcoin::blockdata::transaction::OutPoint {
+    fn from(value: OutPoint) -> Self {
+        bitcoin::blockdata::transaction::OutPoint { txid: value.txid.into(), vout: value.vout }
     }
 }

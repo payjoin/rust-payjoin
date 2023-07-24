@@ -151,7 +151,10 @@ impl App {
             let skey_ser = cert.serialize_private_key_pem().into_bytes();
             rouille::Server::new_ssl(
                 self.config.pj_host.clone(),
-                move |req| self.handle_web_request(req),
+                move |req| {
+                    self.handle_web_request(req)
+                        .with_additional_header("Access-Control-Allow-Origin", "*")
+                },
                 cert_ser.into_bytes(),
                 skey_ser,
             )
@@ -162,6 +165,7 @@ impl App {
         let server = {
             rouille::Server::new(self.config.pj_host.clone(), move |req| {
                 self.handle_web_request(req)
+                    .with_additional_header("Access-Control-Allow-Origin", "*")
             })
             .map_err(|e| anyhow!("Failed to create HTTP server: {}", e))?
         };

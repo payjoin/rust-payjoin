@@ -151,10 +151,7 @@ impl App {
             let skey_ser = cert.serialize_private_key_pem().into_bytes();
             rouille::Server::new_ssl(
                 self.config.pj_host.clone(),
-                move |req| {
-                    self.handle_web_request(req)
-                        .with_additional_header("Access-Control-Allow-Origin", "*")
-                },
+                move |req| self.handle_web_request(req),
                 cert_ser.into_bytes(),
                 skey_ser,
             )
@@ -165,7 +162,6 @@ impl App {
         let server = {
             rouille::Server::new(self.config.pj_host.clone(), move |req| {
                 self.handle_web_request(req)
-                    .with_additional_header("Access-Control-Allow-Origin", "*")
             })
             .map_err(|e| anyhow!("Failed to create HTTP server: {}", e))?
         };
@@ -204,6 +200,7 @@ impl App {
                 .unwrap_or_else(|err_resp| err_resp),
             _ => Response::empty_404(),
         }
+        .with_additional_header("Access-Control-Allow-Origin", "*")
     }
 
     fn handle_get_bip21(&self, amount: Option<Amount>) -> Result<Response, Error> {

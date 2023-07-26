@@ -200,6 +200,7 @@ impl App {
                 .unwrap_or_else(|err_resp| err_resp),
             _ => Response::empty_404(),
         }
+        .with_additional_header("Access-Control-Allow-Origin", "*")
     }
 
     fn handle_get_bip21(&self, amount: Option<Amount>) -> Result<Response, Error> {

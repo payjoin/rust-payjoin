@@ -1,11 +1,11 @@
 use std::{ sync::{ Mutex, Arc, MutexGuard }, collections::HashMap, str::FromStr };
 
 use bitcoin::Amount;
-use serde::{ Deserialize, Serialize };
+use serde::Deserialize;
 use bitcoincore_rpc::{ self, RpcApi };
 
 use crate::{ CachedOutputs, Input, AddressType };
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct BitcoindConfig {
     pub rpc_host: String,
     pub cookie: Option<String>,
@@ -13,9 +13,10 @@ pub struct BitcoindConfig {
     pub rpc_pass: String,
     pub cache_dir: String,
 }
+#[derive(Clone)]
 pub struct BitcoindClient {
     pub config: BitcoindConfig,
-    pub bitcoind_mutex: Mutex<bitcoincore_rpc::Client>,
+    pub bitcoind_mutex: Arc<Mutex<bitcoincore_rpc::Client>>,
     pub cached_outputs: Arc<Mutex<CachedOutputs>>,
 }
 impl BitcoindClient {
@@ -38,7 +39,7 @@ impl BitcoindClient {
             }
         ).expect("Failed to connect to bitcoind");
         let seen_input = Arc::new(Mutex::new(CachedOutputs::new(config.cache_dir.clone())?));
-        let bitcoind_mutex = Mutex::new(bitcoind);
+        let bitcoind_mutex = Arc::new(Mutex::new(bitcoind));
         Ok(Self { config, bitcoind_mutex, cached_outputs: seen_input })
     }
     fn get_rpc_client(&self) -> MutexGuard<bitcoincore_rpc::Client> {
@@ -107,7 +108,6 @@ impl BitcoindClient {
             Err(e) => panic!("{:?}", e),
         };
     }
-
     pub fn get_new_address(
         &self,
         label: Option<&str>,
@@ -122,6 +122,20 @@ impl BitcoindClient {
         {
             Ok(e) => Ok(e.assume_checked().to_string()),
             Err(e) => panic!("{:?}", e),
+        }
+    }
+    pub fn is_address_mine(
+        self,
+        script: &bitcoin::Script,
+        network: bitcoin::Network
+    ) -> Result<bool, payjoin::Error> {
+        if let Ok(address) = bitcoin::Address::from_script(script, network) {
+            self.get_rpc_client()
+                .get_address_info(&address)
+                .map(|info| info.is_mine.unwrap_or(false))
+                .map_err(|e| payjoin::Error::Server(e.into()))
+        } else {
+            Ok(false)
         }
     }
 }

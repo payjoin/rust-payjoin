@@ -1,4 +1,6 @@
-use anyhow::Ok;
+use std::sync::Mutex;
+
+use bitcoin::Script;
 use payjoin::receive::{
     MaybeInputsOwned as PdkMaybeInputsOwned,
     MaybeMixedInputScripts as PdkMaybeMixedInputScripts,
@@ -8,13 +10,78 @@ use payjoin::receive::{
     UncheckedProposal as PdkUncheckedProposal,
     Headers,
 };
-use bitcoin::blockdata::transaction::Transaction as BitcoinTransaction;
-use crate::{ bitcoind::OutPoint, error::Error, transaction::Transaction };
+use crate::{ PdkError, transaction::Transaction };
+use anyhow::anyhow;
+
+pub struct UncheckedProposal {
+    pub internal: PdkUncheckedProposal,
+}
+pub trait CanBroadcast {
+    fn test_mempool_accept(
+        &self,
+        tx_hex: Vec<String>
+    ) -> Result<
+        Vec<bitcoincore_rpc::bitcoincore_rpc_json::TestMempoolAcceptResult>,
+        bitcoincore_rpc::Error
+    >;
+}
+impl UncheckedProposal {
+    pub fn from_request(
+        body: impl std::io::Read,
+        query: String,
+        headers: impl Headers
+    ) -> Result<Self, PdkError> {
+        let res = PdkUncheckedProposal::from_request(body, query.as_str(), headers)?;
+        Ok(UncheckedProposal { internal: res })
+    }
+    // fn get_internal(&self) -> MutexGuard<PdkUncheckedProposal> {
+    //     self.internal.lock().expect("PdkUncheckedProposal")
+    // }
+    pub fn get_transaction_to_schedule_broadcast(&self) -> Transaction {
+        let res = self.internal.get_transaction_to_schedule_broadcast();
+        Transaction { internal: Mutex::new(res) }
+    }
+    pub fn check_can_broadcast(
+        self,
+        can_broadcast: Box<dyn CanBroadcast>
+    ) -> Result<MaybeInputsOwned, PdkError> {
+        let res = self.internal.check_can_broadcast(|tx| {
+            let raw_tx = hex::encode(bitcoin::consensus::encode::serialize(&tx));
+            let mempool_results = can_broadcast
+                .test_mempool_accept(vec![raw_tx])
+                .map_err(|e| PdkError::Server(e.into()))?;
+            match mempool_results.first() {
+                Some(result) => Ok(result.allowed),
+                None =>
+                    Err(
+                        PdkError::Server(
+                            anyhow!("No mempool results returned on broadcast check").into()
+                        )
+                    ),
+            }
+        })?;
+        Ok(MaybeInputsOwned { internal: res })
+    }
+}
 
 pub struct MaybeInputsOwned {
     pub internal: PdkMaybeInputsOwned,
 }
 
+pub trait IsScriptOwned {
+    fn is_owned(&self, script: &Script) -> Result<bool, PdkError>;
+}
+impl MaybeInputsOwned {
+    pub fn check_inputs_not_owned(
+        self,
+        is_owned: Box<dyn IsScriptOwned>
+    ) -> Result<MaybeMixedInputScripts, PdkError> {
+        match self.internal.check_inputs_not_owned(|input| is_owned.is_owned(input)) {
+            Ok(e) => Ok(MaybeMixedInputScripts { internal: e }),
+            Err(e) => Err(e),
+        }
+    }
+}
 pub struct MaybeMixedInputScripts {
     pub internal: PdkMaybeMixedInputScripts,
 }
@@ -41,29 +108,3 @@ pub struct PayjoinProposal {
 impl PayjoinProposal {
     // pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &OutPoint> {}
 }
-
-pub struct UncheckedProposal {
-    pub internal: PdkUncheckedProposal,
-}
-
-// impl UncheckedProposal {
-//     pub fn from_request(
-//         body: impl std::io::Read,
-//         query: String,
-//         headers: impl Headers
-//     ) -> Result<Self, Error> {
-//         let res = PdkUncheckedProposal::from_request(body, query.as_str(), headers)?;
-//         Ok(UncheckedProposal { internal: res })
-//     }
-//     pub fn get_transaction_to_schedule_broadcast(&self) -> Transaction {
-//         let res = self.internal.get_transaction_to_schedule_broadcast();
-//         Transaction { internal: res }
-//     }
-//     // pub fn check_can_broadcast(
-//     //     self,
-//     //     can_broadcast: impl Fn(&BitcoinTransaction) -> Result<bool, payjoin::receive::Error>
-//     // ) -> Result<MaybeInputsOwned, Error> {
-//     //     let res = self.internal.check_can_broadcast(can_broadcast)?;
-//     //     Ok(MaybeInputsOwned { internal: res })
-//     // }
-// }

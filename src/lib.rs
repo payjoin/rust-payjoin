@@ -3,12 +3,11 @@ pub mod bitcoind;
 pub mod error;
 pub mod receive;
 pub mod transaction;
-use std::{ sync::Mutex, collections::HashSet, fs::OpenOptions, str::FromStr };
-
-use bitcoin::{ Amount, psbt::{ PsbtParseError, self } };
-
+use std::{ collections::HashSet, fs::OpenOptions, str::FromStr };
+use bitcoin::Amount;
 use serde::{ Deserialize, Serialize };
-
+pub use payjoin::Error as PdkError;
+uniffi::include_scaffolding!("pdk");
 pub struct CachedOutputs {
     pub outputs: HashSet<OutPoint>,
     pub file: std::fs::File,

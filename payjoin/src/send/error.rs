@@ -127,6 +127,20 @@ impl std::error::Error for ValidationError {
     }
 }
 
+#[derive(Debug)]
+pub struct ConfigurationError(InternalConfigurationError);
+
+#[derive(Debug)]
+pub(crate) enum InternalConfigurationError {
+    PrevTxOut(crate::psbt::PrevTxOutError),
+    InputType(crate::input_type::InputTypeError),
+    NoInputs,
+}
+
+impl From<InternalConfigurationError> for ConfigurationError {
+    fn from(value: InternalConfigurationError) -> Self { ConfigurationError(value) }
+}
+
 /// Error returned when request could not be created.
 ///
 /// This error can currently only happen due to programmer mistake.

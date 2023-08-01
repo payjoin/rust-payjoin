@@ -90,7 +90,9 @@ impl App {
         log::debug!("Original psbt: {:#?}", psbt);
 
         let payout_scripts = std::iter::once(link.address.script_pubkey());
-        let pj_params = Configuration::recommended(&psbt, payout_scripts, fee_rate);
+        // recommendation or bust for this simple reference implementation
+        let pj_params = Configuration::recommended(&psbt, payout_scripts, fee_rate)
+            .unwrap_or_else(|_| Configuration::non_incentivizing());
 
         let (req, ctx) = link
             .create_pj_request(psbt, pj_params)

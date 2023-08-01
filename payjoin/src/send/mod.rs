@@ -149,8 +149,10 @@ pub use error::{CreateRequestError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 use url::Url;
 
+use self::error::ConfigurationError;
 use crate::input_type::InputType;
 use crate::psbt::PsbtExt;
+use crate::send::error::InternalConfigurationError;
 use crate::weight::{varint_size, ComputeWeight};
 
 // See usize casts
@@ -176,11 +178,13 @@ impl Configuration {
     //
     // BIP 78 recommends contributing `originalPSBTFeeRate * vsize(sender_input_type)`.
     // The minfeerate parameter is set if the contribution is available in change.
+    //
+    // This method fails if no recommendation can be made or if the PSBT is malformed.
     pub fn recommended(
         psbt: &Psbt,
         payout_scripts: impl IntoIterator<Item = ScriptBuf>,
         min_fee_rate: FeeRate,
-    ) -> Self {
+    ) -> Result<Self, ConfigurationError> {
         let mut payout_scripts = payout_scripts.into_iter();
         if let Some((additional_fee_index, fee_available)) = psbt
             .unsigned_tx
@@ -191,26 +195,41 @@ impl Configuration {
             .find(|(_, txo)| payout_scripts.all(|script| script != txo.script_pubkey))
             .map(|(i, txo)| (i, bitcoin::Amount::from_sat(txo.value)))
         {
-            // Assume P2WPKH for testing
-            const P2WPKH_INPUT_WEIGHT: Weight = Weight::from_vb_unchecked(68);
-            let recommended_additional_fee = min_fee_rate * P2WPKH_INPUT_WEIGHT;
-            log::debug!("Recommended additional fee: {}", recommended_additional_fee);
+            let input_types = psbt
+                .input_pairs()
+                .map(|input| {
+                    let txo =
+                        input.previous_txout().map_err(InternalConfigurationError::PrevTxOut)?;
+                    Ok(InputType::from_spent_input(txo, input.psbtin)
+                        .map_err(InternalConfigurationError::InputType)?)
+                })
+                .collect::<Result<Vec<InputType>, ConfigurationError>>()?;
+
+            let first_type = input_types.first().ok_or(InternalConfigurationError::NoInputs)?;
+            // use cheapest default if mixed input types
+            let mut input_vsize = InputType::Taproot.expected_input_weight();
+            // Check if all inputs are the same type
+            if input_types.iter().all(|input_type| input_type == first_type) {
+                input_vsize = first_type.expected_input_weight();
+            }
+
+            let recommended_additional_fee = min_fee_rate * input_vsize;
             if fee_available < recommended_additional_fee {
                 log::warn!("Insufficient funds to maintain specified minimum feerate.");
-                return Configuration::with_fee_contribution(
+                return Ok(Configuration::with_fee_contribution(
                     fee_available,
                     Some(additional_fee_index),
                 )
-                .clamp_fee_contribution(true);
+                .clamp_fee_contribution(true));
             }
-            return Configuration::with_fee_contribution(
+            return Ok(Configuration::with_fee_contribution(
                 recommended_additional_fee,
                 Some(additional_fee_index),
             )
             .clamp_fee_contribution(false)
-            .min_fee_rate(min_fee_rate);
+            .min_fee_rate(min_fee_rate));
         }
-        Configuration::non_incentivizing()
+        Ok(Configuration::non_incentivizing())
     }
 
     /// Offer the receiver contribution to pay for his input.
@@ -712,7 +731,6 @@ fn serialize_url(
         let float_fee_rate = min_fee_rate.to_sat_per_kwu() as f32 / 250.0_f32;
         url.query_pairs_mut().append_pair("minfeerate", &float_fee_rate.to_string());
     }
-    log::debug!("Serialized URL: {}", url);
     Ok(url)
 }
 

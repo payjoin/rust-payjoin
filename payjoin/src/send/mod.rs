@@ -226,8 +226,8 @@ impl Configuration {
     }
 
     /// Sets minimum fee rate required by the sender.
-    pub fn min_fee_rate_sat_per_vb(mut self, fee_rate: u64) -> Self {
-        self.min_fee_rate = FeeRate::from_sat_per_vb_unchecked(fee_rate);
+    pub fn min_fee_rate(mut self, fee_rate: FeeRate) -> Self {
+        self.min_fee_rate = fee_rate;
         self
     }
 }

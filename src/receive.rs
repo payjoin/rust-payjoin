@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use bitcoin::Script;
+use bitcoin::{ Script, OutPoint, TxOut, Address };
 use payjoin::receive::{
     MaybeInputsOwned as PdkMaybeInputsOwned,
     MaybeMixedInputScripts as PdkMaybeMixedInputScripts,
@@ -9,8 +9,9 @@ use payjoin::receive::{
     PayjoinProposal as PdkPayjoinProposal,
     UncheckedProposal as PdkUncheckedProposal,
     Headers,
+    RequestError,
 };
-use crate::{ PdkError, transaction::Transaction };
+use crate::{ PdkError, transaction::{ Transaction, PartiallySignedTransaction } };
 use anyhow::anyhow;
 
 pub struct UncheckedProposal {
@@ -64,6 +65,9 @@ impl UncheckedProposal {
     }
 }
 
+///Typestate to validate that the Original PSBT has no receiver-owned inputs.
+
+///Call check_no_receiver_owned_inputs() to proceed.
 pub struct MaybeInputsOwned {
     pub internal: PdkMaybeInputsOwned,
 }
@@ -72,6 +76,9 @@ pub trait IsScriptOwned {
     fn is_owned(&self, script: &Script) -> Result<bool, PdkError>;
 }
 impl MaybeInputsOwned {
+    ///Check that the Original PSBT has no receiver-owned inputs. Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
+
+    ///An attacker could try to spend receiver’s own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         self,
         is_owned: Box<dyn IsScriptOwned>
@@ -82,16 +89,43 @@ impl MaybeInputsOwned {
         }
     }
 }
+///Typestate to validate that the Original PSBT has no inputs that have been seen before.
+///Call check_no_inputs_seen to proceed.
 pub struct MaybeMixedInputScripts {
     pub internal: PdkMaybeMixedInputScripts,
 }
+impl MaybeMixedInputScripts {
+    ///Verify the original transaction did not have mixed input types Call this after checking downstream.
+    ///Note: mixed spends do not necessarily indicate distinct wallet fingerprints. This check is intended to prevent some types of wallet fingerprinting.
+    pub fn check_no_mixed_input_scripts(
+        self
+    ) -> Result<MaybeInputsSeen, payjoin::receive::RequestError> {
+        match self.internal.check_no_mixed_input_scripts() {
+            Ok(e) => Ok(MaybeInputsSeen { internal: e }),
+            Err(e) => Err(e),
+        }
+    }
+}
 ///Typestate to validate that the Original PSBT has no inputs that have been seen before.
+
 ///Call check_no_inputs_seen to proceed.
 pub struct MaybeInputsSeen {
     pub internal: PdkMaybeInputsSeen,
 }
-
-impl MaybeInputsSeen {}
+pub trait IsOutoutKnown {
+    fn is_known(&self, output: &OutPoint) -> Result<bool, PdkError>;
+}
+impl MaybeInputsSeen {
+    pub fn check_no_inputs_seen_before(
+        self,
+        is_known: Box<dyn IsOutoutKnown>
+    ) -> Result<OutputsUnknown, PdkError> {
+        match self.internal.check_no_inputs_seen_before(|output| is_known.is_known(output)) {
+            Ok(e) => Ok(OutputsUnknown { internal: e }),
+            Err(e) => Err(e),
+        }
+    }
+}
 
 ///The receiver has not yet identified which outputs belong to the receiver.
 ///Only accept PSBTs that send us money. Identify those outputs with identify_receiver_outputs() to proceed
@@ -99,12 +133,65 @@ pub struct OutputsUnknown {
     pub internal: PdkOutputsUnknown,
 }
 
-impl OutputsUnknown {}
+impl OutputsUnknown {
+    ///Find which outputs belong to the receiver
+    pub fn identify_receiver_outputs(
+        self,
+        is_receiver_output: Box<dyn IsScriptOwned>
+    ) -> Result<PayjoinProposal, PdkError> {
+        match
+            self.internal.identify_receiver_outputs(|output_script|
+                is_receiver_output.is_owned(output_script)
+            )
+        {
+            Ok(e) => Ok(PayjoinProposal { internal: e }),
+            Err(e) => Err(e),
+        }
+    }
+}
 
 ///A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
 pub struct PayjoinProposal {
     pub internal: PdkPayjoinProposal,
 }
 impl PayjoinProposal {
-    // pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &OutPoint> {}
+    pub fn is_output_substitution_disabled(&self) -> bool {
+        self.internal.is_output_substitution_disabled()
+    }
+
+    //todo create outpoint and txout
+    pub fn contribute_witness_input(&mut self, txout: TxOut, outpoint: OutPoint) {
+        self.internal.contribute_witness_input(txout, outpoint)
+    }
+    pub fn contribute_non_witness_input(&mut self, tx: bitcoin::Transaction, outpoint: OutPoint) {
+        self.internal.contribute_non_witness_input(tx, outpoint)
+    }
+    pub fn substitute_output_address(&mut self, substitute_address: Address) {
+        self.internal.substitute_output_address(substitute_address)
+    }
+
+    ///Apply additional fee contribution now that the receiver has contributed input this is kind of a “build_proposal” step before we sign and finalize and extract
+
+    ///WARNING: DO NOT ALTER INPUTS OR OUTPUTS AFTER THIS STEP
+    pub fn apply_fee(
+        &mut self,
+        min_feerate_sat_per_vb: Option<u64>
+    ) -> Result<PartiallySignedTransaction, RequestError> {
+        match self.internal.apply_fee(min_feerate_sat_per_vb) {
+            Ok(e) => Ok(PartiallySignedTransaction { internal: e.to_owned() }),
+            Err(e) => Err(e),
+        }
+    }
+    ///Return a Payjoin Proposal PSBT that the sender will find acceptable.
+    ///This attempts to calculate any network fee owed by the receiver, subtract it from their output, and return a PSBT that can produce a consensus-valid transaction that the sender will accept.
+    ///wallet_process_psbt should sign and finalize receiver inputs
+    pub fn prepare_psbt(
+        self,
+        processed_psbt: PartiallySignedTransaction
+    ) -> Result<PartiallySignedTransaction, RequestError> {
+        match self.internal.prepare_psbt(processed_psbt.internal.to_owned()) {
+            Ok(e) => Ok(PartiallySignedTransaction { internal: e.to_owned() }),
+            Err(e) => Err(e),
+        }
+    }
 }

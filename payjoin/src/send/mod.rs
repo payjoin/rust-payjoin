@@ -172,6 +172,47 @@ pub struct Configuration {
 }
 
 impl Configuration {
+    // Calculate the recommended fee contribution for an Original PSBT.
+    //
+    // BIP 78 recommends contributing `originalPSBTFeeRate * vsize(sender_input_type)`.
+    // The minfeerate parameter is set if the contribution is available in change.
+    pub fn recommended(
+        psbt: &Psbt,
+        payout_scripts: impl IntoIterator<Item = ScriptBuf>,
+        min_fee_rate: FeeRate,
+    ) -> Self {
+        let mut payout_scripts = payout_scripts.into_iter();
+        if let Some((additional_fee_index, fee_available)) = psbt
+            .unsigned_tx
+            .output
+            .clone()
+            .into_iter()
+            .enumerate()
+            .find(|(_, txo)| payout_scripts.all(|script| script != txo.script_pubkey))
+            .map(|(i, txo)| (i, bitcoin::Amount::from_sat(txo.value)))
+        {
+            // Assume P2WPKH for testing
+            const P2WPKH_INPUT_WEIGHT: Weight = Weight::from_vb_unchecked(68);
+            let recommended_additional_fee = min_fee_rate * P2WPKH_INPUT_WEIGHT;
+            log::debug!("Recommended additional fee: {}", recommended_additional_fee);
+            if fee_available < recommended_additional_fee {
+                log::warn!("Insufficient funds to maintain specified minimum feerate.");
+                return Configuration::with_fee_contribution(
+                    fee_available,
+                    Some(additional_fee_index),
+                )
+                .clamp_fee_contribution(true);
+            }
+            return Configuration::with_fee_contribution(
+                recommended_additional_fee,
+                Some(additional_fee_index),
+            )
+            .clamp_fee_contribution(false)
+            .min_fee_rate(min_fee_rate);
+        }
+        Configuration::non_incentivizing()
+    }
+
     /// Offer the receiver contribution to pay for his input.
     ///
     /// These parameters will allow the receiver to take `max_fee_contribution` from given change
@@ -667,9 +708,11 @@ fn serialize_url(
             .append_pair("maxadditionalfeecontribution", &amount.to_sat().to_string());
     }
     if min_fee_rate > FeeRate::ZERO {
+        // TODO serialize in rust-bitcoin <https://github.com/rust-bitcoin/rust-bitcoin/pull/1787/files#diff-c2ea40075e93ccd068673873166cfa3312ec7439d6bc5a4cbc03e972c7e045c4>
         url.query_pairs_mut()
             .append_pair("minfeerate", &min_fee_rate.to_sat_per_vb_floor().to_string());
     }
+    log::debug!("Serialized URL: {}", url);
     Ok(url)
 }
 

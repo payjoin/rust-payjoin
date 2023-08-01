@@ -58,7 +58,11 @@ impl App {
         let mut outputs = HashMap::with_capacity(1);
         outputs.insert(link.address.to_string(), amount);
 
-        let fee_per_kvb = Amount::from_sat(2000);
+        let fee_rate = bitcoin::FeeRate::from_sat_per_vb(2).ok_or(anyhow!("Invalid fee rate"))?;
+        let fee_sat_per_kvb =
+            fee_rate.to_sat_per_kwu().checked_mul(4).ok_or(anyhow!("Invalid fee rate"))?;
+        let fee_per_kvb = Amount::from_sat(fee_sat_per_kvb);
+        log::debug!("Fee rate sat/kvb: {}", fee_per_kvb.display_in(bitcoin::Denomination::Satoshi));
         let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
             lock_unspent: Some(true),
             fee_rate: Some(fee_per_kvb),
@@ -83,38 +87,8 @@ impl App {
         let psbt = Psbt::from_str(&psbt).with_context(|| "Failed to load PSBT from base64")?;
         log::debug!("Original psbt: {:#?}", psbt);
 
-        log::debug!("uri script_pubkey: {}", link.address.script_pubkey());
-        let additional_fee_index = psbt
-            .unsigned_tx
-            .output
-            .clone()
-            .into_iter()
-            .enumerate()
-            .find(|(_, txo)| txo.script_pubkey != link.address.script_pubkey())
-            .map(|(i, _)| i);
-        log::debug!("Additional fee index: {:?}", additional_fee_index);
-        let pj_params = match additional_fee_index {
-            Some(index) => {
-                let amount_available = psbt
-                    .clone()
-                    .unsigned_tx
-                    .output
-                    .get(index)
-                    .map(|o| Amount::from_sat(o.value))
-                    .unwrap_or_default();
-                const P2TR_INPUT_WEIGHT: u64 = 58; // bitmask is taproot only TODO payjoin-cli is not!
-                let recommended_fee = fee_per_kvb * P2TR_INPUT_WEIGHT;
-                let max_additional_fee = std::cmp::min(
-                    recommended_fee,
-                    amount_available, // offer amount available if recommendation is not
-                );
-
-                // TODO enforce min_fee_rate_sat_per_vb() if recommendation is available
-                Configuration::with_fee_contribution(max_additional_fee, Some(index))
-                    .clamp_fee_contribution(true)
-            }
-            None => Configuration::non_incentivizing(),
-        };
+        let payout_scripts = std::iter::once(link.address.script_pubkey());
+        let pj_params = Configuration::recommended(&psbt, payout_scripts, fee_rate);
 
         let (req, ctx) = link
             .create_pj_request(psbt, pj_params)

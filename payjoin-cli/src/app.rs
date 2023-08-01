@@ -58,7 +58,9 @@ impl App {
         let mut outputs = HashMap::with_capacity(1);
         outputs.insert(link.address.to_string(), amount);
 
-        let fee_rate = bitcoin::FeeRate::from_sat_per_vb(2).ok_or(anyhow!("Invalid fee rate"))?;
+        // TODO: make payjoin-cli send feerate configurable
+        // 2.1 sat/vB == 525 sat/kwu for testing purposes.
+        let fee_rate = bitcoin::FeeRate::from_sat_per_kwu(525);
         let fee_sat_per_kvb =
             fee_rate.to_sat_per_kwu().checked_mul(4).ok_or(anyhow!("Invalid fee rate"))?;
         let fee_per_kvb = Amount::from_sat(fee_sat_per_kvb);

@@ -709,8 +709,8 @@ fn serialize_url(
     }
     if min_fee_rate > FeeRate::ZERO {
         // TODO serialize in rust-bitcoin <https://github.com/rust-bitcoin/rust-bitcoin/pull/1787/files#diff-c2ea40075e93ccd068673873166cfa3312ec7439d6bc5a4cbc03e972c7e045c4>
-        url.query_pairs_mut()
-            .append_pair("minfeerate", &min_fee_rate.to_sat_per_vb_floor().to_string());
+        let float_fee_rate = min_fee_rate.to_sat_per_kwu() as f32 / 250.0_f32;
+        url.query_pairs_mut().append_pair("minfeerate", &float_fee_rate.to_string());
     }
     log::debug!("Serialized URL: {}", url);
     Ok(url)

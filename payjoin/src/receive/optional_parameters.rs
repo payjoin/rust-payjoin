@@ -69,9 +69,13 @@ impl Params {
                             }
                         },
                 ("minfeerate", feerate) =>
-                    params.min_feerate = match feerate.parse::<u64>() {
-                        Ok(rate) => FeeRate::from_sat_per_vb(rate)
-                            .ok_or_else(|| Error::FeeRate(rate.to_string()))?,
+                    params.min_feerate = match feerate.parse::<f32>() {
+                        Ok(fee_rate_sat_per_vb) => {
+                            // TODO Parse with serde when rust-bitcoin supports it
+                            let fee_rate_sat_per_kwu = fee_rate_sat_per_vb * 250.0_f32;
+                            // since it's a minnimum, we want to round up
+                            FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64)
+                        }
                         Err(e) => return Err(Error::FeeRate(e.to_string())),
                     },
                 ("disableoutputsubstitution", v) =>

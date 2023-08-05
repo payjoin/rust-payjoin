@@ -96,7 +96,7 @@ async fn handle_http_req(
     }
 }
 
-struct Buffer {
+pub(crate) struct Buffer {
     buffer: Arc<Mutex<String>>,
     sender: mpsc::Sender<()>,
     receiver: Arc<Mutex<mpsc::Receiver<()>>>,
@@ -142,5 +142,20 @@ impl Buffer {
         }
         *buffer = String::new();
         contents
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_buffer() {
+        let buffer = Buffer::new();
+        let buffer_clone = buffer.clone();
+        tokio::spawn(async move {
+            buffer_clone.push("test".to_string()).await;
+        });
+        buffer.pop().await;
     }
 }

@@ -26,21 +26,23 @@ async fn main() {
             let msg = websocket.read_message().unwrap();
             println!("Received: {}, awaiting Original PSBT", msg);
 
-            let buffered_req = ws_req_buffer.clone().pop().await;
-            // relay Original PSBT request to receiver via websocket
-            let post = Message::Text(buffered_req.to_string());
-            println!("Received Original PSBT, relaying to receiver via websocket");
-            websocket.write_message(post).unwrap();
-
-            println!("Awaiting Payjoin PSBT from receiver via websocket"); // does this need to be async? break because block?
-            // TODO await ws client transform Original PSBT into Payjoin PSBT
-            let msg = websocket.read_message().unwrap();
-            let serialized_res =  msg.into_text().unwrap();
-            println!("Received Payjoin PSBT res {:#?}, relaying to sender via http", serialized_res);
-
-            ws_res_buffer.push(serialized_res).await;
-            println!("sent to http server via push");
-            break;
+            if msg.to_text().unwrap() == "receiver" {
+                let buffered_req = ws_req_buffer.clone().pop().await;
+                // relay Original PSBT request to receiver via websocket
+                let post = Message::Text(buffered_req.to_string());
+                println!("Received Original PSBT, relaying to receiver via websocket");
+                websocket.write_message(post).unwrap();
+    
+                println!("Awaiting Payjoin PSBT from receiver via websocket"); // does this need to be async? break because block?
+                // TODO await ws client transform Original PSBT into Payjoin PSBT
+                let msg = websocket.read_message().unwrap();
+                let serialized_res =  msg.into_text().unwrap();
+                println!("Received Payjoin PSBT res {:#?}, relaying to sender via http", serialized_res);
+    
+                ws_res_buffer.push(serialized_res).await;
+                println!("sent to http server via push");
+                break;
+            }
         }
     });
    

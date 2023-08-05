@@ -506,7 +506,7 @@ impl App {
             println!("* {}", header);
         }
  
-        socket.write_message(Message::Text("Hello WebSocket".into())).unwrap();
+        socket.write_message(Message::Text("receiver".into())).unwrap();
         println!("Waiting for messages...");
         let msg = socket.read_message().expect("Error reading message");
         println!("Received Request, deserializing: {}", msg);

@@ -1,9 +1,10 @@
 use std::net::TcpListener;
+use std::sync::Arc;
 use tungstenite::accept;
 use hyper::Body;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::StatusCode;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tungstenite::Message;
 
 use payjoin::relay;
@@ -12,39 +13,43 @@ use payjoin::relay;
 async fn main() {
     let server = TcpListener::bind("127.0.0.1:3012").unwrap();
     println!("REElay listening on ws://127.0.0.1:3012 😡");
-    let (tx, mut rx) = mpsc::channel::<(relay::Request, oneshot::Sender<relay::Response>)>(1);
-
+    let req_buffer = Buffer::new();
+    let res_buffer = Buffer::new();
+    
+    let ws_req_buffer = req_buffer.clone();
+    let ws_res_buffer = res_buffer.clone();
     tokio::spawn(async move {
+        // run websocket server. On connection, await Original PSBT, relay to http server
         for stream in server.incoming() {
             println!("New ws connection!");
             let mut websocket = accept(stream.unwrap()).unwrap();
             let msg = websocket.read_message().unwrap();
             println!("Received: {}, awaiting Original PSBT", msg);
-            let (relay_req, res_tx) = rx.recv().await.unwrap();
+
+            let buffered_req = ws_req_buffer.clone().pop().await;
             // relay Original PSBT request to receiver via websocket
-            let serialized_req = serde_json::to_string(&relay_req).unwrap();
-            let post = Message::Text(serialized_req.to_string());
+            let post = Message::Text(buffered_req.to_string());
             println!("Received Original PSBT, relaying to receiver via websocket");
             websocket.write_message(post).unwrap();
+
             println!("Awaiting Payjoin PSBT from receiver via websocket"); // does this need to be async? break because block?
             // TODO await ws client transform Original PSBT into Payjoin PSBT
             let msg = websocket.read_message().unwrap();
             let serialized_res =  msg.into_text().unwrap();
-            let res = serde_json::from_str::<relay::Response>(&serialized_res).unwrap();
             println!("Received Payjoin PSBT res {:#?}, relaying to sender via http", serialized_res);
-            // delay 200ms
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-            let sent = res_tx.send(res);
-            println!("sent to http server via res_tx: {:?}", sent);
+
+            ws_res_buffer.push(serialized_res).await;
+            println!("sent to http server via push");
             break;
         }
     });
    
     // run HTTP server. On Post PJ, relay to websocket
     let make_svc = make_service_fn(move |_| {
-        let tx = tx.clone();
+        let req_buffer = req_buffer.clone();
+        let res_buffer = res_buffer.clone();
         async move {
-            let handler = move |req| handle_http_req(tx.clone(), req);
+            let handler = move |req| handle_http_req(req_buffer.clone(), res_buffer.clone(), req);
             Ok::<_, hyper::Error>(service_fn(handler))
         }
     });
@@ -55,7 +60,8 @@ async fn main() {
 }
 
 async fn handle_http_req(
-    tx: mpsc::Sender<(relay::Request, oneshot::Sender<relay::Response<'_>>)>,
+    req_buffer: Buffer,
+    res_buffer: Buffer,
     req: hyper::Request<Body>,
 ) -> Result<hyper::Response<Body>, hyper::Error> {
 
@@ -67,10 +73,12 @@ async fn handle_http_req(
             let body = hyper::body::to_bytes(req.into_body()).await?.to_vec();
             println!("POST / <Original PSBT> body: {:?}", body);
             let relay_req = relay::Request { headers: header, query, body };
-            let (res_tx, res_rx) = oneshot::channel();
-            tx.send((relay_req, res_tx)).await.unwrap();
+            let serialized_req = serde_json::to_string(&relay_req).unwrap();
+            req_buffer.push(serialized_req).await;
             println!("Relayed req to ws channel from HTTP, awaiting Response");
-            let res = res_rx.await.unwrap(); // TODO THIS NEVER GETS CALLED???
+
+            let serialized_res = res_buffer.pop().await;
+            let res = serde_json::from_str::<relay::Response>(&serialized_res).unwrap();
             println!("POST / response <Payjoin PSBT> received {:?}", res);
             let res = hyper::Response::builder()
                 .status(StatusCode::from_u16(res.status_code).unwrap())
@@ -83,5 +91,54 @@ async fn handle_http_req(
             *not_found.status_mut() = StatusCode::NOT_FOUND;
             Ok(not_found)
         }
+    }
+}
+
+struct Buffer {
+    buffer: Arc<Mutex<String>>,
+    sender: mpsc::Sender<()>,
+    receiver: Arc<Mutex<mpsc::Receiver<()>>>,
+}
+
+/// Clone here makes a copy of the Arc pointer, not the underlying data
+/// All clones point to the same internal data
+impl Clone for Buffer {
+    fn clone(&self) -> Self {
+        Buffer {
+            buffer: Arc::clone(&self.buffer),
+            sender: self.sender.clone(),
+            receiver: Arc::clone(&self.receiver),
+        }
+    }
+}
+
+impl Buffer {
+    fn new() -> Self {
+        let (sender, receiver) = mpsc::channel(1);
+        Buffer {
+            buffer: Arc::new(Mutex::new(String::new())),
+            sender,
+            receiver: Arc::new(Mutex::new(receiver)),
+        }
+    }
+
+    async fn push(&self, request: String) {
+        let mut buffer: tokio::sync::MutexGuard<'_, String> = self.buffer.lock().await;
+        *buffer = request;
+        let _ = self.sender.send(()).await; // signal that a new request has been added
+    }
+
+    async fn pop(&self) -> String {
+        let mut buffer = self.buffer.lock().await;
+        let mut contents = buffer.clone();
+        if contents.is_empty() {
+            drop(buffer);
+            // wait for a signal that a new request has been added
+            self.receiver.lock().await.recv().await;
+            buffer = self.buffer.lock().await;
+            contents = buffer.clone();
+        }
+        *buffer = String::new();
+        contents
     }
 }

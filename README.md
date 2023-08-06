@@ -70,6 +70,17 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [ ] Fuzzing
 - [ ] Coverage measurement
 
+## Minimum Supported Rust Version (MSRV)
+
+The `payjoin` library should always compile with any combination of features on Rust **1.57.0**.
+
+To build and test with the MSRV you will need to pin the below dependency versions:
+
+```shell
+cargo update -p log --precise 0.4.18
+cargo update -p tempfile --precise 3.6.0
+```
+
 ## License
 
 MIT

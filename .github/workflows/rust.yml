@@ -6,10 +6,16 @@ jobs:
 
   test-lib:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: payjoin
     strategy:
       fail-fast: false
       matrix:
-        rust: [stable, nightly]
+        rust:
+          - 1.57.0 # MSRV
+          - stable
+          - nightly
 
     steps:
       - uses: actions/checkout@v2
@@ -18,14 +24,20 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
           override: true
+      - name: Fixes for MSRV
+        if: matrix.rust == '1.57.0'
+        run: |
+          cargo update
+          cargo update -p log --precise 0.4.18
+          cargo update -p tempfile --precise 3.6.0
       - name: test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --all-features --lib --manifest-path payjoin/Cargo.toml
+        run: cargo test --verbose --all-features --lib
 
   build-payjoin-cli:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: payjoin-cli
     strategy:
       fail-fast: false
       matrix:
@@ -38,26 +50,26 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
           override: true
-      - run: cd payjoin-cli
-      - name: build payjoin example
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --manifest-path payjoin-cli/Cargo.toml
+      - name: build payjoin cli example
+        run: |
+          cargo build
 
   fmt:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
       matrix:
-        rust: [nightly]
+        package: [payjoin, payjoin-cli]
 
     steps:
       - uses: actions/checkout@v2
       - uses: Swatinem/rust-cache@v1.2.0
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: ${{ matrix.rust }}
+          toolchain: nightly
           override: true
       - run: rustup component add rustfmt --toolchain nightly-x86_64-unknown-linux-gnu
-      - run: cargo fmt --all -- --check
+      - name: fmt check
+        run: |
+          cd ${{ matrix.package }}
+          cargo fmt --all -- --check

@@ -1,6 +1,6 @@
 [package]
 name = "payjoin"
-version = "0.8.0"
+version = "0.8.2"
 authors = ["Dan Gould <dan@chaincase.app>"]
 description = "Payjoin Library for the BIP78 Pay to Endpoint protocol."
 homepage = "https://github.com/chaincase-app/payjoin"

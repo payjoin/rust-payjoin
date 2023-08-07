@@ -329,6 +329,13 @@ mod tests {
                 headers,
                 body: req.body,
             }).expect("Serialized Request");
+            ws_stream.send(Message::Text(serialized_req.clone())).await.unwrap();
+            
+            ws_stream.close(None).await.unwrap();
+
+            // delay & restart
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            let (mut ws_stream, _) = tokio_tungstenite::connect_async(ws_url.clone()).await.expect("Can't connect");
             ws_stream.send(Message::Text(serialized_req)).await.unwrap();
             let msg = ws_stream.next().await.unwrap().unwrap();
             let raw_res_body = msg.to_text().unwrap();

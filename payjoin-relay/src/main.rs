@@ -30,7 +30,7 @@ async fn main() {
                 let msg = read.next().await.unwrap().unwrap();
                 println!("Received: {}, awaiting Original PSBT", msg);
                 if msg.to_text().unwrap() == "receiver" {
-                    let buffered_req = ws_req_buffer.clone().pop().await;
+                    let buffered_req = ws_req_buffer.clone().peek().await;
                     // relay Original PSBT request to receiver via websocket
                     let post = Message::Text(buffered_req.to_string());
                     println!("Received Original PSBT, relaying to receiver via websocket");
@@ -82,7 +82,7 @@ async fn handle_http_req(
             req_buffer.push(serialized_req).await;
             println!("Relayed req to ws channel from HTTP, awaiting Response");
 
-            let serialized_res = res_buffer.pop().await;
+            let serialized_res = res_buffer.peek().await;
             let res = serde_json::from_str::<relay::Response>(&serialized_res).unwrap();
             println!("POST / response <Payjoin PSBT> received {:?}", res);
             let res = hyper::Response::builder()
@@ -133,7 +133,7 @@ impl Buffer {
         let _ = self.sender.send(()).await; // signal that a new request has been added
     }
 
-    async fn pop(&self) -> String {
+    async fn peek(&self) -> String {
         let mut buffer = self.buffer.lock().await;
         let mut contents = buffer.clone();
         if contents.is_empty() {
@@ -143,7 +143,6 @@ impl Buffer {
             buffer = self.buffer.lock().await;
             contents = buffer.clone();
         }
-        *buffer = String::new();
         contents
     }
 }
@@ -174,7 +173,7 @@ mod tests {
         tokio::spawn(async move {
             buffer_clone.push("test".to_string()).await;
         });
-        buffer.pop().await;
+        buffer.peek().await;
     }
 
     #[tokio::test]
@@ -220,26 +219,30 @@ mod tests {
                     println!("Received: {}, awaiting Original PSBT", msg);
 
                     if msg.to_text().unwrap() == "receiver" {
-                        let buffered_req = ws_req_buffer.clone().pop().await;
+                        let buffered_req = ws_req_buffer.clone().peek().await;
                         // relay Original PSBT request to receiver via websocket
                         let post = Message::Text(buffered_req.to_string());
                         println!("Received Original PSBT, relaying to receiver via websocket");
                         write.send(post).await.unwrap();
             
                         println!("Awaiting Payjoin PSBT from receiver via websocket");
-                        let msg = read.next().await.unwrap().unwrap();
-                        let serialized_res =  msg.into_text().unwrap();
-                        println!("Received Payjoin PSBT res {:#?}, relaying to sender via http", serialized_res);
-            
-                        ws_res_buffer.push(serialized_res).await;
-                        println!("sent to http server via push");
+                        match read.next().await {
+                            Some(Ok(Message::Text(res))) => {
+                                println!("Received Payjoin PSBT res {:#?}, relaying to sender via http", res);
+                                
+                                ws_res_buffer.push(res).await;
+                                println!("sent to http server via push");
+                            },
+                            // close frame or other unexpected response
+                            _ => return,
+                        }
                     } else {
                         println!("Received sender request");
                         let serialized_req = msg.into_text().unwrap();
                         ws_req_buffer.push(serialized_req).await;
 
                         println!("Awaiting response");
-                        let serialized_res = ws_res_buffer.pop().await;
+                        let serialized_res = ws_res_buffer.peek().await;
                         write.send(Message::Text(serialized_res)).await.unwrap();
                         println!("Response returned to sender via websocket");
                     }
@@ -262,15 +265,21 @@ mod tests {
             println!("receiver thread started");
             let ws_url = format!("ws://{}/socket", &relay_addr);
             println!("Enrolling receiver with relay @ {}", &ws_url);
-            let (ws_stream, _) = tokio_tungstenite::connect_async(ws_url.clone()).await.expect("Can't connect");
-            let (mut write, mut read) = ws_stream.split();
+            let (mut ws_stream, _) = tokio_tungstenite::connect_async(ws_url.clone()).await.expect("Can't connect");
             println!("receiver connected");
-            write.send(Message::Text("receiver".to_string())).await.unwrap();
-            let msg = read.next().await.expect("Error reading message").unwrap();
+            ws_stream.send(Message::Text("receiver".to_string())).await.unwrap();
+            println!("receiver sent enrollment");
+            ws_stream.close(None).await.unwrap();
+            println!("receiver closed connection");
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            let (mut ws_stream, _) = tokio_tungstenite::connect_async(ws_url.clone()).await.expect("Can't connect");
+            ws_stream.send(Message::Text("receiver".to_string())).await.unwrap();
+            println!("receiver reconnected");
+            let msg = ws_stream.next().await.expect("Error reading message").unwrap();
             let req: relay::Request = serde_json::from_str(&msg.to_text().unwrap()).unwrap();
             let body = std::io::Cursor::new(req.body);
             let raw_res_body = handle_payjoin_req(receiver, body, &req.query, req.headers).unwrap();
-            write.send(Message::text(raw_res_body)).await.unwrap();
+            ws_stream.send(Message::text(raw_res_body)).await.unwrap();
         });
 
         // 2. set up sender, receiver bitcoind wallets
@@ -279,8 +288,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             println!("sender thread started");
             let ws_url = format!("ws://{}/socket", &relay_addr);
-            let (ws_stream, _) = tokio_tungstenite::connect_async(ws_url.clone()).await.expect("Can't connect");
-            let (mut write, mut read) = ws_stream.split();
+            let (mut ws_stream, _) = tokio_tungstenite::connect_async(ws_url.clone()).await.expect("Can't connect");
             // TODO check that mailbox exists on relay
             let mut outputs = HashMap::with_capacity(1);
             outputs.insert(request_address.to_string(), request_amount);
@@ -321,8 +329,8 @@ mod tests {
                 headers,
                 body: req.body,
             }).expect("Serialized Request");
-            write.send(Message::Text(serialized_req)).await.unwrap();
-            let msg = read.next().await.unwrap().unwrap();
+            ws_stream.send(Message::Text(serialized_req)).await.unwrap();
+            let msg = ws_stream.next().await.unwrap().unwrap();
             let raw_res_body = msg.to_text().unwrap();
             let psbt = ctx.process_response(&mut raw_res_body.as_bytes()).expect("Failed to process response");
             let psbt = sender

@@ -1,4 +1,3 @@
-
 use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
@@ -7,7 +6,10 @@ use serde::{Deserialize, Serialize};
 pub struct Request {
     pub body: Vec<u8>,
     pub query: String,
-    #[serde(deserialize_with = "hyper_serde::deserialize", serialize_with = "hyper_serde::serialize")]
+    #[serde(
+        deserialize_with = "hyper_serde::deserialize",
+        serialize_with = "hyper_serde::serialize"
+    )]
     pub headers: hyper::HeaderMap,
 }
 
@@ -29,5 +31,12 @@ impl crate::receive::Headers for VecHeaders<'_> {
     fn get_header(&self, key: &str) -> Option<&str> {
         log::debug!("get_header({})", key);
         self.0.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.as_ref())
+    }
+}
+
+impl crate::receive::Headers for hyper::HeaderMap {
+    fn get_header(&self, key: &str) -> Option<&str> {
+        log::debug!("get_header({})", key);
+        self.get(key).and_then(|v| v.to_str().ok())
     }
 }

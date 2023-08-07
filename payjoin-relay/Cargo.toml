@@ -7,10 +7,19 @@ edition = "2021"
 
 [dependencies]
 futures = "0.3.28"
+futures-util = { version = "0.3.28", default-features = false, features = ["sink", "std"] }
 hyper = { version = "0.14.26", features = ["full"] }
 hyper_serde = "0.13.0"
 payjoin = { path = "../payjoin", features = ["relay"] }
 serde = { version = "1.0.160", features = ["derive"] }
 serde_json = "1.0.96"
 tokio = { version = "1.28.2", features = ["full"] }
+tokio-tungstenite = "0.19.0"
 tungstenite = "0.19.0"
+
+[dev-dependencies]
+bitcoind = { version = "0.31.1", features = ["0_21_2"] }
+env_logger  = "0.9.0"
+log = { version = "0.4", features = ["std"] }
+payjoin = { path = "../payjoin", features = ["send", "receive", "relay"]}
+url = { version= "2.3.1" }

@@ -1,5 +1,9 @@
 # Payjoin Changelog
 
+## 0.8.2
+
+- Support MSRV 1.57.0
+
 ## 0.8.0
 
 - Test receiver compatibility with BlueWallet

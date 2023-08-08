@@ -149,8 +149,10 @@ pub use error::{CreateRequestError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 use url::Url;
 
+use self::error::ConfigurationError;
 use crate::input_type::InputType;
 use crate::psbt::PsbtExt;
+use crate::send::error::InternalConfigurationError;
 use crate::weight::{varint_size, ComputeWeight};
 
 // See usize casts
@@ -172,6 +174,64 @@ pub struct Configuration {
 }
 
 impl Configuration {
+    // Calculate the recommended fee contribution for an Original PSBT.
+    //
+    // BIP 78 recommends contributing `originalPSBTFeeRate * vsize(sender_input_type)`.
+    // The minfeerate parameter is set if the contribution is available in change.
+    //
+    // This method fails if no recommendation can be made or if the PSBT is malformed.
+    pub fn recommended(
+        psbt: &Psbt,
+        payout_scripts: impl IntoIterator<Item = ScriptBuf>,
+        min_fee_rate: FeeRate,
+    ) -> Result<Self, ConfigurationError> {
+        let mut payout_scripts = payout_scripts.into_iter();
+        if let Some((additional_fee_index, fee_available)) = psbt
+            .unsigned_tx
+            .output
+            .clone()
+            .into_iter()
+            .enumerate()
+            .find(|(_, txo)| payout_scripts.all(|script| script != txo.script_pubkey))
+            .map(|(i, txo)| (i, bitcoin::Amount::from_sat(txo.value)))
+        {
+            let input_types = psbt
+                .input_pairs()
+                .map(|input| {
+                    let txo =
+                        input.previous_txout().map_err(InternalConfigurationError::PrevTxOut)?;
+                    Ok(InputType::from_spent_input(txo, input.psbtin)
+                        .map_err(InternalConfigurationError::InputType)?)
+                })
+                .collect::<Result<Vec<InputType>, ConfigurationError>>()?;
+
+            let first_type = input_types.first().ok_or(InternalConfigurationError::NoInputs)?;
+            // use cheapest default if mixed input types
+            let mut input_vsize = InputType::Taproot.expected_input_weight();
+            // Check if all inputs are the same type
+            if input_types.iter().all(|input_type| input_type == first_type) {
+                input_vsize = first_type.expected_input_weight();
+            }
+
+            let recommended_additional_fee = min_fee_rate * input_vsize;
+            if fee_available < recommended_additional_fee {
+                log::warn!("Insufficient funds to maintain specified minimum feerate.");
+                return Ok(Configuration::with_fee_contribution(
+                    fee_available,
+                    Some(additional_fee_index),
+                )
+                .clamp_fee_contribution(true));
+            }
+            return Ok(Configuration::with_fee_contribution(
+                recommended_additional_fee,
+                Some(additional_fee_index),
+            )
+            .clamp_fee_contribution(false)
+            .min_fee_rate(min_fee_rate));
+        }
+        Ok(Configuration::non_incentivizing())
+    }
+
     /// Offer the receiver contribution to pay for his input.
     ///
     /// These parameters will allow the receiver to take `max_fee_contribution` from given change
@@ -226,8 +286,8 @@ impl Configuration {
     }
 
     /// Sets minimum fee rate required by the sender.
-    pub fn min_fee_rate_sat_per_vb(mut self, fee_rate: u64) -> Self {
-        self.min_fee_rate = FeeRate::from_sat_per_vb_unchecked(fee_rate);
+    pub fn min_fee_rate(mut self, fee_rate: FeeRate) -> Self {
+        self.min_fee_rate = fee_rate;
         self
     }
 }
@@ -667,8 +727,9 @@ fn serialize_url(
             .append_pair("maxadditionalfeecontribution", &amount.to_sat().to_string());
     }
     if min_fee_rate > FeeRate::ZERO {
-        url.query_pairs_mut()
-            .append_pair("minfeerate", &min_fee_rate.to_sat_per_vb_floor().to_string());
+        // TODO serialize in rust-bitcoin <https://github.com/rust-bitcoin/rust-bitcoin/pull/1787/files#diff-c2ea40075e93ccd068673873166cfa3312ec7439d6bc5a4cbc03e972c7e045c4>
+        let float_fee_rate = min_fee_rate.to_sat_per_kwu() as f32 / 250.0_f32;
+        url.query_pairs_mut().append_pair("minfeerate", &float_fee_rate.to_string());
     }
     Ok(url)
 }

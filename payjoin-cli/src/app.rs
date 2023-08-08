@@ -42,6 +42,8 @@ impl App {
     }
 
     pub fn send_payjoin(&self, bip21: &str) -> Result<()> {
+        use payjoin::send::Configuration;
+
         let link = payjoin::Uri::try_from(bip21)
             .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
 
@@ -50,16 +52,22 @@ impl App {
             .check_pj_supported()
             .map_err(|e| anyhow!("The provided URI doesn't support payjoin (BIP78): {}", e))?;
 
-        let amount = link
-            .amount
-            .ok_or_else(|| anyhow!("please specify the amount in the Uri"))
-            .map(|amt| Amount::from_sat(amt.to_sat()))?;
+        let amount = link.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
+
+        // wallet_create_funded_psbt requires a HashMap<address: String, Amount>
         let mut outputs = HashMap::with_capacity(1);
         outputs.insert(link.address.to_string(), amount);
 
+        // TODO: make payjoin-cli send feerate configurable
+        // 2.1 sat/vB == 525 sat/kwu for testing purposes.
+        let fee_rate = bitcoin::FeeRate::from_sat_per_kwu(525);
+        let fee_sat_per_kvb =
+            fee_rate.to_sat_per_kwu().checked_mul(4).ok_or(anyhow!("Invalid fee rate"))?;
+        let fee_per_kvb = Amount::from_sat(fee_sat_per_kvb);
+        log::debug!("Fee rate sat/kvb: {}", fee_per_kvb.display_in(bitcoin::Denomination::Satoshi));
         let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
             lock_unspent: Some(true),
-            fee_rate: Some(Amount::from_sat(2000)),
+            fee_rate: Some(fee_per_kvb),
             ..Default::default()
         };
         let psbt = self
@@ -80,10 +88,12 @@ impl App {
             .psbt;
         let psbt = Psbt::from_str(&psbt).with_context(|| "Failed to load PSBT from base64")?;
         log::debug!("Original psbt: {:#?}", psbt);
-        let pj_params = payjoin::send::Configuration::with_fee_contribution(
-            payjoin::bitcoin::Amount::from_sat(10000),
-            None,
-        );
+
+        let payout_scripts = std::iter::once(link.address.script_pubkey());
+        // recommendation or bust for this simple reference implementation
+        let pj_params = Configuration::recommended(&psbt, payout_scripts, fee_rate)
+            .unwrap_or_else(|_| Configuration::non_incentivizing());
+
         let (req, ctx) = link
             .create_pj_request(psbt, pj_params)
             .with_context(|| "Failed to create payjoin request")?;

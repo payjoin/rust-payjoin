@@ -6,6 +6,7 @@ pub mod transaction;
 use std::{ collections::HashSet, fs::OpenOptions, str::FromStr };
 use bitcoin::Amount;
 use serde::{ Deserialize, Serialize };
+pub use bitcoin::Address as BitcoinAdrress;
 pub use payjoin::Error as PdkError;
 uniffi::include_scaffolding!("pdk");
 pub struct CachedOutputs {
@@ -106,4 +107,7 @@ impl From<&Input> for bitcoincore_rpc::json::CreateRawTransactionInput {
             sequence: value.sequence,
         }
     }
+}
+pub struct Address {
+    pub internal: BitcoinAdrress,
 }

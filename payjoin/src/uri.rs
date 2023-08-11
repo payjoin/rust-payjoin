@@ -51,6 +51,12 @@ pub trait UriExtNetworkUnchecked<'a>: sealed::UriExtNetworkUnchecked {
 }
 
 pub trait PjUriExt: sealed::UriExt {
+    /// Prepare an HTTP request and request context to process the response
+    ///
+    /// An HTTP client will own the Request data while Context sticks around so
+    /// a `(Request, Context)` tuple is returned to keep them separated. call:
+    ///
+    /// `let (request, context) = uri.create_pj_request(psbt, params);`
     #[cfg(feature = "send")]
     fn create_pj_request(
         self,

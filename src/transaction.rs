@@ -16,5 +16,5 @@ impl PartiallySignedTransaction {
     }
 }
 pub struct Transaction {
-    pub(crate) internal: Mutex<BitcoinTransaction>,
+    pub(crate) internal: BitcoinTransaction,
 }

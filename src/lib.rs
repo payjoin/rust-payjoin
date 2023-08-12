@@ -8,6 +8,7 @@ use bitcoin::Amount;
 use serde::{ Deserialize, Serialize };
 pub use bitcoin::Address as BitcoinAdrress;
 pub use payjoin::Error as PdkError;
+pub use bitcoin::blockdata::script::Script as BitcoinScript;
 uniffi::include_scaffolding!("pdk");
 pub struct CachedOutputs {
     pub outputs: HashSet<OutPoint>,
@@ -38,6 +39,29 @@ impl From<OutPoint> for bitcoin::OutPoint {
             txid: bitcoin::Txid::from_str(&outpoint.txid).expect("Invalid txid"),
             vout: outpoint.vout,
         }
+    }
+}
+impl From<bitcoin::OutPoint> for OutPoint {
+    fn from(outpoint: bitcoin::OutPoint) -> Self {
+        OutPoint {
+            txid: outpoint.txid.to_string(),
+            vout: outpoint.vout,
+        }
+    }
+}
+
+pub struct Script {
+    inner: Vec<u8>,
+}
+
+impl Script {
+    fn new(raw_output_script: Vec<u8>) -> Self {
+        let script = BitcoinScript::from_bytes(raw_output_script.as_slice());
+        Script { inner: script.to_bytes() }
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        self.inner.to_owned()
     }
 }
 

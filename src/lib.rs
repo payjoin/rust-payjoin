@@ -4,7 +4,7 @@ pub mod error;
 pub mod receive;
 pub mod transaction;
 use std::{ collections::HashSet, fs::OpenOptions, str::FromStr };
-use bitcoin::Amount;
+use bitcoin::{ Amount, ScriptBuf };
 use serde::{ Deserialize, Serialize };
 pub use bitcoin::Address as BitcoinAdrress;
 pub use payjoin::Error as PdkError;
@@ -50,6 +50,7 @@ impl From<bitcoin::OutPoint> for OutPoint {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Script {
     inner: Vec<u8>,
 }
@@ -64,7 +65,32 @@ impl Script {
         self.inner.to_owned()
     }
 }
+#[derive(Debug, Clone)]
+pub struct TxOut {
+    /// The value of the output, in satoshis.
+    value: u64,
+    /// The address of the output.
+    script_pubkey: Script,
+}
+impl From<TxOut> for bitcoin::TxOut {
+    fn from(tx_out: TxOut) -> Self {
+        bitcoin::TxOut {
+            value: tx_out.value,
+            script_pubkey: ScriptBuf::from_bytes(tx_out.script_pubkey.inner),
+        }
+    }
+}
 
+impl From<bitcoin::TxOut> for TxOut {
+    fn from(tx_out: bitcoin::TxOut) -> Self {
+        TxOut {
+            value: tx_out.value,
+            script_pubkey: Script {
+                inner: tx_out.script_pubkey.to_bytes(),
+            },
+        }
+    }
+}
 pub struct Uri {
     pub internal: String,
 }

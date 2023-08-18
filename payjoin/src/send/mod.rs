@@ -353,6 +353,7 @@ impl<'a> RequestBuilder<'a> {
 ///
 /// You need to send this request over HTTP(S) to the receiver.
 #[non_exhaustive]
+#[derive(Debug, Clone)]
 pub struct Request {
     /// URL to send the request to.
     ///

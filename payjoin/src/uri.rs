@@ -8,6 +8,7 @@ use url::Url;
 #[derive(Debug, Clone)]
 pub enum Payjoin {
     Supported(PayjoinParams),
+    V2Only(PayjoinParams),
     Unsupported,
 }
 
@@ -15,6 +16,7 @@ impl Payjoin {
     pub fn pj_is_supported(&self) -> bool {
         match self {
             Payjoin::Supported(_) => true,
+            Payjoin::V2Only(_) => true,
             Payjoin::Unsupported => false,
         }
     }
@@ -74,7 +76,7 @@ impl<'a> UriExtNetworkUnchecked<'a> for Uri<'a, NetworkUnchecked> {
 impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
     fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>> {
         match self.extras {
-            Payjoin::Supported(payjoin) => {
+            Payjoin::Supported(payjoin) | Payjoin::V2Only(payjoin) => {
                 let mut uri = bip21::Uri::with_extras(self.address, payjoin);
                 uri.amount = self.amount;
                 uri.label = self.label;
@@ -166,6 +168,11 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
                         && endpoint.domain().unwrap_or_default().ends_with(".onion")
                 {
                     Ok(Payjoin::Supported(PayjoinParams {
+                        _endpoint: endpoint,
+                        disable_output_substitution: pjos.unwrap_or(false),
+                    }))
+                } else if endpoint.scheme() == "http" {
+                    Ok(Payjoin::V2Only(PayjoinParams {
                         _endpoint: endpoint,
                         disable_output_substitution: pjos.unwrap_or(false),
                     }))

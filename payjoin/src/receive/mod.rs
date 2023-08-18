@@ -303,6 +303,25 @@ pub struct UncheckedProposal {
 }
 
 impl UncheckedProposal {
+    pub fn from_relay_response(mut body: impl std::io::Read) -> Result<Self, RequestError> {
+        let mut buf = Vec::new();
+        let _ = body.read_to_end(&mut buf);
+        let base64 = bitcoin::base64::decode(buf).map_err(InternalRequestError::Base64)?;
+        let unchecked_psbt = Psbt::deserialize(&base64).map_err(InternalRequestError::Psbt)?;
+
+        let psbt = unchecked_psbt.validate().map_err(InternalRequestError::InconsistentPsbt)?;
+        log::debug!("Received original psbt: {:?}", psbt);
+
+        // TODO accept parameters
+        // let pairs = url::form_urlencoded::parse(query.as_bytes());
+        // let params = Params::from_query_pairs(pairs).map_err(InternalRequestError::SenderParams)?;
+        // log::debug!("Received request with params: {:?}", params);
+
+        // TODO handle v1 and v2
+
+        Ok(UncheckedProposal { psbt, params: Params::default() })
+    }
+
     pub fn from_request(
         mut body: impl std::io::Read,
         query: &str,

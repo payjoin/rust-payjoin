@@ -10,7 +10,7 @@ use bitcoincore_rpc::RpcApi;
 use clap::ArgMatches;
 use config::{Config, File, FileFormat};
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::receive::{Error, PayjoinProposal};
+use payjoin::receive::{Error, ProvisionalProposal};
 use payjoin::{bitcoin, PjUriExt, UriExt};
 use rouille::{Request, Response};
 use serde::{Deserialize, Serialize};
@@ -296,7 +296,7 @@ impl App {
         })?;
         log::trace!("check4");
 
-        let mut payjoin = payjoin.identify_receiver_outputs(|output_script| {
+        let mut provisional_payjoin = payjoin.identify_receiver_outputs(|output_script| {
             if let Ok(address) = bitcoin::Address::from_script(output_script, network) {
                 self.bitcoind
                     .get_address_info(&address)
@@ -309,7 +309,7 @@ impl App {
 
         if !self.config.sub_only {
             // Select receiver payjoin inputs.
-            _ = try_contributing_inputs(&mut payjoin, &self.bitcoind)
+            _ = try_contributing_inputs(&mut provisional_payjoin, &self.bitcoind)
                 .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
         }
 
@@ -318,23 +318,23 @@ impl App {
             .get_new_address(None, None)
             .map_err(|e| Error::Server(e.into()))?
             .assume_checked();
-        payjoin.substitute_output_address(receiver_substitute_address);
+        provisional_payjoin.substitute_output_address(receiver_substitute_address);
 
-        let payjoin_proposal_psbt = payjoin.apply_fee(Some(1))?;
-
-        log::debug!("Extracted PSBT: {:#?}", payjoin_proposal_psbt);
-        // Sign payjoin psbt
-        let payjoin_base64_string = base64::encode(&payjoin_proposal_psbt.serialize());
-        // `wallet_process_psbt` adds available utxo data and finalizes
-        let payjoin_proposal_psbt = self
-            .bitcoind
-            .wallet_process_psbt(&payjoin_base64_string, None, None, Some(false))
-            .map_err(|e| Error::Server(e.into()))?
-            .psbt;
-        let payjoin_proposal_psbt = Psbt::from_str(&payjoin_proposal_psbt)
-            .context("Failed to parse PSBT")
-            .map_err(|e| Error::Server(e.into()))?;
-        let payjoin_proposal_psbt = payjoin.prepare_psbt(payjoin_proposal_psbt)?;
+        let payjoi_proposal = provisional_payjoin.finalize_proposal(
+            |psbt: &Psbt| {
+                self.bitcoind
+                    .wallet_process_psbt(
+                        &bitcoin::base64::encode(psbt.serialize()),
+                        None,
+                        None,
+                        Some(false),
+                    )
+                    .map(|res| Psbt::from_str(&res.psbt).map_err(|e| Error::Server(e.into())))
+                    .map_err(|e| Error::Server(e.into()))?
+            },
+            Some(bitcoin::FeeRate::MIN),
+        )?;
+        let payjoin_proposal_psbt = payjoi_proposal.psbt();
         log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
 
         let payload = base64::encode(&payjoin_proposal_psbt.serialize());
@@ -449,7 +449,7 @@ impl AppConfig {
 }
 
 fn try_contributing_inputs(
-    payjoin: &mut PayjoinProposal,
+    payjoin: &mut ProvisionalProposal,
     bitcoind: &bitcoincore_rpc::Client,
 ) -> Result<()> {
     use bitcoin::OutPoint;

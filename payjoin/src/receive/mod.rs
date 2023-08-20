@@ -268,6 +268,7 @@
 
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashMap};
+use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, OutPoint, Script, TxOut};
@@ -522,7 +523,7 @@ impl OutputsUnknown {
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: impl Fn(&Script) -> Result<bool, Error>,
-    ) -> Result<PayjoinProposal, Error> {
+    ) -> Result<ProvisionalProposal, Error> {
         let owned_vouts: Vec<usize> = self
             .psbt
             .unsigned_tx
@@ -540,7 +541,7 @@ impl OutputsUnknown {
             return Err(Error::BadRequest(InternalRequestError::MissingPayment.into()));
         }
 
-        Ok(PayjoinProposal {
+        Ok(ProvisionalProposal {
             original_psbt: self.psbt.clone(),
             payjoin_psbt: self.psbt,
             params: self.params,
@@ -551,7 +552,6 @@ impl OutputsUnknown {
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
 pub struct PayjoinProposal {
-    original_psbt: Psbt,
     payjoin_psbt: Psbt,
     params: Params,
     owned_vouts: Vec<usize>,
@@ -566,6 +566,20 @@ impl PayjoinProposal {
         self.params.disable_output_substitution
     }
 
+    pub fn get_owned_vouts(&self) -> &Vec<usize> { &self.owned_vouts }
+
+    pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
+}
+
+/// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+pub struct ProvisionalProposal {
+    original_psbt: Psbt,
+    payjoin_psbt: Psbt,
+    params: Params,
+    owned_vouts: Vec<usize>,
+}
+
+impl ProvisionalProposal {
     /// Select receiver input such that the payjoin avoids surveillance.
     /// Return the input chosen that has been applied to the Proposal.
     ///
@@ -707,12 +721,8 @@ impl PayjoinProposal {
     /// this is kind of a "build_proposal" step before we sign and finalize and extract
     ///
     /// WARNING: DO NOT ALTER INPUTS OR OUTPUTS AFTER THIS STEP
-    pub fn apply_fee(
-        &mut self,
-        min_feerate_sat_per_vb: Option<u64>,
-    ) -> Result<&Psbt, RequestError> {
-        let min_feerate =
-            FeeRate::from_sat_per_vb_unchecked(min_feerate_sat_per_vb.unwrap_or_default());
+    fn apply_fee(&mut self, min_feerate: Option<FeeRate>) -> Result<&Psbt, RequestError> {
+        let min_feerate = min_feerate.unwrap_or(FeeRate::MIN);
         log::trace!("min_feerate: {:?}", min_feerate);
         log::trace!("params.min_feerate: {:?}", self.params.min_feerate);
         let min_feerate = max(min_feerate, self.params.min_feerate);
@@ -760,7 +770,7 @@ impl PayjoinProposal {
     /// and return a PSBT that can produce a consensus-valid transaction that the sender will accept.
     ///
     /// wallet_process_psbt should sign and finalize receiver inputs
-    pub fn prepare_psbt(mut self, processed_psbt: Psbt) -> Result<Psbt, RequestError> {
+    fn prepare_psbt(mut self, processed_psbt: Psbt) -> Result<PayjoinProposal, RequestError> {
         self.payjoin_psbt = processed_psbt;
         log::trace!("Preparing PSBT {:#?}", self.payjoin_psbt);
         for input in self.payjoin_psbt.inputs_mut() {
@@ -791,7 +801,25 @@ impl PayjoinProposal {
             self.payjoin_psbt.inputs[i].final_script_sig = None;
             self.payjoin_psbt.inputs[i].final_script_witness = None;
         }
-        Ok(self.payjoin_psbt)
+        Ok(PayjoinProposal {
+            payjoin_psbt: self.payjoin_psbt,
+            owned_vouts: self.owned_vouts,
+            params: self.params,
+        })
+    }
+
+    pub fn finalize_proposal(
+        mut self,
+        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, Error>,
+        min_feerate_sat_per_vb: Option<FeeRate>,
+    ) -> Result<PayjoinProposal, Error> {
+        let psbt = self.apply_fee(min_feerate_sat_per_vb)?;
+        let psbt = wallet_process_psbt(psbt).map_err(|e| {
+            log::error!("wallet_process_psbt error");
+            Error::from(e)
+        })?;
+        let payjoin_proposal = self.prepare_psbt(psbt).map_err(RequestError::from)?;
+        Ok(payjoin_proposal)
     }
 }
 

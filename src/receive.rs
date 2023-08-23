@@ -1,6 +1,3 @@
-use std::sync::Mutex;
-
-use bitcoin::{ Script, OutPoint, TxOut, Address };
 use payjoin::receive::{
     MaybeInputsOwned as PdkMaybeInputsOwned,
     MaybeMixedInputScripts as PdkMaybeMixedInputScripts,
@@ -8,10 +5,16 @@ use payjoin::receive::{
     OutputsUnknown as PdkOutputsUnknown,
     PayjoinProposal as PdkPayjoinProposal,
     UncheckedProposal as PdkUncheckedProposal,
-    Headers,
     RequestError,
 };
-use crate::{ PdkError, transaction::{ Transaction, PartiallySignedTransaction } };
+use crate::{
+    PdkError,
+    transaction::{ Transaction, PartiallySignedTransaction },
+    Address,
+    OutPoint,
+    Script,
+    TxOut,
+};
 use anyhow::anyhow;
 
 pub struct UncheckedProposal {
@@ -26,11 +29,32 @@ pub trait CanBroadcast {
         bitcoincore_rpc::Error
     >;
 }
+pub struct Headers {
+    pub length: String,
+}
+
+impl Headers {
+    pub fn new(length: u64) -> Headers {
+        Headers { length: length.to_string() }
+    }
+}
+
+impl payjoin::receive::Headers for Headers {
+    fn get_header(&self, key: &str) -> Option<&str> {
+        match key {
+            "content-length" => Some(&self.length),
+            "content-type" => Some("text/plain"),
+            _ => None,
+        }
+    }
+}
+
 impl UncheckedProposal {
     pub fn from_request(
+        //TODO; Find which type that implement Read trait is an appropriate option
         body: impl std::io::Read,
         query: String,
-        headers: impl Headers
+        headers: Headers
     ) -> Result<Self, PdkError> {
         let res = PdkUncheckedProposal::from_request(body, query.as_str(), headers)?;
         Ok(UncheckedProposal { internal: res })
@@ -40,7 +64,7 @@ impl UncheckedProposal {
     // }
     pub fn get_transaction_to_schedule_broadcast(&self) -> Transaction {
         let res = self.internal.get_transaction_to_schedule_broadcast();
-        Transaction { internal: Mutex::new(res) }
+        Transaction { internal: res }
     }
     pub fn check_can_broadcast(
         self,
@@ -73,7 +97,7 @@ pub struct MaybeInputsOwned {
 }
 
 pub trait IsScriptOwned {
-    fn is_owned(&self, script: &Script) -> Result<bool, PdkError>;
+    fn is_owned(&self, script: Script) -> Result<bool, PdkError>;
 }
 impl MaybeInputsOwned {
     ///Check that the Original PSBT has no receiver-owned inputs. Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
@@ -83,7 +107,11 @@ impl MaybeInputsOwned {
         self,
         is_owned: Box<dyn IsScriptOwned>
     ) -> Result<MaybeMixedInputScripts, PdkError> {
-        match self.internal.check_inputs_not_owned(|input| is_owned.is_owned(input)) {
+        match
+            self.internal.check_inputs_not_owned(|input|
+                is_owned.is_owned(Script { inner: input.to_bytes() })
+            )
+        {
             Ok(e) => Ok(MaybeMixedInputScripts { internal: e }),
             Err(e) => Err(e),
         }
@@ -113,14 +141,18 @@ pub struct MaybeInputsSeen {
     pub internal: PdkMaybeInputsSeen,
 }
 pub trait IsOutoutKnown {
-    fn is_known(&self, output: &OutPoint) -> Result<bool, PdkError>;
+    fn is_known(&self, outpoint: OutPoint) -> Result<bool, PdkError>;
 }
 impl MaybeInputsSeen {
     pub fn check_no_inputs_seen_before(
         self,
         is_known: Box<dyn IsOutoutKnown>
     ) -> Result<OutputsUnknown, PdkError> {
-        match self.internal.check_no_inputs_seen_before(|output| is_known.is_known(output)) {
+        match
+            self.internal.check_no_inputs_seen_before(|outpoint|
+                is_known.is_known(outpoint.to_owned().into())
+            )
+        {
             Ok(e) => Ok(OutputsUnknown { internal: e }),
             Err(e) => Err(e),
         }
@@ -141,7 +173,7 @@ impl OutputsUnknown {
     ) -> Result<PayjoinProposal, PdkError> {
         match
             self.internal.identify_receiver_outputs(|output_script|
-                is_receiver_output.is_owned(output_script)
+                is_receiver_output.is_owned(Script { inner: output_script.to_bytes() })
             )
         {
             Ok(e) => Ok(PayjoinProposal { internal: e }),
@@ -159,15 +191,14 @@ impl PayjoinProposal {
         self.internal.is_output_substitution_disabled()
     }
 
-    //todo create outpoint and txout
     pub fn contribute_witness_input(&mut self, txout: TxOut, outpoint: OutPoint) {
-        self.internal.contribute_witness_input(txout, outpoint)
+        self.internal.contribute_witness_input(txout.into(), outpoint.into())
     }
-    pub fn contribute_non_witness_input(&mut self, tx: bitcoin::Transaction, outpoint: OutPoint) {
-        self.internal.contribute_non_witness_input(tx, outpoint)
+    pub fn contribute_non_witness_input(&mut self, tx: Transaction, outpoint: OutPoint) {
+        self.internal.contribute_non_witness_input(tx.internal, outpoint.into())
     }
     pub fn substitute_output_address(&mut self, substitute_address: Address) {
-        self.internal.substitute_output_address(substitute_address)
+        self.internal.substitute_output_address(substitute_address.internal)
     }
 
     ///Apply additional fee contribution now that the receiver has contributed input this is kind of a “build_proposal” step before we sign and finalize and extract

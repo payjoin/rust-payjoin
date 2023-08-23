@@ -6,13 +6,13 @@ mod integration {
     use bitcoin::psbt::Psbt;
     use bitcoin::{Amount, OutPoint};
     use bitcoind::bitcoincore_rpc;
-    use bitcoind::bitcoincore_rpc::core_rpc_json::AddressType;
+    use bitcoind::bitcoincore_rpc::core_rpc_json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::RpcApi;
     use log::{debug, log_enabled, Level};
     use payjoin::bitcoin::base64;
     use payjoin::receive::Headers;
     use payjoin::send::Request;
-    use payjoin::{bitcoin, PjUriExt, Uri, UriExt};
+    use payjoin::{bitcoin, Error, PjUriExt, Uri, UriExt};
 
     #[test]
     fn integration_test() {
@@ -200,20 +200,27 @@ mod integration {
         let receiver_substitute_address =
             receiver.get_new_address(None, None).unwrap().assume_checked();
         payjoin.substitute_output_address(receiver_substitute_address);
-
-        let payjoin_proposal_psbt = payjoin.apply_fee(None).unwrap();
-
-        // Sign payjoin psbt
-        let payjoin_base64_string = base64::encode(&payjoin_proposal_psbt.serialize());
-        let payjoin_proposal_psbt = receiver
-            .wallet_process_psbt(&payjoin_base64_string, None, None, Some(false))
-            .unwrap()
-            .psbt;
-        let payjoin_proposal_psbt = Psbt::from_str(&payjoin_proposal_psbt).unwrap();
-
-        let payjoin_proposal_psbt = payjoin.prepare_psbt(payjoin_proposal_psbt).unwrap();
-        debug!("Receiver's Payjoin proposal PSBT: {:#?}", payjoin_proposal_psbt);
-
-        base64::encode(&payjoin_proposal_psbt.serialize())
+        let payjoin_proposal = payjoin
+            .finalize_proposal(
+                |psbt: &Psbt| {
+                    Ok(receiver
+                        .wallet_process_psbt(
+                            &bitcoin::base64::encode(psbt.serialize()),
+                            None,
+                            None,
+                            Some(false),
+                        )
+                        .map(|res: WalletProcessPsbtResult| {
+                            let psbt = Psbt::from_str(&res.psbt).unwrap();
+                            return psbt;
+                        })
+                        .unwrap())
+                },
+                Some(bitcoin::FeeRate::MIN),
+            )
+            .unwrap();
+        let psbt = payjoin_proposal.psbt();
+        debug!("Receiver's Payjoin proposal PSBT: {:#?}", &psbt);
+        base64::encode(&psbt.serialize())
     }
 }

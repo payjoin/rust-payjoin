@@ -1,16 +1,19 @@
 use bitcoin::blockdata::transaction::Transaction as BitcoinTransaction;
-use bitcoin::psbt::PartiallySignedTransaction as BitcoinPsbt;
-use std::{str::FromStr, sync::Mutex};
+use payjoin::bitcoin::psbt::PartiallySignedTransaction as BitcoinPsbt;
+use std::{str::FromStr, sync::Arc};
 
 use crate::error::Error;
-
+#[derive(Debug, Clone)]
 pub struct PartiallySignedTransaction {
-	pub(crate) internal: BitcoinPsbt,
+	pub internal: Arc<BitcoinPsbt>,
 }
 impl PartiallySignedTransaction {
-	pub(crate) fn new(psbt_base64: String) -> Result<Self, Error> {
+	pub fn new(psbt_base64: String) -> Result<Self, Error> {
 		let psbt: BitcoinPsbt = BitcoinPsbt::from_str(&psbt_base64)?;
-		Ok(PartiallySignedTransaction { internal: psbt })
+		Ok(PartiallySignedTransaction { internal: Arc::new(psbt) })
+	}
+	pub fn serialize(&self) -> Vec<u8> {
+		self.internal.serialize()
 	}
 }
 pub struct Transaction {

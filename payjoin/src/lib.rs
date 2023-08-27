@@ -35,4 +35,6 @@ mod uri;
 #[cfg(any(feature = "send", feature = "receive"))]
 pub(crate) mod weight;
 
+#[cfg(feature = "base64")]
+pub use bitcoin::base64;
 pub use uri::{PjParseError, PjUri, PjUriExt, Uri, UriExt};

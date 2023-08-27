@@ -80,6 +80,7 @@ To build and test with the MSRV you will need to pin the below dependency versio
 cargo update -p log --precise 0.4.18
 cargo update -p tempfile --precise 3.6.0
 cargo update -p flate2 --precise 1.0.26
+cargo update -p minreq --precise 2.8.0
 ```
 
 ## License

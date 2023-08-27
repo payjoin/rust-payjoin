@@ -324,7 +324,7 @@ impl App {
             |psbt: &Psbt| {
                 self.bitcoind
                     .wallet_process_psbt(
-                        &bitcoin::base64::encode(psbt.serialize()),
+                        &payjoin::base64::encode(psbt.serialize()),
                         None,
                         None,
                         Some(false),
@@ -337,7 +337,7 @@ impl App {
         let payjoin_proposal_psbt = payjoi_proposal.psbt();
         log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
 
-        let payload = base64::encode(&payjoin_proposal_psbt.serialize());
+        let payload = payjoin::base64::encode(&payjoin_proposal_psbt.serialize());
         log::info!("successful response");
         Ok(Response::text(payload))
     }
@@ -488,4 +488,4 @@ impl payjoin::receive::Headers for Headers<'_> {
     }
 }
 
-fn serialize_psbt(psbt: &Psbt) -> String { base64::encode(&psbt.serialize()) }
+fn serialize_psbt(psbt: &Psbt) -> String { payjoin::base64::encode(&psbt.serialize()) }

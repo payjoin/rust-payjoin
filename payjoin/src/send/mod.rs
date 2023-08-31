@@ -328,7 +328,7 @@ impl<'a> RequestBuilder<'a> {
         let input_type = InputType::from_spent_input(txout, zeroth_input.psbtin).unwrap();
 
         #[cfg(not(feature = "v2"))]
-        let request = {
+        let (req, ctx) = {
             let url = serialize_url(
                 self.uri.extras._endpoint.into(),
                 disable_output_substitution,
@@ -337,11 +337,31 @@ impl<'a> RequestBuilder<'a> {
             )
             .map_err(InternalCreateRequestError::Url)?;
             let body = psbt.to_string().as_bytes().to_vec();
-            Request { url, body }
+            (
+                Request { url, body },
+                Context {
+                    original_psbt: psbt,
+                    disable_output_substitution,
+                    fee_contribution,
+                    payee,
+                    input_type,
+                    sequence,
+                    min_fee_rate: self.min_fee_rate,
+                    v2_context: None,
+                },
+            )
         };
 
         #[cfg(feature = "v2")]
-        let request = {
+        let (req, ctx) = {
+            let rs_base64 = crate::v2::subdir(self.uri.extras._endpoint.as_str()).to_string();
+            log::debug!("rs_base64: {:?}", rs_base64);
+            let b64_config =
+                bitcoin::base64::Config::new(bitcoin::base64::CharacterSet::UrlSafe, false);
+            let rs = bitcoin::base64::decode_config(rs_base64, b64_config).unwrap();
+            log::debug!("rs: {:?}", rs.len());
+            let rs = bitcoin::secp256k1::PublicKey::from_slice(&rs).unwrap();
+
             let url = self.uri.extras._endpoint;
             let body = serialize_v2_body(
                 &psbt,
@@ -349,21 +369,24 @@ impl<'a> RequestBuilder<'a> {
                 fee_contribution,
                 self.min_fee_rate,
             )?;
-            Request { url, body }
+            let (body, e) =
+                crate::v2::encrypt_message_a(body, rs).map_err(InternalCreateRequestError::V2)?;
+            (
+                Request { url, body },
+                Context {
+                    original_psbt: psbt,
+                    disable_output_substitution,
+                    fee_contribution,
+                    payee,
+                    input_type,
+                    sequence,
+                    min_fee_rate: self.min_fee_rate,
+                    v2_context: Some(e),
+                },
+            )
         };
 
-        Ok((
-            request,
-            Context {
-                original_psbt: psbt,
-                disable_output_substitution,
-                fee_contribution,
-                payee,
-                input_type,
-                sequence,
-                min_fee_rate: self.min_fee_rate,
-            },
-        ))
+        Ok((req, ctx))
     }
 }
 
@@ -399,6 +422,7 @@ pub struct Context {
     input_type: InputType,
     sequence: Sequence,
     payee: ScriptBuf,
+    v2_context: Option<bitcoin::secp256k1::SecretKey>,
 }
 
 macro_rules! check_eq {
@@ -429,10 +453,39 @@ impl Context {
         self,
         response: &mut impl std::io::Read,
     ) -> Result<Psbt, ValidationError> {
+        #[cfg(feature = "v2")]
+        match self.v2_context {
+            Some(e) => self.process_response_v2(response, e),
+            None => self.process_response_v1(response),
+        }
+
+        #[cfg(not(feature = "v2"))]
+        self.process_response_v1(response)
+    }
+
+    pub fn process_response_v1(
+        self,
+        response: &mut impl std::io::Read,
+    ) -> Result<Psbt, ValidationError> {
         let mut res_str = String::new();
         response.read_to_string(&mut res_str).map_err(InternalValidationError::Io)?;
-        let proposal = Psbt::from_str(&res_str).map_err(InternalValidationError::Psbt)?;
+        let proposal = Psbt::from_str(&res_str).map_err(InternalValidationError::PsbtParse)?;
 
+        // process in non-generic function
+        self.process_proposal(proposal).map(Into::into).map_err(Into::into)
+    }
+
+    #[cfg(feature = "v2")]
+    pub fn process_response_v2(
+        self,
+        response: &mut impl std::io::Read,
+        e: bitcoin::secp256k1::SecretKey,
+    ) -> Result<Psbt, ValidationError> {
+        let mut res_buf = Vec::new();
+        response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
+        let psbt =
+            crate::v2::decrypt_message_b(&mut res_buf, e).map_err(InternalValidationError::V2)?;
+        let proposal = Psbt::deserialize(&psbt).map_err(InternalValidationError::Psbt)?;
         // process in non-generic function
         self.process_proposal(proposal).map(Into::into).map_err(Into::into)
     }
@@ -804,8 +857,8 @@ fn serialize_v2_body(
     )
     .map_err(InternalCreateRequestError::Url)?;
     let query_params = placeholder_url.query().unwrap_or_default();
-    let body = psbt.to_string();
-    Ok(format!("{}\n{}", query_params, body).into_bytes())
+    let base64 = psbt.to_string();
+    Ok(format!("{}\n{}", base64, query_params).into_bytes())
 }
 
 fn serialize_url(
@@ -835,6 +888,7 @@ fn serialize_url(
 #[cfg(test)]
 mod tests {
     #[test]
+    #[cfg(not(feature = "v2"))]
     fn official_vectors() {
         use std::str::FromStr;
 

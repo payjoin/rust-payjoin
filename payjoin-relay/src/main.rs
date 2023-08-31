@@ -153,9 +153,7 @@ async fn post_enroll(body: Body) -> Result<Response<Body>, HandlerError> {
         String::from_utf8(bytes.to_vec()).map_err(|e| HandlerError::BadRequest(e.into()))?;
     let pubkey_bytes: Vec<u8> = base64::decode_config(base64_id, b64_config)
         .map_err(|e| HandlerError::BadRequest(e.into()))?;
-    let pubkey_string =
-        String::from_utf8(pubkey_bytes).map_err(|e| HandlerError::BadRequest(e.into()))?;
-    let pubkey = bitcoin::secp256k1::PublicKey::from_str(&pubkey_string)
+    let pubkey = bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
         .map_err(|e| HandlerError::BadRequest(e.into()))?;
     tracing::info!("Enrolled valid pubkey: {:?}", pubkey);
     Ok(Response::builder().status(StatusCode::NO_CONTENT).body(Body::empty())?)

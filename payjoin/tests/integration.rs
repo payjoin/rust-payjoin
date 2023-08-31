@@ -12,7 +12,7 @@ mod integration {
     use bitcoind::bitcoincore_rpc::RpcApi;
     use log::{debug, log_enabled, Level};
     use payjoin::bitcoin::base64;
-    use payjoin::receive::UncheckedProposal;
+    use payjoin::receive::{PayjoinProposal, UncheckedProposal};
     use payjoin::send::RequestBuilder;
     use payjoin::Uri;
 
@@ -86,7 +86,9 @@ mod integration {
                 headers,
             )
             .unwrap();
-            handle_proposal(proposal, receiver)
+            let psbt = handle_proposal(proposal, receiver);
+            debug!("Receiver's Payjoin proposal PSBT: {:#?}", &psbt);
+            base64::encode(&psbt.serialize())
         }
     }
 
@@ -95,6 +97,8 @@ mod integration {
         use std::process::Stdio;
         use std::sync::Arc;
 
+        use payjoin::receive::{PayjoinProposal, ProposalContext};
+        use payjoin::send::Request;
         use testcontainers::Container;
         use testcontainers_modules::postgres::Postgres;
         use testcontainers_modules::testcontainers::clients::Cli;
@@ -117,18 +121,17 @@ mod integration {
             // **********************
             // Inside the Receiver:
             // Enroll with relay
-            let secp = bitcoin::secp256k1::Secp256k1::new();
-            let mut rng = bitcoin::secp256k1::rand::thread_rng();
-            let key = bitcoin::secp256k1::KeyPair::new(&secp, &mut rng);
-            let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-            let pubkey_base64 = base64::encode_config(key.public_key().to_string(), b64_config);
-            let pk64 = pubkey_base64.clone();
-            let enroll =
-                spawn_blocking(move || http_agent().post(RELAY_URL).send_string(&pk64)).await??;
+            let receive_context = ProposalContext::new();
+            let subdirectory = Arc::new(receive_context.subdirectory());
+            let enroll = {
+                let subdir_clone = subdirectory.clone();
+                spawn_blocking(move || http_agent().post(RELAY_URL).send_string(&subdir_clone))
+                    .await??
+            };
             assert!(enroll.status() == 204);
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let relay_endpoint = format!("{}/{}", RELAY_URL, &pubkey_base64);
+            let relay_endpoint = format!("{}/{}", RELAY_URL, &subdirectory);
             let pj_uri = build_pj_uri(pj_receiver_address, Amount::ONE_BTC, &relay_endpoint);
 
             // **********************
@@ -140,14 +143,17 @@ mod integration {
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?;
             log::info!("send fallback v2");
             log::debug!("Request: {:#?}", &req.body);
-            let response = spawn_blocking(move || {
-                http_agent()
-                    .post(req.url.as_str())
-                    .set("Content-Type", "text/plain")
-                    .set("Async", "true")
-                    .send_string(String::from_utf8(req.body).unwrap().as_ref())
-            })
-            .await??;
+            let response = {
+                let Request { url, body, .. } = req.clone();
+                spawn_blocking(move || {
+                    http_agent()
+                        .post(url.as_str())
+                        .set("Content-Type", "text/plain")
+                        .set("Async", "true")
+                        .send_bytes(&body)
+                })
+                .await??
+            };
             log::info!("Response: {:#?}", &response);
             assert!(response.status() == 202);
             // no response body yet since we are async and pushed fallback_psbt to the buffer
@@ -155,16 +161,31 @@ mod integration {
             // **********************
             // Inside the Receiver:
             // this data would transit from one party to another over the network in production
-            let receive_endpoint = format!("{}/{}", RELAY_URL, &pubkey_base64);
+            let receive_endpoint = format!("{}/{}", RELAY_URL, &subdirectory.clone());
             let response =
                 spawn_blocking(move || http_agent().get(&receive_endpoint).call()).await??;
-            let response = handle_relay_response(response.into_reader(), receiver);
+            let payjoin_proposal =
+                handle_relay_response(response.into_reader(), receiver, receive_context);
             // this response would be returned as http response to the sender
+            let subdir_clone = subdirectory.clone();
+            spawn_blocking(move || {
+                let payjoin_endpoint = format!("{}/{}/payjoin", RELAY_URL, &subdir_clone);
+                http_agent()
+                    .post(&payjoin_endpoint)
+                    .send_bytes(&payjoin_proposal.serialize_body().unwrap())
+            })
+            .await??;
 
             // **********************
             // Inside the Sender:
             // Sender checks, signs, finalizes, extracts, and broadcasts
-            let checked_payjoin_proposal_psbt = ctx.process_response(&mut response.as_bytes())?;
+
+            // Replay post fallback to get the response
+            let response =
+                spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
+                    .await??;
+            let checked_payjoin_proposal_psbt =
+                ctx.process_response(&mut response.into_reader())?;
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
             log::info!("sent");
@@ -186,22 +207,19 @@ mod integration {
             // **********************
             // Inside the Receiver:
             // Enroll with relay
-            let secp = bitcoin::secp256k1::Secp256k1::new();
-            let mut rng = bitcoin::secp256k1::rand::thread_rng();
-            let key = bitcoin::secp256k1::KeyPair::new(&secp, &mut rng);
-            let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-            let pubkey_base64 = base64::encode_config(key.public_key().to_string(), b64_config);
-            let pk64 = pubkey_base64.clone();
-            let enroll =
-                spawn_blocking(move || http_agent().post(RELAY_URL).send_string(&pk64.clone()))
-                    .await?
-                    .unwrap();
+            let receive_context = ProposalContext::new();
+            let subdirectory = Arc::new(receive_context.subdirectory());
+            let enroll = {
+                let subdir_clone = subdirectory.clone();
+                spawn_blocking(move || http_agent().post(RELAY_URL).send_string(&subdir_clone))
+                    .await??
+            };
             assert!(enroll.status() == 204);
 
             // Receiver creates the payjoin URI
             let pj_receiver_address =
                 receiver.get_new_address(None, None).unwrap().assume_checked();
-            let relay_endpoint = format!("{}/{}", RELAY_URL, &pubkey_base64);
+            let relay_endpoint = format!("{}/{}", RELAY_URL, &subdirectory);
             let pj_uri = build_pj_uri(pj_receiver_address, Amount::ONE_BTC, &relay_endpoint);
 
             // **********************
@@ -212,14 +230,16 @@ mod integration {
             let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?;
             log::info!("send fallback v1 to offline receiver fail");
-            let req_clone = req.clone();
-            let res = spawn_blocking(move || {
-                http_agent()
-                    .post(req_clone.url.as_str())
-                    .set("Content-Type", "text/plain")
-                    .send_bytes(&req_clone.body)
-            })
-            .await?;
+            let res = {
+                let Request { url, body, .. } = req.clone();
+                spawn_blocking(move || {
+                    http_agent()
+                        .post(url.as_str())
+                        .set("Content-Type", "text/plain")
+                        .send_bytes(&body)
+                })
+                .await?
+            };
             match res {
                 Err(ureq::Error::Status(code, _)) => assert_eq!(code, 503),
                 _ => panic!("Expected response status code 503, found {:?}", res),
@@ -228,10 +248,11 @@ mod integration {
             // **********************
             // Inside the Receiver:
             let receiver_loop = tokio::task::spawn(async move {
+                let subdirectory = receive_context.subdirectory();
                 let fallback_psbt_body = loop {
-                    let pk64 = pubkey_base64.clone();
+                    let subdir_clone = subdirectory.clone();
                     let response = spawn_blocking(move || {
-                        let receive_endpoint = format!("{}/{}", RELAY_URL, &pk64);
+                        let receive_endpoint = format!("{}/{}", RELAY_URL, &subdir_clone);
                         http_agent().get(&receive_endpoint).call()
                     })
                     .await??;
@@ -250,12 +271,23 @@ mod integration {
                     }
                 };
                 debug!("handle relay response");
-                let response = handle_relay_response(fallback_psbt_body, receiver);
+                let payjoin_proposal =
+                    handle_relay_response(fallback_psbt_body, receiver, receive_context);
+                // this response would be returned as http response to the sender
+                let subdir_clone = subdirectory.clone();
+                let body = payjoin_proposal.serialize_body().unwrap();
+                spawn_blocking(move || {
+                    let payjoin_endpoint = format!("{}/{}/payjoin", RELAY_URL, &subdir_clone);
+                    http_agent().post(&payjoin_endpoint).send_bytes(&body)
+                })
+                .await??;
                 debug!("Post payjoin_psbt to relay");
                 // Respond with payjoin psbt within the time window the sender is willing to wait
-                let payjoin_endpoint = format!("{}/{}/payjoin", RELAY_URL, &pubkey_base64);
+                let payjoin_endpoint = format!("{}/{}/payjoin", RELAY_URL, &subdirectory);
                 let response = spawn_blocking(move || {
-                    http_agent().post(&payjoin_endpoint).send_string(&response)
+                    http_agent()
+                        .post(&payjoin_endpoint)
+                        .send_bytes(&payjoin_proposal.serialize_body().unwrap())
                 })
                 .await??;
                 debug!("POSTed with payjoin_psbt response status {}", response.status());
@@ -266,15 +298,17 @@ mod integration {
             // **********************
             // send fallback v1 to online receiver
             log::info!("send fallback v1 to online receiver should succeed");
-            let req_clone = req.clone();
-            let response = spawn_blocking(move || {
-                http_agent()
-                    .post(req_clone.url.as_str())
-                    .set("Content-Type", "text/plain")
-                    .send_bytes(&req_clone.body)
-                    .expect("Failed to send request")
-            })
-            .await?;
+            let response = {
+                let Request { url, body, .. } = req.clone();
+                spawn_blocking(move || {
+                    http_agent()
+                        .post(url.as_str())
+                        .set("Content-Type", "text/plain")
+                        .send_bytes(&body)
+                        .expect("Failed to send request")
+                })
+                .await?
+            };
             log::info!("Response: {:#?}", &response);
             assert!(response.status() == 200);
 
@@ -322,9 +356,12 @@ mod integration {
         fn handle_relay_response(
             res: impl std::io::Read,
             receiver: bitcoincore_rpc::Client,
-        ) -> String {
-            let proposal = payjoin::receive::UncheckedProposal::from_relay_response(res).unwrap();
-            handle_proposal(proposal, receiver)
+            ctx: ProposalContext,
+        ) -> PayjoinProposal {
+            let proposal = ctx.parse_relay_response(res).unwrap();
+            let proposal = handle_proposal(proposal, receiver);
+            debug!("Receiver's Payjoin proposal PSBT: {:#?}", &proposal.psbt());
+            proposal
         }
 
         fn http_agent() -> ureq::Agent {
@@ -414,7 +451,10 @@ mod integration {
         Ok(Psbt::from_str(&psbt)?)
     }
 
-    fn handle_proposal(proposal: UncheckedProposal, receiver: bitcoincore_rpc::Client) -> String {
+    fn handle_proposal(
+        proposal: UncheckedProposal,
+        receiver: bitcoincore_rpc::Client,
+    ) -> PayjoinProposal {
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
@@ -498,9 +538,7 @@ mod integration {
                 Some(bitcoin::FeeRate::MIN),
             )
             .unwrap();
-        let psbt = payjoin_proposal.psbt();
-        debug!("Receiver's Payjoin proposal PSBT: {:#?}", &psbt);
-        base64::encode(&psbt.serialize())
+        payjoin_proposal
     }
 
     fn extract_pj_tx(

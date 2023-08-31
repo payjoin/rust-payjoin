@@ -288,6 +288,45 @@ pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
 }
 
+#[cfg(feature = "v2")]
+pub struct ProposalContext {
+    s: bitcoin::secp256k1::KeyPair,
+}
+
+#[cfg(feature = "v2")]
+impl ProposalContext {
+    pub fn new() -> Self {
+        let secp = bitcoin::secp256k1::Secp256k1::new();
+        let (sk, _) = secp.generate_keypair(&mut rand::rngs::OsRng);
+        ProposalContext { s: bitcoin::secp256k1::KeyPair::from_secret_key(&secp, &sk) }
+    }
+
+    pub fn subdirectory(&self) -> String {
+        let pubkey = &self.s.public_key().serialize();
+        let b64_config =
+            bitcoin::base64::Config::new(bitcoin::base64::CharacterSet::UrlSafe, false);
+        let pubkey_base64 = bitcoin::base64::encode_config(pubkey, b64_config);
+        pubkey_base64
+    }
+
+    pub fn receive_subdir(&self) -> String {
+        format!("{}/{}", self.subdirectory(), crate::v2::RECEIVE)
+    }
+
+    pub fn parse_relay_response(
+        self,
+        mut body: impl std::io::Read,
+    ) -> Result<UncheckedProposal, Error> {
+        let mut buf = Vec::new();
+        let _ = body.read_to_end(&mut buf);
+        let (proposal, e) =
+            crate::v2::decrypt_message_a(&mut buf, self.s.secret_key()).map_err(Error::V2)?;
+        let proposal = UncheckedProposal::from_v2_payload(proposal, e)?;
+
+        Ok(proposal)
+    }
+}
+
 /// The sender's original PSBT and optional parameters
 ///
 /// This type is used to proces the request. It is returned by
@@ -300,27 +339,10 @@ pub trait Headers {
 pub struct UncheckedProposal {
     psbt: Psbt,
     params: Params,
+    v2_context: Option<bitcoin::secp256k1::PublicKey>,
 }
 
 impl UncheckedProposal {
-    #[cfg(feature = "v2")]
-    pub fn from_relay_response(mut body: impl std::io::Read) -> Result<Self, RequestError> {
-        use std::str::FromStr;
-
-        let mut buf = Vec::new();
-        let _ = body.read_to_end(&mut buf);
-        let buf_as_string = String::from_utf8(buf.to_vec()).map_err(InternalRequestError::Utf8)?;
-        log::debug!("{}", &buf_as_string);
-        let (query, base64) = buf_as_string.split_once('\n').unwrap_or_default();
-        let unchecked_psbt = Psbt::from_str(base64).map_err(InternalRequestError::ParsePsbt)?;
-        let psbt = unchecked_psbt.validate().map_err(InternalRequestError::InconsistentPsbt)?;
-        log::debug!("Received original psbt: {:?}", psbt);
-        let params = Params::from_query_pairs(url::form_urlencoded::parse(query.as_bytes()))
-            .map_err(InternalRequestError::SenderParams)?;
-        log::debug!("Received request with params: {:?}", params);
-        Ok(Self { psbt, params })
-    }
-
     pub fn from_request(
         mut body: impl std::io::Read,
         query: &str,
@@ -357,7 +379,28 @@ impl UncheckedProposal {
 
         // TODO check that params are valid for the request's Original PSBT
 
-        Ok(UncheckedProposal { psbt, params })
+        Ok(UncheckedProposal { psbt, params, v2_context: None })
+    }
+
+    #[cfg(feature = "v2")]
+    fn from_v2_payload(
+        body: Vec<u8>,
+        e: bitcoin::secp256k1::PublicKey,
+    ) -> Result<Self, RequestError> {
+        use std::str::FromStr;
+
+        let buf_as_string = String::from_utf8(body).map_err(InternalRequestError::Utf8)?;
+        log::debug!("{}", &buf_as_string);
+        let (padded_base64, query) = buf_as_string.split_once('\n').unwrap_or_default();
+        let base64 = padded_base64.trim_start_matches('\0');
+        let unchecked_psbt = Psbt::from_str(base64).map_err(InternalRequestError::ParsePsbt)?;
+        let psbt = unchecked_psbt.validate().map_err(InternalRequestError::InconsistentPsbt)?;
+        log::debug!("Received original psbt: {:?}", psbt);
+        let params = Params::from_query_pairs(url::form_urlencoded::parse(query.as_bytes()))
+            .map_err(InternalRequestError::SenderParams)?;
+        log::debug!("Received request with params: {:?}", params);
+        let v2_context = Some(e);
+        Ok(Self { psbt, params, v2_context })
     }
 
     /// The Sender's Original PSBT
@@ -382,7 +425,11 @@ impl UncheckedProposal {
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, Error>,
     ) -> Result<MaybeInputsOwned, Error> {
         if can_broadcast(&self.psbt.clone().extract_tx())? {
-            Ok(MaybeInputsOwned { psbt: self.psbt, params: self.params })
+            Ok(MaybeInputsOwned {
+                psbt: self.psbt,
+                params: self.params,
+                v2_context: self.v2_context,
+            })
         } else {
             Err(Error::BadRequest(InternalRequestError::OriginalPsbtNotBroadcastable.into()))
         }
@@ -394,7 +441,7 @@ impl UncheckedProposal {
     /// So-called "non-interactive" receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks.
     /// Those receivers call `extract_tx_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
     pub fn assume_interactive_receiver(self) -> MaybeInputsOwned {
-        MaybeInputsOwned { psbt: self.psbt, params: self.params }
+        MaybeInputsOwned { psbt: self.psbt, params: self.params, v2_context: self.v2_context }
     }
 }
 
@@ -404,6 +451,7 @@ impl UncheckedProposal {
 pub struct MaybeInputsOwned {
     psbt: Psbt,
     params: Params,
+    v2_context: Option<bitcoin::secp256k1::PublicKey>,
 }
 
 impl MaybeInputsOwned {
@@ -437,7 +485,11 @@ impl MaybeInputsOwned {
         }
         err?;
 
-        Ok(MaybeMixedInputScripts { psbt: self.psbt, params: self.params })
+        Ok(MaybeMixedInputScripts {
+            psbt: self.psbt,
+            params: self.params,
+            v2_context: self.v2_context,
+        })
     }
 }
 
@@ -447,6 +499,7 @@ impl MaybeInputsOwned {
 pub struct MaybeMixedInputScripts {
     psbt: Psbt,
     params: Params,
+    v2_context: Option<bitcoin::secp256k1::PublicKey>,
 }
 
 impl MaybeMixedInputScripts {
@@ -489,7 +542,7 @@ impl MaybeMixedInputScripts {
             })?;
         }
 
-        Ok(MaybeInputsSeen { psbt: self.psbt, params: self.params })
+        Ok(MaybeInputsSeen { psbt: self.psbt, params: self.params, v2_context: self.v2_context })
     }
 }
 
@@ -499,6 +552,7 @@ impl MaybeMixedInputScripts {
 pub struct MaybeInputsSeen {
     psbt: Psbt,
     params: Params,
+    v2_context: Option<bitcoin::secp256k1::PublicKey>,
 }
 impl MaybeInputsSeen {
     /// Make sure that the original transaction inputs have never been seen before.
@@ -521,7 +575,7 @@ impl MaybeInputsSeen {
             }
         })?;
 
-        Ok(OutputsUnknown { psbt: self.psbt, params: self.params })
+        Ok(OutputsUnknown { psbt: self.psbt, params: self.params, v2_context: self.v2_context })
     }
 }
 
@@ -532,6 +586,7 @@ impl MaybeInputsSeen {
 pub struct OutputsUnknown {
     psbt: Psbt,
     params: Params,
+    v2_context: Option<bitcoin::secp256k1::PublicKey>,
 }
 
 impl OutputsUnknown {
@@ -562,6 +617,7 @@ impl OutputsUnknown {
             payjoin_psbt: self.psbt,
             params: self.params,
             owned_vouts,
+            v2_context: self.v2_context,
         })
     }
 }
@@ -572,6 +628,7 @@ pub struct ProvisionalProposal {
     payjoin_psbt: Psbt,
     params: Params,
     owned_vouts: Vec<usize>,
+    v2_context: Option<bitcoin::secp256k1::PublicKey>,
 }
 
 impl ProvisionalProposal {
@@ -800,6 +857,7 @@ impl ProvisionalProposal {
             payjoin_psbt: self.payjoin_psbt,
             owned_vouts: self.owned_vouts,
             params: self.params,
+            v2_context: self.v2_context,
         })
     }
 
@@ -820,6 +878,7 @@ pub struct PayjoinProposal {
     payjoin_psbt: Psbt,
     params: Params,
     owned_vouts: Vec<usize>,
+    v2_context: Option<bitcoin::secp256k1::PublicKey>,
 }
 
 impl PayjoinProposal {
@@ -834,6 +893,22 @@ impl PayjoinProposal {
     pub fn owned_vouts(&self) -> &Vec<usize> { &self.owned_vouts }
 
     pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
+
+    #[cfg(feature = "v2")]
+    pub fn serialize_body(&self) -> Result<Vec<u8>, Error> {
+        match self.v2_context {
+            Some(e) => {
+                let mut payjoin_bytes = self.payjoin_psbt.serialize();
+                crate::v2::encrypt_message_b(&mut payjoin_bytes, e).map_err(Error::V2)
+            }
+            None => Ok(bitcoin::base64::encode(self.payjoin_psbt.serialize()).as_bytes().to_vec()),
+        }
+    }
+
+    #[cfg(not(feature = "v2"))]
+    pub fn serialize_body(&self) -> Vec<u8> {
+        bitcoin::base64::encode(self.payjoin_psbt.serialize()).as_bytes().to_vec()
+    }
 }
 
 #[cfg(test)]

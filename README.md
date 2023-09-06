@@ -1,7 +1,10 @@
-# payjoin-ffi
+# Payjoin language bindings
 
-# Bindings for PDK
+This repository creates libraries for various programming languages, all using the Rust-based [Payjoin](https://github.com/payjoin/rust-payjoin) as the core implementation of BIP178, sourced from the [Payjoin Dev Kit](https://payjoindevkit.org/).
 
-This repository creates the `libpdkffi` multi-language library for the Rust-based [PDK](https://payjoindevkit.org/) from the [Payjoin Dev Kit] project.
+The primary focus of this project is to provide developers with cross-language libraries that seamlessly integrate with different platform languages. By offering support for multiple languages, we aim to enhance the accessibility and usability of Payjoin, empowering developers to incorporate this privacy-enhancing feature into their applications regardless of their preferred programming language.
 
-Each supported language and the platform(s) it's packaged for has its own directory. The Rust code in this project is in the bdk-ffi directory and is a wrapper around the [bdk] library to expose its APIs in a uniform way using the [mozilla/uniffi-rs] bindings generator for each supported target language.
+With a commitment to collaboration and interoperability, this repository strives to foster a more inclusive and diverse ecosystem around Payjoin and BIP178, contributing to the wider adoption of privacy-focused practices within the Bitcoin community. Join us in our mission to build a more private and secure future for Bitcoin transactions through Payjoin and BIP178!
+
+**Current Status:**
+This is a pre-alpha stage and is currently in the design phase. The first language bindings available will be for Android followed by Swift. The ultimate goal is to have Payjoin implementations for Android, iOS, Python, Java, React Native, Flutter, C# and Golang.

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use bitcoin::psbt::PsbtParseError;
+use payjoin::bitcoin::psbt::PsbtParseError;
 use payjoin::receive::RequestError;
 
 #[derive(Debug, PartialEq, Eq)]

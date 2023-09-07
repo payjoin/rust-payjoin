@@ -1,4 +1,5 @@
-pub mod error;
+#![crate_name = "pdk_ffi"]
+mod error;
 pub mod receive;
 pub mod send;
 #[cfg(test)]
@@ -10,10 +11,9 @@ use payjoin::bitcoin::{
 	address::{NetworkChecked, NetworkUnchecked},
 	Address as _BitcoinAdrress, ScriptBuf as BitcoinScriptBuf,
 };
-pub use payjoin::Error as PdkError;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-uniffi::include_scaffolding!("pdk");
+uniffi::include_scaffolding!("pdk_ffi");
 
 /// A reference to a transaction output.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
@@ -48,7 +48,7 @@ where
 }
 impl Address<NetworkChecked> {
 	pub fn from_script(script: ScriptBuf, network: Network) -> Result<Self, anyhow::Error> {
-		match _BitcoinAdrress::from_script(script.inner.as_script(), network.into()) {
+		match _BitcoinAdrress::from_script(script.internal.as_script(), network.into()) {
 			Ok(e) => Ok(Address { internal: e }),
 			Err(e) => anyhow::bail!(e),
 		}
@@ -82,40 +82,38 @@ impl From<Address<NetworkChecked>> for bitcoin::Address {
 	}
 }
 
-#[derive(Debug, Clone)]
+/// A Bitcoin script.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScriptBuf {
-	inner: BitcoinScriptBuf,
+	internal: BitcoinScriptBuf,
 }
 impl ScriptBuf {
 	pub fn new(raw_output_script: Vec<u8>) -> Self {
 		let buf = BitcoinScriptBuf::from_bytes(raw_output_script);
-		ScriptBuf { inner: buf }
+		ScriptBuf { internal: buf }
 	}
 
-	pub fn to_bytes(self) -> Vec<u8> {
-		self.get_internal().to_bytes()
+	pub fn to_bytes(&self) -> Vec<u8> {
+		self.internal.to_bytes()
 	}
-	pub fn to_hex_string(self) -> String {
-		self.get_internal().to_hex_string()
+	pub fn to_hex_string(&self) -> String {
+		self.internal.to_hex_string()
 	}
-	pub fn to_string(self) -> String {
-		self.get_internal().to_string()
+	pub fn to_string(&self) -> String {
+		self.internal.to_string()
 	}
-	pub fn to_asm_string(self) -> String {
-		self.get_internal().to_asm_string()
-	}
-	fn get_internal(self) -> BitcoinScriptBuf {
-		self.inner
+	pub fn to_asm_string(&self) -> String {
+		self.internal.to_asm_string()
 	}
 }
 impl From<ScriptBuf> for bitcoin::ScriptBuf {
 	fn from(value: ScriptBuf) -> Self {
-		value.get_internal()
+		value.internal
 	}
 }
 impl From<bitcoin::ScriptBuf> for ScriptBuf {
 	fn from(value: bitcoin::ScriptBuf) -> Self {
-		ScriptBuf { inner: value }
+		ScriptBuf { internal: value }
 	}
 }
 
@@ -128,7 +126,7 @@ pub struct TxOut {
 }
 impl From<TxOut> for bitcoin::TxOut {
 	fn from(tx_out: TxOut) -> Self {
-		bitcoin::TxOut { value: tx_out.value, script_pubkey: tx_out.script_pubkey.get_internal() }
+		bitcoin::TxOut { value: tx_out.value, script_pubkey: tx_out.script_pubkey.internal }
 	}
 }
 
@@ -136,28 +134,11 @@ impl From<bitcoin::TxOut> for TxOut {
 	fn from(tx_out: bitcoin::TxOut) -> Self {
 		TxOut {
 			value: tx_out.value,
-			script_pubkey: ScriptBuf { inner: tx_out.script_pubkey.into() },
+			script_pubkey: ScriptBuf { internal: tx_out.script_pubkey.into() },
 		}
 	}
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
-pub enum AddressType {
-	Legacy,
-	P2shSegwit,
-	Bech32,
-	Bech32m,
-}
-impl From<AddressType> for bitcoincore_rpc::json::AddressType {
-	fn from(value: AddressType) -> Self {
-		return match value {
-			AddressType::Legacy => bitcoincore_rpc::json::AddressType::Legacy,
-			AddressType::P2shSegwit => bitcoincore_rpc::json::AddressType::P2shSegwit,
-			AddressType::Bech32 => bitcoincore_rpc::json::AddressType::Bech32,
-			AddressType::Bech32m => bitcoincore_rpc::json::AddressType::Bech32m,
-		};
-	}
-}
 // pub struct Input {
 //     pub txid: String,
 //     pub vout: u32,

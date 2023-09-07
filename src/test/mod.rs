@@ -160,7 +160,7 @@ fn handle_pj_request(
 	//  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
 	let txo_to_contribute = crate::TxOut {
 		value: selected_utxo.amount.to_sat(),
-		script_pubkey: ScriptBuf { inner: selected_utxo.script_pub_key.clone() },
+		script_pubkey: ScriptBuf { internal: selected_utxo.script_pub_key.clone() },
 	};
 	let outpoint_to_contribute =
 		crate::OutPoint { txid: selected_utxo.txid.to_string(), vout: selected_utxo.vout };

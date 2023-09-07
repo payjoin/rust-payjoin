@@ -1,12 +1,13 @@
 use crate::{
 	transaction::{PartiallySignedTransaction, Transaction},
-	Address, OutPoint, PdkError, ScriptBuf, TxOut,
+	Address, OutPoint, ScriptBuf, TxOut,
 };
 use payjoin::receive::{
 	MaybeInputsOwned as PdkMaybeInputsOwned, MaybeInputsSeen as PdkMaybeInputsSeen,
 	MaybeMixedInputScripts as PdkMaybeMixedInputScripts, OutputsUnknown as PdkOutputsUnknown,
 	PayjoinProposal as PdkPayjoinProposal, UncheckedProposal as PdkUncheckedProposal,
 };
+use payjoin::Error as PdkError;
 use std::{
 	collections::HashMap,
 	sync::{Arc, Mutex, MutexGuard},
@@ -108,7 +109,7 @@ impl MaybeInputsOwned {
 		self, is_owned: impl IsScriptOwned,
 	) -> Result<MaybeMixedInputScripts, anyhow::Error> {
 		match self.internal.check_inputs_not_owned(|input| {
-			let res = is_owned.is_owned(ScriptBuf { inner: input.to_owned() });
+			let res = is_owned.is_owned(ScriptBuf { internal: input.to_owned() });
 			match res {
 				Ok(e) => Ok(e),
 				Err(e) => Err(PdkError::Server(e.into())),
@@ -178,7 +179,7 @@ impl OutputsUnknown {
 		self, is_receiver_output: impl IsScriptOwned,
 	) -> Result<PayjoinProposal, anyhow::Error> {
 		match self.internal.identify_receiver_outputs(|output_script| {
-			let res = is_receiver_output.is_owned(ScriptBuf { inner: output_script.to_owned() });
+			let res = is_receiver_output.is_owned(ScriptBuf { internal: output_script.to_owned() });
 			match res {
 				Ok(e) => Ok(e),
 				Err(e) => Err(PdkError::Server(e.into())),

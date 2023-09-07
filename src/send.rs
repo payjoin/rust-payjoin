@@ -105,7 +105,7 @@ pub struct Request {
 mod tests {
 	use std::str::FromStr;
 
-	use bitcoincore_rpc::bitcoin::psbt::PartiallySignedTransaction;
+	use payjoin::bitcoin::psbt::PartiallySignedTransaction;
 
 	#[test]
 	fn official_vectors() {

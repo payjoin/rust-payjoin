@@ -1,8 +1,6 @@
-use std::fmt;
-
 use payjoin::bitcoin::psbt::PsbtParseError;
 use payjoin::receive::RequestError;
-
+use std::fmt;
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
 	/// Error encountered during PSBT decoding from Base64 string.

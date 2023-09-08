@@ -1,0 +1,10 @@
+namespace pdk_ffi {
+
+};
+
+interface ScriptBuf {
+  constructor(sequence<u8> raw_output_script);
+  sequence<u8> to_bytes();
+  string to_hex_string();
+  string to_string();
+};

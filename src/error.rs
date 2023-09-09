@@ -1,48 +1,40 @@
 use payjoin::bitcoin::psbt::PsbtParseError;
 use payjoin::receive::RequestError;
-use std::fmt;
-#[derive(Debug, PartialEq, Eq)]
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-	/// Error encountered during PSBT decoding from Base64 string.
-	PsbtParseError(String),
-	ReceiveError(String),
-	///Error that may occur when the request from sender is malformed.
-	///This is currently opaque type because we aren’t sure which variants will stay. You can only display it.
-	RequestError(String),
-	///Error that may occur when coin selection fails.
-	SelectionError(String),
-	///Error returned when request could not be created.
-	///This error can currently only happen due to programmer mistake.
-	CreateRequestError(String),
-	PjParseError(String),
-	UnexpectedError(String),
+    #[error("Error while parsing the string: {0}")] InvalidAddress(String),
+    #[error("Invalid script: {0}")] InvalidScript(String),
+    #[error("Error encountered while decoding PSBT : {0}")] PsbtParseError(String),
+    #[error("Receive error : {0}")] ReceiveError(String),
+    ///Error that may occur when the request from sender is malformed.
+    ///This is currently opaque type because we aren’t sure which variants will stay. You can only display it.
+    #[error("Error encountered while processing the sender's request : {0}")]
+    RequestError(String),
+    ///Error that may occur when coin selection fails.
+    #[error("Selection error : {0}")]
+    SelectionError(String),
+    ///Error returned when request could not be created.
+    ///This error can currently only happen due to programmer mistake.
+    #[error("Error creating the request: {0}")]
+    CreateRequestError(String),
+    #[error("Error parsing the Pj URL: {0}")] PjParseError(String),
+    #[error("{0}")] PjNotSupported(String),
+    #[error("Unexpected error occured: {0}")] UnexpectedError(String),
 }
-impl fmt::Display for Error {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Error::ReceiveError(e) => write!(f, "ReceiveError: {}", e),
-			Error::RequestError(e) => write!(f, "RequestError: {}", e),
-			Error::SelectionError(e) => write!(f, "SelectionError: {}", e),
-			Error::CreateRequestError(e) => write!(f, "CreateRequestError: {}", e),
-			Error::PjParseError(e) => write!(f, "PjParseError: {}", e),
-			Error::PsbtParseError(e) => write!(f, "PsbtParseError: {}", e),
-			Error::UnexpectedError(e) => write!(f, "UnexpectedError: {}", e),
-		}
-	}
-}
-impl std::error::Error for Error {}
+
 impl From<RequestError> for Error {
-	fn from(value: RequestError) -> Self {
-		Error::RequestError(value.to_string())
-	}
+    fn from(value: RequestError) -> Self {
+        Error::RequestError(value.to_string())
+    }
 }
 impl From<PsbtParseError> for Error {
-	fn from(value: PsbtParseError) -> Self {
-		Error::PsbtParseError(value.to_string())
-	}
+    fn from(value: PsbtParseError) -> Self {
+        Error::PsbtParseError(value.to_string())
+    }
 }
 impl From<payjoin::Error> for Error {
-	fn from(value: payjoin::Error) -> Self {
-		Error::UnexpectedError(value.to_string())
-	}
+    fn from(value: payjoin::Error) -> Self {
+        Error::UnexpectedError(value.to_string())
+    }
 }

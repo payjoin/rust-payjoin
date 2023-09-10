@@ -1,16 +1,17 @@
 #![crate_name = "pdk_ffi"]
 mod error;
-pub mod receive;
-pub mod send;
+mod receive;
+mod send;
 #[cfg(test)]
 mod test;
-pub mod transaction;
-pub mod uri;
+mod transaction;
+mod uri;
+use crate::receive::Headers;
+use crate::transaction::{PartiallySignedTransaction, Transaction};
+use crate::uri::{PrjUri, Uri, Url};
+use error::Error;
 pub use payjoin::bitcoin;
-use payjoin::bitcoin::{
-	address::{NetworkChecked, NetworkUnchecked},
-	Address as _BitcoinAdrress, ScriptBuf as BitcoinScriptBuf,
-};
+use payjoin::bitcoin::{Address as BitcoinAdrress, ScriptBuf as BitcoinScriptBuf};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 uniffi::include_scaffolding!("pdk_ffi");
@@ -38,46 +39,32 @@ impl From<bitcoin::OutPoint> for OutPoint {
 	}
 }
 
-//TODO; RECREATE ADDRESS STRUCTURE
 #[derive(Debug, Clone, PartialEq)]
-pub struct Address<T>
-where
-	T: bitcoin::address::NetworkValidation,
-{
-	pub internal: _BitcoinAdrress<T>,
+pub struct Address {
+	pub internal: BitcoinAdrress,
 }
-impl Address<NetworkChecked> {
-	pub fn from_script(script: ScriptBuf, network: Network) -> Result<Self, anyhow::Error> {
-		match _BitcoinAdrress::from_script(script.internal.as_script(), network.into()) {
-			Ok(e) => Ok(Address { internal: e }),
-			Err(e) => anyhow::bail!(e),
+
+impl Address {
+	pub fn new(address: String) -> Result<Address, Error> {
+		match BitcoinAdrress::from_str(&address) {
+			Ok(e) => Ok(Address { internal: e.assume_checked() }),
+			Err(e) => Err(Error::InvalidAddress(e.to_string())),
 		}
 	}
-	pub fn to_string(self) -> String {
+	//TODO; ADD TO .UDL
+	pub fn from_script(script: ScriptBuf, network: Network) -> Result<Self, Error> {
+		match BitcoinAdrress::from_script(script.internal.as_script(), network.into()) {
+			Ok(e) => Ok(Address { internal: e }),
+			Err(e) => Err(Error::InvalidAddress(e.to_string())),
+		}
+	}
+	pub fn to_string(&self) -> String {
 		self.internal.to_string()
 	}
 }
-impl Address<NetworkUnchecked> {
-	pub fn assume_checked(self) -> Result<Address<NetworkChecked>, anyhow::Error> {
-		Ok(Address { internal: self.internal.assume_checked() })
-	}
-	pub fn require_network(
-		self, network: Network,
-	) -> Result<Address<NetworkChecked>, anyhow::Error> {
-		Ok(Address {
-			internal: self.internal.require_network(network.into()).expect("Invalid Network"),
-		})
-	}
-	pub fn from_str(address: &str) -> Result<Self, anyhow::Error> {
-		match _BitcoinAdrress::from_str(&address) {
-			Ok(e) => Ok(Address { internal: e }),
-			Err(e) => anyhow::bail!(e),
-		}
-	}
-}
 
-impl From<Address<NetworkChecked>> for bitcoin::Address {
-	fn from(value: Address<NetworkChecked>) -> Self {
+impl From<Address> for bitcoin::Address {
+	fn from(value: Address) -> Self {
 		value.internal
 	}
 }

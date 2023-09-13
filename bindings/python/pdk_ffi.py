@@ -528,7 +528,27 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_scriptbuf_to_string() != 60369:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_address_to_string() != 12154:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_uri_amount() != 48142:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_uri_address() != 9799:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_uri_check_pj_supported() != 6396:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_serialize() != 44606:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_constructor_scriptbuf_new() != 58311:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_constructor_address_new() != 39137:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_constructor_headers_from_vec() != 39437:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_constructor_url_new() != 42932:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_constructor_uri_new() != 51867:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_constructor_partiallysignedtransaction_new() != 53525:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
 
 # A ctypes library to expose the extern-C FFI definitions.
@@ -560,6 +580,86 @@ _UniFFILib.uniffi_pdk_ffi_fn_method_scriptbuf_to_string.argtypes = (
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_method_scriptbuf_to_string.restype = RustBuffer
+_UniFFILib.uniffi_pdk_ffi_fn_free_address.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_free_address.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_address_new.argtypes = (
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_address_new.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_method_address_to_string.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_address_to_string.restype = RustBuffer
+_UniFFILib.uniffi_pdk_ffi_fn_free_headers.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_free_headers.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_headers_from_vec.argtypes = (
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_headers_from_vec.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_free_url.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_free_url.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_url_new.argtypes = (
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_url_new.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_free_uri.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_free_uri.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_uri_new.argtypes = (
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_uri_new.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_method_uri_amount.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_uri_amount.restype = RustBuffer
+_UniFFILib.uniffi_pdk_ffi_fn_method_uri_address.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_uri_address.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_method_uri_check_pj_supported.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_uri_check_pj_supported.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_free_partiallysignedtransaction.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_free_partiallysignedtransaction.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_partiallysignedtransaction_new.argtypes = (
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_partiallysignedtransaction_new.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_serialize.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_serialize.restype = RustBuffer
+_UniFFILib.uniffi_pdk_ffi_fn_free_prjuri.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_free_prjuri.restype = None
 _UniFFILib.ffi_pdk_ffi_rustbuffer_alloc.argtypes = (
     ctypes.c_int32,
     ctypes.POINTER(RustCallStatus),
@@ -590,9 +690,39 @@ _UniFFILib.uniffi_pdk_ffi_checksum_method_scriptbuf_to_hex_string.restype = ctyp
 _UniFFILib.uniffi_pdk_ffi_checksum_method_scriptbuf_to_string.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_scriptbuf_to_string.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_address_to_string.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_address_to_string.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_uri_amount.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_uri_amount.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_uri_address.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_uri_address.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_uri_check_pj_supported.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_uri_check_pj_supported.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_serialize.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_serialize.restype = ctypes.c_uint16
 _UniFFILib.uniffi_pdk_ffi_checksum_constructor_scriptbuf_new.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_constructor_scriptbuf_new.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_address_new.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_address_new.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_headers_from_vec.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_headers_from_vec.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_url_new.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_url_new.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_uri_new.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_uri_new.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_partiallysignedtransaction_new.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_partiallysignedtransaction_new.restype = ctypes.c_uint16
 _UniFFILib.ffi_pdk_ffi_uniffi_contract_version.argtypes = (
 )
 _UniFFILib.ffi_pdk_ffi_uniffi_contract_version.restype = ctypes.c_uint32
@@ -614,6 +744,32 @@ class FfiConverterUInt8(FfiConverterPrimitiveInt):
     @staticmethod
     def writeUnchecked(value, buf):
         buf.writeU8(value)
+
+class FfiConverterUInt32(FfiConverterPrimitiveInt):
+    CLASS_NAME = "u32"
+    VALUE_MIN = 0
+    VALUE_MAX = 2**32
+
+    @staticmethod
+    def read(buf):
+        return buf.readU32()
+
+    @staticmethod
+    def writeUnchecked(value, buf):
+        buf.writeU32(value)
+
+class FfiConverterUInt64(FfiConverterPrimitiveInt):
+    CLASS_NAME = "u64"
+    VALUE_MIN = 0
+    VALUE_MAX = 2**64
+
+    @staticmethod
+    def read(buf):
+        return buf.readU64()
+
+    @staticmethod
+    def writeUnchecked(value, buf):
+        buf.writeU64(value)
 
 class FfiConverterString:
     @staticmethod
@@ -648,6 +804,215 @@ class FfiConverterString:
         with RustBuffer.allocWithBuilder() as builder:
             builder.write(value.encode("utf-8"))
             return builder.finalize()
+
+
+
+class Address:
+    _pointer: ctypes.c_void_p
+    def __init__(self, address: "str"):
+        
+        self._pointer = rust_call_with_error(FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_address_new,
+        FfiConverterString.lower(address))
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_free_address, pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+    def to_string(self, ) -> "str":
+        return FfiConverterString.lift(
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_address_to_string,self._pointer,)
+        )
+
+
+
+
+
+
+class FfiConverterTypeAddress:
+    @classmethod
+    def read(cls, buf):
+        ptr = buf.readU64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value, buf):
+        if not isinstance(value, Address):
+            raise TypeError("Expected Address instance, {} found".format(value.__class__.__name__))
+        buf.writeU64(cls.lower(value))
+
+    @staticmethod
+    def lift(value):
+        return Address._make_instance_(value)
+
+    @staticmethod
+    def lower(value):
+        return value._pointer
+
+
+
+class Headers:
+    _pointer: ctypes.c_void_p
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_free_headers, pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+    @classmethod
+    def from_vec(cls, body: "typing.List[int]"):
+        
+        # Call the (fallible) function before creating any half-baked object instances.
+        pointer = rust_call(_UniFFILib.uniffi_pdk_ffi_fn_constructor_headers_from_vec,
+        FfiConverterSequenceUInt8.lower(body))
+        return cls._make_instance_(pointer)
+
+
+
+class FfiConverterTypeHeaders:
+    @classmethod
+    def read(cls, buf):
+        ptr = buf.readU64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value, buf):
+        if not isinstance(value, Headers):
+            raise TypeError("Expected Headers instance, {} found".format(value.__class__.__name__))
+        buf.writeU64(cls.lower(value))
+
+    @staticmethod
+    def lift(value):
+        return Headers._make_instance_(value)
+
+    @staticmethod
+    def lower(value):
+        return value._pointer
+
+
+
+class PartiallySignedTransaction:
+    _pointer: ctypes.c_void_p
+    def __init__(self, psbt_base64: "str"):
+        
+        self._pointer = rust_call_with_error(FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_partiallysignedtransaction_new,
+        FfiConverterString.lower(psbt_base64))
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_free_partiallysignedtransaction, pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+    def serialize(self, ) -> "typing.List[int]":
+        return FfiConverterSequenceUInt8.lift(
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_serialize,self._pointer,)
+        )
+
+
+
+
+
+
+class FfiConverterTypePartiallySignedTransaction:
+    @classmethod
+    def read(cls, buf):
+        ptr = buf.readU64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value, buf):
+        if not isinstance(value, PartiallySignedTransaction):
+            raise TypeError("Expected PartiallySignedTransaction instance, {} found".format(value.__class__.__name__))
+        buf.writeU64(cls.lower(value))
+
+    @staticmethod
+    def lift(value):
+        return PartiallySignedTransaction._make_instance_(value)
+
+    @staticmethod
+    def lower(value):
+        return value._pointer
+
+
+
+class PrjUri:
+    _pointer: ctypes.c_void_p
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_free_prjuri, pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+class FfiConverterTypePrjUri:
+    @classmethod
+    def read(cls, buf):
+        ptr = buf.readU64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value, buf):
+        if not isinstance(value, PrjUri):
+            raise TypeError("Expected PrjUri instance, {} found".format(value.__class__.__name__))
+        buf.writeU64(cls.lower(value))
+
+    @staticmethod
+    def lift(value):
+        return PrjUri._make_instance_(value)
+
+    @staticmethod
+    def lower(value):
+        return value._pointer
 
 
 
@@ -728,6 +1093,347 @@ class FfiConverterTypeScriptBuf:
 
 
 
+class Uri:
+    _pointer: ctypes.c_void_p
+    def __init__(self, uri: "str"):
+        
+        self._pointer = rust_call_with_error(FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_uri_new,
+        FfiConverterString.lower(uri))
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_free_uri, pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+    def amount(self, ) -> "typing.Optional[int]":
+        return FfiConverterOptionalUInt64.lift(
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_uri_amount,self._pointer,)
+        )
+
+
+
+
+
+
+    def address(self, ) -> "Address":
+        return FfiConverterTypeAddress.lift(
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_uri_address,self._pointer,)
+        )
+
+
+
+
+
+
+    def check_pj_supported(self, ) -> "PrjUri":
+        return FfiConverterTypePrjUri.lift(
+            rust_call_with_error(
+    FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_method_uri_check_pj_supported,self._pointer,)
+        )
+
+
+
+
+
+
+class FfiConverterTypeUri:
+    @classmethod
+    def read(cls, buf):
+        ptr = buf.readU64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value, buf):
+        if not isinstance(value, Uri):
+            raise TypeError("Expected Uri instance, {} found".format(value.__class__.__name__))
+        buf.writeU64(cls.lower(value))
+
+    @staticmethod
+    def lift(value):
+        return Uri._make_instance_(value)
+
+    @staticmethod
+    def lower(value):
+        return value._pointer
+
+
+
+class Url:
+    _pointer: ctypes.c_void_p
+    def __init__(self, input: "str"):
+        
+        self._pointer = rust_call_with_error(FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_url_new,
+        FfiConverterString.lower(input))
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_free_url, pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+class FfiConverterTypeUrl:
+    @classmethod
+    def read(cls, buf):
+        ptr = buf.readU64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value, buf):
+        if not isinstance(value, Url):
+            raise TypeError("Expected Url instance, {} found".format(value.__class__.__name__))
+        buf.writeU64(cls.lower(value))
+
+    @staticmethod
+    def lift(value):
+        return Url._make_instance_(value)
+
+    @staticmethod
+    def lower(value):
+        return value._pointer
+
+
+class OutPoint:
+
+    def __init__(self, txid, vout):
+        self.txid = txid
+        self.vout = vout
+
+    def __str__(self):
+        return "OutPoint(txid={}, vout={})".format(self.txid, self.vout)
+
+    def __eq__(self, other):
+        if self.txid != other.txid:
+            return False
+        if self.vout != other.vout:
+            return False
+        return True
+
+class FfiConverterTypeOutPoint(FfiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return OutPoint(
+            txid=FfiConverterString.read(buf),
+            vout=FfiConverterUInt32.read(buf),
+        )
+
+    @staticmethod
+    def write(value, buf):
+        FfiConverterString.write(value.txid, buf)
+        FfiConverterUInt32.write(value.vout, buf)
+
+
+# Error
+# We want to define each variant as a nested class that's also a subclass,
+# which is tricky in Python.  To accomplish this we're going to create each
+# class separately, then manually add the child classes to the base class's
+# __dict__.  All of this happens in dummy class to avoid polluting the module
+# namespace.
+class Error(Exception):
+    pass
+
+UniFFITempError = Error
+
+class Error:  # type: ignore
+    class InvalidAddress(UniFFITempError):
+        def __repr__(self):
+            return "Error.InvalidAddress({})".format(repr(str(self)))
+    UniFFITempError.InvalidAddress = InvalidAddress  # type: ignore
+    class InvalidScript(UniFFITempError):
+        def __repr__(self):
+            return "Error.InvalidScript({})".format(repr(str(self)))
+    UniFFITempError.InvalidScript = InvalidScript  # type: ignore
+    class PsbtParseError(UniFFITempError):
+        def __repr__(self):
+            return "Error.PsbtParseError({})".format(repr(str(self)))
+    UniFFITempError.PsbtParseError = PsbtParseError  # type: ignore
+    class ReceiveError(UniFFITempError):
+        def __repr__(self):
+            return "Error.ReceiveError({})".format(repr(str(self)))
+    UniFFITempError.ReceiveError = ReceiveError  # type: ignore
+    class RequestError(UniFFITempError):
+        def __repr__(self):
+            return "Error.RequestError({})".format(repr(str(self)))
+    UniFFITempError.RequestError = RequestError  # type: ignore
+    class SelectionError(UniFFITempError):
+        def __repr__(self):
+            return "Error.SelectionError({})".format(repr(str(self)))
+    UniFFITempError.SelectionError = SelectionError  # type: ignore
+    class CreateRequestError(UniFFITempError):
+        def __repr__(self):
+            return "Error.CreateRequestError({})".format(repr(str(self)))
+    UniFFITempError.CreateRequestError = CreateRequestError  # type: ignore
+    class PjParseError(UniFFITempError):
+        def __repr__(self):
+            return "Error.PjParseError({})".format(repr(str(self)))
+    UniFFITempError.PjParseError = PjParseError  # type: ignore
+    class PjNotSupported(UniFFITempError):
+        def __repr__(self):
+            return "Error.PjNotSupported({})".format(repr(str(self)))
+    UniFFITempError.PjNotSupported = PjNotSupported  # type: ignore
+    class UnexpectedError(UniFFITempError):
+        def __repr__(self):
+            return "Error.UnexpectedError({})".format(repr(str(self)))
+    UniFFITempError.UnexpectedError = UnexpectedError  # type: ignore
+
+Error = UniFFITempError  # type: ignore
+del UniFFITempError
+
+
+class FfiConverterTypeError(FfiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        variant = buf.readI32()
+        if variant == 1:
+            return Error.InvalidAddress(
+                FfiConverterString.read(buf),
+            )
+        if variant == 2:
+            return Error.InvalidScript(
+                FfiConverterString.read(buf),
+            )
+        if variant == 3:
+            return Error.PsbtParseError(
+                FfiConverterString.read(buf),
+            )
+        if variant == 4:
+            return Error.ReceiveError(
+                FfiConverterString.read(buf),
+            )
+        if variant == 5:
+            return Error.RequestError(
+                FfiConverterString.read(buf),
+            )
+        if variant == 6:
+            return Error.SelectionError(
+                FfiConverterString.read(buf),
+            )
+        if variant == 7:
+            return Error.CreateRequestError(
+                FfiConverterString.read(buf),
+            )
+        if variant == 8:
+            return Error.PjParseError(
+                FfiConverterString.read(buf),
+            )
+        if variant == 9:
+            return Error.PjNotSupported(
+                FfiConverterString.read(buf),
+            )
+        if variant == 10:
+            return Error.UnexpectedError(
+                FfiConverterString.read(buf),
+            )
+        raise InternalError("Raw enum value doesn't match any cases")
+
+    @staticmethod
+    def write(value, buf):
+        if isinstance(value, Error.InvalidAddress):
+            buf.writeI32(1)
+        if isinstance(value, Error.InvalidScript):
+            buf.writeI32(2)
+        if isinstance(value, Error.PsbtParseError):
+            buf.writeI32(3)
+        if isinstance(value, Error.ReceiveError):
+            buf.writeI32(4)
+        if isinstance(value, Error.RequestError):
+            buf.writeI32(5)
+        if isinstance(value, Error.SelectionError):
+            buf.writeI32(6)
+        if isinstance(value, Error.CreateRequestError):
+            buf.writeI32(7)
+        if isinstance(value, Error.PjParseError):
+            buf.writeI32(8)
+        if isinstance(value, Error.PjNotSupported):
+            buf.writeI32(9)
+        if isinstance(value, Error.UnexpectedError):
+            buf.writeI32(10)
+
+
+
+
+
+class Network(enum.Enum):
+    BITCOIN = 1
+    TESTNET = 2
+    SIGNET = 3
+    REGTEST = 4
+    
+
+
+class FfiConverterTypeNetwork(FfiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        variant = buf.readI32()
+        if variant == 1:
+            return Network.BITCOIN
+        if variant == 2:
+            return Network.TESTNET
+        if variant == 3:
+            return Network.SIGNET
+        if variant == 4:
+            return Network.REGTEST
+        raise InternalError("Raw enum value doesn't match any cases")
+
+    def write(value, buf):
+        if value == Network.BITCOIN:
+            buf.writeI32(1)
+        if value == Network.TESTNET:
+            buf.writeI32(2)
+        if value == Network.SIGNET:
+            buf.writeI32(3)
+        if value == Network.REGTEST:
+            buf.writeI32(4)
+
+
+
+
+class FfiConverterOptionalUInt64(FfiConverterRustBuffer):
+    @classmethod
+    def write(cls, value, buf):
+        if value is None:
+            buf.writeU8(0)
+            return
+
+        buf.writeU8(1)
+        FfiConverterUInt64.write(value, buf)
+
+    @classmethod
+    def read(cls, buf):
+        flag = buf.readU8()
+        if flag == 0:
+            return None
+        elif flag == 1:
+            return FfiConverterUInt64.read(buf)
+        else:
+            raise InternalError("Unexpected flag byte for optional type")
+
+
+
 class FfiConverterSequenceUInt8(FfiConverterRustBuffer):
     @classmethod
     def write(cls, value, buf):
@@ -748,6 +1454,15 @@ class FfiConverterSequenceUInt8(FfiConverterRustBuffer):
 
 __all__ = [
     "InternalError",
+    "Error",
+    "Network",
+    "OutPoint",
     "ScriptBuf",
+    "Address",
+    "Headers",
+    "Url",
+    "Uri",
+    "PartiallySignedTransaction",
+    "PrjUri",
 ]
 

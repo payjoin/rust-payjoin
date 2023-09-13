@@ -1,10 +1,78 @@
 namespace pdk_ffi {
 
 };
+[Error]
+enum Error {
+    "InvalidAddress",
+    "InvalidScript",
+    "PsbtParseError",
+    "ReceiveError",
+    "RequestError",
+    "SelectionError",
+    "CreateRequestError",
+    "PjParseError",
+    "PjNotSupported",
+    "UnexpectedError"
+};
+dictionary OutPoint {
+  string txid;
+	u32 vout;
+};
+
+enum Network {
+	"Bitcoin",
+	"Testnet",
+	"Signet",
+	"Regtest",
+};
 
 interface ScriptBuf {
   constructor(sequence<u8> raw_output_script);
+
   sequence<u8> to_bytes();
+
   string to_hex_string();
+
   string to_string();
 };
+
+interface Address{
+  [Throws=Error]
+  constructor(string address);
+
+  string to_string();
+};
+
+interface Headers {
+  [Name=from_vec]
+  constructor(sequence<u8> body);
+};
+
+interface Url {
+  [Throws=Error]
+  constructor(string input);
+};
+
+interface Uri {
+  [Throws=Error]
+  constructor(string uri);
+
+  u64? amount();
+
+  Address address();
+
+  [Throws=Error]
+  PrjUri check_pj_supported();
+};
+
+interface PartiallySignedTransaction{
+  [Throws=Error]
+  constructor(string psbt_base64);
+
+  sequence<u8> serialize();
+};
+
+interface PrjUri{
+};
+
+

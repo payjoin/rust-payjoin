@@ -54,11 +54,11 @@ fn integration_test() {
 		pj_receiver_address.to_qr_uri(),
 		amount.to_btc()
 	);
-	let _uri = Uri::from_str(pj_uri_string).unwrap().assume_checked();
+	let _uri = Uri::new(pj_uri_string).unwrap();
 	let pj_uri = _uri.check_pj_supported().expect("Bad Uri");
 	// Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
 	let mut outputs = HashMap::with_capacity(1);
-	outputs.insert(pj_uri.clone().address().to_string(), pj_uri.clone().amount().unwrap());
+	outputs.insert(pj_uri.address().clone().to_string(), pj_uri.amount().clone().unwrap());
 	debug!("outputs: {:?}", outputs);
 	let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
 		lock_unspent: Some(true),
@@ -169,10 +169,8 @@ fn handle_pj_request(
 	let receiver_substitute_address =
 		receiver.get_new_address(None, None).unwrap().assume_checked();
 	payjoin.substitute_output_address(
-		crate::Address::from_str(receiver_substitute_address.to_string().as_str())
-			.expect("Invalid address")
-			.assume_checked()
-			.expect("error assume_checked"),
+		crate::Address::new(receiver_substitute_address.to_string().as_str().to_owned())
+			.expect("Invalid address"),
 	);
 
 	let payjoin_proposal_psbt = payjoin.apply_fee(None).expect("Aplly fee");

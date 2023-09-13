@@ -230,9 +230,7 @@ impl PayjoinProposal {
 	}
 
 	/// Just replace an output address with
-	pub fn substitute_output_address(
-		&self, substitute_address: Address<payjoin::bitcoin::address::NetworkChecked>,
-	) {
+	pub fn substitute_output_address(&self, substitute_address: Address) {
 		if self.get_proposal().as_ref().is_none() {
 			panic!("PayjoinProposal not initalized");
 		}
@@ -336,10 +334,7 @@ mod test {
 			{
 				let network = Network::Bitcoin;
 				Ok(Address::from_script(script, network.clone()).unwrap()
-					== Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
-						.unwrap()
-						.assume_checked()
-						.unwrap())
+					== Address::new("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM".to_owned()).unwrap())
 			}
 		}
 	}

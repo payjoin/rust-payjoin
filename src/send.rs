@@ -12,7 +12,7 @@ pub struct Configuration {
 }
 
 impl Configuration {
-	pub(crate) fn get_configuration_mutex(&self) -> MutexGuard<Option<PdkConfiguration>> {
+	fn get_configuration_mutex(&self) -> MutexGuard<Option<PdkConfiguration>> {
 		self.internal.lock().expect("PdkConfiguration")
 	}
 	///Offer the receiver contribution to pay for his input.

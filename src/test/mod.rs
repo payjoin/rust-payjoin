@@ -79,20 +79,23 @@ fn integration_test() {
 	let psbt = PartiallySignedTransaction::new(psbt).expect("Psbt new");
 	debug!("Original psbt: {:#?}", psbt);
 	let pj_params = Configuration::with_fee_contribution(10000, None);
-	let (req, ctx) = pj_uri.create_pj_request(psbt, pj_params).unwrap();
-	let headers = Headers::from_vec(req.body.clone());
+	pj_params.always_disable_output_substitution(true);
+	pj_params.clamp_fee_contribution(true);
+	let pj_req = pj_uri.create_pj_request(Arc::new(psbt), Arc::new(pj_params)).unwrap();
+	let headers = Headers::from_vec(pj_req.request.body.clone());
 
 	// **********************
 	// Inside the Receiver:
 	// this data would transit from one party to another over the network in production
 	let rec_clone = Arc::new(receiver);
-	let response = handle_pj_request(req, headers, rec_clone.clone());
+	let response = handle_pj_request(pj_req.request, headers, rec_clone.clone());
 	// this response would be returned as http response to the sender
 
 	// **********************
 	// Inside the Sender:
 	// Sender checks, signs, finalizes, extracts, and broadcasts
-	let checked_payjoin_proposal_psbt = ctx.process_response(&mut response.as_bytes()).unwrap();
+	let checked_payjoin_proposal_psbt =
+		pj_req.context.process_response(&mut response.as_bytes()).unwrap();
 	let payjoin_base64_string = base64::encode(&checked_payjoin_proposal_psbt.serialize());
 	let payjoin_psbt =
 		sender.wallet_process_psbt(&payjoin_base64_string, None, None, None).unwrap().psbt;

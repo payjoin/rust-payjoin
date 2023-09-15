@@ -7,14 +7,15 @@ mod test;
 mod transaction;
 mod uri;
 use crate::receive::Headers;
+use crate::send::{Configuration, Context, Request};
 use crate::transaction::{PartiallySignedTransaction, Transaction};
-use crate::uri::{PrjUri, Uri, Url};
+use crate::uri::{PrjUri, PrjUriRequest, Uri, Url};
 use error::Error;
 pub use payjoin::bitcoin;
 use payjoin::bitcoin::{Address as BitcoinAdrress, ScriptBuf as BitcoinScriptBuf};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-uniffi::include_scaffolding!("pdk_ffi");
+uniffi::include_scaffolding!("pdk");
 
 /// A reference to a transaction output.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]

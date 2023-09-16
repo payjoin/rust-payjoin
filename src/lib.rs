@@ -6,16 +6,21 @@ mod send;
 mod test;
 mod transaction;
 mod uri;
-use crate::receive::Headers;
+use crate::receive::{
+	CanBroadcast, Headers, MaybeInputsOwned, MaybeInputsSeen, MaybeMixedInputScripts,
+	OutputsUnknown, PayjoinProposal, UncheckedProposal,
+};
 use crate::send::{Configuration, Context, Request};
-use crate::transaction::{PartiallySignedTransaction, Transaction};
-use crate::uri::{PrjUri, PrjUriRequest, Uri, Url};
-use error::Error;
+
+use crate::transaction::{PartiallySignedTransaction, Transaction, Txid};
+use crate::uri::{Amount, PrjUri, PrjUriRequest, Uri, Url};
+pub use error::Error;
 pub use payjoin::bitcoin;
 use payjoin::bitcoin::{Address as BitcoinAdrress, ScriptBuf as BitcoinScriptBuf};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-uniffi::include_scaffolding!("pdk");
+use std::sync::Arc;
+uniffi::include_scaffolding!("pdk_ffi");
 
 /// A reference to a transaction output.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
@@ -42,20 +47,24 @@ impl From<bitcoin::OutPoint> for OutPoint {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Address {
-	pub internal: BitcoinAdrress,
+	internal: BitcoinAdrress,
 }
-
+impl From<bitcoin::Address> for Address {
+	fn from(value: bitcoin::Address) -> Self {
+		Address { internal: value }
+	}
+}
 impl Address {
 	pub fn new(address: String) -> Result<Address, Error> {
 		match BitcoinAdrress::from_str(&address) {
-			Ok(e) => Ok(Address { internal: e.assume_checked() }),
+			Ok(e) => Ok(e.assume_checked().into()),
 			Err(e) => Err(Error::InvalidAddress(e.to_string())),
 		}
 	}
 	//TODO; ADD TO .UDL
-	pub fn from_script(script: ScriptBuf, network: Network) -> Result<Self, Error> {
+	pub fn from_script(script: Arc<ScriptBuf>, network: Network) -> Result<Self, Error> {
 		match BitcoinAdrress::from_script(script.internal.as_script(), network.into()) {
-			Ok(e) => Ok(Address { internal: e }),
+			Ok(e) => Ok(e.into()),
 			Err(e) => Err(Error::InvalidAddress(e.to_string())),
 		}
 	}

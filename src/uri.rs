@@ -7,11 +7,25 @@ use crate::{
 use payjoin::{bitcoin::address::NetworkChecked, PjUriExt, UriExt};
 use std::{str::FromStr, sync::Arc};
 
-#[derive(Clone)]
-pub struct Uri {
-	pub internal: payjoin::Uri<'static, NetworkChecked>,
+pub struct PrjUriRequest {
+	pub request: Request,
+	pub context: Arc<Context>,
 }
 
+#[derive(Clone)]
+pub struct Uri {
+	internal: payjoin::Uri<'static, NetworkChecked>,
+}
+impl From<Uri> for payjoin::Uri<'static, NetworkChecked> {
+	fn from(value: Uri) -> Self {
+		value.internal
+	}
+}
+impl From<payjoin::Uri<'static, NetworkChecked>> for Uri {
+	fn from(value: payjoin::Uri<'static, NetworkChecked>) -> Self {
+		Self { internal: value }
+	}
+}
 impl Uri {
 	pub fn new(uri: String) -> Result<Self, Error> {
 		match payjoin::Uri::from_str(uri.as_str()) {
@@ -34,44 +48,63 @@ impl Uri {
 	}
 }
 
-// [Throws=Error]
-//  PrjUriRequest create_pj_request( PartiallySignedTransaction psbt, Configuration params );
 #[derive(Debug, Clone)]
 pub struct PrjUri {
-	pub internal: payjoin::PjUri<'static>,
+	internal: payjoin::PjUri<'static>,
 }
-pub struct PrjUriRequest {
-	pub request: Request,
-	pub context: Context,
+impl From<PrjUri> for payjoin::PjUri<'static> {
+	fn from(value: PrjUri) -> Self {
+		value.internal
+	}
 }
+impl From<payjoin::PjUri<'static>> for PrjUri {
+	fn from(value: payjoin::PjUri<'static>) -> Self {
+		Self { internal: value }
+	}
+}
+
 impl PrjUri {
 	pub fn create_pj_request(
 		&self, psbt: Arc<PartiallySignedTransaction>, params: Arc<Configuration>,
 	) -> Result<PrjUriRequest, Error> {
-		let config = std::mem::replace(&mut *params.internal.lock().unwrap(), None);
-		match self
-			.internal
-			.clone()
-			.create_pj_request(psbt.internal.as_ref().to_owned(), config.unwrap())
-		{
+		let config = params.get_configuration();
+		match self.internal.clone().create_pj_request((*psbt).clone().into(), config.0.unwrap()) {
 			Ok(e) => Ok(PrjUriRequest {
 				request: Request { url: Arc::new(Url { internal: e.0.url }), body: e.0.body },
-				context: Context { internal: e.1 },
+				context: Arc::new(e.1.into()),
 			}),
 			Err(e) => Err(Error::CreateRequestError(e.to_string())),
 		}
 	}
 
-	pub fn address(&self) -> Address {
-		Address { internal: self.internal.address.clone() }
+	pub fn address(&self) -> Arc<Address> {
+		Arc::new(self.internal.address.clone().into())
 	}
-	pub fn amount(&self) -> Option<payjoin::bitcoin::Amount> {
-		self.internal.amount
+	pub fn amount(&self) -> Option<Arc<Amount>> {
+		self.internal.amount.map(|x| Arc::new(Amount::from_sat(x.to_sat())))
+	}
+}
+#[derive(Clone, Debug)]
+pub struct Amount {
+	internal: u64,
+}
+impl Amount {
+	pub fn from_sat(sats: u64) -> Self {
+		Self { internal: sats }
+	}
+	pub fn from_btc(btc: f64) -> Self {
+		Self { internal: (btc as u64) * 100000000 }
+	}
+	pub fn to_sat(&self) -> u64 {
+		self.internal
+	}
+	pub fn to_btc(&self) -> f64 {
+		return (self.internal as f64) / (100000000 as f64);
 	}
 }
 
 pub struct Url {
-	pub internal: url::Url,
+	internal: url::Url,
 }
 impl Url {
 	pub fn new(input: String) -> Result<Url, Error> {
@@ -79,6 +112,9 @@ impl Url {
 			Ok(e) => Ok(Self { internal: e }),
 			Err(e) => Err(Error::UnexpectedError(e.to_string())),
 		}
+	}
+	pub fn query(&self) -> Option<String> {
+		self.internal.query().map(|x| x.to_string())
 	}
 }
 #[cfg(test)]

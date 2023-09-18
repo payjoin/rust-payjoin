@@ -1,18 +1,24 @@
-use crate::{transaction::PartiallySignedTransaction, uri::Url};
-use payjoin::send::ValidationError;
-pub use payjoin::send::{Configuration as PdkConfiguration, Context as PdkContext};
+use crate::uri::Url;
+pub use payjoin::send::Configuration as PdkConfiguration;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 ///Builder for sender-side payjoin parameters
 ///
 ///These parameters define how client wants to handle Payjoin.
 pub struct Configuration {
-	pub internal: Mutex<Option<PdkConfiguration>>,
+	internal: Mutex<Option<PdkConfiguration>>,
 }
-
+impl From<PdkConfiguration> for Configuration {
+	fn from(value: PdkConfiguration) -> Self {
+		Self { internal: Mutex::new(Some(value)) }
+	}
+}
 impl Configuration {
-	fn get_configuration_mutex(&self) -> MutexGuard<Option<PdkConfiguration>> {
-		self.internal.lock().expect("PdkConfiguration")
+	pub fn get_configuration(
+		&self,
+	) -> (Option<PdkConfiguration>, MutexGuard<Option<PdkConfiguration>>) {
+		let mut data_guard = self.internal.lock().unwrap();
+		(std::mem::replace(&mut *data_guard, None), data_guard)
 	}
 	///Offer the receiver contribution to pay for his input.
 	///
@@ -24,63 +30,70 @@ impl Configuration {
 			payjoin::bitcoin::Amount::from_sat(max_fee_contribution),
 			change_index.map(|x| x as usize),
 		);
-		Self { internal: Mutex::new(Some(configuration)) }
+		configuration.into()
 	}
 	///Perform Payjoin without incentivizing the payee to cooperate.
 	///
 	///While it’s generally better to offer some contribution some users may wish not to. This function disables contribution.
 	pub fn non_incentivizing() -> Self {
-		Self { internal: Mutex::new(Some(PdkConfiguration::non_incentivizing())) }
+		PdkConfiguration::non_incentivizing().into()
 	}
 	///Disable output substitution even if the receiver didn’t.
 	///
 	///This forbids receiver switching output or decreasing amount. It is generally not recommended to set this as it may prevent the receiver from doing advanced operations such as opening LN channels and it also guarantees the receiver will not reward the sender with a discount.
 	pub fn always_disable_output_substitution(&self, disable: bool) {
-		{
-			let mut data_guard = self.get_configuration_mutex();
-			let _config = std::mem::replace(&mut *data_guard, None);
-			*data_guard = Some(_config.unwrap().always_disable_output_substitution(disable));
-		}
+		let (config, mut guard) = Self::get_configuration(self);
+		*guard = Some(config.unwrap().always_disable_output_substitution(disable));
 	}
 
 	///Decrease fee contribution instead of erroring.
 	///
 	///If this option is set and a transaction with change amount lower than fee contribution is provided then instead of returning error the fee contribution will be just lowered to match the change amount.
 	pub fn clamp_fee_contribution(&self, clamp: bool) {
-		{
-			let mut data_guard = self.get_configuration_mutex();
-			let _config = std::mem::replace(&mut *data_guard, None);
-			*data_guard = Some(_config.unwrap().clamp_fee_contribution(clamp));
-		}
+		let (config, mut guard) = Self::get_configuration(self);
+		*guard = Some(config.unwrap().clamp_fee_contribution(clamp));
 	}
 	///Sets minimum fee rate required by the sender.
 	pub fn min_fee_rate_sat_per_vb(&self, fee_rate: u64) {
-		let mut data_guard = self.get_configuration_mutex();
-		let _config = std::mem::replace(&mut *data_guard, None);
-		*data_guard = Some(_config.unwrap().min_fee_rate_sat_per_vb(fee_rate));
+		let (config, mut guard) = Self::get_configuration(self);
+		*guard = Some(config.unwrap().min_fee_rate_sat_per_vb(fee_rate));
 	}
 }
 
 ///Data required for validation of response.
 
 ///This type is used to process the response. It is returned from PjUriExt::create_pj_request() method and you only need to call .process_response() on it to continue BIP78 flow.
+
 pub struct Context {
-	pub internal: PdkContext,
+	internal: payjoin::send::Context,
 }
-
-impl Context {
-	///Decodes and validates the response.
-
-	///Call this method with response from receiver to continue BIP78 flow. If the response is valid you will get appropriate PSBT that you should sign and broadcast.
-	pub fn process_response(
-		self, response: &mut impl std::io::Read,
-	) -> Result<PartiallySignedTransaction, ValidationError> {
-		match self.internal.process_response(response) {
-			Ok(e) => Ok(PartiallySignedTransaction { internal: Arc::new(e.to_owned()) }),
-			Err(e) => Err(e),
-		}
+impl From<Context> for payjoin::send::Context {
+	fn from(value: Context) -> Self {
+		value.internal
 	}
 }
+impl From<payjoin::send::Context> for Context {
+	fn from(value: payjoin::send::Context) -> Self {
+		Self { internal: value }
+	}
+}
+
+// impl Context {
+//     //TODO; MOVED TO PSBT STRUCT
+
+//     pub fn process_response(
+//         &mut self,
+//         response: String
+//     ) -> Result<Arc<PartiallySignedTransaction>, Error> {
+//         let context = std::mem::replace(self.internal.borrow_mut(), None);
+
+//         match context.unwrap().process_response(&mut response.as_bytes()) {
+//             Ok(e) => Ok(Arc::new(PartiallySignedTransaction { internal: e.to_owned() })),
+//             Err(e) => Err(Error::UnexpectedError(e.to_string())),
+//         }
+//     }
+
+// }
 
 ///Represents data that needs to be transmitted to the receiver.
 

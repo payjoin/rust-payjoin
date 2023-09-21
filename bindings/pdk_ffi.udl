@@ -19,6 +19,11 @@ dictionary OutPoint {
 	u32 vout;
 };
 
+dictionary Request {
+  Url url;
+	sequence<u8> body;
+};
+
 enum Network {
 	"Bitcoin",
 	"Testnet",
@@ -34,11 +39,16 @@ interface ScriptBuf {
   string to_hex_string();
 
   string to_string();
+
+  string to_asm_string();
 };
 
 interface Address{
   [Throws=Error]
   constructor(string address);
+
+  [Name=from_script, Throws=Error]
+  constructor(ScriptBuf script , Network network);
 
   string to_string();
 };
@@ -46,11 +56,15 @@ interface Address{
 interface Headers {
   [Name=from_vec]
   constructor(sequence<u8> body);
+
+  record<string, string> get_map();
 };
 
 interface Url {
   [Throws=Error]
   constructor(string input);
+
+  string? query();
 };
 
 interface Uri {
@@ -65,14 +79,90 @@ interface Uri {
   PrjUri check_pj_supported();
 };
 
+
+
+interface Configuration{
+  [Name=with_fee_contribution]
+  constructor(u64 max_fee_contribution, u64? change_index);
+
+  [Name=non_incentivizing]
+  constructor();
+
+ void always_disable_output_substitution(boolean disable);
+
+ void  clamp_fee_contribution(boolean clamp);
+
+ void min_fee_rate_sat_per_vb(u64 fee_rate);
+};
+
+dictionary PrjUriRequest{
+  Context context;
+  Request request;
+};
+
 interface PartiallySignedTransaction{
   [Throws=Error]
   constructor(string psbt_base64);
 
+  [Name=process_response, Throws=Error]
+  constructor( Context context, string response);
+
   sequence<u8> serialize();
 };
 
-interface PrjUri{
+interface Context{};
+interface Amount{
+ [Name=from_sat]
+ constructor(u64 sats); 
+
+ [Name=from_btc]
+ constructor(double btc); 
+
+ double to_btc();
+
+ u64 to_sat();
 };
+
+interface PrjUri{
+  [Throws=Error]
+  PrjUriRequest create_pj_request( PartiallySignedTransaction psbt, Configuration params );
+
+  Address address();
+
+  Amount? amount();
+};
+
+interface Txid{
+  string to_string();
+};
+
+interface Transaction{
+
+  [Throws=Error]
+  constructor(sequence<u8> transaction_bytes);
+
+  Txid txid();
+  
+  };
+
+[Trait]
+interface CanBroadcast {
+    [Throws=Error]
+    boolean test_mempool_accept(sequence<string> tx_hex);
+};
+
+interface UncheckedProposal{
+  [Name=from_request, Throws=Error]
+  constructor( sequence<u8> body, string query, Headers headers );
+
+  Transaction get_transaction_to_schedule_broadcast();
+
+  [Throws=Error]
+  MaybeInputsOwned check_can_broadcast(CanBroadcast can_broadcast);
+  MaybeInputsOwned assume_interactive_receiver();
+};
+
+interface MaybeInputsOwned{};
+
 
 

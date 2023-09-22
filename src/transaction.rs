@@ -4,7 +4,7 @@ use payjoin::bitcoin::{
 };
 use std::{io::Cursor, str::FromStr, sync::Arc};
 
-use crate::{error::Error, send::Context};
+use crate::{error::PayjoinError, send::Context};
 
 ///
 /// Partially signed transaction, commonly referred to as a PSBT.
@@ -23,36 +23,38 @@ impl From<PartiallySignedTransaction> for BitcoinPsbt {
 	}
 }
 impl PartiallySignedTransaction {
-	pub fn new(psbt_base64: String) -> Result<Self, Error> {
+	pub fn new(psbt_base64: String) -> Result<Self, PayjoinError> {
 		let psbt = BitcoinPsbt::from_str(&psbt_base64)?;
 		Ok(PartiallySignedTransaction { internal: psbt })
 	}
 	///Decodes and validates the response.
 
 	///Call this method with response from receiver to continue BIP78 flow. If the response is valid you will get appropriate PSBT that you should sign and broadcast.
-	pub fn process_response(context: Arc<Context>, response: String) -> Result<Self, Error> {
+	pub fn process_response(context: Arc<Context>, response: String) -> Result<Self, PayjoinError> {
 		let ctx: payjoin::send::Context = match Arc::try_unwrap(context) {
 			Ok(e) => e.into(),
 			Err(_) => panic!("Context preproses failed"),
 		};
 		match ctx.process_response(&mut response.as_bytes()) {
 			Ok(e) => Ok(PartiallySignedTransaction { internal: e }),
-			Err(e) => Err(Error::UnexpectedError(e.to_string())),
+			Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
 		}
 	}
 	pub fn serialize(&self) -> Vec<u8> {
 		self.internal.serialize()
 	}
 }
+
+#[derive(Clone)]
 pub struct Transaction {
 	internal: BitcoinTransaction,
 }
 impl Transaction {
-	pub fn new(transaction_bytes: Vec<u8>) -> Result<Self, Error> {
+	pub fn new(transaction_bytes: Vec<u8>) -> Result<Self, PayjoinError> {
 		let mut decoder = Cursor::new(transaction_bytes);
 		match BitcoinTransaction::consensus_decode(&mut decoder) {
 			Ok(e) => Ok(e.into()),
-			Err(e) => Err(Error::UnexpectedError(e.to_string())),
+			Err(e) => Err(PayjoinError::TransactionError { message: e.to_string() }),
 		}
 	}
 	pub fn txid(&self) -> Arc<Txid> {

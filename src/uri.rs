@@ -1,5 +1,5 @@
 use crate::{
-	error::Error,
+	error::PayjoinError,
 	send::{Configuration, Context, Request},
 	transaction::PartiallySignedTransaction,
 	Address,
@@ -27,10 +27,10 @@ impl From<payjoin::Uri<'static, NetworkChecked>> for Uri {
 	}
 }
 impl Uri {
-	pub fn new(uri: String) -> Result<Self, Error> {
+	pub fn new(uri: String) -> Result<Self, PayjoinError> {
 		match payjoin::Uri::from_str(uri.as_str()) {
 			Ok(e) => Ok(Uri { internal: e.assume_checked() }),
-			Err(e) => Err(Error::PjParseError(e.to_string())),
+			Err(e) => Err(PayjoinError::PjParseError { message: e.to_string() }),
 		}
 	}
 	//TODO; ADD TO .UDL
@@ -40,10 +40,10 @@ impl Uri {
 	pub fn amount(&self) -> Option<u64> {
 		self.internal.amount.map(|x| x.to_sat())
 	}
-	pub fn check_pj_supported(&self) -> Result<Arc<PrjUri>, Error> {
+	pub fn check_pj_supported(&self) -> Result<Arc<PrjUri>, PayjoinError> {
 		match self.internal.clone().check_pj_supported() {
 			Ok(e) => Ok(Arc::new(PrjUri { internal: e })),
-			Err(e) => Err(Error::PjNotSupported(e.to_string())),
+			Err(e) => Err(PayjoinError::PjNotSupported { message: e.to_string() }),
 		}
 	}
 }
@@ -66,14 +66,14 @@ impl From<payjoin::PjUri<'static>> for PrjUri {
 impl PrjUri {
 	pub fn create_pj_request(
 		&self, psbt: Arc<PartiallySignedTransaction>, params: Arc<Configuration>,
-	) -> Result<PrjUriRequest, Error> {
+	) -> Result<PrjUriRequest, PayjoinError> {
 		let config = params.get_configuration();
 		match self.internal.clone().create_pj_request((*psbt).clone().into(), config.0.unwrap()) {
 			Ok(e) => Ok(PrjUriRequest {
 				request: Request { url: Arc::new(Url { internal: e.0.url }), body: e.0.body },
 				context: Arc::new(e.1.into()),
 			}),
-			Err(e) => Err(Error::CreateRequestError(e.to_string())),
+			Err(e) => Err(PayjoinError::CreateRequestError { message: e.to_string() }),
 		}
 	}
 
@@ -107,10 +107,10 @@ pub struct Url {
 	internal: url::Url,
 }
 impl Url {
-	pub fn new(input: String) -> Result<Url, Error> {
+	pub fn new(input: String) -> Result<Url, PayjoinError> {
 		match url::Url::from_str(input.as_str()) {
 			Ok(e) => Ok(Self { internal: e }),
-			Err(e) => Err(Error::UnexpectedError(e.to_string())),
+			Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
 		}
 	}
 	pub fn query(&self) -> Option<String> {

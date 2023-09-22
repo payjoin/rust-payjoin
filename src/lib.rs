@@ -9,6 +9,8 @@ mod uri;
 use crate::receive::{
     CanBroadcast,
     Headers,
+    IsOutputKnown,
+    IsScriptOwned,
     MaybeInputsOwned,
     MaybeInputsSeen,
     MaybeMixedInputScripts,
@@ -20,7 +22,8 @@ use crate::send::{ Configuration, Context, Request };
 
 use crate::transaction::{ PartiallySignedTransaction, Transaction, Txid };
 use crate::uri::{ Amount, PrjUri, PrjUriRequest, Uri, Url };
-pub use error::Error;
+
+use error::PayjoinError;
 pub use payjoin::bitcoin;
 use payjoin::bitcoin::{ Address as BitcoinAdrress, ScriptBuf as BitcoinScriptBuf };
 use serde::{ Deserialize, Serialize };
@@ -61,17 +64,17 @@ impl From<bitcoin::Address> for Address {
     }
 }
 impl Address {
-    pub fn new(address: String) -> Result<Address, Error> {
+    pub fn new(address: String) -> Result<Address, PayjoinError> {
         match BitcoinAdrress::from_str(&address) {
             Ok(e) => Ok(e.assume_checked().into()),
-            Err(e) => Err(Error::InvalidAddress(e.to_string())),
+            Err(e) => Err(PayjoinError::InvalidAddress { message: e.to_string() }),
         }
     }
-    //TODO; ADD TO .UDL
-    pub fn from_script(script: Arc<ScriptBuf>, network: Network) -> Result<Self, Error> {
+
+    pub fn from_script(script: Arc<ScriptBuf>, network: Network) -> Result<Self, PayjoinError> {
         match BitcoinAdrress::from_script(script.internal.as_script(), network.into()) {
             Ok(e) => Ok(e.into()),
-            Err(e) => Err(Error::InvalidAddress(e.to_string())),
+            Err(e) => Err(PayjoinError::InvalidScript { message: e.to_string() }),
         }
     }
     pub fn to_string(&self) -> String {
@@ -120,16 +123,19 @@ impl From<bitcoin::ScriptBuf> for ScriptBuf {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TxOut {
     /// The value of the output, in satoshis.
     value: u64,
     /// The address of the output.
-    script_pubkey: ScriptBuf,
+    script_pubkey: Arc<ScriptBuf>,
 }
 impl From<TxOut> for bitcoin::TxOut {
     fn from(tx_out: TxOut) -> Self {
-        bitcoin::TxOut { value: tx_out.value, script_pubkey: tx_out.script_pubkey.internal }
+        bitcoin::TxOut {
+            value: tx_out.value,
+            script_pubkey: (*tx_out.script_pubkey).clone().internal,
+        }
     }
 }
 
@@ -137,7 +143,7 @@ impl From<bitcoin::TxOut> for TxOut {
     fn from(tx_out: bitcoin::TxOut) -> Self {
         TxOut {
             value: tx_out.value,
-            script_pubkey: ScriptBuf { internal: tx_out.script_pubkey.into() },
+            script_pubkey: Arc::new(ScriptBuf { internal: tx_out.script_pubkey.into() }),
         }
     }
 }

@@ -540,7 +540,7 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_uri_address() != 9799:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_uri_check_pj_supported() != 6396:
+    if lib.uniffi_pdk_ffi_checksum_method_uri_check_pj_supported() != 59523:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_configuration_always_disable_output_substitution() != 40817:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -554,7 +554,7 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_amount_to_sat() != 29783:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_prjuri_create_pj_request() != 19696:
+    if lib.uniffi_pdk_ffi_checksum_method_prjuri_create_pj_request() != 32535:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_prjuri_address() != 57168:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -564,41 +564,61 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_transaction_txid() != 4855:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_canbroadcast_test_mempool_accept() != 35316:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_get_transaction_to_schedule_broadcast() != 16604:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_check_can_broadcast() != 28025:
+    if lib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_check_can_broadcast() != 54863:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_assume_interactive_receiver() != 57669:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_maybeinputsowned_check_inputs_not_owned() != 53733:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_maybemixedinputscripts_check_no_mixed_input_scripts() != 8893:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_maybeinputsseen_check_no_inputs_seen_before() != 31674:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_outputsunknown_identify_receiver_outputs() != 5078:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_is_output_substitution_disabled() != 54016:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_contribute_witness_input() != 31039:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_contribute_non_witness_input() != 55631:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_substitute_output_address() != 12391:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_try_preserving_privacy() != 23083:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_apply_fee() != 26537:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_prepare_psbt() != 61983:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_constructor_scriptbuf_new() != 58311:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_constructor_address_new() != 39137:
+    if lib.uniffi_pdk_ffi_checksum_constructor_address_new() != 15445:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_constructor_address_from_script() != 27152:
+    if lib.uniffi_pdk_ffi_checksum_constructor_address_from_script() != 16919:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_constructor_headers_from_vec() != 39437:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_constructor_url_new() != 42932:
+    if lib.uniffi_pdk_ffi_checksum_constructor_url_new() != 54043:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_constructor_uri_new() != 51867:
+    if lib.uniffi_pdk_ffi_checksum_constructor_uri_new() != 13012:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_constructor_configuration_with_fee_contribution() != 39612:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_constructor_configuration_non_incentivizing() != 39042:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_constructor_partiallysignedtransaction_new() != 53525:
+    if lib.uniffi_pdk_ffi_checksum_constructor_partiallysignedtransaction_new() != 55149:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_constructor_partiallysignedtransaction_process_response() != 10492:
+    if lib.uniffi_pdk_ffi_checksum_constructor_partiallysignedtransaction_process_response() != 28591:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_constructor_amount_from_sat() != 25373:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_constructor_amount_from_btc() != 44216:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_constructor_transaction_new() != 49366:
+    if lib.uniffi_pdk_ffi_checksum_constructor_transaction_new() != 50809:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_constructor_uncheckedproposal_from_request() != 19962:
+    if lib.uniffi_pdk_ffi_checksum_constructor_uncheckedproposal_from_request() != 48433:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
 
 # A ctypes library to expose the extern-C FFI definitions.
@@ -842,17 +862,6 @@ _UniFFILib.uniffi_pdk_ffi_fn_method_transaction_txid.argtypes = (
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_method_transaction_txid.restype = ctypes.c_void_p
-_UniFFILib.uniffi_pdk_ffi_fn_free_canbroadcast.argtypes = (
-    ctypes.c_void_p,
-    ctypes.POINTER(RustCallStatus),
-)
-_UniFFILib.uniffi_pdk_ffi_fn_free_canbroadcast.restype = None
-_UniFFILib.uniffi_pdk_ffi_fn_method_canbroadcast_test_mempool_accept.argtypes = (
-    ctypes.c_void_p,
-    RustBuffer,
-    ctypes.POINTER(RustCallStatus),
-)
-_UniFFILib.uniffi_pdk_ffi_fn_method_canbroadcast_test_mempool_accept.restype = ctypes.c_int8
 _UniFFILib.uniffi_pdk_ffi_fn_free_uncheckedproposal.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
@@ -872,7 +881,7 @@ _UniFFILib.uniffi_pdk_ffi_fn_method_uncheckedproposal_get_transaction_to_schedul
 _UniFFILib.uniffi_pdk_ffi_fn_method_uncheckedproposal_get_transaction_to_schedule_broadcast.restype = ctypes.c_void_p
 _UniFFILib.uniffi_pdk_ffi_fn_method_uncheckedproposal_check_can_broadcast.argtypes = (
     ctypes.c_void_p,
-    ctypes.c_void_p,
+    ctypes.c_uint64,
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_method_uncheckedproposal_check_can_broadcast.restype = ctypes.c_void_p
@@ -886,6 +895,107 @@ _UniFFILib.uniffi_pdk_ffi_fn_free_maybeinputsowned.argtypes = (
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_free_maybeinputsowned.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_method_maybeinputsowned_check_inputs_not_owned.argtypes = (
+    ctypes.c_void_p,
+    ctypes.c_uint64,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_maybeinputsowned_check_inputs_not_owned.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_free_maybemixedinputscripts.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_free_maybemixedinputscripts.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_method_maybemixedinputscripts_check_no_mixed_input_scripts.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_maybemixedinputscripts_check_no_mixed_input_scripts.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_free_maybeinputsseen.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_free_maybeinputsseen.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_method_maybeinputsseen_check_no_inputs_seen_before.argtypes = (
+    ctypes.c_void_p,
+    ctypes.c_uint64,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_maybeinputsseen_check_no_inputs_seen_before.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_free_outputsunknown.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_free_outputsunknown.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_method_outputsunknown_identify_receiver_outputs.argtypes = (
+    ctypes.c_void_p,
+    ctypes.c_uint64,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_outputsunknown_identify_receiver_outputs.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_free_payjoinproposal.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_free_payjoinproposal.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_is_output_substitution_disabled.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_is_output_substitution_disabled.restype = ctypes.c_int8
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_contribute_witness_input.argtypes = (
+    ctypes.c_void_p,
+    RustBuffer,
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_contribute_witness_input.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_contribute_non_witness_input.argtypes = (
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_contribute_non_witness_input.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_substitute_output_address.argtypes = (
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_substitute_output_address.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_try_preserving_privacy.argtypes = (
+    ctypes.c_void_p,
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_try_preserving_privacy.restype = RustBuffer
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_apply_fee.argtypes = (
+    ctypes.c_void_p,
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_apply_fee.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_prepare_psbt.argtypes = (
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_prepare_psbt.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_init_callback_canbroadcast.argtypes = (
+    FOREIGN_CALLBACK_T,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_init_callback_canbroadcast.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_init_callback_isscriptowned.argtypes = (
+    FOREIGN_CALLBACK_T,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_init_callback_isscriptowned.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_init_callback_isoutputknown.argtypes = (
+    FOREIGN_CALLBACK_T,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_init_callback_isoutputknown.restype = None
 _UniFFILib.ffi_pdk_ffi_rustbuffer_alloc.argtypes = (
     ctypes.c_int32,
     ctypes.POINTER(RustCallStatus),
@@ -970,9 +1080,6 @@ _UniFFILib.uniffi_pdk_ffi_checksum_method_txid_to_string.restype = ctypes.c_uint
 _UniFFILib.uniffi_pdk_ffi_checksum_method_transaction_txid.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_transaction_txid.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_canbroadcast_test_mempool_accept.argtypes = (
-)
-_UniFFILib.uniffi_pdk_ffi_checksum_method_canbroadcast_test_mempool_accept.restype = ctypes.c_uint16
 _UniFFILib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_get_transaction_to_schedule_broadcast.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_get_transaction_to_schedule_broadcast.restype = ctypes.c_uint16
@@ -982,6 +1089,39 @@ _UniFFILib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_check_can_broadcast.
 _UniFFILib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_assume_interactive_receiver.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_assume_interactive_receiver.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_maybeinputsowned_check_inputs_not_owned.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_maybeinputsowned_check_inputs_not_owned.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_maybemixedinputscripts_check_no_mixed_input_scripts.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_maybemixedinputscripts_check_no_mixed_input_scripts.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_maybeinputsseen_check_no_inputs_seen_before.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_maybeinputsseen_check_no_inputs_seen_before.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_outputsunknown_identify_receiver_outputs.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_outputsunknown_identify_receiver_outputs.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_is_output_substitution_disabled.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_is_output_substitution_disabled.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_contribute_witness_input.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_contribute_witness_input.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_contribute_non_witness_input.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_contribute_non_witness_input.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_substitute_output_address.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_substitute_output_address.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_try_preserving_privacy.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_try_preserving_privacy.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_apply_fee.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_apply_fee.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_prepare_psbt.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_prepare_psbt.restype = ctypes.c_uint16
 _UniFFILib.uniffi_pdk_ffi_checksum_constructor_scriptbuf_new.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_constructor_scriptbuf_new.restype = ctypes.c_uint16
@@ -1138,7 +1278,7 @@ class Address:
     _pointer: ctypes.c_void_p
     def __init__(self, address: "str"):
         
-        self._pointer = rust_call_with_error(FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_address_new,
+        self._pointer = rust_call_with_error(FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_address_new,
         FfiConverterString.lower(address))
 
     def __del__(self):
@@ -1161,7 +1301,7 @@ class Address:
         
         
         # Call the (fallible) function before creating any half-baked object instances.
-        pointer = rust_call_with_error(FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_address_from_script,
+        pointer = rust_call_with_error(FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_address_from_script,
         FfiConverterTypeScriptBuf.lower(script),
         FfiConverterTypeNetwork.lower(network))
         return cls._make_instance_(pointer)
@@ -1276,62 +1416,6 @@ class FfiConverterTypeAmount:
     @staticmethod
     def lift(value):
         return Amount._make_instance_(value)
-
-    @staticmethod
-    def lower(value):
-        return value._pointer
-
-
-
-class CanBroadcast:
-    _pointer: ctypes.c_void_p
-
-    def __del__(self):
-        # In case of partial initialization of instances.
-        pointer = getattr(self, "_pointer", None)
-        if pointer is not None:
-            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_free_canbroadcast, pointer)
-
-    # Used by alternative constructors or any methods which return this type.
-    @classmethod
-    def _make_instance_(cls, pointer):
-        # Lightly yucky way to bypass the usual __init__ logic
-        # and just create a new instance with the required pointer.
-        inst = cls.__new__(cls)
-        inst._pointer = pointer
-        return inst
-
-
-    def test_mempool_accept(self, tx_hex: "typing.List[str]") -> "bool":
-        
-        return FfiConverterBool.lift(
-            rust_call_with_error(
-    FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_method_canbroadcast_test_mempool_accept,self._pointer,
-        FfiConverterSequenceString.lower(tx_hex))
-        )
-
-
-
-
-
-
-class FfiConverterTypeCanBroadcast:
-    @classmethod
-    def read(cls, buf):
-        ptr = buf.readU64()
-        if ptr == 0:
-            raise InternalError("Raw pointer value was null")
-        return cls.lift(ptr)
-
-    @classmethod
-    def write(cls, value, buf):
-        if not isinstance(value, CanBroadcast):
-            raise TypeError("Expected CanBroadcast instance, {} found".format(value.__class__.__name__))
-        buf.writeU64(cls.lower(value))
-
-    @staticmethod
-    def lift(value):
-        return CanBroadcast._make_instance_(value)
 
     @staticmethod
     def lower(value):
@@ -1557,6 +1641,19 @@ class MaybeInputsOwned:
         return inst
 
 
+    def check_inputs_not_owned(self, is_owned: "IsScriptOwned") -> "MaybeMixedInputScripts":
+        
+        return FfiConverterTypeMaybeMixedInputScripts.lift(
+            rust_call_with_error(
+    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_maybeinputsowned_check_inputs_not_owned,self._pointer,
+        FfiConverterCallbackInterfaceIsScriptOwned.lower(is_owned))
+        )
+
+
+
+
+
+
 class FfiConverterTypeMaybeInputsOwned:
     @classmethod
     def read(cls, buf):
@@ -1581,11 +1678,177 @@ class FfiConverterTypeMaybeInputsOwned:
 
 
 
+class MaybeInputsSeen:
+    _pointer: ctypes.c_void_p
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_free_maybeinputsseen, pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+    def check_no_inputs_seen_before(self, is_known: "IsOutputKnown") -> "OutputsUnknown":
+        
+        return FfiConverterTypeOutputsUnknown.lift(
+            rust_call_with_error(
+    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_maybeinputsseen_check_no_inputs_seen_before,self._pointer,
+        FfiConverterCallbackInterfaceIsOutputKnown.lower(is_known))
+        )
+
+
+
+
+
+
+class FfiConverterTypeMaybeInputsSeen:
+    @classmethod
+    def read(cls, buf):
+        ptr = buf.readU64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value, buf):
+        if not isinstance(value, MaybeInputsSeen):
+            raise TypeError("Expected MaybeInputsSeen instance, {} found".format(value.__class__.__name__))
+        buf.writeU64(cls.lower(value))
+
+    @staticmethod
+    def lift(value):
+        return MaybeInputsSeen._make_instance_(value)
+
+    @staticmethod
+    def lower(value):
+        return value._pointer
+
+
+
+class MaybeMixedInputScripts:
+    _pointer: ctypes.c_void_p
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_free_maybemixedinputscripts, pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+    def check_no_mixed_input_scripts(self, ) -> "MaybeInputsSeen":
+        return FfiConverterTypeMaybeInputsSeen.lift(
+            rust_call_with_error(
+    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_maybemixedinputscripts_check_no_mixed_input_scripts,self._pointer,)
+        )
+
+
+
+
+
+
+class FfiConverterTypeMaybeMixedInputScripts:
+    @classmethod
+    def read(cls, buf):
+        ptr = buf.readU64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value, buf):
+        if not isinstance(value, MaybeMixedInputScripts):
+            raise TypeError("Expected MaybeMixedInputScripts instance, {} found".format(value.__class__.__name__))
+        buf.writeU64(cls.lower(value))
+
+    @staticmethod
+    def lift(value):
+        return MaybeMixedInputScripts._make_instance_(value)
+
+    @staticmethod
+    def lower(value):
+        return value._pointer
+
+
+
+class OutputsUnknown:
+    _pointer: ctypes.c_void_p
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_free_outputsunknown, pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+    def identify_receiver_outputs(self, is_receiver_output: "IsScriptOwned") -> "PayjoinProposal":
+        
+        return FfiConverterTypePayjoinProposal.lift(
+            rust_call_with_error(
+    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_outputsunknown_identify_receiver_outputs,self._pointer,
+        FfiConverterCallbackInterfaceIsScriptOwned.lower(is_receiver_output))
+        )
+
+
+
+
+
+
+class FfiConverterTypeOutputsUnknown:
+    @classmethod
+    def read(cls, buf):
+        ptr = buf.readU64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value, buf):
+        if not isinstance(value, OutputsUnknown):
+            raise TypeError("Expected OutputsUnknown instance, {} found".format(value.__class__.__name__))
+        buf.writeU64(cls.lower(value))
+
+    @staticmethod
+    def lift(value):
+        return OutputsUnknown._make_instance_(value)
+
+    @staticmethod
+    def lower(value):
+        return value._pointer
+
+
+
 class PartiallySignedTransaction:
     _pointer: ctypes.c_void_p
     def __init__(self, psbt_base64: "str"):
         
-        self._pointer = rust_call_with_error(FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_partiallysignedtransaction_new,
+        self._pointer = rust_call_with_error(FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_partiallysignedtransaction_new,
         FfiConverterString.lower(psbt_base64))
 
     def __del__(self):
@@ -1608,7 +1871,7 @@ class PartiallySignedTransaction:
         
         
         # Call the (fallible) function before creating any half-baked object instances.
-        pointer = rust_call_with_error(FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_partiallysignedtransaction_process_response,
+        pointer = rust_call_with_error(FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_partiallysignedtransaction_process_response,
         FfiConverterTypeContext.lower(context),
         FfiConverterString.lower(response))
         return cls._make_instance_(pointer)
@@ -1649,6 +1912,135 @@ class FfiConverterTypePartiallySignedTransaction:
 
 
 
+class PayjoinProposal:
+    _pointer: ctypes.c_void_p
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_free_payjoinproposal, pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+    def is_output_substitution_disabled(self, ) -> "bool":
+        return FfiConverterBool.lift(
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_is_output_substitution_disabled,self._pointer,)
+        )
+
+
+
+
+
+
+    def contribute_witness_input(self, txout: "TxOut",outpoint: "OutPoint"):
+        
+        
+        rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_contribute_witness_input,self._pointer,
+        FfiConverterTypeTxOut.lower(txout),
+        FfiConverterTypeOutPoint.lower(outpoint))
+
+
+
+
+
+
+
+    def contribute_non_witness_input(self, tx: "Transaction",outpoint: "OutPoint"):
+        
+        
+        rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_contribute_non_witness_input,self._pointer,
+        FfiConverterTypeTransaction.lower(tx),
+        FfiConverterTypeOutPoint.lower(outpoint))
+
+
+
+
+
+
+
+    def substitute_output_address(self, substitute_address: "Address"):
+        
+        rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_substitute_output_address,self._pointer,
+        FfiConverterTypeAddress.lower(substitute_address))
+
+
+
+
+
+
+
+    def try_preserving_privacy(self, candidate_inputs: "dict") -> "OutPoint":
+        
+        return FfiConverterTypeOutPoint.lift(
+            rust_call_with_error(
+    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_try_preserving_privacy,self._pointer,
+        FfiConverterMapUInt64TypeOutPoint.lower(candidate_inputs))
+        )
+
+
+
+
+
+
+    def apply_fee(self, min_feerate_sat_per_vb: "typing.Optional[int]") -> "PartiallySignedTransaction":
+        
+        return FfiConverterTypePartiallySignedTransaction.lift(
+            rust_call_with_error(
+    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_apply_fee,self._pointer,
+        FfiConverterOptionalUInt64.lower(min_feerate_sat_per_vb))
+        )
+
+
+
+
+
+
+    def prepare_psbt(self, processed_psbt: "PartiallySignedTransaction") -> "PartiallySignedTransaction":
+        
+        return FfiConverterTypePartiallySignedTransaction.lift(
+            rust_call_with_error(
+    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_prepare_psbt,self._pointer,
+        FfiConverterTypePartiallySignedTransaction.lower(processed_psbt))
+        )
+
+
+
+
+
+
+class FfiConverterTypePayjoinProposal:
+    @classmethod
+    def read(cls, buf):
+        ptr = buf.readU64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value, buf):
+        if not isinstance(value, PayjoinProposal):
+            raise TypeError("Expected PayjoinProposal instance, {} found".format(value.__class__.__name__))
+        buf.writeU64(cls.lower(value))
+
+    @staticmethod
+    def lift(value):
+        return PayjoinProposal._make_instance_(value)
+
+    @staticmethod
+    def lower(value):
+        return value._pointer
+
+
+
 class PrjUri:
     _pointer: ctypes.c_void_p
 
@@ -1673,7 +2065,7 @@ class PrjUri:
         
         return FfiConverterTypePrjUriRequest.lift(
             rust_call_with_error(
-    FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_method_prjuri_create_pj_request,self._pointer,
+    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_prjuri_create_pj_request,self._pointer,
         FfiConverterTypePartiallySignedTransaction.lower(psbt),
         FfiConverterTypeConfiguration.lower(params))
         )
@@ -1818,7 +2210,7 @@ class Transaction:
     _pointer: ctypes.c_void_p
     def __init__(self, transaction_bytes: "typing.List[int]"):
         
-        self._pointer = rust_call_with_error(FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_transaction_new,
+        self._pointer = rust_call_with_error(FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_transaction_new,
         FfiConverterSequenceUInt8.lower(transaction_bytes))
 
     def __del__(self):
@@ -1948,7 +2340,7 @@ class UncheckedProposal:
         
         
         # Call the (fallible) function before creating any half-baked object instances.
-        pointer = rust_call_with_error(FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_uncheckedproposal_from_request,
+        pointer = rust_call_with_error(FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_uncheckedproposal_from_request,
         FfiConverterSequenceUInt8.lower(body),
         FfiConverterString.lower(query),
         FfiConverterTypeHeaders.lower(headers))
@@ -1970,8 +2362,8 @@ class UncheckedProposal:
         
         return FfiConverterTypeMaybeInputsOwned.lift(
             rust_call_with_error(
-    FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_method_uncheckedproposal_check_can_broadcast,self._pointer,
-        FfiConverterTypeCanBroadcast.lower(can_broadcast))
+    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_uncheckedproposal_check_can_broadcast,self._pointer,
+        FfiConverterCallbackInterfaceCanBroadcast.lower(can_broadcast))
         )
 
 
@@ -2017,7 +2409,7 @@ class Uri:
     _pointer: ctypes.c_void_p
     def __init__(self, uri: "str"):
         
-        self._pointer = rust_call_with_error(FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_uri_new,
+        self._pointer = rust_call_with_error(FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_uri_new,
         FfiConverterString.lower(uri))
 
     def __del__(self):
@@ -2059,7 +2451,7 @@ class Uri:
     def check_pj_supported(self, ) -> "PrjUri":
         return FfiConverterTypePrjUri.lift(
             rust_call_with_error(
-    FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_method_uri_check_pj_supported,self._pointer,)
+    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_uri_check_pj_supported,self._pointer,)
         )
 
 
@@ -2095,7 +2487,7 @@ class Url:
     _pointer: ctypes.c_void_p
     def __init__(self, input: "str"):
         
-        self._pointer = rust_call_with_error(FfiConverterTypeError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_url_new,
+        self._pointer = rust_call_with_error(FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_url_new,
         FfiConverterString.lower(input))
 
     def __del__(self):
@@ -2237,131 +2629,34 @@ class FfiConverterTypeRequest(FfiConverterRustBuffer):
         FfiConverterSequenceUInt8.write(value.body, buf)
 
 
-# Error
-# We want to define each variant as a nested class that's also a subclass,
-# which is tricky in Python.  To accomplish this we're going to create each
-# class separately, then manually add the child classes to the base class's
-# __dict__.  All of this happens in dummy class to avoid polluting the module
-# namespace.
-class Error(Exception):
-    pass
+class TxOut:
 
-UniFFITempError = Error
+    def __init__(self, value, script_pubkey):
+        self.value = value
+        self.script_pubkey = script_pubkey
 
-class Error:  # type: ignore
-    class InvalidAddress(UniFFITempError):
-        def __repr__(self):
-            return "Error.InvalidAddress({})".format(repr(str(self)))
-    UniFFITempError.InvalidAddress = InvalidAddress  # type: ignore
-    class InvalidScript(UniFFITempError):
-        def __repr__(self):
-            return "Error.InvalidScript({})".format(repr(str(self)))
-    UniFFITempError.InvalidScript = InvalidScript  # type: ignore
-    class PsbtParseError(UniFFITempError):
-        def __repr__(self):
-            return "Error.PsbtParseError({})".format(repr(str(self)))
-    UniFFITempError.PsbtParseError = PsbtParseError  # type: ignore
-    class ReceiveError(UniFFITempError):
-        def __repr__(self):
-            return "Error.ReceiveError({})".format(repr(str(self)))
-    UniFFITempError.ReceiveError = ReceiveError  # type: ignore
-    class RequestError(UniFFITempError):
-        def __repr__(self):
-            return "Error.RequestError({})".format(repr(str(self)))
-    UniFFITempError.RequestError = RequestError  # type: ignore
-    class SelectionError(UniFFITempError):
-        def __repr__(self):
-            return "Error.SelectionError({})".format(repr(str(self)))
-    UniFFITempError.SelectionError = SelectionError  # type: ignore
-    class CreateRequestError(UniFFITempError):
-        def __repr__(self):
-            return "Error.CreateRequestError({})".format(repr(str(self)))
-    UniFFITempError.CreateRequestError = CreateRequestError  # type: ignore
-    class PjParseError(UniFFITempError):
-        def __repr__(self):
-            return "Error.PjParseError({})".format(repr(str(self)))
-    UniFFITempError.PjParseError = PjParseError  # type: ignore
-    class PjNotSupported(UniFFITempError):
-        def __repr__(self):
-            return "Error.PjNotSupported({})".format(repr(str(self)))
-    UniFFITempError.PjNotSupported = PjNotSupported  # type: ignore
-    class UnexpectedError(UniFFITempError):
-        def __repr__(self):
-            return "Error.UnexpectedError({})".format(repr(str(self)))
-    UniFFITempError.UnexpectedError = UnexpectedError  # type: ignore
+    def __str__(self):
+        return "TxOut(value={}, script_pubkey={})".format(self.value, self.script_pubkey)
 
-Error = UniFFITempError  # type: ignore
-del UniFFITempError
+    def __eq__(self, other):
+        if self.value != other.value:
+            return False
+        if self.script_pubkey != other.script_pubkey:
+            return False
+        return True
 
-
-class FfiConverterTypeError(FfiConverterRustBuffer):
+class FfiConverterTypeTxOut(FfiConverterRustBuffer):
     @staticmethod
     def read(buf):
-        variant = buf.readI32()
-        if variant == 1:
-            return Error.InvalidAddress(
-                FfiConverterString.read(buf),
-            )
-        if variant == 2:
-            return Error.InvalidScript(
-                FfiConverterString.read(buf),
-            )
-        if variant == 3:
-            return Error.PsbtParseError(
-                FfiConverterString.read(buf),
-            )
-        if variant == 4:
-            return Error.ReceiveError(
-                FfiConverterString.read(buf),
-            )
-        if variant == 5:
-            return Error.RequestError(
-                FfiConverterString.read(buf),
-            )
-        if variant == 6:
-            return Error.SelectionError(
-                FfiConverterString.read(buf),
-            )
-        if variant == 7:
-            return Error.CreateRequestError(
-                FfiConverterString.read(buf),
-            )
-        if variant == 8:
-            return Error.PjParseError(
-                FfiConverterString.read(buf),
-            )
-        if variant == 9:
-            return Error.PjNotSupported(
-                FfiConverterString.read(buf),
-            )
-        if variant == 10:
-            return Error.UnexpectedError(
-                FfiConverterString.read(buf),
-            )
-        raise InternalError("Raw enum value doesn't match any cases")
+        return TxOut(
+            value=FfiConverterUInt64.read(buf),
+            script_pubkey=FfiConverterTypeScriptBuf.read(buf),
+        )
 
     @staticmethod
     def write(value, buf):
-        if isinstance(value, Error.InvalidAddress):
-            buf.writeI32(1)
-        if isinstance(value, Error.InvalidScript):
-            buf.writeI32(2)
-        if isinstance(value, Error.PsbtParseError):
-            buf.writeI32(3)
-        if isinstance(value, Error.ReceiveError):
-            buf.writeI32(4)
-        if isinstance(value, Error.RequestError):
-            buf.writeI32(5)
-        if isinstance(value, Error.SelectionError):
-            buf.writeI32(6)
-        if isinstance(value, Error.CreateRequestError):
-            buf.writeI32(7)
-        if isinstance(value, Error.PjParseError):
-            buf.writeI32(8)
-        if isinstance(value, Error.PjNotSupported):
-            buf.writeI32(9)
-        if isinstance(value, Error.UnexpectedError):
-            buf.writeI32(10)
+        FfiConverterUInt64.write(value.value, buf)
+        FfiConverterTypeScriptBuf.write(value.script_pubkey, buf)
 
 
 
@@ -2399,6 +2694,552 @@ class FfiConverterTypeNetwork(FfiConverterRustBuffer):
         if value == Network.REGTEST:
             buf.writeI32(4)
 
+
+
+# PayjoinError
+# We want to define each variant as a nested class that's also a subclass,
+# which is tricky in Python.  To accomplish this we're going to create each
+# class separately, then manually add the child classes to the base class's
+# __dict__.  All of this happens in dummy class to avoid polluting the module
+# namespace.
+class PayjoinError(Exception):
+    pass
+
+UniFFITempPayjoinError = PayjoinError
+
+class PayjoinError:  # type: ignore
+    class InvalidAddress(UniFFITempPayjoinError):
+        def __init__(self, message):
+            super().__init__(", ".join([
+                "message={!r}".format(message),
+            ]))
+            self.message = message
+        def __repr__(self):
+            return "PayjoinError.InvalidAddress({})".format(str(self))
+    UniFFITempPayjoinError.InvalidAddress = InvalidAddress  # type: ignore
+    class InvalidScript(UniFFITempPayjoinError):
+        def __init__(self, message):
+            super().__init__(", ".join([
+                "message={!r}".format(message),
+            ]))
+            self.message = message
+        def __repr__(self):
+            return "PayjoinError.InvalidScript({})".format(str(self))
+    UniFFITempPayjoinError.InvalidScript = InvalidScript  # type: ignore
+    class PsbtParseError(UniFFITempPayjoinError):
+        def __init__(self, message):
+            super().__init__(", ".join([
+                "message={!r}".format(message),
+            ]))
+            self.message = message
+        def __repr__(self):
+            return "PayjoinError.PsbtParseError({})".format(str(self))
+    UniFFITempPayjoinError.PsbtParseError = PsbtParseError  # type: ignore
+    class ReceiveError(UniFFITempPayjoinError):
+        def __init__(self, message):
+            super().__init__(", ".join([
+                "message={!r}".format(message),
+            ]))
+            self.message = message
+        def __repr__(self):
+            return "PayjoinError.ReceiveError({})".format(str(self))
+    UniFFITempPayjoinError.ReceiveError = ReceiveError  # type: ignore
+    class RequestError(UniFFITempPayjoinError):
+        def __init__(self, message):
+            super().__init__(", ".join([
+                "message={!r}".format(message),
+            ]))
+            self.message = message
+        def __repr__(self):
+            return "PayjoinError.RequestError({})".format(str(self))
+    UniFFITempPayjoinError.RequestError = RequestError  # type: ignore
+    class SelectionError(UniFFITempPayjoinError):
+        def __init__(self):
+            pass
+        def __repr__(self):
+            return "PayjoinError.SelectionError({})".format(str(self))
+    UniFFITempPayjoinError.SelectionError = SelectionError  # type: ignore
+    class CreateRequestError(UniFFITempPayjoinError):
+        def __init__(self, message):
+            super().__init__(", ".join([
+                "message={!r}".format(message),
+            ]))
+            self.message = message
+        def __repr__(self):
+            return "PayjoinError.CreateRequestError({})".format(str(self))
+    UniFFITempPayjoinError.CreateRequestError = CreateRequestError  # type: ignore
+    class PjParseError(UniFFITempPayjoinError):
+        def __init__(self, message):
+            super().__init__(", ".join([
+                "message={!r}".format(message),
+            ]))
+            self.message = message
+        def __repr__(self):
+            return "PayjoinError.PjParseError({})".format(str(self))
+    UniFFITempPayjoinError.PjParseError = PjParseError  # type: ignore
+    class PjNotSupported(UniFFITempPayjoinError):
+        def __init__(self, message):
+            super().__init__(", ".join([
+                "message={!r}".format(message),
+            ]))
+            self.message = message
+        def __repr__(self):
+            return "PayjoinError.PjNotSupported({})".format(str(self))
+    UniFFITempPayjoinError.PjNotSupported = PjNotSupported  # type: ignore
+    class ContextValidationError(UniFFITempPayjoinError):
+        def __init__(self, message):
+            super().__init__(", ".join([
+                "message={!r}".format(message),
+            ]))
+            self.message = message
+        def __repr__(self):
+            return "PayjoinError.ContextValidationError({})".format(str(self))
+    UniFFITempPayjoinError.ContextValidationError = ContextValidationError  # type: ignore
+    class TransactionError(UniFFITempPayjoinError):
+        def __init__(self, message):
+            super().__init__(", ".join([
+                "message={!r}".format(message),
+            ]))
+            self.message = message
+        def __repr__(self):
+            return "PayjoinError.TransactionError({})".format(str(self))
+    UniFFITempPayjoinError.TransactionError = TransactionError  # type: ignore
+    class UnexpectedError(UniFFITempPayjoinError):
+        def __init__(self, message):
+            super().__init__(", ".join([
+                "message={!r}".format(message),
+            ]))
+            self.message = message
+        def __repr__(self):
+            return "PayjoinError.UnexpectedError({})".format(str(self))
+    UniFFITempPayjoinError.UnexpectedError = UnexpectedError  # type: ignore
+    class ServerError(UniFFITempPayjoinError):
+        def __init__(self, message):
+            super().__init__(", ".join([
+                "message={!r}".format(message),
+            ]))
+            self.message = message
+        def __repr__(self):
+            return "PayjoinError.ServerError({})".format(str(self))
+    UniFFITempPayjoinError.ServerError = ServerError  # type: ignore
+
+PayjoinError = UniFFITempPayjoinError  # type: ignore
+del UniFFITempPayjoinError
+
+
+class FfiConverterTypePayjoinError(FfiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        variant = buf.readI32()
+        if variant == 1:
+            return PayjoinError.InvalidAddress(
+                message=FfiConverterString.read(buf),
+            )
+        if variant == 2:
+            return PayjoinError.InvalidScript(
+                message=FfiConverterString.read(buf),
+            )
+        if variant == 3:
+            return PayjoinError.PsbtParseError(
+                message=FfiConverterString.read(buf),
+            )
+        if variant == 4:
+            return PayjoinError.ReceiveError(
+                message=FfiConverterString.read(buf),
+            )
+        if variant == 5:
+            return PayjoinError.RequestError(
+                message=FfiConverterString.read(buf),
+            )
+        if variant == 6:
+            return PayjoinError.SelectionError(
+            )
+        if variant == 7:
+            return PayjoinError.CreateRequestError(
+                message=FfiConverterString.read(buf),
+            )
+        if variant == 8:
+            return PayjoinError.PjParseError(
+                message=FfiConverterString.read(buf),
+            )
+        if variant == 9:
+            return PayjoinError.PjNotSupported(
+                message=FfiConverterString.read(buf),
+            )
+        if variant == 10:
+            return PayjoinError.ContextValidationError(
+                message=FfiConverterString.read(buf),
+            )
+        if variant == 11:
+            return PayjoinError.TransactionError(
+                message=FfiConverterString.read(buf),
+            )
+        if variant == 12:
+            return PayjoinError.UnexpectedError(
+                message=FfiConverterString.read(buf),
+            )
+        if variant == 13:
+            return PayjoinError.ServerError(
+                message=FfiConverterString.read(buf),
+            )
+        raise InternalError("Raw enum value doesn't match any cases")
+
+    @staticmethod
+    def write(value, buf):
+        if isinstance(value, PayjoinError.InvalidAddress):
+            buf.writeI32(1)
+            FfiConverterString.write(value.message, buf)
+        if isinstance(value, PayjoinError.InvalidScript):
+            buf.writeI32(2)
+            FfiConverterString.write(value.message, buf)
+        if isinstance(value, PayjoinError.PsbtParseError):
+            buf.writeI32(3)
+            FfiConverterString.write(value.message, buf)
+        if isinstance(value, PayjoinError.ReceiveError):
+            buf.writeI32(4)
+            FfiConverterString.write(value.message, buf)
+        if isinstance(value, PayjoinError.RequestError):
+            buf.writeI32(5)
+            FfiConverterString.write(value.message, buf)
+        if isinstance(value, PayjoinError.SelectionError):
+            buf.writeI32(6)
+        if isinstance(value, PayjoinError.CreateRequestError):
+            buf.writeI32(7)
+            FfiConverterString.write(value.message, buf)
+        if isinstance(value, PayjoinError.PjParseError):
+            buf.writeI32(8)
+            FfiConverterString.write(value.message, buf)
+        if isinstance(value, PayjoinError.PjNotSupported):
+            buf.writeI32(9)
+            FfiConverterString.write(value.message, buf)
+        if isinstance(value, PayjoinError.ContextValidationError):
+            buf.writeI32(10)
+            FfiConverterString.write(value.message, buf)
+        if isinstance(value, PayjoinError.TransactionError):
+            buf.writeI32(11)
+            FfiConverterString.write(value.message, buf)
+        if isinstance(value, PayjoinError.UnexpectedError):
+            buf.writeI32(12)
+            FfiConverterString.write(value.message, buf)
+        if isinstance(value, PayjoinError.ServerError):
+            buf.writeI32(13)
+            FfiConverterString.write(value.message, buf)
+
+
+
+import threading
+
+class ConcurrentHandleMap:
+    """
+    A map where inserting, getting and removing data is synchronized with a lock.
+    """
+
+    def __init__(self):
+        # type Handle = int
+        self._left_map = {}  # type: Dict[Handle, Any]
+        self._right_map = {}  # type: Dict[Any, Handle]
+
+        self._lock = threading.Lock()
+        self._current_handle = 0
+        self._stride = 1
+
+
+    def insert(self, obj):
+        with self._lock:
+            if obj in self._right_map:
+                return self._right_map[obj]
+            else:
+                handle = self._current_handle
+                self._current_handle += self._stride
+                self._left_map[handle] = obj
+                self._right_map[obj] = handle
+                return handle
+
+    def get(self, handle):
+        with self._lock:
+            return self._left_map.get(handle)
+
+    def remove(self, handle):
+        with self._lock:
+            if handle in self._left_map:
+                obj = self._left_map.pop(handle)
+                del self._right_map[obj]
+                return obj
+
+# Magic number for the Rust proxy to call using the same mechanism as every other method,
+# to free the callback once it's dropped by Rust.
+IDX_CALLBACK_FREE = 0
+# Return codes for callback calls
+UNIFFI_CALLBACK_SUCCESS = 0
+UNIFFI_CALLBACK_ERROR = 1
+UNIFFI_CALLBACK_UNEXPECTED_ERROR = 2
+
+class FfiConverterCallbackInterface:
+    _handle_map = ConcurrentHandleMap()
+
+    def __init__(self, cb):
+        self._foreign_callback = cb
+
+    def drop(self, handle):
+        self.__class__._handle_map.remove(handle)
+
+    @classmethod
+    def lift(cls, handle):
+        obj = cls._handle_map.get(handle)
+        if not obj:
+            raise InternalError("The object in the handle map has been dropped already")
+
+        return obj
+
+    @classmethod
+    def read(cls, buf):
+        handle = buf.readU64()
+        cls.lift(handle)
+
+    @classmethod
+    def lower(cls, cb):
+        handle = cls._handle_map.insert(cb)
+        return handle
+
+    @classmethod
+    def write(cls, cb, buf):
+        buf.writeU64(cls.lower(cb))
+
+# Declaration and FfiConverters for CanBroadcast Callback Interface
+
+class CanBroadcast:
+    def test_mempool_accept(self, tx_hex: "typing.List[str]"):
+        raise NotImplementedError
+
+    
+
+def py_foreignCallbackCallbackInterfaceCanBroadcast(handle, method, args_data, args_len, buf_ptr):
+    
+    def invoke_test_mempool_accept(python_callback, args_stream, buf_ptr):
+        def makeCall():return python_callback.test_mempool_accept(
+                FfiConverterSequenceString.read(args_stream)
+                )
+
+        def makeCallAndHandleReturn():
+            rval = makeCall()
+            with RustBuffer.allocWithBuilder() as builder:
+                FfiConverterBool.write(rval, builder)
+                buf_ptr[0] = builder.finalize()
+            return UNIFFI_CALLBACK_SUCCESS
+        try:
+            return makeCallAndHandleReturn()
+        except PayjoinError as e:
+            # Catch errors declared in the UDL file
+            with RustBuffer.allocWithBuilder() as builder:
+                FfiConverterTypePayjoinError.write(e, builder)
+                buf_ptr[0] = builder.finalize()
+            return UNIFFI_CALLBACK_ERROR
+
+    
+
+    cb = FfiConverterCallbackInterfaceCanBroadcast.lift(handle)
+    if not cb:
+        raise InternalError("No callback in handlemap; this is a Uniffi bug")
+
+    if method == IDX_CALLBACK_FREE:
+        FfiConverterCallbackInterfaceCanBroadcast.drop(handle)
+        # Successfull return
+        # See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs`
+        return UNIFFI_CALLBACK_SUCCESS
+
+    if method == 1:
+        # Call the method and handle any errors
+        # See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs` for details
+        try:
+            return invoke_test_mempool_accept(cb, RustBufferStream(args_data, args_len), buf_ptr)
+        except BaseException as e:
+            # Catch unexpected errors
+            try:
+                # Try to serialize the exception into a String
+                buf_ptr[0] = FfiConverterString.lower(repr(e))
+            except:
+                # If that fails, just give up
+                pass
+            return UNIFFI_CALLBACK_UNEXPECTED_ERROR
+    
+
+    # This should never happen, because an out of bounds method index won't
+    # ever be used. Once we can catch errors, we should return an InternalException.
+    # https://github.com/mozilla/uniffi-rs/issues/351
+
+    # An unexpected error happened.
+    # See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs`
+    return UNIFFI_CALLBACK_UNEXPECTED_ERROR
+
+# We need to keep this function reference alive:
+# if they get GC'd while in use then UniFFI internals could attempt to call a function
+# that is in freed memory.
+# That would be...uh...bad. Yeah, that's the word. Bad.
+foreignCallbackCallbackInterfaceCanBroadcast = FOREIGN_CALLBACK_T(py_foreignCallbackCallbackInterfaceCanBroadcast)
+rust_call(lambda err: _UniFFILib.uniffi_pdk_ffi_fn_init_callback_canbroadcast(foreignCallbackCallbackInterfaceCanBroadcast, err))
+
+# The FfiConverter which transforms the Callbacks in to Handles to pass to Rust.
+FfiConverterCallbackInterfaceCanBroadcast = FfiConverterCallbackInterface(foreignCallbackCallbackInterfaceCanBroadcast)
+
+
+
+
+
+# Declaration and FfiConverters for IsOutputKnown Callback Interface
+
+class IsOutputKnown:
+    def is_known(self, outpoint: "OutPoint"):
+        raise NotImplementedError
+
+    
+
+def py_foreignCallbackCallbackInterfaceIsOutputKnown(handle, method, args_data, args_len, buf_ptr):
+    
+    def invoke_is_known(python_callback, args_stream, buf_ptr):
+        def makeCall():return python_callback.is_known(
+                FfiConverterTypeOutPoint.read(args_stream)
+                )
+
+        def makeCallAndHandleReturn():
+            rval = makeCall()
+            with RustBuffer.allocWithBuilder() as builder:
+                FfiConverterBool.write(rval, builder)
+                buf_ptr[0] = builder.finalize()
+            return UNIFFI_CALLBACK_SUCCESS
+        try:
+            return makeCallAndHandleReturn()
+        except PayjoinError as e:
+            # Catch errors declared in the UDL file
+            with RustBuffer.allocWithBuilder() as builder:
+                FfiConverterTypePayjoinError.write(e, builder)
+                buf_ptr[0] = builder.finalize()
+            return UNIFFI_CALLBACK_ERROR
+
+    
+
+    cb = FfiConverterCallbackInterfaceIsOutputKnown.lift(handle)
+    if not cb:
+        raise InternalError("No callback in handlemap; this is a Uniffi bug")
+
+    if method == IDX_CALLBACK_FREE:
+        FfiConverterCallbackInterfaceIsOutputKnown.drop(handle)
+        # Successfull return
+        # See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs`
+        return UNIFFI_CALLBACK_SUCCESS
+
+    if method == 1:
+        # Call the method and handle any errors
+        # See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs` for details
+        try:
+            return invoke_is_known(cb, RustBufferStream(args_data, args_len), buf_ptr)
+        except BaseException as e:
+            # Catch unexpected errors
+            try:
+                # Try to serialize the exception into a String
+                buf_ptr[0] = FfiConverterString.lower(repr(e))
+            except:
+                # If that fails, just give up
+                pass
+            return UNIFFI_CALLBACK_UNEXPECTED_ERROR
+    
+
+    # This should never happen, because an out of bounds method index won't
+    # ever be used. Once we can catch errors, we should return an InternalException.
+    # https://github.com/mozilla/uniffi-rs/issues/351
+
+    # An unexpected error happened.
+    # See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs`
+    return UNIFFI_CALLBACK_UNEXPECTED_ERROR
+
+# We need to keep this function reference alive:
+# if they get GC'd while in use then UniFFI internals could attempt to call a function
+# that is in freed memory.
+# That would be...uh...bad. Yeah, that's the word. Bad.
+foreignCallbackCallbackInterfaceIsOutputKnown = FOREIGN_CALLBACK_T(py_foreignCallbackCallbackInterfaceIsOutputKnown)
+rust_call(lambda err: _UniFFILib.uniffi_pdk_ffi_fn_init_callback_isoutputknown(foreignCallbackCallbackInterfaceIsOutputKnown, err))
+
+# The FfiConverter which transforms the Callbacks in to Handles to pass to Rust.
+FfiConverterCallbackInterfaceIsOutputKnown = FfiConverterCallbackInterface(foreignCallbackCallbackInterfaceIsOutputKnown)
+
+
+
+
+
+# Declaration and FfiConverters for IsScriptOwned Callback Interface
+
+class IsScriptOwned:
+    def is_owned(self, script: "ScriptBuf"):
+        raise NotImplementedError
+
+    
+
+def py_foreignCallbackCallbackInterfaceIsScriptOwned(handle, method, args_data, args_len, buf_ptr):
+    
+    def invoke_is_owned(python_callback, args_stream, buf_ptr):
+        def makeCall():return python_callback.is_owned(
+                FfiConverterTypeScriptBuf.read(args_stream)
+                )
+
+        def makeCallAndHandleReturn():
+            rval = makeCall()
+            with RustBuffer.allocWithBuilder() as builder:
+                FfiConverterBool.write(rval, builder)
+                buf_ptr[0] = builder.finalize()
+            return UNIFFI_CALLBACK_SUCCESS
+        try:
+            return makeCallAndHandleReturn()
+        except PayjoinError as e:
+            # Catch errors declared in the UDL file
+            with RustBuffer.allocWithBuilder() as builder:
+                FfiConverterTypePayjoinError.write(e, builder)
+                buf_ptr[0] = builder.finalize()
+            return UNIFFI_CALLBACK_ERROR
+
+    
+
+    cb = FfiConverterCallbackInterfaceIsScriptOwned.lift(handle)
+    if not cb:
+        raise InternalError("No callback in handlemap; this is a Uniffi bug")
+
+    if method == IDX_CALLBACK_FREE:
+        FfiConverterCallbackInterfaceIsScriptOwned.drop(handle)
+        # Successfull return
+        # See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs`
+        return UNIFFI_CALLBACK_SUCCESS
+
+    if method == 1:
+        # Call the method and handle any errors
+        # See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs` for details
+        try:
+            return invoke_is_owned(cb, RustBufferStream(args_data, args_len), buf_ptr)
+        except BaseException as e:
+            # Catch unexpected errors
+            try:
+                # Try to serialize the exception into a String
+                buf_ptr[0] = FfiConverterString.lower(repr(e))
+            except:
+                # If that fails, just give up
+                pass
+            return UNIFFI_CALLBACK_UNEXPECTED_ERROR
+    
+
+    # This should never happen, because an out of bounds method index won't
+    # ever be used. Once we can catch errors, we should return an InternalException.
+    # https://github.com/mozilla/uniffi-rs/issues/351
+
+    # An unexpected error happened.
+    # See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs`
+    return UNIFFI_CALLBACK_UNEXPECTED_ERROR
+
+# We need to keep this function reference alive:
+# if they get GC'd while in use then UniFFI internals could attempt to call a function
+# that is in freed memory.
+# That would be...uh...bad. Yeah, that's the word. Bad.
+foreignCallbackCallbackInterfaceIsScriptOwned = FOREIGN_CALLBACK_T(py_foreignCallbackCallbackInterfaceIsScriptOwned)
+rust_call(lambda err: _UniFFILib.uniffi_pdk_ffi_fn_init_callback_isscriptowned(foreignCallbackCallbackInterfaceIsScriptOwned, err))
+
+# The FfiConverter which transforms the Callbacks in to Handles to pass to Rust.
+FfiConverterCallbackInterfaceIsScriptOwned = FfiConverterCallbackInterface(foreignCallbackCallbackInterfaceIsScriptOwned)
 
 
 
@@ -2508,6 +3349,33 @@ class FfiConverterSequenceString(FfiConverterRustBuffer):
 
 
 
+class FfiConverterMapUInt64TypeOutPoint(FfiConverterRustBuffer):
+    @classmethod
+    def write(cls, items, buf):
+        buf.writeI32(len(items))
+        for (key, value) in items.items():
+            FfiConverterUInt64.write(key, buf)
+            FfiConverterTypeOutPoint.write(value, buf)
+
+    @classmethod
+    def read(cls, buf):
+        count = buf.readI32()
+        if count < 0:
+            raise InternalError("Unexpected negative map size")
+
+        # It would be nice to use a dict comprehension,
+        # but in Python 3.7 and before the evaluation order is not according to spec,
+        # so we we're reading the value before the key.
+        # This loop makes the order explicit: first reading the key, then the value.
+        d = {}
+        for i in range(count):
+            key = FfiConverterUInt64.read(buf)
+            val = FfiConverterTypeOutPoint.read(buf)
+            d[key] = val
+        return d
+
+
+
 class FfiConverterMapStringString(FfiConverterRustBuffer):
     @classmethod
     def write(cls, items, buf):
@@ -2535,11 +3403,12 @@ class FfiConverterMapStringString(FfiConverterRustBuffer):
 
 __all__ = [
     "InternalError",
-    "Error",
     "Network",
+    "PayjoinError",
     "OutPoint",
     "PrjUriRequest",
     "Request",
+    "TxOut",
     "ScriptBuf",
     "Address",
     "Headers",
@@ -2552,8 +3421,14 @@ __all__ = [
     "PrjUri",
     "Txid",
     "Transaction",
-    "CanBroadcast",
     "UncheckedProposal",
     "MaybeInputsOwned",
+    "MaybeMixedInputScripts",
+    "MaybeInputsSeen",
+    "OutputsUnknown",
+    "PayjoinProposal",
+    "CanBroadcast",
+    "IsScriptOwned",
+    "IsOutputKnown",
 ]
 

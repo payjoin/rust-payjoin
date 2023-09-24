@@ -1,3 +1,3 @@
 fn main() {
-	uniffi::generate_scaffolding("bindings/pdk_ffi.udl").unwrap();
+	uniffi::generate_scaffolding("src/pdk_ffi.udl").unwrap();
 }

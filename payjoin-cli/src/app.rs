@@ -83,13 +83,9 @@ impl App {
         let psbt = Psbt::from_str(&psbt).with_context(|| "Failed to load PSBT from base64")?;
         log::debug!("Original psbt: {:#?}", psbt);
 
-        let payout_scripts = std::iter::once(uri.address.script_pubkey());
-
         let (req, ctx) = payjoin::send::RequestBuilder::from_psbt_and_uri(psbt, uri)
             .with_context(|| "Failed to build payjoin request")?
-            .with_recommended_params(payout_scripts, fee_rate)
-            .with_context(|| "Configuration error")?
-            .build()
+            .build_recommended(fee_rate)
             .with_context(|| "Failed to build payjoin request")?;
 
         let client = reqwest::blocking::Client::builder()

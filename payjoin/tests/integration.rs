@@ -79,8 +79,12 @@ mod integration {
         debug!("Original psbt: {:#?}", psbt);
         let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt, pj_uri)
             .unwrap()
-            .build_with_fee_contribution(payjoin::bitcoin::Amount::from_sat(10000), None)
-            .build()
+            .build_with_additional_fee(
+                payjoin::bitcoin::Amount::from_sat(10000),
+                None,
+                bitcoin::FeeRate::ZERO,
+                false,
+            )
             .unwrap();
         let headers = HeaderMock::from_vec(&req.body);
 

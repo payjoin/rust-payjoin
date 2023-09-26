@@ -150,10 +150,8 @@ pub use error::{CreateRequestError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 use url::Url;
 
-use self::error::ConfigurationError;
 use crate::input_type::InputType;
 use crate::psbt::PsbtExt;
-use crate::send::error::InternalConfigurationError;
 use crate::uri::UriExt;
 use crate::weight::{varint_size, ComputeWeight};
 use crate::PjUri;
@@ -199,18 +197,30 @@ impl<'a> RequestBuilder<'a> {
         })
     }
 
+    /// Disable output substitution even if the receiver didn't.
+    ///
+    /// This forbids receiver switching output or decreasing amount.
+    /// It is generally **not** recommended to set this as it may prevent the receiver from
+    /// doing advanced operations such as opening LN channels and it also guarantees the
+    /// receiver will **not** reward the sender with a discount.
+    pub fn always_disable_output_substitution(mut self, disable: bool) -> Self {
+        self.disable_output_substitution = disable;
+        self
+    }
+
     // Calculate the recommended fee contribution for an Original PSBT.
     //
     // BIP 78 recommends contributing `originalPSBTFeeRate * vsize(sender_input_type)`.
     // The minfeerate parameter is set if the contribution is available in change.
     //
     // This method fails if no recommendation can be made or if the PSBT is malformed.
-    pub fn with_recommended_params(
+    pub fn build_recommended(
         self,
-        payout_scripts: impl IntoIterator<Item = ScriptBuf>,
         min_fee_rate: FeeRate,
-    ) -> Result<Self, ConfigurationError> {
-        let mut payout_scripts = payout_scripts.into_iter();
+    ) -> Result<(Request, Context), CreateRequestError> {
+        // TODO support optional batched payout scripts. This would require a change to
+        // build() which now checks for a single payee.
+        let mut payout_scripts = std::iter::once(self.uri.address.script_pubkey());
         if let Some((additional_fee_index, fee_available)) = self
             .psbt
             .unsigned_tx
@@ -226,13 +236,13 @@ impl<'a> RequestBuilder<'a> {
                 .input_pairs()
                 .map(|input| {
                     let txo =
-                        input.previous_txout().map_err(InternalConfigurationError::PrevTxOut)?;
+                        input.previous_txout().map_err(InternalCreateRequestError::PrevTxOut)?;
                     Ok(InputType::from_spent_input(txo, input.psbtin)
-                        .map_err(InternalConfigurationError::InputType)?)
+                        .map_err(InternalCreateRequestError::InputType)?)
                 })
-                .collect::<Result<Vec<InputType>, ConfigurationError>>()?;
+                .collect::<Result<Vec<InputType>, InternalCreateRequestError>>()?;
 
-            let first_type = input_types.first().ok_or(InternalConfigurationError::NoInputs)?;
+            let first_type = input_types.first().ok_or(InternalCreateRequestError::NoInputs)?;
             // use cheapest default if mixed input types
             let mut input_vsize = InputType::Taproot.expected_input_weight();
             // Check if all inputs are the same type
@@ -243,16 +253,21 @@ impl<'a> RequestBuilder<'a> {
             let recommended_additional_fee = min_fee_rate * input_vsize;
             if fee_available < recommended_additional_fee {
                 log::warn!("Insufficient funds to maintain specified minimum feerate.");
-                return Ok(self
-                    .with_fee_contribution(fee_available, Some(additional_fee_index))
-                    .clamp_fee_contribution(true));
+                return self.build_with_additional_fee(
+                    fee_available,
+                    Some(additional_fee_index),
+                    min_fee_rate,
+                    true,
+                );
             }
-            return Ok(self
-                .with_fee_contribution(recommended_additional_fee, Some(additional_fee_index))
-                .clamp_fee_contribution(false)
-                .min_fee_rate(min_fee_rate));
+            return self.build_with_additional_fee(
+                recommended_additional_fee,
+                Some(additional_fee_index),
+                min_fee_rate,
+                false,
+            );
         }
-        Ok(self.non_incentivizing())
+        self.build_non_incentivizing()
     }
 
     /// Offer the receiver contribution to pay for his input.
@@ -262,62 +277,39 @@ impl<'a> RequestBuilder<'a> {
     ///
     /// `change_index` specifies which output can be used to pay fee. If `None` is provided, then
     /// the output is auto-detected unless the supplied transaction has more than two outputs.
-    pub fn with_fee_contribution(
-        self,
+    ///
+    /// `clamp_fee_contribution` decreases fee contribution instead of erroring.
+    ///
+    /// If this option is true and a transaction with change amount lower than fee
+    /// contribution is provided then instead of returning error the fee contribution will
+    /// be just lowered in the request to match the change amount.
+    pub fn build_with_additional_fee(
+        mut self,
         max_fee_contribution: bitcoin::Amount,
         change_index: Option<usize>,
-    ) -> Self {
-        Self {
-            disable_output_substitution: false,
-            fee_contribution: Some((max_fee_contribution, change_index)),
-            clamp_fee_contribution: false,
-            min_fee_rate: FeeRate::ZERO,
-            ..self
-        }
+        min_fee_rate: FeeRate,
+        clamp_fee_contribution: bool,
+    ) -> Result<(Request, Context), CreateRequestError> {
+        self.fee_contribution = Some((max_fee_contribution, change_index));
+        self.clamp_fee_contribution = clamp_fee_contribution;
+        self.min_fee_rate = min_fee_rate;
+        self.build()
     }
 
     /// Perform Payjoin without incentivizing the payee to cooperate.
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
-    pub fn non_incentivizing(self) -> Self {
-        Self {
-            disable_output_substitution: false,
-            fee_contribution: None,
-            clamp_fee_contribution: false,
-            min_fee_rate: FeeRate::ZERO,
-            ..self
-        }
+    pub fn build_non_incentivizing(mut self) -> Result<(Request, Context), CreateRequestError> {
+        // since this is a builder, these should already be cleared
+        // but we'll reset them to be sure
+        self.fee_contribution = None;
+        self.clamp_fee_contribution = false;
+        self.min_fee_rate = FeeRate::ZERO;
+        self.build()
     }
 
-    /// Disable output substitution even if the receiver didn't.
-    ///
-    /// This forbids receiver switching output or decreasing amount.
-    /// It is generally **not** recommended to set this as it may prevent the receiver from
-    /// doing advanced operations such as opening LN channels and it also guarantees the
-    /// receiver will **not** reward the sender with a discount.
-    pub fn always_disable_output_substitution(mut self, disable: bool) -> Self {
-        self.disable_output_substitution = disable;
-        self
-    }
-
-    /// Decrease fee contribution instead of erroring.
-    ///
-    /// If this option is set and a transaction with change amount lower than fee
-    /// contribution is provided then instead of returning error the fee contribution will
-    /// be just lowered to match the change amount.
-    pub fn clamp_fee_contribution(mut self, clamp: bool) -> Self {
-        self.clamp_fee_contribution = clamp;
-        self
-    }
-
-    /// Sets minimum fee rate required by the sender.
-    pub fn min_fee_rate(mut self, fee_rate: FeeRate) -> Self {
-        self.min_fee_rate = fee_rate;
-        self
-    }
-
-    pub fn build(self) -> Result<(Request, Context), CreateRequestError> {
+    fn build(self) -> Result<(Request, Context), CreateRequestError> {
         let mut psbt =
             self.psbt.validate().map_err(InternalCreateRequestError::InconsistentOriginalPsbt)?;
         psbt.validate_input_utxos(true)

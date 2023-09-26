@@ -5,9 +5,6 @@ use bitcoin::address::{Error, NetworkChecked, NetworkUnchecked};
 use bitcoin::Network;
 use url::Url;
 
-#[cfg(feature = "send")]
-use crate::send;
-
 #[derive(Debug, Clone)]
 pub enum Payjoin {
     Supported(PayjoinParams),
@@ -50,21 +47,6 @@ pub trait UriExtNetworkUnchecked<'a>: sealed::UriExtNetworkUnchecked {
     fn assume_checked(self) -> Uri<'a, NetworkChecked>;
 }
 
-pub trait PjUriExt: sealed::UriExt {
-    /// Prepare an HTTP request and request context to process the response
-    ///
-    /// An HTTP client will own the Request data while Context sticks around so
-    /// a `(Request, Context)` tuple is returned to keep them separated. call:
-    ///
-    /// `let (request, context) = uri.create_pj_request(psbt, params);`
-    #[cfg(feature = "send")]
-    fn create_pj_request(
-        self,
-        psbt: bitcoin::psbt::Psbt,
-        params: send::Configuration,
-    ) -> Result<(send::Request, send::Context), send::CreateRequestError>;
-}
-
 pub trait UriExt<'a>: sealed::UriExt {
     fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>>;
 }
@@ -89,24 +71,8 @@ impl<'a> UriExtNetworkUnchecked<'a> for Uri<'a, NetworkUnchecked> {
     }
 }
 
-impl<'a> PjUriExt for PjUri<'a> {
-    #[cfg(feature = "send")]
-    fn create_pj_request(
-        self,
-        psbt: bitcoin::psbt::Psbt,
-        params: send::Configuration,
-    ) -> Result<(send::Request, send::Context), send::CreateRequestError> {
-        use crate::psbt::PsbtExt;
-
-        let valid_psbt =
-            psbt.validate().map_err(send::InternalCreateRequestError::InconsistentOriginalPsbt)?;
-        send::from_psbt_and_uri(valid_psbt, self, params)
-    }
-}
-
 impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
     fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>> {
-        //let checked_address = self.address.assume_checked();
         match self.extras {
             Payjoin::Supported(payjoin) => {
                 let mut uri = bip21::Uri::with_extras(self.address, payjoin);

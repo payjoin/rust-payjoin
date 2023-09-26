@@ -141,6 +141,30 @@ impl From<InternalConfigurationError> for ConfigurationError {
     fn from(value: InternalConfigurationError) -> Self { ConfigurationError(value) }
 }
 
+impl fmt::Display for ConfigurationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use InternalConfigurationError::*;
+
+        match &self.0 {
+            PrevTxOut(e) => write!(f, "invalid previous transaction output: {}", e),
+            InputType(e) => write!(f, "invalid input type: {}", e),
+            NoInputs => write!(f, "no inputs"),
+        }
+    }
+}
+
+impl std::error::Error for ConfigurationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use InternalConfigurationError::*;
+
+        match &self.0 {
+            PrevTxOut(error) => Some(error),
+            InputType(error) => Some(error),
+            NoInputs => None,
+        }
+    }
+}
+
 /// Error returned when request could not be created.
 ///
 /// This error can currently only happen due to programmer mistake.
@@ -163,6 +187,7 @@ pub(crate) enum InternalCreateRequestError {
     ChangeIndexOutOfBounds,
     ChangeIndexPointsAtPayee,
     Url(url::ParseError),
+    UriDoesNotSupportPayjoin,
 }
 
 impl fmt::Display for CreateRequestError {
@@ -182,6 +207,7 @@ impl fmt::Display for CreateRequestError {
             ChangeIndexOutOfBounds => write!(f, "fee output index is points out of bounds"),
             ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
             Url(e) => write!(f, "cannot parse endpoint url: {:#?}", e),
+            UriDoesNotSupportPayjoin => write!(f, "the URI does not support payjoin"),
         }
     }
 }
@@ -203,6 +229,7 @@ impl std::error::Error for CreateRequestError {
             ChangeIndexOutOfBounds => None,
             ChangeIndexPointsAtPayee => None,
             Url(error) => Some(error),
+            UriDoesNotSupportPayjoin => None,
         }
     }
 }

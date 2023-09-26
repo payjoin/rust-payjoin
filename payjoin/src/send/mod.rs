@@ -143,6 +143,7 @@
 
 use std::str::FromStr;
 
+use bitcoin::address::NetworkChecked;
 use bitcoin::psbt::Psbt;
 use bitcoin::{FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
 pub use error::{CreateRequestError, ValidationError};
@@ -153,7 +154,9 @@ use self::error::ConfigurationError;
 use crate::input_type::InputType;
 use crate::psbt::PsbtExt;
 use crate::send::error::InternalConfigurationError;
+use crate::uri::UriExt;
 use crate::weight::{varint_size, ComputeWeight};
+use crate::PjUri;
 
 // See usize casts
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -163,30 +166,53 @@ mod error;
 
 type InternalResult<T> = Result<T, InternalValidationError>;
 
-/// Builder for sender-side payjoin parameters
-///
-/// These parameters define how client wants to handle Payjoin.
-pub struct Configuration {
+pub struct RequestBuilder<'a> {
+    psbt: Psbt,
+    uri: PjUri<'a>,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
     clamp_fee_contribution: bool,
     min_fee_rate: FeeRate,
 }
 
-impl Configuration {
+impl<'a> RequestBuilder<'a> {
+    /// Prepare an HTTP request and request context to process the response
+    ///
+    /// An HTTP client will own the Request data while Context sticks around so
+    /// a `(Request, Context)` tuple is returned from `RequestBuilder::build()`
+    /// to keep them separated.
+    pub fn from_psbt_and_uri(
+        psbt: Psbt,
+        uri: crate::Uri<'a, NetworkChecked>,
+    ) -> Result<Self, CreateRequestError> {
+        let uri = uri
+            .check_pj_supported()
+            .map_err(|_| InternalCreateRequestError::UriDoesNotSupportPayjoin)?;
+        Ok(Self {
+            psbt,
+            uri,
+            // Sender's optional parameters
+            disable_output_substitution: false,
+            fee_contribution: None,
+            clamp_fee_contribution: false,
+            min_fee_rate: FeeRate::ZERO,
+        })
+    }
+
     // Calculate the recommended fee contribution for an Original PSBT.
     //
     // BIP 78 recommends contributing `originalPSBTFeeRate * vsize(sender_input_type)`.
     // The minfeerate parameter is set if the contribution is available in change.
     //
     // This method fails if no recommendation can be made or if the PSBT is malformed.
-    pub fn recommended(
-        psbt: &Psbt,
+    pub fn with_recommended_params(
+        self,
         payout_scripts: impl IntoIterator<Item = ScriptBuf>,
         min_fee_rate: FeeRate,
     ) -> Result<Self, ConfigurationError> {
         let mut payout_scripts = payout_scripts.into_iter();
-        if let Some((additional_fee_index, fee_available)) = psbt
+        if let Some((additional_fee_index, fee_available)) = self
+            .psbt
             .unsigned_tx
             .output
             .clone()
@@ -195,7 +221,8 @@ impl Configuration {
             .find(|(_, txo)| payout_scripts.all(|script| script != txo.script_pubkey))
             .map(|(i, txo)| (i, bitcoin::Amount::from_sat(txo.value)))
         {
-            let input_types = psbt
+            let input_types = self
+                .psbt
                 .input_pairs()
                 .map(|input| {
                     let txo =
@@ -216,20 +243,16 @@ impl Configuration {
             let recommended_additional_fee = min_fee_rate * input_vsize;
             if fee_available < recommended_additional_fee {
                 log::warn!("Insufficient funds to maintain specified minimum feerate.");
-                return Ok(Configuration::with_fee_contribution(
-                    fee_available,
-                    Some(additional_fee_index),
-                )
-                .clamp_fee_contribution(true));
+                return Ok(self
+                    .with_fee_contribution(fee_available, Some(additional_fee_index))
+                    .clamp_fee_contribution(true));
             }
-            return Ok(Configuration::with_fee_contribution(
-                recommended_additional_fee,
-                Some(additional_fee_index),
-            )
-            .clamp_fee_contribution(false)
-            .min_fee_rate(min_fee_rate));
+            return Ok(self
+                .with_fee_contribution(recommended_additional_fee, Some(additional_fee_index))
+                .clamp_fee_contribution(false)
+                .min_fee_rate(min_fee_rate));
         }
-        Ok(Configuration::non_incentivizing())
+        Ok(self.non_incentivizing())
     }
 
     /// Offer the receiver contribution to pay for his input.
@@ -240,14 +263,16 @@ impl Configuration {
     /// `change_index` specifies which output can be used to pay fee. If `None` is provided, then
     /// the output is auto-detected unless the supplied transaction has more than two outputs.
     pub fn with_fee_contribution(
+        self,
         max_fee_contribution: bitcoin::Amount,
         change_index: Option<usize>,
     ) -> Self {
-        Configuration {
+        Self {
             disable_output_substitution: false,
             fee_contribution: Some((max_fee_contribution, change_index)),
             clamp_fee_contribution: false,
             min_fee_rate: FeeRate::ZERO,
+            ..self
         }
     }
 
@@ -255,12 +280,13 @@ impl Configuration {
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
-    pub fn non_incentivizing() -> Self {
-        Configuration {
+    pub fn non_incentivizing(self) -> Self {
+        Self {
             disable_output_substitution: false,
             fee_contribution: None,
             clamp_fee_contribution: false,
             min_fee_rate: FeeRate::ZERO,
+            ..self
         }
     }
 
@@ -289,6 +315,19 @@ impl Configuration {
     pub fn min_fee_rate(mut self, fee_rate: FeeRate) -> Self {
         self.min_fee_rate = fee_rate;
         self
+    }
+
+    pub fn build(self) -> Result<(Request, Context), CreateRequestError> {
+        let valid_psbt =
+            self.psbt.validate().map_err(InternalCreateRequestError::InconsistentOriginalPsbt)?;
+        build_request(
+            valid_psbt,
+            self.uri,
+            self.disable_output_substitution,
+            self.fee_contribution,
+            self.clamp_fee_contribution,
+            self.min_fee_rate,
+        )
     }
 }
 
@@ -700,12 +739,13 @@ fn check_change_index(
 fn determine_fee_contribution(
     psbt: &Psbt,
     payee: &Script,
-    params: &Configuration,
+    fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
+    clamp_fee_contribution: bool,
 ) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
-    Ok(match params.fee_contribution {
-        Some((fee, None)) => find_change_index(psbt, payee, fee, params.clamp_fee_contribution)?,
+    Ok(match fee_contribution {
+        Some((fee, None)) => find_change_index(psbt, payee, fee, clamp_fee_contribution)?,
         Some((fee, Some(index))) =>
-            Some(check_change_index(psbt, payee, fee, index, params.clamp_fee_contribution)?),
+            Some(check_change_index(psbt, payee, fee, index, clamp_fee_contribution)?),
         None => None,
     })
 }
@@ -739,18 +779,22 @@ fn serialize_psbt(psbt: &Psbt) -> Vec<u8> {
     bitcoin::base64::encode(bytes).into_bytes()
 }
 
-pub(crate) fn from_psbt_and_uri(
+pub(crate) fn build_request(
     mut psbt: Psbt,
     uri: crate::uri::PjUri<'_>,
-    params: Configuration,
+    disable_output_substitution: bool,
+    fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
+    clamp_fee_contribution: bool,
+    min_fee_rate: FeeRate,
 ) -> Result<(Request, Context), CreateRequestError> {
     psbt.validate_input_utxos(true).map_err(InternalCreateRequestError::InvalidOriginalInput)?;
     let disable_output_substitution =
-        uri.extras.disable_output_substitution || params.disable_output_substitution;
+        uri.extras.disable_output_substitution || disable_output_substitution;
     let payee = uri.address.script_pubkey();
 
     check_single_payee(&psbt, &payee, uri.amount)?;
-    let fee_contribution = determine_fee_contribution(&psbt, &payee, &params)?;
+    let fee_contribution =
+        determine_fee_contribution(&psbt, &payee, fee_contribution, clamp_fee_contribution)?;
     clear_unneeded_fields(&mut psbt);
 
     let zeroth_input = psbt.input_pairs().next().ok_or(InternalCreateRequestError::NoInputs)?;
@@ -762,7 +806,7 @@ pub(crate) fn from_psbt_and_uri(
         uri.extras._endpoint.into(),
         disable_output_substitution,
         fee_contribution,
-        params.min_fee_rate,
+        min_fee_rate,
     )
     .map_err(InternalCreateRequestError::Url)?;
     let body = serialize_psbt(&psbt);
@@ -775,7 +819,7 @@ pub(crate) fn from_psbt_and_uri(
             payee,
             input_type,
             sequence,
-            min_fee_rate: params.min_fee_rate,
+            min_fee_rate,
         },
     ))
 }

@@ -318,16 +318,48 @@ impl<'a> RequestBuilder<'a> {
     }
 
     pub fn build(self) -> Result<(Request, Context), CreateRequestError> {
-        let valid_psbt =
+        let mut psbt =
             self.psbt.validate().map_err(InternalCreateRequestError::InconsistentOriginalPsbt)?;
-        build_request(
-            valid_psbt,
-            self.uri,
-            self.disable_output_substitution,
+        psbt.validate_input_utxos(true)
+            .map_err(InternalCreateRequestError::InvalidOriginalInput)?;
+        let disable_output_substitution =
+            self.uri.extras.disable_output_substitution || self.disable_output_substitution;
+        let payee = self.uri.address.script_pubkey();
+
+        check_single_payee(&psbt, &payee, self.uri.amount)?;
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            &payee,
             self.fee_contribution,
             self.clamp_fee_contribution,
+        )?;
+        clear_unneeded_fields(&mut psbt);
+
+        let zeroth_input = psbt.input_pairs().next().ok_or(InternalCreateRequestError::NoInputs)?;
+
+        let sequence = zeroth_input.txin.sequence;
+        let txout = zeroth_input.previous_txout().expect("We already checked this above");
+        let input_type = InputType::from_spent_input(txout, zeroth_input.psbtin).unwrap();
+        let url = serialize_url(
+            self.uri.extras._endpoint.into(),
+            disable_output_substitution,
+            fee_contribution,
             self.min_fee_rate,
         )
+        .map_err(InternalCreateRequestError::Url)?;
+        let body = serialize_psbt(&psbt);
+        Ok((
+            Request { url, body },
+            Context {
+                original_psbt: psbt,
+                disable_output_substitution,
+                fee_contribution,
+                payee,
+                input_type,
+                sequence,
+                min_fee_rate: self.min_fee_rate,
+            },
+        ))
     }
 }
 
@@ -777,51 +809,6 @@ fn serialize_url(
 fn serialize_psbt(psbt: &Psbt) -> Vec<u8> {
     let bytes = psbt.serialize();
     bitcoin::base64::encode(bytes).into_bytes()
-}
-
-pub(crate) fn build_request(
-    mut psbt: Psbt,
-    uri: crate::uri::PjUri<'_>,
-    disable_output_substitution: bool,
-    fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
-    clamp_fee_contribution: bool,
-    min_fee_rate: FeeRate,
-) -> Result<(Request, Context), CreateRequestError> {
-    psbt.validate_input_utxos(true).map_err(InternalCreateRequestError::InvalidOriginalInput)?;
-    let disable_output_substitution =
-        uri.extras.disable_output_substitution || disable_output_substitution;
-    let payee = uri.address.script_pubkey();
-
-    check_single_payee(&psbt, &payee, uri.amount)?;
-    let fee_contribution =
-        determine_fee_contribution(&psbt, &payee, fee_contribution, clamp_fee_contribution)?;
-    clear_unneeded_fields(&mut psbt);
-
-    let zeroth_input = psbt.input_pairs().next().ok_or(InternalCreateRequestError::NoInputs)?;
-
-    let sequence = zeroth_input.txin.sequence;
-    let txout = zeroth_input.previous_txout().expect("We already checked this above");
-    let input_type = InputType::from_spent_input(txout, zeroth_input.psbtin).unwrap();
-    let url = serialize_url(
-        uri.extras._endpoint.into(),
-        disable_output_substitution,
-        fee_contribution,
-        min_fee_rate,
-    )
-    .map_err(InternalCreateRequestError::Url)?;
-    let body = serialize_psbt(&psbt);
-    Ok((
-        Request { url, body },
-        Context {
-            original_psbt: psbt,
-            disable_output_substitution,
-            fee_contribution,
-            payee,
-            input_type,
-            sequence,
-            min_fee_rate,
-        },
-    ))
 }
 
 #[cfg(test)]

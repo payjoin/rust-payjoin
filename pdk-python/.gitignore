@@ -1,0 +1,10 @@
+
+dist/
+pdkpython.egg-info/
+__pycache__/
+.idea/
+.DS_Store
+
+*.swp
+*.whl
+build/

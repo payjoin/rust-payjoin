@@ -1,31 +1,33 @@
+use std::{io::Cursor, str::FromStr, sync::Arc};
+
 use payjoin::bitcoin::psbt::PartiallySignedTransaction as BitcoinPsbt;
 use payjoin::bitcoin::{
 	blockdata::transaction::Transaction as BitcoinTransaction, consensus::Decodable,
 };
-use std::{io::Cursor, str::FromStr, sync::Arc};
 
 use crate::{error::PayjoinError, send::Context};
 
 ///
 /// Partially signed transaction, commonly referred to as a PSBT.
 #[derive(Debug, Clone)]
-pub struct PartiallySignedTransaction {
-	internal: BitcoinPsbt,
-}
+pub struct PartiallySignedTransaction(BitcoinPsbt);
+
 impl From<BitcoinPsbt> for PartiallySignedTransaction {
 	fn from(value: BitcoinPsbt) -> Self {
-		PartiallySignedTransaction { internal: value }
+		PartiallySignedTransaction(value)
 	}
 }
+
 impl From<PartiallySignedTransaction> for BitcoinPsbt {
 	fn from(value: PartiallySignedTransaction) -> Self {
-		value.internal
+		value.0
 	}
 }
+
 impl PartiallySignedTransaction {
 	pub fn new(psbt_base64: String) -> Result<Self, PayjoinError> {
 		let psbt = BitcoinPsbt::from_str(&psbt_base64)?;
-		Ok(PartiallySignedTransaction { internal: psbt })
+		Ok(PartiallySignedTransaction(psbt))
 	}
 	///Decodes and validates the response.
 
@@ -36,12 +38,15 @@ impl PartiallySignedTransaction {
 			Err(_) => panic!("Context preproses failed"),
 		};
 		match ctx.process_response(&mut response.as_bytes()) {
-			Ok(e) => Ok(PartiallySignedTransaction { internal: e }),
+			Ok(e) => Ok(PartiallySignedTransaction(e)),
 			Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
 		}
 	}
 	pub fn serialize(&self) -> Vec<u8> {
-		self.internal.serialize()
+		self.0.serialize()
+	}
+	pub fn to_string(&self) -> String {
+		self.0.to_string()
 	}
 }
 
@@ -49,6 +54,7 @@ impl PartiallySignedTransaction {
 pub struct Transaction {
 	internal: BitcoinTransaction,
 }
+
 impl Transaction {
 	pub fn new(transaction_bytes: Vec<u8>) -> Result<Self, PayjoinError> {
 		let mut decoder = Cursor::new(transaction_bytes);
@@ -61,17 +67,21 @@ impl Transaction {
 		Arc::new(Txid(self.internal.txid().to_string()))
 	}
 }
+
 pub struct Txid(String);
+
 impl Txid {
 	pub fn to_string(&self) -> String {
 		self.0.clone()
 	}
 }
+
 impl From<Transaction> for BitcoinTransaction {
 	fn from(value: Transaction) -> Self {
 		value.internal
 	}
 }
+
 impl From<BitcoinTransaction> for Transaction {
 	fn from(value: BitcoinTransaction) -> Self {
 		Self { internal: value }

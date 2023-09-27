@@ -31,7 +31,7 @@ jobs:
           cargo update -p log --precise 0.4.18
           cargo update -p tempfile --precise 3.6.0
           cargo update -p flate2 --precise 1.0.26
-          cargo update -p minreq --precise 2.8.0
+          cargo update -p rustls --precise 0.20.8
       - name: test
         run: cargo test --verbose --all-features --lib
 

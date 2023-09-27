@@ -6,7 +6,7 @@
 //! 1. Parse BIP21 as [`payjoin::Uri`](crate::Uri)
 //! 2. Construct URI request parameters, a finalized “Original PSBT” paying .amount to .address
 //! 3. (optional) Spawn a thread or async task that will broadcast the original PSBT fallback after delay (e.g. 1 minute) unless canceled
-//! 4. Construct the request [`PjUriExt::create_pj_request()`](crate::PjUriExt::create_pj_request()) with the PSBT and your parameters
+//! 4. Construct the request using [`RequestBuilder`](crate::send::RequestBuilder) with the PSBT and payjoin uri
 //! 5. Send the request and receive response
 //! 6. Process the response with [`Context::process_response()`](crate::send::Context::process_response())
 //! 7. Sign and finalize the Payjoin Proposal PSBT
@@ -23,19 +23,16 @@
 //! Start by parsing a valid BIP 21 uri having the `pj` parameter. This is the [`bip21`](https://crates.io/crates/bip21) crate under the hood.
 //!
 //! ```
-//! let link = payjoin::Uri::try_from(bip21)
-//!     .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
-//!
-//! let link = link
-//!     .check_pj_supported()
-//!     .map_err(|e| anyhow!("The provided URI doesn't support payjoin (BIP78): {}", e))?;
+//! let uri = payjoin::Uri::try_from(bip21)
+//!     .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?
+//!     .assume_checked(); // assume bitcoin address is for the right network
 //! ```
 //!
 //! ### 2. Construct URI request parameters, a finalized "Original PSBT" paying `.amount` to `.address`
 //!
 //! ```
 //! let mut outputs = HashMap::with_capacity(1);
-//! outputs.insert(link.address.to_string(), amount);
+//! outputs.insert(uri.address.to_string(), amount);
 //!
 //! let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
 //!     lock_unspent: Some(true),
@@ -60,10 +57,6 @@
 //! let psbt = Psbt::from_str(&psbt) // SHOULD BE PROVIDED BY CRATE AS HELPER USING rust-bitcoin base64 feature
 //!     .with_context(|| "Failed to load PSBT from base64")?;
 //! log::debug!("Original psbt: {:#?}", psbt);
-//! let pj_params = payjoin::sender::Configuration::with_fee_contribution(
-//!     payjoin::bitcoin::Amount::from_sat(10000),
-//!     None,
-//! );
 //! ```
 //!
 //! ### 3. (optional) Spawn a thread or async task that will broadcast the transaction after delay (e.g. 1 minute) unless canceled
@@ -76,8 +69,10 @@
 //! ### 4. Construct the request with the PSBT and parameters
 //!
 //! ```
-//! let (req, ctx) = link
-//!     .create_pj_request(psbt, pj_params)
+//! let min_fee_rate = bitcoin::FeeRate::from_sat_per_vb(1); // SPECIFY YOUR USER'S MINIMUM FEE RATE
+//! let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt, uri)
+//!     .with_context(|| "Failed to create payjoin request")?
+//!     .build_recommended(min_fee_rate)
 //!     .with_context(|| "Failed to create payjoin request")?;
 //! ```
 //!
@@ -89,7 +84,6 @@
 //!
 //! ```
 //! let client = reqwest::blocking::Client::builder()
-//!     .danger_accept_invalid_certs(danger_accept_invalid_certs)
 //!     .build()
 //!     .with_context(|| "Failed to build reqwest http client")?;
 //! let response = client
@@ -375,8 +369,8 @@ pub struct Request {
 
 /// Data required for validation of response.
 ///
-/// This type is used to process the response. It is returned from [`PjUriExt::create_pj_request()`](crate::PjUriExt::create_pj_request()) method
-/// and you only need to call [`.process_response()`](crate::send::Context::process_response()) on it to continue BIP78 flow.
+/// This type is used to process the response. Get it from [`RequestBuilder`](crate::send::RequestBuilder)'s build methods.
+/// Then you only need to call [`.process_response()`](crate::send::Context::process_response()) on it to continue BIP78 flow.
 pub struct Context {
     original_psbt: Psbt,
     disable_output_substitution: bool,

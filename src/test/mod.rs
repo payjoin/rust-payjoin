@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+use std::str::FromStr;
+use std::sync::Arc;
+
 use bitcoin::psbt::Psbt;
 use bitcoind::bitcoincore_rpc;
 use bitcoind::bitcoincore_rpc::core_rpc_json::AddressType;
@@ -5,9 +9,6 @@ use bitcoind::bitcoincore_rpc::RpcApi;
 use log::{debug, log_enabled, Level};
 use payjoin::bitcoin;
 use payjoin::bitcoin::base64;
-use std::collections::HashMap;
-use std::str::FromStr;
-use std::sync::Arc;
 
 use crate::receive::{Headers, IsOutputKnown, IsScriptOwned, UncheckedProposal};
 use crate::send::{Configuration, Request};
@@ -54,6 +55,7 @@ fn integration_test() {
 		pj_receiver_address.to_qr_uri(),
 		amount.to_btc()
 	);
+	print!("pj_uri {:}\n", pj_uri_string);
 	let _uri = Uri::new(pj_uri_string).unwrap();
 	let pj_uri = _uri.check_pj_supported().expect("Bad Uri");
 	// Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
@@ -80,7 +82,7 @@ fn integration_test() {
 		.psbt;
 	let psbt = sender.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
 	let psbt = PartiallySignedTransaction::new(psbt).expect("Psbt new");
-	debug!("Original psbt: {:#?}", psbt);
+	eprintln!("Original psbt: {:#?}", psbt.to_string());
 	let pj_params = Configuration::with_fee_contribution(10000, None);
 	pj_params.always_disable_output_substitution(true);
 	pj_params.clamp_fee_contribution(true);
@@ -92,6 +94,8 @@ fn integration_test() {
 	// this data would transit from one party to another over the network in production
 	let rec_clone = Arc::new(receiver);
 	let response = handle_pj_request(pj_req.request, headers, rec_clone.clone());
+
+	eprintln!("response psbt: {:#?}", response);
 	// this response would be returned as http response to the sender
 
 	// **********************
@@ -151,7 +155,6 @@ fn handle_pj_request(
 			.identify_receiver_outputs(Box::new(MockScriptOwned(receiver.clone())))
 			.expect("Receiver should have at least one output"),
 	);
-	print!("payjoin:  {}", payjoin.is_output_substitution_disabled());
 	// Select receiver payjoin inputs. TODO Lock them.
 	let available_inputs = receiver.list_unspent(None, None, None, None, None).unwrap();
 	let candidate_inputs: HashMap<u64, crate::OutPoint> = available_inputs
@@ -201,6 +204,7 @@ fn handle_pj_request(
 }
 
 struct TestBroadcast(Arc<bitcoincore_rpc::Client>);
+
 impl crate::receive::CanBroadcast for TestBroadcast {
 	fn test_mempool_accept(&self, tx_hex: Vec<String>) -> Result<bool, PayjoinError> {
 		match self.0.test_mempool_accept(&tx_hex) {
@@ -212,13 +216,17 @@ impl crate::receive::CanBroadcast for TestBroadcast {
 		}
 	}
 }
+
 struct MockScriptOwned(Arc<bitcoincore_rpc::Client>);
+
 struct MockOutputOwned {}
+
 impl IsOutputKnown for MockOutputOwned {
 	fn is_known(&self, _: crate::OutPoint) -> Result<bool, PayjoinError> {
 		Ok(false)
 	}
 }
+
 impl IsScriptOwned for MockScriptOwned {
 	fn is_owned(&self, script: Arc<ScriptBuf>) -> Result<bool, PayjoinError> {
 		{

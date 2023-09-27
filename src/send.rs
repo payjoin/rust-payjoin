@@ -1,6 +1,8 @@
-use crate::uri::Url;
-pub use payjoin::send::Configuration as PdkConfiguration;
 use std::sync::{Arc, Mutex, MutexGuard};
+
+pub use payjoin::send::Configuration as PdkConfiguration;
+
+use crate::uri::Url;
 
 ///Builder for sender-side payjoin parameters
 ///
@@ -8,11 +10,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 pub struct Configuration {
 	internal: Mutex<Option<PdkConfiguration>>,
 }
+
 impl From<PdkConfiguration> for Configuration {
 	fn from(value: PdkConfiguration) -> Self {
 		Self { internal: Mutex::new(Some(value)) }
 	}
 }
+
 impl Configuration {
 	pub fn get_configuration(
 		&self,
@@ -67,11 +71,13 @@ impl Configuration {
 pub struct Context {
 	internal: payjoin::send::Context,
 }
+
 impl From<Context> for payjoin::send::Context {
 	fn from(value: Context) -> Self {
 		value.internal
 	}
 }
+
 impl From<payjoin::send::Context> for Context {
 	fn from(value: payjoin::send::Context) -> Self {
 		Self { internal: value }
@@ -111,28 +117,24 @@ pub struct Request {
 
 #[cfg(test)]
 mod tests {
-	use std::str::FromStr;
-
-	use payjoin::bitcoin::psbt::PartiallySignedTransaction;
+	use crate::PartiallySignedTransaction;
 
 	#[test]
 	fn official_vectors() {
-		let original_psbt =
-            "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+		let original = "cHNidP8BAHECAAAAAVuDh6O7xLpvJm70AWI6N25VtXzMiknZxAwcPtGoB/VHAAAAAAD+////AuYPECQBAAAAFgAUHAMjFjcTerY7Cmi4se8VqWIW5HgA4fUFAAAAABYAFL6Az084ngrVLQfpl3hccYjeF+EQAAAAAAABAIQCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wNSAQH/////AgDyBSoBAAAAFgAUQ0p5pXSyKswNZuFoJjltIQhFnpkAAAAAAAAAACZqJKohqe3i9hw/cdHe/T+pmd+jaVN1XGkGiXmZYrSL69g2l06M+QAAAAABAR8A8gUqAQAAABYAFENKeaV0sirMDWbhaCY5bSEIRZ6ZAQhrAkcwRAIgFe1S3DHoDIPHogsTU/9UD7IqPbNXDYfyU2JZT9HKD7oCIAxU7sZzUcoGsmM3lDetos/3N5fM5oynmzuvsrFiILN5ASECfoMstJPrqnyhems+r158wTniKIBaPkkCinDC4VdvmsYAIgIDXVq5OYL7D4Ur28OTJ77j0lZrSPzO5XGmkL/KIF7wKmgQgTP32gAAAIABAACAAQAAgAAA";
 
-		let proposal =
-            "cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAQEgqBvXBQAAAAAXqRTeTh6QYcpZE1sDWtXm1HmQRUNU0IcBBBYAFMeKRXJTVYKNVlgHTdUmDV/LaYUwIgYDFZrAGqDVh1TEtNi300ntHt/PCzYrT2tVEGcjooWPhRYYSFzWUDEAAIABAACAAAAAgAEAAAAAAAAAAAEBIICEHgAAAAAAF6kUyPLL+cphRyyI5GTUazV0hF2R2NWHAQcXFgAUX4BmVeWSTJIEwtUb5TlPS/ntohABCGsCRzBEAiBnu3tA3yWlT0WBClsXXS9j69Bt+waCs9JcjWtNjtv7VgIge2VYAaBeLPDB6HGFlpqOENXMldsJezF9Gs5amvDQRDQBIQJl1jz1tBt8hNx2owTm+4Du4isx0pmdKNMNIjjaMHFfrQABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUIgICygvBWB5prpfx61y1HDAwo37kYP3YRJBvAjtunBAur3wYSFzWUDEAAIABAACAAAAAgAEAAAABAAAAAAA=";
-
-		let original_psbt = PartiallySignedTransaction::from_str(original_psbt).unwrap();
+		let original_psbt = PartiallySignedTransaction::new(original.to_string()).unwrap();
 		eprintln!("original: {:#?}", original_psbt);
-		let mut proposal = PartiallySignedTransaction::from_str(proposal).unwrap();
-		eprintln!("proposal: {:#?}", proposal);
-		for mut output in proposal.clone().outputs {
-			output.bip32_derivation.clear();
-		}
-		for mut input in proposal.clone().inputs {
-			input.bip32_derivation.clear();
-		}
-		proposal.inputs[0].witness_utxo = None;
+
+		let pj_uri_string = "BITCOIN:BCRT1Q7WXQ0R2JHJKX8HQS3SHLKFAEAEF38C38SYKGZY?amount=1&pj=https://example.comOriginal".to_string();
+		let _uri = crate::Uri::new(pj_uri_string).unwrap();
+		eprintln!("address: {:#?}", _uri.address().to_string());
+
+		let pj_uri = _uri.check_pj_supported().expect("Bad Uri");
+
+		let pj_params = crate::Configuration::with_fee_contribution(10000, None);
+		pj_params.always_disable_output_substitution(true);
+		pj_params.clamp_fee_contribution(true);
+		assert_eq!(pj_uri.amount().unwrap().to_btc(), 1.0)
 	}
 }

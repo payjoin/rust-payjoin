@@ -1,5 +1,12 @@
 # Payjoin Changelog
 
+## 0.10.0
+
+- Export `base64` with feature by @jbesraa in #102
+- Improve `receive` api with `ProvisionalProposal`by @jbesraa in #90
+- Document `create_pj_request` by @jbesraa in #87
+- Add BIP 78 reccommended fee `Configuration` by @DanGould in #86
+
 ## 0.9.0
 
 Bumping `bitcoin` and other crates was a breaking api change. This is a 0.8.1 semver re-release.

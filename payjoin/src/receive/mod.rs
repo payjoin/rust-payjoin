@@ -107,7 +107,7 @@
 //!
 //! ```
 //! // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
-//! let _to_broadcast_in_failure_case = proposal.get_transaction_to_schedule_broadcast();
+//! let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 //!
 //! // The network is used for checks later
 //! let network = match bitcoind.get_blockchain_info()?.chain.as_str() {
@@ -294,7 +294,7 @@ pub trait Headers {
 /// [`UncheckedProposal::from_request()`](crate::receive::UncheckedProposal::from_request()).
 ///
 /// If you are implementing an interactive payment processor, you should get extract the original
-/// transaction with get_transaction_to_schedule_broadcast() and schedule, followed by checking
+/// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
 /// that the transaction can be broadcast with check_can_broadcast. Otherwise it is safe to
 /// call assume_interactive_receive to proceed with validation.
 pub struct UncheckedProposal {
@@ -343,7 +343,7 @@ impl UncheckedProposal {
     }
 
     /// The Sender's Original PSBT
-    pub fn get_transaction_to_schedule_broadcast(&self) -> bitcoin::Transaction {
+    pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
         self.psbt.clone().extract_tx()
     }
 
@@ -351,7 +351,7 @@ impl UncheckedProposal {
     ///
     /// Receiver MUST check that the Original PSBT from the sender
     /// can be broadcast, i.e. `testmempoolaccept` bitcoind rpc returns { "allowed": true,.. }
-    /// for `get_transaction_to_check_broadcast()` before calling this method.
+    /// for `extract_tx_to_sheculed_broadcast()` before calling this method.
     ///
     /// Do this check if you generate bitcoin uri to receive Payjoin on sender request without manual human approval, like a payment processor.
     /// Such so called "non-interactive" receivers are otherwise vulnerable to probing attacks.
@@ -374,7 +374,7 @@ impl UncheckedProposal {
     /// requires manual intervention, as in most consumer wallets.
     ///
     /// So-called "non-interactive" receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks.
-    /// Those receivers call `get_transaction_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
+    /// Those receivers call `extract_tx_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
     pub fn assume_interactive_receiver(self) -> MaybeInputsOwned {
         MaybeInputsOwned { psbt: self.psbt, params: self.params }
     }
@@ -813,7 +813,7 @@ impl PayjoinProposal {
         self.params.disable_output_substitution
     }
 
-    pub fn get_owned_vouts(&self) -> &Vec<usize> { &self.owned_vouts }
+    pub fn owned_vouts(&self) -> &Vec<usize> { &self.owned_vouts }
 
     pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
 }
@@ -841,7 +841,7 @@ mod test {
         }
     }
 
-    fn get_proposal_from_test_vector() -> Result<UncheckedProposal, RequestError> {
+    fn proposal_from_test_vector() -> Result<UncheckedProposal, RequestError> {
         // OriginalPSBT Test Vector from BIP
         // | InputScriptType | Orginal PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
         // |-----------------|-----------------------|------------------------------|-------------------------|
@@ -859,7 +859,7 @@ mod test {
 
     #[test]
     fn can_get_proposal_from_request() {
-        let proposal = get_proposal_from_test_vector();
+        let proposal = proposal_from_test_vector();
         assert!(proposal.is_ok(), "OriginalPSBT should be a valid request");
     }
 
@@ -869,7 +869,7 @@ mod test {
 
         use bitcoin::{Address, Network};
 
-        let proposal = get_proposal_from_test_vector().unwrap();
+        let proposal = proposal_from_test_vector().unwrap();
         let mut payjoin = proposal
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| Ok(false))

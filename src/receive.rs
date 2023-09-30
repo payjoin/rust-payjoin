@@ -1,20 +1,22 @@
-use crate::{
-	transaction::{PartiallySignedTransaction, Transaction},
-	Address, OutPoint, PayjoinError, ScriptBuf, TxOut,
+use std::{
+	collections::HashMap,
+	sync::{Arc, Mutex, MutexGuard},
 };
+
 use payjoin::receive::{
 	MaybeInputsOwned as PdkMaybeInputsOwned, MaybeInputsSeen as PdkMaybeInputsSeen,
 	MaybeMixedInputScripts as PdkMaybeMixedInputScripts, OutputsUnknown as PdkOutputsUnknown,
 	PayjoinProposal as PdkPayjoinProposal, UncheckedProposal as PdkUncheckedProposal,
 };
 use payjoin::Error as PdkError;
-use std::{
-	collections::HashMap,
-	sync::{Arc, Mutex, MutexGuard},
+
+use crate::{
+	transaction::{PartiallySignedTransaction, Transaction},
+	Address, OutPoint, PayjoinError, ScriptBuf, TxOut,
 };
 
 pub trait CanBroadcast: Send + Sync {
-	fn test_mempool_accept(&self, tx_hex: Vec<String>) -> Result<bool, PayjoinError>;
+	fn test_mempool_accept(&self, tx: Vec<u8>) -> Result<bool, PayjoinError>;
 }
 
 #[derive(Clone)]
@@ -37,6 +39,7 @@ impl payjoin::receive::Headers for Headers {
 		self.0.get(key).map(|e| e.as_str())
 	}
 }
+
 /// The sender’s original PSBT and optional parameters
 ///
 /// This type is used to proces the request. It is returned by UncheckedProposal::from_request().
@@ -51,6 +54,7 @@ impl From<PdkUncheckedProposal> for UncheckedProposal {
 		Self { internal: Mutex::new(Some(value)) }
 	}
 }
+
 impl UncheckedProposal {
 	pub fn get_configuration(
 		&self,
@@ -96,9 +100,9 @@ impl UncheckedProposal {
 	) -> Result<Arc<MaybeInputsOwned>, PayjoinError> {
 		let (proposal, _) = Self::get_configuration(self);
 		let res = proposal.unwrap().check_can_broadcast(|tx| {
-			let raw_tx = hex::encode(payjoin::bitcoin::consensus::encode::serialize(&tx));
-			let mempool_results = can_broadcast.test_mempool_accept(vec![raw_tx]);
-			match mempool_results {
+			match can_broadcast
+				.test_mempool_accept(payjoin::bitcoin::consensus::encode::serialize(&tx))
+			{
 				Ok(e) => Ok(e),
 				Err(e) => Err(PdkError::Server(e.into())),
 			}
@@ -127,6 +131,7 @@ impl UncheckedProposal {
 pub struct MaybeInputsOwned {
 	internal: Mutex<Option<PdkMaybeInputsOwned>>,
 }
+
 impl From<PdkMaybeInputsOwned> for MaybeInputsOwned {
 	fn from(value: PdkMaybeInputsOwned) -> Self {
 		MaybeInputsOwned { internal: Mutex::new(Some(value)) }
@@ -136,6 +141,7 @@ impl From<PdkMaybeInputsOwned> for MaybeInputsOwned {
 pub trait IsScriptOwned: Send + Sync {
 	fn is_owned(&self, script: Arc<ScriptBuf>) -> Result<bool, PayjoinError>;
 }
+
 impl MaybeInputsOwned {
 	fn get_owned_inputs(
 		&self,
@@ -169,11 +175,13 @@ impl MaybeInputsOwned {
 pub struct MaybeMixedInputScripts {
 	internal: Mutex<Option<PdkMaybeMixedInputScripts>>,
 }
+
 impl From<PdkMaybeMixedInputScripts> for MaybeMixedInputScripts {
 	fn from(value: PdkMaybeMixedInputScripts) -> Self {
 		MaybeMixedInputScripts { internal: Mutex::new(Some(value)) }
 	}
 }
+
 impl MaybeMixedInputScripts {
 	fn get_input_scripts(
 		&self,
@@ -192,6 +200,7 @@ impl MaybeMixedInputScripts {
 		}
 	}
 }
+
 pub trait IsOutputKnown {
 	fn is_known(&self, outpoint: OutPoint) -> Result<bool, PayjoinError>;
 }
@@ -202,11 +211,13 @@ pub trait IsOutputKnown {
 pub struct MaybeInputsSeen {
 	internal: Mutex<Option<PdkMaybeInputsSeen>>,
 }
+
 impl From<PdkMaybeInputsSeen> for MaybeInputsSeen {
 	fn from(value: PdkMaybeInputsSeen) -> Self {
 		MaybeInputsSeen { internal: Mutex::new(Some(value)) }
 	}
 }
+
 impl MaybeInputsSeen {
 	fn get_inputs(&self) -> (Option<PdkMaybeInputsSeen>, MutexGuard<Option<PdkMaybeInputsSeen>>) {
 		let mut data_guard = self.internal.lock().unwrap();
@@ -229,6 +240,7 @@ impl MaybeInputsSeen {
 		}
 	}
 }
+
 /// The receiver has not yet identified which outputs belong to the receiver.
 ///
 /// Only accept PSBTs that send us money. Identify those outputs with identify_receiver_outputs() to proceed
@@ -236,6 +248,7 @@ impl MaybeInputsSeen {
 pub struct OutputsUnknown {
 	internal: Mutex<Option<PdkOutputsUnknown>>,
 }
+
 impl From<PdkOutputsUnknown> for OutputsUnknown {
 	fn from(value: PdkOutputsUnknown) -> Self {
 		OutputsUnknown { internal: Mutex::new(Some(value)) }
@@ -272,11 +285,13 @@ impl OutputsUnknown {
 pub struct PayjoinProposal {
 	internal: Mutex<Option<PdkPayjoinProposal>>,
 }
+
 impl From<PdkPayjoinProposal> for PayjoinProposal {
 	fn from(value: PdkPayjoinProposal) -> Self {
 		PayjoinProposal { internal: Mutex::new(Some(value)) }
 	}
 }
+
 impl PayjoinProposal {
 	fn get_proposal(&self) -> Option<PdkPayjoinProposal> {
 		let mut data_guard = self.internal.lock().unwrap();
@@ -392,13 +407,17 @@ mod test {
 		let proposal = get_proposal_from_test_vector();
 		assert!(proposal.is_ok(), "OriginalPSBT should be a valid request");
 	}
+
 	struct MockScriptOwned {}
+
 	struct MockOutputOwned {}
+
 	impl IsOutputKnown for MockOutputOwned {
 		fn is_known(&self, _: OutPoint) -> Result<bool, PayjoinError> {
 			Ok(false)
 		}
 	}
+
 	impl IsScriptOwned for MockScriptOwned {
 		fn is_owned(&self, script: Arc<ScriptBuf>) -> Result<bool, PayjoinError> {
 			{

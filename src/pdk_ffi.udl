@@ -132,7 +132,7 @@ interface Transaction{
 
 callback interface CanBroadcast {
     [Throws=PayjoinError]
-    boolean test_mempool_accept(sequence<string> tx_hex);
+    boolean test_mempool_accept( sequence<u8> tx );
 };
 
 interface UncheckedProposal{

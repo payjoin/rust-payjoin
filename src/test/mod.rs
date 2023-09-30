@@ -10,6 +10,7 @@ use log::{debug, log_enabled, Level};
 use payjoin::bitcoin;
 use payjoin::bitcoin::base64;
 
+use crate::bitcoin::consensus::encode::serialize_hex;
 use crate::receive::{Headers, IsOutputKnown, IsScriptOwned, UncheckedProposal};
 use crate::send::{Configuration, Request};
 use crate::transaction::PartiallySignedTransaction;
@@ -42,14 +43,14 @@ fn integration_test() {
 	);
 
 	assert_eq!(
-		payjoin::bitcoin::Amount::from_btc(50.0).unwrap(),
+		bitcoin::Amount::from_btc(50.0).unwrap(),
 		sender.get_balances().unwrap().mine.trusted,
 		"sender doesn't own bitcoin"
 	);
 
 	// Receiver creates the payjoin URI
 	let pj_receiver_address = receiver.get_new_address(None, None).unwrap().assume_checked();
-	let amount = payjoin::bitcoin::Amount::from_btc(1.0).unwrap();
+	let amount = bitcoin::Amount::from_btc(1.0).unwrap();
 	let pj_uri_string = format!(
 		"{}?amount={}&pj=https://example.com",
 		pj_receiver_address.to_qr_uri(),
@@ -67,7 +68,7 @@ fn integration_test() {
 	debug!("outputs: {:?}", outputs);
 	let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
 		lock_unspent: Some(true),
-		fee_rate: Some(payjoin::bitcoin::Amount::from_sat(2000)),
+		fee_rate: Some(bitcoin::Amount::from_sat(2000)),
 		..Default::default()
 	};
 	let psbt = sender
@@ -206,8 +207,8 @@ fn handle_pj_request(
 struct TestBroadcast(Arc<bitcoincore_rpc::Client>);
 
 impl crate::receive::CanBroadcast for TestBroadcast {
-	fn test_mempool_accept(&self, tx_hex: Vec<String>) -> Result<bool, PayjoinError> {
-		match self.0.test_mempool_accept(&tx_hex) {
+	fn test_mempool_accept(&self, tx: Vec<u8>) -> Result<bool, PayjoinError> {
+		match self.0.test_mempool_accept(&[serialize_hex(&tx)]) {
 			Ok(e) => Ok(match e.first() {
 				Some(e) => e.allowed,
 				None => panic!("No Mempool Result"),

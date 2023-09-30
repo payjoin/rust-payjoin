@@ -3028,7 +3028,7 @@ class FfiConverterCallbackInterface:
 # Declaration and FfiConverters for CanBroadcast Callback Interface
 
 class CanBroadcast:
-    def test_mempool_accept(self, tx_hex: "typing.List[str]"):
+    def test_mempool_accept(self, tx: "typing.List[int]"):
         raise NotImplementedError
 
     
@@ -3037,7 +3037,7 @@ def py_foreignCallbackCallbackInterfaceCanBroadcast(handle, method, args_data, a
     
     def invoke_test_mempool_accept(python_callback, args_stream, buf_ptr):
         def makeCall():return python_callback.test_mempool_accept(
-                FfiConverterSequenceString.read(args_stream)
+                FfiConverterSequenceUInt8.read(args_stream)
                 )
 
         def makeCallAndHandleReturn():
@@ -3345,26 +3345,6 @@ class FfiConverterSequenceUInt8(FfiConverterRustBuffer):
 
         return [
             FfiConverterUInt8.read(buf) for i in range(count)
-        ]
-
-
-
-class FfiConverterSequenceString(FfiConverterRustBuffer):
-    @classmethod
-    def write(cls, value, buf):
-        items = len(value)
-        buf.writeI32(items)
-        for item in value:
-            FfiConverterString.write(item, buf)
-
-    @classmethod
-    def read(cls, buf):
-        count = buf.readI32()
-        if count < 0:
-            raise InternalError("Unexpected negative sequence length")
-
-        return [
-            FfiConverterString.read(buf) for i in range(count)
         ]
 
 

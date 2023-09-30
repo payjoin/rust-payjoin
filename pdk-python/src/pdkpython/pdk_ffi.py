@@ -550,6 +550,8 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_serialize() != 44606:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_to_string() != 60327:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_amount_to_btc() != 57316:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_amount_to_sat() != 29783:
@@ -785,6 +787,11 @@ _UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_serialize.argtype
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_serialize.restype = RustBuffer
+_UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_to_string.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_to_string.restype = RustBuffer
 _UniFFILib.uniffi_pdk_ffi_fn_free_context.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
@@ -1059,6 +1066,9 @@ _UniFFILib.uniffi_pdk_ffi_checksum_method_configuration_min_fee_rate_sat_per_vb.
 _UniFFILib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_serialize.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_serialize.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_to_string.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_to_string.restype = ctypes.c_uint16
 _UniFFILib.uniffi_pdk_ffi_checksum_method_amount_to_btc.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_amount_to_btc.restype = ctypes.c_uint16
@@ -1881,6 +1891,16 @@ class PartiallySignedTransaction:
     def serialize(self, ) -> "typing.List[int]":
         return FfiConverterSequenceUInt8.lift(
             rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_serialize,self._pointer,)
+        )
+
+
+
+
+
+
+    def to_string(self, ) -> "str":
+        return FfiConverterString.lift(
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_to_string,self._pointer,)
         )
 
 

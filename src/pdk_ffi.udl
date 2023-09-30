@@ -98,6 +98,7 @@ interface PartiallySignedTransaction{
   [Name=process_response, Throws=PayjoinError]
   constructor( Context context, string response);
   sequence<u8> serialize();
+  string to_string();
 };
 
 interface Context{};

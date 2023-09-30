@@ -137,7 +137,7 @@ mod integration {
         .unwrap();
 
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
-        let _to_broadcast_in_failure_case = proposal.get_transaction_to_schedule_broadcast();
+        let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // Receive Check 1: Can Broadcast
         let proposal = proposal

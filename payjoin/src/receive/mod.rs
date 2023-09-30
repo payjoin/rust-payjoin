@@ -107,7 +107,7 @@
 //!
 //! ```
 //! // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
-//! let _to_broadcast_in_failure_case = proposal.get_transaction_to_schedule_broadcast();
+//! let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 //!
 //! // The network is used for checks later
 //! let network = match bitcoind.get_blockchain_info()?.chain.as_str() {
@@ -268,7 +268,6 @@
 
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashMap};
-use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, OutPoint, Script, TxOut};
@@ -295,34 +294,10 @@ pub trait Headers {
 /// [`UncheckedProposal::from_request()`](crate::receive::UncheckedProposal::from_request()).
 ///
 /// If you are implementing an interactive payment processor, you should get extract the original
-/// transaction with get_transaction_to_schedule_broadcast() and schedule, followed by checking
+/// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
 /// that the transaction can be broadcast with check_can_broadcast. Otherwise it is safe to
 /// call assume_interactive_receive to proceed with validation.
 pub struct UncheckedProposal {
-    psbt: Psbt,
-    params: Params,
-}
-
-/// Typestate to validate that the Original PSBT has no receiver-owned inputs.
-///
-/// Call [`check_no_receiver_owned_inputs()`](struct.UncheckedProposal.html#method.check_no_receiver_owned_inputs) to proceed.
-pub struct MaybeInputsOwned {
-    psbt: Psbt,
-    params: Params,
-}
-
-/// Typestate to validate that the Original PSBT has no mixed input types.
-///
-/// Call [`check_no_mixed_input_types`](struct.UncheckedProposal.html#method.check_no_mixed_input_scripts) to proceed.
-pub struct MaybeMixedInputScripts {
-    psbt: Psbt,
-    params: Params,
-}
-
-/// Typestate to validate that the Original PSBT has no inputs that have been seen before.
-///
-/// Call [`check_no_inputs_seen`](struct.MaybeInputsSeen.html#method.check_no_inputs_seen_before) to proceed.
-pub struct MaybeInputsSeen {
     psbt: Psbt,
     params: Params,
 }
@@ -368,7 +343,7 @@ impl UncheckedProposal {
     }
 
     /// The Sender's Original PSBT
-    pub fn get_transaction_to_schedule_broadcast(&self) -> bitcoin::Transaction {
+    pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
         self.psbt.clone().extract_tx()
     }
 
@@ -376,7 +351,7 @@ impl UncheckedProposal {
     ///
     /// Receiver MUST check that the Original PSBT from the sender
     /// can be broadcast, i.e. `testmempoolaccept` bitcoind rpc returns { "allowed": true,.. }
-    /// for `get_transaction_to_check_broadcast()` before calling this method.
+    /// for `extract_tx_to_sheculed_broadcast()` before calling this method.
     ///
     /// Do this check if you generate bitcoin uri to receive Payjoin on sender request without manual human approval, like a payment processor.
     /// Such so called "non-interactive" receivers are otherwise vulnerable to probing attacks.
@@ -399,10 +374,18 @@ impl UncheckedProposal {
     /// requires manual intervention, as in most consumer wallets.
     ///
     /// So-called "non-interactive" receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks.
-    /// Those receivers call `get_transaction_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
+    /// Those receivers call `extract_tx_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
     pub fn assume_interactive_receiver(self) -> MaybeInputsOwned {
         MaybeInputsOwned { psbt: self.psbt, params: self.params }
     }
+}
+
+/// Typestate to validate that the Original PSBT has no receiver-owned inputs.
+///
+/// Call [`check_no_receiver_owned_inputs()`](struct.UncheckedProposal.html#method.check_no_receiver_owned_inputs) to proceed.
+pub struct MaybeInputsOwned {
+    psbt: Psbt,
+    params: Params,
 }
 
 impl MaybeInputsOwned {
@@ -438,6 +421,14 @@ impl MaybeInputsOwned {
 
         Ok(MaybeMixedInputScripts { psbt: self.psbt, params: self.params })
     }
+}
+
+/// Typestate to validate that the Original PSBT has no mixed input types.
+///
+/// Call [`check_no_mixed_input_types`](struct.UncheckedProposal.html#method.check_no_mixed_input_scripts) to proceed.
+pub struct MaybeMixedInputScripts {
+    psbt: Psbt,
+    params: Params,
 }
 
 impl MaybeMixedInputScripts {
@@ -484,6 +475,13 @@ impl MaybeMixedInputScripts {
     }
 }
 
+/// Typestate to validate that the Original PSBT has no inputs that have been seen before.
+///
+/// Call [`check_no_inputs_seen`](struct.MaybeInputsSeen.html#method.check_no_inputs_seen_before) to proceed.
+pub struct MaybeInputsSeen {
+    psbt: Psbt,
+    params: Params,
+}
 impl MaybeInputsSeen {
     /// Make sure that the original transaction inputs have never been seen before.
     /// This prevents probing attacks. This prevents reentrant Payjoin, where a sender
@@ -548,27 +546,6 @@ impl OutputsUnknown {
             owned_vouts,
         })
     }
-}
-
-/// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
-pub struct PayjoinProposal {
-    payjoin_psbt: Psbt,
-    params: Params,
-    owned_vouts: Vec<usize>,
-}
-
-impl PayjoinProposal {
-    pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
-        self.payjoin_psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
-    }
-
-    pub fn is_output_substitution_disabled(&self) -> bool {
-        self.params.disable_output_substitution
-    }
-
-    pub fn get_owned_vouts(&self) -> &Vec<usize> { &self.owned_vouts }
-
-    pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
@@ -814,13 +791,31 @@ impl ProvisionalProposal {
         min_feerate_sat_per_vb: Option<FeeRate>,
     ) -> Result<PayjoinProposal, Error> {
         let psbt = self.apply_fee(min_feerate_sat_per_vb)?;
-        let psbt = wallet_process_psbt(psbt).map_err(|e| {
-            log::error!("wallet_process_psbt error");
-            Error::from(e)
-        })?;
-        let payjoin_proposal = self.prepare_psbt(psbt).map_err(RequestError::from)?;
+        let psbt = wallet_process_psbt(psbt)?;
+        let payjoin_proposal = self.prepare_psbt(psbt)?;
         Ok(payjoin_proposal)
     }
+}
+
+/// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+pub struct PayjoinProposal {
+    payjoin_psbt: Psbt,
+    params: Params,
+    owned_vouts: Vec<usize>,
+}
+
+impl PayjoinProposal {
+    pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
+        self.payjoin_psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
+    }
+
+    pub fn is_output_substitution_disabled(&self) -> bool {
+        self.params.disable_output_substitution
+    }
+
+    pub fn owned_vouts(&self) -> &Vec<usize> { &self.owned_vouts }
+
+    pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
 }
 
 #[cfg(test)]
@@ -846,7 +841,7 @@ mod test {
         }
     }
 
-    fn get_proposal_from_test_vector() -> Result<UncheckedProposal, RequestError> {
+    fn proposal_from_test_vector() -> Result<UncheckedProposal, RequestError> {
         // OriginalPSBT Test Vector from BIP
         // | InputScriptType | Orginal PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
         // |-----------------|-----------------------|------------------------------|-------------------------|
@@ -864,7 +859,7 @@ mod test {
 
     #[test]
     fn can_get_proposal_from_request() {
-        let proposal = get_proposal_from_test_vector();
+        let proposal = proposal_from_test_vector();
         assert!(proposal.is_ok(), "OriginalPSBT should be a valid request");
     }
 
@@ -874,7 +869,7 @@ mod test {
 
         use bitcoin::{Address, Network};
 
-        let proposal = get_proposal_from_test_vector().unwrap();
+        let proposal = proposal_from_test_vector().unwrap();
         let mut payjoin = proposal
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| Ok(false))

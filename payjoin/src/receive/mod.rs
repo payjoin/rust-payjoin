@@ -268,7 +268,6 @@
 
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashMap};
-use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, OutPoint, Script, TxOut};
@@ -814,11 +813,8 @@ impl ProvisionalProposal {
         min_feerate_sat_per_vb: Option<FeeRate>,
     ) -> Result<PayjoinProposal, Error> {
         let psbt = self.apply_fee(min_feerate_sat_per_vb)?;
-        let psbt = wallet_process_psbt(psbt).map_err(|e| {
-            log::error!("wallet_process_psbt error");
-            Error::from(e)
-        })?;
-        let payjoin_proposal = self.prepare_psbt(psbt).map_err(RequestError::from)?;
+        let psbt = wallet_process_psbt(psbt)?;
+        let payjoin_proposal = self.prepare_psbt(psbt)?;
         Ok(payjoin_proposal)
     }
 }

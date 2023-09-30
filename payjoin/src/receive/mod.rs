@@ -302,30 +302,6 @@ pub struct UncheckedProposal {
     params: Params,
 }
 
-/// Typestate to validate that the Original PSBT has no receiver-owned inputs.
-///
-/// Call [`check_no_receiver_owned_inputs()`](struct.UncheckedProposal.html#method.check_no_receiver_owned_inputs) to proceed.
-pub struct MaybeInputsOwned {
-    psbt: Psbt,
-    params: Params,
-}
-
-/// Typestate to validate that the Original PSBT has no mixed input types.
-///
-/// Call [`check_no_mixed_input_types`](struct.UncheckedProposal.html#method.check_no_mixed_input_scripts) to proceed.
-pub struct MaybeMixedInputScripts {
-    psbt: Psbt,
-    params: Params,
-}
-
-/// Typestate to validate that the Original PSBT has no inputs that have been seen before.
-///
-/// Call [`check_no_inputs_seen`](struct.MaybeInputsSeen.html#method.check_no_inputs_seen_before) to proceed.
-pub struct MaybeInputsSeen {
-    psbt: Psbt,
-    params: Params,
-}
-
 impl UncheckedProposal {
     pub fn from_request(
         mut body: impl std::io::Read,
@@ -404,6 +380,14 @@ impl UncheckedProposal {
     }
 }
 
+/// Typestate to validate that the Original PSBT has no receiver-owned inputs.
+///
+/// Call [`check_no_receiver_owned_inputs()`](struct.UncheckedProposal.html#method.check_no_receiver_owned_inputs) to proceed.
+pub struct MaybeInputsOwned {
+    psbt: Psbt,
+    params: Params,
+}
+
 impl MaybeInputsOwned {
     /// Check that the Original PSBT has no receiver-owned inputs.
     /// Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
@@ -437,6 +421,14 @@ impl MaybeInputsOwned {
 
         Ok(MaybeMixedInputScripts { psbt: self.psbt, params: self.params })
     }
+}
+
+/// Typestate to validate that the Original PSBT has no mixed input types.
+///
+/// Call [`check_no_mixed_input_types`](struct.UncheckedProposal.html#method.check_no_mixed_input_scripts) to proceed.
+pub struct MaybeMixedInputScripts {
+    psbt: Psbt,
+    params: Params,
 }
 
 impl MaybeMixedInputScripts {
@@ -483,6 +475,13 @@ impl MaybeMixedInputScripts {
     }
 }
 
+/// Typestate to validate that the Original PSBT has no inputs that have been seen before.
+///
+/// Call [`check_no_inputs_seen`](struct.MaybeInputsSeen.html#method.check_no_inputs_seen_before) to proceed.
+pub struct MaybeInputsSeen {
+    psbt: Psbt,
+    params: Params,
+}
 impl MaybeInputsSeen {
     /// Make sure that the original transaction inputs have never been seen before.
     /// This prevents probing attacks. This prevents reentrant Payjoin, where a sender
@@ -547,27 +546,6 @@ impl OutputsUnknown {
             owned_vouts,
         })
     }
-}
-
-/// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
-pub struct PayjoinProposal {
-    payjoin_psbt: Psbt,
-    params: Params,
-    owned_vouts: Vec<usize>,
-}
-
-impl PayjoinProposal {
-    pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
-        self.payjoin_psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
-    }
-
-    pub fn is_output_substitution_disabled(&self) -> bool {
-        self.params.disable_output_substitution
-    }
-
-    pub fn get_owned_vouts(&self) -> &Vec<usize> { &self.owned_vouts }
-
-    pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
@@ -817,6 +795,27 @@ impl ProvisionalProposal {
         let payjoin_proposal = self.prepare_psbt(psbt)?;
         Ok(payjoin_proposal)
     }
+}
+
+/// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+pub struct PayjoinProposal {
+    payjoin_psbt: Psbt,
+    params: Params,
+    owned_vouts: Vec<usize>,
+}
+
+impl PayjoinProposal {
+    pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
+        self.payjoin_psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
+    }
+
+    pub fn is_output_substitution_disabled(&self) -> bool {
+        self.params.disable_output_substitution
+    }
+
+    pub fn get_owned_vouts(&self) -> &Vec<usize> { &self.owned_vouts }
+
+    pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
 }
 
 #[cfg(test)]

@@ -590,6 +590,8 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_try_preserving_privacy() != 23083:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_utxos_to_be_locked() != 9680:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_apply_fee() != 26537:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_prepare_psbt() != 61983:
@@ -976,6 +978,11 @@ _UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_try_preserving_privacy.argty
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_try_preserving_privacy.restype = RustBuffer
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_utxos_to_be_locked.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_utxos_to_be_locked.restype = RustBuffer
 _UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_apply_fee.argtypes = (
     ctypes.c_void_p,
     RustBuffer,
@@ -1126,6 +1133,9 @@ _UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_substitute_output_addr
 _UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_try_preserving_privacy.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_try_preserving_privacy.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_utxos_to_be_locked.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_utxos_to_be_locked.restype = ctypes.c_uint16
 _UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_apply_fee.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_apply_fee.restype = ctypes.c_uint16
@@ -2004,6 +2014,16 @@ class PayjoinProposal:
             rust_call_with_error(
     FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_try_preserving_privacy,self._pointer,
         FfiConverterMapUInt64TypeOutPoint.lower(candidate_inputs))
+        )
+
+
+
+
+
+
+    def utxos_to_be_locked(self, ) -> "typing.List[OutPoint]":
+        return FfiConverterSequenceTypeOutPoint.lift(
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_utxos_to_be_locked,self._pointer,)
         )
 
 
@@ -3345,6 +3365,26 @@ class FfiConverterSequenceUInt8(FfiConverterRustBuffer):
 
         return [
             FfiConverterUInt8.read(buf) for i in range(count)
+        ]
+
+
+
+class FfiConverterSequenceTypeOutPoint(FfiConverterRustBuffer):
+    @classmethod
+    def write(cls, value, buf):
+        items = len(value)
+        buf.writeI32(items)
+        for item in value:
+            FfiConverterTypeOutPoint.write(item, buf)
+
+    @classmethod
+    def read(cls, buf):
+        count = buf.readI32()
+        if count < 0:
+            raise InternalError("Unexpected negative sequence length")
+
+        return [
+            FfiConverterTypeOutPoint.read(buf) for i in range(count)
         ]
 
 

@@ -344,7 +344,7 @@ impl PayjoinProposal {
 	) -> Result<Arc<PartiallySignedTransaction>, PayjoinError> {
 		let proposal = self.get_proposal();
 		if proposal.is_none() {
-			panic!("PayjoinProposal not initalized");
+			panic!("PayjoinProposal not initialized");
 		}
 		match proposal.unwrap().prepare_psbt((*processed_psbt).clone().into()) {
 			Ok(e) => Ok(Arc::new(e.into())),
@@ -374,7 +374,17 @@ impl PayjoinProposal {
 			Err(_) => Err(PayjoinError::SelectionError),
 		}
 	}
-	// TODO - pub fn utxos_to_be_locked(&self)
+	pub fn utxos_to_be_locked(&self) -> Vec<OutPoint> {
+		let mut outpoints: Vec<OutPoint> = Vec::new();
+		let proposal = self.get_proposal();
+		if proposal.is_none() {
+			panic!("PayjoinProposal not initialized");
+		}
+		for e in proposal.unwrap().utxos_to_be_locked() {
+			outpoints.push((e.to_owned()).into())
+		}
+		outpoints
+	}
 }
 
 #[cfg(test)]

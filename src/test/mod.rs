@@ -156,7 +156,7 @@ fn handle_pj_request(
 			.identify_receiver_outputs(Box::new(MockScriptOwned(receiver.clone())))
 			.expect("Receiver should have at least one output"),
 	);
-	// Select receiver payjoin inputs. TODO Lock them.
+	// Select receiver payjoin inputs.
 	let available_inputs = receiver.list_unspent(None, None, None, None, None).unwrap();
 	let candidate_inputs: HashMap<u64, crate::OutPoint> = available_inputs
 		.iter()

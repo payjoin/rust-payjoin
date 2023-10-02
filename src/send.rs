@@ -84,23 +84,6 @@ impl From<payjoin::send::Context> for Context {
 	}
 }
 
-// impl Context {
-//     //TODO; MOVED TO PSBT STRUCT
-
-//     pub fn process_response(
-//         &mut self,
-//         response: String
-//     ) -> Result<Arc<PartiallySignedTransaction>, Error> {
-//         let context = std::mem::replace(self.internal.borrow_mut(), None);
-
-//         match context.unwrap().process_response(&mut response.as_bytes()) {
-//             Ok(e) => Ok(Arc::new(PartiallySignedTransaction { internal: e.to_owned() })),
-//             Err(e) => Err(Error::UnexpectedError(e.to_string())),
-//         }
-//     }
-
-// }
-
 ///Represents data that needs to be transmitted to the receiver.
 
 ///You need to send this request over HTTP(S) to the receiver.

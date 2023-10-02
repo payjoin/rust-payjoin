@@ -29,7 +29,7 @@ dictionary TxOut{
 };
 
 dictionary Request {
-  Url url;
+    Url url;
 	sequence<u8> body;
 };
 
@@ -41,123 +41,123 @@ enum Network {
 };
 
 interface ScriptBuf {
-  constructor(sequence<u8> raw_output_script);
-  sequence<u8> to_bytes();
-  string to_hex_string();
-  string to_string();
-  string to_asm_string();
+      constructor(sequence<u8> raw_output_script);
+      sequence<u8> to_bytes();
+      string to_hex_string();
+      string to_string();
+      string to_asm_string();
 };
 
 interface Address{
-  [Throws=PayjoinError]
-  constructor(string address);
-  [Name=from_script, Throws=PayjoinError]
-  constructor(ScriptBuf script , Network network);
-  string to_string();
+      [Throws=PayjoinError]
+      constructor(string address);
+      [Name=from_script, Throws=PayjoinError]
+      constructor(ScriptBuf script , Network network);
+      string to_string();
 };
 
 interface Headers {
-  [Name=from_vec]
-  constructor(sequence<u8> body);
-  record<string, string> get_map();
+      [Name=from_vec]
+      constructor(sequence<u8> body);
+      record<string, string> get_map();
 };
 
 interface Url {
-  [Throws=PayjoinError]
-  constructor(string input);
-  string? query();
+      [Throws=PayjoinError]
+      constructor(string input);
+      string? query();
 };
 
 interface Uri {
-  [Throws=PayjoinError]
-  constructor(string uri);
-  u64? amount();
-  Address address();
-  [Throws=PayjoinError]
-  PrjUri check_pj_supported();
+      [Throws=PayjoinError]
+      constructor(string uri);
+      u64? amount();
+      Address address();
+      [Throws=PayjoinError]
+      PrjUri check_pj_supported();
 };
 
 interface Configuration{
-  [Name=with_fee_contribution]
-  constructor(u64 max_fee_contribution, u64? change_index);
-  [Name=non_incentivizing]
-  constructor();
-  void always_disable_output_substitution(boolean disable);
-  void  clamp_fee_contribution(boolean clamp);
-  void min_fee_rate_sat_per_vb(u64 fee_rate);
+      [Name=with_fee_contribution]
+      constructor(u64 max_fee_contribution, u64? change_index);
+      [Name=non_incentivizing]
+      constructor();
+      void always_disable_output_substitution(boolean disable);
+      void  clamp_fee_contribution(boolean clamp);
+      void min_fee_rate_sat_per_vb(u64 fee_rate);
 };
 
 dictionary PrjUriRequest{
-  Context context;
-  Request request;
+      Context context;
+      Request request;
 };
 
 interface PartiallySignedTransaction{
-  [Throws=PayjoinError]
-  constructor(string psbt_base64);
-  [Name=process_response, Throws=PayjoinError]
-  constructor( Context context, string response);
-  sequence<u8> serialize();
-  string to_string();
+      [Throws=PayjoinError]
+      constructor(string psbt_base64);
+      [Name=process_response, Throws=PayjoinError]
+      constructor( Context context, string response);
+      sequence<u8> serialize();
+      string to_string();
 };
 
 interface Context{};
 
 interface Amount{
-  [Name=from_sat]
-  constructor(u64 sats); 
-  [Name=from_btc]
-  constructor(double btc); 
-  double to_btc();
-  u64 to_sat();
+      [Name=from_sat]
+      constructor(u64 sats);
+      [Name=from_btc]
+      constructor(double btc);
+      double to_btc();
+      u64 to_sat();
 };
 
 interface PrjUri{
-  [Throws=PayjoinError]
-  PrjUriRequest create_pj_request( PartiallySignedTransaction psbt, Configuration params );
-  Address address();
-  Amount? amount();
+      [Throws=PayjoinError]
+      PrjUriRequest create_pj_request(PartiallySignedTransaction psbt, Configuration params);
+      Address address();
+      Amount? amount();
 };
 
 interface Txid{
-  string to_string();
+      string to_string();
 };
 
 interface Transaction{
-  [Throws=PayjoinError]
-  constructor(sequence<u8> transaction_bytes);
-  Txid txid();
+      [Throws=PayjoinError]
+      constructor(sequence<u8> transaction_bytes);
+      Txid txid();
 };
 
 
 callback interface CanBroadcast {
-    [Throws=PayjoinError]
-    boolean test_mempool_accept( sequence<u8> tx );
+        [Throws=PayjoinError]
+        boolean test_mempool_accept(sequence<u8> tx);
 };
 
 interface UncheckedProposal{
-  [Name=from_request, Throws=PayjoinError]
-  constructor( sequence<u8> body, string query, Headers headers );
-  Transaction get_transaction_to_schedule_broadcast();
-  [Throws=PayjoinError]
-  MaybeInputsOwned check_can_broadcast(CanBroadcast can_broadcast);
-  MaybeInputsOwned assume_interactive_receiver();
+      [Name=from_request, Throws=PayjoinError]
+      constructor(sequence<u8> body, string query, Headers headers);
+      Transaction get_transaction_to_schedule_broadcast();
+      [Throws=PayjoinError]
+      MaybeInputsOwned check_can_broadcast(CanBroadcast can_broadcast);
+      MaybeInputsOwned assume_interactive_receiver();
 };
 
 
 callback interface IsScriptOwned {
-    [Throws=PayjoinError]
-    boolean is_owned(ScriptBuf script);
+        [Throws=PayjoinError]
+        boolean is_owned(ScriptBuf script);
 };
 
 interface MaybeInputsOwned{
- [Throws=PayjoinError]
- MaybeMixedInputScripts check_inputs_not_owned( IsScriptOwned is_owned);
+     [Throws=PayjoinError]
+     MaybeMixedInputScripts check_inputs_not_owned(IsScriptOwned is_owned);
 };
 
 interface MaybeMixedInputScripts{
- [Throws=PayjoinError]
- MaybeInputsSeen check_no_mixed_input_scripts(); 
+     [Throws=PayjoinError]
+     MaybeInputsSeen check_no_mixed_input_scripts();
 };
 
 callback interface IsOutputKnown {
@@ -166,26 +166,27 @@ callback interface IsOutputKnown {
 };
 
 interface MaybeInputsSeen{
- [Throws=PayjoinError]
- OutputsUnknown check_no_inputs_seen_before( IsOutputKnown is_known );
+     [Throws=PayjoinError]
+     OutputsUnknown check_no_inputs_seen_before(IsOutputKnown is_known);
 };
 
 interface OutputsUnknown {
- [Throws=PayjoinError]
- PayjoinProposal identify_receiver_outputs( IsScriptOwned is_receiver_output );
+     [Throws=PayjoinError]
+     PayjoinProposal identify_receiver_outputs(IsScriptOwned is_receiver_output);
 };
 
 interface PayjoinProposal{
-  boolean is_output_substitution_disabled();
-  void contribute_witness_input( TxOut txout, OutPoint outpoint );
-  void contribute_non_witness_input( Transaction tx, OutPoint outpoint );
-  void substitute_output_address( Address substitute_address);
-  [Throws=PayjoinError]
-  OutPoint try_preserving_privacy( record<u64, OutPoint> candidate_inputs );
-  [Throws=PayjoinError]
-  PartiallySignedTransaction apply_fee( u64? min_feerate_sat_per_vb );
-  [Throws=PayjoinError]
-  PartiallySignedTransaction prepare_psbt( PartiallySignedTransaction processed_psbt );
+      boolean is_output_substitution_disabled();
+      void contribute_witness_input(TxOut txout, OutPoint outpoint);
+      void contribute_non_witness_input(Transaction tx, OutPoint outpoint);
+      void substitute_output_address(Address substitute_address);
+      [Throws=PayjoinError]
+      OutPoint try_preserving_privacy(record<u64, OutPoint> candidate_inputs);
+      sequence<OutPoint> utxos_to_be_locked();
+      [Throws=PayjoinError]
+      PartiallySignedTransaction apply_fee(u64? min_feerate_sat_per_vb);
+      [Throws=PayjoinError]
+      PartiallySignedTransaction prepare_psbt(PartiallySignedTransaction processed_psbt);
 };
 
 

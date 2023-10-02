@@ -35,7 +35,7 @@ impl PartiallySignedTransaction {
 	pub fn process_response(context: Arc<Context>, response: String) -> Result<Self, PayjoinError> {
 		let ctx: payjoin::send::Context = match Arc::try_unwrap(context) {
 			Ok(e) => e.into(),
-			Err(_) => panic!("Context preproses failed"),
+			Err(_) => panic!("Context pre-process failed"),
 		};
 		match ctx.process_response(&mut response.as_bytes()) {
 			Ok(e) => Ok(PartiallySignedTransaction(e)),

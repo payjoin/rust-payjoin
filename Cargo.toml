@@ -1,10 +1,22 @@
 [package]
-name = "payjoin-ffi"
+name = "pdk-ffi"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+name = "pdk_ffi"
+
+[build-dependencies]
+uniffi = { version = "0.24.3", features = ["build"] }
+
+[dev-dependencies]
+uniffi = { version = "0.24.3", features = ["bindgen-tests"] }
+assert_matches = "1.5.0"
+env_logger = "0.10.0"
+bitcoind = { version = "0.32.0", features = ["0_21_2"] }
+
 
 [dependencies]
 anyhow = "1.0.70"
@@ -19,10 +31,14 @@ reqwest = { version = "0.11.4", features = ["blocking"] }
 rcgen = { version = "0.11.1", optional = true }
 serde = { version = "1.0.160", features = ["derive"] }
 payjoin = { version = "0.9.0", features = ["send", "receive", "rand"] }
-bitcoin = "0.30.1"
+serde_json = "1.0.103"
+uniffi = "0.24.3"
+hex = "0.4.3"
+url = "2.4.0"
 
-[profile.release]
-panic = "abort"
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
 
-[profile.dev]
-panic = "abort"
+[features]
+default = ["uniffi/cli"]

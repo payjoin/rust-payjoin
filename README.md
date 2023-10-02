@@ -8,4 +8,3 @@ With a commitment to collaboration and interoperability, this repository strives
 
 **Current Status:**
 This is a pre-alpha stage and is currently in the design phase. The first language bindings available will be for Android followed by Swift. The ultimate goal is to have Payjoin implementations for Android, iOS, Python, Java, React Native, Flutter, C# and Golang.
-

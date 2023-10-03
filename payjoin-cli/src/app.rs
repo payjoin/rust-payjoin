@@ -41,7 +41,7 @@ impl App {
         Ok(Self { config, bitcoind, seen_inputs })
     }
 
-    pub fn send_payjoin(&self, bip21: &str) -> Result<()> {
+    pub fn send_payjoin(&self, bip21: &str, fee_rate: &f32) -> Result<()> {
         let uri = payjoin::Uri::try_from(bip21)
             .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?
             .assume_checked();
@@ -51,10 +51,9 @@ impl App {
         // wallet_create_funded_psbt requires a HashMap<address: String, Amount>
         let mut outputs = HashMap::with_capacity(1);
         outputs.insert(uri.address.to_string(), amount);
-
-        // TODO: make payjoin-cli send feerate configurable
-        // 2.1 sat/vB == 525 sat/kwu for testing purposes.
-        let fee_rate = bitcoin::FeeRate::from_sat_per_kwu(525);
+        let fee_rate_sat_per_kwu = fee_rate * 250.0_f32;
+        let fee_rate: bitcoin::FeeRate =
+            bitcoin::FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64);
         let fee_sat_per_kvb =
             fee_rate.to_sat_per_kwu().checked_mul(4).ok_or(anyhow!("Invalid fee rate"))?;
         let fee_per_kvb = Amount::from_sat(fee_sat_per_kvb);

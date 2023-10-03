@@ -1,4 +1,6 @@
 use payjoin::bitcoin::psbt::PsbtParseError;
+use payjoin::receive::RequestError;
+use payjoin::Error;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PayjoinError {
@@ -42,7 +44,8 @@ pub enum PayjoinError {
 
 	#[error("Malformed response from receiver is : {message}")]
 	ContextValidationError { message: String },
-	#[error("Unexpected error occured: {message}")]
+
+	#[error("Unexpected error occurred: {message}")]
 	UnexpectedError { message: String },
 }
 
@@ -51,6 +54,22 @@ impl From<PsbtParseError> for PayjoinError {
 		PayjoinError::PsbtParseError { message: value.to_string() }
 	}
 }
+
+impl From<Error> for PayjoinError {
+	fn from(value: Error) -> Self {
+		match value {
+			Error::BadRequest(e) => e.into(),
+			Error::Server(e) => PayjoinError::ServerError { message: e.to_string() },
+		}
+	}
+}
+
+impl From<RequestError> for PayjoinError {
+	fn from(value: RequestError) -> Self {
+		PayjoinError::RequestError { message: value.to_string() }
+	}
+}
+
 impl From<uniffi::UnexpectedUniFFICallbackError> for PayjoinError {
 	fn from(e: uniffi::UnexpectedUniFFICallbackError) -> Self {
 		Self::UnexpectedError { message: e.reason }

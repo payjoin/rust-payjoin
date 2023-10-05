@@ -45,7 +45,7 @@ impl PartiallySignedTransaction {
 	pub fn serialize(&self) -> Vec<u8> {
 		self.0.serialize()
 	}
-	pub fn to_string(&self) -> String {
+	pub fn as_string(&self) -> String {
 		self.0.to_string()
 	}
 }
@@ -71,7 +71,7 @@ impl Transaction {
 pub struct Txid(String);
 
 impl Txid {
-	pub fn to_string(&self) -> String {
+	pub fn as_string(&self) -> String {
 		self.0.clone()
 	}
 }

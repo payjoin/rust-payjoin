@@ -108,7 +108,7 @@ impl Amount {
 		self.internal
 	}
 	pub fn to_btc(&self) -> f64 {
-		return (self.internal as f64) / (100000000 as f64);
+		(self.internal as f64) / (100000000f64)
 	}
 }
 

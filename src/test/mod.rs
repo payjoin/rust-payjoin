@@ -1,21 +1,22 @@
+mod integration_test;
+
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use bitcoin::psbt::Psbt;
 use bitcoind::bitcoincore_rpc;
 use bitcoind::bitcoincore_rpc::core_rpc_json::AddressType;
 use bitcoind::bitcoincore_rpc::RpcApi;
 use log::{debug, log_enabled, Level};
-use payjoin::bitcoin;
 use payjoin::bitcoin::base64;
+use payjoin::bitcoin::psbt::Psbt;
 
-use crate::bitcoin::consensus::encode::serialize_hex;
 use crate::receive::{Headers, IsOutputKnown, IsScriptOwned, UncheckedProposal};
 use crate::send::{Configuration, Request};
 use crate::transaction::PartiallySignedTransaction;
 use crate::uri::Uri;
 use crate::{Network, PayjoinError, ScriptBuf};
+use payjoin::bitcoin::consensus::encode::serialize_hex;
 
 #[test]
 fn integration_test() {
@@ -43,14 +44,14 @@ fn integration_test() {
 	);
 
 	assert_eq!(
-		bitcoin::Amount::from_btc(50.0).unwrap(),
+		payjoin::bitcoin::Amount::from_btc(50.0).unwrap(),
 		sender.get_balances().unwrap().mine.trusted,
 		"sender doesn't own bitcoin"
 	);
 
 	// Receiver creates the payjoin URI
 	let pj_receiver_address = receiver.get_new_address(None, None).unwrap().assume_checked();
-	let amount = bitcoin::Amount::from_btc(1.0).unwrap();
+	let amount = payjoin::bitcoin::Amount::from_btc(1.0).unwrap();
 	let pj_uri_string = format!(
 		"{}?amount={}&pj=https://example.com",
 		pj_receiver_address.to_qr_uri(),
@@ -62,13 +63,13 @@ fn integration_test() {
 	// Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
 	let mut outputs = HashMap::with_capacity(1);
 	outputs.insert(
-		pj_uri.address().clone().to_string(),
+		pj_uri.address().clone().as_string(),
 		payjoin::bitcoin::Amount::from_sat(pj_uri.amount().clone().unwrap().to_sat()),
 	);
 	debug!("outputs: {:?}", outputs);
 	let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
 		lock_unspent: Some(true),
-		fee_rate: Some(bitcoin::Amount::from_sat(2000)),
+		fee_rate: Some(payjoin::bitcoin::Amount::from_sat(2000)),
 		..Default::default()
 	};
 	let psbt = sender
@@ -83,10 +84,8 @@ fn integration_test() {
 		.psbt;
 	let psbt = sender.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
 	let psbt = PartiallySignedTransaction::new(psbt).expect("Psbt new");
-	eprintln!("Original psbt: {:#?}", psbt.to_string());
+	eprintln!("Original psbt: {:#?}", psbt.as_string());
 	let pj_params = Configuration::with_fee_contribution(10000, None);
-	pj_params.always_disable_output_substitution(true);
-	pj_params.clamp_fee_contribution(true);
 	let pj_req = pj_uri.create_pj_request(Arc::new(psbt), Arc::new(pj_params)).unwrap();
 	let headers = Headers::from_vec(pj_req.request.body.clone());
 
@@ -117,7 +116,7 @@ fn integration_test() {
 	debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
 
 	let payjoin_tx = payjoin_psbt.extract_tx();
-	bitcoind.client.send_raw_transaction(&payjoin_tx).unwrap();
+	bitcoind.client.send_raw_transaction(&payjoin_tx).expect("Tx Broadcast failed");
 }
 
 // Receiver receive and process original_psbt from a sender
@@ -131,7 +130,7 @@ fn handle_pj_request(
 		req.url.query().unwrap_or("".to_string()).to_string(),
 		Arc::new(headers),
 	)
-	.unwrap();
+	.expect("UncheckedProposal::from_request  error");
 
 	// in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
 	let _to_broadcast_in_failure_case = proposal.get_transaction_to_schedule_broadcast();
@@ -234,7 +233,7 @@ impl IsScriptOwned for MockScriptOwned {
 			let network = Network::Regtest;
 
 			let address = crate::Address::from_script(script, network).unwrap();
-			let addr: bitcoin::Address = address.into();
+			let addr: payjoin::bitcoin::Address = address.into();
 			Ok(self.0.get_address_info(&addr).unwrap().is_mine.unwrap())
 		}
 	}

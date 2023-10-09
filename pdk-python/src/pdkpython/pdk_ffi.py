@@ -526,11 +526,11 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_scriptbuf_to_hex_string() != 60766:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_scriptbuf_to_string() != 60369:
+    if lib.uniffi_pdk_ffi_checksum_method_scriptbuf_as_string() != 18364:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_scriptbuf_to_asm_string() != 15833:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_address_to_string() != 12154:
+    if lib.uniffi_pdk_ffi_checksum_method_address_as_string() != 63695:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_headers_get_map() != 58617:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -546,11 +546,11 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_configuration_clamp_fee_contribution() != 6195:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_configuration_min_fee_rate_sat_per_vb() != 12958:
+    if lib.uniffi_pdk_ffi_checksum_method_configuration_min_fee_rate() != 22405:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_serialize() != 44606:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_to_string() != 60327:
+    if lib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_as_string() != 28856:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_amount_to_btc() != 57316:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -562,11 +562,11 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_prjuri_amount() != 55572:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_txid_to_string() != 38884:
+    if lib.uniffi_pdk_ffi_checksum_method_txid_as_string() != 30335:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_transaction_txid() != 4855:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_get_transaction_to_schedule_broadcast() != 16604:
+    if lib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_extract_tx_to_schedule_broadcast() != 8174:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_check_can_broadcast() != 54863:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -578,23 +578,17 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_method_maybeinputsseen_check_no_inputs_seen_before() != 31674:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_outputsunknown_identify_receiver_outputs() != 5078:
+    if lib.uniffi_pdk_ffi_checksum_method_outputsunknown_identify_receiver_outputs() != 32353:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_is_output_substitution_disabled() != 54016:
+    if lib.uniffi_pdk_ffi_checksum_method_provisionalproposal_contribute_witness_input() != 35548:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_contribute_witness_input() != 31039:
+    if lib.uniffi_pdk_ffi_checksum_method_provisionalproposal_contribute_non_witness_input() != 59506:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_contribute_non_witness_input() != 55631:
+    if lib.uniffi_pdk_ffi_checksum_method_provisionalproposal_substitute_output_address() != 13397:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_substitute_output_address() != 12391:
+    if lib.uniffi_pdk_ffi_checksum_method_provisionalproposal_try_preserving_privacy() != 8030:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_try_preserving_privacy() != 23083:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_utxos_to_be_locked() != 9680:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_apply_fee() != 26537:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_pdk_ffi_checksum_method_payjoinproposal_prepare_psbt() != 61983:
+    if lib.uniffi_pdk_ffi_checksum_method_provisionalproposal_finalize_proposal() != 9335:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_constructor_scriptbuf_new() != 58311:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -610,6 +604,8 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_constructor_configuration_with_fee_contribution() != 39612:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_constructor_configuration_recommended() != 28805:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_constructor_configuration_non_incentivizing() != 39042:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_constructor_partiallysignedtransaction_new() != 55149:
@@ -623,6 +619,18 @@ def uniffi_check_api_checksums(lib):
     if lib.uniffi_pdk_ffi_checksum_constructor_transaction_new() != 50809:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_pdk_ffi_checksum_constructor_uncheckedproposal_from_request() != 48433:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_constructor_feerate_zero() != 14614:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_constructor_feerate_min() != 42211:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_constructor_feerate_max() != 31684:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_constructor_feerate_broadcast_min() != 49794:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_constructor_feerate_dust() != 3328:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_pdk_ffi_checksum_constructor_feerate_from_sat_per_kwu() != 30584:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
 
 # A ctypes library to expose the extern-C FFI definitions.
@@ -649,11 +657,11 @@ _UniFFILib.uniffi_pdk_ffi_fn_method_scriptbuf_to_hex_string.argtypes = (
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_method_scriptbuf_to_hex_string.restype = RustBuffer
-_UniFFILib.uniffi_pdk_ffi_fn_method_scriptbuf_to_string.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_fn_method_scriptbuf_as_string.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
 )
-_UniFFILib.uniffi_pdk_ffi_fn_method_scriptbuf_to_string.restype = RustBuffer
+_UniFFILib.uniffi_pdk_ffi_fn_method_scriptbuf_as_string.restype = RustBuffer
 _UniFFILib.uniffi_pdk_ffi_fn_method_scriptbuf_to_asm_string.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
@@ -675,11 +683,11 @@ _UniFFILib.uniffi_pdk_ffi_fn_constructor_address_from_script.argtypes = (
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_constructor_address_from_script.restype = ctypes.c_void_p
-_UniFFILib.uniffi_pdk_ffi_fn_method_address_to_string.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_fn_method_address_as_string.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
 )
-_UniFFILib.uniffi_pdk_ffi_fn_method_address_to_string.restype = RustBuffer
+_UniFFILib.uniffi_pdk_ffi_fn_method_address_as_string.restype = RustBuffer
 _UniFFILib.uniffi_pdk_ffi_fn_free_headers.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
@@ -746,6 +754,13 @@ _UniFFILib.uniffi_pdk_ffi_fn_constructor_configuration_with_fee_contribution.arg
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_constructor_configuration_with_fee_contribution.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_configuration_recommended.argtypes = (
+    ctypes.c_void_p,
+    RustBuffer,
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_configuration_recommended.restype = ctypes.c_void_p
 _UniFFILib.uniffi_pdk_ffi_fn_constructor_configuration_non_incentivizing.argtypes = (
     ctypes.POINTER(RustCallStatus),
 )
@@ -762,12 +777,12 @@ _UniFFILib.uniffi_pdk_ffi_fn_method_configuration_clamp_fee_contribution.argtype
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_method_configuration_clamp_fee_contribution.restype = None
-_UniFFILib.uniffi_pdk_ffi_fn_method_configuration_min_fee_rate_sat_per_vb.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_fn_method_configuration_min_fee_rate.argtypes = (
     ctypes.c_void_p,
-    ctypes.c_uint64,
+    ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
 )
-_UniFFILib.uniffi_pdk_ffi_fn_method_configuration_min_fee_rate_sat_per_vb.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_method_configuration_min_fee_rate.restype = None
 _UniFFILib.uniffi_pdk_ffi_fn_free_partiallysignedtransaction.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
@@ -789,11 +804,11 @@ _UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_serialize.argtype
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_serialize.restype = RustBuffer
-_UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_to_string.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_as_string.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
 )
-_UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_to_string.restype = RustBuffer
+_UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_as_string.restype = RustBuffer
 _UniFFILib.uniffi_pdk_ffi_fn_free_context.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
@@ -851,11 +866,11 @@ _UniFFILib.uniffi_pdk_ffi_fn_free_txid.argtypes = (
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_free_txid.restype = None
-_UniFFILib.uniffi_pdk_ffi_fn_method_txid_to_string.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_fn_method_txid_as_string.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
 )
-_UniFFILib.uniffi_pdk_ffi_fn_method_txid_to_string.restype = RustBuffer
+_UniFFILib.uniffi_pdk_ffi_fn_method_txid_as_string.restype = RustBuffer
 _UniFFILib.uniffi_pdk_ffi_fn_free_transaction.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
@@ -883,11 +898,11 @@ _UniFFILib.uniffi_pdk_ffi_fn_constructor_uncheckedproposal_from_request.argtypes
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_constructor_uncheckedproposal_from_request.restype = ctypes.c_void_p
-_UniFFILib.uniffi_pdk_ffi_fn_method_uncheckedproposal_get_transaction_to_schedule_broadcast.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_fn_method_uncheckedproposal_extract_tx_to_schedule_broadcast.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
 )
-_UniFFILib.uniffi_pdk_ffi_fn_method_uncheckedproposal_get_transaction_to_schedule_broadcast.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_method_uncheckedproposal_extract_tx_to_schedule_broadcast.restype = ctypes.c_void_p
 _UniFFILib.uniffi_pdk_ffi_fn_method_uncheckedproposal_check_can_broadcast.argtypes = (
     ctypes.c_void_p,
     ctypes.c_uint64,
@@ -942,59 +957,79 @@ _UniFFILib.uniffi_pdk_ffi_fn_method_outputsunknown_identify_receiver_outputs.arg
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_method_outputsunknown_identify_receiver_outputs.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_free_feerate.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_free_feerate.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_zero.argtypes = (
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_zero.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_min.argtypes = (
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_min.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_max.argtypes = (
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_max.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_broadcast_min.argtypes = (
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_broadcast_min.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_dust.argtypes = (
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_dust.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_from_sat_per_kwu.argtypes = (
+    ctypes.c_uint64,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_from_sat_per_kwu.restype = ctypes.c_void_p
+_UniFFILib.uniffi_pdk_ffi_fn_free_provisionalproposal.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_free_provisionalproposal.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_contribute_witness_input.argtypes = (
+    ctypes.c_void_p,
+    RustBuffer,
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_contribute_witness_input.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_contribute_non_witness_input.argtypes = (
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_contribute_non_witness_input.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_substitute_output_address.argtypes = (
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_substitute_output_address.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_try_preserving_privacy.argtypes = (
+    ctypes.c_void_p,
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_try_preserving_privacy.restype = RustBuffer
+_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_finalize_proposal.argtypes = (
+    ctypes.c_void_p,
+    ctypes.c_uint64,
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_finalize_proposal.restype = ctypes.c_void_p
 _UniFFILib.uniffi_pdk_ffi_fn_free_payjoinproposal.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_free_payjoinproposal.restype = None
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_is_output_substitution_disabled.argtypes = (
-    ctypes.c_void_p,
-    ctypes.POINTER(RustCallStatus),
-)
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_is_output_substitution_disabled.restype = ctypes.c_int8
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_contribute_witness_input.argtypes = (
-    ctypes.c_void_p,
-    RustBuffer,
-    RustBuffer,
-    ctypes.POINTER(RustCallStatus),
-)
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_contribute_witness_input.restype = None
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_contribute_non_witness_input.argtypes = (
-    ctypes.c_void_p,
-    ctypes.c_void_p,
-    RustBuffer,
-    ctypes.POINTER(RustCallStatus),
-)
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_contribute_non_witness_input.restype = None
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_substitute_output_address.argtypes = (
-    ctypes.c_void_p,
-    ctypes.c_void_p,
-    ctypes.POINTER(RustCallStatus),
-)
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_substitute_output_address.restype = None
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_try_preserving_privacy.argtypes = (
-    ctypes.c_void_p,
-    RustBuffer,
-    ctypes.POINTER(RustCallStatus),
-)
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_try_preserving_privacy.restype = RustBuffer
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_utxos_to_be_locked.argtypes = (
-    ctypes.c_void_p,
-    ctypes.POINTER(RustCallStatus),
-)
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_utxos_to_be_locked.restype = RustBuffer
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_apply_fee.argtypes = (
-    ctypes.c_void_p,
-    RustBuffer,
-    ctypes.POINTER(RustCallStatus),
-)
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_apply_fee.restype = ctypes.c_void_p
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_prepare_psbt.argtypes = (
-    ctypes.c_void_p,
-    ctypes.c_void_p,
-    ctypes.POINTER(RustCallStatus),
-)
-_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_prepare_psbt.restype = ctypes.c_void_p
 _UniFFILib.uniffi_pdk_ffi_fn_init_callback_canbroadcast.argtypes = (
     FOREIGN_CALLBACK_T,
     ctypes.POINTER(RustCallStatus),
@@ -1010,6 +1045,11 @@ _UniFFILib.uniffi_pdk_ffi_fn_init_callback_isoutputknown.argtypes = (
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_pdk_ffi_fn_init_callback_isoutputknown.restype = None
+_UniFFILib.uniffi_pdk_ffi_fn_init_callback_processpartiallysignedtransactioninterface.argtypes = (
+    FOREIGN_CALLBACK_T,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_pdk_ffi_fn_init_callback_processpartiallysignedtransactioninterface.restype = None
 _UniFFILib.ffi_pdk_ffi_rustbuffer_alloc.argtypes = (
     ctypes.c_int32,
     ctypes.POINTER(RustCallStatus),
@@ -1037,15 +1077,15 @@ _UniFFILib.uniffi_pdk_ffi_checksum_method_scriptbuf_to_bytes.restype = ctypes.c_
 _UniFFILib.uniffi_pdk_ffi_checksum_method_scriptbuf_to_hex_string.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_scriptbuf_to_hex_string.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_scriptbuf_to_string.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_checksum_method_scriptbuf_as_string.argtypes = (
 )
-_UniFFILib.uniffi_pdk_ffi_checksum_method_scriptbuf_to_string.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_scriptbuf_as_string.restype = ctypes.c_uint16
 _UniFFILib.uniffi_pdk_ffi_checksum_method_scriptbuf_to_asm_string.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_scriptbuf_to_asm_string.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_address_to_string.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_checksum_method_address_as_string.argtypes = (
 )
-_UniFFILib.uniffi_pdk_ffi_checksum_method_address_to_string.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_address_as_string.restype = ctypes.c_uint16
 _UniFFILib.uniffi_pdk_ffi_checksum_method_headers_get_map.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_headers_get_map.restype = ctypes.c_uint16
@@ -1067,15 +1107,15 @@ _UniFFILib.uniffi_pdk_ffi_checksum_method_configuration_always_disable_output_su
 _UniFFILib.uniffi_pdk_ffi_checksum_method_configuration_clamp_fee_contribution.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_configuration_clamp_fee_contribution.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_configuration_min_fee_rate_sat_per_vb.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_checksum_method_configuration_min_fee_rate.argtypes = (
 )
-_UniFFILib.uniffi_pdk_ffi_checksum_method_configuration_min_fee_rate_sat_per_vb.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_configuration_min_fee_rate.restype = ctypes.c_uint16
 _UniFFILib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_serialize.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_serialize.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_to_string.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_as_string.argtypes = (
 )
-_UniFFILib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_to_string.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_partiallysignedtransaction_as_string.restype = ctypes.c_uint16
 _UniFFILib.uniffi_pdk_ffi_checksum_method_amount_to_btc.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_amount_to_btc.restype = ctypes.c_uint16
@@ -1091,15 +1131,15 @@ _UniFFILib.uniffi_pdk_ffi_checksum_method_prjuri_address.restype = ctypes.c_uint
 _UniFFILib.uniffi_pdk_ffi_checksum_method_prjuri_amount.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_prjuri_amount.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_txid_to_string.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_checksum_method_txid_as_string.argtypes = (
 )
-_UniFFILib.uniffi_pdk_ffi_checksum_method_txid_to_string.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_txid_as_string.restype = ctypes.c_uint16
 _UniFFILib.uniffi_pdk_ffi_checksum_method_transaction_txid.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_transaction_txid.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_get_transaction_to_schedule_broadcast.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_extract_tx_to_schedule_broadcast.argtypes = (
 )
-_UniFFILib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_get_transaction_to_schedule_broadcast.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_extract_tx_to_schedule_broadcast.restype = ctypes.c_uint16
 _UniFFILib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_check_can_broadcast.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_uncheckedproposal_check_can_broadcast.restype = ctypes.c_uint16
@@ -1118,30 +1158,21 @@ _UniFFILib.uniffi_pdk_ffi_checksum_method_maybeinputsseen_check_no_inputs_seen_b
 _UniFFILib.uniffi_pdk_ffi_checksum_method_outputsunknown_identify_receiver_outputs.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_method_outputsunknown_identify_receiver_outputs.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_is_output_substitution_disabled.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_checksum_method_provisionalproposal_contribute_witness_input.argtypes = (
 )
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_is_output_substitution_disabled.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_contribute_witness_input.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_checksum_method_provisionalproposal_contribute_witness_input.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_provisionalproposal_contribute_non_witness_input.argtypes = (
 )
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_contribute_witness_input.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_contribute_non_witness_input.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_checksum_method_provisionalproposal_contribute_non_witness_input.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_provisionalproposal_substitute_output_address.argtypes = (
 )
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_contribute_non_witness_input.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_substitute_output_address.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_checksum_method_provisionalproposal_substitute_output_address.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_provisionalproposal_try_preserving_privacy.argtypes = (
 )
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_substitute_output_address.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_try_preserving_privacy.argtypes = (
+_UniFFILib.uniffi_pdk_ffi_checksum_method_provisionalproposal_try_preserving_privacy.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_provisionalproposal_finalize_proposal.argtypes = (
 )
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_try_preserving_privacy.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_utxos_to_be_locked.argtypes = (
-)
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_utxos_to_be_locked.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_apply_fee.argtypes = (
-)
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_apply_fee.restype = ctypes.c_uint16
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_prepare_psbt.argtypes = (
-)
-_UniFFILib.uniffi_pdk_ffi_checksum_method_payjoinproposal_prepare_psbt.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_method_provisionalproposal_finalize_proposal.restype = ctypes.c_uint16
 _UniFFILib.uniffi_pdk_ffi_checksum_constructor_scriptbuf_new.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_constructor_scriptbuf_new.restype = ctypes.c_uint16
@@ -1163,6 +1194,9 @@ _UniFFILib.uniffi_pdk_ffi_checksum_constructor_uri_new.restype = ctypes.c_uint16
 _UniFFILib.uniffi_pdk_ffi_checksum_constructor_configuration_with_fee_contribution.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_constructor_configuration_with_fee_contribution.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_configuration_recommended.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_configuration_recommended.restype = ctypes.c_uint16
 _UniFFILib.uniffi_pdk_ffi_checksum_constructor_configuration_non_incentivizing.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_constructor_configuration_non_incentivizing.restype = ctypes.c_uint16
@@ -1184,6 +1218,24 @@ _UniFFILib.uniffi_pdk_ffi_checksum_constructor_transaction_new.restype = ctypes.
 _UniFFILib.uniffi_pdk_ffi_checksum_constructor_uncheckedproposal_from_request.argtypes = (
 )
 _UniFFILib.uniffi_pdk_ffi_checksum_constructor_uncheckedproposal_from_request.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_feerate_zero.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_feerate_zero.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_feerate_min.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_feerate_min.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_feerate_max.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_feerate_max.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_feerate_broadcast_min.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_feerate_broadcast_min.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_feerate_dust.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_feerate_dust.restype = ctypes.c_uint16
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_feerate_from_sat_per_kwu.argtypes = (
+)
+_UniFFILib.uniffi_pdk_ffi_checksum_constructor_feerate_from_sat_per_kwu.restype = ctypes.c_uint16
 _UniFFILib.ffi_pdk_ffi_uniffi_contract_version.argtypes = (
 )
 _UniFFILib.ffi_pdk_ffi_uniffi_contract_version.restype = ctypes.c_uint32
@@ -1328,9 +1380,9 @@ class Address:
 
 
 
-    def to_string(self, ) -> "str":
+    def as_string(self, ) -> "str":
         return FfiConverterString.lift(
-            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_address_to_string,self._pointer,)
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_address_as_string,self._pointer,)
         )
 
 
@@ -1473,6 +1525,19 @@ class Configuration:
 
 
     @classmethod
+    def recommended(cls, psbt: "PartiallySignedTransaction",payout_scripts: "typing.List[ScriptBuf]",min_fee_rate: "FeeRate"):
+        
+        
+        
+        # Call the (fallible) function before creating any half-baked object instances.
+        pointer = rust_call_with_error(FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_constructor_configuration_recommended,
+        FfiConverterTypePartiallySignedTransaction.lower(psbt),
+        FfiConverterSequenceTypeScriptBuf.lower(payout_scripts),
+        FfiConverterTypeFeeRate.lower(min_fee_rate))
+        return cls._make_instance_(pointer)
+
+
+    @classmethod
     def non_incentivizing(cls, ):
         # Call the (fallible) function before creating any half-baked object instances.
         pointer = rust_call(_UniFFILib.uniffi_pdk_ffi_fn_constructor_configuration_non_incentivizing,)
@@ -1502,10 +1567,10 @@ class Configuration:
 
 
 
-    def min_fee_rate_sat_per_vb(self, fee_rate: "int"):
+    def min_fee_rate(self, fee_rate: "FeeRate"):
         
-        rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_configuration_min_fee_rate_sat_per_vb,self._pointer,
-        FfiConverterUInt64.lower(fee_rate))
+        rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_configuration_min_fee_rate,self._pointer,
+        FfiConverterTypeFeeRate.lower(fee_rate))
 
 
 
@@ -1573,6 +1638,93 @@ class FfiConverterTypeContext:
     @staticmethod
     def lift(value):
         return Context._make_instance_(value)
+
+    @staticmethod
+    def lower(value):
+        return value._pointer
+
+
+
+class FeeRate:
+    _pointer: ctypes.c_void_p
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_free_feerate, pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+    @classmethod
+    def zero(cls, ):
+        # Call the (fallible) function before creating any half-baked object instances.
+        pointer = rust_call(_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_zero,)
+        return cls._make_instance_(pointer)
+
+
+    @classmethod
+    def min(cls, ):
+        # Call the (fallible) function before creating any half-baked object instances.
+        pointer = rust_call(_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_min,)
+        return cls._make_instance_(pointer)
+
+
+    @classmethod
+    def max(cls, ):
+        # Call the (fallible) function before creating any half-baked object instances.
+        pointer = rust_call(_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_max,)
+        return cls._make_instance_(pointer)
+
+
+    @classmethod
+    def broadcast_min(cls, ):
+        # Call the (fallible) function before creating any half-baked object instances.
+        pointer = rust_call(_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_broadcast_min,)
+        return cls._make_instance_(pointer)
+
+
+    @classmethod
+    def dust(cls, ):
+        # Call the (fallible) function before creating any half-baked object instances.
+        pointer = rust_call(_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_dust,)
+        return cls._make_instance_(pointer)
+
+
+    @classmethod
+    def from_sat_per_kwu(cls, sat_kwu: "int"):
+        
+        # Call the (fallible) function before creating any half-baked object instances.
+        pointer = rust_call(_UniFFILib.uniffi_pdk_ffi_fn_constructor_feerate_from_sat_per_kwu,
+        FfiConverterUInt64.lower(sat_kwu))
+        return cls._make_instance_(pointer)
+
+
+
+class FfiConverterTypeFeeRate:
+    @classmethod
+    def read(cls, buf):
+        ptr = buf.readU64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value, buf):
+        if not isinstance(value, FeeRate):
+            raise TypeError("Expected FeeRate instance, {} found".format(value.__class__.__name__))
+        buf.writeU64(cls.lower(value))
+
+    @staticmethod
+    def lift(value):
+        return FeeRate._make_instance_(value)
 
     @staticmethod
     def lower(value):
@@ -1827,9 +1979,9 @@ class OutputsUnknown:
         return inst
 
 
-    def identify_receiver_outputs(self, is_receiver_output: "IsScriptOwned") -> "PayjoinProposal":
+    def identify_receiver_outputs(self, is_receiver_output: "IsScriptOwned") -> "ProvisionalProposal":
         
-        return FfiConverterTypePayjoinProposal.lift(
+        return FfiConverterTypeProvisionalProposal.lift(
             rust_call_with_error(
     FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_outputsunknown_identify_receiver_outputs,self._pointer,
         FfiConverterCallbackInterfaceIsScriptOwned.lower(is_receiver_output))
@@ -1908,9 +2060,9 @@ class PartiallySignedTransaction:
 
 
 
-    def to_string(self, ) -> "str":
+    def as_string(self, ) -> "str":
         return FfiConverterString.lift(
-            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_to_string,self._pointer,)
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_partiallysignedtransaction_as_string,self._pointer,)
         )
 
 
@@ -1959,102 +2111,6 @@ class PayjoinProposal:
         inst = cls.__new__(cls)
         inst._pointer = pointer
         return inst
-
-
-    def is_output_substitution_disabled(self, ) -> "bool":
-        return FfiConverterBool.lift(
-            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_is_output_substitution_disabled,self._pointer,)
-        )
-
-
-
-
-
-
-    def contribute_witness_input(self, txout: "TxOut",outpoint: "OutPoint"):
-        
-        
-        rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_contribute_witness_input,self._pointer,
-        FfiConverterTypeTxOut.lower(txout),
-        FfiConverterTypeOutPoint.lower(outpoint))
-
-
-
-
-
-
-
-    def contribute_non_witness_input(self, tx: "Transaction",outpoint: "OutPoint"):
-        
-        
-        rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_contribute_non_witness_input,self._pointer,
-        FfiConverterTypeTransaction.lower(tx),
-        FfiConverterTypeOutPoint.lower(outpoint))
-
-
-
-
-
-
-
-    def substitute_output_address(self, substitute_address: "Address"):
-        
-        rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_substitute_output_address,self._pointer,
-        FfiConverterTypeAddress.lower(substitute_address))
-
-
-
-
-
-
-
-    def try_preserving_privacy(self, candidate_inputs: "dict") -> "OutPoint":
-        
-        return FfiConverterTypeOutPoint.lift(
-            rust_call_with_error(
-    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_try_preserving_privacy,self._pointer,
-        FfiConverterMapUInt64TypeOutPoint.lower(candidate_inputs))
-        )
-
-
-
-
-
-
-    def utxos_to_be_locked(self, ) -> "typing.List[OutPoint]":
-        return FfiConverterSequenceTypeOutPoint.lift(
-            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_utxos_to_be_locked,self._pointer,)
-        )
-
-
-
-
-
-
-    def apply_fee(self, min_feerate_sat_per_vb: "typing.Optional[int]") -> "PartiallySignedTransaction":
-        
-        return FfiConverterTypePartiallySignedTransaction.lift(
-            rust_call_with_error(
-    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_apply_fee,self._pointer,
-        FfiConverterOptionalUInt64.lower(min_feerate_sat_per_vb))
-        )
-
-
-
-
-
-
-    def prepare_psbt(self, processed_psbt: "PartiallySignedTransaction") -> "PartiallySignedTransaction":
-        
-        return FfiConverterTypePartiallySignedTransaction.lift(
-            rust_call_with_error(
-    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_payjoinproposal_prepare_psbt,self._pointer,
-        FfiConverterTypePartiallySignedTransaction.lower(processed_psbt))
-        )
-
-
-
-
 
 
 class FfiConverterTypePayjoinProposal:
@@ -2159,6 +2215,114 @@ class FfiConverterTypePrjUri:
 
 
 
+class ProvisionalProposal:
+    _pointer: ctypes.c_void_p
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_free_provisionalproposal, pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+    def contribute_witness_input(self, txout: "TxOut",outpoint: "OutPoint"):
+        
+        
+        rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_contribute_witness_input,self._pointer,
+        FfiConverterTypeTxOut.lower(txout),
+        FfiConverterTypeOutPoint.lower(outpoint))
+
+
+
+
+
+
+
+    def contribute_non_witness_input(self, tx: "Transaction",outpoint: "OutPoint"):
+        
+        
+        rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_contribute_non_witness_input,self._pointer,
+        FfiConverterTypeTransaction.lower(tx),
+        FfiConverterTypeOutPoint.lower(outpoint))
+
+
+
+
+
+
+
+    def substitute_output_address(self, substitute_address: "Address"):
+        
+        rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_substitute_output_address,self._pointer,
+        FfiConverterTypeAddress.lower(substitute_address))
+
+
+
+
+
+
+
+    def try_preserving_privacy(self, candidate_inputs: "dict") -> "OutPoint":
+        
+        return FfiConverterTypeOutPoint.lift(
+            rust_call_with_error(
+    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_try_preserving_privacy,self._pointer,
+        FfiConverterMapUInt64TypeOutPoint.lower(candidate_inputs))
+        )
+
+
+
+
+
+
+    def finalize_proposal(self, process_psbt: "ProcessPartiallySignedTransactionInterface",min_feerate_sat_per_vb: "typing.Optional[FeeRate]") -> "PayjoinProposal":
+        
+        
+        return FfiConverterTypePayjoinProposal.lift(
+            rust_call_with_error(
+    FfiConverterTypePayjoinError,_UniFFILib.uniffi_pdk_ffi_fn_method_provisionalproposal_finalize_proposal,self._pointer,
+        FfiConverterCallbackInterfaceProcessPartiallySignedTransactionInterface.lower(process_psbt),
+        FfiConverterOptionalTypeFeeRate.lower(min_feerate_sat_per_vb))
+        )
+
+
+
+
+
+
+class FfiConverterTypeProvisionalProposal:
+    @classmethod
+    def read(cls, buf):
+        ptr = buf.readU64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value, buf):
+        if not isinstance(value, ProvisionalProposal):
+            raise TypeError("Expected ProvisionalProposal instance, {} found".format(value.__class__.__name__))
+        buf.writeU64(cls.lower(value))
+
+    @staticmethod
+    def lift(value):
+        return ProvisionalProposal._make_instance_(value)
+
+    @staticmethod
+    def lower(value):
+        return value._pointer
+
+
+
 class ScriptBuf:
     _pointer: ctypes.c_void_p
     def __init__(self, raw_output_script: "typing.List[int]"):
@@ -2202,9 +2366,9 @@ class ScriptBuf:
 
 
 
-    def to_string(self, ) -> "str":
+    def as_string(self, ) -> "str":
         return FfiConverterString.lift(
-            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_scriptbuf_to_string,self._pointer,)
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_scriptbuf_as_string,self._pointer,)
         )
 
 
@@ -2322,9 +2486,9 @@ class Txid:
         return inst
 
 
-    def to_string(self, ) -> "str":
+    def as_string(self, ) -> "str":
         return FfiConverterString.lift(
-            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_txid_to_string,self._pointer,)
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_txid_as_string,self._pointer,)
         )
 
 
@@ -2388,9 +2552,9 @@ class UncheckedProposal:
 
 
 
-    def get_transaction_to_schedule_broadcast(self, ) -> "Transaction":
+    def extract_tx_to_schedule_broadcast(self, ) -> "Transaction":
         return FfiConverterTypeTransaction.lift(
-            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_uncheckedproposal_get_transaction_to_schedule_broadcast,self._pointer,)
+            rust_call(_UniFFILib.uniffi_pdk_ffi_fn_method_uncheckedproposal_extract_tx_to_schedule_broadcast,self._pointer,)
         )
 
 
@@ -3283,6 +3447,86 @@ FfiConverterCallbackInterfaceIsScriptOwned = FfiConverterCallbackInterface(forei
 
 
 
+
+
+# Declaration and FfiConverters for ProcessPartiallySignedTransactionInterface Callback Interface
+
+class ProcessPartiallySignedTransactionInterface:
+    def process_psbt(self, psbt: "PartiallySignedTransaction"):
+        raise NotImplementedError
+
+    
+
+def py_foreignCallbackCallbackInterfaceProcessPartiallySignedTransactionInterface(handle, method, args_data, args_len, buf_ptr):
+    
+    def invoke_process_psbt(python_callback, args_stream, buf_ptr):
+        def makeCall():return python_callback.process_psbt(
+                FfiConverterTypePartiallySignedTransaction.read(args_stream)
+                )
+
+        def makeCallAndHandleReturn():
+            rval = makeCall()
+            with RustBuffer.allocWithBuilder() as builder:
+                FfiConverterTypePartiallySignedTransaction.write(rval, builder)
+                buf_ptr[0] = builder.finalize()
+            return UNIFFI_CALLBACK_SUCCESS
+        try:
+            return makeCallAndHandleReturn()
+        except PayjoinError as e:
+            # Catch errors declared in the UDL file
+            with RustBuffer.allocWithBuilder() as builder:
+                FfiConverterTypePayjoinError.write(e, builder)
+                buf_ptr[0] = builder.finalize()
+            return UNIFFI_CALLBACK_ERROR
+
+    
+
+    cb = FfiConverterCallbackInterfaceProcessPartiallySignedTransactionInterface.lift(handle)
+    if not cb:
+        raise InternalError("No callback in handlemap; this is a Uniffi bug")
+
+    if method == IDX_CALLBACK_FREE:
+        FfiConverterCallbackInterfaceProcessPartiallySignedTransactionInterface.drop(handle)
+        # Successfull return
+        # See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs`
+        return UNIFFI_CALLBACK_SUCCESS
+
+    if method == 1:
+        # Call the method and handle any errors
+        # See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs` for details
+        try:
+            return invoke_process_psbt(cb, RustBufferStream(args_data, args_len), buf_ptr)
+        except BaseException as e:
+            # Catch unexpected errors
+            try:
+                # Try to serialize the exception into a String
+                buf_ptr[0] = FfiConverterString.lower(repr(e))
+            except:
+                # If that fails, just give up
+                pass
+            return UNIFFI_CALLBACK_UNEXPECTED_ERROR
+    
+
+    # This should never happen, because an out of bounds method index won't
+    # ever be used. Once we can catch errors, we should return an InternalException.
+    # https://github.com/mozilla/uniffi-rs/issues/351
+
+    # An unexpected error happened.
+    # See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs`
+    return UNIFFI_CALLBACK_UNEXPECTED_ERROR
+
+# We need to keep this function reference alive:
+# if they get GC'd while in use then UniFFI internals could attempt to call a function
+# that is in freed memory.
+# That would be...uh...bad. Yeah, that's the word. Bad.
+foreignCallbackCallbackInterfaceProcessPartiallySignedTransactionInterface = FOREIGN_CALLBACK_T(py_foreignCallbackCallbackInterfaceProcessPartiallySignedTransactionInterface)
+rust_call(lambda err: _UniFFILib.uniffi_pdk_ffi_fn_init_callback_processpartiallysignedtransactioninterface(foreignCallbackCallbackInterfaceProcessPartiallySignedTransactionInterface, err))
+
+# The FfiConverter which transforms the Callbacks in to Handles to pass to Rust.
+FfiConverterCallbackInterfaceProcessPartiallySignedTransactionInterface = FfiConverterCallbackInterface(foreignCallbackCallbackInterfaceProcessPartiallySignedTransactionInterface)
+
+
+
 class FfiConverterOptionalUInt64(FfiConverterRustBuffer):
     @classmethod
     def write(cls, value, buf):
@@ -3349,6 +3593,28 @@ class FfiConverterOptionalTypeAmount(FfiConverterRustBuffer):
 
 
 
+class FfiConverterOptionalTypeFeeRate(FfiConverterRustBuffer):
+    @classmethod
+    def write(cls, value, buf):
+        if value is None:
+            buf.writeU8(0)
+            return
+
+        buf.writeU8(1)
+        FfiConverterTypeFeeRate.write(value, buf)
+
+    @classmethod
+    def read(cls, buf):
+        flag = buf.readU8()
+        if flag == 0:
+            return None
+        elif flag == 1:
+            return FfiConverterTypeFeeRate.read(buf)
+        else:
+            raise InternalError("Unexpected flag byte for optional type")
+
+
+
 class FfiConverterSequenceUInt8(FfiConverterRustBuffer):
     @classmethod
     def write(cls, value, buf):
@@ -3369,13 +3635,13 @@ class FfiConverterSequenceUInt8(FfiConverterRustBuffer):
 
 
 
-class FfiConverterSequenceTypeOutPoint(FfiConverterRustBuffer):
+class FfiConverterSequenceTypeScriptBuf(FfiConverterRustBuffer):
     @classmethod
     def write(cls, value, buf):
         items = len(value)
         buf.writeI32(items)
         for item in value:
-            FfiConverterTypeOutPoint.write(item, buf)
+            FfiConverterTypeScriptBuf.write(item, buf)
 
     @classmethod
     def read(cls, buf):
@@ -3384,7 +3650,7 @@ class FfiConverterSequenceTypeOutPoint(FfiConverterRustBuffer):
             raise InternalError("Unexpected negative sequence length")
 
         return [
-            FfiConverterTypeOutPoint.read(buf) for i in range(count)
+            FfiConverterTypeScriptBuf.read(buf) for i in range(count)
         ]
 
 
@@ -3466,9 +3732,12 @@ __all__ = [
     "MaybeMixedInputScripts",
     "MaybeInputsSeen",
     "OutputsUnknown",
+    "FeeRate",
+    "ProvisionalProposal",
     "PayjoinProposal",
     "CanBroadcast",
     "IsScriptOwned",
     "IsOutputKnown",
+    "ProcessPartiallySignedTransactionInterface",
 ]
 

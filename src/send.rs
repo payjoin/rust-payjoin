@@ -1,5 +1,8 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use crate::error::PayjoinError;
+use crate::transaction::PartiallySignedTransaction;
+use crate::{FeeRate, ScriptBuf};
 pub use payjoin::send::Configuration as PdkConfiguration;
 
 use crate::uri::Url;
@@ -22,7 +25,7 @@ impl Configuration {
 		&self,
 	) -> (Option<PdkConfiguration>, MutexGuard<Option<PdkConfiguration>>) {
 		let mut data_guard = self.internal.lock().unwrap();
-		(std::mem::replace(&mut *data_guard, None), data_guard)
+		(Option::take(&mut *data_guard), data_guard)
 	}
 	///Offer the receiver contribution to pay for his input.
 	///
@@ -36,6 +39,27 @@ impl Configuration {
 		);
 		configuration.into()
 	}
+
+	//TODO;  doesn't satisfy `payjoin::send::error::ConfigurationError: ToString`
+	pub fn recommended(
+		psbt: Arc<PartiallySignedTransaction>, payout_scripts: Vec<Arc<ScriptBuf>>,
+		min_fee_rate: Arc<FeeRate>,
+	) -> Result<Self, PayjoinError> {
+		let script_buf_iter =
+			payout_scripts.iter().map(|x| (*(x.to_owned())).clone().into()).into_iter();
+
+		match PdkConfiguration::recommended(
+			&((*psbt).clone().into()),
+			script_buf_iter,
+			(*min_fee_rate).0,
+		) {
+			Ok(e) => Ok(e.into()),
+			Err(_) => Err(PayjoinError::UnexpectedError {
+				message: "Invalid configuration found".to_string(),
+			}),
+		}
+	}
+
 	///Perform Payjoin without incentivizing the payee to cooperate.
 	///
 	///While it’s generally better to offer some contribution some users may wish not to. This function disables contribution.
@@ -58,9 +82,9 @@ impl Configuration {
 		*guard = Some(config.unwrap().clamp_fee_contribution(clamp));
 	}
 	///Sets minimum fee rate required by the sender.
-	pub fn min_fee_rate_sat_per_vb(&self, fee_rate: u64) {
+	pub fn min_fee_rate(&self, fee_rate: Arc<FeeRate>) {
 		let (config, mut guard) = Self::get_configuration(self);
-		*guard = Some(config.unwrap().min_fee_rate_sat_per_vb(fee_rate));
+		*guard = Some(config.unwrap().min_fee_rate((*fee_rate.clone()).into()));
 	}
 }
 
@@ -111,7 +135,7 @@ mod tests {
 
 		let pj_uri_string = "BITCOIN:BCRT1Q7WXQ0R2JHJKX8HQS3SHLKFAEAEF38C38SYKGZY?amount=1&pj=https://example.comOriginal".to_string();
 		let _uri = crate::Uri::new(pj_uri_string).unwrap();
-		eprintln!("address: {:#?}", _uri.address().to_string());
+		eprintln!("address: {:#?}", _uri.address().as_string());
 
 		let pj_uri = _uri.check_pj_supported().expect("Bad Uri");
 

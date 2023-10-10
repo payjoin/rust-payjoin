@@ -1,12 +1,12 @@
 [package]
-name = "pdk-ffi"
+name = "payjoin_ffi"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]
-name = "pdk_ffi"
+name = "payjoin_ffi"
 
 [build-dependencies]
 uniffi = { version = "0.24.3", features = ["build"] }
@@ -15,7 +15,7 @@ uniffi = { version = "0.24.3", features = ["build"] }
 uniffi = { version = "0.24.3", features = ["bindgen-tests"] }
 assert_matches = "1.5.0"
 env_logger = "0.10.0"
-bitcoind = { version = "0.32.0", features = ["0_21_2"] }
+bitcoind = { version = "0.33.2", features = ["0_21_2"] }
 
 
 [dependencies]

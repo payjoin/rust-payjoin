@@ -1,9 +1,9 @@
 [bindings.kotlin]
-package_name = "org.payjoindevkit.pdk"
-cdylib_name = "pdk_ffi"
+package_name = "org.payjoindevkit"
+cdylib_name = "payjoin_ffi"
 
 [bindings.python]
-cdylib_name = "pdk_ffi"
+cdylib_name = "payjoin_ffi"
 
 [bindings.swift]
-cdylib_name = "pdk_ffi"
+cdylib_name = "payjoin_ffi"

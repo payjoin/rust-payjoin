@@ -1,4 +1,4 @@
-#![crate_name = "pdk_ffi"]
+#![crate_name = "payjoin_ffi"]
 
 mod error;
 mod receive;
@@ -23,7 +23,7 @@ use payjoin::bitcoin::{Address as BitcoinAddress, ScriptBuf as BitcoinScriptBuf}
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::sync::Arc;
-uniffi::include_scaffolding!("pdk_ffi");
+uniffi::include_scaffolding!("payjoin_ffi");
 
 /// A reference to a transaction output.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]

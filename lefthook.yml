@@ -1,11 +1,9 @@
-#pre-commit:
-#  parallel: true
-#  commands:
-#    build:
-#      run: cargo build
-#    test:
-#      run: cargo test
-#    fmt:
-#      run: cargo fmt --all -- --check
-#    clippy:
-#      run: cargo clippy -- -D warnings
+pre-commit:
+  parallel: true
+  commands:
+    test:
+      run: cargo test
+    fmt:
+      run: cargo fmt --all -- --check
+    clippy:
+      run: cargo clippy -- -D warnings

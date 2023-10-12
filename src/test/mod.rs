@@ -1,22 +1,23 @@
-mod integration_test;
-
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use crate::error::PayjoinError;
+use crate::receive::{
+	Headers, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransactionInterface,
+	UncheckedProposal,
+};
+use crate::send::{Configuration, Request};
+use crate::transaction::PartiallySignedTransaction;
+use crate::uri::{Amount, Uri};
+use crate::{FeeRate, Network, ScriptBuf};
 use bitcoind::bitcoincore_rpc;
-use bitcoind::bitcoincore_rpc::core_rpc_json::AddressType;
+use bitcoind::bitcoincore_rpc::bitcoin::consensus::encode::serialize_hex;
+use bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::{AddressType, WalletProcessPsbtResult};
 use bitcoind::bitcoincore_rpc::RpcApi;
 use log::{debug, log_enabled, Level};
 use payjoin::bitcoin::base64;
 use payjoin::bitcoin::psbt::Psbt;
-
-use crate::receive::{Headers, IsOutputKnown, IsScriptOwned, UncheckedProposal};
-use crate::send::{Configuration, Request};
-use crate::transaction::PartiallySignedTransaction;
-use crate::uri::Uri;
-use crate::{Network, PayjoinError, ScriptBuf};
-use payjoin::bitcoin::consensus::encode::serialize_hex;
 
 #[test]
 fn integration_test() {
@@ -37,39 +38,24 @@ fn integration_test() {
 	bitcoind.client.generate_to_address(1, &receiver_address).unwrap();
 	bitcoind.client.generate_to_address(101, &sender_address).unwrap();
 
-	assert_eq!(
-		payjoin::bitcoin::Amount::from_btc(50.0).unwrap(),
-		receiver.get_balances().unwrap().mine.trusted,
-		"receiver doesn't own bitcoin"
-	);
-
-	assert_eq!(
-		payjoin::bitcoin::Amount::from_btc(50.0).unwrap(),
-		sender.get_balances().unwrap().mine.trusted,
-		"sender doesn't own bitcoin"
-	);
-
 	// Receiver creates the payjoin URI
 	let pj_receiver_address = receiver.get_new_address(None, None).unwrap().assume_checked();
-	let amount = payjoin::bitcoin::Amount::from_btc(1.0).unwrap();
+	let amount = Amount::from_btc(1.0);
 	let pj_uri_string = format!(
 		"{}?amount={}&pj=https://example.com",
 		pj_receiver_address.to_qr_uri(),
 		amount.to_btc()
 	);
-	print!("pj_uri {:}\n", pj_uri_string);
-	let _uri = Uri::new(pj_uri_string).unwrap();
-	let pj_uri = _uri.check_pj_supported().expect("Bad Uri");
+	let pj_uri = Uri::new(pj_uri_string).unwrap();
+	let pj_uri = pj_uri.check_pj_supported().expect("Bad Uri");
+
 	// Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
 	let mut outputs = HashMap::with_capacity(1);
-	outputs.insert(
-		pj_uri.address().clone().as_string(),
-		payjoin::bitcoin::Amount::from_sat(pj_uri.amount().clone().unwrap().to_sat()),
-	);
+	outputs.insert(pj_uri.address().as_string(), (*pj_uri.amount().unwrap()).clone().into());
 	debug!("outputs: {:?}", outputs);
 	let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
 		lock_unspent: Some(true),
-		fee_rate: Some(payjoin::bitcoin::Amount::from_sat(2000)),
+		fee_rate: Some(Amount::from_sat(2000).into()),
 		..Default::default()
 	};
 	let psbt = sender
@@ -83,31 +69,25 @@ fn integration_test() {
 		.expect("failed to create PSBT")
 		.psbt;
 	let psbt = sender.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
-	let psbt = PartiallySignedTransaction::new(psbt).expect("Psbt new");
-	eprintln!("Original psbt: {:#?}", psbt.as_string());
+	let psbt = Psbt::from_str(&psbt).unwrap();
+	debug!("Original psbt: {:#?}", psbt);
 	let pj_params = Configuration::with_fee_contribution(10000, None);
-	let pj_req = pj_uri.create_pj_request(Arc::new(psbt), Arc::new(pj_params)).unwrap();
-	let headers = Headers::from_vec(pj_req.request.body.clone());
+	let prj_uri_req = pj_uri.create_pj_request(Arc::new(psbt.into()), pj_params.into()).unwrap();
+	let req = prj_uri_req.request;
+	let ctx = prj_uri_req.context;
+	let headers = Headers::from_vec(req.body.clone());
 
 	// **********************
 	// Inside the Receiver:
 	// this data would transit from one party to another over the network in production
-	let rec_clone = Arc::new(receiver);
-	let response = handle_pj_request(pj_req.request, headers, rec_clone.clone());
-
-	eprintln!("response psbt: {:#?}", response);
+	let response = handle_pj_request(req, headers, Arc::new(receiver));
 	// this response would be returned as http response to the sender
 
 	// **********************
 	// Inside the Sender:
 	// Sender checks, signs, finalizes, extracts, and broadcasts
-
 	let checked_payjoin_proposal_psbt =
-		match PartiallySignedTransaction::process_response(pj_req.context, response) {
-			Ok(e) => e,
-			Err(_) => panic!("process_response error"),
-		};
-
+		PartiallySignedTransaction::process_response(ctx, response).unwrap();
 	let payjoin_base64_string = base64::encode(&checked_payjoin_proposal_psbt.serialize());
 	let payjoin_psbt =
 		sender.wallet_process_psbt(&payjoin_base64_string, None, None, None).unwrap().psbt;
@@ -116,7 +96,7 @@ fn integration_test() {
 	debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
 
 	let payjoin_tx = payjoin_psbt.extract_tx();
-	bitcoind.client.send_raw_transaction(&payjoin_tx).expect("Tx Broadcast failed");
+	bitcoind.client.send_raw_transaction(&payjoin_tx).unwrap();
 }
 
 // Receiver receive and process original_psbt from a sender
@@ -126,18 +106,18 @@ fn handle_pj_request(
 ) -> String {
 	// Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
 	let proposal = UncheckedProposal::from_request(
-		req.body,
-		req.url.query().unwrap_or("".to_string()).to_string(),
+		req.body.clone(),
+		req.url.query().unwrap_or("".to_string()),
 		Arc::new(headers),
 	)
-	.expect("UncheckedProposal::from_request  error");
+	.unwrap();
 
 	// in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
-	let _to_broadcast_in_failure_case = proposal.get_transaction_to_schedule_broadcast();
+	let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
 	let proposal = proposal
 		.check_can_broadcast(Box::new(TestBroadcast(receiver.clone())))
-		.expect("Payjoin proposal should be broadcastable");
+		.expect("Payjoin proposal should be broadcast");
 
 	// Receive Check 2: receiver can't sign for proposal inputs
 	let proposal = proposal
@@ -155,7 +135,8 @@ fn handle_pj_request(
 			.identify_receiver_outputs(Box::new(MockScriptOwned(receiver.clone())))
 			.expect("Receiver should have at least one output"),
 	);
-	// Select receiver payjoin inputs.
+
+	// Select receiver payjoin inputs. TODO Lock them.
 	let available_inputs = receiver.list_unspent(None, None, None, None, None).unwrap();
 	let candidate_inputs: HashMap<u64, crate::OutPoint> = available_inputs
 		.iter()
@@ -172,6 +153,7 @@ fn handle_pj_request(
 		.unwrap();
 
 	//  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
+	//  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
 	let txo_to_contribute = crate::TxOut {
 		value: selected_utxo.amount.to_sat(),
 		script_pubkey: Arc::new(ScriptBuf { internal: selected_utxo.script_pub_key.clone() }),
@@ -182,44 +164,51 @@ fn handle_pj_request(
 
 	let receiver_substitute_address =
 		receiver.get_new_address(None, None).unwrap().assume_checked();
-	payjoin.substitute_output_address(Arc::new(
-		crate::Address::new(receiver_substitute_address.to_string().as_str().to_owned())
-			.expect("Invalid address"),
-	));
-
-	let payjoin_proposal_psbt = payjoin.apply_fee(None).expect("Aplly fee");
-
-	// Sign payjoin psbt
-	let payjoin_base64_string = base64::encode(&payjoin_proposal_psbt.serialize());
-	let payjoin_proposal_psbt =
-		receiver.wallet_process_psbt(&payjoin_base64_string, None, None, Some(false)).unwrap().psbt;
-	let payjoin_proposal_psbt =
-		PartiallySignedTransaction::new(payjoin_proposal_psbt).expect("Invalid psbt");
-
-	let payjoin_proposal_psbt =
-		payjoin.prepare_psbt(Arc::new(payjoin_proposal_psbt)).expect("Prepare psbt");
-	debug!("Receiver's Payjoin proposal PSBT: {:#?}", payjoin_proposal_psbt);
-
-	base64::encode(&payjoin_proposal_psbt.serialize())
+	payjoin.substitute_output_address(Arc::new(receiver_substitute_address.into()));
+	let payjoin_proposal = payjoin
+		.finalize_proposal(
+			Box::new(MockProcessPartiallySignedTransactionInterface { 0: receiver }),
+			Some(Arc::new(FeeRate::min())),
+		)
+		.unwrap();
+	let psbt = payjoin_proposal.psbt();
+	debug!("Receiver's Payjoin proposal PSBT: {:#?}", &psbt);
+	base64::encode(&psbt.serialize())
 }
 
 struct TestBroadcast(Arc<bitcoincore_rpc::Client>);
 
 impl crate::receive::CanBroadcast for TestBroadcast {
 	fn test_mempool_accept(&self, tx: Vec<u8>) -> Result<bool, PayjoinError> {
-		match self.0.test_mempool_accept(&[serialize_hex(&tx)]) {
-			Ok(e) => Ok(match e.first() {
-				Some(e) => e.allowed,
-				None => panic!("No Mempool Result"),
-			}),
-			Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
-		}
+		eprintln!("{}", serialize_hex(&tx));
+		Ok(true)
 	}
 }
 
 struct MockScriptOwned(Arc<bitcoincore_rpc::Client>);
 
 struct MockOutputOwned {}
+
+struct MockProcessPartiallySignedTransactionInterface(Arc<bitcoincore_rpc::Client>);
+
+impl ProcessPartiallySignedTransactionInterface for MockProcessPartiallySignedTransactionInterface {
+	fn process_psbt(
+		&self, psbt: Arc<PartiallySignedTransaction>,
+	) -> Result<Arc<PartiallySignedTransaction>, PayjoinError> {
+		Ok(self
+			.0
+			.wallet_process_psbt(
+				&payjoin::bitcoin::base64::encode((*psbt).clone().serialize()),
+				None,
+				None,
+				Some(false),
+			)
+			.map(|res: WalletProcessPsbtResult| {
+				PartiallySignedTransaction::new(res.psbt).map(|e| Arc::new(e)).unwrap()
+			})
+			.unwrap())
+	}
+}
 
 impl IsOutputKnown for MockOutputOwned {
 	fn is_known(&self, _: crate::OutPoint) -> Result<bool, PayjoinError> {

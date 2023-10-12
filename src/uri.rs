@@ -92,9 +92,15 @@ impl PrjUri {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Amount {
 	internal: u64,
+}
+
+impl From<Amount> for payjoin::bitcoin::Amount {
+	fn from(value: Amount) -> Self {
+		payjoin::bitcoin::Amount::from_sat(value.internal)
+	}
 }
 
 impl Amount {

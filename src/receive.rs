@@ -58,7 +58,7 @@ impl UncheckedProposal {
 		&self,
 	) -> (Option<PdkUncheckedProposal>, MutexGuard<Option<PdkUncheckedProposal>>) {
 		let mut data_guard = self.internal.lock().unwrap();
-		(std::mem::replace(&mut *data_guard, None), data_guard)
+		(Option::take(&mut *data_guard), data_guard)
 	}
 	pub fn from_request(
 		body: Vec<u8>, query: String, headers: Arc<Headers>,
@@ -76,7 +76,13 @@ impl UncheckedProposal {
 	/// The Sender’s Original PSBT
 	pub fn extract_tx_to_schedule_broadcast(&self) -> Arc<Transaction> {
 		Arc::new(
-			self.get_configuration().1.as_ref().unwrap().extract_tx_to_schedule_broadcast().into(),
+			self.internal
+				.lock()
+				.unwrap()
+				.as_ref()
+				.unwrap()
+				.extract_tx_to_schedule_broadcast()
+				.into(),
 		)
 	}
 
@@ -141,7 +147,7 @@ impl MaybeInputsOwned {
 		&self,
 	) -> (Option<PdkMaybeInputsOwned>, MutexGuard<Option<PdkMaybeInputsOwned>>) {
 		let mut data_guard = self.internal.lock().unwrap();
-		(std::mem::replace(&mut *data_guard, None), data_guard)
+		(Option::take(&mut *data_guard), data_guard)
 	}
 	//TODO;  move occurs because `self.internal` has type `payjoin::receive::MaybeInputsOwned`, which does not implement the `Copy` trait
 	pub fn check_inputs_not_owned(
@@ -179,7 +185,7 @@ impl MaybeMixedInputScripts {
 		&self,
 	) -> (Option<PdkMaybeMixedInputScripts>, MutexGuard<Option<PdkMaybeMixedInputScripts>>) {
 		let mut data_guard = self.internal.lock().unwrap();
-		(std::mem::replace(&mut *data_guard, None), data_guard)
+		(Option::take(&mut *data_guard), data_guard)
 	}
 	/// Verify the original transaction did not have mixed input types Call this after checking downstream.
 	///
@@ -214,7 +220,7 @@ impl From<PdkMaybeInputsSeen> for MaybeInputsSeen {
 impl MaybeInputsSeen {
 	fn get_inputs(&self) -> (Option<PdkMaybeInputsSeen>, MutexGuard<Option<PdkMaybeInputsSeen>>) {
 		let mut data_guard = self.internal.lock().unwrap();
-		(std::mem::replace(&mut *data_guard, None), data_guard)
+		(Option::take(&mut *data_guard), data_guard)
 	}
 	//TODO; move occurs because `self.internal` has type `payjoin::receive::MaybeInputsSeen`, which does not implement the `Copy` trait
 	/// Make sure that the original transaction inputs have never been seen before. This prevents probing attacks. This prevents reentrant Payjoin, where a sender proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
@@ -254,7 +260,7 @@ impl OutputsUnknown {
 		&self,
 	) -> (Option<PdkOutputsUnknown>, MutexGuard<Option<PdkOutputsUnknown>>) {
 		let mut data_guard = self.internal.lock().unwrap();
-		(std::mem::replace(&mut *data_guard, None), data_guard)
+		(Option::take(&mut *data_guard), data_guard)
 	}
 	/// Find which outputs belong to the receiver
 	//TODO; move occurs because `self.internal` has type `payjoin::receive::OutputsUnknown`, which does not implement the `Copy` trait
@@ -296,7 +302,7 @@ pub trait ProcessPartiallySignedTransactionInterface: Send + Sync {
 impl ProvisionalProposal {
 	fn get_proposal(&self) -> Option<PdkProvisionalProposal> {
 		let mut data_guard = self.internal.lock().unwrap();
-		std::mem::replace(&mut *data_guard, None)
+		Option::take(&mut *data_guard)
 	}
 	fn get_proposal_mutex_guard(&self) -> MutexGuard<Option<PdkProvisionalProposal>> {
 		self.internal.lock().unwrap()
@@ -443,7 +449,7 @@ mod test {
 	#[test]
 	fn unchecked_proposal_unlocks_after_checks() {
 		let proposal = get_proposal_from_test_vector().unwrap();
-		let payjoin = proposal
+		let _payjoin = proposal
 			.assume_interactive_receiver()
 			.clone()
 			.check_inputs_not_owned(Box::new(MockScriptOwned {}))

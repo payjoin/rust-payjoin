@@ -45,13 +45,12 @@ impl Configuration {
 		psbt: Arc<PartiallySignedTransaction>, payout_scripts: Vec<Arc<ScriptBuf>>,
 		min_fee_rate: Arc<FeeRate>,
 	) -> Result<Self, PayjoinError> {
-		let script_buf_iter =
-			payout_scripts.iter().map(|x| (*(x.to_owned())).clone().into()).into_iter();
+		let script_buf_iter = payout_scripts.iter().map(|x| (*(x.to_owned())).clone().into());
 
 		match PdkConfiguration::recommended(
 			&((*psbt).clone().into()),
 			script_buf_iter,
-			(*min_fee_rate).0,
+			(*min_fee_rate).into(),
 		) {
 			Ok(e) => Ok(e.into()),
 			Err(_) => Err(PayjoinError::UnexpectedError {

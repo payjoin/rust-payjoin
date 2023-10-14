@@ -15,3 +15,7 @@ Cargo.lock
 # Python related
 __pycache__
 
+/python/venv/
+/python/.vscode/
+/python/payjoin.egg-info/
+/python/.venv/

@@ -19,3 +19,4 @@ __pycache__
 /python/.vscode/
 /python/payjoin.egg-info/
 /python/.venv/
+/python/.env

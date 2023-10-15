@@ -1,6 +1,7 @@
 use payjoin::bitcoin::psbt::PsbtParseError;
 use payjoin::receive::RequestError;
 use payjoin::Error;
+use std::fmt::Debug;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PayjoinError {
@@ -28,15 +29,15 @@ pub enum PayjoinError {
 	ServerError { message: String },
 
 	///Error that may occur when coin selection fails.
-	#[error("Error that may occur when coin selection fails.")]
-	SelectionError,
+	#[error("Error that may occur when coin selection fails: {message}")]
+	SelectionError { message: String },
 
 	///Error returned when request could not be created.
 	///This error can currently only happen due to programmer mistake.
 	#[error("Error creating the request: {message}")]
 	CreateRequestError { message: String },
 
-	#[error("Error parsing the Pj URL:: {message}")]
+	#[error("Error parsing the Pj URL: {message}")]
 	PjParseError { message: String },
 
 	#[error("{message}")]
@@ -54,6 +55,8 @@ impl From<PsbtParseError> for PayjoinError {
 		PayjoinError::PsbtParseError { message: value.to_string() }
 	}
 }
+
+//TODO; Implement ToString trait to SelectionError or make the values public.
 
 impl From<Error> for PayjoinError {
 	fn from(value: Error) -> Self {

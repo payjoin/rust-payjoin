@@ -97,6 +97,14 @@ impl ScriptBuf {
 		ScriptBuf { internal: buf }
 	}
 
+	pub fn from_string(script: String) -> anyhow::Result<Self, PayjoinError> {
+		let buf = BitcoinScriptBuf::from_hex(&script);
+		match buf {
+			Ok(e) => Ok(Self { internal: e }),
+			Err(e) => Err(PayjoinError::InvalidScript { message: e.to_string() }),
+		}
+	}
+
 	pub fn to_bytes(&self) -> Vec<u8> {
 		self.internal.to_bytes()
 	}

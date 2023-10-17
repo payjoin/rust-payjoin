@@ -107,9 +107,12 @@ impl App {
             .header("Content-Type", "text/plain")
             .send()
             .with_context(|| "HTTP request failed")?;
-        // TODO display well-known errors and log::debug the rest
-        let psbt =
-            ctx.process_response(&mut response).with_context(|| "Failed to process response")?;
+        let psbt = ctx.process_response(&mut response).or_else(|e| {
+            // It is imperative to carefully display pre-defined messages to end users and the details in debug, otherwise receiver could craft a message to phish the sender.
+            log::error!("Response contains error: {}", e);
+            log::debug!("Response contains error: {:?}", e);
+            Err(e)
+        })?;
         log::debug!("Proposed psbt: {:#?}", psbt);
         let psbt = self
             .bitcoind

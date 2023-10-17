@@ -145,7 +145,7 @@ use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
 use bitcoin::{FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
-pub use error::{CreateRequestError, ValidationError};
+pub use error::{CreateRequestError, ResponseError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 use url::Url;
 
@@ -351,12 +351,17 @@ impl Context {
     pub fn process_response(
         self,
         response: &mut impl std::io::Read,
-    ) -> Result<Psbt, ValidationError> {
+    ) -> Result<Psbt, ResponseError> {
         let mut res_str = String::new();
         response.read_to_string(&mut res_str).map_err(InternalValidationError::Io)?;
-        let proposal = Psbt::from_str(&res_str).map_err(InternalValidationError::Psbt)?;
-
-        // process in non-generic function
+        let proposal = Psbt::from_str(&res_str).or_else(|_| {
+            // That wasn't a valid PSBT. Maybe it's a valid error response?
+            serde_json::from_str::<ResponseError>(&res_str)
+                // which isn't the Ok result, it's actually an error.
+                .map(|e| Err(e))
+                // if not, we have an invalid response
+                .unwrap_or_else(|_| Err(InternalValidationError::Parse.into()))
+        })?;
         self.process_proposal(proposal).map(Into::into).map_err(Into::into)
     }
 

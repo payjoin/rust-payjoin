@@ -13,7 +13,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             Self::BadRequest(e) => e.fmt(f),
-            Self::Server(e) => write!(f, "Internal Server Error: {}", e),
+            Self::Server(_) => crate::response_error::WellKnownError::Unavailable.fmt(f),
         }
     }
 }

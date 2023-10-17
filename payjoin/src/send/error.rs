@@ -16,7 +16,7 @@ pub struct ValidationError {
 
 #[derive(Debug)]
 pub(crate) enum InternalValidationError {
-    Psbt(bitcoin::psbt::PsbtParseError),
+    Parse,
     Io(std::io::Error),
     InvalidInputType(InputTypeError),
     InvalidProposedInput(crate::psbt::PrevTxOutError),
@@ -58,7 +58,6 @@ impl fmt::Display for ValidationError {
         use InternalValidationError::*;
 
         match &self.internal {
-            Psbt(e) => write!(f, "couldn't decode PSBT: {}", e),
             Io(e) => write!(f, "couldn't read PSBT: {}", e),
             InvalidInputType(e) => write!(f, "invalid transaction input type: {}", e),
             InvalidProposedInput(e) => write!(f, "invalid proposed transaction input: {}", e),
@@ -86,6 +85,7 @@ impl fmt::Display for ValidationError {
             PayeeTookContributedFee => write!(f, "payee tried to take fee contribution for himself"),
             FeeContributionPaysOutputSizeIncrease => write!(f, "fee contribution pays for additional outputs"),
             FeeRateBelowMinimum =>  write!(f, "the fee rate of proposed transaction is below minimum"),
+            Parse => write!(f, "couldn't decode as PSBT or JSON",),
         }
     }
 }
@@ -95,7 +95,6 @@ impl std::error::Error for ValidationError {
         use InternalValidationError::*;
 
         match &self.internal {
-            Psbt(error) => Some(error),
             Io(error) => Some(error),
             InvalidInputType(error) => Some(error),
             InvalidProposedInput(error) => Some(error),
@@ -123,6 +122,7 @@ impl std::error::Error for ValidationError {
             PayeeTookContributedFee => None,
             FeeContributionPaysOutputSizeIncrease => None,
             FeeRateBelowMinimum => None,
+            Parse => None,
         }
     }
 }
@@ -209,4 +209,105 @@ impl std::error::Error for CreateRequestError {
 
 impl From<InternalCreateRequestError> for CreateRequestError {
     fn from(value: InternalCreateRequestError) -> Self { CreateRequestError(value) }
+}
+
+use serde::Deserialize;
+
+pub enum ResponseError {
+    // Well known errors with internal message for logs as String
+    WellKnown(WellKnownError, String),
+    // Don't display unknowns to end users, only debug logs
+    Unrecognized(String, String),
+
+    Validation(ValidationError),
+}
+
+impl From<InternalValidationError> for ResponseError {
+    fn from(value: InternalValidationError) -> Self {
+        Self::Validation(ValidationError { internal: value })
+    }
+}
+
+// It is imperative to carefully display pre-defined messages to end users and the details in debug.
+impl fmt::Display for ResponseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::WellKnown(e, _) => e.fmt(f),
+            // Don't display unknowns to end users, only debug logs
+            Self::Unrecognized(_, _) => write!(f, "The receiver sent an unrecognized error."),
+            Self::Validation(e) => write!(f, "The receiver sent an invalid response: {}", e),
+        }
+    }
+}
+
+impl fmt::Debug for ResponseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::WellKnown(e, msg) =>
+                write!(f, r#"Well known error: {{ "errorCode": "{}", "message": "{}" }}"#, e, msg),
+            Self::Unrecognized(code, msg) => write!(
+                f,
+                r#"Unrecognized error: {{ "errorCode": "{}", "message": "{}" }}"#,
+                code, msg
+            ),
+            Self::Validation(e) => write!(f, "Validation({:?})", e),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ResponseError {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let res = RawResponseError::deserialize(deserializer)?;
+
+        let well_known_error = WellKnownError::from_str(&res.error_code);
+
+        if let Some(wk_error) = well_known_error {
+            Ok(ResponseError::WellKnown(wk_error, res.message))
+        } else {
+            Ok(ResponseError::Unrecognized(res.error_code, res.message))
+        }
+    }
+}
+
+impl std::error::Error for ResponseError {}
+
+#[derive(Debug, Deserialize)]
+struct RawResponseError {
+    #[serde(rename = "errorCode")]
+    error_code: String,
+    message: String,
+}
+
+#[derive(Debug)]
+pub enum WellKnownError {
+    Unavailable,
+    NotEnoughMoney,
+    VersionUnsupported,
+    OriginalPsbtRejected,
+}
+
+impl WellKnownError {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "unavailable" => Some(WellKnownError::Unavailable),
+            "not-enough-money" => Some(WellKnownError::NotEnoughMoney),
+            "version-unsupported" => Some(WellKnownError::VersionUnsupported),
+            "original-psbt-rejected" => Some(WellKnownError::OriginalPsbtRejected),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for WellKnownError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Unavailable => write!(f, "The payjoin endpoint is not available for now."),
+            Self::NotEnoughMoney => write!(f, "The receiver added some inputs but could not bump the fee of the payjoin proposal."),
+            Self::VersionUnsupported => write!(f, "This version of payjoin is not supported."),
+            Self::OriginalPsbtRejected => write!(f, "The receiver rejected the original PSBT."),
+        }
+    }
 }

@@ -45,6 +45,10 @@ impl PartiallySignedTransaction {
 	pub fn serialize(&self) -> Vec<u8> {
 		self.0.serialize()
 	}
+
+	pub fn extract_tx(&self) -> Arc<Transaction> {
+		Arc::new(self.0.clone().extract_tx().into())
+	}
 	pub fn as_string(&self) -> String {
 		self.0.to_string()
 	}
@@ -66,13 +70,8 @@ impl Transaction {
 	pub fn txid(&self) -> Arc<Txid> {
 		Arc::new(Txid(self.internal.txid().to_string()))
 	}
-}
-
-pub struct Txid(String);
-
-impl Txid {
-	pub fn as_string(&self) -> String {
-		self.0.clone()
+	pub fn serialize(&self) -> Vec<u8> {
+		payjoin::bitcoin::consensus::serialize(&self.internal)
 	}
 }
 
@@ -85,5 +84,13 @@ impl From<Transaction> for BitcoinTransaction {
 impl From<BitcoinTransaction> for Transaction {
 	fn from(value: BitcoinTransaction) -> Self {
 		Self { internal: value }
+	}
+}
+
+pub struct Txid(String);
+
+impl Txid {
+	pub fn as_string(&self) -> String {
+		self.0.clone()
 	}
 }

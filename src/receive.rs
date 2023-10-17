@@ -340,7 +340,7 @@ impl ProvisionalProposal {
 		let mut guard = self.get_proposal_mutex_guard();
 		match guard.as_mut().unwrap().try_preserving_privacy(_candidate_inputs) {
 			Ok(e) => Ok(OutPoint { txid: e.txid.to_string(), vout: e.vout }),
-			Err(_) => Err(PayjoinError::SelectionError),
+			Err(e) => Err(PayjoinError::SelectionError { message: format!("{:?}", e) }),
 		}
 	}
 
@@ -360,7 +360,7 @@ impl ProvisionalProposal {
 			min_feerate_sat_per_vb.map(|x| (*x).into()),
 		) {
 			Ok(e) => Ok(Arc::new(PayjoinProposal { internal: e })),
-			Err(_) => Err(PayjoinError::SelectionError),
+			Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
 		}
 	}
 }
@@ -387,11 +387,11 @@ impl PayjoinProposal {
 	pub fn is_output_substitution_disabled(&self) -> bool {
 		self.internal.is_output_substitution_disabled()
 	}
-	pub fn owned_vouts(&self) -> Vec<usize> {
-		self.internal.owned_vouts().clone()
+	pub fn owned_vouts(&self) -> Vec<u64> {
+		self.internal.owned_vouts().iter().map(|x| *x as u64).collect()
 	}
-	pub fn psbt(&self) -> PartiallySignedTransaction {
-		self.internal.psbt().clone().into()
+	pub fn psbt(&self) -> Arc<PartiallySignedTransaction> {
+		Arc::new(self.internal.psbt().clone().into())
 	}
 }
 
@@ -410,8 +410,8 @@ mod test {
 		// | P2SH-P2WPKH     |  2 sat/vbyte          | 0.00000182                   | 0                       |
 		let original_psbt =
             "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
-
 		let body = original_psbt.as_bytes();
+
 		let headers = Headers::from_vec(body.to_vec());
 		UncheckedProposal::from_request(
 			body.to_vec(),

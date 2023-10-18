@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::str::FromStr;
+
 use std::sync::Arc;
 
 use crate::error::PayjoinError;
@@ -16,8 +16,6 @@ use bitcoind::bitcoincore_rpc::bitcoin::consensus::encode::serialize_hex;
 use bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::{AddressType, WalletProcessPsbtResult};
 use bitcoind::bitcoincore_rpc::RpcApi;
 use log::{debug, log_enabled, Level};
-use payjoin::bitcoin::base64;
-use payjoin::bitcoin::psbt::Psbt;
 
 #[test]
 fn integration_test() {
@@ -52,7 +50,7 @@ fn integration_test() {
 	// Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
 	let mut outputs = HashMap::with_capacity(1);
 	outputs.insert(pj_uri.address().as_string(), (*pj_uri.amount().unwrap()).clone().into());
-	debug!("outputs: {:?}", outputs);
+	eprintln!("outputs: {:?}", outputs);
 	let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
 		lock_unspent: Some(true),
 		fee_rate: Some(Amount::from_sat(2000).into()),
@@ -68,11 +66,11 @@ fn integration_test() {
 		)
 		.expect("failed to create PSBT")
 		.psbt;
-	let psbt = sender.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
-	let psbt = Psbt::from_str(&psbt).unwrap();
-	debug!("Original psbt: {:#?}", psbt);
+	let psbt_base64 = sender.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
+	let psbt = PartiallySignedTransaction::new(psbt_base64).expect("Invalid psbt_base64");
+	eprintln!("Original psbt: {:#?}", psbt.as_string());
 	let pj_params = Configuration::with_fee_contribution(10000, None);
-	let prj_uri_req = pj_uri.create_pj_request(Arc::new(psbt.into()), pj_params.into()).unwrap();
+	let prj_uri_req = pj_uri.create_pj_request(Arc::new(psbt), pj_params.into()).unwrap();
 	let req = prj_uri_req.request;
 	let ctx = prj_uri_req.context;
 	let headers = Headers::from_vec(req.body.clone());
@@ -88,19 +86,23 @@ fn integration_test() {
 	// Sender checks, signs, finalizes, extracts, and broadcasts
 	let checked_payjoin_proposal_psbt =
 		PartiallySignedTransaction::process_response(ctx, response).unwrap();
-	let payjoin_base64_string = base64::encode(&checked_payjoin_proposal_psbt.serialize());
-	let payjoin_psbt =
-		sender.wallet_process_psbt(&payjoin_base64_string, None, None, None).unwrap().psbt;
+	let payjoin_psbt = sender
+		.wallet_process_psbt(&checked_payjoin_proposal_psbt.as_string(), None, None, None)
+		.unwrap()
+		.psbt;
 	let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false)).unwrap().psbt.unwrap();
-	let payjoin_psbt = Psbt::from_str(&payjoin_psbt).unwrap();
-	debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
 
-	let payjoin_tx = payjoin_psbt.extract_tx();
-	bitcoind.client.send_raw_transaction(&payjoin_tx).unwrap();
+	let payjoin_psbt = PartiallySignedTransaction::new(payjoin_psbt).unwrap();
+	eprintln!("Sender's Payjoin PSBT: {:#?}\n", payjoin_psbt.as_string());
+	let tx = payjoin_psbt.extract_tx();
+	let payjoin_tx: payjoin::bitcoin::Transaction =
+		(crate::Transaction::new(tx.serialize()).expect("Invalid payjoin_psbt tx")).clone().into();
+	let txid = bitcoind.client.send_raw_transaction(&payjoin_tx).unwrap();
+	eprintln!("Broadcast txid: {:?}", txid)
 }
 
 // Receiver receive and process original_psbt from a sender
-// In production it it will come in as an HTTP request (over ssl or onion)
+// In production it will come in as an HTTP request (over ssl or onion)
 fn handle_pj_request(
 	req: Request, headers: Headers, receiver: Arc<bitcoincore_rpc::Client>,
 ) -> String {
@@ -114,13 +116,12 @@ fn handle_pj_request(
 
 	// in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
 	let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
-
-	let proposal = proposal
+	let inputs_owned = proposal
 		.check_can_broadcast(Box::new(TestBroadcast(receiver.clone())))
 		.expect("Payjoin proposal should be broadcast");
 
 	// Receive Check 2: receiver can't sign for proposal inputs
-	let proposal = proposal
+	let proposal = inputs_owned
 		.check_inputs_not_owned(Box::new(MockScriptOwned(receiver.clone())))
 		.expect("Receiver should not own any of the inputs");
 
@@ -142,7 +143,6 @@ fn handle_pj_request(
 		.iter()
 		.map(|i| (i.amount.to_sat(), crate::OutPoint { txid: i.txid.to_string(), vout: i.vout }))
 		.collect();
-
 	let selected_outpoint = payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
 	let selected_utxo = available_inputs
 		.iter()
@@ -152,7 +152,6 @@ fn handle_pj_request(
 		})
 		.unwrap();
 
-	//  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
 	//  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
 	let txo_to_contribute = crate::TxOut {
 		value: selected_utxo.amount.to_sat(),
@@ -172,15 +171,14 @@ fn handle_pj_request(
 		)
 		.unwrap();
 	let psbt = payjoin_proposal.psbt();
-	debug!("Receiver's Payjoin proposal PSBT: {:#?}", &psbt);
-	base64::encode(&psbt.serialize())
+	psbt.as_string()
 }
 
 struct TestBroadcast(Arc<bitcoincore_rpc::Client>);
 
 impl crate::receive::CanBroadcast for TestBroadcast {
 	fn test_mempool_accept(&self, tx: Vec<u8>) -> Result<bool, PayjoinError> {
-		eprintln!("{}", serialize_hex(&tx));
+		debug!("{}", serialize_hex(&tx));
 		Ok(true)
 	}
 }
@@ -197,12 +195,7 @@ impl ProcessPartiallySignedTransactionInterface for MockProcessPartiallySignedTr
 	) -> Result<Arc<PartiallySignedTransaction>, PayjoinError> {
 		Ok(self
 			.0
-			.wallet_process_psbt(
-				&payjoin::bitcoin::base64::encode((*psbt).clone().serialize()),
-				None,
-				None,
-				Some(false),
-			)
+			.wallet_process_psbt(&psbt.as_string(), None, None, Some(false))
 			.map(|res: WalletProcessPsbtResult| {
 				PartiallySignedTransaction::new(res.psbt).map(|e| Arc::new(e)).unwrap()
 			})
@@ -220,7 +213,6 @@ impl IsScriptOwned for MockScriptOwned {
 	fn is_owned(&self, script: Arc<ScriptBuf>) -> Result<bool, PayjoinError> {
 		{
 			let network = Network::Regtest;
-
 			let address = crate::Address::from_script(script, network).unwrap();
 			let addr: payjoin::bitcoin::Address = address.into();
 			Ok(self.0.get_address_info(&addr).unwrap().is_mine.unwrap())

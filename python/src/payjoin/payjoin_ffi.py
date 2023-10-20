@@ -550,6 +550,8 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_partiallysignedtransaction_serialize() != 45849:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_partiallysignedtransaction_extract_tx() != 6070:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_partiallysignedtransaction_as_string() != 32034:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_amount_to_btc() != 39645:
@@ -565,6 +567,8 @@ def uniffi_check_api_checksums(lib):
     if lib.uniffi_payjoin_ffi_checksum_method_txid_as_string() != 38333:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_transaction_txid() != 4652:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_transaction_serialize() != 39639:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_uncheckedproposal_extract_tx_to_schedule_broadcast() != 28662:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -590,7 +594,17 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_finalize_proposal() != 46915:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_utxos_to_be_locked() != 55131:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_is_output_substitution_disabled() != 62839:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_owned_vouts() != 47791:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_psbt() != 18759:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_constructor_scriptbuf_new() != 27877:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_constructor_scriptbuf_from_string() != 39407:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_constructor_address_new() != 3978:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -647,6 +661,11 @@ _UniFFILib.uniffi_payjoin_ffi_fn_constructor_scriptbuf_new.argtypes = (
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_payjoin_ffi_fn_constructor_scriptbuf_new.restype = ctypes.c_void_p
+_UniFFILib.uniffi_payjoin_ffi_fn_constructor_scriptbuf_from_string.argtypes = (
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_payjoin_ffi_fn_constructor_scriptbuf_from_string.restype = ctypes.c_void_p
 _UniFFILib.uniffi_payjoin_ffi_fn_method_scriptbuf_to_bytes.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
@@ -804,6 +823,11 @@ _UniFFILib.uniffi_payjoin_ffi_fn_method_partiallysignedtransaction_serialize.arg
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_payjoin_ffi_fn_method_partiallysignedtransaction_serialize.restype = RustBuffer
+_UniFFILib.uniffi_payjoin_ffi_fn_method_partiallysignedtransaction_extract_tx.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_payjoin_ffi_fn_method_partiallysignedtransaction_extract_tx.restype = ctypes.c_void_p
 _UniFFILib.uniffi_payjoin_ffi_fn_method_partiallysignedtransaction_as_string.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
@@ -886,6 +910,11 @@ _UniFFILib.uniffi_payjoin_ffi_fn_method_transaction_txid.argtypes = (
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_payjoin_ffi_fn_method_transaction_txid.restype = ctypes.c_void_p
+_UniFFILib.uniffi_payjoin_ffi_fn_method_transaction_serialize.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_payjoin_ffi_fn_method_transaction_serialize.restype = RustBuffer
 _UniFFILib.uniffi_payjoin_ffi_fn_free_uncheckedproposal.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
@@ -1030,6 +1059,26 @@ _UniFFILib.uniffi_payjoin_ffi_fn_free_payjoinproposal.argtypes = (
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_payjoin_ffi_fn_free_payjoinproposal.restype = None
+_UniFFILib.uniffi_payjoin_ffi_fn_method_payjoinproposal_utxos_to_be_locked.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_payjoin_ffi_fn_method_payjoinproposal_utxos_to_be_locked.restype = RustBuffer
+_UniFFILib.uniffi_payjoin_ffi_fn_method_payjoinproposal_is_output_substitution_disabled.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_payjoin_ffi_fn_method_payjoinproposal_is_output_substitution_disabled.restype = ctypes.c_int8
+_UniFFILib.uniffi_payjoin_ffi_fn_method_payjoinproposal_owned_vouts.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_payjoin_ffi_fn_method_payjoinproposal_owned_vouts.restype = RustBuffer
+_UniFFILib.uniffi_payjoin_ffi_fn_method_payjoinproposal_psbt.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_payjoin_ffi_fn_method_payjoinproposal_psbt.restype = ctypes.c_void_p
 _UniFFILib.uniffi_payjoin_ffi_fn_init_callback_canbroadcast.argtypes = (
     FOREIGN_CALLBACK_T,
     ctypes.POINTER(RustCallStatus),
@@ -1113,6 +1162,9 @@ _UniFFILib.uniffi_payjoin_ffi_checksum_method_configuration_min_fee_rate.restype
 _UniFFILib.uniffi_payjoin_ffi_checksum_method_partiallysignedtransaction_serialize.argtypes = (
 )
 _UniFFILib.uniffi_payjoin_ffi_checksum_method_partiallysignedtransaction_serialize.restype = ctypes.c_uint16
+_UniFFILib.uniffi_payjoin_ffi_checksum_method_partiallysignedtransaction_extract_tx.argtypes = (
+)
+_UniFFILib.uniffi_payjoin_ffi_checksum_method_partiallysignedtransaction_extract_tx.restype = ctypes.c_uint16
 _UniFFILib.uniffi_payjoin_ffi_checksum_method_partiallysignedtransaction_as_string.argtypes = (
 )
 _UniFFILib.uniffi_payjoin_ffi_checksum_method_partiallysignedtransaction_as_string.restype = ctypes.c_uint16
@@ -1137,6 +1189,9 @@ _UniFFILib.uniffi_payjoin_ffi_checksum_method_txid_as_string.restype = ctypes.c_
 _UniFFILib.uniffi_payjoin_ffi_checksum_method_transaction_txid.argtypes = (
 )
 _UniFFILib.uniffi_payjoin_ffi_checksum_method_transaction_txid.restype = ctypes.c_uint16
+_UniFFILib.uniffi_payjoin_ffi_checksum_method_transaction_serialize.argtypes = (
+)
+_UniFFILib.uniffi_payjoin_ffi_checksum_method_transaction_serialize.restype = ctypes.c_uint16
 _UniFFILib.uniffi_payjoin_ffi_checksum_method_uncheckedproposal_extract_tx_to_schedule_broadcast.argtypes = (
 )
 _UniFFILib.uniffi_payjoin_ffi_checksum_method_uncheckedproposal_extract_tx_to_schedule_broadcast.restype = ctypes.c_uint16
@@ -1173,9 +1228,24 @@ _UniFFILib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_try_preserving
 _UniFFILib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_finalize_proposal.argtypes = (
 )
 _UniFFILib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_finalize_proposal.restype = ctypes.c_uint16
+_UniFFILib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_utxos_to_be_locked.argtypes = (
+)
+_UniFFILib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_utxos_to_be_locked.restype = ctypes.c_uint16
+_UniFFILib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_is_output_substitution_disabled.argtypes = (
+)
+_UniFFILib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_is_output_substitution_disabled.restype = ctypes.c_uint16
+_UniFFILib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_owned_vouts.argtypes = (
+)
+_UniFFILib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_owned_vouts.restype = ctypes.c_uint16
+_UniFFILib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_psbt.argtypes = (
+)
+_UniFFILib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_psbt.restype = ctypes.c_uint16
 _UniFFILib.uniffi_payjoin_ffi_checksum_constructor_scriptbuf_new.argtypes = (
 )
 _UniFFILib.uniffi_payjoin_ffi_checksum_constructor_scriptbuf_new.restype = ctypes.c_uint16
+_UniFFILib.uniffi_payjoin_ffi_checksum_constructor_scriptbuf_from_string.argtypes = (
+)
+_UniFFILib.uniffi_payjoin_ffi_checksum_constructor_scriptbuf_from_string.restype = ctypes.c_uint16
 _UniFFILib.uniffi_payjoin_ffi_checksum_constructor_address_new.argtypes = (
 )
 _UniFFILib.uniffi_payjoin_ffi_checksum_constructor_address_new.restype = ctypes.c_uint16
@@ -2060,6 +2130,16 @@ class PartiallySignedTransaction:
 
 
 
+    def extract_tx(self, ) -> "Transaction":
+        return FfiConverterTypeTransaction.lift(
+            rust_call(_UniFFILib.uniffi_payjoin_ffi_fn_method_partiallysignedtransaction_extract_tx,self._pointer,)
+        )
+
+
+
+
+
+
     def as_string(self, ) -> "str":
         return FfiConverterString.lift(
             rust_call(_UniFFILib.uniffi_payjoin_ffi_fn_method_partiallysignedtransaction_as_string,self._pointer,)
@@ -2111,6 +2191,46 @@ class PayjoinProposal:
         inst = cls.__new__(cls)
         inst._pointer = pointer
         return inst
+
+
+    def utxos_to_be_locked(self, ) -> "typing.List[OutPoint]":
+        return FfiConverterSequenceTypeOutPoint.lift(
+            rust_call(_UniFFILib.uniffi_payjoin_ffi_fn_method_payjoinproposal_utxos_to_be_locked,self._pointer,)
+        )
+
+
+
+
+
+
+    def is_output_substitution_disabled(self, ) -> "bool":
+        return FfiConverterBool.lift(
+            rust_call(_UniFFILib.uniffi_payjoin_ffi_fn_method_payjoinproposal_is_output_substitution_disabled,self._pointer,)
+        )
+
+
+
+
+
+
+    def owned_vouts(self, ) -> "typing.List[int]":
+        return FfiConverterSequenceUInt64.lift(
+            rust_call(_UniFFILib.uniffi_payjoin_ffi_fn_method_payjoinproposal_owned_vouts,self._pointer,)
+        )
+
+
+
+
+
+
+    def psbt(self, ) -> "PartiallySignedTransaction":
+        return FfiConverterTypePartiallySignedTransaction.lift(
+            rust_call(_UniFFILib.uniffi_payjoin_ffi_fn_method_payjoinproposal_psbt,self._pointer,)
+        )
+
+
+
+
 
 
 class FfiConverterTypePayjoinProposal:
@@ -2345,6 +2465,15 @@ class ScriptBuf:
         inst._pointer = pointer
         return inst
 
+    @classmethod
+    def from_string(cls, script: "str"):
+        
+        # Call the (fallible) function before creating any half-baked object instances.
+        pointer = rust_call_with_error(FfiConverterTypePayjoinError,_UniFFILib.uniffi_payjoin_ffi_fn_constructor_scriptbuf_from_string,
+        FfiConverterString.lower(script))
+        return cls._make_instance_(pointer)
+
+
 
     def to_bytes(self, ) -> "typing.List[int]":
         return FfiConverterSequenceUInt8.lift(
@@ -2436,6 +2565,16 @@ class Transaction:
     def txid(self, ) -> "Txid":
         return FfiConverterTypeTxid.lift(
             rust_call(_UniFFILib.uniffi_payjoin_ffi_fn_method_transaction_txid,self._pointer,)
+        )
+
+
+
+
+
+
+    def serialize(self, ) -> "typing.List[int]":
+        return FfiConverterSequenceUInt8.lift(
+            rust_call(_UniFFILib.uniffi_payjoin_ffi_fn_method_transaction_serialize,self._pointer,)
         )
 
 
@@ -2958,8 +3097,11 @@ class PayjoinError:  # type: ignore
             return "PayjoinError.RequestError({})".format(str(self))
     UniFFITempPayjoinError.RequestError = RequestError  # type: ignore
     class SelectionError(UniFFITempPayjoinError):
-        def __init__(self):
-            pass
+        def __init__(self, message):
+            super().__init__(", ".join([
+                "message={!r}".format(message),
+            ]))
+            self.message = message
         def __repr__(self):
             return "PayjoinError.SelectionError({})".format(str(self))
     UniFFITempPayjoinError.SelectionError = SelectionError  # type: ignore
@@ -3057,6 +3199,7 @@ class FfiConverterTypePayjoinError(FfiConverterRustBuffer):
             )
         if variant == 6:
             return PayjoinError.SelectionError(
+                message=FfiConverterString.read(buf),
             )
         if variant == 7:
             return PayjoinError.CreateRequestError(
@@ -3107,6 +3250,7 @@ class FfiConverterTypePayjoinError(FfiConverterRustBuffer):
             FfiConverterString.write(value.message, buf)
         if isinstance(value, PayjoinError.SelectionError):
             buf.writeI32(6)
+            FfiConverterString.write(value.message, buf)
         if isinstance(value, PayjoinError.CreateRequestError):
             buf.writeI32(7)
             FfiConverterString.write(value.message, buf)
@@ -3635,6 +3779,26 @@ class FfiConverterSequenceUInt8(FfiConverterRustBuffer):
 
 
 
+class FfiConverterSequenceUInt64(FfiConverterRustBuffer):
+    @classmethod
+    def write(cls, value, buf):
+        items = len(value)
+        buf.writeI32(items)
+        for item in value:
+            FfiConverterUInt64.write(item, buf)
+
+    @classmethod
+    def read(cls, buf):
+        count = buf.readI32()
+        if count < 0:
+            raise InternalError("Unexpected negative sequence length")
+
+        return [
+            FfiConverterUInt64.read(buf) for i in range(count)
+        ]
+
+
+
 class FfiConverterSequenceTypeScriptBuf(FfiConverterRustBuffer):
     @classmethod
     def write(cls, value, buf):
@@ -3651,6 +3815,26 @@ class FfiConverterSequenceTypeScriptBuf(FfiConverterRustBuffer):
 
         return [
             FfiConverterTypeScriptBuf.read(buf) for i in range(count)
+        ]
+
+
+
+class FfiConverterSequenceTypeOutPoint(FfiConverterRustBuffer):
+    @classmethod
+    def write(cls, value, buf):
+        items = len(value)
+        buf.writeI32(items)
+        for item in value:
+            FfiConverterTypeOutPoint.write(item, buf)
+
+    @classmethod
+    def read(cls, buf):
+        count = buf.readI32()
+        if count < 0:
+            raise InternalError("Unexpected negative sequence length")
+
+        return [
+            FfiConverterTypeOutPoint.read(buf) for i in range(count)
         ]
 
 

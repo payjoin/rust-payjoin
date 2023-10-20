@@ -8,7 +8,7 @@ interface PayjoinError {
     PsbtParseError (string message);
     ReceiveError (string message);
     RequestError(string message);
-    SelectionError();
+    SelectionError(string message);
     CreateRequestError(string message);
     PjParseError(string message);
     PjNotSupported(string message);
@@ -42,6 +42,8 @@ enum Network {
 
 interface ScriptBuf {
       constructor(sequence<u8> raw_output_script);
+      [Name=from_string, Throws=PayjoinError]
+      constructor(string script);
       sequence<u8> to_bytes();
       string to_hex_string();
       string as_string();
@@ -100,6 +102,7 @@ interface PartiallySignedTransaction{
       [Name=process_response, Throws=PayjoinError]
       constructor( Context context, string response);
       sequence<u8> serialize();
+      Transaction extract_tx();
       string as_string();
 };
 
@@ -129,6 +132,7 @@ interface Transaction{
       [Throws=PayjoinError]
       constructor(sequence<u8> transaction_bytes);
       Txid txid();
+      sequence<u8> serialize();
 };
 
 
@@ -206,7 +210,13 @@ interface ProvisionalProposal{
       [Throws=PayjoinError]
       PayjoinProposal finalize_proposal(ProcessPartiallySignedTransactionInterface process_psbt, FeeRate? min_feerate_sat_per_vb);
 };
-interface PayjoinProposal{};
+
+interface PayjoinProposal{
+        sequence<OutPoint> utxos_to_be_locked();
+        boolean is_output_substitution_disabled();
+        sequence<u64> owned_vouts();
+        PartiallySignedTransaction psbt();
+};
 
 
 

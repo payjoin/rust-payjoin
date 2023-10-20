@@ -354,13 +354,9 @@ impl Context {
     ) -> Result<Psbt, ResponseError> {
         let mut res_str = String::new();
         response.read_to_string(&mut res_str).map_err(InternalValidationError::Io)?;
-        let proposal = Psbt::from_str(&res_str).or_else(|_| {
+        let proposal = Psbt::from_str(&res_str).map_err(|_| {
             // That wasn't a valid PSBT. Maybe it's a valid error response?
-            serde_json::from_str::<ResponseError>(&res_str)
-                // which isn't the Ok result, it's actually an error.
-                .map(|e| Err(e))
-                // if not, we have an invalid response
-                .unwrap_or_else(|_| Err(InternalValidationError::Parse.into()))
+            ResponseError::from_json(&res_str)
         })?;
         self.process_proposal(proposal).map(Into::into).map_err(Into::into)
     }

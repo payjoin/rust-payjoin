@@ -211,8 +211,6 @@ impl From<InternalCreateRequestError> for CreateRequestError {
     fn from(value: InternalCreateRequestError) -> Self { CreateRequestError(value) }
 }
 
-use serde::Deserialize;
-
 pub enum ResponseError {
     // Well known errors with internal message for logs as String
     WellKnown(WellKnownError, String),
@@ -220,6 +218,30 @@ pub enum ResponseError {
     Unrecognized(String, String),
 
     Validation(ValidationError),
+}
+
+impl ResponseError {
+    pub fn from_json(json: &str) -> Self {
+        use std::convert::TryInto;
+
+        use tinyjson::{JsonParser, JsonValue};
+
+        let parsed: JsonValue = json.parse().unwrap();
+        //.unwrap_or_else( |_| ResponseError::Validation(InternalValidationError::Parse.into()));
+        let maybe_code = parsed["errorCode"].get();
+        let maybe_message = parsed["message"].get();
+        if let (Some(error_code), Some(message)) = (maybe_code, maybe_message) {
+            let well_known_error = WellKnownError::from_str(&error_code);
+
+            if let Some(wk_error) = well_known_error {
+                ResponseError::WellKnown(wk_error, message.to_string())
+            } else {
+                ResponseError::Unrecognized(error_code.to_string(), message.to_string())
+            }
+        } else {
+            ResponseError::Validation(InternalValidationError::Parse.into())
+        }
+    }
 }
 
 impl From<InternalValidationError> for ResponseError {
@@ -255,31 +277,7 @@ impl fmt::Debug for ResponseError {
     }
 }
 
-impl<'de> Deserialize<'de> for ResponseError {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let res = RawResponseError::deserialize(deserializer)?;
-
-        let well_known_error = WellKnownError::from_str(&res.error_code);
-
-        if let Some(wk_error) = well_known_error {
-            Ok(ResponseError::WellKnown(wk_error, res.message))
-        } else {
-            Ok(ResponseError::Unrecognized(res.error_code, res.message))
-        }
-    }
-}
-
 impl std::error::Error for ResponseError {}
-
-#[derive(Debug, Deserialize)]
-struct RawResponseError {
-    #[serde(rename = "errorCode")]
-    error_code: String,
-    message: String,
-}
 
 #[derive(Debug)]
 pub enum WellKnownError {

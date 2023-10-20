@@ -11,8 +11,8 @@ mod integration {
     use log::{debug, log_enabled, Level};
     use payjoin::bitcoin::base64;
     use payjoin::receive::Headers;
-    use payjoin::send::Request;
-    use payjoin::{bitcoin, Error, PjUriExt, Uri, UriExt};
+    use payjoin::send::{Request, RequestBuilder};
+    use payjoin::{bitcoin, Error, Uri};
 
     #[test]
     fn integration_test() {
@@ -53,9 +53,8 @@ mod integration {
             pj_receiver_address.to_qr_uri(),
             amount.to_btc()
         );
-        let pj_uri = Uri::from_str(&pj_uri_string).unwrap().assume_checked();
-        let pj_uri = pj_uri.check_pj_supported().expect("Bad Uri");
-
+        let pj_uri = Uri::from_str(&pj_uri_string).unwrap();
+        let pj_uri = pj_uri.assume_checked();
         // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
         let mut outputs = HashMap::with_capacity(1);
         outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap());
@@ -78,11 +77,15 @@ mod integration {
         let psbt = sender.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
         let psbt = Psbt::from_str(&psbt).unwrap();
         debug!("Original psbt: {:#?}", psbt);
-        let pj_params = payjoin::send::Configuration::with_fee_contribution(
-            payjoin::bitcoin::Amount::from_sat(10000),
-            None,
-        );
-        let (req, ctx) = pj_uri.create_pj_request(psbt, pj_params).unwrap();
+        let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt, pj_uri)
+            .unwrap()
+            .build_with_additional_fee(
+                payjoin::bitcoin::Amount::from_sat(10000),
+                None,
+                bitcoin::FeeRate::ZERO,
+                false,
+            )
+            .unwrap();
         let headers = HeaderMock::from_vec(&req.body);
 
         // **********************

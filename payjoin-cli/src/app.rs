@@ -9,9 +9,9 @@ use bitcoincore_rpc::jsonrpc::serde_json;
 use bitcoincore_rpc::RpcApi;
 use clap::ArgMatches;
 use config::{Config, File, FileFormat};
+use payjoin::bitcoin;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::receive::{Error, ProvisionalProposal};
-use payjoin::{bitcoin, PjUriExt, UriExt};
 use rouille::{Request, Response};
 use serde::{Deserialize, Serialize};
 
@@ -42,21 +42,15 @@ impl App {
     }
 
     pub fn send_payjoin(&self, bip21: &str) -> Result<()> {
-        use payjoin::send::Configuration;
+        let uri = payjoin::Uri::try_from(bip21)
+            .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?
+            .assume_checked();
 
-        let link = payjoin::Uri::try_from(bip21)
-            .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
-
-        let link = link
-            .assume_checked()
-            .check_pj_supported()
-            .map_err(|e| anyhow!("The provided URI doesn't support payjoin (BIP78): {}", e))?;
-
-        let amount = link.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
+        let amount = uri.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
 
         // wallet_create_funded_psbt requires a HashMap<address: String, Amount>
         let mut outputs = HashMap::with_capacity(1);
-        outputs.insert(link.address.to_string(), amount);
+        outputs.insert(uri.address.to_string(), amount);
 
         // TODO: make payjoin-cli send feerate configurable
         // 2.1 sat/vB == 525 sat/kwu for testing purposes.
@@ -89,14 +83,11 @@ impl App {
         let psbt = Psbt::from_str(&psbt).with_context(|| "Failed to load PSBT from base64")?;
         log::debug!("Original psbt: {:#?}", psbt);
 
-        let payout_scripts = std::iter::once(link.address.script_pubkey());
-        // recommendation or bust for this simple reference implementation
-        let pj_params = Configuration::recommended(&psbt, payout_scripts, fee_rate)
-            .unwrap_or_else(|_| Configuration::non_incentivizing());
+        let (req, ctx) = payjoin::send::RequestBuilder::from_psbt_and_uri(psbt, uri)
+            .with_context(|| "Failed to build payjoin request")?
+            .build_recommended(fee_rate)
+            .with_context(|| "Failed to build payjoin request")?;
 
-        let (req, ctx) = link
-            .create_pj_request(psbt, pj_params)
-            .with_context(|| "Failed to create payjoin request")?;
         let client = reqwest::blocking::Client::builder()
             .danger_accept_invalid_certs(self.config.danger_accept_invalid_certs)
             .build()
@@ -141,12 +132,10 @@ impl App {
             amount.to_btc(),
             self.config.pj_endpoint
         );
-        let pj_uri = Uri::from_str(&pj_uri_string)
-            .map_err(|e| anyhow!("Constructed a bad URI string from args: {}", e))?;
-        let _pj_uri = pj_uri
-            .assume_checked()
-            .check_pj_supported()
-            .map_err(|e| anyhow!("Constructed URI does not support payjoin: {}", e))?;
+        // check that the URI is corrctly formatted
+        let _pj_uri = Uri::from_str(&pj_uri_string)
+            .map_err(|e| anyhow!("Constructed a bad URI string from args: {}", e))?
+            .assume_checked();
 
         println!(
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
@@ -231,10 +220,8 @@ impl App {
         };
         let uri = payjoin::Uri::try_from(uri_string.clone())
             .map_err(|_| Error::Server(anyhow!("Could not parse payjoin URI string.").into()))?;
-        let _ = uri
-            .assume_checked() // we just got it from bitcoind above
-            .check_pj_supported()
-            .map_err(|_| Error::Server(anyhow!("Created bip21 with invalid &pj=.").into()))?;
+        let _ = uri.assume_checked(); // we just got it from bitcoind above
+
         Ok(Response::text(uri_string))
     }
 

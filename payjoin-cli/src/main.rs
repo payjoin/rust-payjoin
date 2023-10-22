@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::{arg, Arg, ArgMatches, Command};
+use clap::{arg, value_parser, Arg, ArgMatches, Command};
 
 mod app;
 use app::{App, AppConfig};
@@ -14,7 +14,9 @@ fn main() -> Result<()> {
     match matches.subcommand() {
         Some(("send", sub_matches)) => {
             let bip21 = sub_matches.get_one::<String>("BIP21").context("Missing BIP21 argument")?;
-            app.send_payjoin(bip21)?;
+            let fee_rate_sat_per_vb =
+                sub_matches.get_one::<f32>("fee_rate").context("Missing fee_rate argument")?;
+            app.send_payjoin(bip21, fee_rate_sat_per_vb)?;
         }
         Some(("receive", sub_matches)) => {
             let amount =
@@ -49,6 +51,12 @@ fn cli() -> ArgMatches {
             Command::new("send")
                 .arg_required_else_help(true)
                 .arg(arg!(<BIP21> "The `bitcoin:...` payjoin uri to send to"))
+                .arg_required_else_help(true)
+                .arg(
+                    arg!(--fee_rate <VALUE>)
+                    .help("Fee rate in sat/vB")
+                    .value_parser(value_parser!(f32)),
+                )
                 .arg(Arg::new("DANGER_ACCEPT_INVALID_CERTS")
                     .hide(true)
                     .help("Wicked dangerous! Vulnerable to MITM attacks! Accept invalid certs for the payjoin endpoint"))

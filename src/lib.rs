@@ -10,8 +10,8 @@ mod uri;
 
 use crate::receive::{
 	CanBroadcast, Headers, IsOutputKnown, IsScriptOwned, MaybeInputsOwned, MaybeInputsSeen,
-	MaybeMixedInputScripts, OutputsUnknown, PayjoinProposal,
-	ProcessPartiallySignedTransactionInterface, ProvisionalProposal, UncheckedProposal,
+	MaybeMixedInputScripts, OutputsUnknown, PayjoinProposal, ProcessPartiallySignedTransaction,
+	ProvisionalProposal, UncheckedProposal,
 };
 use crate::send::{Configuration, Context, Request};
 

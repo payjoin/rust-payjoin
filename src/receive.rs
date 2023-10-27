@@ -1,3 +1,4 @@
+use payjoin::bitcoin::psbt::Psbt;
 use payjoin::receive::{
 	MaybeInputsOwned as PdkMaybeInputsOwned, MaybeInputsSeen as PdkMaybeInputsSeen,
 	MaybeMixedInputScripts as PdkMaybeMixedInputScripts, OutputsUnknown as PdkOutputsUnknown,
@@ -5,6 +6,7 @@ use payjoin::receive::{
 	UncheckedProposal as PdkUncheckedProposal,
 };
 use payjoin::Error as PdkError;
+use std::str::FromStr;
 use std::sync::{Mutex, MutexGuard};
 use std::{collections::HashMap, sync::Arc};
 
@@ -293,10 +295,8 @@ impl From<PdkProvisionalProposal> for ProvisionalProposal {
 	}
 }
 
-pub trait ProcessPartiallySignedTransactionInterface: Send + Sync {
-	fn process_psbt(
-		&self, psbt: Arc<PartiallySignedTransaction>,
-	) -> Result<Arc<PartiallySignedTransaction>, PayjoinError>;
+pub trait ProcessPartiallySignedTransaction: Send + Sync {
+	fn process_psbt(&self, psbt: Arc<PartiallySignedTransaction>) -> Result<String, PayjoinError>;
 }
 
 impl ProvisionalProposal {
@@ -345,16 +345,16 @@ impl ProvisionalProposal {
 	}
 
 	pub fn finalize_proposal(
-		&self, process_psbt: Box<dyn ProcessPartiallySignedTransactionInterface>,
+		&self, process_psbt: Box<dyn ProcessPartiallySignedTransaction>,
 		min_feerate_sat_per_vb: Option<Arc<FeeRate>>,
 	) -> Result<Arc<PayjoinProposal>, PayjoinError> {
 		let proposal = self.get_proposal();
 		if proposal.is_none() {
-			panic!("PayjoinProposal moved out of memory");
+			panic!("PayjoinProposal moved out of memory")
 		}
 		match proposal.unwrap().finalize_proposal(
 			|psbt| match process_psbt.process_psbt(Arc::new(psbt.clone().into())) {
-				Ok(e) => Ok((*e).clone().into()),
+				Ok(e) => Ok(Psbt::from_str(e.as_str()).expect("Invalid process_psbt ")),
 				Err(e) => Err(PdkError::Server(e.into())),
 			},
 			min_feerate_sat_per_vb.map(|x| (*x).into()),

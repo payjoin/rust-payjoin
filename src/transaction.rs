@@ -5,7 +5,7 @@ use payjoin::bitcoin::{
 	blockdata::transaction::Transaction as BitcoinTransaction, consensus::Decodable,
 };
 
-use crate::{error::PayjoinError, send::Context};
+use crate::error::PayjoinError;
 
 ///
 /// Partially signed transaction, commonly referred to as a PSBT.
@@ -25,23 +25,11 @@ impl From<PartiallySignedTransaction> for BitcoinPsbt {
 }
 
 impl PartiallySignedTransaction {
-	pub fn new(psbt_base64: String) -> Result<Self, PayjoinError> {
+	pub fn from_string(psbt_base64: String) -> Result<Self, PayjoinError> {
 		let psbt = BitcoinPsbt::from_str(&psbt_base64)?;
 		Ok(PartiallySignedTransaction(psbt))
 	}
-	///Decodes and validates the response.
 
-	///Call this method with response from receiver to continue BIP78 flow. If the response is valid you will get appropriate PSBT that you should sign and broadcast.
-	pub fn process_response(context: Arc<Context>, response: String) -> Result<Self, PayjoinError> {
-		let ctx: payjoin::send::Context = match Arc::try_unwrap(context) {
-			Ok(e) => e.into(),
-			Err(_) => panic!("Context pre-process failed"),
-		};
-		match ctx.process_response(&mut response.as_bytes()) {
-			Ok(e) => Ok(PartiallySignedTransaction(e)),
-			Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
-		}
-	}
 	pub fn serialize(&self) -> Vec<u8> {
 		self.0.serialize()
 	}

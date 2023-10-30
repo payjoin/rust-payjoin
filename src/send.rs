@@ -2,10 +2,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::error::PayjoinError;
 use crate::transaction::PartiallySignedTransaction;
+use crate::uri::Url;
 use crate::{FeeRate, ScriptBuf};
 pub use payjoin::send::Configuration as PdkConfiguration;
-
-use crate::uri::Url;
 
 ///Builder for sender-side payjoin parameters
 ///
@@ -92,18 +91,31 @@ impl Configuration {
 ///This type is used to process the response. It is returned from PjUriExt::create_pj_request() method and you only need to call .process_response() on it to continue BIP78 flow.
 
 pub struct Context {
-	internal: payjoin::send::Context,
+	internal: Mutex<Option<payjoin::send::Context>>,
 }
 
-impl From<Context> for payjoin::send::Context {
-	fn from(value: Context) -> Self {
-		value.internal
+impl Context {
+	fn get_context(&self) -> Option<payjoin::send::Context> {
+		let mut data_guard = self.internal.lock().unwrap();
+		Option::take(&mut *data_guard)
+	}
+	///Decodes and validates the response.
+
+	///Call this method with response from receiver to continue BIP78 flow. If the response is valid you will get appropriate PSBT that you should sign and broadcast.
+
+	pub fn process_response(
+		&self, response: String,
+	) -> Result<Arc<PartiallySignedTransaction>, PayjoinError> {
+		match self.get_context().unwrap().process_response(&mut response.as_bytes()) {
+			Ok(e) => Ok(Arc::new(PartiallySignedTransaction::from(e))),
+			Err(e) => Err(PayjoinError::ContextValidationError { message: e.to_string() }),
+		}
 	}
 }
 
 impl From<payjoin::send::Context> for Context {
 	fn from(value: payjoin::send::Context) -> Self {
-		Self { internal: value }
+		Self { internal: Mutex::new(Some(value)) }
 	}
 }
 
@@ -129,7 +141,7 @@ mod tests {
 	fn official_vectors() {
 		let original = "cHNidP8BAHECAAAAAVuDh6O7xLpvJm70AWI6N25VtXzMiknZxAwcPtGoB/VHAAAAAAD+////AuYPECQBAAAAFgAUHAMjFjcTerY7Cmi4se8VqWIW5HgA4fUFAAAAABYAFL6Az084ngrVLQfpl3hccYjeF+EQAAAAAAABAIQCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wNSAQH/////AgDyBSoBAAAAFgAUQ0p5pXSyKswNZuFoJjltIQhFnpkAAAAAAAAAACZqJKohqe3i9hw/cdHe/T+pmd+jaVN1XGkGiXmZYrSL69g2l06M+QAAAAABAR8A8gUqAQAAABYAFENKeaV0sirMDWbhaCY5bSEIRZ6ZAQhrAkcwRAIgFe1S3DHoDIPHogsTU/9UD7IqPbNXDYfyU2JZT9HKD7oCIAxU7sZzUcoGsmM3lDetos/3N5fM5oynmzuvsrFiILN5ASECfoMstJPrqnyhems+r158wTniKIBaPkkCinDC4VdvmsYAIgIDXVq5OYL7D4Ur28OTJ77j0lZrSPzO5XGmkL/KIF7wKmgQgTP32gAAAIABAACAAQAAgAAA";
 
-		let original_psbt = PartiallySignedTransaction::new(original.to_string()).unwrap();
+		let original_psbt = PartiallySignedTransaction::from_string(original.to_string()).unwrap();
 		eprintln!("original: {:#?}", original_psbt);
 
 		let pj_uri_string = "BITCOIN:BCRT1Q7WXQ0R2JHJKX8HQS3SHLKFAEAEF38C38SYKGZY?amount=1&pj=https://example.comOriginal".to_string();

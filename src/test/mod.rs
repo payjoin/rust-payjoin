@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use crate::error::PayjoinError;
 use crate::receive::{
-	Headers, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransactionInterface,
-	UncheckedProposal,
+	Headers, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction, UncheckedProposal,
 };
 use crate::send::{Configuration, Request};
 use crate::transaction::PartiallySignedTransaction;
@@ -67,7 +66,7 @@ fn integration_test() {
 		.expect("failed to create PSBT")
 		.psbt;
 	let psbt_base64 = sender.wallet_process_psbt(&psbt, None, None, None).unwrap().psbt;
-	let psbt = PartiallySignedTransaction::new(psbt_base64).expect("Invalid psbt_base64");
+	let psbt = PartiallySignedTransaction::from_string(psbt_base64).expect("Invalid psbt_base64");
 	eprintln!("Original psbt: {:#?}", psbt.as_string());
 	let pj_params = Configuration::with_fee_contribution(10000, None);
 	let prj_uri_req = pj_uri.create_pj_request(Arc::new(psbt), pj_params.into()).unwrap();
@@ -84,15 +83,14 @@ fn integration_test() {
 	// **********************
 	// Inside the Sender:
 	// Sender checks, signs, finalizes, extracts, and broadcasts
-	let checked_payjoin_proposal_psbt =
-		PartiallySignedTransaction::process_response(ctx, response).unwrap();
+	let checked_payjoin_proposal_psbt = (*ctx).process_response(response).unwrap();
 	let payjoin_psbt = sender
 		.wallet_process_psbt(&checked_payjoin_proposal_psbt.as_string(), None, None, None)
 		.unwrap()
 		.psbt;
 	let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false)).unwrap().psbt.unwrap();
 
-	let payjoin_psbt = PartiallySignedTransaction::new(payjoin_psbt).unwrap();
+	let payjoin_psbt = PartiallySignedTransaction::from_string(payjoin_psbt).unwrap();
 	eprintln!("Sender's Payjoin PSBT: {:#?}\n", payjoin_psbt.as_string());
 	let tx = payjoin_psbt.extract_tx();
 	let payjoin_tx: payjoin::bitcoin::Transaction =
@@ -189,16 +187,12 @@ struct MockOutputOwned {}
 
 struct MockProcessPartiallySignedTransactionInterface(Arc<bitcoincore_rpc::Client>);
 
-impl ProcessPartiallySignedTransactionInterface for MockProcessPartiallySignedTransactionInterface {
-	fn process_psbt(
-		&self, psbt: Arc<PartiallySignedTransaction>,
-	) -> Result<Arc<PartiallySignedTransaction>, PayjoinError> {
+impl ProcessPartiallySignedTransaction for MockProcessPartiallySignedTransactionInterface {
+	fn process_psbt(&self, psbt: Arc<PartiallySignedTransaction>) -> Result<String, PayjoinError> {
 		Ok(self
 			.0
 			.wallet_process_psbt(&psbt.as_string(), None, None, Some(false))
-			.map(|res: WalletProcessPsbtResult| {
-				PartiallySignedTransaction::new(res.psbt).map(|e| Arc::new(e)).unwrap()
-			})
+			.map(|res: WalletProcessPsbtResult| res.psbt)
 			.unwrap())
 	}
 }

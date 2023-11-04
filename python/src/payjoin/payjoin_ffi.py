@@ -554,6 +554,8 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_partiallysignedtransaction_as_string() != 32034:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_context_process_response() != 3341:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_amount_to_btc() != 39645:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_amount_to_sat() != 11749:
@@ -592,7 +594,7 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_try_preserving_privacy() != 18598:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_finalize_proposal() != 46915:
+    if lib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_finalize_proposal() != 56758:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_utxos_to_be_locked() != 55131:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -622,9 +624,7 @@ def uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_constructor_configuration_non_incentivizing() != 27440:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_constructor_partiallysignedtransaction_new() != 58526:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_constructor_partiallysignedtransaction_process_response() != 42239:
+    if lib.uniffi_payjoin_ffi_checksum_constructor_partiallysignedtransaction_from_string() != 53728:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_constructor_amount_from_sat() != 50973:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -807,17 +807,11 @@ _UniFFILib.uniffi_payjoin_ffi_fn_free_partiallysignedtransaction.argtypes = (
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_payjoin_ffi_fn_free_partiallysignedtransaction.restype = None
-_UniFFILib.uniffi_payjoin_ffi_fn_constructor_partiallysignedtransaction_new.argtypes = (
+_UniFFILib.uniffi_payjoin_ffi_fn_constructor_partiallysignedtransaction_from_string.argtypes = (
     RustBuffer,
     ctypes.POINTER(RustCallStatus),
 )
-_UniFFILib.uniffi_payjoin_ffi_fn_constructor_partiallysignedtransaction_new.restype = ctypes.c_void_p
-_UniFFILib.uniffi_payjoin_ffi_fn_constructor_partiallysignedtransaction_process_response.argtypes = (
-    ctypes.c_void_p,
-    RustBuffer,
-    ctypes.POINTER(RustCallStatus),
-)
-_UniFFILib.uniffi_payjoin_ffi_fn_constructor_partiallysignedtransaction_process_response.restype = ctypes.c_void_p
+_UniFFILib.uniffi_payjoin_ffi_fn_constructor_partiallysignedtransaction_from_string.restype = ctypes.c_void_p
 _UniFFILib.uniffi_payjoin_ffi_fn_method_partiallysignedtransaction_serialize.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
@@ -838,6 +832,12 @@ _UniFFILib.uniffi_payjoin_ffi_fn_free_context.argtypes = (
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_payjoin_ffi_fn_free_context.restype = None
+_UniFFILib.uniffi_payjoin_ffi_fn_method_context_process_response.argtypes = (
+    ctypes.c_void_p,
+    RustBuffer,
+    ctypes.POINTER(RustCallStatus),
+)
+_UniFFILib.uniffi_payjoin_ffi_fn_method_context_process_response.restype = ctypes.c_void_p
 _UniFFILib.uniffi_payjoin_ffi_fn_free_amount.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(RustCallStatus),
@@ -1094,11 +1094,11 @@ _UniFFILib.uniffi_payjoin_ffi_fn_init_callback_isoutputknown.argtypes = (
     ctypes.POINTER(RustCallStatus),
 )
 _UniFFILib.uniffi_payjoin_ffi_fn_init_callback_isoutputknown.restype = None
-_UniFFILib.uniffi_payjoin_ffi_fn_init_callback_processpartiallysignedtransactioninterface.argtypes = (
+_UniFFILib.uniffi_payjoin_ffi_fn_init_callback_processpartiallysignedtransaction.argtypes = (
     FOREIGN_CALLBACK_T,
     ctypes.POINTER(RustCallStatus),
 )
-_UniFFILib.uniffi_payjoin_ffi_fn_init_callback_processpartiallysignedtransactioninterface.restype = None
+_UniFFILib.uniffi_payjoin_ffi_fn_init_callback_processpartiallysignedtransaction.restype = None
 _UniFFILib.ffi_payjoin_ffi_rustbuffer_alloc.argtypes = (
     ctypes.c_int32,
     ctypes.POINTER(RustCallStatus),
@@ -1168,6 +1168,9 @@ _UniFFILib.uniffi_payjoin_ffi_checksum_method_partiallysignedtransaction_extract
 _UniFFILib.uniffi_payjoin_ffi_checksum_method_partiallysignedtransaction_as_string.argtypes = (
 )
 _UniFFILib.uniffi_payjoin_ffi_checksum_method_partiallysignedtransaction_as_string.restype = ctypes.c_uint16
+_UniFFILib.uniffi_payjoin_ffi_checksum_method_context_process_response.argtypes = (
+)
+_UniFFILib.uniffi_payjoin_ffi_checksum_method_context_process_response.restype = ctypes.c_uint16
 _UniFFILib.uniffi_payjoin_ffi_checksum_method_amount_to_btc.argtypes = (
 )
 _UniFFILib.uniffi_payjoin_ffi_checksum_method_amount_to_btc.restype = ctypes.c_uint16
@@ -1270,12 +1273,9 @@ _UniFFILib.uniffi_payjoin_ffi_checksum_constructor_configuration_recommended.res
 _UniFFILib.uniffi_payjoin_ffi_checksum_constructor_configuration_non_incentivizing.argtypes = (
 )
 _UniFFILib.uniffi_payjoin_ffi_checksum_constructor_configuration_non_incentivizing.restype = ctypes.c_uint16
-_UniFFILib.uniffi_payjoin_ffi_checksum_constructor_partiallysignedtransaction_new.argtypes = (
+_UniFFILib.uniffi_payjoin_ffi_checksum_constructor_partiallysignedtransaction_from_string.argtypes = (
 )
-_UniFFILib.uniffi_payjoin_ffi_checksum_constructor_partiallysignedtransaction_new.restype = ctypes.c_uint16
-_UniFFILib.uniffi_payjoin_ffi_checksum_constructor_partiallysignedtransaction_process_response.argtypes = (
-)
-_UniFFILib.uniffi_payjoin_ffi_checksum_constructor_partiallysignedtransaction_process_response.restype = ctypes.c_uint16
+_UniFFILib.uniffi_payjoin_ffi_checksum_constructor_partiallysignedtransaction_from_string.restype = ctypes.c_uint16
 _UniFFILib.uniffi_payjoin_ffi_checksum_constructor_amount_from_sat.argtypes = (
 )
 _UniFFILib.uniffi_payjoin_ffi_checksum_constructor_amount_from_sat.restype = ctypes.c_uint16
@@ -1691,6 +1691,19 @@ class Context:
         return inst
 
 
+    def process_response(self, response: "str") -> "PartiallySignedTransaction":
+        
+        return FfiConverterTypePartiallySignedTransaction.lift(
+            rust_call_with_error(
+    FfiConverterTypePayjoinError,_UniFFILib.uniffi_payjoin_ffi_fn_method_context_process_response,self._pointer,
+        FfiConverterString.lower(response))
+        )
+
+
+
+
+
+
 class FfiConverterTypeContext:
     @classmethod
     def read(cls, buf):
@@ -2088,10 +2101,6 @@ class FfiConverterTypeOutputsUnknown:
 
 class PartiallySignedTransaction:
     _pointer: ctypes.c_void_p
-    def __init__(self, psbt_base64: "str"):
-        
-        self._pointer = rust_call_with_error(FfiConverterTypePayjoinError,_UniFFILib.uniffi_payjoin_ffi_fn_constructor_partiallysignedtransaction_new,
-        FfiConverterString.lower(psbt_base64))
 
     def __del__(self):
         # In case of partial initialization of instances.
@@ -2109,13 +2118,11 @@ class PartiallySignedTransaction:
         return inst
 
     @classmethod
-    def process_response(cls, context: "Context",response: "str"):
-        
+    def from_string(cls, psbt_base64: "str"):
         
         # Call the (fallible) function before creating any half-baked object instances.
-        pointer = rust_call_with_error(FfiConverterTypePayjoinError,_UniFFILib.uniffi_payjoin_ffi_fn_constructor_partiallysignedtransaction_process_response,
-        FfiConverterTypeContext.lower(context),
-        FfiConverterString.lower(response))
+        pointer = rust_call_with_error(FfiConverterTypePayjoinError,_UniFFILib.uniffi_payjoin_ffi_fn_constructor_partiallysignedtransaction_from_string,
+        FfiConverterString.lower(psbt_base64))
         return cls._make_instance_(pointer)
 
 
@@ -2404,13 +2411,13 @@ class ProvisionalProposal:
 
 
 
-    def finalize_proposal(self, process_psbt: "ProcessPartiallySignedTransactionInterface",min_feerate_sat_per_vb: "typing.Optional[FeeRate]") -> "PayjoinProposal":
+    def finalize_proposal(self, process_psbt: "ProcessPartiallySignedTransaction",min_feerate_sat_per_vb: "typing.Optional[FeeRate]") -> "PayjoinProposal":
         
         
         return FfiConverterTypePayjoinProposal.lift(
             rust_call_with_error(
     FfiConverterTypePayjoinError,_UniFFILib.uniffi_payjoin_ffi_fn_method_provisionalproposal_finalize_proposal,self._pointer,
-        FfiConverterCallbackInterfaceProcessPartiallySignedTransactionInterface.lower(process_psbt),
+        FfiConverterCallbackInterfaceProcessPartiallySignedTransaction.lower(process_psbt),
         FfiConverterOptionalTypeFeeRate.lower(min_feerate_sat_per_vb))
         )
 
@@ -3593,15 +3600,15 @@ FfiConverterCallbackInterfaceIsScriptOwned = FfiConverterCallbackInterface(forei
 
 
 
-# Declaration and FfiConverters for ProcessPartiallySignedTransactionInterface Callback Interface
+# Declaration and FfiConverters for ProcessPartiallySignedTransaction Callback Interface
 
-class ProcessPartiallySignedTransactionInterface:
+class ProcessPartiallySignedTransaction:
     def process_psbt(self, psbt: "PartiallySignedTransaction"):
         raise NotImplementedError
 
     
 
-def py_foreignCallbackCallbackInterfaceProcessPartiallySignedTransactionInterface(handle, method, args_data, args_len, buf_ptr):
+def py_foreignCallbackCallbackInterfaceProcessPartiallySignedTransaction(handle, method, args_data, args_len, buf_ptr):
     
     def invoke_process_psbt(python_callback, args_stream, buf_ptr):
         def makeCall():return python_callback.process_psbt(
@@ -3611,7 +3618,7 @@ def py_foreignCallbackCallbackInterfaceProcessPartiallySignedTransactionInterfac
         def makeCallAndHandleReturn():
             rval = makeCall()
             with RustBuffer.allocWithBuilder() as builder:
-                FfiConverterTypePartiallySignedTransaction.write(rval, builder)
+                FfiConverterString.write(rval, builder)
                 buf_ptr[0] = builder.finalize()
             return UNIFFI_CALLBACK_SUCCESS
         try:
@@ -3625,12 +3632,12 @@ def py_foreignCallbackCallbackInterfaceProcessPartiallySignedTransactionInterfac
 
     
 
-    cb = FfiConverterCallbackInterfaceProcessPartiallySignedTransactionInterface.lift(handle)
+    cb = FfiConverterCallbackInterfaceProcessPartiallySignedTransaction.lift(handle)
     if not cb:
         raise InternalError("No callback in handlemap; this is a Uniffi bug")
 
     if method == IDX_CALLBACK_FREE:
-        FfiConverterCallbackInterfaceProcessPartiallySignedTransactionInterface.drop(handle)
+        FfiConverterCallbackInterfaceProcessPartiallySignedTransaction.drop(handle)
         # Successfull return
         # See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs`
         return UNIFFI_CALLBACK_SUCCESS
@@ -3663,11 +3670,11 @@ def py_foreignCallbackCallbackInterfaceProcessPartiallySignedTransactionInterfac
 # if they get GC'd while in use then UniFFI internals could attempt to call a function
 # that is in freed memory.
 # That would be...uh...bad. Yeah, that's the word. Bad.
-foreignCallbackCallbackInterfaceProcessPartiallySignedTransactionInterface = FOREIGN_CALLBACK_T(py_foreignCallbackCallbackInterfaceProcessPartiallySignedTransactionInterface)
-rust_call(lambda err: _UniFFILib.uniffi_payjoin_ffi_fn_init_callback_processpartiallysignedtransactioninterface(foreignCallbackCallbackInterfaceProcessPartiallySignedTransactionInterface, err))
+foreignCallbackCallbackInterfaceProcessPartiallySignedTransaction = FOREIGN_CALLBACK_T(py_foreignCallbackCallbackInterfaceProcessPartiallySignedTransaction)
+rust_call(lambda err: _UniFFILib.uniffi_payjoin_ffi_fn_init_callback_processpartiallysignedtransaction(foreignCallbackCallbackInterfaceProcessPartiallySignedTransaction, err))
 
 # The FfiConverter which transforms the Callbacks in to Handles to pass to Rust.
-FfiConverterCallbackInterfaceProcessPartiallySignedTransactionInterface = FfiConverterCallbackInterface(foreignCallbackCallbackInterfaceProcessPartiallySignedTransactionInterface)
+FfiConverterCallbackInterfaceProcessPartiallySignedTransaction = FfiConverterCallbackInterface(foreignCallbackCallbackInterfaceProcessPartiallySignedTransaction)
 
 
 
@@ -3922,6 +3929,6 @@ __all__ = [
     "CanBroadcast",
     "IsScriptOwned",
     "IsOutputKnown",
-    "ProcessPartiallySignedTransactionInterface",
+    "ProcessPartiallySignedTransaction",
 ]
 

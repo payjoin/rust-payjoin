@@ -97,16 +97,17 @@ dictionary PrjUriRequest{
 };
 
 interface PartiallySignedTransaction{
-      [Throws=PayjoinError]
+      [Name=from_string,Throws=PayjoinError]
       constructor(string psbt_base64);
-      [Name=process_response, Throws=PayjoinError]
-      constructor( Context context, string response);
       sequence<u8> serialize();
       Transaction extract_tx();
       string as_string();
 };
 
-interface Context{};
+interface Context{
+    [Throws=PayjoinError]
+	PartiallySignedTransaction process_response(  string response);
+};
 
 interface Amount{
       [Name=from_sat]
@@ -181,9 +182,9 @@ interface OutputsUnknown {
      ProvisionalProposal identify_receiver_outputs(IsScriptOwned is_receiver_output);
 };
 
-callback interface ProcessPartiallySignedTransactionInterface {
+callback interface ProcessPartiallySignedTransaction {
         [Throws=PayjoinError]
-        PartiallySignedTransaction process_psbt(PartiallySignedTransaction psbt);
+        string process_psbt(PartiallySignedTransaction psbt);
 };
 
 interface FeeRate{
@@ -208,7 +209,7 @@ interface ProvisionalProposal{
       [Throws=PayjoinError]
       OutPoint try_preserving_privacy(record<u64, OutPoint> candidate_inputs);
       [Throws=PayjoinError]
-      PayjoinProposal finalize_proposal(ProcessPartiallySignedTransactionInterface process_psbt, FeeRate? min_feerate_sat_per_vb);
+      PayjoinProposal finalize_proposal(ProcessPartiallySignedTransaction process_psbt, FeeRate? min_feerate_sat_per_vb);
 };
 
 interface PayjoinProposal{

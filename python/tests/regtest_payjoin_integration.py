@@ -55,7 +55,7 @@ class TestPayjoin(unittest.TestCase):
             {"lockUnspents": True, "feeRate": 0.000020},
         )["psbt"]
         processed_psbt = sender._call("walletprocesspsbt", pre_processed_psbt)["psbt"]
-        psbt = PartiallySignedTransaction(processed_psbt)
+        psbt = PartiallySignedTransaction.from_string(processed_psbt)
         pj_params = Configuration.with_fee_contribution(10000, None)
         prj_uri_req = prj_uri.create_pj_request(psbt, pj_params)
         req = prj_uri_req.request
@@ -74,9 +74,7 @@ class TestPayjoin(unittest.TestCase):
         # **********************
         # Inside the Sender:
         # Sender checks, signs, finalizes, extracts, and broadcasts
-        checked_payjoin_proposal_psbt = PartiallySignedTransaction.process_response(
-            ctx, response
-        )
+        checked_payjoin_proposal_psbt = ctx.process_response(response)
         payjoin_processed_psbt = sender._call(
             "walletprocesspsbt",
             checked_payjoin_proposal_psbt.as_string(),
@@ -161,7 +159,7 @@ class ProcessPartiallySignedTransactionCallBack:
             "walletprocesspsbt",
             psbt.as_string(),
         )["psbt"]
-        return PartiallySignedTransaction(_psbt)
+        return _psbt
 
 
 class BroadcastCallBack:

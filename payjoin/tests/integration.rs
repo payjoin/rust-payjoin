@@ -356,7 +356,7 @@ mod integration {
             // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             debug!("Original psbt: {:#?}", psbt);
-            let (send_req, _) = RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
+            let (send_req, send_ctx) = RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             log::info!("send fallback v1 to offline receiver fail");
@@ -377,7 +377,7 @@ mod integration {
 
             // **********************
             // Inside the Receiver:
-            let _receiver_loop = tokio::task::spawn(async move {
+            let receiver_loop = tokio::task::spawn(async move {
                 let (response, ctx) = loop {
                     let (req, ctx) = enrolled.extract_req().unwrap();
                     let response = spawn_blocking(move || {
@@ -428,18 +428,17 @@ mod integration {
                         .send_bytes(&body)
                         .expect("Failed to send request")
                 })
-                .await
+                .await?
             };
             log::info!("Response: {:#?}", &response);
-            assert!(response.is_err());
+            assert!(is_success(response.status()));
 
-            // TODO support v1 relay
-            // let checked_payjoin_proposal_psbt =
-            //     send_ctx.process_response(&mut response.into_reader())?;
-            // let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
-            // sender.send_raw_transaction(&payjoin_tx)?;
-            // log::info!("sent");
-            // assert!(receiver_loop.await.is_ok(), "The spawned task panicked or returned an error");
+            let checked_payjoin_proposal_psbt =
+                send_ctx.process_response(&mut response.into_reader())?;
+            let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
+            sender.send_raw_transaction(&payjoin_tx)?;
+            log::info!("sent");
+            assert!(receiver_loop.await.is_ok(), "The spawned task panicked or returned an error");
             relay.kill().await?;
             let output = &relay.wait_with_output().await?;
             log::info!("Status: {}", output.status);

@@ -65,6 +65,11 @@ pub(crate) enum InternalRequestError {
     /// Original PSBT input has been seen before. Only automatic receivers, aka "interactive" in the spec
     /// look out for these to prevent probing attacks.
     InputSeen(bitcoin::OutPoint),
+    /// Serde deserialization failed
+    #[cfg(feature = "v2")]
+    ParsePsbt(bitcoin::psbt::PsbtParseError),
+    #[cfg(feature = "v2")]
+    Utf8(std::string::FromUtf8Error),
 }
 
 impl From<InternalRequestError> for RequestError {
@@ -125,6 +130,10 @@ impl fmt::Display for RequestError {
                 write_error(f, "original-psbt-rejected", &format!("Input Type Error: {}.", e)),
             InternalRequestError::InputSeen(_) =>
                 write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
+            #[cfg(feature = "v2")]
+            InternalRequestError::ParsePsbt(e) => write_error(f, "Error parsing PSBT:", e),
+            #[cfg(feature = "v2")]
+            InternalRequestError::Utf8(e) => write_error(f, "Error parsing PSBT:", e),
         }
     }
 }

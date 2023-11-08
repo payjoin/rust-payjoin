@@ -303,23 +303,22 @@ pub struct UncheckedProposal {
 }
 
 impl UncheckedProposal {
+    #[cfg(feature = "v2")]
     pub fn from_relay_response(mut body: impl std::io::Read) -> Result<Self, RequestError> {
+        use std::str::FromStr;
+
         let mut buf = Vec::new();
         let _ = body.read_to_end(&mut buf);
-        let base64 = bitcoin::base64::decode(buf).map_err(InternalRequestError::Base64)?;
-        let unchecked_psbt = Psbt::deserialize(&base64).map_err(InternalRequestError::Psbt)?;
-
+        let buf_as_string = String::from_utf8(buf.to_vec()).map_err(InternalRequestError::Utf8)?;
+        log::debug!("{}", &buf_as_string);
+        let (query, base64) = buf_as_string.split_once('\n').unwrap_or_default();
+        let unchecked_psbt = Psbt::from_str(base64).map_err(InternalRequestError::ParsePsbt)?;
         let psbt = unchecked_psbt.validate().map_err(InternalRequestError::InconsistentPsbt)?;
         log::debug!("Received original psbt: {:?}", psbt);
-
-        // TODO accept parameters
-        // let pairs = url::form_urlencoded::parse(query.as_bytes());
-        // let params = Params::from_query_pairs(pairs).map_err(InternalRequestError::SenderParams)?;
-        // log::debug!("Received request with params: {:?}", params);
-
-        // TODO handle v1 and v2
-
-        Ok(UncheckedProposal { psbt, params: Params::default() })
+        let params = Params::from_query_pairs(url::form_urlencoded::parse(query.as_bytes()))
+            .map_err(InternalRequestError::SenderParams)?;
+        log::debug!("Received request with params: {:?}", params);
+        Ok(Self { psbt, params })
     }
 
     pub fn from_request(

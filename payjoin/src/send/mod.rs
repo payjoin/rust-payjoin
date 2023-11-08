@@ -326,16 +326,34 @@ impl<'a> RequestBuilder<'a> {
         let sequence = zeroth_input.txin.sequence;
         let txout = zeroth_input.previous_txout().expect("We already checked this above");
         let input_type = InputType::from_spent_input(txout, zeroth_input.psbtin).unwrap();
-        let url = serialize_url(
-            self.uri.extras._endpoint.into(),
-            disable_output_substitution,
-            fee_contribution,
-            self.min_fee_rate,
-        )
-        .map_err(InternalCreateRequestError::Url)?;
-        let body = serialize_psbt(&psbt);
+
+        #[cfg(not(feature = "v2"))]
+        let request = {
+            let url = serialize_url(
+                self.uri.extras._endpoint.into(),
+                disable_output_substitution,
+                fee_contribution,
+                self.min_fee_rate,
+            )
+            .map_err(InternalCreateRequestError::Url)?;
+            let body = psbt.to_string().as_bytes().to_vec();
+            Request { url, body }
+        };
+
+        #[cfg(feature = "v2")]
+        let request = {
+            let url = self.uri.extras._endpoint;
+            let body = serialize_v2_body(
+                &psbt,
+                disable_output_substitution,
+                fee_contribution,
+                self.min_fee_rate,
+            )?;
+            Request { url, body }
+        };
+
         Ok((
-            Request { url, body },
+            request,
             Context {
                 original_psbt: psbt,
                 disable_output_substitution,
@@ -372,6 +390,7 @@ pub struct Request {
 ///
 /// This type is used to process the response. Get it from [`RequestBuilder`](crate::send::RequestBuilder)'s build methods.
 /// Then you only need to call [`.process_response()`](crate::send::Context::process_response()) on it to continue BIP78 flow.
+#[derive(Debug)]
 pub struct Context {
     original_psbt: Psbt,
     disable_output_substitution: bool,
@@ -769,6 +788,26 @@ fn determine_fee_contribution(
     })
 }
 
+#[cfg(feature = "v2")]
+fn serialize_v2_body(
+    psbt: &Psbt,
+    disable_output_substitution: bool,
+    fee_contribution: Option<(bitcoin::Amount, usize)>,
+    min_feerate: FeeRate,
+) -> Result<Vec<u8>, CreateRequestError> {
+    // Grug say localhost base be discarded anyway. no big brain needed.
+    let placeholder_url = serialize_url(
+        "http:/localhost".to_string(),
+        disable_output_substitution,
+        fee_contribution,
+        min_feerate,
+    )
+    .map_err(InternalCreateRequestError::Url)?;
+    let query_params = placeholder_url.query().unwrap_or_default();
+    let body = psbt.to_string();
+    Ok(format!("{}\n{}", query_params, body).into_bytes())
+}
+
 fn serialize_url(
     endpoint: String,
     disable_output_substitution: bool,
@@ -791,11 +830,6 @@ fn serialize_url(
         url.query_pairs_mut().append_pair("minfeerate", &float_fee_rate.to_string());
     }
     Ok(url)
-}
-
-fn serialize_psbt(psbt: &Psbt) -> Vec<u8> {
-    let bytes = psbt.serialize();
-    bitcoin::base64::encode(bytes).into_bytes()
 }
 
 #[cfg(test)]

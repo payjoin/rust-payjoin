@@ -86,6 +86,12 @@ pub(crate) enum InternalRequestError {
     ParsePsbt(bitcoin::psbt::PsbtParseError),
     #[cfg(feature = "v2")]
     Utf8(std::string::FromUtf8Error),
+    /// Original PSBT fee rate is below minimum fee rate set by the receiver.
+    ///
+    /// First argument is the calculated fee rate of the original PSBT.
+    ///
+    /// Second argument is the minimum fee rate optionaly set by the receiver.
+    PsbtBelowFeeRate(bitcoin::FeeRate, bitcoin::FeeRate),
 }
 
 impl From<InternalRequestError> for RequestError {
@@ -150,6 +156,17 @@ impl fmt::Display for RequestError {
             InternalRequestError::ParsePsbt(e) => write_error(f, "Error parsing PSBT:", e),
             #[cfg(feature = "v2")]
             InternalRequestError::Utf8(e) => write_error(f, "Error parsing PSBT:", e),
+            InternalRequestError::PsbtBelowFeeRate(
+                original_psbt_fee_rate,
+                receiver_min_fee_rate,
+            ) => write_error(
+                f,
+                "original-psbt-rejected",
+                &format!(
+                    "Original PSBT fee rate too low: {} < {}.",
+                    original_psbt_fee_rate, receiver_min_fee_rate
+                ),
+            ),
         }
     }
 }

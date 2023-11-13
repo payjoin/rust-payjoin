@@ -1,6 +1,8 @@
-import base64
-from binascii import unhexlify
+import os
 import sys
+import time
+# This script is in the 'tests' directory and the 'payjoin' module is in the 'src' directory
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
 import hashlib
 import unittest
@@ -14,47 +16,83 @@ from bitcoin.core.script import (
     SignatureHash,
 )
 from bitcoin.wallet import *
-from bitcoin.rpc import Proxy, hexlify_str
+from bitcoin.rpc import Proxy, hexlify_str, JSONRPCError
 
+SelectParams("regtest")
+
+# Function to create and load a wallet if it doesn't already exist
+def create_and_load_wallet(rpc_connection, wallet_name):
+    try:
+        # Try to load the wallet using the _call method
+        rpc_connection._call('loadwallet', wallet_name)
+        print(f"Wallet '{wallet_name}' loaded successfully.")
+    except JSONRPCError as e:
+        # Check if the error code indicates the wallet does not exist
+        if e.error['code'] == -18:  # Wallet not found error code
+            # Create the wallet since it does not exist using the _call method
+            rpc_connection._call('createwallet', wallet_name)
+            print(f"Wallet '{wallet_name}' created and loaded successfully.")
+        else:
+            # If it's not a 'wallet not found' error, re-raise the exception
+            raise
+
+# Set up RPC connections
+rpc_user = "admin1"
+rpc_password = "123"
+rpc_host = "localhost"
+rpc_port = "18443"
 
 class TestPayjoin(unittest.TestCase):
-    def test_integration(self):
-        SelectParams("regtest")
-        receiver = Proxy(
-            service_url="http://bitcoin:bitcoin@127.0.0.1:18443/wallet/_legacy"
-        )
-        sender = Proxy(service_url="http://bitcoin:bitcoin@127.0.0.1:18443/wallet/")
+    @classmethod
+    def setUpClass(cls):
+        # Initialize wallets once before all tests
+        sender_wallet_name = "sender"
+        sender_rpc_url = f"http://{rpc_user}:{rpc_password}@{rpc_host}:{rpc_port}/wallet/{sender_wallet_name}"
+        cls.sender = Proxy(service_url=sender_rpc_url)
+        create_and_load_wallet(cls.sender, sender_wallet_name)
 
-        # Create an address from that private key.
-        sender_address = sender._call("getnewaddress", "sender_address", "bech32")
+        receiver_wallet_name = "receiver"
+        receiver_rpc_url = f"http://{rpc_user}:{rpc_password}@{rpc_host}:{rpc_port}/wallet/{receiver_wallet_name}"
+        cls.receiver = Proxy(service_url=receiver_rpc_url)
+        create_and_load_wallet(cls.receiver, receiver_wallet_name)
+    def test_integration(self):
+        # Generate a new address for the sender
+        sender_address = self.sender.getnewaddress()
         print(f"\nsender_address: {sender_address}")
 
-        receiver_address = sender._call("getnewaddress", "receiver_address", "bech32")
-        print(f"receiver_address: {receiver_address}")
+        # Generate a new address for the receiver
+        receiver_address = self.receiver.getnewaddress()
+        print(f"\nreceiver_address: {receiver_address}")
 
-        # receiver._call("importprivkey", str(receiver_address))
-        # sender._call("importprivkey", str(sender_address))
+        self.sender.generatetoaddress(10, str(sender_address))
+        self.receiver.generatetoaddress(10, str(receiver_address))
 
-        # Check if there's any funds available.
+        # Fetch and print the balance of the sender address
+        sender_balance = self.sender.getreceivedbyaddress(sender_address, 0)  # 0 confirmations for the balance including unconfirmed transactions
+        print(f"Sender address balance: {sender_balance}")
 
-        receiver.generatetoaddress(1, str(receiver_address))
-        sender.generatetoaddress(101, str(sender_address))
-        pj_uri_address = receiver.getnewaddress()
+        # Fetch and print the balance of the receiver address
+        receiver_balance = self.receiver.getreceivedbyaddress(receiver_address, 0)  # 0 confirmations for the balance including unconfirmed transactions
+        print(f"Receiver address balance: {receiver_balance}")
+    
+        pj_uri_address = self.receiver.getnewaddress()
         pj_uri_string = "{}?amount={}&pj=https://example.com".format(
             f"BITCOIN:{str(pj_uri_address).upper()}", 1
         )
+        print(f"\npj_uri_string: {pj_uri_string}")
         prj_uri = Uri(pj_uri_string).check_pj_supported()
+        print(f"\nprj_uri: {prj_uri}")
         outputs = {}
         outputs[prj_uri.address().as_string()] = prj_uri.amount().to_btc()
         pprint(outputs)
-        pre_processed_psbt = sender._call(
+        pre_processed_psbt = self.sender._call(
             "walletcreatefundedpsbt",
             [],
             outputs,
             0,
             {"lockUnspents": True, "feeRate": 0.000020},
         )["psbt"]
-        processed_psbt = sender._call("walletprocesspsbt", pre_processed_psbt)["psbt"]
+        processed_psbt = self.sender._call("walletprocesspsbt", pre_processed_psbt)["psbt"]
         psbt = PartiallySignedTransaction.from_string(processed_psbt)
         pj_params = Configuration.with_fee_contribution(10000, None)
         prj_uri_req = prj_uri.create_pj_request(psbt, pj_params)
@@ -67,7 +105,7 @@ class TestPayjoin(unittest.TestCase):
         response = self.handle_pj_request(
             req=req,
             headers=headers,
-            connection=receiver,
+            connection=self.receiver,
         )
         # this response would be returned as http response to the sender
 
@@ -75,12 +113,12 @@ class TestPayjoin(unittest.TestCase):
         # Inside the Sender:
         # Sender checks, signs, finalizes, extracts, and broadcasts
         checked_payjoin_proposal_psbt = ctx.process_response(response)
-        payjoin_processed_psbt = sender._call(
+        payjoin_processed_psbt = self.sender._call(
             "walletprocesspsbt",
             checked_payjoin_proposal_psbt.as_string(),
         )["psbt"]
 
-        payjoin_finalized_psbt = sender._call(
+        payjoin_finalized_psbt = self.sender._call(
             "finalizepsbt",
             payjoin_processed_psbt,
         )["psbt"]
@@ -94,7 +132,7 @@ class TestPayjoin(unittest.TestCase):
         print(
             f"Sender's Tx hex: {payjoin_tx_hex}\n",
         )
-        pprint(sender._call("sendrawtransaction", payjoin_tx_hex))
+        pprint(self.sender._call("sendrawtransaction", payjoin_tx_hex))
 
     def handle_pj_request(self, req: Request, headers: Headers, connection: Proxy):
         proposal = UncheckedProposal.from_request(req.body, req.url.query(), headers)
@@ -184,3 +222,6 @@ class OwnedScriptsCallBack:
     def is_owned(self, script: ScriptBuf):
         address = Address.from_script(script, network=Network.REGTEST)
         return self.connection._call("getaddressinfo", address.as_string())["ismine"]
+
+if __name__ == '__main__':
+    unittest.main()

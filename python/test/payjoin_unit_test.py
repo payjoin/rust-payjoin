@@ -1,19 +1,19 @@
 import unittest
-import payjoin as pdk
+import payjoin as payjoin
 
 
 class TestURIs(unittest.TestCase):
     def test_todo_url_encoded(self):
         uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao"
-        self.assertTrue(pdk.Uri(uri), "pj url should be url encoded")
+        self.assertTrue(payjoin.Uri(uri), "pj url should be url encoded")
 
     def test_valid_url(self):
         uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao"
-        self.assertTrue(pdk.Uri(uri), "pj is not a valid url")
+        self.assertTrue(payjoin.Uri(uri), "pj is not a valid url")
 
     def test_missing_amount(self):
         uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://testnet.demo.btcpayserver.org/BTC/pj"
-        self.assertTrue(pdk.Uri(uri), "missing amount should be ok")
+        self.assertTrue(payjoin.Uri(uri), "missing amount should be ok")
 
     def test_valid_uris(self):
         https = "https://example.com"
@@ -27,24 +27,30 @@ class TestURIs(unittest.TestCase):
             for pj in [https, onion]:
                 uri = f"{address}?amount=1&pj={pj}"
                 try:
-                    pdk.Uri(uri)
+                    payjoin.Uri(uri)
                 except Exception as e:
                     self.fail(f"Failed to create a valid Uri for {uri}. Error: {e}")
                     # recieve module
 
 
-class ScriptOwnershipChecker(pdk.IsScriptOwned):
-    def is_owned(self, script: pdk.ScriptBuf):
-        return True
+class ScriptOwnershipChecker(payjoin.IsScriptOwned):
+    def __init__(self, value):
+        self.value = value
+
+    def is_owned(self, script: payjoin.ScriptBuf):
+        return self.value
 
 
-class OutputAvailabilityChecker(pdk.IsOutputKnown):
-    def is_known(self, outpoint: pdk.OutPoint):
-        return True
+class OutputOwnershipChecker(payjoin.IsOutputKnown):
+    def __init__(self, value):
+        self.value = value
+
+    def is_known(self, outpoint: payjoin.OutPoint):
+        return self.value
 
 
-class TestReceiveMod(unittest.TestCase):
-    def get_proposal_from_test_vector(self) -> pdk.UncheckedProposal:
+class TestReceiveModule(unittest.TestCase):
+    def get_proposal_from_test_vector(self) -> payjoin.UncheckedProposal:
         try:
             # OriginalPSBT Test Vector from BIP
             original_psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA="
@@ -52,11 +58,11 @@ class TestReceiveMod(unittest.TestCase):
             body = bytes(original_psbt)
 
             # Mimicking the Headers::from_vec() from Rust, assuming it converts the byte array to some header-like object
-            headers = pdk.Headers.from_vec(body)
+            headers = payjoin.Headers.from_vec(body)
 
             # Call to UncheckedProposal::from_request() from Rust
             # In Python, you would replace this with the appropriate function call or object instantiation
-            unchecked_proposal = pdk.UncheckedProposal.from_request(
+            unchecked_proposal = payjoin.UncheckedProposal.from_request(
                 body,
                 "?maxadditionalfeecontribution=182?additionalfeeoutputindex=0",
                 headers,
@@ -78,21 +84,21 @@ class TestReceiveMod(unittest.TestCase):
             original_psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA="
             body = list(bytes(original_psbt, "utf-8"))
             # Mimicking the Headers::from_vec() from Rust, assuming it converts the byte array to some header-like object
-            headers = pdk.Headers.from_vec(body)
+            headers = payjoin.Headers.from_vec(body)
 
             # Call to UncheckedProposal::from_request() from Rust
             # In Python, you would replace this with the appropriate function call or object instantiation
-            unchecked_proposal = pdk.UncheckedProposal.from_request(
+            unchecked_proposal = payjoin.UncheckedProposal.from_request(
                 body,
                 "?maxadditionalfeecontribution=182?additionalfeeoutputindex=0",
                 headers,
             )
             proposal = (
                 unchecked_proposal.assume_interactive_receiver()
-                .check_inputs_not_owned(ScriptOwnershipChecker())
+                .check_inputs_not_owned(ScriptOwnershipChecker(False))
                 .check_no_mixed_input_scripts()
-                .check_no_inputs_seen_before(OutputAvailabilityChecker)
-                .identify_receiver_outputs(ScriptOwnershipChecker)
+                .check_no_inputs_seen_before(OutputOwnershipChecker(False))
+                .identify_receiver_outputs(ScriptOwnershipChecker(True))
             )
             # payjoin_proposal = proposal.apply_fee(1)
             # print(payjoin_proposal.serialize())

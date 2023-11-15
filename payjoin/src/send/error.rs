@@ -196,7 +196,7 @@ impl fmt::Display for CreateRequestError {
             AmbiguousChangeOutput => write!(f, "can not determine which output is change because there's more than two outputs"),
             ChangeIndexOutOfBounds => write!(f, "fee output index is points out of bounds"),
             ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
-            Url(e) => write!(f, "cannot parse endpoint url: {:#?}", e),
+            Url(e) => write!(f, "cannot parse url: {:#?}", e),
             UriDoesNotSupportPayjoin => write!(f, "the URI does not support payjoin"),
             PrevTxOut(e) => write!(f, "invalid previous transaction output: {}", e),
             InputType(e) => write!(f, "invalid input type: {}", e),

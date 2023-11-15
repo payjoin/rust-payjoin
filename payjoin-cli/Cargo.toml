@@ -20,6 +20,7 @@ path = "src/main.rs"
 [features]
 native-certs = ["ureq/native-certs"]
 danger-local-https = ["rcgen", "rustls/dangerous_configuration", "hyper-rustls"]
+v2 = ["payjoin/v2"]
 
 [dependencies]
 anyhow = "1.0.70"

@@ -1,7 +1,6 @@
 use std::{error, fmt};
 
 pub const MAX_BUFFER_SIZE: usize = 65536;
-pub const RECEIVE: &str = "receive";
 pub const PADDED_MESSAGE_BYTES: usize = 7168; // 7KB
 
 pub fn subdir(path: &str) -> String {
@@ -53,10 +52,7 @@ pub fn encrypt_message_a(
     Ok((message_a, e_sec))
 }
 
-pub fn decrypt_message_a(
-    message_a: &mut [u8],
-    s: SecretKey,
-) -> Result<(Vec<u8>, PublicKey), Error> {
+pub fn decrypt_message_a(message_a: &[u8], s: SecretKey) -> Result<(Vec<u8>, PublicKey), Error> {
     // let message a = [pubkey/AD][nonce][authentication tag][ciphertext]
     let e = PublicKey::from_slice(&message_a[..33])?;
     let nonce = Nonce::from_slice(&message_a[33..45]);
@@ -119,11 +115,21 @@ pub struct Error(InternalError);
 
 #[derive(Debug)]
 pub(crate) enum InternalError {
+    Ohttp(ohttp::Error),
+    Bhttp(bhttp::Error),
     ParseUrl(url::ParseError),
     Secp256k1(bitcoin::secp256k1::Error),
     ChaCha20Poly1305(chacha20poly1305::aead::Error),
     InvalidKeyLength,
     PayloadTooLarge,
+}
+
+impl From<ohttp::Error> for Error {
+    fn from(value: ohttp::Error) -> Self { Self(InternalError::Ohttp(value)) }
+}
+
+impl From<bhttp::Error> for Error {
+    fn from(value: bhttp::Error) -> Self { Self(InternalError::Bhttp(value)) }
 }
 
 impl From<url::ParseError> for Error {
@@ -145,6 +151,8 @@ impl fmt::Display for Error {
         use InternalError::*;
 
         match &self.0 {
+            Ohttp(e) => e.fmt(f),
+            Bhttp(e) => e.fmt(f),
             ParseUrl(e) => e.fmt(f),
             Secp256k1(e) => e.fmt(f),
             ChaCha20Poly1305(e) => e.fmt(f),
@@ -160,6 +168,8 @@ impl error::Error for Error {
         use InternalError::*;
 
         match &self.0 {
+            Ohttp(e) => Some(e),
+            Bhttp(e) => Some(e),
             ParseUrl(e) => Some(e),
             Secp256k1(e) => Some(e),
             ChaCha20Poly1305(_) | InvalidKeyLength | PayloadTooLarge => None,
@@ -169,4 +179,38 @@ impl error::Error for Error {
 
 impl From<InternalError> for Error {
     fn from(value: InternalError) -> Self { Self(value) }
+}
+
+pub fn ohttp_encapsulate(
+    ohttp_config: &[u8],
+    method: &str,
+    target_resource: &str,
+    body: Option<&[u8]>,
+) -> Result<(Vec<u8>, ohttp::ClientResponse), Error> {
+    let ctx = ohttp::ClientRequest::from_encoded_config(ohttp_config)?;
+    let url = url::Url::parse(target_resource)?;
+    let mut bhttp_message = bhttp::Message::request(
+        method.as_bytes().to_vec(),
+        url.scheme().as_bytes().to_vec(),
+        url.authority().as_bytes().to_vec(),
+        url.path().as_bytes().to_vec(),
+    );
+    if let Some(body) = body {
+        bhttp_message.write_content(body);
+    }
+    let mut bhttp_req = Vec::new();
+    let _ = bhttp_message.write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_req);
+    let encapsulated = ctx.encapsulate(&bhttp_req)?;
+    Ok(encapsulated)
+}
+
+/// decapsulate ohttp, bhttp response and return http response body and status code
+pub fn ohttp_decapsulate(
+    res_ctx: ohttp::ClientResponse,
+    ohttp_body: &[u8],
+) -> Result<Vec<u8>, Error> {
+    let bhttp_body = res_ctx.decapsulate(ohttp_body)?;
+    let mut r = std::io::Cursor::new(bhttp_body);
+    let response = bhttp::Message::read_bhttp(&mut r)?;
+    Ok(response.content().to_vec())
 }

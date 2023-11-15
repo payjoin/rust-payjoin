@@ -94,7 +94,9 @@ impl App {
         let (req, ctx) = payjoin::send::RequestBuilder::from_psbt_and_uri(psbt, uri)
             .with_context(|| "Failed to build payjoin request")?
             .build_recommended(fee_rate)
-            .with_context(|| "Failed to build payjoin request")?;
+            .with_context(|| "Failed to build payjoin request")?
+            .extract_v1()?;
+
         let http = http_agent()?;
         println!("Sending fallback request to {}", &req.url);
         let response = spawn_blocking(move || {

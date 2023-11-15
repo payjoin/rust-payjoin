@@ -13,7 +13,7 @@ pip install payjoin
 
 ## Usage 
 ```python
-import payjoin as pdk
+import payjoin as payjoin
 """
 
 setup(

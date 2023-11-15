@@ -4,7 +4,7 @@ set -euo pipefail
 python3 --version
 pip install --user -r requirements.txt
 
-echo "Generating pdk_ffi.py..."
+echo "Generating payjoin_ffi.py..."
 cd ../
 cargo run --bin uniffi-bindgen generate src/payjoin_ffi.udl --language python --out-dir python/src/payjoin/ --no-format
 

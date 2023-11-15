@@ -72,7 +72,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 
 ## Minimum Supported Rust Version (MSRV)
 
-The `payjoin` library should always compile with any combination of features on Rust **1.57.0**.
+The `payjoin` library should always compile with any combination of features on Rust **1.63.0**.
 
 To build and test with the MSRV you will need to pin the below dependency versions:
 
@@ -84,7 +84,10 @@ cargo update -p minreq --precise 2.8.0
 cargo update -p rustls --precise 0.20.8
 cargo update -p webpki --precise 0.22.2
 cargo update -p byteorder --precise 1.4.3
+cargo update -p regex --precise 1.9.6
 ```
+
+The `payjoin-cli` should compile with Rust **stable** MSRV
 
 ## License
 

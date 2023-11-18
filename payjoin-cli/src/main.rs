@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::{arg, value_parser, Arg, ArgMatches, Command};
+use clap::{value_parser, Arg, ArgMatches, Command};
 
 mod app;
 use app::{App, AppConfig};
@@ -13,14 +13,18 @@ fn main() -> Result<()> {
 
     match matches.subcommand() {
         Some(("send", sub_matches)) => {
-            let bip21 = sub_matches.get_one::<String>("BIP21").context("Missing BIP21 argument")?;
-            let fee_rate_sat_per_vb =
-                sub_matches.get_one::<f32>("fee_rate").context("Missing fee_rate argument")?;
+            let bip21 = sub_matches
+                .get_one::<String>("BIP21")
+                .context("Missing BIP21 argument")?;
+            let fee_rate_sat_per_vb = sub_matches
+                .get_one::<f32>("fee-rate")
+                .context("Missing fee_rate argument")?;
             app.send_payjoin(bip21, fee_rate_sat_per_vb)?;
         }
         Some(("receive", sub_matches)) => {
-            let amount =
-                sub_matches.get_one::<String>("AMOUNT").context("Missing AMOUNT argument")?;
+            let amount = sub_matches
+                .get_one::<String>("AMOUNT")
+                .context("Missing AMOUNT argument")?;
             app.receive_payjoin(amount)?;
         }
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
@@ -50,10 +54,13 @@ fn cli() -> ArgMatches {
         .subcommand(
             Command::new("send")
                 .arg_required_else_help(true)
-                .arg(arg!(<BIP21> "The `bitcoin:...` payjoin uri to send to"))
+                .arg(
+                    Arg::new("BIP21")
+                    .help("The `bitcoin:...` payjoin uri to send to"))
                 .arg_required_else_help(true)
                 .arg(
-                    arg!(--fee_rate <VALUE>)
+                    Arg::new("fee-rate")
+                    .long("fee-rate")
                     .help("Fee rate in sat/vB")
                     .value_parser(value_parser!(f32)),
                 )
@@ -64,7 +71,9 @@ fn cli() -> ArgMatches {
         .subcommand(
             Command::new("receive")
                 .arg_required_else_help(true)
-                .arg(arg!(<AMOUNT> "The amount to receive in satoshis"))
+                .arg(
+                    Arg::new("AMOUNT")
+                    .help("The ammount to receive in satoshis"))
                 .arg_required_else_help(true)
                 .arg(Arg::new("port")
                     .long("host-port")

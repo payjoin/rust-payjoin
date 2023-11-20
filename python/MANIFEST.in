@@ -1,1 +1,3 @@
 include ./src/payjoin/libpayjoin_ffi.dylib
+include ./src/payjoin/payjoin_ffi.dll
+include ./src/payjoin/libpayjoin_ffi.so

@@ -12,17 +12,18 @@ cargo run --bin uniffi-bindgen generate src/payjoin_ffi.udl --language python --
 
 echo "Generating native binaries..."
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
-cargo build --release --target aarch64-apple-darwin
+
+cargo build --profile release-smaller --target aarch64-apple-darwin
 echo "Done building aarch64-apple-darwin"
 
-cargo build --release --target x86_64-apple-darwin
+cargo build --profile release-smaller --target x86_64-apple-darwin
 echo "Done building x86_64-apple-darwin"
 
 echo "Building macos fat library"
 
 lipo -create -output python/src/payjoin/$LIBNAME \
-        target/aarch64-apple-darwin/release/$LIBNAME \
-        target/x86_64-apple-darwin/release/$LIBNAME
+        target/aarch64-apple-darwin/release-smaller/$LIBNAME \
+        target/x86_64-apple-darwin/release-smaller/$LIBNAME
 
 
 echo "All done!"

@@ -14,9 +14,9 @@ cargo run --bin uniffi-bindgen generate src/payjoin_ffi.udl --language python --
 
 echo "Generating native binaries..."
 rustup target add $WINDOWS_TARGET
-cargo build  --release --target $WINDOWS_TARGET
+cargo build --profile release-smaller --target $WINDOWS_TARGET
 
 echo "Copying windows payjoin_ffi.dll"
-cp target/$WINDOWS_TARGET/release/$LIBNAME python/src/payjoin/$LIBNAME
+cp target/$WINDOWS_TARGET/release-smaller/$LIBNAME python/src/payjoin/$LIBNAME
 
 echo "All done!"

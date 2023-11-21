@@ -2,7 +2,10 @@
 name = "payjoin-cli"
 version = "0.0.1"
 authors = ["Dan Gould <d@ngould.dev>", "Martin Habovstiak <martin.habovstiak@gmail.com>"]
-edition = "2018"
+repository = "https://github.com/payjoin/rust-payjoin"
+readme = "README.md"
+edition = "2021"
+resolver = "2"
 
 [[bin]]
 name = "payjoin"

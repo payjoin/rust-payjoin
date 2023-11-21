@@ -15,7 +15,7 @@ fn main() -> Result<()> {
         Some(("send", sub_matches)) => {
             let bip21 = sub_matches.get_one::<String>("BIP21").context("Missing BIP21 argument")?;
             let fee_rate_sat_per_vb =
-                sub_matches.get_one::<f32>("fee_rate").context("Missing fee_rate argument")?;
+                sub_matches.get_one::<f32>("fee_rate").context("Missing --fee-rate argument")?;
             app.send_payjoin(bip21, fee_rate_sat_per_vb)?;
         }
         Some(("receive", sub_matches)) => {
@@ -52,8 +52,9 @@ fn cli() -> ArgMatches {
                 .arg_required_else_help(true)
                 .arg(arg!(<BIP21> "The `bitcoin:...` payjoin uri to send to"))
                 .arg_required_else_help(true)
-                .arg(
-                    arg!(--fee_rate <VALUE>)
+                .arg(Arg::new("fee_rate")
+                    .long("fee-rate")
+                    .value_name("FEE_SAT_PER_VB")
                     .help("Fee rate in sat/vB")
                     .value_parser(value_parser!(f32)),
                 )

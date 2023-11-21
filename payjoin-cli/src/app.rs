@@ -81,22 +81,27 @@ impl App {
             .psbt;
         let psbt = Psbt::from_str(&psbt).with_context(|| "Failed to load PSBT from base64")?;
         log::debug!("Original psbt: {:#?}", psbt);
-
+        let fallback_tx = psbt.clone().extract_tx();
         let (req, ctx) = payjoin::send::RequestBuilder::from_psbt_and_uri(psbt, uri)
             .with_context(|| "Failed to build payjoin request")?
             .build_recommended(fee_rate)
             .with_context(|| "Failed to build payjoin request")?;
-
         let client = reqwest::blocking::Client::builder()
             .danger_accept_invalid_certs(self.config.danger_accept_invalid_certs)
             .build()
             .with_context(|| "Failed to build reqwest http client")?;
+        println!("Sending fallback request to {}", &req.url);
         let mut response = client
             .post(req.url)
             .body(req.body)
             .header("Content-Type", "text/plain")
             .send()
             .with_context(|| "HTTP request failed")?;
+        println!("Sent fallback transaction txid: {}", fallback_tx.txid());
+        println!(
+            "Sent fallback transaction hex: {:#}",
+            payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
+        );
         // TODO display well-known errors and log::debug the rest
         let psbt =
             ctx.process_response(&mut response).with_context(|| "Failed to process response")?;
@@ -116,7 +121,7 @@ impl App {
             .bitcoind
             .send_raw_transaction(&tx)
             .with_context(|| "Failed to send raw transaction")?;
-        log::info!("Transaction sent: {}", txid);
+        println!("Payjoin sent: {}", txid);
         Ok(())
     }
 
@@ -324,7 +329,10 @@ impl App {
         log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
 
         let payload = payjoin::base64::encode(&payjoin_proposal_psbt.serialize());
-        log::info!("successful response");
+        println!(
+            "Responded with Payjoin proposal {}",
+            payjoin_proposal_psbt.clone().extract_tx().txid()
+        );
         Ok(Response::text(payload))
     }
 

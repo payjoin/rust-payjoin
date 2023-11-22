@@ -28,9 +28,9 @@ the [mozilla/uniffi-rs] bindings generator for each supported target language.
 The below directories include instructions for using, building, and
 publishing the native language binding for [Payjoin Dev Kit] supported by this project.
 
-| Language | Platform              | Published Package | Building Documentation | API Docs |
-|----------|-----------------------|-------------------|------------------------|----------|
-| Python   | linux, macOS, Windows | payjoin           | [Readme payjoin]       |          |
+| Language | Platform              | Published Package | Building Documentation             | API Docs |
+| -------- | --------------------- | ----------------- | ---------------------------------- | -------- |
+| Python   | linux, macOS, Windows | payjoin           | [Readme payjoin](python/README.md) |          |
 
 ## Minimum Supported Rust Version (MSRV)
 
@@ -47,8 +47,6 @@ pip install payjoin
 ## 🚨 Warning 🚨
 
 The `main` branch of this repository is still under development and is incomplete.
-
-[Readme payjoin]: https://github.com/LtbLightning/payjoin-ffi/blob/start-python-uniffi/python/README.md
 
 [Payjoin Dev Kit]: https://payjoindevkit.org/
 

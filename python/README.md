@@ -71,7 +71,7 @@ python setup.py bdist_wheel --verbose
 # Force reinstall payjoin
 pip install ./dist/payjoin-<version>.whl --force-reinstall
 
-#Run unit tests
+#Run the integration test
 python -m unittest --verbose test/payjoin_integration_test.py
 ```
 

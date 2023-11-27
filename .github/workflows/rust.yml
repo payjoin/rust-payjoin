@@ -39,7 +39,7 @@ jobs:
       - name: test
         run: cargo test --verbose --all-features --lib
 
-  build-payjoin-cli:
+  test-payjoin-cli:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -58,7 +58,7 @@ jobs:
           override: true
       - name: build payjoin cli example
         run: |
-          cargo build
+          cargo test --verbose --features=local-https
 
   fmt:
     runs-on: ubuntu-latest

@@ -59,7 +59,9 @@ fn cli() -> ArgMatches {
                     .value_parser(value_parser!(f32)),
                 )
                 .arg(Arg::new("DANGER_ACCEPT_INVALID_CERTS")
+                    .long("danger-accept-invalid-certs")
                     .hide(true)
+                    .action(clap::ArgAction::SetTrue)
                     .help("Wicked dangerous! Vulnerable to MITM attacks! Accept invalid certs for the payjoin endpoint"))
         )
         .subcommand(

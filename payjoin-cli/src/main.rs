@@ -4,7 +4,8 @@ use clap::{arg, value_parser, Arg, ArgMatches, Command};
 mod app;
 use app::{App, AppConfig};
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     env_logger::init();
 
     let matches = cli();
@@ -16,12 +17,12 @@ fn main() -> Result<()> {
             let bip21 = sub_matches.get_one::<String>("BIP21").context("Missing BIP21 argument")?;
             let fee_rate_sat_per_vb =
                 sub_matches.get_one::<f32>("fee_rate").context("Missing --fee-rate argument")?;
-            app.send_payjoin(bip21, fee_rate_sat_per_vb)?;
+            app.send_payjoin(bip21, fee_rate_sat_per_vb).await?;
         }
         Some(("receive", sub_matches)) => {
             let amount =
                 sub_matches.get_one::<String>("AMOUNT").context("Missing AMOUNT argument")?;
-            app.receive_payjoin(amount)?;
+            app.receive_payjoin(amount).await?;
         }
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
@@ -80,8 +81,7 @@ fn cli() -> ArgMatches {
                 .arg(Arg::new("sub_only")
                     .long("sub-only")
                     .short('s')
-                    .num_args(0)
-                    .required(false)
+                    .action(clap::ArgAction::SetTrue)
                     .hide(true)
                     .help("Use payjoin like a payment code, no hot wallet required. Only substitute outputs. Don't contribute inputs."))
         )

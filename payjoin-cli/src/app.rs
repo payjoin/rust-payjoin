@@ -418,7 +418,7 @@ impl AppConfig {
             .set_default("pj_host", "0.0.0.0:3000")?
             .set_default("pj_endpoint", "https://localhost:3000")?
             .set_default("sub_only", false)?
-            .add_source(File::new("config.toml", FileFormat::Toml));
+            .add_source(File::new("config.toml", FileFormat::Toml).required(false));
 
         let builder = match matches.subcommand() {
             Some(("send", matches)) => builder.set_override_option(

@@ -299,6 +299,7 @@ pub trait Headers {
 /// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
 /// that the transaction can be broadcast with check_can_broadcast. Otherwise it is safe to
 /// call assume_interactive_receive to proceed with validation.
+#[derive(Debug, Clone)]
 pub struct UncheckedProposal {
     psbt: Psbt,
     params: Params,

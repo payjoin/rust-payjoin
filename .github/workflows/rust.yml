@@ -28,13 +28,6 @@ jobs:
         if: matrix.rust == '1.63.0'
         run: |
           cargo update
-          cargo update -p log --precise 0.4.18
-          cargo update -p tempfile --precise 3.6.0
-          cargo update -p flate2 --precise 1.0.26
-          cargo update -p minreq --precise 2.8.0
-          cargo update -p rustls --precise 0.20.8
-          cargo update -p webpki --precise 0.22.2
-          cargo update -p byteorder --precise 1.4.3
           cargo update -p regex --precise 1.9.6
       - name: test
         run: cargo test --verbose --all-features --lib
@@ -47,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust: [stable, nightly]
+        rust: [1.63.0, stable, nightly]
 
     steps:
       - uses: actions/checkout@v2
@@ -56,9 +49,15 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
           override: true
+      - name: Fixes for MSRV
+        if: matrix.rust == '1.63.0'
+        run: |
+          cargo update
+          cargo update -p regex --precise 1.9.6
+          cargo update -p time@0.3.30 --precise 0.3.20
       - name: build payjoin cli example
         run: |
-          cargo test --verbose --features=local-https
+          cargo test --verbose --features=danger-local-https
 
   fmt:
     runs-on: ubuntu-latest

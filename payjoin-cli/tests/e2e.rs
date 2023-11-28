@@ -1,4 +1,4 @@
-#[cfg(all(feature = "danger-local-https"))]
+#[cfg(feature = "danger-local-https")]
 mod e2e {
     use std::env;
     use std::process::Stdio;

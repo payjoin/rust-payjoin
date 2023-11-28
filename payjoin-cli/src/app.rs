@@ -16,6 +16,10 @@ use payjoin::bitcoin;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::receive::{Error, ProvisionalProposal};
 use serde::{Deserialize, Serialize};
+use tokio::task::spawn_blocking;
+
+#[cfg(feature = "danger-local-https")]
+const LOCAL_CERT_FILE: &str = "localhost.der";
 
 #[derive(Clone)]
 pub(crate) struct App {
@@ -91,27 +95,24 @@ impl App {
             .with_context(|| "Failed to build payjoin request")?
             .build_recommended(fee_rate)
             .with_context(|| "Failed to build payjoin request")?;
-        let client = reqwest::Client::builder()
-            .danger_accept_invalid_certs(self.config.danger_accept_invalid_certs)
-            .build()
-            .with_context(|| "Failed to build reqwest http client")?;
+        let http = http_agent()?;
         println!("Sending fallback request to {}", &req.url);
-        let response = client
-            .post(req.url)
-            .body(req.body)
-            .header("Content-Type", "text/plain")
-            .send()
-            .await
-            .with_context(|| "HTTP request failed")?;
+        let response = spawn_blocking(move || {
+            http.post(req.url.as_str())
+                .set("Content-Type", "text/plain")
+                .send_bytes(&req.body)
+                .with_context(|| "HTTP request failed")
+        })
+        .await??;
         println!("Sent fallback transaction txid: {}", fallback_tx.txid());
         println!(
             "Sent fallback transaction hex: {:#}",
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
         );
-        let mut response = std::io::Cursor::new(response.text().await?);
         // TODO display well-known errors and log::debug the rest
-        let psbt =
-            ctx.process_response(&mut response).with_context(|| "Failed to process response")?;
+        let psbt = ctx
+            .process_response(&mut response.into_reader())
+            .with_context(|| "Failed to process response")?;
         log::debug!("Proposed psbt: {:#?}", psbt);
         let psbt = self
             .bitcoind()?
@@ -154,12 +155,19 @@ impl App {
         );
         println!("{}", pj_uri_string);
 
-        #[cfg(feature = "local-https")]
+        #[cfg(feature = "danger-local-https")]
         let server = {
+            use std::io::Write;
+
             use hyper::server::conn::AddrIncoming;
             use rustls::{Certificate, PrivateKey};
 
             let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
+            let cert_der = cert.serialize_der()?;
+            let mut local_cert_path = std::env::temp_dir();
+            local_cert_path.push(LOCAL_CERT_FILE);
+            let mut file = std::fs::File::create(local_cert_path)?;
+            file.write_all(&cert_der)?;
             let key = PrivateKey(cert.serialize_private_key_der());
             let certs = vec![Certificate(cert.serialize_der()?)];
             let incoming = AddrIncoming::bind(&bind_addr.into())?;
@@ -171,7 +179,7 @@ impl App {
             Server::builder(acceptor)
         };
 
-        #[cfg(not(feature = "local-https"))]
+        #[cfg(not(feature = "danger-local-https"))]
         let server = Server::bind(&bind_addr);
 
         let make_svc = make_service_fn(|_| {
@@ -399,9 +407,6 @@ pub(crate) struct AppConfig {
     pub bitcoind_rpcuser: String,
     pub bitcoind_rpcpass: String,
 
-    // send-only
-    pub danger_accept_invalid_certs: bool,
-
     // receive-only
     pub pj_host: String,
     pub pj_endpoint: String,
@@ -432,17 +437,13 @@ impl AppConfig {
                 matches.get_one::<String>("rpcpass").map(|s| s.as_str()),
             )?
             // Subcommand defaults without which file serialization fails.
-            .set_default("danger_accept_invalid_certs", false)?
             .set_default("pj_host", "0.0.0.0:3000")?
             .set_default("pj_endpoint", "https://localhost:3000")?
             .set_default("sub_only", false)?
             .add_source(File::new("config.toml", FileFormat::Toml).required(false));
 
         let builder = match matches.subcommand() {
-            Some(("send", matches)) => builder.set_override_option(
-                "danger_accept_invalid_certs",
-                matches.get_one::<bool>("DANGER_ACCEPT_INVALID_CERTS").copied(),
-            )?,
+            Some(("send", _)) => builder,
             Some(("receive", matches)) => builder
                 .set_override_option(
                     "pj_host",
@@ -500,3 +501,25 @@ impl payjoin::receive::Headers for Headers<'_> {
 }
 
 fn serialize_psbt(psbt: &Psbt) -> String { payjoin::base64::encode(&psbt.serialize()) }
+
+#[cfg(feature = "danger-local-https")]
+fn http_agent() -> Result<ureq::Agent> {
+    use rustls::client::ClientConfig;
+    use rustls::{Certificate, RootCertStore};
+    use ureq::AgentBuilder;
+
+    let mut local_cert_path = std::env::temp_dir();
+    local_cert_path.push(LOCAL_CERT_FILE);
+    let cert_der = std::fs::read(local_cert_path)?;
+    let mut root_cert_store = RootCertStore::empty();
+    root_cert_store.add(&Certificate(cert_der))?;
+    let client_config = ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(root_cert_store)
+        .with_no_client_auth();
+
+    Ok(AgentBuilder::new().tls_config(Arc::new(client_config)).build())
+}
+
+#[cfg(not(feature = "danger-local-https"))]
+fn http_agent() -> Result<ureq::Agent> { Ok(ureq::Agent::new()) }

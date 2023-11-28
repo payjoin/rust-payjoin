@@ -1,4 +1,4 @@
-#[cfg(all(feature = "local-https"))]
+#[cfg(all(feature = "danger-local-https"))]
 mod e2e {
     use std::env;
     use std::process::Stdio;
@@ -98,7 +98,6 @@ mod e2e {
             .arg(&bip21)
             .arg("--fee-rate")
             .arg("1")
-            .arg("--danger-accept-invalid-certs")
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()

@@ -1,4 +1,4 @@
-#[cfg(all(feature = "local-https"))]
+#[cfg(feature = "danger-local-https")]
 mod e2e {
     use std::env;
     use std::process::Stdio;
@@ -50,7 +50,7 @@ mod e2e {
         let pj_host = find_free_port();
         let pj_endpoint = format!("https://localhost:{}", pj_host);
 
-        let payjoin_cli = "target/debug/payjoin-cli";
+        let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
 
         let mut cli_receiver = Command::new(payjoin_cli)
             .arg("--rpchost")
@@ -98,7 +98,6 @@ mod e2e {
             .arg(&bip21)
             .arg("--fee-rate")
             .arg("1")
-            .arg("--danger-accept-invalid-certs")
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()

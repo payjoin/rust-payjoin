@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -9,39 +10,47 @@ use bitcoincore_rpc::jsonrpc::serde_json;
 use bitcoincore_rpc::RpcApi;
 use clap::ArgMatches;
 use config::{Config, File, FileFormat};
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use payjoin::bitcoin;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::receive::{Error, ProvisionalProposal};
-use rouille::{Request, Response};
 use serde::{Deserialize, Serialize};
+use tokio::task::spawn_blocking;
 
+#[cfg(feature = "danger-local-https")]
+const LOCAL_CERT_FILE: &str = "localhost.der";
+
+#[derive(Clone)]
 pub(crate) struct App {
     config: AppConfig,
-    bitcoind: bitcoincore_rpc::Client,
     seen_inputs: Arc<Mutex<SeenInputs>>,
 }
 
 impl App {
     pub fn new(config: AppConfig) -> Result<Self> {
-        let bitcoind = match &config.bitcoind_cookie {
+        let seen_inputs = Arc::new(Mutex::new(SeenInputs::new()?));
+        Ok(Self { config, seen_inputs })
+    }
+
+    pub fn bitcoind(&self) -> Result<bitcoincore_rpc::Client> {
+        match &self.config.bitcoind_cookie {
             Some(cookie) => bitcoincore_rpc::Client::new(
-                &config.bitcoind_rpchost,
+                &self.config.bitcoind_rpchost,
                 bitcoincore_rpc::Auth::CookieFile(cookie.into()),
             ),
             None => bitcoincore_rpc::Client::new(
-                &config.bitcoind_rpchost,
+                &self.config.bitcoind_rpchost,
                 bitcoincore_rpc::Auth::UserPass(
-                    config.bitcoind_rpcuser.clone(),
-                    config.bitcoind_rpcpass.clone(),
+                    self.config.bitcoind_rpcuser.clone(),
+                    self.config.bitcoind_rpcpass.clone(),
                 ),
             ),
         }
-        .context("Failed to connect to bitcoind")?;
-        let seen_inputs = Arc::new(Mutex::new(SeenInputs::new()?));
-        Ok(Self { config, bitcoind, seen_inputs })
+        .with_context(|| "Failed to connect to bitcoind")
     }
 
-    pub fn send_payjoin(&self, bip21: &str, fee_rate: &f32) -> Result<()> {
+    pub async fn send_payjoin(&self, bip21: &str, fee_rate: &f32) -> Result<()> {
         let uri = payjoin::Uri::try_from(bip21)
             .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?
             .assume_checked();
@@ -64,7 +73,7 @@ impl App {
             ..Default::default()
         };
         let psbt = self
-            .bitcoind
+            .bitcoind()?
             .wallet_create_funded_psbt(
                 &[], // inputs
                 &outputs,
@@ -75,7 +84,7 @@ impl App {
             .context("Failed to create PSBT")?
             .psbt;
         let psbt = self
-            .bitcoind
+            .bitcoind()?
             .wallet_process_psbt(&psbt, None, None, None)
             .with_context(|| "Failed to process PSBT")?
             .psbt;
@@ -86,49 +95,48 @@ impl App {
             .with_context(|| "Failed to build payjoin request")?
             .build_recommended(fee_rate)
             .with_context(|| "Failed to build payjoin request")?;
-        let client = reqwest::blocking::Client::builder()
-            .danger_accept_invalid_certs(self.config.danger_accept_invalid_certs)
-            .build()
-            .with_context(|| "Failed to build reqwest http client")?;
+        let http = http_agent()?;
         println!("Sending fallback request to {}", &req.url);
-        let mut response = client
-            .post(req.url)
-            .body(req.body)
-            .header("Content-Type", "text/plain")
-            .send()
-            .with_context(|| "HTTP request failed")?;
+        let response = spawn_blocking(move || {
+            http.post(req.url.as_str())
+                .set("Content-Type", "text/plain")
+                .send_bytes(&req.body)
+                .with_context(|| "HTTP request failed")
+        })
+        .await??;
         println!("Sent fallback transaction txid: {}", fallback_tx.txid());
         println!(
             "Sent fallback transaction hex: {:#}",
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
         );
         // TODO display well-known errors and log::debug the rest
-        let psbt =
-            ctx.process_response(&mut response).with_context(|| "Failed to process response")?;
+        let psbt = ctx
+            .process_response(&mut response.into_reader())
+            .with_context(|| "Failed to process response")?;
         log::debug!("Proposed psbt: {:#?}", psbt);
         let psbt = self
-            .bitcoind
+            .bitcoind()?
             .wallet_process_psbt(&serialize_psbt(&psbt), None, None, None)
             .with_context(|| "Failed to process PSBT")?
             .psbt;
         let tx = self
-            .bitcoind
+            .bitcoind()?
             .finalize_psbt(&psbt, Some(true))
             .with_context(|| "Failed to finalize PSBT")?
             .hex
             .ok_or_else(|| anyhow!("Incomplete PSBT"))?;
         let txid = self
-            .bitcoind
+            .bitcoind()?
             .send_raw_transaction(&tx)
             .with_context(|| "Failed to send raw transaction")?;
         println!("Payjoin sent: {}", txid);
         Ok(())
     }
 
-    pub fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
+    pub async fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
         use payjoin::Uri;
 
-        let pj_receiver_address = self.bitcoind.get_new_address(None, None)?.assume_checked();
+        let pj_receiver_address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
         let amount = Amount::from_sat(amount_arg.parse()?);
         let pj_uri_string = format!(
             "{}?amount={}&pj={}",
@@ -140,75 +148,98 @@ impl App {
         let _pj_uri = Uri::from_str(&pj_uri_string)
             .map_err(|e| anyhow!("Constructed a bad URI string from args: {}", e))?
             .assume_checked();
-
+        let bind_addr: SocketAddr = self.config.pj_host.parse()?;
         println!(
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
             self.config.pj_host
         );
         println!("{}", pj_uri_string);
 
-        #[cfg(feature = "local-https")]
+        #[cfg(feature = "danger-local-https")]
         let server = {
-            let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
-            let cert_ser = cert.serialize_pem()?;
-            let skey_ser = cert.serialize_private_key_pem().into_bytes();
-            rouille::Server::new_ssl(
-                self.config.pj_host.clone(),
-                move |req| self.handle_web_request(req),
-                cert_ser.into_bytes(),
-                skey_ser,
-            )
-            .map_err(|e| anyhow!("Failed to create HTTPS server: {}", e))?
+            use std::io::Write;
+
+            use hyper::server::conn::AddrIncoming;
+            use rustls::{Certificate, PrivateKey};
+
+            let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
+            let cert_der = cert.serialize_der()?;
+            let mut local_cert_path = std::env::temp_dir();
+            local_cert_path.push(LOCAL_CERT_FILE);
+            let mut file = std::fs::File::create(local_cert_path)?;
+            file.write_all(&cert_der)?;
+            let key = PrivateKey(cert.serialize_private_key_der());
+            let certs = vec![Certificate(cert.serialize_der()?)];
+            let incoming = AddrIncoming::bind(&bind_addr.into())?;
+            let acceptor = hyper_rustls::TlsAcceptor::builder()
+                .with_single_cert(certs, key)
+                .map_err(|e| anyhow::anyhow!("TLS error: {}", e))?
+                .with_all_versions_alpn()
+                .with_incoming(incoming);
+            Server::builder(acceptor)
         };
 
-        #[cfg(not(feature = "local-https"))]
-        let server = {
-            rouille::Server::new(self.config.pj_host.clone(), move |req| {
-                self.handle_web_request(req)
-            })
-            .map_err(|e| anyhow!("Failed to create HTTP server: {}", e))?
-        };
+        #[cfg(not(feature = "danger-local-https"))]
+        let server = Server::bind(&bind_addr);
 
-        server.run();
+        let make_svc = make_service_fn(|_| {
+            let app = self.clone();
+            async move {
+                let handler = move |req| app.clone().handle_web_request(req);
+                Ok::<_, hyper::Error>(service_fn(handler))
+            }
+        });
+        server.serve(make_svc).await?;
         Ok(())
     }
 
-    fn handle_web_request(&self, req: &Request) -> Response {
+    async fn handle_web_request(self, req: Request<Body>) -> Result<Response<Body>> {
         log::debug!("Received request: {:?}", req);
-        match (req.method(), req.url().as_ref()) {
-            ("GET", "/bip21") => {
-                log::debug!("{:?}, {:?}", req.method(), req.raw_query_string());
-                let amount = req.get_param("amount").map(|amt| {
+        let mut response = match (req.method(), req.uri().path()) {
+            (&Method::GET, "/bip21") => {
+                let query_string = req.uri().query().unwrap_or("");
+                log::debug!("{:?}, {:?}", req.method(), query_string);
+                let query_params: HashMap<_, _> =
+                    url::form_urlencoded::parse(query_string.as_bytes()).into_owned().collect();
+                let amount = query_params.get("amount").map(|amt| {
                     Amount::from_btc(amt.parse().expect("Failed to parse amount")).unwrap()
                 });
                 self.handle_get_bip21(amount)
                     .map_err(|e| {
                         log::error!("Error handling request: {}", e);
-                        Response::text(e.to_string()).with_status_code(500)
+                        Response::builder().status(500).body(Body::from(e.to_string())).unwrap()
                     })
                     .unwrap_or_else(|err_resp| err_resp)
             }
-            ("POST", _) => self
+            (&Method::POST, _) => self
                 .handle_payjoin_post(req)
+                .await
                 .map_err(|e| match e {
                     Error::BadRequest(e) => {
                         log::error!("Error handling request: {}", e);
-                        Response::text(e.to_string()).with_status_code(400)
+                        Response::builder().status(400).body(Body::from(e.to_string())).unwrap()
                     }
                     e => {
                         log::error!("Error handling request: {}", e);
-                        Response::text(e.to_string()).with_status_code(500)
+                        Response::builder().status(500).body(Body::from(e.to_string())).unwrap()
                     }
                 })
                 .unwrap_or_else(|err_resp| err_resp),
-            _ => Response::empty_404(),
-        }
-        .with_additional_header("Access-Control-Allow-Origin", "*")
+            _ => Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from("Not found"))
+                .unwrap(),
+        };
+        response
+            .headers_mut()
+            .insert("Access-Control-Allow-Origin", hyper::header::HeaderValue::from_static("*"));
+        Ok(response)
     }
 
-    fn handle_get_bip21(&self, amount: Option<Amount>) -> Result<Response, Error> {
+    fn handle_get_bip21(&self, amount: Option<Amount>) -> Result<Response<Body>, Error> {
         let address = self
-            .bitcoind
+            .bitcoind()
+            .map_err(|e| Error::Server(e.into()))?
             .get_new_address(None, None)
             .map_err(|e| Error::Server(e.into()))?
             .assume_checked();
@@ -226,36 +257,35 @@ impl App {
             .map_err(|_| Error::Server(anyhow!("Could not parse payjoin URI string.").into()))?;
         let _ = uri.assume_checked(); // we just got it from bitcoind above
 
-        Ok(Response::text(uri_string))
+        Ok(Response::new(Body::from(uri_string)))
     }
 
-    fn handle_payjoin_post(&self, req: &Request) -> Result<Response, Error> {
-        let headers = Headers(req.headers());
-        let proposal = payjoin::receive::UncheckedProposal::from_request(
-            req.data().context("Failed to read request body").map_err(|e| {
-                log::warn!("Failed to read request body: {}", e);
-                Error::Server(e.into())
-            })?,
-            req.raw_query_string(),
-            headers,
-        )?;
+    async fn handle_payjoin_post(&self, req: Request<Body>) -> Result<Response<Body>, Error> {
+        let (parts, body) = req.into_parts();
+        let headers = Headers(&parts.headers);
+        let query_string = parts.uri.query().unwrap_or("");
+        let body = std::io::Cursor::new(
+            hyper::body::to_bytes(body).await.map_err(|e| Error::Server(e.into()))?.to_vec(),
+        );
+        let proposal =
+            payjoin::receive::UncheckedProposal::from_request(body, query_string, headers)?;
+
+        let bitcoind = self.bitcoind().map_err(|e| Error::Server(e.into()))?;
 
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // The network is used for checks later
         let network =
-            self.bitcoind.get_blockchain_info().map_err(|e| Error::Server(e.into())).and_then(
+            bitcoind.get_blockchain_info().map_err(|e| Error::Server(e.into())).and_then(
                 |info| bitcoin::Network::from_str(&info.chain).map_err(|e| Error::Server(e.into())),
             )?;
 
         // Receive Check 1: Can Broadcast
         let proposal = proposal.check_can_broadcast(|tx| {
             let raw_tx = bitcoin::consensus::encode::serialize_hex(&tx);
-            let mempool_results = self
-                .bitcoind
-                .test_mempool_accept(&[raw_tx])
-                .map_err(|e| Error::Server(e.into()))?;
+            let mempool_results =
+                bitcoind.test_mempool_accept(&[raw_tx]).map_err(|e| Error::Server(e.into()))?;
             match mempool_results.first() {
                 Some(result) => Ok(result.allowed),
                 None => Err(Error::Server(
@@ -268,7 +298,7 @@ impl App {
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal.check_inputs_not_owned(|input| {
             if let Ok(address) = bitcoin::Address::from_script(input, network) {
-                self.bitcoind
+                bitcoind
                     .get_address_info(&address)
                     .map(|info| info.is_mine.unwrap_or(false))
                     .map_err(|e| Error::Server(e.into()))
@@ -289,7 +319,7 @@ impl App {
 
         let mut provisional_payjoin = payjoin.identify_receiver_outputs(|output_script| {
             if let Ok(address) = bitcoin::Address::from_script(output_script, network) {
-                self.bitcoind
+                bitcoind
                     .get_address_info(&address)
                     .map(|info| info.is_mine.unwrap_or(false))
                     .map_err(|e| Error::Server(e.into()))
@@ -300,12 +330,11 @@ impl App {
 
         if !self.config.sub_only {
             // Select receiver payjoin inputs.
-            _ = try_contributing_inputs(&mut provisional_payjoin, &self.bitcoind)
+            _ = try_contributing_inputs(&mut provisional_payjoin, &bitcoind)
                 .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
         }
 
-        let receiver_substitute_address = self
-            .bitcoind
+        let receiver_substitute_address = bitcoind
             .get_new_address(None, None)
             .map_err(|e| Error::Server(e.into()))?
             .assume_checked();
@@ -313,7 +342,7 @@ impl App {
 
         let payjoi_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &Psbt| {
-                self.bitcoind
+                bitcoind
                     .wallet_process_psbt(
                         &payjoin::base64::encode(psbt.serialize()),
                         None,
@@ -328,12 +357,9 @@ impl App {
         let payjoin_proposal_psbt = payjoi_proposal.psbt();
         log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
 
-        let payload = payjoin::base64::encode(&payjoin_proposal_psbt.serialize());
-        println!(
-            "Responded with Payjoin proposal {}",
-            payjoin_proposal_psbt.clone().extract_tx().txid()
-        );
-        Ok(Response::text(payload))
+        let payload = payjoin::base64::encode(payjoin_proposal_psbt.serialize());
+        log::info!("successful response");
+        Ok(Response::new(Body::from(payload)))
     }
 
     fn insert_input_seen_before(&self, input: bitcoin::OutPoint) -> Result<bool> {
@@ -374,15 +400,12 @@ impl OutPointSet {
     fn insert(&mut self, input: bitcoin::OutPoint) -> bool { self.0.insert(input) }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct AppConfig {
     pub bitcoind_rpchost: String,
     pub bitcoind_cookie: Option<String>,
     pub bitcoind_rpcuser: String,
     pub bitcoind_rpcpass: String,
-
-    // send-only
-    pub danger_accept_invalid_certs: bool,
 
     // receive-only
     pub pj_host: String,
@@ -414,17 +437,13 @@ impl AppConfig {
                 matches.get_one::<String>("rpcpass").map(|s| s.as_str()),
             )?
             // Subcommand defaults without which file serialization fails.
-            .set_default("danger_accept_invalid_certs", false)?
             .set_default("pj_host", "0.0.0.0:3000")?
             .set_default("pj_endpoint", "https://localhost:3000")?
             .set_default("sub_only", false)?
             .add_source(File::new("config.toml", FileFormat::Toml).required(false));
 
         let builder = match matches.subcommand() {
-            Some(("send", matches)) => builder.set_override_option(
-                "danger_accept_invalid_certs",
-                matches.get_one::<bool>("DANGER_ACCEPT_INVALID_CERTS").copied(),
-            )?,
+            Some(("send", _)) => builder,
             Some(("receive", matches)) => builder
                 .set_override_option(
                     "pj_host",
@@ -474,12 +493,33 @@ fn try_contributing_inputs(
     Ok(())
 }
 
-struct Headers<'a>(rouille::HeadersIter<'a>);
+struct Headers<'a>(&'a hyper::HeaderMap);
 impl payjoin::receive::Headers for Headers<'_> {
     fn get_header(&self, key: &str) -> Option<&str> {
-        let mut copy = self.0.clone(); // lol
-        copy.find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v)
+        self.0.get(key).map(|v| v.to_str()).transpose().ok().flatten()
     }
 }
 
 fn serialize_psbt(psbt: &Psbt) -> String { payjoin::base64::encode(&psbt.serialize()) }
+
+#[cfg(feature = "danger-local-https")]
+fn http_agent() -> Result<ureq::Agent> {
+    use rustls::client::ClientConfig;
+    use rustls::{Certificate, RootCertStore};
+    use ureq::AgentBuilder;
+
+    let mut local_cert_path = std::env::temp_dir();
+    local_cert_path.push(LOCAL_CERT_FILE);
+    let cert_der = std::fs::read(local_cert_path)?;
+    let mut root_cert_store = RootCertStore::empty();
+    root_cert_store.add(&Certificate(cert_der))?;
+    let client_config = ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(root_cert_store)
+        .with_no_client_auth();
+
+    Ok(AgentBuilder::new().tls_config(Arc::new(client_config)).build())
+}
+
+#[cfg(not(feature = "danger-local-https"))]
+fn http_agent() -> Result<ureq::Agent> { Ok(ureq::Agent::new()) }

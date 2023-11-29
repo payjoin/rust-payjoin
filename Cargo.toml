@@ -1,0 +1,3 @@
+[workspace]
+members = ["payjoin", "payjoin-cli"]
+resolver = "2"

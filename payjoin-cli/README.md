@@ -35,11 +35,11 @@ rpcport = 18443
 From the `payjoin-cli directory, where "boom" is the receiving wallet, 18443 is the rpc port, and you wish to request 10,000 sats run:
 
 ```console
-RUST_LOG=debug cargo run --features=local-https -- -r "http://localhost:18443/wallet/boom" receive 10000
+RUST_LOG=debug cargo run --features=danger-local-https -- -r "http://localhost:18443/wallet/boom" receive 10000
 ```
 
 The default configuration listens for payjoin requests at `http://localhost:3000` and expects you to proxy https requests there.
-Payjoin requires a secure endpoint, either https and .onion are valid. In order to receive payjoin in a local testing environment one may enable the  `local-https` feature which will provision a self-signed certificate and host the `https://localhost:3000` endpoint. Emphasis on HTTP**S**.
+Payjoin requires a secure endpoint, either https and .onion are valid. In order to receive payjoin in a local testing environment one may enable the  `danger-local-https` feature which will provision a self-signed certificate and host the `https://localhost:3000` endpoint. Emphasis on HTTP**S**.
 
 This will generate a payjoin capable bip21 URI with which to accept payjoin:
 
@@ -54,11 +54,6 @@ Note: A wallet cannot payjoin with itself, need separate wallets.
 Create another config.toml file in this directory and configure it as you did
 previously, except replace the receiver wallet name with the sender
 wallet name ("ocean" for me).
-
-If you are testing locally using a self-signed certificate as with the `local-https` feature, add the following line to the
-configuration file:
-
-danger_accept_invalid_certs = true
 
 Using the previously generated bip21 URI, run the following command
 from the sender directory:

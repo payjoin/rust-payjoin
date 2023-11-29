@@ -4,7 +4,8 @@ use clap::{arg, value_parser, Arg, ArgMatches, Command};
 mod app;
 use app::{App, AppConfig};
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     env_logger::init();
 
     let matches = cli();
@@ -16,12 +17,12 @@ fn main() -> Result<()> {
             let bip21 = sub_matches.get_one::<String>("BIP21").context("Missing BIP21 argument")?;
             let fee_rate_sat_per_vb =
                 sub_matches.get_one::<f32>("fee_rate").context("Missing --fee-rate argument")?;
-            app.send_payjoin(bip21, fee_rate_sat_per_vb)?;
+            app.send_payjoin(bip21, fee_rate_sat_per_vb).await?;
         }
         Some(("receive", sub_matches)) => {
             let amount =
                 sub_matches.get_one::<String>("AMOUNT").context("Missing AMOUNT argument")?;
-            app.receive_payjoin(amount)?;
+            app.receive_payjoin(amount).await?;
         }
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
@@ -35,16 +36,20 @@ fn cli() -> ArgMatches {
         .arg(Arg::new("rpchost")
             .long("rpchost")
             .short('r')
+            .takes_value(true)
             .help("The port of the bitcoin node"))
         .arg(Arg::new("cookie_file")
             .long("cookie-file")
             .short('c')
+            .takes_value(true)
             .help("Path to the cookie file of the bitcoin node"))
         .arg(Arg::new("rpcuser")
             .long("rpcuser")
+            .takes_value(true)
             .help("The username for the bitcoin node"))
         .arg(Arg::new("rpcpass")
             .long("rpcpass")
+            .takes_value(true)
             .help("The password for the bitcoin node"))
         .subcommand_required(true)
         .subcommand(
@@ -58,11 +63,6 @@ fn cli() -> ArgMatches {
                     .help("Fee rate in sat/vB")
                     .value_parser(value_parser!(f32)),
                 )
-                .arg(Arg::new("DANGER_ACCEPT_INVALID_CERTS")
-                    .long("danger-accept-invalid-certs")
-                    .hide(true)
-                    .action(clap::ArgAction::SetTrue)
-                    .help("Wicked dangerous! Vulnerable to MITM attacks! Accept invalid certs for the payjoin endpoint"))
         )
         .subcommand(
             Command::new("receive")
@@ -72,16 +72,17 @@ fn cli() -> ArgMatches {
                 .arg(Arg::new("port")
                     .long("host-port")
                     .short('p')
+                    .takes_value(true)
                     .help("The local port to listen on"))
                 .arg(Arg::new("endpoint")
                     .long("endpoint")
                     .short('e')
+                    .takes_value(true)
                     .help("The `pj=` endpoint to receive the payjoin request"))
                 .arg(Arg::new("sub_only")
                     .long("sub-only")
                     .short('s')
-                    .num_args(0)
-                    .required(false)
+                    .action(clap::ArgAction::SetTrue)
                     .hide(true)
                     .help("Use payjoin like a payment code, no hot wallet required. Only substitute outputs. Don't contribute inputs."))
         )

@@ -2,6 +2,7 @@
 name = "payjoin-cli"
 version = "0.0.1-alpha"
 authors = ["Dan Gould <d@ngould.dev>"]
+description = "A command-line Payjoin client for Bitcoin Core"
 repository = "https://github.com/payjoin/rust-payjoin"
 readme = "README.md"
 keywords = ["bip78", "payjoin", "bitcoin"]

@@ -1,9 +1,12 @@
 [package]
 name = "payjoin-cli"
 version = "0.0.1-alpha"
-authors = ["Dan Gould <d@ngould.dev>", "Martin Habovstiak <martin.habovstiak@gmail.com>"]
+authors = ["Dan Gould <d@ngould.dev>"]
 repository = "https://github.com/payjoin/rust-payjoin"
 readme = "README.md"
+keywords = ["bip78", "payjoin", "bitcoin"]
+categories = ["cryptography::cryptocurrencies", "network-programming"]
+license = "MITNFA"
 edition = "2021"
 resolver = "2"
 exclude = ["tests"]

@@ -1,5 +1,9 @@
 # Payjoin Changelog
 
+## 0.11.0
+
+- Introduce `send` `RequestBuilder` flow
+
 ## 0.10.0
 
 - Export `base64` with feature by @jbesraa in #102

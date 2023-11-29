@@ -50,7 +50,7 @@ mod e2e {
         let pj_host = find_free_port();
         let pj_endpoint = format!("https://localhost:{}", pj_host);
 
-        let payjoin_cli = "target/debug/payjoin-cli";
+        let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
 
         let mut cli_receiver = Command::new(payjoin_cli)
             .arg("--rpchost")

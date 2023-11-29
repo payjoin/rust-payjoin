@@ -957,6 +957,8 @@ version = "0.10.0"
 dependencies = [
  "bip21",
  "bitcoin",
+ "bitcoind",
+ "env_logger",
  "log",
  "rand",
  "url",

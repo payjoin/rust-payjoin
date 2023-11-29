@@ -1,3 +1,6 @@
 [workspace]
 members = ["payjoin", "payjoin-cli"]
 resolver = "2"
+
+[patch.crates-io.payjoin]
+path = "payjoin"

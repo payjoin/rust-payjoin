@@ -1716,6 +1716,7 @@ dependencies = [
  "ohttp",
  "rand",
  "rustls",
+ "serde",
  "testcontainers",
  "testcontainers-modules",
  "tokio",

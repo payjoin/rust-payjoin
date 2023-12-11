@@ -386,7 +386,7 @@ impl<'a> RequestContext<'a> {
     pub fn extract_v2(
         &self,
         ohttp_proxy_url: &str,
-    ) -> Result<(Request, ContextV2), CreateRequestError> {
+    ) -> Result<(Request, ContextV2, ohttp::ClientResponse), CreateRequestError> {
         let rs_base64 = crate::v2::subdir(self.uri.extras._endpoint.as_str()).to_string();
         log::debug!("rs_base64: {:?}", rs_base64);
         let b64_config =
@@ -427,8 +427,8 @@ impl<'a> RequestContext<'a> {
                     min_fee_rate: self.min_fee_rate,
                 },
                 e,
-                ohttp_res,
             },
+            ohttp_res,
         ))
     }
 }
@@ -471,7 +471,6 @@ pub struct ContextV1 {
 pub struct ContextV2 {
     context_v1: ContextV1,
     e: bitcoin::secp256k1::SecretKey,
-    ohttp_res: ohttp::ClientResponse,
 }
 
 macro_rules! check_eq {
@@ -504,10 +503,11 @@ impl ContextV2 {
     pub fn process_response(
         self,
         response: &mut impl std::io::Read,
+        ohttp_ctx: ohttp::ClientResponse,
     ) -> Result<Option<Psbt>, ValidationError> {
         let mut res_buf = Vec::new();
         response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
-        let mut res_buf = crate::v2::ohttp_decapsulate(self.ohttp_res, &res_buf)
+        let mut res_buf = crate::v2::ohttp_decapsulate(ohttp_ctx, &res_buf)
             .map_err(InternalValidationError::V2)?;
         let psbt = crate::v2::decrypt_message_b(&mut res_buf, self.e)
             .map_err(InternalValidationError::V2)?;

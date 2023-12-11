@@ -247,7 +247,7 @@ mod integration {
             // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             debug!("Original psbt: {:#?}", psbt);
-            let (send_req, send_ctx) = RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
+            let (send_req, send_ctx, ohttp) = RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v2(OH_RELAY_URL)?;
             log::info!("send fallback v2");
@@ -298,7 +298,7 @@ mod integration {
             })
             .await??;
             let checked_payjoin_proposal_psbt =
-                send_ctx.process_response(&mut response.into_reader())?.unwrap();
+                send_ctx.process_response(&mut response.into_reader(), ohttp)?.unwrap();
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
             log::info!("sent");

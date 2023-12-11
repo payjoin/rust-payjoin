@@ -211,7 +211,7 @@ impl<'a> RequestBuilder<'a> {
     pub fn build_recommended(
         self,
         min_fee_rate: FeeRate,
-    ) -> Result<(Request, Context), CreateRequestError> {
+    ) -> Result<RequestContext<'a>, CreateRequestError> {
         // TODO support optional batched payout scripts. This would require a change to
         // build() which now checks for a single payee.
         let mut payout_scripts = std::iter::once(self.uri.address.script_pubkey());
@@ -283,7 +283,7 @@ impl<'a> RequestBuilder<'a> {
         change_index: Option<usize>,
         min_fee_rate: FeeRate,
         clamp_fee_contribution: bool,
-    ) -> Result<(Request, Context), CreateRequestError> {
+    ) -> Result<RequestContext<'a>, CreateRequestError> {
         self.fee_contribution = Some((max_fee_contribution, change_index));
         self.clamp_fee_contribution = clamp_fee_contribution;
         self.min_fee_rate = min_fee_rate;
@@ -294,7 +294,7 @@ impl<'a> RequestBuilder<'a> {
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
-    pub fn build_non_incentivizing(mut self) -> Result<(Request, Context), CreateRequestError> {
+    pub fn build_non_incentivizing(mut self) -> Result<RequestContext<'a>, CreateRequestError> {
         // since this is a builder, these should already be cleared
         // but we'll reset them to be sure
         self.fee_contribution = None;
@@ -303,7 +303,7 @@ impl<'a> RequestBuilder<'a> {
         self.build()
     }
 
-    fn build(self) -> Result<(Request, Context), CreateRequestError> {
+    fn build(self) -> Result<RequestContext<'a>, CreateRequestError> {
         let mut psbt =
             self.psbt.validate().map_err(InternalCreateRequestError::InconsistentOriginalPsbt)?;
         psbt.validate_input_utxos(true)
@@ -326,24 +326,108 @@ impl<'a> RequestBuilder<'a> {
         let sequence = zeroth_input.txin.sequence;
         let txout = zeroth_input.previous_txout().expect("We already checked this above");
         let input_type = InputType::from_spent_input(txout, zeroth_input.psbtin).unwrap();
-        let url = serialize_url(
-            self.uri.extras._endpoint.into(),
+
+        Ok(RequestContext {
+            psbt,
+            uri: self.uri,
             disable_output_substitution,
             fee_contribution,
+            payee,
+            input_type,
+            sequence,
+            min_fee_rate: self.min_fee_rate,
+        })
+    }
+}
+
+pub struct RequestContext<'a> {
+    psbt: Psbt,
+    uri: PjUri<'a>,
+    disable_output_substitution: bool,
+    fee_contribution: Option<(bitcoin::Amount, usize)>,
+    min_fee_rate: FeeRate,
+    input_type: InputType,
+    sequence: Sequence,
+    payee: ScriptBuf,
+}
+
+impl<'a> RequestContext<'a> {
+    /// Extract serialized V1 Request and Context froma Payjoin Proposal
+    pub fn extract_v1(self) -> Result<(Request, ContextV1), CreateRequestError> {
+        let url = serialize_url(
+            self.uri.extras._endpoint.into(),
+            self.disable_output_substitution,
+            self.fee_contribution,
             self.min_fee_rate,
         )
         .map_err(InternalCreateRequestError::Url)?;
-        let body = serialize_psbt(&psbt);
+        let body = self.psbt.to_string().as_bytes().to_vec();
         Ok((
             Request { url, body },
-            Context {
-                original_psbt: psbt,
-                disable_output_substitution,
-                fee_contribution,
-                payee,
-                input_type,
-                sequence,
+            ContextV1 {
+                original_psbt: self.psbt,
+                disable_output_substitution: self.disable_output_substitution,
+                fee_contribution: self.fee_contribution,
+                payee: self.payee,
+                input_type: self.input_type,
+                sequence: self.sequence,
                 min_fee_rate: self.min_fee_rate,
+            },
+        ))
+    }
+
+    /// Extract serialized Request and Context from a Payjoin Proposal.
+    ///
+    /// In order to support polling, this may need to be called many times to be encrypted with
+    /// new unique nonces to make independent OHTTP requests.
+    ///
+    /// The `ohttp_proxy` merely passes the encrypted payload to the ohttp gateway of the receiver
+    #[cfg(feature = "v2")]
+    pub fn extract_v2(
+        &self,
+        ohttp_proxy_url: &str,
+    ) -> Result<(Request, ContextV2), CreateRequestError> {
+        let rs_base64 = crate::v2::subdir(self.uri.extras._endpoint.as_str()).to_string();
+        log::debug!("rs_base64: {:?}", rs_base64);
+        let b64_config =
+            bitcoin::base64::Config::new(bitcoin::base64::CharacterSet::UrlSafe, false);
+        let rs = bitcoin::base64::decode_config(rs_base64, b64_config).unwrap();
+        log::debug!("rs: {:?}", rs.len());
+        let rs = bitcoin::secp256k1::PublicKey::from_slice(&rs).unwrap();
+
+        let url = self.uri.extras._endpoint.clone();
+        let body = serialize_v2_body(
+            &self.psbt,
+            self.disable_output_substitution,
+            self.fee_contribution,
+            self.min_fee_rate,
+        )?;
+        let (body, e) =
+            crate::v2::encrypt_message_a(body, rs).map_err(InternalCreateRequestError::V2)?;
+        let (body, ohttp_res) = crate::v2::ohttp_encapsulate(
+            &self.uri.extras.ohttp_config.as_ref().unwrap().encode().unwrap(),
+            "POST",
+            url.as_str(),
+            Some(&body),
+        )
+        .map_err(InternalCreateRequestError::V2)?;
+        log::debug!("ohttp_proxy_url: {:?}", ohttp_proxy_url);
+        let url = Url::parse(ohttp_proxy_url).map_err(InternalCreateRequestError::Url)?;
+        Ok((
+            Request { url, body },
+            // this method may be called more than once to re-construct the ohttp, therefore we must clone (or TODO memoize)
+            ContextV2 {
+                context_v1: ContextV1 {
+                    original_psbt: self.psbt.clone(),
+                    disable_output_substitution: self.disable_output_substitution,
+                    fee_contribution: self.fee_contribution,
+                    payee: self.payee.clone(),
+                    input_type: self.input_type,
+                    sequence: self.sequence,
+                    min_fee_rate: self.min_fee_rate,
+                },
+                e,
+                ohttp_res,
             },
         ))
     }
@@ -353,6 +437,7 @@ impl<'a> RequestBuilder<'a> {
 ///
 /// You need to send this request over HTTP(S) to the receiver.
 #[non_exhaustive]
+#[derive(Debug, Clone)]
 pub struct Request {
     /// URL to send the request to.
     ///
@@ -371,7 +456,8 @@ pub struct Request {
 ///
 /// This type is used to process the response. Get it from [`RequestBuilder`](crate::send::RequestBuilder)'s build methods.
 /// Then you only need to call [`.process_response()`](crate::send::Context::process_response()) on it to continue BIP78 flow.
-pub struct Context {
+#[derive(Debug)]
+pub struct ContextV1 {
     original_psbt: Psbt,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
@@ -379,6 +465,13 @@ pub struct Context {
     input_type: InputType,
     sequence: Sequence,
     payee: ScriptBuf,
+}
+
+#[cfg(feature = "v2")]
+pub struct ContextV2 {
+    context_v1: ContextV1,
+    e: bitcoin::secp256k1::SecretKey,
+    ohttp_res: ohttp::ClientResponse,
 }
 
 macro_rules! check_eq {
@@ -399,7 +492,35 @@ macro_rules! ensure {
     };
 }
 
-impl Context {
+#[cfg(feature = "v2")]
+impl ContextV2 {
+    /// Decodes and validates the response.
+    ///
+    /// Call this method with response from receiver to continue BIP-??? flow.
+    /// A successful response can either be None if the relay has not response yet or Some(Psbt).
+    ///
+    /// If the response is some valid PSBT you should sign and broadcast.
+    #[inline]
+    pub fn process_response(
+        self,
+        response: &mut impl std::io::Read,
+    ) -> Result<Option<Psbt>, ValidationError> {
+        let mut res_buf = Vec::new();
+        response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
+        let mut res_buf = crate::v2::ohttp_decapsulate(self.ohttp_res, &res_buf)
+            .map_err(InternalValidationError::V2)?;
+        let psbt = crate::v2::decrypt_message_b(&mut res_buf, self.e)
+            .map_err(InternalValidationError::V2)?;
+        if psbt.is_empty() {
+            return Ok(None);
+        }
+        let proposal = Psbt::deserialize(&psbt).map_err(InternalValidationError::Psbt)?;
+        let processed_proposal = self.context_v1.process_proposal(proposal)?;
+        Ok(Some(processed_proposal))
+    }
+}
+
+impl ContextV1 {
     /// Decodes and validates the response.
     ///
     /// Call this method with response from receiver to continue BIP78 flow. If the response is
@@ -411,7 +532,7 @@ impl Context {
     ) -> Result<Psbt, ValidationError> {
         let mut res_str = String::new();
         response.read_to_string(&mut res_str).map_err(InternalValidationError::Io)?;
-        let proposal = Psbt::from_str(&res_str).map_err(InternalValidationError::Psbt)?;
+        let proposal = Psbt::from_str(&res_str).map_err(InternalValidationError::PsbtParse)?;
 
         // process in non-generic function
         self.process_proposal(proposal).map(Into::into).map_err(Into::into)
@@ -768,6 +889,26 @@ fn determine_fee_contribution(
     })
 }
 
+#[cfg(feature = "v2")]
+fn serialize_v2_body(
+    psbt: &Psbt,
+    disable_output_substitution: bool,
+    fee_contribution: Option<(bitcoin::Amount, usize)>,
+    min_feerate: FeeRate,
+) -> Result<Vec<u8>, CreateRequestError> {
+    // Grug say localhost base be discarded anyway. no big brain needed.
+    let placeholder_url = serialize_url(
+        "http:/localhost".to_string(),
+        disable_output_substitution,
+        fee_contribution,
+        min_feerate,
+    )
+    .map_err(InternalCreateRequestError::Url)?;
+    let query_params = placeholder_url.query().unwrap_or_default();
+    let base64 = psbt.to_string();
+    Ok(format!("{}\n{}", base64, query_params).into_bytes())
+}
+
 fn serialize_url(
     endpoint: String,
     disable_output_substitution: bool,
@@ -792,11 +933,6 @@ fn serialize_url(
     Ok(url)
 }
 
-fn serialize_psbt(psbt: &Psbt) -> Vec<u8> {
-    let bytes = psbt.serialize();
-    bitcoin::base64::encode(bytes).into_bytes()
-}
-
 #[cfg(test)]
 mod tests {
     #[test]
@@ -817,7 +953,7 @@ mod tests {
         eprintln!("original: {:#?}", original_psbt);
         let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
         let sequence = original_psbt.unsigned_tx.input[0].sequence;
-        let ctx = super::Context {
+        let ctx = super::ContextV1 {
             original_psbt,
             disable_output_substitution: false,
             fee_contribution: None,

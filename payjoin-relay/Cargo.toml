@@ -1,0 +1,32 @@
+[package]
+name = "payjoin-relay"
+version = "0.0.1"
+authors = ["Dan Gould <d@ngould.dev>"]
+description = "A relay server for Payjoin V2 coordination"
+repository = "https://github.com/payjoin/rust-payjoin"
+readme = "README.md"
+keywords = ["bip78", "payjoin", "bitcoin", "relay"]
+categories = ["cryptography::cryptocurrencies", "network-programming"]
+license = "MITNFA"
+edition = "2021"
+resolver = "2"
+exclude = ["tests"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+danger-local-https = ["hyper-rustls", "rcgen", "rustls"]
+
+[dependencies]
+anyhow = "1.0.71"
+bitcoin = { version = "0.30.0", features = ["base64"] }
+bhttp = { version = "0.4.0", features = ["http"] }
+hyper = { version = "0.14", features = ["full"] }
+hyper-rustls = { version = "0.24", optional = true }
+ohttp = "0.4.0"
+rcgen = { version = "0.11", optional = true }
+rustls = { version = "0.21", optional = true }
+sqlx = { version = "0.7.1", features = ["postgres", "runtime-tokio"] }
+tokio = { version = "1.12.0", features = ["full"] }
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }

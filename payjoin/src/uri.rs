@@ -5,9 +5,9 @@ use bitcoin::address::{Error, NetworkChecked, NetworkUnchecked};
 use bitcoin::Network;
 use url::Url;
 
-#[derive(Debug, Clone)]
 pub enum Payjoin {
     Supported(PayjoinParams),
+    V2Only(PayjoinParams),
     Unsupported,
 }
 
@@ -15,15 +15,17 @@ impl Payjoin {
     pub fn pj_is_supported(&self) -> bool {
         match self {
             Payjoin::Supported(_) => true,
+            Payjoin::V2Only(_) => true,
             Payjoin::Unsupported => false,
         }
     }
 }
 
-#[derive(Debug, Clone)]
 pub struct PayjoinParams {
     pub(crate) _endpoint: Url,
     pub(crate) disable_output_substitution: bool,
+    #[cfg(feature = "v2")]
+    pub(crate) ohttp_config: Option<ohttp::KeyConfig>,
 }
 
 pub type Uri<'a, NetworkValidation> = bip21::Uri<'a, NetworkValidation, Payjoin>;
@@ -74,7 +76,7 @@ impl<'a> UriExtNetworkUnchecked<'a> for Uri<'a, NetworkUnchecked> {
 impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
     fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>> {
         match self.extras {
-            Payjoin::Supported(payjoin) => {
+            Payjoin::Supported(payjoin) | Payjoin::V2Only(payjoin) => {
                 let mut uri = bip21::Uri::with_extras(self.address, payjoin);
                 uri.amount = self.amount;
                 uri.label = self.label;
@@ -110,6 +112,8 @@ impl<'a> bip21::de::DeserializeParams<'a> for Payjoin {
 pub struct DeserializationState {
     pj: Option<Url>,
     pjos: Option<bool>,
+    #[cfg(feature = "v2")]
+    ohttp: Option<ohttp::KeyConfig>,
 }
 
 #[derive(Debug)]
@@ -133,6 +137,19 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
         <Self::Value as bip21::DeserializationError>::Error,
     > {
         match key {
+            #[cfg(feature = "v2")]
+            "ohttp" if self.ohttp.is_none() => {
+                let base64_config = Cow::try_from(value).map_err(InternalPjParseError::NotUtf8)?;
+                let config_bytes =
+                    bitcoin::base64::decode_config(&*base64_config, bitcoin::base64::URL_SAFE)
+                        .map_err(InternalPjParseError::NotBase64)?;
+                let config = ohttp::KeyConfig::decode(&config_bytes)
+                    .map_err(InternalPjParseError::BadOhttp)?;
+                self.ohttp = Some(config);
+                Ok(bip21::de::ParamKind::Known)
+            }
+            #[cfg(feature = "v2")]
+            "ohttp" => Err(PjParseError(InternalPjParseError::MultipleParams("ohttp"))),
             "pj" if self.pj.is_none() => {
                 let endpoint = Cow::try_from(value).map_err(InternalPjParseError::NotUtf8)?;
                 let url = Url::parse(&endpoint).map_err(InternalPjParseError::BadEndpoint)?;
@@ -154,6 +171,51 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
         }
     }
 
+    #[cfg(feature = "v2")]
+    fn finalize(
+        self,
+    ) -> std::result::Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
+        match (self.pj, self.pjos, self.ohttp) {
+            (None, None, _) => Ok(Payjoin::Unsupported),
+            (None, Some(_), _) => Err(PjParseError(InternalPjParseError::MissingEndpoint)),
+            (Some(endpoint), pjos, None) => {
+                if endpoint.scheme() == "https"
+                    || endpoint.scheme() == "http"
+                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
+                {
+                    Ok(Payjoin::Supported(PayjoinParams {
+                        _endpoint: endpoint,
+                        disable_output_substitution: pjos.unwrap_or(false),
+                        ohttp_config: None,
+                    }))
+                } else {
+                    Err(PjParseError(InternalPjParseError::UnsecureEndpoint))
+                }
+            }
+            (Some(endpoint), pjos, Some(ohttp)) => {
+                if endpoint.scheme() == "https"
+                    || endpoint.scheme() == "http"
+                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
+                {
+                    Ok(Payjoin::Supported(PayjoinParams {
+                        _endpoint: endpoint,
+                        disable_output_substitution: pjos.unwrap_or(false),
+                        ohttp_config: Some(ohttp),
+                    }))
+                } else if endpoint.scheme() == "http" {
+                    Ok(Payjoin::V2Only(PayjoinParams {
+                        _endpoint: endpoint,
+                        disable_output_substitution: pjos.unwrap_or(false),
+                        ohttp_config: Some(ohttp),
+                    }))
+                } else {
+                    Err(PjParseError(InternalPjParseError::UnsecureEndpoint))
+                }
+            }
+        }
+    }
+
+    #[cfg(not(feature = "v2"))]
     fn finalize(
         self,
     ) -> std::result::Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
@@ -186,7 +248,11 @@ impl std::fmt::Display for PjParseError {
             }
             InternalPjParseError::MissingEndpoint => write!(f, "Missing payjoin endpoint"),
             InternalPjParseError::NotUtf8(_) => write!(f, "Endpoint is not valid UTF-8"),
+            #[cfg(feature = "v2")]
+            InternalPjParseError::NotBase64(_) => write!(f, "ohttp config is not valid base64"),
             InternalPjParseError::BadEndpoint(_) => write!(f, "Endpoint is not valid"),
+            #[cfg(feature = "v2")]
+            InternalPjParseError::BadOhttp(_) => write!(f, "ohttp config is not valid"),
             InternalPjParseError::UnsecureEndpoint => {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }
@@ -200,7 +266,11 @@ enum InternalPjParseError {
     MultipleParams(&'static str),
     MissingEndpoint,
     NotUtf8(core::str::Utf8Error),
+    #[cfg(feature = "v2")]
+    NotBase64(bitcoin::base64::DecodeError),
     BadEndpoint(url::ParseError),
+    #[cfg(feature = "v2")]
+    BadOhttp(ohttp::Error),
     UnsecureEndpoint,
 }
 

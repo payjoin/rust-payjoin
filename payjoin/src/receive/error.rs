@@ -7,6 +7,9 @@ pub enum Error {
     BadRequest(RequestError),
     // To be returned as HTTP 500
     Server(Box<dyn error::Error>),
+    // V2 d/encapsulation failed
+    #[cfg(feature = "v2")]
+    V2(crate::v2::Error),
 }
 
 impl fmt::Display for Error {
@@ -14,6 +17,8 @@ impl fmt::Display for Error {
         match &self {
             Self::BadRequest(e) => e.fmt(f),
             Self::Server(e) => write!(f, "Internal Server Error: {}", e),
+            #[cfg(feature = "v2")]
+            Self::V2(e) => e.fmt(f),
         }
     }
 }
@@ -23,12 +28,23 @@ impl error::Error for Error {
         match &self {
             Self::BadRequest(_) => None,
             Self::Server(e) => Some(e.as_ref()),
+            #[cfg(feature = "v2")]
+            Self::V2(e) => Some(e),
         }
     }
 }
 
 impl From<RequestError> for Error {
     fn from(e: RequestError) -> Self { Error::BadRequest(e) }
+}
+
+impl From<InternalRequestError> for Error {
+    fn from(e: InternalRequestError) -> Self { Error::BadRequest(e.into()) }
+}
+
+#[cfg(feature = "v2")]
+impl From<crate::v2::Error> for Error {
+    fn from(e: crate::v2::Error) -> Self { Error::V2(e) }
 }
 
 /// Error that may occur when the request from sender is malformed.
@@ -65,6 +81,11 @@ pub(crate) enum InternalRequestError {
     /// Original PSBT input has been seen before. Only automatic receivers, aka "interactive" in the spec
     /// look out for these to prevent probing attacks.
     InputSeen(bitcoin::OutPoint),
+    /// Serde deserialization failed
+    #[cfg(feature = "v2")]
+    ParsePsbt(bitcoin::psbt::PsbtParseError),
+    #[cfg(feature = "v2")]
+    Utf8(std::string::FromUtf8Error),
 }
 
 impl From<InternalRequestError> for RequestError {
@@ -125,6 +146,10 @@ impl fmt::Display for RequestError {
                 write_error(f, "original-psbt-rejected", &format!("Input Type Error: {}.", e)),
             InternalRequestError::InputSeen(_) =>
                 write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
+            #[cfg(feature = "v2")]
+            InternalRequestError::ParsePsbt(e) => write_error(f, "Error parsing PSBT:", e),
+            #[cfg(feature = "v2")]
+            InternalRequestError::Utf8(e) => write_error(f, "Error parsing PSBT:", e),
         }
     }
 }

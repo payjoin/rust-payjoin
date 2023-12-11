@@ -270,10 +270,12 @@ use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashMap};
 
 use bitcoin::psbt::Psbt;
-use bitcoin::{Amount, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::{base64, Amount, FeeRate, OutPoint, Script, TxOut};
 
 mod error;
 mod optional_parameters;
+#[cfg(feature = "v2")]
+pub mod v2;
 
 pub use error::{Error, RequestError, SelectionError};
 use error::{InternalRequestError, InternalSelectionError};
@@ -327,7 +329,7 @@ impl UncheckedProposal {
         // enforce the limit
         let mut buf = vec![0; content_length as usize]; // 4_000_000 * 4 / 3 fits in u32
         body.read_exact(&mut buf).map_err(InternalRequestError::Io)?;
-        let base64 = bitcoin::base64::decode(&buf).map_err(InternalRequestError::Base64)?;
+        let base64 = base64::decode(&buf).map_err(InternalRequestError::Base64)?;
         let unchecked_psbt = Psbt::deserialize(&base64).map_err(InternalRequestError::Psbt)?;
 
         let psbt = unchecked_psbt.validate().map_err(InternalRequestError::InconsistentPsbt)?;
@@ -549,6 +551,7 @@ impl OutputsUnknown {
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+#[derive(Debug)]
 pub struct ProvisionalProposal {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,

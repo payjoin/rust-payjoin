@@ -16,13 +16,22 @@ pub struct ValidationError {
 
 #[derive(Debug)]
 pub(crate) enum InternalValidationError {
-    Psbt(bitcoin::psbt::PsbtParseError),
+    PsbtParse(bitcoin::psbt::PsbtParseError),
     Io(std::io::Error),
     InvalidInputType(InputTypeError),
     InvalidProposedInput(crate::psbt::PrevTxOutError),
-    VersionsDontMatch { proposed: i32, original: i32 },
-    LockTimesDontMatch { proposed: LockTime, original: LockTime },
-    SenderTxinSequenceChanged { proposed: Sequence, original: Sequence },
+    VersionsDontMatch {
+        proposed: i32,
+        original: i32,
+    },
+    LockTimesDontMatch {
+        proposed: LockTime,
+        original: LockTime,
+    },
+    SenderTxinSequenceChanged {
+        proposed: Sequence,
+        original: Sequence,
+    },
     SenderTxinContainsNonWitnessUtxo,
     SenderTxinContainsWitnessUtxo,
     SenderTxinContainsFinalScriptSig,
@@ -32,7 +41,10 @@ pub(crate) enum InternalValidationError {
     ReceiverTxinNotFinalized,
     ReceiverTxinMissingUtxoInfo,
     MixedSequence,
-    MixedInputTypes { proposed: InputType, original: InputType },
+    MixedInputTypes {
+        proposed: InputType,
+        original: InputType,
+    },
     MissingOrShuffledInputs,
     TxOutContainsKeyPaths,
     FeeContributionExceedsMaximum,
@@ -44,6 +56,10 @@ pub(crate) enum InternalValidationError {
     PayeeTookContributedFee,
     FeeContributionPaysOutputSizeIncrease,
     FeeRateBelowMinimum,
+    #[cfg(feature = "v2")]
+    V2(crate::v2::Error),
+    #[cfg(feature = "v2")]
+    Psbt(bitcoin::psbt::Error),
 }
 
 impl From<InternalValidationError> for ValidationError {
@@ -58,7 +74,7 @@ impl fmt::Display for ValidationError {
         use InternalValidationError::*;
 
         match &self.internal {
-            Psbt(e) => write!(f, "couldn't decode PSBT: {}", e),
+            PsbtParse(e) => write!(f, "couldn't decode PSBT: {}", e),
             Io(e) => write!(f, "couldn't read PSBT: {}", e),
             InvalidInputType(e) => write!(f, "invalid transaction input type: {}", e),
             InvalidProposedInput(e) => write!(f, "invalid proposed transaction input: {}", e),
@@ -86,6 +102,10 @@ impl fmt::Display for ValidationError {
             PayeeTookContributedFee => write!(f, "payee tried to take fee contribution for himself"),
             FeeContributionPaysOutputSizeIncrease => write!(f, "fee contribution pays for additional outputs"),
             FeeRateBelowMinimum =>  write!(f, "the fee rate of proposed transaction is below minimum"),
+            #[cfg(feature = "v2")]
+            V2(e) => write!(f, "v2 error: {}", e),
+            #[cfg(feature = "v2")]
+            Psbt(e) => write!(f, "psbt error: {}", e),
         }
     }
 }
@@ -95,7 +115,7 @@ impl std::error::Error for ValidationError {
         use InternalValidationError::*;
 
         match &self.internal {
-            Psbt(error) => Some(error),
+            PsbtParse(error) => Some(error),
             Io(error) => Some(error),
             InvalidInputType(error) => Some(error),
             InvalidProposedInput(error) => Some(error),
@@ -123,6 +143,10 @@ impl std::error::Error for ValidationError {
             PayeeTookContributedFee => None,
             FeeContributionPaysOutputSizeIncrease => None,
             FeeRateBelowMinimum => None,
+            #[cfg(feature = "v2")]
+            V2(error) => Some(error),
+            #[cfg(feature = "v2")]
+            Psbt(error) => Some(error),
         }
     }
 }
@@ -152,6 +176,8 @@ pub(crate) enum InternalCreateRequestError {
     UriDoesNotSupportPayjoin,
     PrevTxOut(crate::psbt::PrevTxOutError),
     InputType(crate::input_type::InputTypeError),
+    #[cfg(feature = "v2")]
+    V2(crate::v2::Error),
 }
 
 impl fmt::Display for CreateRequestError {
@@ -170,10 +196,12 @@ impl fmt::Display for CreateRequestError {
             AmbiguousChangeOutput => write!(f, "can not determine which output is change because there's more than two outputs"),
             ChangeIndexOutOfBounds => write!(f, "fee output index is points out of bounds"),
             ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
-            Url(e) => write!(f, "cannot parse endpoint url: {:#?}", e),
+            Url(e) => write!(f, "cannot parse url: {:#?}", e),
             UriDoesNotSupportPayjoin => write!(f, "the URI does not support payjoin"),
             PrevTxOut(e) => write!(f, "invalid previous transaction output: {}", e),
             InputType(e) => write!(f, "invalid input type: {}", e),
+            #[cfg(feature = "v2")]
+            V2(e) => write!(f, "v2 error: {}", e),
         }
     }
 }
@@ -198,6 +226,8 @@ impl std::error::Error for CreateRequestError {
             UriDoesNotSupportPayjoin => None,
             PrevTxOut(error) => Some(error),
             InputType(error) => Some(error),
+            #[cfg(feature = "v2")]
+            V2(error) => Some(error),
         }
     }
 }

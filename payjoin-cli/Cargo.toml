@@ -20,6 +20,7 @@ path = "src/main.rs"
 [features]
 native-certs = ["ureq/native-certs"]
 danger-local-https = ["rcgen", "rustls/dangerous_configuration", "hyper-rustls"]
+v2 = ["payjoin/v2"]
 
 [dependencies]
 anyhow = "1.0.70"
@@ -41,3 +42,4 @@ url = "2.2.1"
 
 [dev-dependencies]
 bitcoind = { version = "0.31.1", features = ["0_21_2"] }
+tokio = { version = "1.12.0", features = ["full"] }

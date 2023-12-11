@@ -1,5 +1,14 @@
 # Payjoin Changelog
 
+## 0.12.0
+
+- Introduce `v2` feature with oblivious, asynchronous, serverless payjoin
+- Return `RequestContext` from which either v1 or v2 `(Request, Context)` tuples may be extracted
+- Derive `Debug, Clone` from `send::Request`, `receive::UncheckedProposal`, `optional_parameters::Params`
+- Don't derive `Debug, Clone` from `uri::{Payjoin, PayjoinParams}`
+- Derive `Serialize, Deserialize` for `RequestContext` and `Enrolled` in `v2` to enable persistent state for asynchronous requests
+- `UncheckedProposal::check_can_broadcast` became `::check_broadcast_suitability` allowing receiver to specify minnimum acceptable feerate
+
 ## 0.11.0
 
 - Introduce `send` `RequestBuilder` flow

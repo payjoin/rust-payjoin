@@ -22,6 +22,12 @@ async fn main() -> Result<()> {
         Some(("receive", sub_matches)) => {
             let amount =
                 sub_matches.get_one::<String>("AMOUNT").context("Missing AMOUNT argument")?;
+            #[cfg(feature = "v2")]
+            let is_retry =
+                sub_matches.get_one::<bool>("retry").context("Could not read --retry")?;
+            #[cfg(feature = "v2")]
+            app.receive_payjoin(amount, *is_retry).await?;
+            #[cfg(not(feature = "v2"))]
             app.receive_payjoin(amount).await?;
         }
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
@@ -85,6 +91,11 @@ fn cli() -> ArgMatches {
                     .short('e')
                     .takes_value(true)
                     .help("The `pj=` endpoint to receive the payjoin request"))
+                .arg(Arg::new("retry")
+                    .long("retry")
+                    .short('r')
+                    .action(clap::ArgAction::SetTrue)
+                    .help("Retry the asynchronous payjoin request if it did not yet complete"))
                 .arg(Arg::new("sub_only")
                     .long("sub-only")
                     .short('s')

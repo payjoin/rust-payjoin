@@ -107,7 +107,7 @@ fn subdirectory(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
     base64::encode_config(pubkey, b64_config)
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Enrolled {
     relay_url: url::Url,
     ohttp_config: Vec<u8>,

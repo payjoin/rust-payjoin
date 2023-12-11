@@ -33,13 +33,15 @@ const LOCAL_CERT_FILE: &str = "localhost.der";
 #[derive(Clone)]
 pub(crate) struct App {
     config: AppConfig,
+    receive_store: Arc<Mutex<ReceiveStore>>,
     seen_inputs: Arc<Mutex<SeenInputs>>,
 }
 
 impl App {
     pub fn new(config: AppConfig) -> Result<Self> {
         let seen_inputs = Arc::new(Mutex::new(SeenInputs::new()?));
-        Ok(Self { config, seen_inputs })
+        let receive_store = Arc::new(Mutex::new(ReceiveStore::new()?));
+        Ok(Self { config, receive_store, seen_inputs })
     }
 
     pub fn bitcoind(&self) -> Result<bitcoincore_rpc::Client> {
@@ -96,25 +98,37 @@ impl App {
     }
 
     #[cfg(feature = "v2")]
-    pub async fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
+    pub async fn receive_payjoin(self, amount_arg: &str, is_retry: bool) -> Result<()> {
         use v2::Enroller;
 
-        let mut enroller = Enroller::from_relay_config(
-            &self.config.pj_endpoint,
-            &self.config.ohttp_config,
-            &self.config.ohttp_proxy,
-        );
-        let (req, ctx) = enroller.extract_req()?;
-        log::debug!("Enrolling receiver");
-        let ohttp_response = spawn_blocking(move || {
-            let http = http_agent()?;
-            http.post(req.url.as_ref()).send_bytes(&req.body).with_context(|| "HTTP request failed")
-        })
-        .await??;
+        let mut enrolled = if !is_retry {
+            let mut enroller = Enroller::from_relay_config(
+                &self.config.pj_endpoint,
+                &self.config.ohttp_config,
+                &self.config.ohttp_proxy,
+            );
+            let (req, ctx) = enroller.extract_req()?;
+            log::debug!("Enrolling receiver");
+            let ohttp_response = spawn_blocking(move || {
+                let http = http_agent()?;
+                http.post(req.url.as_ref())
+                    .send_bytes(&req.body)
+                    .with_context(|| "HTTP request failed")
+            })
+            .await??;
 
-        let mut enrolled = enroller
-            .process_res(ohttp_response.into_reader(), ctx)
-            .map_err(|_| anyhow!("Enrollment failed"))?;
+            let enrolled = enroller
+                .process_res(ohttp_response.into_reader(), ctx)
+                .map_err(|_| anyhow!("Enrollment failed"))?;
+            self.receive_store.lock().expect("mutex lock failed").write(enrolled.clone())?;
+            enrolled
+        } else {
+            let session = self.receive_store.lock().expect("mutex lock failed");
+            log::debug!("Resuming session");
+            let session = session.session.clone().unwrap();
+            session
+        };
+
         log::debug!("Enrolled receiver");
 
         let pj_uri_string =
@@ -141,6 +155,7 @@ impl App {
         let _ = res.into_reader().read_to_end(&mut buf)?;
         let res = payjoin_proposal.deserialize_res(buf, ohttp_ctx);
         log::debug!("Received response {:?}", res);
+        self.receive_store.lock().expect("mutex lock failed").clear()?;
         Ok(())
     }
 
@@ -613,6 +628,46 @@ impl App {
 
     fn insert_input_seen_before(&self, input: bitcoin::OutPoint) -> Result<bool> {
         self.seen_inputs.lock().expect("mutex lock failed").insert(input)
+    }
+}
+
+#[cfg(feature = "v2")]
+struct ReceiveStore {
+    session: Option<payjoin::receive::v2::Enrolled>,
+    file: std::fs::File,
+}
+
+impl ReceiveStore {
+    fn new() -> Result<Self> {
+        let mut file =
+            OpenOptions::new().write(true).read(true).create(true).open("receive_store.json")?;
+        let session = match serde_json::from_reader(&mut file) {
+            Ok(session) => Some(session),
+            Err(e) => {
+                log::debug!("error reading receive session store: {}", e);
+                None
+            }
+        };
+
+        Ok(Self { session: session, file })
+    }
+
+    fn write(
+        &mut self,
+        session: payjoin::receive::v2::Enrolled,
+    ) -> Result<&mut payjoin::receive::v2::Enrolled> {
+        use std::io::Write;
+
+        let session = self.session.insert(session);
+        let serialized = serde_json::to_string(session)?;
+        self.file.write_all(serialized.as_bytes())?;
+        Ok(session)
+    }
+
+    fn clear(&mut self) -> Result<()> {
+        let file = OpenOptions::new().write(true).open("receive_store.json")?;
+        file.set_len(0)?;
+        Ok(())
     }
 }
 

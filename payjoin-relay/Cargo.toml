@@ -10,7 +10,6 @@ categories = ["cryptography::cryptocurrencies", "network-programming"]
 license = "MITNFA"
 edition = "2021"
 resolver = "2"
-exclude = ["tests"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

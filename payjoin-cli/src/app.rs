@@ -539,7 +539,7 @@ impl App {
             )?;
 
         // Receive Check 1: Can Broadcast
-        let proposal = proposal.check_can_broadcast(|tx| {
+        let proposal = proposal.check_broadcast_suitability(None, |tx| {
             let raw_tx = bitcoin::consensus::encode::serialize_hex(&tx);
             let mempool_results =
                 bitcoind.test_mempool_accept(&[raw_tx]).map_err(|e| Error::Server(e.into()))?;

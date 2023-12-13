@@ -101,7 +101,7 @@ mod integration {
 
             // Receive Check 1: Can Broadcast
             let proposal = proposal
-                .check_can_broadcast(|tx| {
+                .check_broadcast_suitability(None, |tx| {
                     Ok(receiver
                         .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
                         .unwrap()
@@ -483,7 +483,7 @@ mod integration {
 
             // Receive Check 1: Can Broadcast
             let proposal = proposal
-                .check_can_broadcast(|tx| {
+                .check_broadcast_suitability(None, |tx| {
                     Ok(receiver
                         .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
                         .unwrap()

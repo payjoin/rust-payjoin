@@ -4,7 +4,7 @@ use std::fmt;
 use bitcoin::FeeRate;
 use log::warn;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Params {
     // version
     // v: usize,

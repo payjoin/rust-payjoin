@@ -123,7 +123,7 @@
 //! We need to know this transaction is consensus-valid.
 //!
 //! ```
-//! let checked_1 = proposal.check_can_broadcast(|tx| {
+//! let checked_1 = proposal.check_broadcast_suitability(None, |tx| {
 //!         let raw_tx = bitcoin::consensus::encode::serialize(&tx).to_hex();
 //!         let mempool_results = self
 //!             .bitcoind
@@ -297,8 +297,9 @@ pub trait Headers {
 ///
 /// If you are implementing an interactive payment processor, you should get extract the original
 /// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
-/// that the transaction can be broadcast with check_can_broadcast. Otherwise it is safe to
+/// that the transaction can be broadcast with check_broadcast_suitability. Otherwise it is safe to
 /// call assume_interactive_receive to proceed with validation.
+#[derive(Debug, Clone)]
 pub struct UncheckedProposal {
     psbt: Psbt,
     params: Params,
@@ -344,16 +345,24 @@ impl UncheckedProposal {
         Ok(UncheckedProposal { psbt, params })
     }
 
-    /// The Sender's Original PSBT
+    /// The Sender's Original PSBT transaction
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
         self.psbt.clone().extract_tx()
     }
 
-    /// Call after checking that the Original PSBT can be broadcast.
+    fn psbt_fee_rate(&self) -> Result<FeeRate, Error> {
+        let original_psbt_fee = self.psbt.fee().map_err(InternalRequestError::Psbt)?;
+        Ok(original_psbt_fee / self.extract_tx_to_schedule_broadcast().weight())
+    }
+
+    /// Check that the Original PSBT can be broadcasted.
     ///
     /// Receiver MUST check that the Original PSBT from the sender
-    /// can be broadcast, i.e. `testmempoolaccept` bitcoind rpc returns { "allowed": true,.. }
-    /// for `extract_tx_to_sheculed_broadcast()` before calling this method.
+    /// can be broadcast, i.e. `testmempoolaccept` bitcoind rpc returns { "allowed": true,.. }.
+    ///
+    /// Receiver can optionaly set a minimum feerate that will be enforced on the Original PSBT.
+    /// This can be used to prevent probing attacks and make it easier to deal with
+    /// high feerate environments.
     ///
     /// Do this check if you generate bitcoin uri to receive Payjoin on sender request without manual human approval, like a payment processor.
     /// Such so called "non-interactive" receivers are otherwise vulnerable to probing attacks.
@@ -361,14 +370,25 @@ impl UncheckedProposal {
     /// Broadcasting the Original PSBT after some time in the failure case makes incurs sender cost and prevents probing.
     ///
     /// Call this after checking downstream.
-    pub fn check_can_broadcast(
+    pub fn check_broadcast_suitability(
         self,
+        min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, Error>,
     ) -> Result<MaybeInputsOwned, Error> {
+        let original_psbt_fee_rate = self.psbt_fee_rate()?;
+        if let Some(min_fee_rate) = min_fee_rate {
+            if original_psbt_fee_rate < min_fee_rate {
+                return Err(InternalRequestError::PsbtBelowFeeRate(
+                    original_psbt_fee_rate,
+                    min_fee_rate,
+                )
+                .into());
+            }
+        }
         if can_broadcast(&self.psbt.clone().extract_tx())? {
             Ok(MaybeInputsOwned { psbt: self.psbt, params: self.params })
         } else {
-            Err(Error::BadRequest(InternalRequestError::OriginalPsbtNotBroadcastable.into()))
+            Err(InternalRequestError::OriginalPsbtNotBroadcastable.into())
         }
     }
 
@@ -855,7 +875,7 @@ mod test {
         let headers = MockHeaders::new(body.len() as u64);
         UncheckedProposal::from_request(
             body,
-            "?maxadditionalfeecontribution=182?additionalfeeoutputindex=0",
+            "maxadditionalfeecontribution=182&additionalfeeoutputindex=0",
             headers,
         )
     }
@@ -873,6 +893,7 @@ mod test {
         use bitcoin::{Address, Network};
 
         let proposal = proposal_from_test_vector().unwrap();
+        assert_eq!(proposal.psbt_fee_rate().unwrap().to_sat_per_vb_floor(), 2);
         let mut payjoin = proposal
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| Ok(false))

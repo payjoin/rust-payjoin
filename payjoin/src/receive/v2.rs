@@ -323,7 +323,7 @@ impl Enrolled {
 ///
 /// If you are implementing an interactive payment processor, you should get extract the original
 /// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
-/// that the transaction can be broadcast with check_can_broadcast. Otherwise it is safe to
+/// that the transaction can be broadcast with check_broadcast_suitability. Otherwise it is safe to
 /// call assume_interactive_receive to proceed with validation.
 pub struct UncheckedProposal {
     inner: super::UncheckedProposal,
@@ -364,11 +364,12 @@ impl UncheckedProposal {
     /// Broadcasting the Original PSBT after some time in the failure case makes incurs sender cost and prevents probing.
     ///
     /// Call this after checking downstream.
-    pub fn check_can_broadcast(
+    pub fn check_broadcast_suitability(
         self,
+        min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, Error>,
     ) -> Result<MaybeInputsOwned, Error> {
-        let inner = self.inner.check_can_broadcast(can_broadcast)?;
+        let inner = self.inner.check_broadcast_suitability(min_fee_rate, can_broadcast)?;
         Ok(MaybeInputsOwned { inner, context: self.context })
     }
 

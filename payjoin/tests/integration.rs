@@ -45,13 +45,52 @@ mod integration {
             // **********************
             // Inside the Receiver:
             // this data would transit from one party to another over the network in production
-            let response = handle_pj_request(req, headers, receiver);
+            let valid_response = handle_pj_request(req, headers, receiver);
             // this response would be returned as http response to the sender
 
             // **********************
             // Inside the Sender:
+            //
+            // Validate sender can handle known errors correctly
+            let known_error = r#"{"errorCode":"version-unsupported", "message":"Debug Message"}"#;
+            let response_error =
+                ctx.clone().process_response(&mut known_error.as_bytes()).unwrap_err();
+            assert_eq!(
+                format!("{:#}", response_error),
+                "This version of payjoin is not supported."
+            );
+            assert_eq!(
+                format!("{:?}", response_error),
+                "Well known error: { \"errorCode\": \"version-unsupported\",\n                \"message\": \"Debug Message\" }"
+            );
+            match response_error {
+                payjoin::send::ResponseError::WellKnown(e) => {
+                    assert_eq!(e.clone().error_code(), "version-unsupported");
+                    assert_eq!(e.message(), "Debug Message");
+                }
+                _ => panic!("Unexpected error type"),
+            };
+            let response_error = ctx.clone().process_response(&mut known_error.as_bytes());
+            assert_eq!(
+                response_error.unwrap_err().to_string(),
+                "This version of payjoin is not supported.".to_string()
+            );
+            let unrecognized_error = r#"{"errorCode":"not-recognized", "message":"o"}"#;
+            let response_error = ctx.clone().process_response(&mut unrecognized_error.as_bytes());
+            assert_eq!(
+                response_error.unwrap_err().to_string(),
+                "The receiver sent an unrecognized error."
+            );
+            // we only accept json with errorCode
+            let validation_error = r#"{"error_code":"not-recognized", "message":"o"}"#;
+            let error = ctx.clone().process_response(&mut validation_error.as_bytes()).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "The receiver sent an invalid response: couldn't decode as PSBT or JSON"
+            );
             // Sender checks, signs, finalizes, extracts, and broadcasts
-            let checked_payjoin_proposal_psbt = ctx.process_response(&mut response.as_bytes())?;
+            let checked_payjoin_proposal_psbt =
+                ctx.process_response(&mut valid_response.as_bytes())?;
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
             Ok(())

@@ -112,9 +112,10 @@ impl App {
             "Sent fallback transaction hex: {:#}",
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
         );
-        let psbt = ctx
-            .process_response(&mut response.into_reader())
-            .map_err(|e| anyhow!("Failed to process response {}", e))?;
+        let psbt = ctx.process_response(&mut response.into_reader()).map_err(|e| {
+            log::debug!("Error processing response: {:?}", e);
+            anyhow!("Failed to process response {}", e)
+        })?;
 
         self.process_pj_response(psbt)?;
         Ok(())
@@ -293,7 +294,6 @@ impl App {
     }
 
     fn process_pj_response(&self, psbt: Psbt) -> Result<bitcoin::Txid> {
-        // TODO display well-known errors and log::debug the rest
         log::debug!("Proposed psbt: {:#?}", psbt);
         let psbt = self
             .bitcoind()?

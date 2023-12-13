@@ -142,6 +142,12 @@ use bitcoin::psbt::Psbt;
 use bitcoin::{FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
 pub use error::{CreateRequestError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
+#[cfg(feature = "v2")]
+use serde::{
+    de::{self, MapAccess, Visitor},
+    ser::SerializeStruct,
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use url::Url;
 
 use crate::input_type::InputType;
@@ -211,7 +217,7 @@ impl<'a> RequestBuilder<'a> {
     pub fn build_recommended(
         self,
         min_fee_rate: FeeRate,
-    ) -> Result<RequestContext<'a>, CreateRequestError> {
+    ) -> Result<RequestContext, CreateRequestError> {
         // TODO support optional batched payout scripts. This would require a change to
         // build() which now checks for a single payee.
         let mut payout_scripts = std::iter::once(self.uri.address.script_pubkey());
@@ -283,7 +289,7 @@ impl<'a> RequestBuilder<'a> {
         change_index: Option<usize>,
         min_fee_rate: FeeRate,
         clamp_fee_contribution: bool,
-    ) -> Result<RequestContext<'a>, CreateRequestError> {
+    ) -> Result<RequestContext, CreateRequestError> {
         self.fee_contribution = Some((max_fee_contribution, change_index));
         self.clamp_fee_contribution = clamp_fee_contribution;
         self.min_fee_rate = min_fee_rate;
@@ -294,7 +300,7 @@ impl<'a> RequestBuilder<'a> {
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
-    pub fn build_non_incentivizing(mut self) -> Result<RequestContext<'a>, CreateRequestError> {
+    pub fn build_non_incentivizing(mut self) -> Result<RequestContext, CreateRequestError> {
         // since this is a builder, these should already be cleared
         // but we'll reset them to be sure
         self.fee_contribution = None;
@@ -303,11 +309,14 @@ impl<'a> RequestBuilder<'a> {
         self.build()
     }
 
-    fn build(self) -> Result<RequestContext<'a>, CreateRequestError> {
+    fn build(self) -> Result<RequestContext, CreateRequestError> {
         let mut psbt =
             self.psbt.validate().map_err(InternalCreateRequestError::InconsistentOriginalPsbt)?;
         psbt.validate_input_utxos(true)
             .map_err(InternalCreateRequestError::InvalidOriginalInput)?;
+        let endpoint = self.uri.extras._endpoint.clone();
+        #[cfg(feature = "v2")]
+        let ohttp_config = self.uri.extras.ohttp_config;
         let disable_output_substitution =
             self.uri.extras.disable_output_substitution || self.disable_output_substitution;
         let payee = self.uri.address.script_pubkey();
@@ -327,35 +336,50 @@ impl<'a> RequestBuilder<'a> {
         let txout = zeroth_input.previous_txout().expect("We already checked this above");
         let input_type = InputType::from_spent_input(txout, zeroth_input.psbtin).unwrap();
 
+        #[cfg(feature = "v2")]
+        let e = {
+            let secp = bitcoin::secp256k1::Secp256k1::new();
+            let (e_sec, _) = secp.generate_keypair(&mut rand::rngs::OsRng);
+            e_sec
+        };
+
         Ok(RequestContext {
             psbt,
-            uri: self.uri,
+            endpoint,
+            #[cfg(feature = "v2")]
+            ohttp_config,
             disable_output_substitution,
             fee_contribution,
             payee,
             input_type,
             sequence,
             min_fee_rate: self.min_fee_rate,
+            #[cfg(feature = "v2")]
+            e,
         })
     }
 }
 
-pub struct RequestContext<'a> {
+pub struct RequestContext {
     psbt: Psbt,
-    uri: PjUri<'a>,
+    endpoint: Url,
+    #[cfg(feature = "v2")]
+    ohttp_config: Option<ohttp::KeyConfig>,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
     input_type: InputType,
     sequence: Sequence,
     payee: ScriptBuf,
+    #[cfg(feature = "v2")]
+    e: bitcoin::secp256k1::SecretKey,
 }
 
-impl<'a> RequestContext<'a> {
+impl RequestContext {
     /// Extract serialized V1 Request and Context froma Payjoin Proposal
     pub fn extract_v1(self) -> Result<(Request, ContextV1), CreateRequestError> {
         let url = serialize_url(
-            self.uri.extras._endpoint.into(),
+            self.endpoint.into(),
             self.disable_output_substitution,
             self.fee_contribution,
             self.min_fee_rate,
@@ -387,7 +411,7 @@ impl<'a> RequestContext<'a> {
         &self,
         ohttp_proxy_url: &str,
     ) -> Result<(Request, ContextV2, ohttp::ClientResponse), CreateRequestError> {
-        let rs_base64 = crate::v2::subdir(self.uri.extras._endpoint.as_str()).to_string();
+        let rs_base64 = crate::v2::subdir(self.endpoint.as_str()).to_string();
         log::debug!("rs_base64: {:?}", rs_base64);
         let b64_config =
             bitcoin::base64::Config::new(bitcoin::base64::CharacterSet::UrlSafe, false);
@@ -395,17 +419,17 @@ impl<'a> RequestContext<'a> {
         log::debug!("rs: {:?}", rs.len());
         let rs = bitcoin::secp256k1::PublicKey::from_slice(&rs).unwrap();
 
-        let url = self.uri.extras._endpoint.clone();
+        let url = self.endpoint.clone();
         let body = serialize_v2_body(
             &self.psbt,
             self.disable_output_substitution,
             self.fee_contribution,
             self.min_fee_rate,
         )?;
-        let (body, e) =
-            crate::v2::encrypt_message_a(body, rs).map_err(InternalCreateRequestError::V2)?;
+        let body = crate::v2::encrypt_message_a(body, self.e, rs)
+            .map_err(InternalCreateRequestError::V2)?;
         let (body, ohttp_res) = crate::v2::ohttp_encapsulate(
-            &self.uri.extras.ohttp_config.as_ref().unwrap().encode().unwrap(),
+            &self.ohttp_config.as_ref().unwrap().encode().unwrap(),
             "POST",
             url.as_str(),
             Some(&body),
@@ -426,13 +450,152 @@ impl<'a> RequestContext<'a> {
                     sequence: self.sequence,
                     min_fee_rate: self.min_fee_rate,
                 },
-                e,
+                e: self.e,
             },
             ohttp_res,
         ))
     }
 }
 
+#[cfg(feature = "v2")]
+impl Serialize for RequestContext {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("RequestContext", 8)?;
+        state.serialize_field("psbt", &self.psbt.to_string())?;
+        state.serialize_field("endpoint", &self.endpoint.as_str())?;
+        let ohttp_string = self
+            .ohttp_config
+            .as_ref()
+            .map_or("".to_string(), |config| bitcoin::base64::encode(config.encode().unwrap()));
+        state.serialize_field("ohttp_config", &ohttp_string)?;
+        state.serialize_field("disable_output_substitution", &self.disable_output_substitution)?;
+        state.serialize_field(
+            "fee_contribution",
+            &self.fee_contribution.as_ref().map(|(amount, index)| (amount.to_sat(), *index)),
+        )?;
+        state.serialize_field("min_fee_rate", &self.min_fee_rate)?;
+        state.serialize_field("input_type", &self.input_type)?;
+        state.serialize_field("sequence", &self.sequence)?;
+        state.serialize_field("payee", &self.payee)?;
+        state.serialize_field("e", &self.e.secret_bytes())?;
+        state.end()
+    }
+}
+
+#[cfg(feature = "v2")]
+impl<'de> Deserialize<'de> for RequestContext {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct RequestContextVisitor;
+
+        const FIELDS: &[&str] = &[
+            "psbt",
+            "endpoint",
+            "ohttp_config",
+            "disable_output_substitution",
+            "fee_contribution",
+            "min_fee_rate",
+            "input_type",
+            "sequence",
+            "payee",
+            "e",
+        ];
+
+        impl<'de> Visitor<'de> for RequestContextVisitor {
+            type Value = RequestContext;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("struct RequestContext")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<RequestContext, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut psbt = None;
+                let mut endpoint = None;
+                let mut ohttp_config = None;
+                let mut disable_output_substitution = None;
+                let mut fee_contribution = None;
+                let mut min_fee_rate = None;
+                let mut input_type = None;
+                let mut sequence = None;
+                let mut payee = None;
+                let mut e = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "psbt" => {
+                            let buf: String = map.next_value::<String>()?;
+                            psbt = Some(Psbt::from_str(&buf).map_err(de::Error::custom)?);
+                        }
+                        "endpoint" =>
+                            endpoint = Some(
+                                url::Url::from_str(&map.next_value::<String>()?)
+                                    .map_err(de::Error::custom)?,
+                            ),
+                        "ohttp_config" => {
+                            let ohttp_base64: String = map.next_value()?;
+                            ohttp_config = if ohttp_base64.is_empty() {
+                                None
+                            } else {
+                                Some(
+                                    ohttp::KeyConfig::decode(
+                                        bitcoin::base64::decode(&ohttp_base64)
+                                            .map_err(de::Error::custom)?
+                                            .as_slice(),
+                                    )
+                                    .map_err(de::Error::custom)?,
+                                )
+                            };
+                        }
+                        "disable_output_substitution" =>
+                            disable_output_substitution = Some(map.next_value()?),
+                        "fee_contribution" => {
+                            let fc: Option<(u64, usize)> = map.next_value()?;
+                            fee_contribution = fc
+                                .map(|(amount, index)| (bitcoin::Amount::from_sat(amount), index));
+                        }
+                        "min_fee_rate" => min_fee_rate = Some(map.next_value()?),
+                        "input_type" => input_type = Some(map.next_value()?),
+                        "sequence" => sequence = Some(map.next_value()?),
+                        "payee" => payee = Some(map.next_value()?),
+                        "e" => {
+                            let secret_bytes: Vec<u8> = map.next_value()?;
+                            e = Some(
+                                bitcoin::secp256k1::SecretKey::from_slice(&secret_bytes)
+                                    .map_err(de::Error::custom)?,
+                            );
+                        }
+                        _ => return Err(de::Error::unknown_field(key.as_str(), FIELDS)),
+                    }
+                }
+
+                Ok(RequestContext {
+                    psbt: psbt.ok_or_else(|| de::Error::missing_field("psbt"))?,
+                    endpoint: endpoint.ok_or_else(|| de::Error::missing_field("endpoint"))?,
+                    ohttp_config,
+                    disable_output_substitution: disable_output_substitution
+                        .ok_or_else(|| de::Error::missing_field("disable_output_substitution"))?,
+                    fee_contribution,
+                    min_fee_rate: min_fee_rate
+                        .ok_or_else(|| de::Error::missing_field("min_fee_rate"))?,
+                    input_type: input_type.ok_or_else(|| de::Error::missing_field("input_type"))?,
+                    sequence: sequence.ok_or_else(|| de::Error::missing_field("sequence"))?,
+                    payee: payee.ok_or_else(|| de::Error::missing_field("payee"))?,
+                    e: e.ok_or_else(|| de::Error::missing_field("e"))?,
+                })
+            }
+        }
+
+        deserializer.deserialize_struct("RequestContext", FIELDS, RequestContextVisitor)
+    }
+}
 /// Represents data that needs to be transmitted to the receiver.
 ///
 /// You need to send this request over HTTP(S) to the receiver.

@@ -25,6 +25,8 @@ use payjoin::receive::{PayjoinProposal, UncheckedProposal};
 use payjoin::send::RequestContext;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "v2")]
+use tokio::sync::Mutex as AsyncMutex;
+#[cfg(feature = "v2")]
 use tokio::task::spawn_blocking;
 
 #[cfg(feature = "danger-local-https")]
@@ -33,15 +35,25 @@ const LOCAL_CERT_FILE: &str = "localhost.der";
 #[derive(Clone)]
 pub(crate) struct App {
     config: AppConfig,
-    receive_store: Arc<Mutex<ReceiveStore>>,
+    #[cfg(feature = "v2")]
+    receive_store: Arc<AsyncMutex<ReceiveStore>>,
+    #[cfg(feature = "v2")]
+    send_store: Arc<AsyncMutex<SendStore>>,
     seen_inputs: Arc<Mutex<SeenInputs>>,
 }
 
 impl App {
     pub fn new(config: AppConfig) -> Result<Self> {
         let seen_inputs = Arc::new(Mutex::new(SeenInputs::new()?));
-        let receive_store = Arc::new(Mutex::new(ReceiveStore::new()?));
-        Ok(Self { config, receive_store, seen_inputs })
+        #[cfg(feature = "v2")]
+        let receive_store = Arc::new(AsyncMutex::new(ReceiveStore::new()?));
+        #[cfg(feature = "v2")]
+        let send_store = Arc::new(AsyncMutex::new(SendStore::new()?));
+        #[cfg(feature = "v2")]
+        let app = Self { config, receive_store, send_store, seen_inputs };
+        #[cfg(not(feature = "v2"))]
+        let app = Self { config, seen_inputs };
+        Ok(app)
     }
 
     pub fn bitcoind(&self) -> Result<bitcoincore_rpc::Client> {
@@ -62,11 +74,22 @@ impl App {
     }
 
     #[cfg(feature = "v2")]
-    pub async fn send_payjoin(&self, bip21: &str, fee_rate: &f32) -> Result<()> {
-        let req_ctx = self.create_pj_request(bip21, fee_rate)?;
+    pub async fn send_payjoin(&self, bip21: &str, fee_rate: &f32, is_retry: bool) -> Result<()> {
+        let mut session = self.send_store.lock().await;
+        let req_ctx = if is_retry {
+            log::debug!("Resuming session");
+            // Get a reference to RequestContext
+            session.req_ctx.as_ref().expect("RequestContext is missing")
+        } else {
+            let req_ctx = self.create_pj_request(bip21, fee_rate)?;
+            session.write(req_ctx)?;
+            log::debug!("Writing req_ctx");
+            session.req_ctx.as_ref().expect("RequestContext is missing")
+        };
         log::debug!("Awaiting response");
         let res = self.long_poll_post(req_ctx).await?;
         self.process_pj_response(res)?;
+        session.clear()?;
         Ok(())
     }
 
@@ -120,13 +143,12 @@ impl App {
             let enrolled = enroller
                 .process_res(ohttp_response.into_reader(), ctx)
                 .map_err(|_| anyhow!("Enrollment failed"))?;
-            self.receive_store.lock().expect("mutex lock failed").write(enrolled.clone())?;
+            self.receive_store.lock().await.write(enrolled.clone())?;
             enrolled
         } else {
-            let session = self.receive_store.lock().expect("mutex lock failed");
+            let session = self.receive_store.lock().await;
             log::debug!("Resuming session");
-            let session = session.session.clone().unwrap();
-            session
+            session.session.clone().ok_or(anyhow!("No session found"))?
         };
 
         log::debug!("Enrolled receiver");
@@ -155,7 +177,7 @@ impl App {
         let _ = res.into_reader().read_to_end(&mut buf)?;
         let res = payjoin_proposal.deserialize_res(buf, ohttp_ctx);
         log::debug!("Received response {:?}", res);
-        self.receive_store.lock().expect("mutex lock failed").clear()?;
+        self.receive_store.lock().await.clear()?;
         Ok(())
     }
 
@@ -173,7 +195,7 @@ impl App {
     }
 
     #[cfg(feature = "v2")]
-    async fn long_poll_post(&self, req_ctx: payjoin::send::RequestContext<'_>) -> Result<Psbt> {
+    async fn long_poll_post(&self, req_ctx: &payjoin::send::RequestContext) -> Result<Psbt> {
         loop {
             let (req, ctx, ohttp) = req_ctx.extract_v2(&self.config.ohttp_proxy)?;
             println!("Sending fallback request to {}", &req.url);
@@ -221,7 +243,7 @@ impl App {
         }
     }
 
-    fn create_pj_request<'a>(&self, bip21: &'a str, fee_rate: &f32) -> Result<RequestContext<'a>> {
+    fn create_pj_request(&self, bip21: &str, fee_rate: &f32) -> Result<RequestContext> {
         let uri = payjoin::Uri::try_from(bip21)
             .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
 
@@ -632,11 +654,53 @@ impl App {
 }
 
 #[cfg(feature = "v2")]
+struct SendStore {
+    req_ctx: Option<payjoin::send::RequestContext>,
+    file: std::fs::File,
+}
+
+#[cfg(feature = "v2")]
+impl SendStore {
+    fn new() -> Result<Self> {
+        let mut file =
+            OpenOptions::new().write(true).read(true).create(true).open("send_store.json")?;
+        let session = match serde_json::from_reader(&mut file) {
+            Ok(session) => Some(session),
+            Err(e) => {
+                log::debug!("error reading send session store: {}", e);
+                None
+            }
+        };
+
+        Ok(Self { req_ctx: session, file })
+    }
+
+    fn write(
+        &mut self,
+        session: payjoin::send::RequestContext,
+    ) -> Result<&mut payjoin::send::RequestContext> {
+        use std::io::Write;
+
+        let session = self.req_ctx.insert(session);
+        let serialized = serde_json::to_string(session)?;
+        self.file.write_all(serialized.as_bytes())?;
+        Ok(session)
+    }
+
+    fn clear(&mut self) -> Result<()> {
+        let file = OpenOptions::new().write(true).open("send_store.json")?;
+        file.set_len(0)?;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "v2")]
 struct ReceiveStore {
     session: Option<payjoin::receive::v2::Enrolled>,
     file: std::fs::File,
 }
 
+#[cfg(feature = "v2")]
 impl ReceiveStore {
     fn new() -> Result<Self> {
         let mut file =
@@ -649,7 +713,7 @@ impl ReceiveStore {
             }
         };
 
-        Ok(Self { session: session, file })
+        Ok(Self { session, file })
     }
 
     fn write(

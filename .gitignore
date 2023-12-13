@@ -1,4 +1,4 @@
 target
 *config.toml
 *seen_inputs.json
-*session_store.json
+*_store.json

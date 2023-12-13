@@ -576,3 +576,25 @@ impl PayjoinProposal {
         Ok(res)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    #[cfg(feature = "v2")]
+    fn enrolled_ser_de_roundtrip() {
+        let enrolled = Enrolled {
+            relay_url: url::Url::parse("https://relay.com").unwrap(),
+            ohttp_config: vec![1, 2, 3],
+            ohttp_proxy: url::Url::parse("https://proxy.com").unwrap(),
+            s: bitcoin::secp256k1::KeyPair::from_secret_key(
+                &bitcoin::secp256k1::Secp256k1::new(),
+                &bitcoin::secp256k1::SecretKey::from_slice(&[1; 32]).unwrap(),
+            ),
+        };
+        let serialized = serde_json::to_string(&enrolled).unwrap();
+        let deserialized = serde_json::from_str(&serialized).unwrap();
+        assert!(enrolled == deserialized);
+    }
+}

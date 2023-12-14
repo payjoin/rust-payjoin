@@ -197,7 +197,7 @@ impl App {
     #[cfg(feature = "v2")]
     async fn long_poll_post(&self, req_ctx: &payjoin::send::RequestContext) -> Result<Psbt> {
         loop {
-            let (req, ctx, ohttp) = req_ctx.extract_v2(&self.config.ohttp_proxy)?;
+            let (req, ctx) = req_ctx.extract_v2(&self.config.ohttp_proxy)?;
             println!("Sending fallback request to {}", &req.url);
             let http = http_agent()?;
             let response = spawn_blocking(move || {
@@ -209,7 +209,7 @@ impl App {
             .await??;
 
             println!("Sent fallback transaction");
-            let psbt = ctx.process_response(&mut response.into_reader(), ohttp)?;
+            let psbt = ctx.process_response(&mut response.into_reader())?;
             if let Some(psbt) = psbt {
                 return Ok(psbt);
             } else {

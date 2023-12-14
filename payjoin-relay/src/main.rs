@@ -15,7 +15,7 @@ use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
 const DEFAULT_RELAY_PORT: &str = "8080";
-const DEFAULT_DB_HOST: &str = "localhost:5432";
+const DEFAULT_DB_HOST: &str = "redis://127.0.0.1/";
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_BUFFER_SIZE: usize = 65536;
 const V1_REJECT_RES_JSON: &str =
@@ -35,9 +35,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(DEFAULT_TIMEOUT_SECS);
     let timeout = std::time::Duration::from_secs(timeout_secs);
     let db_host = env::var("PJ_DB_HOST").unwrap_or_else(|_| DEFAULT_DB_HOST.to_string());
-
-    let pool = DbPool::new(timeout, db_host).await?;
     let ohttp = Arc::new(Mutex::new(init_ohttp()?));
+    let pool = Arc::new(Mutex::new(DbPool::new(db_host)?));
     let make_svc = make_service_fn(|_| {
         let pool = pool.clone();
         let ohttp = ohttp.clone();
@@ -117,7 +116,7 @@ fn init_ohttp() -> Result<ohttp::Server> {
 
 async fn handle_ohttp_gateway(
     req: Request<Body>,
-    pool: DbPool,
+    pool: Arc<Mutex<DbPool>>,
     ohttp: Arc<Mutex<ohttp::Server>>,
 ) -> Result<Response<Body>> {
     let path = req.uri().path().to_string();
@@ -142,7 +141,7 @@ async fn handle_ohttp_gateway(
 
 async fn handle_ohttp(
     body: Body,
-    pool: DbPool,
+    pool: Arc<Mutex<DbPool>>,
     ohttp: Arc<Mutex<ohttp::Server>>,
 ) -> Result<Response<Body>, HandlerError> {
     // decapsulate
@@ -187,7 +186,10 @@ async fn handle_ohttp(
     Ok(Response::new(Body::from(ohttp_res)))
 }
 
-async fn handle_v2(pool: DbPool, req: Request<Body>) -> Result<Response<Body>, HandlerError> {
+async fn handle_v2(
+    pool: Arc<Mutex<DbPool>>,
+    req: Request<Body>,
+) -> Result<Response<Body>, HandlerError> {
     let path = req.uri().path().to_string();
     let (parts, body) = req.into_parts();
 
@@ -259,7 +261,7 @@ async fn post_fallback_v1(
     id: &str,
     query: String,
     body: Body,
-    pool: DbPool,
+    pool: Arc<Mutex<DbPool>>,
 ) -> Result<Response<Body>, HandlerError> {
     trace!("Post fallback v1");
     let none_response = Response::builder()
@@ -285,7 +287,7 @@ async fn post_fallback_v1(
 async fn post_fallback_v2(
     id: &str,
     body: Body,
-    pool: DbPool,
+    pool: Arc<Mutex<DbPool>>,
 ) -> Result<Response<Body>, HandlerError> {
     trace!("Post fallback v2");
     let none_response = Response::builder().status(StatusCode::ACCEPTED).body(Body::empty())?;
@@ -295,7 +297,7 @@ async fn post_fallback_v2(
 async fn post_fallback(
     id: &str,
     body: Body,
-    pool: DbPool,
+    pool: Arc<Mutex<DbPool>>,
     none_response: Response<Body>,
 ) -> Result<Response<Body>, HandlerError> {
     tracing::trace!("Post fallback");
@@ -307,39 +309,43 @@ async fn post_fallback(
         return Err(HandlerError::PayloadTooLarge);
     }
 
-    match pool.push_req(&id, req.into()).await {
+    match pool.lock().await.push_req(&id, req.into()).await {
         Ok(_) => (),
         Err(e) => return Err(HandlerError::BadRequest(e.into())),
     };
 
-    match pool.peek_res(&id).await {
-        Some(result) => match result {
-            Ok(buffered_res) => Ok(Response::new(Body::from(buffered_res))),
-            Err(e) => Err(HandlerError::BadRequest(e.into())),
-        },
-        None => Ok(none_response),
+    match pool.lock().await.clone().peek_res(&id).await {
+        Ok(result) =>
+            if result.is_empty() {
+                Ok(none_response)
+            } else {
+                Ok(Response::new(Body::from(result)))
+            },
+        Err(_) => Ok(none_response),
     }
 }
 
-async fn get_fallback(id: &str, pool: DbPool) -> Result<Response<Body>, HandlerError> {
+async fn get_fallback(id: &str, pool: Arc<Mutex<DbPool>>) -> Result<Response<Body>, HandlerError> {
     trace!("GET fallback");
     let id = shorten_string(id);
-    match pool.peek_req(&id).await {
-        Some(result) => match result {
-            Ok(buffered_req) => Ok(Response::new(Body::from(buffered_req))),
-            Err(e) => Err(HandlerError::BadRequest(e.into())),
-        },
-        None => Ok(Response::builder().status(StatusCode::ACCEPTED).body(Body::empty())?),
+    match pool.lock().await.clone().peek_req(&id).await {
+        Ok(result) => Ok(Response::new(Body::from(result))),
+        Err(_) => Ok(Response::builder().status(StatusCode::ACCEPTED).body(Body::empty())?),
     }
 }
 
-async fn post_payjoin(id: &str, body: Body, pool: DbPool) -> Result<Response<Body>, HandlerError> {
+async fn post_payjoin(
+    id: &str,
+    body: Body,
+    pool: Arc<Mutex<DbPool>>,
+) -> Result<Response<Body>, HandlerError> {
     trace!("POST payjoin");
     let id = shorten_string(id);
     let res = hyper::body::to_bytes(body)
         .await
         .map_err(|e| HandlerError::InternalServerError(e.into()))?;
 
+    let mut pool = pool.lock().await;
     match pool.push_res(&id, res.into()).await {
         Ok(_) => Ok(Response::builder().status(StatusCode::NO_CONTENT).body(Body::empty())?),
         Err(e) => Err(HandlerError::BadRequest(e.into())),

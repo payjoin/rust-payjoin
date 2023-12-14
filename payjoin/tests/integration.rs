@@ -197,7 +197,7 @@ mod integration {
 
         use payjoin::receive::v2::{Enrolled, Enroller, PayjoinProposal, UncheckedProposal};
         use testcontainers::Container;
-        use testcontainers_modules::postgres::Postgres;
+        use testcontainers_modules::redis::Redis;
         use testcontainers_modules::testcontainers::clients::Cli;
         use tokio::process::{Child, Command};
         use tokio::task::spawn_blocking;
@@ -428,19 +428,22 @@ mod integration {
             Ok(())
         }
 
-        async fn init_relay<'a>(docker: &'a Cli) -> (Child, Container<'a, Postgres>) {
+        async fn init_relay<'a>(docker: &'a Cli) -> (Child, Container<'a, Redis>) {
             println!("Initializing relay server");
             env::set_var("PJ_RELAY_PORT", "8088");
             env::set_var("PJ_RELAY_TIMEOUT_SECS", "2");
-            let postgres = docker.run(Postgres::default());
-            env::set_var("PJ_DB_HOST", format!("127.0.0.1:{}", postgres.get_host_port_ipv4(5432)));
-            println!("Postgres running on {}", postgres.get_host_port_ipv4(5432));
+            let db = docker.run(Redis::default());
+            env::set_var(
+                "PJ_DB_HOST",
+                format!("redis://127.0.0.1:{}", db.get_host_port_ipv4(6379)),
+            );
+            println!("Postgres running on {}", db.get_host_port_ipv4(6379));
             compile_payjoin_relay().await.wait().await.unwrap();
             let workspace_root = env::var("CARGO_MANIFEST_DIR").unwrap();
             let binary_path = format!("{}/../target/debug/payjoin-relay", workspace_root);
             let mut command = Command::new(binary_path);
             command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
-            (command.spawn().unwrap(), postgres)
+            (command.spawn().unwrap(), db)
         }
 
         async fn compile_payjoin_relay() -> Child {

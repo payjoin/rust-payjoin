@@ -107,7 +107,7 @@ fn subdirectory(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
     base64::encode_config(pubkey, b64_config)
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Enrolled {
     relay_url: url::Url,
     ohttp_config: Vec<u8>,
@@ -574,5 +574,27 @@ impl PayjoinProposal {
         // display success or failure
         let res = crate::v2::ohttp_decapsulate(ohttp_context, &res)?;
         Ok(res)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    #[cfg(feature = "v2")]
+    fn enrolled_ser_de_roundtrip() {
+        let enrolled = Enrolled {
+            relay_url: url::Url::parse("https://relay.com").unwrap(),
+            ohttp_config: vec![1, 2, 3],
+            ohttp_proxy: url::Url::parse("https://proxy.com").unwrap(),
+            s: bitcoin::secp256k1::KeyPair::from_secret_key(
+                &bitcoin::secp256k1::Secp256k1::new(),
+                &bitcoin::secp256k1::SecretKey::from_slice(&[1; 32]).unwrap(),
+            ),
+        };
+        let serialized = serde_json::to_string(&enrolled).unwrap();
+        let deserialized = serde_json::from_str(&serialized).unwrap();
+        assert!(enrolled == deserialized);
     }
 }

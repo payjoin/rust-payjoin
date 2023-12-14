@@ -34,10 +34,11 @@ use chacha20poly1305::{AeadCore, ChaCha20Poly1305, Nonce};
 /// <- Receiver E, EE(payload), payload protected by knowledge of sender & receiver key
 pub fn encrypt_message_a(
     mut raw_msg: Vec<u8>,
+    e_sec: SecretKey,
     s: PublicKey,
-) -> Result<(Vec<u8>, SecretKey), Error> {
+) -> Result<Vec<u8>, Error> {
     let secp = Secp256k1::new();
-    let (e_sec, e_pub) = secp.generate_keypair(&mut OsRng);
+    let e_pub = e_sec.public_key(&secp);
     let es = SharedSecret::new(&s, &e_sec);
     let cipher = ChaCha20Poly1305::new_from_slice(&es.secret_bytes())
         .map_err(|_| InternalError::InvalidKeyLength)?;
@@ -49,7 +50,7 @@ pub fn encrypt_message_a(
     let mut message_a = e_pub.serialize().to_vec();
     message_a.extend(&nonce[..]);
     message_a.extend(&c_t[..]);
-    Ok((message_a, e_sec))
+    Ok(message_a)
 }
 
 pub fn decrypt_message_a(message_a: &[u8], s: SecretKey) -> Result<(Vec<u8>, PublicKey), Error> {

@@ -22,6 +22,62 @@ pub(crate) enum InputType {
     Taproot,
 }
 
+#[cfg(feature = "v2")]
+impl serde::Serialize for InputType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use InputType::*;
+
+        match self {
+            P2Pk => serializer.serialize_str("P2PK"),
+            P2Pkh => serializer.serialize_str("P2PKH"),
+            P2Sh => serializer.serialize_str("P2SH"),
+            SegWitV0 { ty, nested } =>
+                serializer.serialize_str(&format!("SegWitV0: type={}, nested={}", ty, nested)),
+            Taproot => serializer.serialize_str("Taproot"),
+        }
+    }
+}
+
+#[cfg(feature = "v2")]
+impl<'de> serde::Deserialize<'de> for InputType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use InputType::*;
+
+        let s = String::deserialize(deserializer)?;
+        if let Some(rest) = s.strip_prefix("SegWitV0: ") {
+            let parts: Vec<&str> = rest.split(", ").collect();
+            if parts.len() != 2 {
+                return Err(serde::de::Error::custom("invalid format for SegWitV0"));
+            }
+            log::debug!("parts: {:?}", parts);
+            let ty = match parts[0].strip_prefix("type=") {
+                Some("pubkey") => SegWitV0Type::Pubkey,
+                Some("script") => SegWitV0Type::Script,
+                _ => return Err(serde::de::Error::custom("invalid SegWitV0 type")),
+            };
+
+            let nested = match parts[1].strip_prefix("nested=") {
+                Some("true") => true,
+                Some("false") => false,
+                _ => return Err(serde::de::Error::custom("invalid SegWitV0 nested value")),
+            };
+
+            Ok(SegWitV0 { ty, nested })
+        } else {
+            match s.as_str() {
+                "P2PK" => Ok(P2Pk),
+                "P2PKH" => Ok(P2Pkh),
+                "P2SH" => Ok(P2Sh),
+                "Taproot" => Ok(Taproot),
+                _ => Err(serde::de::Error::custom("invalid type")),
+            }
+        }
+    }
+}
+
 impl InputType {
     pub(crate) fn from_spent_input(
         txout: &TxOut,

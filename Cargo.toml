@@ -1,12 +1,12 @@
 [package]
-name = "pdk-ffi"
+name = "payjoin_ffi"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]
-name = "pdk_ffi"
+name = "payjoin_ffi"
 
 [build-dependencies]
 uniffi = { version = "0.24.3", features = ["build"] }
@@ -15,30 +15,32 @@ uniffi = { version = "0.24.3", features = ["build"] }
 uniffi = { version = "0.24.3", features = ["bindgen-tests"] }
 assert_matches = "1.5.0"
 env_logger = "0.10.0"
-bitcoind = { version = "0.32.0", features = ["0_21_2"] }
+bitcoind = { version = "0.33.2", features = ["0_21_2"] }
 
 
 [dependencies]
 anyhow = "1.0.70"
-base64 = "0.21.2"
-bip21 = "0.3.1"
-bitcoincore-rpc = "0.17.0"
-clap = "4.1.4"
-config = "0.13.3"
 env_logger = "0.10.0"
 log = "0.4.7"
-reqwest = { version = "0.11.4", features = ["blocking"] }
-rcgen = { version = "0.11.1", optional = true }
 serde = { version = "1.0.160", features = ["derive"] }
-payjoin = { version = "0.9.0", features = ["send", "receive", "rand"] }
+payjoin = { version = "0.10.0", features = ["send", "receive", "rand"] }
 serde_json = "1.0.103"
-uniffi = "0.24.3"
-hex = "0.4.3"
+uniffi = { version = "0.24.3" }
 url = "2.4.0"
+thiserror = "1.0.47"
+bitcoincore-rpc = "0.17.0"
 
 [[bin]]
 name = "uniffi-bindgen"
 path = "uniffi-bindgen.rs"
+
+[profile.release-smaller]
+inherits = "release"
+opt-level = 'z'
+lto = true
+codegen-units = 1
+strip = true
+
 
 [features]
 default = ["uniffi/cli"]

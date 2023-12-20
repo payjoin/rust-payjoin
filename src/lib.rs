@@ -1,19 +1,29 @@
-pub mod error;
-pub mod receive;
-pub mod send;
+#![crate_name = "payjoin_ffi"]
+
+mod error;
+mod receive;
+mod send;
 #[cfg(test)]
 mod test;
-pub mod transaction;
-pub mod uri;
-pub use payjoin::bitcoin;
-use payjoin::bitcoin::{
-	address::{NetworkChecked, NetworkUnchecked},
-	Address as _BitcoinAdrress, ScriptBuf as BitcoinScriptBuf,
+mod transaction;
+mod uri;
+
+use crate::receive::{
+	CanBroadcast, Headers, IsOutputKnown, IsScriptOwned, MaybeInputsOwned, MaybeInputsSeen,
+	MaybeMixedInputScripts, OutputsUnknown, PayjoinProposal, ProcessPartiallySignedTransaction,
+	ProvisionalProposal, UncheckedProposal,
 };
-pub use payjoin::Error as PdkError;
+use crate::send::{Configuration, Context, Request};
+
+use crate::transaction::{PartiallySignedTransaction, Transaction, Txid};
+use crate::uri::{Amount, PrjUri, PrjUriRequest, Uri, Url};
+
+use error::PayjoinError;
+use payjoin::bitcoin::{Address as BitcoinAddress, ScriptBuf as BitcoinScriptBuf};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-uniffi::include_scaffolding!("pdk");
+use std::sync::Arc;
+uniffi::include_scaffolding!("payjoin_ffi");
 
 /// A reference to a transaction output.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
@@ -24,183 +34,199 @@ pub struct OutPoint {
 	pub vout: u32,
 }
 
-impl From<OutPoint> for bitcoin::OutPoint {
+impl From<OutPoint> for payjoin::bitcoin::OutPoint {
 	fn from(outpoint: OutPoint) -> Self {
-		bitcoin::OutPoint {
-			txid: bitcoin::Txid::from_str(&outpoint.txid).expect("Invalid txid"),
+		payjoin::bitcoin::OutPoint {
+			txid: payjoin::bitcoin::Txid::from_str(&outpoint.txid).expect("Invalid txid"),
 			vout: outpoint.vout,
 		}
 	}
 }
-impl From<bitcoin::OutPoint> for OutPoint {
-	fn from(outpoint: bitcoin::OutPoint) -> Self {
+
+impl From<payjoin::bitcoin::OutPoint> for OutPoint {
+	fn from(outpoint: payjoin::bitcoin::OutPoint) -> Self {
 		OutPoint { txid: outpoint.txid.to_string(), vout: outpoint.vout }
 	}
 }
 
-//TODO; RECREATE ADDRESS STRUCTURE
 #[derive(Debug, Clone, PartialEq)]
-pub struct Address<T>
-where
-	T: bitcoin::address::NetworkValidation,
-{
-	pub internal: _BitcoinAdrress<T>,
+pub struct Address {
+	internal: BitcoinAddress,
 }
-impl Address<NetworkChecked> {
-	pub fn from_script(script: ScriptBuf, network: Network) -> Result<Self, anyhow::Error> {
-		match _BitcoinAdrress::from_script(script.inner.as_script(), network.into()) {
-			Ok(e) => Ok(Address { internal: e }),
-			Err(e) => anyhow::bail!(e),
-		}
-	}
-	pub fn to_string(self) -> String {
-		self.internal.to_string()
-	}
-}
-impl Address<NetworkUnchecked> {
-	pub fn assume_checked(self) -> Result<Address<NetworkChecked>, anyhow::Error> {
-		Ok(Address { internal: self.internal.assume_checked() })
-	}
-	pub fn require_network(
-		self, network: Network,
-	) -> Result<Address<NetworkChecked>, anyhow::Error> {
-		Ok(Address {
-			internal: self.internal.require_network(network.into()).expect("Invalid Network"),
-		})
-	}
-	pub fn from_str(address: &str) -> Result<Self, anyhow::Error> {
-		match _BitcoinAdrress::from_str(&address) {
-			Ok(e) => Ok(Address { internal: e }),
-			Err(e) => anyhow::bail!(e),
-		}
+
+impl From<payjoin::bitcoin::Address> for Address {
+	fn from(value: payjoin::bitcoin::Address) -> Self {
+		Address { internal: value }
 	}
 }
 
-impl From<Address<NetworkChecked>> for bitcoin::Address {
-	fn from(value: Address<NetworkChecked>) -> Self {
+impl Address {
+	pub fn new(address: String) -> Result<Address, PayjoinError> {
+		match BitcoinAddress::from_str(&address) {
+			Ok(e) => Ok(e.assume_checked().into()),
+			Err(e) => Err(PayjoinError::InvalidAddress { message: e.to_string() }),
+		}
+	}
+
+	pub fn from_script(script: Arc<ScriptBuf>, network: Network) -> Result<Self, PayjoinError> {
+		match BitcoinAddress::from_script(script.internal.as_script(), network.into()) {
+			Ok(e) => Ok(e.into()),
+			Err(e) => Err(PayjoinError::InvalidScript { message: e.to_string() }),
+		}
+	}
+	pub fn as_string(&self) -> String {
+		self.internal.to_string()
+	}
+}
+
+impl From<Address> for payjoin::bitcoin::Address {
+	fn from(value: Address) -> Self {
 		value.internal
 	}
 }
 
-#[derive(Debug, Clone)]
+/// A Bitcoin script.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScriptBuf {
-	inner: BitcoinScriptBuf,
+	internal: BitcoinScriptBuf,
 }
+
 impl ScriptBuf {
 	pub fn new(raw_output_script: Vec<u8>) -> Self {
 		let buf = BitcoinScriptBuf::from_bytes(raw_output_script);
-		ScriptBuf { inner: buf }
+		ScriptBuf { internal: buf }
 	}
 
-	pub fn to_bytes(self) -> Vec<u8> {
-		self.get_internal().to_bytes()
+	pub fn from_string(script: String) -> anyhow::Result<Self, PayjoinError> {
+		let buf = BitcoinScriptBuf::from_hex(&script);
+		match buf {
+			Ok(e) => Ok(Self { internal: e }),
+			Err(e) => Err(PayjoinError::InvalidScript { message: e.to_string() }),
+		}
 	}
-	pub fn to_hex_string(self) -> String {
-		self.get_internal().to_hex_string()
+
+	pub fn to_bytes(&self) -> Vec<u8> {
+		self.internal.to_bytes()
 	}
-	pub fn to_string(self) -> String {
-		self.get_internal().to_string()
+	pub fn to_hex_string(&self) -> String {
+		self.internal.to_hex_string()
 	}
-	pub fn to_asm_string(self) -> String {
-		self.get_internal().to_asm_string()
+	pub fn as_string(&self) -> String {
+		self.internal.to_string()
 	}
-	fn get_internal(self) -> BitcoinScriptBuf {
-		self.inner
+	pub fn to_asm_string(&self) -> String {
+		self.internal.to_asm_string()
 	}
 }
-impl From<ScriptBuf> for bitcoin::ScriptBuf {
+
+impl From<ScriptBuf> for payjoin::bitcoin::ScriptBuf {
 	fn from(value: ScriptBuf) -> Self {
-		value.get_internal()
-	}
-}
-impl From<bitcoin::ScriptBuf> for ScriptBuf {
-	fn from(value: bitcoin::ScriptBuf) -> Self {
-		ScriptBuf { inner: value }
+		value.internal
 	}
 }
 
-#[derive(Debug)]
+impl From<payjoin::bitcoin::ScriptBuf> for ScriptBuf {
+	fn from(value: payjoin::bitcoin::ScriptBuf) -> Self {
+		ScriptBuf { internal: value }
+	}
+}
+
+#[derive(Debug, Clone)]
 pub struct TxOut {
 	/// The value of the output, in satoshis.
 	value: u64,
 	/// The address of the output.
-	script_pubkey: ScriptBuf,
-}
-impl From<TxOut> for bitcoin::TxOut {
-	fn from(tx_out: TxOut) -> Self {
-		bitcoin::TxOut { value: tx_out.value, script_pubkey: tx_out.script_pubkey.get_internal() }
-	}
+	script_pubkey: Arc<ScriptBuf>,
 }
 
-impl From<bitcoin::TxOut> for TxOut {
-	fn from(tx_out: bitcoin::TxOut) -> Self {
-		TxOut {
+impl From<TxOut> for payjoin::bitcoin::TxOut {
+	fn from(tx_out: TxOut) -> Self {
+		payjoin::bitcoin::TxOut {
 			value: tx_out.value,
-			script_pubkey: ScriptBuf { inner: tx_out.script_pubkey.into() },
+			script_pubkey: (*tx_out.script_pubkey).clone().internal,
 		}
 	}
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
-pub enum AddressType {
-	Legacy,
-	P2shSegwit,
-	Bech32,
-	Bech32m,
-}
-impl From<AddressType> for bitcoincore_rpc::json::AddressType {
-	fn from(value: AddressType) -> Self {
-		return match value {
-			AddressType::Legacy => bitcoincore_rpc::json::AddressType::Legacy,
-			AddressType::P2shSegwit => bitcoincore_rpc::json::AddressType::P2shSegwit,
-			AddressType::Bech32 => bitcoincore_rpc::json::AddressType::Bech32,
-			AddressType::Bech32m => bitcoincore_rpc::json::AddressType::Bech32m,
-		};
+impl From<payjoin::bitcoin::TxOut> for TxOut {
+	fn from(tx_out: payjoin::bitcoin::TxOut) -> Self {
+		TxOut {
+			value: tx_out.value,
+			script_pubkey: Arc::new(ScriptBuf { internal: tx_out.script_pubkey }),
+		}
 	}
 }
-// pub struct Input {
-//     pub txid: String,
-//     pub vout: u32,
-//     pub sequence: Option<u32>,
-// }
-// impl Input {
-//     pub fn new(txid: String, vout: u32, sequence: Option<u32>) -> Self {
-//         Self { txid, vout, sequence }
-//     }
-// }
-// impl From<&Input> for bitcoincore_rpc::json::CreateRawTransactionInput {
-//     fn from(value: &Input) -> Self {
-//         bitcoincore_rpc::json::CreateRawTransactionInput {
-//             txid: bitcoin::Txid::from_str(&value.txid).expect("Invalid Txid"),
-//             vout: value.vout,
-//             sequence: value.sequence,
-//         }
-//     }
-// }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum Network {
 	///Bitcoin’s testnet
 	Testnet,
 	///Bitcoin’s regtest
 	Regtest,
+	#[default]
 	///Classic Bitcoin
 	Bitcoin,
 	///Bitcoin’s signet
 	Signet,
 }
-impl Default for Network {
-	fn default() -> Self {
-		Network::Testnet
-	}
-}
-impl From<Network> for bitcoin::Network {
+
+impl From<Network> for payjoin::bitcoin::Network {
 	fn from(network: Network) -> Self {
 		match network {
-			Network::Signet => bitcoin::Network::Signet,
-			Network::Testnet => bitcoin::Network::Testnet,
-			Network::Regtest => bitcoin::Network::Regtest,
-			Network::Bitcoin => bitcoin::Network::Bitcoin,
+			Network::Signet => payjoin::bitcoin::Network::Signet,
+			Network::Testnet => payjoin::bitcoin::Network::Testnet,
+			Network::Regtest => payjoin::bitcoin::Network::Regtest,
+			Network::Bitcoin => payjoin::bitcoin::Network::Bitcoin,
 		}
+	}
+}
+
+#[derive(Copy, Clone)]
+pub struct FeeRate(payjoin::bitcoin::FeeRate);
+
+impl From<FeeRate> for payjoin::bitcoin::FeeRate {
+	fn from(value: FeeRate) -> Self {
+		value.0
+	}
+}
+
+impl From<payjoin::bitcoin::FeeRate> for FeeRate {
+	fn from(value: payjoin::bitcoin::FeeRate) -> Self {
+		Self(value)
+	}
+}
+
+impl FeeRate {
+	/// 0 sat/kwu.
+	pub fn zero() -> Self {
+		payjoin::bitcoin::FeeRate::ZERO.into()
+	}
+	/// Minimum possible value (0 sat/kwu).
+	///
+	/// Equivalent to [`ZERO`](Self::ZERO), may better express intent in some contexts.
+	pub fn min() -> Self {
+		payjoin::bitcoin::FeeRate::MIN.into()
+	}
+
+	/// Maximum possible value.
+	pub fn max() -> Self {
+		payjoin::bitcoin::FeeRate::MAX.into()
+	}
+
+	/// Minimum fee rate required to broadcast a transaction.
+	///
+	/// The value matches the default Bitcoin Core policy at the time of library release.
+	pub fn broadcast_min() -> Self {
+		payjoin::bitcoin::FeeRate::BROADCAST_MIN.into()
+	}
+
+	/// Fee rate used to compute dust amount.
+	pub fn dust() -> Self {
+		payjoin::bitcoin::FeeRate::DUST.into()
+	}
+
+	/// Constructs `FeeRate` from satoshis per 1000 weight units.
+	pub fn from_sat_per_kwu(sat_kwu: u64) -> Self {
+		payjoin::bitcoin::FeeRate::from_sat_per_kwu(sat_kwu).into()
 	}
 }

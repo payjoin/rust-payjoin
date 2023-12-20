@@ -1,50 +1,80 @@
-use std::fmt;
-
 use payjoin::bitcoin::psbt::PsbtParseError;
 use payjoin::receive::RequestError;
+use payjoin::Error;
+use std::fmt::Debug;
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum Error {
-	/// Error encountered during PSBT decoding from Base64 string.
-	PsbtParseError(String),
-	ReceiveError(String),
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum PayjoinError {
+	#[error("Error while parsing the string: {message} ")]
+	InvalidAddress { message: String },
+	#[error("Error while parsing the script: {message}")]
+	InvalidScript { message: String },
+
+	#[error("Error encountered while decoding PSBT: {message} ")]
+	PsbtParseError { message: String },
+
+	#[error("Receive error: {message}")]
+	ReceiveError { message: String },
+
 	///Error that may occur when the request from sender is malformed.
 	///This is currently opaque type because we aren’t sure which variants will stay. You can only display it.
-	RequestError(String),
+	#[error("Error encountered while processing the sender's request : {message}")]
+	RequestError { message: String },
+
+	///Error that may occur when the request from sender is malformed.
+	#[error("Error encountered while decoding tranaction data : {message}")]
+	TransactionError { message: String },
+	// To be returned as HTTP 500
+	#[error("HTTP 500 : {message}")]
+	ServerError { message: String },
+
 	///Error that may occur when coin selection fails.
-	SelectionError(String),
+	#[error("Error that may occur when coin selection fails: {message}")]
+	SelectionError { message: String },
+
 	///Error returned when request could not be created.
 	///This error can currently only happen due to programmer mistake.
-	CreateRequestError(String),
-	PjParseError(String),
-	UnexpectedError(String),
+	#[error("Error creating the request: {message}")]
+	CreateRequestError { message: String },
+
+	#[error("Error parsing the Pj URL: {message}")]
+	PjParseError { message: String },
+
+	#[error("{message}")]
+	PjNotSupported { message: String },
+
+	#[error("Malformed response from receiver is : {message}")]
+	ContextValidationError { message: String },
+
+	#[error("Unexpected error occurred: {message}")]
+	UnexpectedError { message: String },
 }
-impl fmt::Display for Error {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Error::ReceiveError(e) => write!(f, "ReceiveError: {}", e),
-			Error::RequestError(e) => write!(f, "RequestError: {}", e),
-			Error::SelectionError(e) => write!(f, "SelectionError: {}", e),
-			Error::CreateRequestError(e) => write!(f, "CreateRequestError: {}", e),
-			Error::PjParseError(e) => write!(f, "PjParseError: {}", e),
-			Error::PsbtParseError(e) => write!(f, "PsbtParseError: {}", e),
-			Error::UnexpectedError(e) => write!(f, "UnexpectedError: {}", e),
+
+impl From<PsbtParseError> for PayjoinError {
+	fn from(value: PsbtParseError) -> Self {
+		PayjoinError::PsbtParseError { message: value.to_string() }
+	}
+}
+
+//TODO; Implement ToString trait to SelectionError or make the values public.
+
+impl From<Error> for PayjoinError {
+	fn from(value: Error) -> Self {
+		match value {
+			Error::BadRequest(e) => e.into(),
+			Error::Server(e) => PayjoinError::ServerError { message: e.to_string() },
 		}
 	}
 }
-impl std::error::Error for Error {}
-impl From<RequestError> for Error {
+
+impl From<RequestError> for PayjoinError {
 	fn from(value: RequestError) -> Self {
-		Error::RequestError(value.to_string())
+		PayjoinError::RequestError { message: value.to_string() }
 	}
 }
-impl From<PsbtParseError> for Error {
-	fn from(value: PsbtParseError) -> Self {
-		Error::PsbtParseError(value.to_string())
-	}
-}
-impl From<payjoin::Error> for Error {
-	fn from(value: payjoin::Error) -> Self {
-		Error::UnexpectedError(value.to_string())
+
+impl From<uniffi::UnexpectedUniFFICallbackError> for PayjoinError {
+	fn from(e: uniffi::UnexpectedUniFFICallbackError) -> Self {
+		Self::UnexpectedError { message: e.reason }
 	}
 }

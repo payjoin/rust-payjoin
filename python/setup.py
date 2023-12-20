@@ -3,7 +3,7 @@
 from setuptools import setup, find_packages
 
 LONG_DESCRIPTION = """# payjoin
-This repository creates libraries for various programming languages, all using the Rust-based [Payjoin](https://github.com/payjoin/rust-payjoin) 
+This is a python library which implements payjoin, BIP178. It uses the Rust-based [Payjoin](https://github.com/payjoin/rust-payjoin) 
 as the core implementation of BIP178, sourced from the [Payjoin Dev Kit](https://payjoindevkit.org/).
 
 ## Install the package
@@ -27,5 +27,9 @@ setup(
     package_dir={"payjoin": "./src/payjoin"},
     version='0.1.0.dev',
     license="MIT or Apache 2.0",
+    author="BitcoinZavior",
+    author_email="BitcoinZavior@GMail.Com",
+    url="https://LtbL.io",
+    author_organization="Let there be Lightning, Inc",
     has_ext_modules=lambda: True,
 )

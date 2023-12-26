@@ -213,13 +213,13 @@ impl HandlerError {
     fn to_response(&self) -> Response<Body> {
         let status = match self {
             HandlerError::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
-            HandlerError::BadRequest(e) => {
-                error!("Bad request: {}", e);
-                StatusCode::BAD_REQUEST
-            }
             HandlerError::InternalServerError(e) => {
                 error!("Internal server error: {}", e);
                 StatusCode::INTERNAL_SERVER_ERROR
+            }
+            HandlerError::BadRequest(e) => {
+                error!("Bad request: {}", e);
+                StatusCode::BAD_REQUEST
             }
         };
 

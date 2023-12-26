@@ -211,20 +211,19 @@ enum HandlerError {
 
 impl HandlerError {
     fn to_response(&self) -> Response<Body> {
-        let status = match self {
-            HandlerError::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+        let mut res = Response::default();
+        match self {
+            HandlerError::PayloadTooLarge => *res.status_mut() = StatusCode::PAYLOAD_TOO_LARGE,
             HandlerError::InternalServerError(e) => {
                 error!("Internal server error: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
+                *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR
             }
             HandlerError::BadRequest(e) => {
                 error!("Bad request: {}", e);
-                StatusCode::BAD_REQUEST
+                *res.status_mut() = StatusCode::BAD_REQUEST
             }
         };
 
-        let mut res = Response::new(Body::empty());
-        *res.status_mut() = status;
         res
     }
 }

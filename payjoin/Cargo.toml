@@ -30,6 +30,7 @@ bhttp = { version = "0.4.0", optional = true }
 rand = { version = "0.8.4", optional = true }
 serde = { version = "1.0.186", default-features = false, optional = true }
 url = "2.2.2"
+serde_json = "1.0.108"
 
 [dev-dependencies]
 bitcoind = { version = "0.31.1", features = ["0_21_2"] }

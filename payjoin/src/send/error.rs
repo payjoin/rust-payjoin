@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Display};
 
 use bitcoin::locktime::absolute::LockTime;
 use bitcoin::Sequence;
@@ -16,7 +16,7 @@ pub struct ValidationError {
 
 #[derive(Debug)]
 pub(crate) enum InternalValidationError {
-    PsbtParse(bitcoin::psbt::PsbtParseError),
+    Parse,
     Io(std::io::Error),
     InvalidInputType(InputTypeError),
     InvalidProposedInput(crate::psbt::PrevTxOutError),
@@ -74,7 +74,7 @@ impl fmt::Display for ValidationError {
         use InternalValidationError::*;
 
         match &self.internal {
-            PsbtParse(e) => write!(f, "couldn't decode PSBT: {}", e),
+            Parse => write!(f, "couldn't decode as PSBT or JSON",),
             Io(e) => write!(f, "couldn't read PSBT: {}", e),
             InvalidInputType(e) => write!(f, "invalid transaction input type: {}", e),
             InvalidProposedInput(e) => write!(f, "invalid proposed transaction input: {}", e),
@@ -115,7 +115,7 @@ impl std::error::Error for ValidationError {
         use InternalValidationError::*;
 
         match &self.internal {
-            PsbtParse(error) => Some(error),
+            Parse => None,
             Io(error) => Some(error),
             InvalidInputType(error) => Some(error),
             InvalidProposedInput(error) => Some(error),
@@ -234,4 +234,192 @@ impl std::error::Error for CreateRequestError {
 
 impl From<InternalCreateRequestError> for CreateRequestError {
     fn from(value: InternalCreateRequestError) -> Self { CreateRequestError(value) }
+}
+
+/// Represent an error returned by the receiver.
+pub enum ResponseError {
+    /// `WellKnown` errors following the BIP78 spec
+    /// https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-Receivers_well_known_errors
+    /// These errors are displayed to end users.
+    ///
+    /// The `WellKnownError` represents `errorCode` and `message`.
+    WellKnown(WellKnownError),
+    /// `Unrecognized` errors are errors that are not well known and are only displayed in debug logs.
+    /// They are not displayed to end users.
+    ///
+    /// The first `String` is `errorCode`
+    /// The second `String` is `message`.
+    Unrecognized(String, String),
+    /// `Validation` errors are errors that are caused by malformed responses.
+    /// They are only displayed in debug logs.
+    Validation(ValidationError),
+}
+
+impl ResponseError {
+    fn from_json(json: serde_json::Value) -> Self {
+        // we try to find the errorCode field and
+        // if it exists we try to parse it as a well known error
+        // if its an unknown error we return the error code and message
+        // from original response
+        // if errorCode field doesn't exist we return parse error
+        let message = json
+            .as_object()
+            .and_then(|v| v.get("message"))
+            .and_then(|v| v.as_str())
+            .ok_or(InternalValidationError::Parse)
+            .unwrap_or("");
+        match json
+            .as_object()
+            .and_then(|v| v.get("errorCode"))
+            .and_then(|v| v.as_str())
+            .ok_or(InternalValidationError::Parse)
+        {
+            Ok(str) =>
+                if let Ok(known_error) = WellKnownError::from_error_code(str, message.to_string()) {
+                    return known_error.into();
+                } else {
+                    return Self::Unrecognized(str.to_string(), message.to_string());
+                },
+            Err(e) => return e.into(),
+        }
+    }
+    /// Parse a response from the receiver.
+    ///
+    /// response must be valid JSON string.
+    pub fn from_str(response: &str) -> Self {
+        if let Some(parsed) = serde_json::from_str(response).ok() {
+            Self::from_json(parsed)
+        } else {
+            InternalValidationError::Parse.into()
+        }
+    }
+}
+
+impl std::error::Error for ResponseError {}
+
+impl From<WellKnownError> for ResponseError {
+    fn from(value: WellKnownError) -> Self { Self::WellKnown(value) }
+}
+
+impl From<InternalValidationError> for ResponseError {
+    fn from(value: InternalValidationError) -> Self {
+        Self::Validation(ValidationError { internal: value })
+    }
+}
+
+// It is imperative to carefully display pre-defined messages to end users and the details in debug.
+impl Display for ResponseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::WellKnown(e) => e.fmt(f),
+            // Don't display unknowns to end users, only debug logs
+            Self::Unrecognized(_, _) => write!(f, "The receiver sent an unrecognized error."),
+            Self::Validation(e) => write!(f, "The receiver sent an invalid response: {}", e),
+        }
+    }
+}
+
+impl fmt::Debug for ResponseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::WellKnown(e) => write!(
+                f,
+                r#"Well known error: {{ "errorCode": "{}",
+                "message": "{}" }}"#,
+                e.error_code(),
+                e.message()
+            ),
+            Self::Unrecognized(code, msg) => write!(
+                f,
+                r#"Unrecognized error: {{ "errorCode": "{}", "message": "{}" }}"#,
+                code, msg
+            ),
+            Self::Validation(e) => write!(f, "Validation({:?})", e),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WellKnownError {
+    Unavailable(String),
+    NotEnoughMoney(String),
+    VersionUnsupported(String),
+    OriginalPsbtRejected(String),
+}
+
+impl WellKnownError {
+    pub fn error_code(&self) -> &str {
+        match self {
+            WellKnownError::Unavailable(_) => "unavailable",
+            WellKnownError::NotEnoughMoney(_) => "not-enough-money",
+            WellKnownError::VersionUnsupported(_) => "version-unsupported",
+            WellKnownError::OriginalPsbtRejected(_) => "original-psbt-rejected",
+        }
+    }
+    pub fn message(&self) -> &str {
+        match self {
+            WellKnownError::Unavailable(m) => m,
+            WellKnownError::NotEnoughMoney(m) => m,
+            WellKnownError::VersionUnsupported(m) => m,
+            WellKnownError::OriginalPsbtRejected(m) => m,
+        }
+    }
+}
+
+impl WellKnownError {
+    fn from_error_code(s: &str, message: String) -> Result<Self, ()> {
+        match s {
+            "unavailable" => Ok(WellKnownError::Unavailable(message)),
+            "not-enough-money" => Ok(WellKnownError::NotEnoughMoney(message)),
+            "version-unsupported" => Ok(WellKnownError::VersionUnsupported(message)),
+            "original-psbt-rejected" => Ok(WellKnownError::OriginalPsbtRejected(message)),
+            _ => Err(()),
+        }
+    }
+}
+
+impl Display for WellKnownError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Unavailable(_) => write!(f, "The payjoin endpoint is not available for now."),
+            Self::NotEnoughMoney(_) => write!(f, "The receiver added some inputs but could not bump the fee of the payjoin proposal."),
+            Self::VersionUnsupported(_) => write!(f, "This version of payjoin is not supported."),
+            Self::OriginalPsbtRejected(_) => write!(f, "The receiver rejected the original PSBT."),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bitcoind::bitcoincore_rpc::jsonrpc::serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn test_parse_json() {
+        let known_str_error =
+            r#"{"errorCode":"version-unsupported", "message":"custom message here"}"#;
+        let error = ResponseError::from_str(known_str_error);
+        match error {
+            ResponseError::WellKnown(e) => {
+                assert_eq!(e.error_code(), "version-unsupported");
+                assert_eq!(e.message(), "custom message here");
+                assert_eq!(e.to_string(), "This version of payjoin is not supported.");
+            }
+            _ => panic!("Expected WellKnown error"),
+        };
+        let unrecognized_error = r#"{"errorCode":"random", "message":"random"}"#;
+        assert_eq!(
+            ResponseError::from_str(unrecognized_error).to_string(),
+            "The receiver sent an unrecognized error."
+        );
+        let invalid_json_error = json!({
+            "err": "random",
+            "message": "This version of payjoin is not supported."
+        });
+        assert_eq!(
+            ResponseError::from_json(invalid_json_error).to_string(),
+            "The receiver sent an invalid response: couldn't decode as PSBT or JSON"
+        );
+    }
 }

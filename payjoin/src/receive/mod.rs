@@ -800,6 +800,7 @@ impl ProvisionalProposal {
             self.payjoin_psbt.inputs[i].witness_utxo = None;
             self.payjoin_psbt.inputs[i].final_script_sig = None;
             self.payjoin_psbt.inputs[i].final_script_witness = None;
+            self.payjoin_psbt.inputs[i].tap_key_sig = None;
         }
         Ok(PayjoinProposal {
             payjoin_psbt: self.payjoin_psbt,

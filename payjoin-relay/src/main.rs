@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bitcoin::{self, base64};
+use hyper::header::HeaderValue;
 use hyper::server::conn::AddrIncoming;
 use hyper::server::Builder;
 use hyper::service::{make_service_fn, service_fn};
@@ -151,8 +152,9 @@ async fn handle_ohttp(
     let ohttp_body =
         hyper::body::to_bytes(body).await.map_err(|e| HandlerError::BadRequest(e.into()))?;
     let mut ohttp_locked = ohttp.lock().await;
-    let (bhttp_req, res_ctx) =
-        ohttp_locked.decapsulate(&ohttp_body).map_err(|e| HandlerError::BadRequest(e.into()))?;
+    let (bhttp_req, res_ctx) = ohttp_locked
+        .decapsulate(&ohttp_body)
+        .map_err(|e| HandlerError::OhttpKeyRejection(e.into()))?;
     drop(ohttp_locked);
     let mut cursor = std::io::Cursor::new(bhttp_req);
     let req =
@@ -206,25 +208,34 @@ async fn handle_v2(pool: DbPool, req: Request<Body>) -> Result<Response<Body>, H
 enum HandlerError {
     PayloadTooLarge,
     InternalServerError(anyhow::Error),
+    OhttpKeyRejection(anyhow::Error),
     BadRequest(anyhow::Error),
 }
 
 impl HandlerError {
     fn to_response(&self) -> Response<Body> {
-        let status = match self {
-            HandlerError::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
-            HandlerError::BadRequest(e) => {
-                error!("Bad request: {}", e);
-                StatusCode::BAD_REQUEST
-            }
+        let mut res = Response::default();
+        match self {
+            HandlerError::PayloadTooLarge => *res.status_mut() = StatusCode::PAYLOAD_TOO_LARGE,
             HandlerError::InternalServerError(e) => {
                 error!("Internal server error: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
+                *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR
+            }
+            HandlerError::OhttpKeyRejection(e) => {
+                const OHTTP_KEY_REJECTION_RES_JSON: &str = r#"{"type":"https://iana.org/assignments/http-problem-types#ohttp-key", "title": "key identifier unknown"}"#;
+
+                error!("Bad request: Key configuration rejected: {}", e);
+                *res.status_mut() = StatusCode::BAD_REQUEST;
+                res.headers_mut()
+                    .insert("Content-Type", HeaderValue::from_static("application/problem+json"));
+                *res.body_mut() = Body::from(OHTTP_KEY_REJECTION_RES_JSON);
+            }
+            HandlerError::BadRequest(e) => {
+                error!("Bad request: {}", e);
+                *res.status_mut() = StatusCode::BAD_REQUEST
             }
         };
 
-        let mut res = Response::new(Body::empty());
-        *res.status_mut() = status;
         res
     }
 }

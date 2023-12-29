@@ -208,12 +208,13 @@ impl App {
             .await??;
 
             println!("Sent fallback transaction");
-            let psbt = ctx.process_response(&mut response.into_reader())?;
-            if let Some(psbt) = psbt {
-                return Ok(psbt);
-            } else {
-                log::info!("No response yet for POST payjoin request, retrying some seconds");
-                std::thread::sleep(std::time::Duration::from_secs(5));
+            match ctx.process_response(&mut response.into_reader()) {
+                Ok(Some(psbt)) => return Ok(psbt),
+                Ok(None) => std::thread::sleep(std::time::Duration::from_secs(5)),
+                Err(re) => {
+                    println!("{}", re);
+                    log::debug!("{:?}", re);
+                }
             }
         }
     }

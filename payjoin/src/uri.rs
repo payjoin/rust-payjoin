@@ -3,6 +3,8 @@ use std::convert::TryFrom;
 
 use bitcoin::address::{Error, NetworkChecked, NetworkUnchecked};
 use bitcoin::Network;
+#[cfg(feature = "v2")]
+use std::sync::Arc;
 use url::Url;
 
 pub enum Payjoin {
@@ -25,10 +27,21 @@ pub struct PayjoinParams {
     pub(crate) _endpoint: Url,
     pub(crate) disable_output_substitution: bool,
     #[cfg(feature = "v2")]
-    pub(crate) ohttp_config: Option<ohttp::KeyConfig>,
+    pub(crate) ohttp_config: Option<Arc<ohttp::KeyConfig>>,
 }
 
+impl Clone for PayjoinParams {
+    fn clone(&self) -> Self {
+        PayjoinParams {
+            _endpoint: self._endpoint.clone(),
+            disable_output_substitution: self.disable_output_substitution,
+            #[cfg(feature = "v2")]
+            ohttp_config: self.ohttp_config.as_ref().map(|config| config.clone()),
+        }
+    }
+}
 pub type Uri<'a, NetworkValidation> = bip21::Uri<'a, NetworkValidation, Payjoin>;
+
 pub type PjUri<'a> = bip21::Uri<'a, NetworkChecked, PayjoinParams>;
 
 mod sealed {
@@ -97,7 +110,9 @@ impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
 }
 
 impl PayjoinParams {
-    pub fn is_output_substitution_disabled(&self) -> bool { self.disable_output_substitution }
+    pub fn is_output_substitution_disabled(&self) -> bool {
+        self.disable_output_substitution
+    }
 }
 
 impl bip21::de::DeserializationError for Payjoin {
@@ -120,13 +135,17 @@ pub struct DeserializationState {
 pub struct PjParseError(InternalPjParseError);
 
 impl From<InternalPjParseError> for PjParseError {
-    fn from(value: InternalPjParseError) -> Self { PjParseError(value) }
+    fn from(value: InternalPjParseError) -> Self {
+        PjParseError(value)
+    }
 }
 
 impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
     type Value = Payjoin;
 
-    fn is_param_known(&self, param: &str) -> bool { matches!(param, "pj" | "pjos") }
+    fn is_param_known(&self, param: &str) -> bool {
+        matches!(param, "pj" | "pjos")
+    }
 
     fn deserialize_temp(
         &mut self,
@@ -160,9 +179,15 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
             "pj" => Err(InternalPjParseError::MultipleParams("pj").into()),
             "pjos" if self.pjos.is_none() => {
                 match &*Cow::try_from(value).map_err(|_| InternalPjParseError::BadPjOs)? {
-                    "0" => self.pjos = Some(false),
-                    "1" => self.pjos = Some(true),
-                    _ => return Err(InternalPjParseError::BadPjOs.into()),
+                    "0" => {
+                        self.pjos = Some(false);
+                    }
+                    "1" => {
+                        self.pjos = Some(true);
+                    }
+                    _ => {
+                        return Err(InternalPjParseError::BadPjOs.into());
+                    }
                 }
                 Ok(bip21::de::ParamKind::Known)
             }
@@ -180,8 +205,8 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
             (None, Some(_), _) => Err(PjParseError(InternalPjParseError::MissingEndpoint)),
             (Some(endpoint), pjos, None) => {
                 if endpoint.scheme() == "https"
-                    || endpoint.scheme() == "http"
-                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
+                    || (endpoint.scheme() == "http"
+                        && endpoint.domain().unwrap_or_default().ends_with(".onion"))
                 {
                     Ok(Payjoin::Supported(PayjoinParams {
                         _endpoint: endpoint,
@@ -194,19 +219,19 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
             }
             (Some(endpoint), pjos, Some(ohttp)) => {
                 if endpoint.scheme() == "https"
-                    || endpoint.scheme() == "http"
-                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
+                    || (endpoint.scheme() == "http"
+                        && endpoint.domain().unwrap_or_default().ends_with(".onion"))
                 {
                     Ok(Payjoin::Supported(PayjoinParams {
                         _endpoint: endpoint,
                         disable_output_substitution: pjos.unwrap_or(false),
-                        ohttp_config: Some(ohttp),
+                        ohttp_config: Some(Arc::new(ohttp)),
                     }))
                 } else if endpoint.scheme() == "http" {
                     Ok(Payjoin::V2Only(PayjoinParams {
                         _endpoint: endpoint,
                         disable_output_substitution: pjos.unwrap_or(false),
-                        ohttp_config: Some(ohttp),
+                        ohttp_config: Some(Arc::new(ohttp)),
                     }))
                 } else {
                     Err(PjParseError(InternalPjParseError::UnsecureEndpoint))
@@ -224,8 +249,8 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
             (None, Some(_)) => Err(PjParseError(InternalPjParseError::MissingEndpoint)),
             (Some(endpoint), pjos) => {
                 if endpoint.scheme() == "https"
-                    || endpoint.scheme() == "http"
-                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
+                    || (endpoint.scheme() == "http"
+                        && endpoint.domain().unwrap_or_default().ends_with(".onion"))
                 {
                     Ok(Payjoin::Supported(PayjoinParams {
                         _endpoint: endpoint,
@@ -302,7 +327,8 @@ mod tests {
 
     #[test]
     fn test_missing_amount() {
-        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://testnet.demo.btcpayserver.org/BTC/pj";
+        let uri =
+            "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://testnet.demo.btcpayserver.org/BTC/pj";
         assert!(Uri::try_from(uri).is_ok(), "missing amount should be ok");
     }
 

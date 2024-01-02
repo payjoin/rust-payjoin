@@ -20,6 +20,28 @@ impl Payjoin {
             Payjoin::Unsupported => false,
         }
     }
+    pub fn endpoint(&self) -> Option<&Url> {
+        match self {
+            Payjoin::Supported(params) => Some(&params.endpoint),
+            Payjoin::V2Only(params) => Some(&params.endpoint),
+            Payjoin::Unsupported => None,
+        }
+    }
+    pub fn disable_output_substitution(&self) -> bool {
+        match self {
+            Payjoin::Supported(params) => params.disable_output_substitution,
+            Payjoin::V2Only(params) => params.disable_output_substitution,
+            Payjoin::Unsupported => false,
+        }
+    }
+    #[cfg(feature = "v2")]
+    pub fn ohttp_config(&self) -> Option<&ohttp::KeyConfig> {
+        match self {
+            Payjoin::Supported(params) => params.ohttp_config.as_ref(),
+            Payjoin::V2Only(params) => params.ohttp_config.as_ref(),
+            Payjoin::Unsupported => None,
+        }
+    }
 }
 
 #[derive(Clone)]

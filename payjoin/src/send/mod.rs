@@ -314,7 +314,7 @@ impl<'a> RequestBuilder<'a> {
             self.psbt.validate().map_err(InternalCreateRequestError::InconsistentOriginalPsbt)?;
         psbt.validate_input_utxos(true)
             .map_err(InternalCreateRequestError::InvalidOriginalInput)?;
-        let endpoint = self.uri.extras._endpoint.clone();
+        let endpoint = self.uri.extras.endpoint.clone();
         #[cfg(feature = "v2")]
         let ohttp_config = self.uri.extras.ohttp_config;
         let disable_output_substitution =

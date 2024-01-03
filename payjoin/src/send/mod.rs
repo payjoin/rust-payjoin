@@ -687,7 +687,7 @@ impl ContextV2 {
     pub fn process_response(
         self,
         response: &mut impl std::io::Read,
-    ) -> Result<Option<Psbt>, ValidationError> {
+    ) -> Result<Option<Psbt>, ResponseError> {
         let mut res_buf = Vec::new();
         response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
         let mut res_buf = crate::v2::ohttp_decapsulate(self.ohttp_res, &res_buf)

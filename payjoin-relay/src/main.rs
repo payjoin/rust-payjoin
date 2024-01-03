@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bitcoin::{self, base64};
-use hyper::header::HeaderValue;
+use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
 use hyper::server::conn::AddrIncoming;
 use hyper::server::Builder;
 use hyper::service::{make_service_fn, service_fn};
@@ -136,9 +136,7 @@ async fn handle_ohttp_gateway(
     .unwrap_or_else(|e| e.to_response());
 
     // Allow CORS for third-party access
-    response
-        .headers_mut()
-        .insert("Access-Control-Allow-Origin", hyper::header::HeaderValue::from_static("*"));
+    response.headers_mut().insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
 
     Ok(response)
 }
@@ -227,7 +225,7 @@ impl HandlerError {
                 error!("Bad request: Key configuration rejected: {}", e);
                 *res.status_mut() = StatusCode::BAD_REQUEST;
                 res.headers_mut()
-                    .insert("Content-Type", HeaderValue::from_static("application/problem+json"));
+                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 *res.body_mut() = Body::from(OHTTP_KEY_REJECTION_RES_JSON);
             }
             HandlerError::BadRequest(e) => {

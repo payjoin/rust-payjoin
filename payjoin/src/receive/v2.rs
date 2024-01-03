@@ -71,11 +71,12 @@ impl Enroller {
 
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), crate::v2::Error> {
         let url = self.ohttp_proxy.clone();
+        let subdirectory = self.subdirectory();
         let (body, ctx) = crate::v2::ohttp_encapsulate(
             &self.ohttp_config,
             "POST",
             self.relay_url.as_str(),
-            Some(self.subdirectory().as_bytes()),
+            Some(subdirectory.as_bytes()),
         )?;
         let req = Request { url, body };
         Ok((req, ctx))

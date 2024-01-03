@@ -111,7 +111,7 @@ fn init_ohttp() -> Result<ohttp::Server> {
         encoded_config,
         base64::Config::new(base64::CharacterSet::UrlSafe, false),
     );
-    info!("ohttp server config base64 UrlSafe: {:?}", b64_config);
+    info!("ohttp-keys server config base64 UrlSafe: {:?}", b64_config);
     Ok(ohttp::Server::new(server_config)?)
 }
 
@@ -128,8 +128,7 @@ async fn handle_ohttp_gateway(
     debug!("handle_ohttp_gateway: {:?}", &path_segments);
     let mut response = match (parts.method, path_segments.as_slice()) {
         (Method::POST, ["", ""]) => handle_ohttp(body, pool, ohttp).await,
-        (Method::GET, ["", "ohttp-config"]) =>
-            Ok(get_ohttp_config(ohttp_config(&ohttp).await?).await),
+        (Method::GET, ["", "ohttp-keys"]) => get_ohttp_keys(&ohttp).await,
         (Method::POST, ["", id]) => post_fallback_v1(id, query, body, pool).await,
         _ => Ok(not_found()),
     }
@@ -353,18 +352,17 @@ fn not_found() -> Response<Body> {
     res
 }
 
-async fn get_ohttp_config(config: String) -> Response<Body> {
-    trace!("GET ohttp config: {:?}", config);
+async fn get_ohttp_keys(ohttp: &Arc<Mutex<ohttp::Server>>) -> Result<Response<Body>, HandlerError> {
     let mut res = Response::default();
-    *res.body_mut() = Body::from(config);
-    res
+    res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/ohttp-keys"));
+    let ohttp_keys = ohttp
+        .lock()
+        .await
+        .config()
+        .encode()
+        .map_err(|e| HandlerError::InternalServerError(e.into()))?;
+    *res.body_mut() = Body::from(ohttp_keys);
+    Ok(res)
 }
 
 fn shorten_string(input: &str) -> String { input.chars().take(8).collect() }
-
-async fn ohttp_config(server: &Arc<Mutex<ohttp::Server>>) -> Result<String> {
-    let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-    let server = server.lock().await;
-    let encoded_config = server.config().encode()?;
-    Ok(base64::encode_config(encoded_config, b64_config))
-}

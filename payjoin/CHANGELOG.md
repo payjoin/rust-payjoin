@@ -1,5 +1,17 @@
 # Payjoin Changelog
 
+## 0.13.0
+
+### API
+
+- Parse json errors from the receiver into `WellKnown` or other `ResponseErrors`
+
+### Fixes
+
+- Fixed problem where outdated OHTTP Config issue was unclear (#153)
+- Support Taproot PSBT field clearing and validation (#157)
+- Build `v2` docs
+
 ## 0.12.0
 
 - Introduce `v2` feature with oblivious, asynchronous, serverless payjoin

@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize, Serializer};
 use super::{Error, InternalRequestError, RequestError, SelectionError};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
-
 /// Represents data that needs to be transmitted to the payjoin relay.
 ///
 /// You need to send this request over HTTP(S) to the relay.
@@ -24,7 +23,7 @@ pub struct Request {
     pub body: Vec<u8>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct V2Context {
     relay_url: url::Url,
     ohttp_config: Vec<u8>,
@@ -33,7 +32,7 @@ pub struct V2Context {
     e: Option<bitcoin::secp256k1::PublicKey>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Enroller {
     relay_url: url::Url,
     ohttp_config: Vec<u8>,
@@ -67,7 +66,9 @@ impl Enroller {
         base64::encode_config(pubkey, b64_config)
     }
 
-    pub fn payjoin_subdir(&self) -> String { format!("{}/{}", self.subdirectory(), "payjoin") }
+    pub fn payjoin_subdir(&self) -> String {
+        format!("{}/{}", self.subdirectory(), "payjoin")
+    }
 
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), crate::v2::Error> {
         let url = self.ohttp_proxy.clone();
@@ -306,7 +307,9 @@ impl Enrolled {
         crate::v2::ohttp_encapsulate(&self.ohttp_config, "GET", &self.fallback_target(), None)
     }
 
-    pub fn pubkey(&self) -> [u8; 33] { self.s.public_key().serialize() }
+    pub fn pubkey(&self) -> [u8; 33] {
+        self.s.public_key().serialize()
+    }
 
     pub fn fallback_target(&self) -> String {
         let pubkey = &self.s.public_key().serialize();
@@ -325,6 +328,7 @@ impl Enrolled {
 /// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
 /// that the transaction can be broadcast with check_broadcast_suitability. Otherwise it is safe to
 /// call assume_interactive_receive to proceed with validation.
+#[derive(Clone)]
 pub struct UncheckedProposal {
     inner: super::UncheckedProposal,
     context: V2Context,
@@ -387,11 +391,11 @@ impl UncheckedProposal {
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
 /// Call [`check_no_receiver_owned_inputs()`](struct.UncheckedProposal.html#method.check_no_receiver_owned_inputs) to proceed.
+#[derive(Clone)]
 pub struct MaybeInputsOwned {
     inner: super::MaybeInputsOwned,
     context: V2Context,
 }
-
 impl MaybeInputsOwned {
     /// Check that the Original PSBT has no receiver-owned inputs.
     /// Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
@@ -409,6 +413,7 @@ impl MaybeInputsOwned {
 /// Typestate to validate that the Original PSBT has no mixed input types.
 ///
 /// Call [`check_no_mixed_input_types`](struct.UncheckedProposal.html#method.check_no_mixed_input_scripts) to proceed.
+#[derive(Clone)]
 pub struct MaybeMixedInputScripts {
     inner: super::MaybeMixedInputScripts,
     context: V2Context,
@@ -429,6 +434,7 @@ impl MaybeMixedInputScripts {
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
 /// Call [`check_no_inputs_seen`](struct.MaybeInputsSeen.html#method.check_no_inputs_seen_before) to proceed.
+#[derive(Clone)]
 pub struct MaybeInputsSeen {
     inner: super::MaybeInputsSeen,
     context: V2Context,
@@ -451,11 +457,11 @@ impl MaybeInputsSeen {
 ///
 /// Only accept PSBTs that send us money.
 /// Identify those outputs with `identify_receiver_outputs()` to proceed
+#[derive(Clone)]
 pub struct OutputsUnknown {
     inner: super::OutputsUnknown,
     context: V2Context,
 }
-
 impl OutputsUnknown {
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
@@ -468,7 +474,7 @@ impl OutputsUnknown {
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProvisionalProposal {
     pub inner: super::ProvisionalProposal,
     context: V2Context,
@@ -517,6 +523,7 @@ impl ProvisionalProposal {
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+#[derive(Clone)]
 pub struct PayjoinProposal {
     inner: super::PayjoinProposal,
     context: V2Context,
@@ -531,22 +538,28 @@ impl PayjoinProposal {
         self.inner.is_output_substitution_disabled()
     }
 
-    pub fn owned_vouts(&self) -> &Vec<usize> { self.inner.owned_vouts() }
+    pub fn owned_vouts(&self) -> &Vec<usize> {
+        self.inner.owned_vouts()
+    }
 
-    pub fn psbt(&self) -> &Psbt { self.inner.psbt() }
+    pub fn psbt(&self) -> &Psbt {
+        self.inner.psbt()
+    }
 
-    pub fn extract_v1_req(&self) -> String { base64::encode(self.inner.payjoin_psbt.serialize()) }
+    pub fn extract_v1_req(&self) -> String {
+        base64::encode(self.inner.payjoin_psbt.serialize())
+    }
 
     #[cfg(feature = "v2")]
     pub fn extract_v2_req(&self) -> Result<(Request, ohttp::ClientResponse), Error> {
-        let body = match self.context.e {
+        let body = (match self.context.e {
             Some(e) => {
                 let mut payjoin_bytes = self.inner.payjoin_psbt.serialize();
                 log::debug!("THERE IS AN e: {}", e);
                 crate::v2::encrypt_message_b(&mut payjoin_bytes, e)
             }
             None => Ok(self.extract_v1_req().as_bytes().to_vec()),
-        }?;
+        })?;
         let post_payjoin_target = format!(
             "{}{}/payjoin",
             self.context.relay_url.as_str(),

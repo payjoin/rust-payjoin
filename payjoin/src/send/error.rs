@@ -178,6 +178,12 @@ pub(crate) enum InternalCreateRequestError {
     InputType(crate::input_type::InputTypeError),
     #[cfg(feature = "v2")]
     V2(crate::v2::Error),
+    #[cfg(feature = "v2")]
+    SubdirectoryNotBase64(bitcoin::base64::DecodeError),
+    #[cfg(feature = "v2")]
+    SubdirectoryInvalidPubkey(bitcoin::secp256k1::Error),
+    #[cfg(feature = "v2")]
+    MissingOhttpConfig,
 }
 
 impl fmt::Display for CreateRequestError {
@@ -202,6 +208,12 @@ impl fmt::Display for CreateRequestError {
             InputType(e) => write!(f, "invalid input type: {}", e),
             #[cfg(feature = "v2")]
             V2(e) => write!(f, "v2 error: {}", e),
+            #[cfg(feature = "v2")]
+            SubdirectoryNotBase64(e) => write!(f, "subdirectory is not valid base64 error: {}", e),
+            #[cfg(feature = "v2")]
+            SubdirectoryInvalidPubkey(e) => write!(f, "subdirectory does not represent a valid pubkey: {}", e),
+            #[cfg(feature = "v2")]
+            MissingOhttpConfig => write!(f, "no ohttp configuration with which to make a v2 request available"),
         }
     }
 }
@@ -228,6 +240,12 @@ impl std::error::Error for CreateRequestError {
             InputType(error) => Some(error),
             #[cfg(feature = "v2")]
             V2(error) => Some(error),
+            #[cfg(feature = "v2")]
+            SubdirectoryNotBase64(error) => Some(error),
+            #[cfg(feature = "v2")]
+            SubdirectoryInvalidPubkey(error) => Some(error),
+            #[cfg(feature = "v2")]
+            MissingOhttpConfig => None,
         }
     }
 }

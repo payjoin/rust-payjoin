@@ -333,8 +333,9 @@ impl<'a> RequestBuilder<'a> {
         let zeroth_input = psbt.input_pairs().next().ok_or(InternalCreateRequestError::NoInputs)?;
 
         let sequence = zeroth_input.txin.sequence;
-        let txout = zeroth_input.previous_txout().expect("We already checked this above");
-        let input_type = InputType::from_spent_input(txout, zeroth_input.psbtin).unwrap();
+        let txout = zeroth_input.previous_txout().map_err(InternalCreateRequestError::PrevTxOut)?;
+        let input_type = InputType::from_spent_input(txout, zeroth_input.psbtin)
+            .map_err(InternalCreateRequestError::InputType)?;
 
         #[cfg(feature = "v2")]
         let e = {
@@ -435,9 +436,11 @@ impl RequestContext {
         log::debug!("rs_base64: {:?}", rs_base64);
         let b64_config =
             bitcoin::base64::Config::new(bitcoin::base64::CharacterSet::UrlSafe, false);
-        let rs = bitcoin::base64::decode_config(rs_base64, b64_config).unwrap();
+        let rs = bitcoin::base64::decode_config(rs_base64, b64_config)
+            .map_err(InternalCreateRequestError::SubdirectoryNotBase64)?;
         log::debug!("rs: {:?}", rs.len());
-        let rs = bitcoin::secp256k1::PublicKey::from_slice(&rs).unwrap();
+        let rs = bitcoin::secp256k1::PublicKey::from_slice(&rs)
+            .map_err(InternalCreateRequestError::SubdirectoryInvalidPubkey)?;
 
         let url = self.endpoint.clone();
         let body = serialize_v2_body(
@@ -449,7 +452,12 @@ impl RequestContext {
         let body = crate::v2::encrypt_message_a(body, self.e, rs)
             .map_err(InternalCreateRequestError::V2)?;
         let (body, ohttp_res) = crate::v2::ohttp_encapsulate(
-            &self.ohttp_config.as_ref().unwrap().encode().unwrap(),
+            &self
+                .ohttp_config
+                .as_ref()
+                .ok_or(InternalCreateRequestError::MissingOhttpConfig)?
+                .encode()
+                .map_err(|e| InternalCreateRequestError::V2(e.into()))?,
             "POST",
             url.as_str(),
             Some(&body),
@@ -486,10 +494,12 @@ impl Serialize for RequestContext {
         let mut state = serializer.serialize_struct("RequestContext", 8)?;
         state.serialize_field("psbt", &self.psbt.to_string())?;
         state.serialize_field("endpoint", &self.endpoint.as_str())?;
-        let ohttp_string = self
-            .ohttp_config
-            .as_ref()
-            .map_or("".to_string(), |config| bitcoin::base64::encode(config.encode().unwrap()));
+        let ohttp_string = self.ohttp_config.as_ref().map_or(Ok("".to_string()), |config| {
+            config
+                .encode()
+                .map_err(|e| serde::ser::Error::custom(format!("ohttp-keys encoding error: {}", e)))
+                .map(|encoded| bitcoin::base64::encode(encoded))
+        })?;
         state.serialize_field("ohttp_config", &ohttp_string)?;
         state.serialize_field("disable_output_substitution", &self.disable_output_substitution)?;
         state.serialize_field(

@@ -1712,7 +1712,7 @@ dependencies = [
 
 [[package]]
 name = "payjoin"
-version = "0.13.0"
+version = "0.13.0-rc.1"
 dependencies = [
  "bhttp",
  "bip21",

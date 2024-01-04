@@ -1,6 +1,6 @@
 [package]
 name = "payjoin"
-version = "0.12.0"
+version = "0.13.0"
 authors = ["Dan Gould <d@ngould.dev>"]
 description = "Payjoin Library for the BIP78 Pay to Endpoint protocol."
 repository = "https://github.com/payjoin/rust-payjoin"
@@ -43,4 +43,4 @@ tokio = { version = "1.12.0", features = ["full"] }
 ureq = "2.8.0"
 
 [package.metadata.docs.rs]
-features = ["send", "receive", "base64"]    
+features = ["send", "receive", "base64", "v2"]    

@@ -39,7 +39,9 @@ impl DbPool {
 }
 
 impl Clone for DbPool {
-    fn clone(&self) -> Self { Self { pool: self.pool.clone(), timeout: self.timeout } }
+    fn clone(&self) -> Self {
+        Self { pool: self.pool.clone(), timeout: self.timeout }
+    }
 }
 
 async fn init_postgres(db_host: String) -> Result<PgPool> {
@@ -151,12 +153,13 @@ async fn peek(
     .fetch_one(pool)
     .await
     {
-        Ok(row) =>
+        Ok(row) => {
             if let Some(content) = row.0 {
                 if !content.is_empty() {
                     return Ok(content);
                 }
-            },
+            }
+        }
         Err(e) => {
             debug!("Failed to fetch content initially: {}", e);
             // We'll continue to the next step even if the query failed

@@ -31,8 +31,9 @@ impl serde::Serialize for InputType {
             P2Pk => serializer.serialize_str("P2PK"),
             P2Pkh => serializer.serialize_str("P2PKH"),
             P2Sh => serializer.serialize_str("P2SH"),
-            SegWitV0 { ty, nested } =>
-                serializer.serialize_str(&format!("SegWitV0: type={}, nested={}", ty, nested)),
+            SegWitV0 { ty, nested } => {
+                serializer.serialize_str(&format!("SegWitV0: type={}, nested={}", ty, nested))
+            }
             Taproot => serializer.serialize_str("Taproot"),
         }
     }
@@ -93,8 +94,9 @@ impl InputType {
                 .as_ref()
                 .and_then(|script_buf| unpack_p2sh(script_buf.as_ref()))
             {
-                Some(script) if script.is_witness_program() =>
-                    Self::segwit_from_script(script, true),
+                Some(script) if script.is_witness_program() => {
+                    Self::segwit_from_script(script, true)
+                }
                 Some(_) => Ok(InputType::P2Sh),
                 None => Err(InputTypeError::NotFinalized),
             }
@@ -112,8 +114,9 @@ impl InputType {
             .ok_or(InputTypeError::UnknownInputType)?
             .map_err(|_| InputTypeError::UnknownInputType)?;
         match witness_version {
-            Instruction::PushBytes(bytes) if bytes.is_empty() =>
-                Ok(InputType::SegWitV0 { ty: instructions.try_into()?, nested }),
+            Instruction::PushBytes(bytes) if bytes.is_empty() => {
+                Ok(InputType::SegWitV0 { ty: instructions.try_into()?, nested })
+            }
             Instruction::Op(bitcoin::blockdata::opcodes::all::OP_PUSHNUM_1) => {
                 let instruction = instructions
                     .next()
@@ -121,8 +124,9 @@ impl InputType {
                     .map_err(|_| InputTypeError::UnknownInputType)?;
                 match instruction {
                     Instruction::PushBytes(bytes) if bytes.len() == 32 => Ok(InputType::Taproot),
-                    Instruction::PushBytes(_) | Instruction::Op(_) =>
-                        Err(InputTypeError::UnknownInputType),
+                    Instruction::PushBytes(_) | Instruction::Op(_) => {
+                        Err(InputTypeError::UnknownInputType)
+                    }
                 }
             }
             _ => Err(InputTypeError::UnknownInputType),
@@ -150,8 +154,9 @@ impl fmt::Display for InputType {
             InputType::P2Pk => write!(f, "P2PK"),
             InputType::P2Pkh => write!(f, "P2PKH"),
             InputType::P2Sh => write!(f, "P2SH"),
-            InputType::SegWitV0 { ty, nested } =>
-                write!(f, "SegWitV0: type={}, nested={}", ty, nested),
+            InputType::SegWitV0 { ty, nested } => {
+                write!(f, "SegWitV0: type={}, nested={}", ty, nested)
+            }
             InputType::Taproot => write!(f, "Taproot"),
         }
     }

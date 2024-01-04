@@ -42,9 +42,13 @@ pub(crate) trait PsbtExt: Sized {
 }
 
 impl PsbtExt for Psbt {
-    fn inputs_mut(&mut self) -> &mut [psbt::Input] { &mut self.inputs }
+    fn inputs_mut(&mut self) -> &mut [psbt::Input] {
+        &mut self.inputs
+    }
 
-    fn outputs_mut(&mut self) -> &mut [psbt::Output] { &mut self.outputs }
+    fn outputs_mut(&mut self) -> &mut [psbt::Output] {
+        &mut self.outputs
+    }
 
     fn xpub_mut(
         &mut self,
@@ -56,7 +60,9 @@ impl PsbtExt for Psbt {
         &mut self.proprietary
     }
 
-    fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>> { &mut self.unknown }
+    fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>> {
+        &mut self.unknown
+    }
 
     fn input_pairs(&self) -> Box<dyn Iterator<Item = InputPair<'_>> + '_> {
         Box::new(
@@ -136,8 +142,9 @@ impl<'a> InputPair<'a> {
 
     pub fn validate_utxo(&self, treat_missing_as_error: bool) -> Result<(), PsbtInputError> {
         match (&self.psbtin.non_witness_utxo, &self.psbtin.witness_utxo) {
-            (None, None) if treat_missing_as_error =>
-                Err(PsbtInputError::PrevTxOut(PrevTxOutError::MissingUtxoInformation)),
+            (None, None) if treat_missing_as_error => {
+                Err(PsbtInputError::PrevTxOut(PrevTxOutError::MissingUtxoInformation))
+            }
             (None, None) => Ok(()),
             (Some(tx), None) if tx.txid() == self.txin.previous_output.txid => tx
                 .output
@@ -229,7 +236,9 @@ impl std::error::Error for PsbtInputError {
 }
 
 impl From<PrevTxOutError> for PsbtInputError {
-    fn from(value: PrevTxOutError) -> Self { PsbtInputError::PrevTxOut(value) }
+    fn from(value: PrevTxOutError) -> Self {
+        PsbtInputError::PrevTxOut(value)
+    }
 }
 
 #[derive(Debug)]
@@ -245,5 +254,7 @@ impl fmt::Display for PsbtInputsError {
 }
 
 impl std::error::Error for PsbtInputsError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { Some(&self.error) }
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
 }

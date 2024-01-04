@@ -323,7 +323,7 @@ impl UncheckedProposal {
             .parse::<u64>()
             .map_err(InternalRequestError::InvalidContentLength)?;
         // 4M block size limit with base64 encoding overhead => maximum reasonable size of content-length
-        if content_length > 4_000_000 * 4 / 3 {
+        if content_length > (4_000_000 * 4) / 3 {
             return Err(InternalRequestError::ContentLengthTooLarge(content_length).into());
         }
 
@@ -405,6 +405,7 @@ impl UncheckedProposal {
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
 /// Call [`check_no_receiver_owned_inputs()`](struct.UncheckedProposal.html#method.check_no_receiver_owned_inputs) to proceed.
+#[derive(Clone)]
 pub struct MaybeInputsOwned {
     psbt: Psbt,
     params: Params,
@@ -432,8 +433,9 @@ impl MaybeInputsOwned {
             })
             .find_map(|script| match is_owned(&script) {
                 Ok(false) => None,
-                Ok(true) =>
-                    Some(Error::BadRequest(InternalRequestError::InputOwned(script).into())),
+                Ok(true) => {
+                    Some(Error::BadRequest(InternalRequestError::InputOwned(script).into()))
+                }
                 Err(e) => Some(Error::Server(e.into())),
             })
         {
@@ -448,6 +450,7 @@ impl MaybeInputsOwned {
 /// Typestate to validate that the Original PSBT has no mixed input types.
 ///
 /// Call [`check_no_mixed_input_types`](struct.UncheckedProposal.html#method.check_no_mixed_input_scripts) to proceed.
+#[derive(Clone)]
 pub struct MaybeMixedInputScripts {
     psbt: Psbt,
     params: Params,
@@ -500,6 +503,7 @@ impl MaybeMixedInputScripts {
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
 /// Call [`check_no_inputs_seen`](struct.MaybeInputsSeen.html#method.check_no_inputs_seen_before) to proceed.
+#[derive(Clone)]
 pub struct MaybeInputsSeen {
     psbt: Psbt,
     params: Params,
@@ -515,12 +519,17 @@ impl MaybeInputsSeen {
         self.psbt.input_pairs().try_for_each(|input| {
             match is_known(&input.txin.previous_output) {
                 Ok(false) => Ok::<(), Error>(()),
-                Ok(true) =>  {
-                    log::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
-                    Err(Error::BadRequest(
-                        InternalRequestError::InputSeen(input.txin.previous_output).into(),
-                    ))?
-                },
+                Ok(true) => {
+                    log::warn!(
+                        "Request contains an input we've seen before: {}. Preventing possible probing attack.",
+                        input.txin.previous_output
+                    );
+                    Err(
+                        Error::BadRequest(
+                            InternalRequestError::InputSeen(input.txin.previous_output).into()
+                        )
+                    )?
+                }
                 Err(e) => Err(Error::Server(e.into()))?,
             }
         })?;
@@ -533,6 +542,7 @@ impl MaybeInputsSeen {
 ///
 /// Only accept PSBTs that send us money.
 /// Identify those outputs with `identify_receiver_outputs()` to proceed
+#[derive(Clone)]
 pub struct OutputsUnknown {
     psbt: Psbt,
     params: Params,
@@ -571,7 +581,7 @@ impl OutputsUnknown {
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProvisionalProposal {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,
@@ -800,7 +810,6 @@ impl ProvisionalProposal {
             self.payjoin_psbt.inputs[i].witness_utxo = None;
             self.payjoin_psbt.inputs[i].final_script_sig = None;
             self.payjoin_psbt.inputs[i].final_script_witness = None;
-            self.payjoin_psbt.inputs[i].tap_key_sig = None;
         }
         Ok(PayjoinProposal {
             payjoin_psbt: self.payjoin_psbt,
@@ -822,6 +831,7 @@ impl ProvisionalProposal {
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+#[derive(Clone)]
 pub struct PayjoinProposal {
     payjoin_psbt: Psbt,
     params: Params,
@@ -837,9 +847,13 @@ impl PayjoinProposal {
         self.params.disable_output_substitution
     }
 
-    pub fn owned_vouts(&self) -> &Vec<usize> { &self.owned_vouts }
+    pub fn owned_vouts(&self) -> &Vec<usize> {
+        &self.owned_vouts
+    }
 
-    pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
+    pub fn psbt(&self) -> &Psbt {
+        &self.payjoin_psbt
+    }
 }
 
 #[cfg(test)]
@@ -852,7 +866,9 @@ mod test {
 
     impl MockHeaders {
         #[cfg(test)]
-        fn new(length: u64) -> MockHeaders { MockHeaders { length: length.to_string() } }
+        fn new(length: u64) -> MockHeaders {
+            MockHeaders { length: length.to_string() }
+        }
     }
 
     impl Headers for MockHeaders {
@@ -870,7 +886,8 @@ mod test {
         // | InputScriptType | Orginal PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
         // |-----------------|-----------------------|------------------------------|-------------------------|
         // | P2SH-P2WPKH     |  2 sat/vbyte          | 0.00000182                   | 0                       |
-        let original_psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+        let original_psbt =
+            "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
 
         let body = original_psbt.as_bytes();
         let headers = MockHeaders::new(body.len() as u64);

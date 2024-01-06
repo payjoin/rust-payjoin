@@ -378,7 +378,7 @@ impl Display for WellKnownError {
         match self {
             Self::Unavailable(_) => write!(f, "The payjoin endpoint is not available for now."),
             Self::NotEnoughMoney(_) => write!(f, "The receiver added some inputs but could not bump the fee of the payjoin proposal."),
-            Self::VersionUnsupported(_, _) => write!(f, "This version of payjoin is not supported."),
+            Self::VersionUnsupported(_, v) => write!(f, "This version of payjoin is not supported. Use version {:?}.", v),
             Self::OriginalPsbtRejected(_) => write!(f, "The receiver rejected the original PSBT."),
         }
     }
@@ -392,14 +392,16 @@ mod tests {
 
     #[test]
     fn test_parse_json() {
-        let known_str_error =
-            r#"{"errorCode":"version-unsupported", "message":"custom message here"}"#;
+        let known_str_error = r#"{"errorCode":"version-unsupported", "message":"custom message here", "supported": [1, 2]}"#;
         let error = ResponseError::from_str(known_str_error);
         match error {
             ResponseError::WellKnown(e) => {
                 assert_eq!(e.error_code(), "version-unsupported");
                 assert_eq!(e.message(), "custom message here");
-                assert_eq!(e.to_string(), "This version of payjoin is not supported.");
+                assert_eq!(
+                    e.to_string(),
+                    "This version of payjoin is not supported. Use version [1, 2]."
+                );
             }
             _ => panic!("Expected WellKnown error"),
         };

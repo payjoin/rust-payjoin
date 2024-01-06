@@ -123,11 +123,18 @@ impl fmt::Display for RequestError {
                 &format!("Content length too large: {}.", length),
             ),
             InternalRequestError::SenderParams(e) => match e {
-                super::optional_parameters::Error::UnknownVersion => write_error(
-                    f,
-                    "version-unsupported",
-                    "This version of payjoin is not supported.",
-                ),
+                super::optional_parameters::Error::UnknownVersion => {
+                    write!(
+                        f,
+                        r#"{{
+                            "errorCode": "version-unsupported",
+                            "supported": "{}",
+                            "message": "This version of payjoin is not supported."
+                        }}"#,
+                        serde_json::to_string(&super::optional_parameters::SUPPORTED_VERSIONS)
+                            .map_err(|_| fmt::Error)?
+                    )
+                }
                 _ => write_error(f, "sender-params-error", e),
             },
             InternalRequestError::InconsistentPsbt(e) =>

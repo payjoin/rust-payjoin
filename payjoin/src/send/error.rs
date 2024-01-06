@@ -268,19 +268,34 @@ impl ResponseError {
             .and_then(|v| v.as_str())
             .ok_or(InternalValidationError::Parse)
             .unwrap_or("");
-        match json
-            .as_object()
-            .and_then(|v| v.get("errorCode"))
-            .and_then(|v| v.as_str())
-            .ok_or(InternalValidationError::Parse)
+        if let Some(error_code) =
+            json.as_object().and_then(|v| v.get("errorCode")).and_then(|v| v.as_str())
         {
-            Ok(str) =>
-                if let Ok(known_error) = WellKnownError::from_error_code(str, message.to_string()) {
-                    return known_error.into();
-                } else {
-                    return Self::Unrecognized(str.to_string(), message.to_string());
-                },
-            Err(e) => return e.into(),
+            match error_code {
+                "version-unsupported" => {
+                    let supported = json
+                        .as_object()
+                        .and_then(|v| v.get("supported"))
+                        .and_then(|v| v.as_array())
+                        .map(|array| array.iter().filter_map(|v| v.as_u64()).collect::<Vec<u64>>())
+                        .ok_or(InternalValidationError::Parse)
+                        .unwrap_or_else(|_| Vec::new());
+
+                    return WellKnownError::VersionUnsupported(message.to_string(), supported)
+                        .into();
+                }
+                _ => {
+                    if let Ok(known_error) =
+                        WellKnownError::from_error_code(error_code, message.to_string())
+                    {
+                        return known_error.into();
+                    } else {
+                        return Self::Unrecognized(error_code.to_string(), message.to_string());
+                    }
+                }
+            }
+        } else {
+            return InternalValidationError::Parse.into();
         }
     }
     /// Parse a response from the receiver.
@@ -343,7 +358,7 @@ impl fmt::Debug for ResponseError {
 pub enum WellKnownError {
     Unavailable(String),
     NotEnoughMoney(String),
-    VersionUnsupported(String),
+    VersionUnsupported(String, Vec<u64>),
     OriginalPsbtRejected(String),
 }
 
@@ -352,7 +367,7 @@ impl WellKnownError {
         match self {
             WellKnownError::Unavailable(_) => "unavailable",
             WellKnownError::NotEnoughMoney(_) => "not-enough-money",
-            WellKnownError::VersionUnsupported(_) => "version-unsupported",
+            WellKnownError::VersionUnsupported(_, _) => "version-unsupported",
             WellKnownError::OriginalPsbtRejected(_) => "original-psbt-rejected",
         }
     }
@@ -360,7 +375,7 @@ impl WellKnownError {
         match self {
             WellKnownError::Unavailable(m) => m,
             WellKnownError::NotEnoughMoney(m) => m,
-            WellKnownError::VersionUnsupported(m) => m,
+            WellKnownError::VersionUnsupported(m, _) => m,
             WellKnownError::OriginalPsbtRejected(m) => m,
         }
     }
@@ -371,7 +386,7 @@ impl WellKnownError {
         match s {
             "unavailable" => Ok(WellKnownError::Unavailable(message)),
             "not-enough-money" => Ok(WellKnownError::NotEnoughMoney(message)),
-            "version-unsupported" => Ok(WellKnownError::VersionUnsupported(message)),
+            "version-unsupported" => Ok(WellKnownError::VersionUnsupported(message, vec![])),
             "original-psbt-rejected" => Ok(WellKnownError::OriginalPsbtRejected(message)),
             _ => Err(()),
         }
@@ -383,7 +398,7 @@ impl Display for WellKnownError {
         match self {
             Self::Unavailable(_) => write!(f, "The payjoin endpoint is not available for now."),
             Self::NotEnoughMoney(_) => write!(f, "The receiver added some inputs but could not bump the fee of the payjoin proposal."),
-            Self::VersionUnsupported(_) => write!(f, "This version of payjoin is not supported."),
+            Self::VersionUnsupported(_, _) => write!(f, "This version of payjoin is not supported."),
             Self::OriginalPsbtRejected(_) => write!(f, "The receiver rejected the original PSBT."),
         }
     }

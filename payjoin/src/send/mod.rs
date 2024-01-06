@@ -1201,25 +1201,29 @@ mod test {
 
     #[test]
     fn handle_known_errors() {
+        use crate::send::error::{ResponseError, WellKnownError};
+
         let ctx = create_v1_context();
         let known_json_error = serde_json::json!({
             "errorCode": "version-unsupported",
             "message": "This version of payjoin is not supported."
         })
         .to_string();
-        assert_eq!(
-            ctx.process_response(&mut known_json_error.as_bytes()).unwrap_err().to_string(),
-            "This version of payjoin is not supported."
-        );
+        match ctx.process_response(&mut known_json_error.as_bytes()) {
+            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported(_, _))) =>
+                assert!(true),
+            _ => panic!("Expected WellKnownError"),
+        }
+
         let ctx = create_v1_context();
         let invalid_json_error = serde_json::json!({
             "err": "random",
             "message": "This version of payjoin is not supported."
         })
         .to_string();
-        assert_eq!(
-            ctx.process_response(&mut invalid_json_error.as_bytes()).unwrap_err().to_string(),
-            "The receiver sent an invalid response: couldn't decode as PSBT or JSON"
-        )
+        match ctx.process_response(&mut invalid_json_error.as_bytes()) {
+            Err(ResponseError::Validation(_)) => assert!(true),
+            _ => panic!("Expected unrecognized JSON error"),
+        }
     }
 }

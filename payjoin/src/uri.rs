@@ -6,7 +6,6 @@ use bitcoin::Network;
 #[cfg(feature = "v2")]
 use std::sync::Arc;
 use url::Url;
-
 #[derive(Clone)]
 pub enum Payjoin {
     Supported(PayjoinParams),
@@ -41,8 +40,8 @@ impl Clone for PayjoinParams {
         }
     }
 }
-pub type Uri<'a, NetworkValidation> = bip21::Uri<'a, NetworkValidation, Payjoin>;
 
+pub type Uri<'a, NetworkValidation> = bip21::Uri<'a, NetworkValidation, Payjoin>;
 pub type PjUri<'a> = bip21::Uri<'a, NetworkChecked, PayjoinParams>;
 
 mod sealed {

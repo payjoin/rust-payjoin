@@ -25,7 +25,7 @@ pub(crate) fn witness_weight(witness: &Witness) -> Weight {
     let mut size = varint_size(witness.len() as u64);
 
     for item in witness.iter() {
-        size += varint_size(item.len() as u64) + item.len() as u64;
+        size += varint_size(item.len() as u64) + (item.len() as u64);
     }
 
     Weight::from_witness_data_size(size)
@@ -33,7 +33,7 @@ pub(crate) fn witness_weight(witness: &Witness) -> Weight {
 
 impl ComputeSize for Script {
     fn encoded_size(&self) -> u64 {
-        self.len() as u64 + varint_size(self.len() as u64)
+        (self.len() as u64) + varint_size(self.len() as u64)
     }
 }
 

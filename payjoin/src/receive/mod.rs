@@ -450,6 +450,7 @@ impl MaybeInputsOwned {
 /// Typestate to validate that the Original PSBT has no mixed input types.
 ///
 /// Call [`check_no_mixed_input_types`](struct.UncheckedProposal.html#method.check_no_mixed_input_scripts) to proceed.
+
 #[derive(Clone)]
 pub struct MaybeMixedInputScripts {
     psbt: Psbt,

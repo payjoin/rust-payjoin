@@ -16,8 +16,20 @@ pub(crate) enum InconsistentPsbt {
 impl fmt::Display for InconsistentPsbt {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            InconsistentPsbt::UnequalInputCounts { tx_ins, psbt_ins, } => write!(f, "The number of PSBT inputs ({}) doesn't equal to the number of unsigned transaction inputs ({})", psbt_ins, tx_ins),
-            InconsistentPsbt::UnequalOutputCounts { tx_outs, psbt_outs, } => write!(f, "The number of PSBT outputs ({}) doesn't equal to the number of unsigned transaction outputs ({})", psbt_outs, tx_outs),
+            InconsistentPsbt::UnequalInputCounts { tx_ins, psbt_ins } =>
+                write!(
+                    f,
+                    "The number of PSBT inputs ({}) doesn't equal to the number of unsigned transaction inputs ({})",
+                    psbt_ins,
+                    tx_ins
+                ),
+            InconsistentPsbt::UnequalOutputCounts { tx_outs, psbt_outs } =>
+                write!(
+                    f,
+                    "The number of PSBT outputs ({}) doesn't equal to the number of unsigned transaction outputs ({})",
+                    psbt_outs,
+                    tx_outs
+                ),
         }
     }
 }
@@ -155,10 +167,10 @@ impl<'a> InputPair<'a> {
                     }
                 })?)
                 .ok_or_else(|| {
-                    PrevTxOutError::IndexOutOfBounds {
+                    (PrevTxOutError::IndexOutOfBounds {
                         output_count: tx.output.len(),
                         index: self.txin.previous_output.vout,
-                    }
+                    })
                     .into()
                 })
                 .map(drop),
@@ -219,8 +231,16 @@ impl fmt::Display for PsbtInputError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             PsbtInputError::PrevTxOut(_) => write!(f, "invalid previous transaction output"),
-            PsbtInputError::UnequalTxid => write!(f, "transaction ID of previous transaction doesn't match one specified in input spending it"),
-            PsbtInputError::SegWitTxOutMismatch => write!(f, "transaction output provided in SegWit UTXO field doesn't match the one in non-SegWit UTXO field"),
+            PsbtInputError::UnequalTxid =>
+                write!(
+                    f,
+                    "transaction ID of previous transaction doesn't match one specified in input spending it"
+                ),
+            PsbtInputError::SegWitTxOutMismatch =>
+                write!(
+                    f,
+                    "transaction output provided in SegWit UTXO field doesn't match the one in non-SegWit UTXO field"
+                ),
         }
     }
 }

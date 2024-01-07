@@ -133,11 +133,9 @@ impl App {
             );
             let (req, ctx) = enroller.extract_req()?;
             log::debug!("Enrolling receiver");
+            let http = http_agent()?;
             let ohttp_response = spawn_blocking(move || {
-                let http = http_agent()?;
-                http.post(req.url.as_ref())
-                    .send_bytes(&req.body)
-                    .with_context(|| "HTTP request failed")
+                http.post(req.url.as_ref()).send_bytes(&req.body).map_err(map_ureq_err)
             })
             .await??;
 
@@ -173,7 +171,7 @@ impl App {
             .extract_v2_req()
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         let http = http_agent()?;
-        let res = http.post(req.url.as_str()).send_bytes(&req.body)?;
+        let res = http.post(req.url.as_str()).send_bytes(&req.body).map_err(map_ureq_err)?;
         let mut buf = Vec::new();
         let _ = res.into_reader().read_to_end(&mut buf)?;
         let res = payjoin_proposal.deserialize_res(buf, ohttp_ctx);
@@ -205,17 +203,18 @@ impl App {
                 http.post(req.url.as_ref())
                     .set("Content-Type", "text/plain")
                     .send_bytes(&req.body)
-                    .with_context(|| "HTTP request failed")
+                    .map_err(map_ureq_err)
             })
             .await??;
 
             println!("Sent fallback transaction");
-            let psbt = ctx.process_response(&mut response.into_reader())?;
-            if let Some(psbt) = psbt {
-                return Ok(psbt);
-            } else {
-                log::info!("No response yet for POST payjoin request, retrying some seconds");
-                std::thread::sleep(std::time::Duration::from_secs(5));
+            match ctx.process_response(&mut response.into_reader()) {
+                Ok(Some(psbt)) => return Ok(psbt),
+                Ok(None) => std::thread::sleep(std::time::Duration::from_secs(5)),
+                Err(re) => {
+                    println!("{}", re);
+                    log::debug!("{:?}", re);
+                }
             }
         }
     }
@@ -230,8 +229,10 @@ impl App {
                 enrolled.extract_req().map_err(|_| anyhow!("Failed to extract request"))?;
             log::debug!("GET fallback_psbt");
             let http = http_agent()?;
-            let ohttp_response =
-                spawn_blocking(move || http.post(req.url.as_str()).send_bytes(&req.body)).await??;
+            let ohttp_response = spawn_blocking(move || {
+                http.post(req.url.as_str()).send_bytes(&req.body).map_err(map_ureq_err)
+            })
+            .await??;
 
             let proposal = enrolled
                 .process_res(ohttp_response.into_reader(), context)
@@ -912,4 +913,16 @@ fn http_agent() -> Result<ureq::Agent> {
 #[cfg(not(feature = "danger-local-https"))]
 fn http_agent() -> Result<ureq::Agent> {
     Ok(ureq::Agent::new())
+}
+
+fn map_ureq_err(e: ureq::Error) -> anyhow::Error {
+    let e_string = e.to_string();
+    match e.into_response() {
+        Some(res) => anyhow!(
+            "HTTP request failed: {} {}",
+            res.status(),
+            res.into_string().unwrap_or_default()
+        ),
+        None => anyhow!("No HTTP response: {}", e_string),
+    }
 }

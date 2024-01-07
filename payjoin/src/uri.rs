@@ -7,6 +7,7 @@ use bitcoin::Network;
 use std::sync::Arc;
 use url::Url;
 
+#[derive(Clone)]
 pub enum Payjoin {
     Supported(PayjoinParams),
     V2Only(PayjoinParams),

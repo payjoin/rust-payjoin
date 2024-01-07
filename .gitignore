@@ -2,3 +2,4 @@ target
 *config.toml
 *seen_inputs.json
 *_store.json
+payjoin/src/.DS_Store

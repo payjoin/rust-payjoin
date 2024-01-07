@@ -239,6 +239,7 @@ mod integration {
         use super::*;
 
         const PJ_RELAY_URL: &str = "https://localhost:8088";
+        const BAD_OHTTP_CONFIG: &str = "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM";
         const OH_RELAY_URL: &str = "https://localhost:8088";
         const LOCAL_CERT_FILE: &str = "localhost.der";
 
@@ -264,6 +265,19 @@ mod integration {
 
             // **********************
             // Inside the Receiver:
+            // Try enroll with bad relay ohttp-config
+            let mut bad_enroller =
+                Enroller::from_relay_config(&PJ_RELAY_URL, &BAD_OHTTP_CONFIG, &OH_RELAY_URL);
+            let (req, _ctx) = bad_enroller.extract_req()?;
+            let res =
+                spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
+                    .await?;
+            assert!(res.is_err());
+            assert!(
+                res.unwrap_err().into_response().unwrap().content_type()
+                    == "application/problem+json"
+            );
+
             // Enroll with relay
             let mut enroller =
                 Enroller::from_relay_config(&PJ_RELAY_URL, &ohttp_config, &OH_RELAY_URL);

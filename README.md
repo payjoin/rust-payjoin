@@ -1,7 +1,7 @@
 # Payjoin language bindings
 
 This repository creates libraries for various programming languages, all using the
-Rust-based [Payjoin](https://github.com/payjoin/rust-payjoin) as the core implementation of [BIP-78](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki), sourced from
+Rust-based [Payjoin](https://github.com/payjoin/rust-payjoin) as the core implementation of BIP178, sourced from
 the [Payjoin Dev Kit].
 
 The primary focus of this project is to provide developers with cross-language libraries that seamlessly integrate with
@@ -10,9 +10,9 @@ usability of Payjoin, empowering developers to incorporate this privacy-enhancin
 regardless of their preferred programming language.
 
 With a commitment to collaboration and interoperability, this repository strives to foster a more inclusive and diverse
-ecosystem around Payjoin and BIP-78, contributing to the wider adoption of privacy-focused practices within the Bitcoin
+ecosystem around Payjoin and BIP178, contributing to the wider adoption of privacy-focused practices within the Bitcoin
 community. Join us in our mission to build a more private and secure future for Bitcoin transactions through Payjoin and
-BIP-78!
+BIP178!
 
 **Current Status:**
 This is a pre-alpha stage and is currently in the design phase. The first language bindings available will be for Python
@@ -28,9 +28,9 @@ the [mozilla/uniffi-rs] bindings generator for each supported target language.
 The below directories include instructions for using, building, and
 publishing the native language binding for [Payjoin Dev Kit] supported by this project.
 
-| Language | Platform              | Published Package | Building Documentation             | API Docs |
-| -------- | --------------------- | ----------------- | ---------------------------------- | -------- |
-| Python   | linux, macOS, Windows | payjoin           | [Readme payjoin](python/README.md) |          |
+| Language | Platform              | Published Package | Building Documentation | API Docs |
+|----------|-----------------------|-------------------|------------------------|----------|
+| Python   | linux, macOS, Windows | payjoin           | [Readme payjoin](python/README.md)|      |
 
 ## Minimum Supported Rust Version (MSRV)
 

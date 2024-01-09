@@ -1,9 +1,93 @@
 use std::borrow::Cow;
 use std::convert::TryFrom;
 
-use bitcoin::address::{Error, NetworkChecked, NetworkUnchecked};
-use bitcoin::Network;
+use bip21::de::UriError;
+use bip21::{DeserializationError, DeserializeParams};
+use bitcoin::address::{Error, NetworkChecked, NetworkUnchecked, NetworkValidation};
+use bitcoin::{Address, Amount, Network};
 use url::Url;
+
+/// Payjoin Uri represents a bip21 uri with additional
+/// payjoin parameters.
+pub struct PayjoinUri<
+    'a,
+    N: NetworkValidation,
+    P: DeserializeParams<'a> + DeserializationError + Sized,
+> {
+    pub inner: bip21::Uri<'a, N, P>,
+}
+
+impl<'a, N: NetworkValidation, P: DeserializeParams<'a> + DeserializationError + Sized>
+    From<bip21::Uri<'a, N, P>> for PayjoinUri<'a, N, P>
+{
+    fn from(value: bip21::Uri<'a, N, P>) -> Self { Self { inner: value } }
+}
+
+impl<'a> PayjoinUri<'a, NetworkUnchecked, Payjoin> {
+    /// Marks network of this address as checked.
+    pub fn assume_checked(self) -> PayjoinUri<'a, NetworkChecked, Payjoin> {
+        PayjoinUri::new(
+            self.inner.address.assume_checked(),
+            self.inner.extras,
+            self.inner.amount,
+            self.inner.label,
+            self.inner.message,
+        )
+        .into()
+    }
+    /// Checks whether network of this address is as required.
+    pub fn require_network(
+        self,
+        network: Network,
+    ) -> Result<PayjoinUri<'a, NetworkChecked, Payjoin>, Error> {
+        Ok(PayjoinUri::new(
+            self.inner.address.require_network(network)?,
+            self.inner.extras,
+            self.inner.amount,
+            self.inner.label,
+            self.inner.message,
+        )
+        .into())
+    }
+}
+
+impl<'a, N: NetworkValidation> PayjoinUri<'a, N, Payjoin> {
+    fn new(
+        address: Address<N>,
+        extras: Payjoin,
+        amount: Option<Amount>,
+        label: Option<bip21::Param<'a>>,
+        message: Option<bip21::Param<'a>>,
+    ) -> Self {
+        let mut uri = bip21::Uri::with_extras(address, extras);
+        uri.amount = amount;
+        uri.label = label;
+        uri.message = message;
+        Self { inner: uri }
+    }
+}
+
+impl From<bip21::de::Error<PjParseError>> for PjParseError {
+    fn from(e: bip21::de::Error<PjParseError>) -> Self {
+        match e {
+            bip21::de::Error::Uri(e) => InternalPjParseError::UriParseError(e).into(),
+            bip21::de::Error::Extras(e) => e.into(),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a str> for PayjoinUri<'a, NetworkUnchecked, Payjoin> {
+    type Error = PjParseError;
+
+    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
+        let uri = bip21::Uri::try_from(s).map_err(|e| Into::<PjParseError>::into(e))?;
+        Ok(uri.into())
+    }
+}
+
+impl ToString for PayjoinUri<'_, NetworkChecked, Payjoin> {
+    fn to_string(&self) -> String { self.inner.to_string() }
+}
 
 #[derive(Clone)]
 pub enum Payjoin {
@@ -266,6 +350,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
 impl std::fmt::Display for PjParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.0 {
+            InternalPjParseError::UriParseError(e) => write!(f, "Uri parse error: {}", e),
             InternalPjParseError::BadPjOs => write!(f, "Bad pjos parameter"),
             InternalPjParseError::MultipleParams(param) => {
                 write!(f, "Multiple instances of parameter '{}'", param)
@@ -286,6 +371,7 @@ impl std::fmt::Display for PjParseError {
 
 #[derive(Debug)]
 enum InternalPjParseError {
+    UriParseError(UriError),
     BadPjOs,
     MultipleParams(&'static str),
     MissingEndpoint,

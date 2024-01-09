@@ -2,6 +2,8 @@ use payjoin::bitcoin::psbt::PsbtParseError;
 use payjoin::receive::RequestError;
 use payjoin::Error;
 use std::fmt::Debug;
+use bitcoincore_rpc::bitcoin::block::ValidationError;
+use payjoin::send::{CreateRequestError, ResponseError as PdkResponseError};
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PayjoinError {
@@ -13,8 +15,8 @@ pub enum PayjoinError {
 	#[error("Error encountered while decoding PSBT: {message} ")]
 	PsbtParseError { message: String },
 
-	#[error("Receive error: {message}")]
-	ReceiveError { message: String },
+	#[error("Response error: {message}")]
+	ResponseError{ message: String },
 
 	///Error that may occur when the request from sender is malformed.
 	///This is currently opaque type because we aren’t sure which variants will stay. You can only display it.
@@ -44,7 +46,10 @@ pub enum PayjoinError {
 	PjNotSupported { message: String },
 
 	#[error("Malformed response from receiver is : {message}")]
-	ContextValidationError { message: String },
+	ValidationError { message: String },
+
+	#[error("V2Error: {message}")]
+	V2Error { message: String },
 
 	#[error("Unexpected error occurred: {message}")]
 	UnexpectedError { message: String },
@@ -56,13 +61,14 @@ impl From<PsbtParseError> for PayjoinError {
 	}
 }
 
-//TODO; Implement ToString trait to SelectionError or make the values public.
+
 
 impl From<Error> for PayjoinError {
 	fn from(value: Error) -> Self {
 		match value {
 			Error::BadRequest(e) => e.into(),
 			Error::Server(e) => PayjoinError::ServerError { message: e.to_string() },
+			// Error::V2(e) => PayjoinError::V2Error {message: format!("{:?}", e), }
 		}
 	}
 }
@@ -73,6 +79,21 @@ impl From<RequestError> for PayjoinError {
 	}
 }
 
+impl From<PdkResponseError> for PayjoinError {
+	fn from(value: PdkResponseError) -> Self {
+		PayjoinError::ResponseError {message: value.to_string()}
+	}
+}
+impl From<ValidationError> for PayjoinError {
+	fn from(value: ValidationError) -> Self {
+		PayjoinError::ValidationError {message: value.to_string()}
+	}
+}
+impl From<CreateRequestError> for PayjoinError {
+	fn from(value: CreateRequestError) -> Self {
+		PayjoinError::CreateRequestError {message: value.to_string()}
+	}
+}
 impl From<uniffi::UnexpectedUniFFICallbackError> for PayjoinError {
 	fn from(e: uniffi::UnexpectedUniFFICallbackError) -> Self {
 		Self::UnexpectedError { message: e.reason }

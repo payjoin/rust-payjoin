@@ -123,6 +123,41 @@ impl From<InternalPjParseError> for PjParseError {
     fn from(value: InternalPjParseError) -> Self { PjParseError(value) }
 }
 
+impl<'a> bip21::SerializeParams for &'a MaybePayjoinExtras {
+    type Key = &'static str;
+    type Value = String;
+    type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
+
+    fn serialize_params(self) -> Self::Iterator {
+        match self {
+            MaybePayjoinExtras::Supported(extras) => extras.serialize_params(),
+            MaybePayjoinExtras::Unsupported => vec![].into_iter(),
+        }
+    }
+}
+
+impl<'a> bip21::SerializeParams for &'a PayjoinExtras {
+    type Key = &'static str;
+    type Value = String;
+    type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
+
+    fn serialize_params(self) -> Self::Iterator {
+        #[allow(unused_mut)]
+        let mut params = vec![
+            ("pj", self.endpoint.as_str().to_string()),
+            ("pjos", if self.disable_output_substitution { "1" } else { "0" }.to_string()),
+        ];
+        #[cfg(feature = "v2")]
+        if let Some(config) = self.ohttp_config.clone().and_then(|c| c.encode().ok()) {
+            let encoded_config = bitcoin::base64::encode_config(config, bitcoin::base64::URL_SAFE);
+            params.push(("ohttp", encoded_config));
+        } else {
+            log::warn!("Failed to encode ohttp config, ignoring");
+        }
+        params.into_iter()
+    }
+}
+
 impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
     type Value = MaybePayjoinExtras;
 

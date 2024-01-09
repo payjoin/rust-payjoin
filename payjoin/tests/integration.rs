@@ -14,7 +14,7 @@ mod integration {
     use log::{debug, log_enabled, Level};
     use payjoin::bitcoin::base64;
     use payjoin::send::{Request, RequestBuilder};
-    use payjoin::Uri;
+    use payjoin::{Payjoin, PayjoinUri};
 
     type BoxError = Box<dyn std::error::Error>;
 
@@ -33,7 +33,18 @@ mod integration {
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let pj_uri = build_pj_uri(pj_receiver_address, Amount::ONE_BTC, EXAMPLE_URL, None);
+            let pj_uri_string = format!(
+                "{}?amount={}&pj={}",
+                pj_receiver_address.to_qr_uri(),
+                Amount::ONE_BTC.to_btc(),
+                EXAMPLE_URL,
+            );
+            debug!("PJ URI: {}", &pj_uri_string);
+            let pj_uri = {
+                let pj_uri = PayjoinUri::try_from(pj_uri_string.as_str()).unwrap();
+                let pj_uri = pj_uri.assume_checked();
+                pj_uri
+            };
             // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             debug!("Original psbt: {:#?}", psbt);
@@ -250,12 +261,21 @@ mod integration {
             let fallback_target = enrolled.fallback_target();
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let pj_uri = build_pj_uri(
-                pj_receiver_address,
-                Amount::ONE_BTC,
+            let mut pj_uri_string = format!(
+                "{}?amount={}&pj={}",
+                pj_receiver_address.to_qr_uri(),
+                Amount::ONE_BTC.to_btc(),
                 &fallback_target,
-                Some(&ohttp_config),
             );
+            if let Some(ohttp) = Some(&ohttp_config) {
+                write!(pj_uri_string, "&ohttp={}", ohttp).unwrap();
+            }
+            debug!("PJ URI: {}", &pj_uri_string);
+            let pj_uri = {
+                let pj_uri = PayjoinUri::try_from(pj_uri_string.as_str()).unwrap();
+                let pj_uri = pj_uri.assume_checked();
+                pj_uri
+            };
 
             // **********************
             // Inside the Sender:
@@ -359,13 +379,21 @@ mod integration {
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
             let fallback_target = enrolled.fallback_target();
-            let pj_uri = build_pj_uri(
-                pj_receiver_address,
-                Amount::ONE_BTC,
+            let mut pj_uri_string = format!(
+                "{}?amount={}&pj={}",
+                pj_receiver_address.to_qr_uri(),
+                Amount::ONE_BTC.to_btc(),
                 &fallback_target,
-                Some(&ohttp_config),
             );
-
+            if let Some(ohttp) = Some(&ohttp_config) {
+                write!(pj_uri_string, "&ohttp={}", ohttp).unwrap();
+            }
+            debug!("PJ URI: {}", &pj_uri_string);
+            let pj_uri = {
+                let pj_uri = PayjoinUri::try_from(pj_uri_string.as_str()).unwrap();
+                let pj_uri = pj_uri.assume_checked();
+                pj_uri
+            };
             // **********************
             // Inside the V1 Sender:
             // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
@@ -631,28 +659,12 @@ mod integration {
         Ok((bitcoind, sender, receiver))
     }
 
-    fn build_pj_uri<'a>(
-        address: bitcoin::Address,
-        amount: Amount,
-        pj: &'a str,
-        ohttp: Option<&'a str>,
-    ) -> Uri<'a, NetworkChecked> {
-        let mut pj_uri_string =
-            format!("{}?amount={}&pj={}", address.to_qr_uri(), amount.to_btc(), pj,);
-        if let Some(ohttp) = ohttp {
-            write!(pj_uri_string, "&ohttp={}", ohttp).unwrap();
-        }
-        debug!("PJ URI: {}", &pj_uri_string);
-        let pj_uri = Uri::from_str(&pj_uri_string).unwrap();
-        pj_uri.assume_checked()
-    }
-
     fn build_original_psbt(
         sender: &bitcoincore_rpc::Client,
-        pj_uri: &Uri<'_, NetworkChecked>,
+        pj_uri: &PayjoinUri<'_, NetworkChecked, Payjoin>,
     ) -> Result<Psbt, BoxError> {
         let mut outputs = HashMap::with_capacity(1);
-        outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap());
+        outputs.insert(pj_uri.inner.address.to_string(), pj_uri.inner.amount.unwrap());
         debug!("outputs: {:?}", outputs);
         let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
             lock_unspent: Some(true),

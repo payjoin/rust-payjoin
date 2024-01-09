@@ -152,9 +152,8 @@ use url::Url;
 
 use crate::input_type::InputType;
 use crate::psbt::PsbtExt;
-use crate::uri::UriExt;
 use crate::weight::{varint_size, ComputeWeight};
-use crate::PjUri;
+use crate::PayjoinUri;
 
 // See usize casts
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -167,7 +166,7 @@ type InternalResult<T> = Result<T, InternalValidationError>;
 #[derive(Clone)]
 pub struct RequestBuilder<'a> {
     psbt: Psbt,
-    uri: PjUri<'a>,
+    uri: PayjoinUri<'a, NetworkChecked, crate::uri::Payjoin>,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
     clamp_fee_contribution: bool,
@@ -182,11 +181,11 @@ impl<'a> RequestBuilder<'a> {
     /// to keep them separated.
     pub fn from_psbt_and_uri(
         psbt: Psbt,
-        uri: crate::Uri<'a, NetworkChecked>,
+        uri: PayjoinUri<'a, NetworkChecked, crate::uri::Payjoin>,
     ) -> Result<Self, CreateRequestError> {
-        let uri = uri
-            .check_pj_supported()
-            .map_err(|_| InternalCreateRequestError::UriDoesNotSupportPayjoin)?;
+        if !uri.inner.extras.pj_is_supported() {
+            return Err(InternalCreateRequestError::UriDoesNotSupportPayjoin.into());
+        }
         Ok(Self {
             psbt,
             uri,
@@ -221,7 +220,7 @@ impl<'a> RequestBuilder<'a> {
     ) -> Result<RequestContext, CreateRequestError> {
         // TODO support optional batched payout scripts. This would require a change to
         // build() which now checks for a single payee.
-        let mut payout_scripts = std::iter::once(self.uri.address.script_pubkey());
+        let mut payout_scripts = std::iter::once(self.uri.inner.address.script_pubkey());
         if let Some((additional_fee_index, fee_available)) = self
             .psbt
             .unsigned_tx
@@ -315,14 +314,14 @@ impl<'a> RequestBuilder<'a> {
             self.psbt.validate().map_err(InternalCreateRequestError::InconsistentOriginalPsbt)?;
         psbt.validate_input_utxos(true)
             .map_err(InternalCreateRequestError::InvalidOriginalInput)?;
-        let endpoint = self.uri.extras.endpoint.clone();
+        let endpoint = self.uri.inner.extras.endpoint().clone();
         #[cfg(feature = "v2")]
-        let ohttp_config = self.uri.extras.ohttp_config;
+        let ohttp_config = self.uri.inner.extras.ohttp_config();
         let disable_output_substitution =
-            self.uri.extras.disable_output_substitution || self.disable_output_substitution;
-        let payee = self.uri.address.script_pubkey();
+            self.uri.inner.extras.disable_output_substitution() || self.disable_output_substitution;
+        let payee = self.uri.inner.address.script_pubkey();
 
-        check_single_payee(&psbt, &payee, self.uri.amount)?;
+        check_single_payee(&psbt, &payee, self.uri.inner.amount)?;
         let fee_contribution = determine_fee_contribution(
             &psbt,
             &payee,
@@ -347,9 +346,9 @@ impl<'a> RequestBuilder<'a> {
 
         Ok(RequestContext {
             psbt,
-            endpoint,
+            endpoint: endpoint.unwrap().clone(),
             #[cfg(feature = "v2")]
-            ohttp_config,
+            ohttp_config: ohttp_config.cloned(),
             disable_output_substitution,
             fee_contribution,
             payee,
@@ -1215,8 +1214,9 @@ mod test {
         })
         .to_string();
         match ctx.process_response(&mut known_json_error.as_bytes()) {
-            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported(_, _))) =>
-                assert!(true),
+            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported(_, _))) => {
+                assert!(true)
+            }
             _ => panic!("Expected WellKnownError"),
         }
 

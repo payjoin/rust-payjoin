@@ -23,6 +23,7 @@ use payjoin::receive::Error;
 #[cfg(not(feature = "v2"))]
 use payjoin::receive::{PayjoinProposal, UncheckedProposal};
 use payjoin::send::RequestContext;
+use payjoin::PayjoinUri;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "v2")]
 use tokio::sync::Mutex as AsyncMutex;
@@ -246,16 +247,17 @@ impl App {
     }
 
     fn create_pj_request(&self, bip21: &str, fee_rate: &f32) -> Result<RequestContext> {
-        let uri = payjoin::Uri::try_from(bip21)
+        let uri = PayjoinUri::try_from(bip21)
             .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
 
         let uri = uri.assume_checked();
 
-        let amount = uri.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
+        let amount =
+            uri.inner.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
 
         // wallet_create_funded_psbt requires a HashMap<address: String, Amount>
         let mut outputs = HashMap::with_capacity(1);
-        outputs.insert(uri.address.to_string(), amount);
+        outputs.insert(uri.inner.address.to_string(), amount);
         let fee_rate_sat_per_kwu = fee_rate * 250.0_f32;
         let fee_rate: bitcoin::FeeRate =
             bitcoin::FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64);
@@ -380,7 +382,7 @@ impl App {
         let pj_uri_string = format!("{}&ohttp={}", pj_uri_string, self.config.ohttp_config,);
 
         // to check uri validity
-        let _pj_uri = payjoin::Uri::from_str(&pj_uri_string)
+        let _pj_uri = PayjoinUri::try_from(pj_uri_string.as_str())
             .map_err(|e| anyhow!("Constructed a bad URI string from args: {}", e))?;
 
         Ok(pj_uri_string)
@@ -448,7 +450,7 @@ impl App {
         } else {
             format!("{}?pj={}", address.to_qr_uri(), self.config.pj_endpoint)
         };
-        let uri = payjoin::Uri::try_from(uri_string.clone())
+        let uri = PayjoinUri::try_from(uri_string.as_str())
             .map_err(|_| Error::Server(anyhow!("Could not parse payjoin URI string.").into()))?;
         let _ = uri.assume_checked(); // we just got it from bitcoind above
 

@@ -136,74 +136,6 @@ pub struct PayjoinParams {
     pub(crate) ohttp_config: Option<ohttp::KeyConfig>,
 }
 
-pub type Uri<'a, NetworkValidation> = bip21::Uri<'a, NetworkValidation, Payjoin>;
-pub type PjUri<'a> = bip21::Uri<'a, NetworkChecked, PayjoinParams>;
-
-mod sealed {
-    use bitcoin::address::{NetworkChecked, NetworkUnchecked};
-
-    pub trait UriExt: Sized {}
-
-    impl<'a> UriExt for super::Uri<'a, NetworkChecked> {}
-    impl<'a> UriExt for super::PjUri<'a> {}
-
-    pub trait UriExtNetworkUnchecked: Sized {}
-
-    impl<'a> UriExtNetworkUnchecked for super::Uri<'a, NetworkUnchecked> {}
-}
-pub trait UriExtNetworkUnchecked<'a>: sealed::UriExtNetworkUnchecked {
-    fn require_network(self, network: Network) -> Result<Uri<'a, NetworkChecked>, Error>;
-
-    fn assume_checked(self) -> Uri<'a, NetworkChecked>;
-}
-
-pub trait UriExt<'a>: sealed::UriExt {
-    fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>>;
-}
-
-impl<'a> UriExtNetworkUnchecked<'a> for Uri<'a, NetworkUnchecked> {
-    fn require_network(self, network: Network) -> Result<Uri<'a, NetworkChecked>, Error> {
-        let checked_address = self.address.require_network(network)?;
-        let mut uri = bip21::Uri::with_extras(checked_address, self.extras);
-        uri.amount = self.amount;
-        uri.label = self.label;
-        uri.message = self.message;
-        Ok(uri)
-    }
-
-    fn assume_checked(self) -> Uri<'a, NetworkChecked> {
-        let checked_address = self.address.assume_checked();
-        let mut uri = bip21::Uri::with_extras(checked_address, self.extras);
-        uri.amount = self.amount;
-        uri.label = self.label;
-        uri.message = self.message;
-        uri
-    }
-}
-
-impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
-    fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>> {
-        match self.extras {
-            Payjoin::Supported(payjoin) | Payjoin::V2Only(payjoin) => {
-                let mut uri = bip21::Uri::with_extras(self.address, payjoin);
-                uri.amount = self.amount;
-                uri.label = self.label;
-                uri.message = self.message;
-
-                Ok(uri)
-            }
-            Payjoin::Unsupported => {
-                let mut uri = bip21::Uri::new(self.address);
-                uri.amount = self.amount;
-                uri.label = self.label;
-                uri.message = self.message;
-
-                Err(uri)
-            }
-        }
-    }
-}
-
 impl PayjoinParams {
     pub fn is_output_substitution_disabled(&self) -> bool { self.disable_output_substitution }
 }
@@ -427,41 +359,41 @@ impl<'a> bip21::SerializeParams for &'a PayjoinParams {
 mod tests {
     use std::convert::TryFrom;
 
-    use crate::Uri;
+    use crate::PayjoinUri;
 
     #[test]
     fn test_short() {
-        assert!(Uri::try_from("").is_err());
-        assert!(Uri::try_from("bitcoin").is_err());
-        assert!(Uri::try_from("bitcoin:").is_err());
+        assert!(PayjoinUri::try_from("").is_err());
+        assert!(PayjoinUri::try_from("bitcoin").is_err());
+        assert!(PayjoinUri::try_from("bitcoin:").is_err());
     }
 
     #[ignore]
     #[test]
     fn test_todo_url_encoded() {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao";
-        assert!(Uri::try_from(uri).is_err(), "pj url should be url encoded");
+        assert!(PayjoinUri::try_from(uri).is_err(), "pj url should be url encoded");
     }
 
     #[test]
     fn test_valid_url() {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=this_is_NOT_a_validURL";
-        assert!(Uri::try_from(uri).is_err(), "pj is not a valid url");
+        assert!(PayjoinUri::try_from(uri).is_err(), "pj is not a valid url");
     }
 
     #[test]
     fn test_missing_amount() {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://testnet.demo.btcpayserver.org/BTC/pj";
-        assert!(Uri::try_from(uri).is_ok(), "missing amount should be ok");
+        assert!(PayjoinUri::try_from(uri).is_ok(), "missing amount should be ok");
     }
 
     #[test]
     fn test_unencrypted() {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=http://example.com";
-        assert!(Uri::try_from(uri).is_err(), "unencrypted connection");
+        assert!(PayjoinUri::try_from(uri).is_err(), "unencrypted connection");
 
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=ftp://foo.onion";
-        assert!(Uri::try_from(uri).is_err(), "unencrypted connection");
+        assert!(PayjoinUri::try_from(uri).is_err(), "unencrypted connection");
     }
 
     #[test]
@@ -478,15 +410,16 @@ mod tests {
                 // TODO add with and without amount
                 // TODO shuffle params
                 let uri = format!("{}?amount=1&pj={}", address, pj);
-                assert!(Uri::try_from(&*uri).is_ok());
+                assert!(PayjoinUri::try_from(&*uri).is_ok());
             }
         }
     }
 
     #[test]
     fn test_unsupported() {
-        assert!(!Uri::try_from("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX")
+        assert!(!PayjoinUri::try_from("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX")
             .unwrap()
+            .inner
             .extras
             .pj_is_supported());
     }

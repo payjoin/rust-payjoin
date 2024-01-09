@@ -298,6 +298,45 @@ enum InternalPjParseError {
     UnsecureEndpoint,
 }
 
+impl<'a> bip21::SerializeParams for &'a Payjoin {
+    type Key = &'static str;
+    type Value = String;
+    type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
+
+    fn serialize_params(self) -> Self::Iterator {
+        match self {
+            Payjoin::Supported(params) => params.serialize_params(),
+            Payjoin::V2Only(params) => params.serialize_params(),
+            Payjoin::Unsupported => vec![].into_iter(),
+        }
+    }
+}
+
+impl<'a> bip21::SerializeParams for &'a PayjoinParams {
+    type Key = &'static str;
+    type Value = String;
+    type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
+
+    fn serialize_params(self) -> Self::Iterator {
+        let mut params = vec![
+            ("pj", self.endpoint.as_str().to_string()),
+            ("pjos", if self.disable_output_substitution { "1" } else { "0" }.to_string()),
+        ];
+        #[cfg(feature = "v2")]
+        if let Some(config) = &self.ohttp_config {
+            if let Ok(config) = config.encode() {
+                let encoded_config =
+                    bitcoin::base64::encode_config(config, bitcoin::base64::URL_SAFE);
+                params.push(("ohttp", encoded_config));
+            } else {
+                log::warn!("Failed to encode ohttp config, ignoring");
+            }
+            log::warn!("Ohttp config is not set, ignoring");
+        }
+        params.into_iter()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::convert::TryFrom;

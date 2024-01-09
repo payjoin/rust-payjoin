@@ -96,23 +96,7 @@ impl UncheckedProposal {
 	///
 	/// Call this after checking downstream.
 	/// TODO; Implement `Copy` trait UncheckedProposal to solve "to move occurs because `self.internal` has type `payjoin::receive::UncheckedProposal`, which does not implement the `Copy` trait"
-	pub fn check_can_broadcast(
-		&self, can_broadcast: Box<dyn CanBroadcast>,
-	) -> Result<Arc<MaybeInputsOwned>, PayjoinError> {
-		let (proposal, _) = Self::get_configuration(self);
-		let res = proposal.unwrap().check_can_broadcast(|tx| {
-			match can_broadcast
-				.test_mempool_accept(payjoin::bitcoin::consensus::encode::serialize(&tx))
-			{
-				Ok(e) => Ok(e),
-				Err(e) => Err(PdkError::Server(e.into())),
-			}
-		});
-		match res {
-			Ok(e) => Ok(Arc::new(e.into())),
-			Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
-		}
-	}
+
 
 	/// Call this method if the only way to initiate a Payjoin with this receiver requires manual intervention, as in most consumer wallets.
 	///
@@ -197,7 +181,7 @@ impl MaybeMixedInputScripts {
 		let (input_scripts, _) = Self::get_input_scripts(self);
 		match input_scripts.unwrap().check_no_mixed_input_scripts() {
 			Ok(e) => Ok(Arc::new(e.into())),
-			Err(e) => Err(PayjoinError::ReceiveError { message: e.to_string() }),
+			Err(e) => Err(e.into()),
 		}
 	}
 }
@@ -238,7 +222,7 @@ impl MaybeInputsSeen {
 			}
 		}) {
 			Ok(e) => Ok(Arc::new(e.into())),
-			Err(e) => Err(PayjoinError::ReceiveError { message: e.to_string() }),
+			Err(e) => Err(e.into()),
 		}
 	}
 }
@@ -279,7 +263,7 @@ impl OutputsUnknown {
 			}
 		}) {
 			Ok(e) => Ok(Arc::new(e.into())),
-			Err(e) => Err(PayjoinError::ReceiveError { message: e.to_string() }),
+			Err(e) => Err(e.into()),
 		}
 	}
 }

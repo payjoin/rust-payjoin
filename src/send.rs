@@ -1,89 +1,42 @@
 use std::sync::{Arc, Mutex, MutexGuard};
+use payjoin::send::CreateRequestError;
 
 use crate::error::PayjoinError;
 use crate::transaction::PartiallySignedTransaction;
-use crate::uri::Url;
+use crate::uri::{Uri, Url};
 use crate::{FeeRate, ScriptBuf};
-pub use payjoin::send::Configuration as PdkConfiguration;
+pub use payjoin::send::RequestBuilder as PdkRequestBuilder;
 
 ///Builder for sender-side payjoin parameters
 ///
 ///These parameters define how client wants to handle Payjoin.
-pub struct Configuration {
-	internal: Mutex<Option<PdkConfiguration>>,
+pub struct RequestBuilder {
+	internal: PdkRequestBuilder<'static>,
 }
 
-impl From<PdkConfiguration> for Configuration {
-	fn from(value: PdkConfiguration) -> Self {
-		Self { internal: Mutex::new(Some(value)) }
+impl From<PdkRequestBuilder<'static>> for RequestBuilder {
+	fn from(value:PdkRequestBuilder<'static>) -> Self {
+		Self { internal: value }
 	}
 }
 
-impl Configuration {
-	pub fn get_configuration(
-		&self,
-	) -> (Option<PdkConfiguration>, MutexGuard<Option<PdkConfiguration>>) {
-		let mut data_guard = self.internal.lock().unwrap();
-		(Option::take(&mut *data_guard), data_guard)
-	}
-	///Offer the receiver contribution to pay for his input.
-	///
-	///These parameters will allow the receiver to take max_fee_contribution from given change output to pay for additional inputs. The recommended fee is size_of_one_input * fee_rate.
-	///
-	///change_index specifies which output can be used to pay fee. If None is provided, then the output is auto-detected unless the supplied transaction has more than two outputs.
-	pub fn with_fee_contribution(max_fee_contribution: u64, change_index: Option<u64>) -> Self {
-		let configuration = PdkConfiguration::with_fee_contribution(
-			payjoin::bitcoin::Amount::from_sat(max_fee_contribution),
-			change_index.map(|x| x as usize),
-		);
-		configuration.into()
-	}
+impl RequestBuilder {
 
-	//TODO;  doesn't satisfy `payjoin::send::error::ConfigurationError: ToString`
-	pub fn recommended(
-		psbt: Arc<PartiallySignedTransaction>, payout_scripts: Vec<Arc<ScriptBuf>>,
-		min_fee_rate: Arc<FeeRate>,
+	/// Prepare an HTTP request and request context to process the response
+	///
+	/// An HTTP client will own the Request data while Context sticks around so
+	/// a `(Request, Context)` tuple is returned from `RequestBuilder::build()`
+	/// to keep them separated.
+	pub fn from_psbt_and_uri(
+		psbt: Arc<PartiallySignedTransaction>,
+		uri: Arc<Uri>
 	) -> Result<Self, PayjoinError> {
-		let script_buf_iter = payout_scripts.iter().map(|x| (*(x.to_owned())).clone().into());
-
-		match PdkConfiguration::recommended(
-			&((*psbt).clone().into()),
-			script_buf_iter,
-			(*min_fee_rate).into(),
-		) {
+		match PdkRequestBuilder::from_psbt_and_uri((*psbt).clone().into(), uri.assume_checked()?.into()){
 			Ok(e) => Ok(e.into()),
-			Err(_) => Err(PayjoinError::UnexpectedError {
-				message: "Invalid configuration found".to_string(),
-			}),
+			Err(e) => Err(e.into())
 		}
 	}
 
-	///Perform Payjoin without incentivizing the payee to cooperate.
-	///
-	///While it’s generally better to offer some contribution some users may wish not to. This function disables contribution.
-	pub fn non_incentivizing() -> Self {
-		PdkConfiguration::non_incentivizing().into()
-	}
-	///Disable output substitution even if the receiver didn’t.
-	///
-	///This forbids receiver switching output or decreasing amount. It is generally not recommended to set this as it may prevent the receiver from doing advanced operations such as opening LN channels and it also guarantees the receiver will not reward the sender with a discount.
-	pub fn always_disable_output_substitution(&self, disable: bool) {
-		let (config, mut guard) = Self::get_configuration(self);
-		*guard = Some(config.unwrap().always_disable_output_substitution(disable));
-	}
-
-	///Decrease fee contribution instead of erroring.
-	///
-	///If this option is set and a transaction with change amount lower than fee contribution is provided then instead of returning error the fee contribution will be just lowered to match the change amount.
-	pub fn clamp_fee_contribution(&self, clamp: bool) {
-		let (config, mut guard) = Self::get_configuration(self);
-		*guard = Some(config.unwrap().clamp_fee_contribution(clamp));
-	}
-	///Sets minimum fee rate required by the sender.
-	pub fn min_fee_rate(&self, fee_rate: Arc<FeeRate>) {
-		let (config, mut guard) = Self::get_configuration(self);
-		*guard = Some(config.unwrap().min_fee_rate((*fee_rate.clone()).into()));
-	}
 }
 
 ///Data required for validation of response.
@@ -91,30 +44,20 @@ impl Configuration {
 ///This type is used to process the response. It is returned from PjUriExt::create_pj_request() method and you only need to call .process_response() on it to continue BIP78 flow.
 
 pub struct Context {
-	internal: Mutex<Option<payjoin::send::Context>>,
+	internal: Mutex<Option<payjoin::send::ContextV1>>,
 }
 
 impl Context {
-	fn get_context(&self) -> Option<payjoin::send::Context> {
+	fn get_context(&self) -> Option<payjoin::send::ContextV1> {
 		let mut data_guard = self.internal.lock().unwrap();
 		Option::take(&mut *data_guard)
 	}
-	///Decodes and validates the response.
 
-	///Call this method with response from receiver to continue BIP78 flow. If the response is valid you will get appropriate PSBT that you should sign and broadcast.
 
-	pub fn process_response(
-		&self, response: String,
-	) -> Result<Arc<PartiallySignedTransaction>, PayjoinError> {
-		match self.get_context().unwrap().process_response(&mut response.as_bytes()) {
-			Ok(e) => Ok(Arc::new(PartiallySignedTransaction::from(e))),
-			Err(e) => Err(PayjoinError::ContextValidationError { message: e.to_string() }),
-		}
-	}
 }
 
-impl From<payjoin::send::Context> for Context {
-	fn from(value: payjoin::send::Context) -> Self {
+impl From<payjoin::send::ContextV1> for Context {
+	fn from(value: payjoin::send::ContextV1) -> Self {
 		Self { internal: Mutex::new(Some(value)) }
 	}
 }
@@ -148,11 +91,7 @@ mod tests {
 		let _uri = crate::Uri::new(pj_uri_string).unwrap();
 		eprintln!("address: {:#?}", _uri.address().as_string());
 
-		let pj_uri = _uri.check_pj_supported().expect("Bad Uri");
 
-		let pj_params = crate::Configuration::with_fee_contribution(10000, None);
-		pj_params.always_disable_output_substitution(true);
-		pj_params.clamp_fee_contribution(true);
-		assert_eq!(pj_uri.amount().unwrap().to_btc(), 1.0)
+
 	}
 }

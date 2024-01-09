@@ -1,10 +1,12 @@
 use std::{str::FromStr, sync::Arc};
+use bitcoin::address::NetworkValidation;
 
-use payjoin::{bitcoin::address::NetworkChecked, PjUriExt, UriExt};
+use payjoin::{bitcoin::address::NetworkChecked};
+use payjoin::bitcoin::address::NetworkUnchecked;
 
 use crate::{
 	error::PayjoinError,
-	send::{Configuration, Context, Request},
+	send::{RequestBuilder, Context, Request},
 	transaction::PartiallySignedTransaction,
 	Address,
 };
@@ -14,83 +16,63 @@ pub struct PrjUriRequest {
 	pub context: Arc<Context>,
 }
 
+impl From<payjoin::Uri<'static, NetworkChecked>> for Uri {
+	fn from(value: payjoin::Uri<'static, NetworkChecked>) -> Self {
+		Uri(PayjoinUriWrapper::Checked(value))
+	}
+}
+impl From<payjoin::Uri<'static, NetworkUnchecked>> for Uri {
+	fn from(value: payjoin::Uri<'static, NetworkUnchecked>) -> Self {
+		Uri(PayjoinUriWrapper::UnChecked(value))
+	}
+}
 #[derive(Clone)]
-pub struct Uri {
-	internal: payjoin::Uri<'static, NetworkChecked>,
+pub struct Uri (PayjoinUriWrapper);
+#[derive(Clone)]
+enum PayjoinUriWrapper {
+	Checked(payjoin::Uri<'static, NetworkChecked>),
+	UnChecked(payjoin::Uri<'static, NetworkUnchecked>)
 }
 
 impl From<Uri> for payjoin::Uri<'static, NetworkChecked> {
-	fn from(value: Uri) -> Self {
-		value.internal
+	fn from(uri: Uri) -> Self {
+		match uri.0 {
+			PayjoinUriWrapper::Checked(e) => e,
+			PayjoinUriWrapper::UnChecked(e) => e.assume_checked()
+		}
 	}
 }
-
-impl From<payjoin::Uri<'static, NetworkChecked>> for Uri {
-	fn from(value: payjoin::Uri<'static, NetworkChecked>) -> Self {
-		Self { internal: value }
+impl From<Uri> for payjoin::Uri<'static, NetworkUnchecked> {
+	fn from(uri: Uri) -> Self {
+		match uri.0 {
+			PayjoinUriWrapper::UnChecked(e) => e,
+			PayjoinUriWrapper::Checked(e) => e,
+		}
 	}
 }
 
 impl Uri {
 	pub fn new(uri: String) -> Result<Self, PayjoinError> {
 		match payjoin::Uri::from_str(uri.as_str()) {
-			Ok(e) => Ok(Uri { internal: e.assume_checked() }),
+			Ok(e) => Ok(e.into()),
 			Err(e) => Err(PayjoinError::PjParseError { message: e.to_string() }),
 		}
 	}
 
-	pub fn address(&self) -> Arc<Address> {
-		Arc::new(Address { internal: self.internal.clone().address })
-	}
-	pub fn amount(&self) -> Option<u64> {
-		self.internal.amount.map(|x| x.to_sat())
-	}
-	pub fn check_pj_supported(&self) -> Result<Arc<PrjUri>, PayjoinError> {
-		match self.internal.clone().check_pj_supported() {
-			Ok(e) => Ok(Arc::new(PrjUri { internal: e })),
-			Err(e) => Err(PayjoinError::PjNotSupported { message: e.to_string() }),
+	pub fn assume_checked(&self) -> Result<Self, PayjoinError> {
+		match self.clone().0 {
+			PayjoinUriWrapper::Checked(e) => Ok(e.into()),
+			PayjoinUriWrapper::UnChecked(e) => Ok(e.assume_checked().into())
 		}
 	}
 }
 
-#[derive(Debug, Clone)]
-pub struct PrjUri {
-	internal: payjoin::PjUri<'static>,
-}
+pub struct PjUri(payjoin::PjUri<'static>);
 
-impl From<PrjUri> for payjoin::PjUri<'static> {
-	fn from(value: PrjUri) -> Self {
-		value.internal
-	}
-}
 
-impl From<payjoin::PjUri<'static>> for PrjUri {
-	fn from(value: payjoin::PjUri<'static>) -> Self {
-		Self { internal: value }
-	}
-}
 
-impl PrjUri {
-	pub fn create_pj_request(
-		&self, psbt: Arc<PartiallySignedTransaction>, params: Arc<Configuration>,
-	) -> Result<PrjUriRequest, PayjoinError> {
-		let config = params.get_configuration();
-		match self.internal.clone().create_pj_request((*psbt).clone().into(), config.0.unwrap()) {
-			Ok(e) => Ok(PrjUriRequest {
-				request: Request { url: Arc::new(Url { internal: e.0.url }), body: e.0.body },
-				context: Arc::new(e.1.into()),
-			}),
-			Err(e) => Err(PayjoinError::CreateRequestError { message: e.to_string() }),
-		}
-	}
 
-	pub fn address(&self) -> Arc<Address> {
-		Arc::new(self.internal.address.clone().into())
-	}
-	pub fn amount(&self) -> Option<Arc<Amount>> {
-		self.internal.amount.map(|x| Arc::new(Amount::from_sat(x.to_sat())))
-	}
-}
+
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Amount {

@@ -19,6 +19,7 @@
 
 pub extern crate bitcoin;
 
+pub use url::Url;
 #[cfg(feature = "receive")]
 pub mod receive;
 #[cfg(feature = "receive")]
@@ -40,4 +41,6 @@ pub(crate) mod weight;
 
 #[cfg(feature = "base64")]
 pub use bitcoin::base64;
-pub use uri::{Payjoin, PayjoinUri, PjParseError};
+#[cfg(feature = "v2")]
+pub use ohttp::KeyConfig;
+pub use uri::{Payjoin, PayjoinUri, PayjoinUriBuilder, PjParseError};

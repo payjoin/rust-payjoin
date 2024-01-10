@@ -355,6 +355,80 @@ impl<'a> bip21::SerializeParams for &'a PayjoinParams {
     }
 }
 
+/// Builder for `bip21::Uri` with PayjoinParams.
+///
+/// Payjoin receiver can use this builder to create a payjoin
+/// uri to send to the sender.
+pub struct PayjoinUriBuilder {
+    /// Address you want to receive funds to.
+    ///
+    /// Must be a valid bitcoin address.
+    address: Address,
+    /// Payjoing endpoint url listening for payjoin requests.
+    ///
+    /// Must be a valid url that can be parsed
+    /// with `[Payjoin::Url::parse]`.
+    pj_endpoint: Url,
+    /// Amount you want to receive.
+    ///
+    /// If `None` the amount will be left unspecified.
+    amount: Option<Amount>,
+    /// Message
+    message: Option<String>,
+    /// Label
+    label: Option<String>,
+    #[cfg(feature = "v2")]
+    /// Config for ohttp.
+    ///
+    /// Required only for v2 payjoin.
+    ohttp_config: Option<ohttp::KeyConfig>,
+}
+
+impl PayjoinUriBuilder {
+    /// Create a new `PayjoinUriBuilder` with required parameters.
+    pub fn new(
+        address: Address,
+        pj_endpoint: Url,
+        #[cfg(feature = "v2")] ohttp_config: Option<ohttp::KeyConfig>,
+    ) -> Self {
+        Self {
+            address,
+            pj_endpoint,
+            amount: None,
+            message: None,
+            label: None,
+            #[cfg(feature = "v2")]
+            ohttp_config,
+        }
+    }
+    /// Set the amount you want to receive.
+    pub fn amount(&mut self, amount: Amount) { self.amount = Some(amount); }
+    /// Set the message.
+    pub fn message(&mut self, message: String) { self.message = Some(message); }
+    /// Set the label.
+    pub fn label(&mut self, label: String) { self.label = Some(label); }
+    /// Build payjoin URI.
+    ///
+    /// Constructs a `bip21::Uri` with PayjoinParams from the
+    /// parameters set in the builder.
+    pub fn build<'a>(self) -> PayjoinUri<'a, NetworkChecked, Payjoin> {
+        let pj_params = PayjoinParams {
+            endpoint: self.pj_endpoint,
+            disable_output_substitution: false,
+            #[cfg(feature = "v2")]
+            ohttp_config: self.ohttp_config,
+        };
+        let pj_extras = Payjoin::Supported(pj_params);
+        PayjoinUri::new(
+            self.address,
+            pj_extras,
+            self.amount,
+            self.label.map(bip21::Param::from),
+            self.message.map(bip21::Param::from),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::convert::TryFrom;

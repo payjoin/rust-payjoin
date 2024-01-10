@@ -4,6 +4,11 @@ use std::fmt;
 use bitcoin::FeeRate;
 use log::warn;
 
+#[cfg(feature = "v2")]
+pub(crate) const SUPPORTED_VERSIONS: [&str; 2] = ["1", "2"];
+#[cfg(not(feature = "v2"))]
+pub(crate) const SUPPORTED_VERSIONS: [&str; 1] = ["1"];
+
 #[derive(Debug, Clone)]
 pub(crate) struct Params {
     // version

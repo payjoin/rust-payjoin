@@ -375,13 +375,10 @@ impl ResponseError {
             .as_object()
             .and_then(|v| v.get("message"))
             .and_then(|v| v.as_str())
-            .ok_or(InternalValidationError::Parse)
-            .unwrap_or("");
-        match json
-            .as_object()
-            .and_then(|v| v.get("errorCode"))
-            .and_then(|v| v.as_str())
-            .ok_or(InternalValidationError::Parse)
+            .unwrap_or_default()
+            .to_string();
+        if let Some(error_code) =
+            json.as_object().and_then(|v| v.get("errorCode")).and_then(|v| v.as_str())
         {
             Ok(str) => {
                 if let Ok(known_error) = WellKnownError::from_error_code(str, message.to_string()) {
@@ -395,14 +392,14 @@ impl ResponseError {
             }
         }
     }
+
     /// Parse a response from the receiver.
     ///
     /// response must be valid JSON string.
     pub fn from_str(response: &str) -> Self {
-        if let Some(parsed) = serde_json::from_str(response).ok() {
-            Self::from_json(parsed)
-        } else {
-            InternalValidationError::Parse.into()
+        match serde_json::from_str(response) {
+            Ok(json) => Self::from_json(json),
+            Err(_) => InternalValidationError::Parse.into(),
         }
     }
 }
@@ -457,7 +454,7 @@ impl fmt::Debug for ResponseError {
 pub enum WellKnownError {
     Unavailable(String),
     NotEnoughMoney(String),
-    VersionUnsupported(String),
+    VersionUnsupported(String, Vec<u64>),
     OriginalPsbtRejected(String),
 }
 
@@ -466,7 +463,7 @@ impl WellKnownError {
         match self {
             WellKnownError::Unavailable(_) => "unavailable",
             WellKnownError::NotEnoughMoney(_) => "not-enough-money",
-            WellKnownError::VersionUnsupported(_) => "version-unsupported",
+            WellKnownError::VersionUnsupported(_, _) => "version-unsupported",
             WellKnownError::OriginalPsbtRejected(_) => "original-psbt-rejected",
         }
     }
@@ -474,20 +471,8 @@ impl WellKnownError {
         match self {
             WellKnownError::Unavailable(m) => m,
             WellKnownError::NotEnoughMoney(m) => m,
-            WellKnownError::VersionUnsupported(m) => m,
+            WellKnownError::VersionUnsupported(m, _) => m,
             WellKnownError::OriginalPsbtRejected(m) => m,
-        }
-    }
-}
-
-impl WellKnownError {
-    fn from_error_code(s: &str, message: String) -> Result<Self, ()> {
-        match s {
-            "unavailable" => Ok(WellKnownError::Unavailable(message)),
-            "not-enough-money" => Ok(WellKnownError::NotEnoughMoney(message)),
-            "version-unsupported" => Ok(WellKnownError::VersionUnsupported(message)),
-            "original-psbt-rejected" => Ok(WellKnownError::OriginalPsbtRejected(message)),
-            _ => Err(()),
         }
     }
 }
@@ -515,14 +500,16 @@ mod tests {
 
     #[test]
     fn test_parse_json() {
-        let known_str_error =
-            r#"{"errorCode":"version-unsupported", "message":"custom message here"}"#;
+        let known_str_error = r#"{"errorCode":"version-unsupported", "message":"custom message here", "supported": [1, 2]}"#;
         let error = ResponseError::from_str(known_str_error);
         match error {
             ResponseError::WellKnown(e) => {
                 assert_eq!(e.error_code(), "version-unsupported");
                 assert_eq!(e.message(), "custom message here");
-                assert_eq!(e.to_string(), "This version of payjoin is not supported.");
+                assert_eq!(
+                    e.to_string(),
+                    "This version of payjoin is not supported. Use version [1, 2]."
+                );
             }
             _ => panic!("Expected WellKnown error"),
         }

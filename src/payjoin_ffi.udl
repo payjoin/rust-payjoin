@@ -6,13 +6,14 @@ interface PayjoinError {
     InvalidAddress(string message);
     InvalidScript(string message);
     PsbtParseError (string message);
-    ReceiveError (string message);
+    ResponseError (string message);
     RequestError(string message);
     SelectionError(string message);
     CreateRequestError(string message);
     PjParseError(string message);
     PjNotSupported(string message);
-    ContextValidationError(string message);
+    V2Error(string message);
+    ValidationError(string message);
     TransactionError(string message);
     UnexpectedError(string message);
     ServerError(string message);
@@ -73,22 +74,12 @@ interface Url {
 interface Uri {
       [Throws=PayjoinError]
       constructor(string uri);
-      u64? amount();
-      Address address();
-      [Throws=PayjoinError]
-      PrjUri check_pj_supported();
 };
 
-interface Configuration{
-      [Name=with_fee_contribution]
-      constructor(u64 max_fee_contribution, u64? change_index);
-      [Name=recommended, Throws=PayjoinError]
-      constructor(PartiallySignedTransaction psbt, sequence<ScriptBuf> payout_scripts, FeeRate min_fee_rate);
-      [Name=non_incentivizing]
-      constructor();
-      void always_disable_output_substitution(boolean disable);
-      void  clamp_fee_contribution(boolean clamp);
-      void min_fee_rate(FeeRate fee_rate);
+
+interface RequestBuilder{
+      [Throws=PayjoinError, Name=from_psbt_and_uri]
+      constructor(PartiallySignedTransaction psbt, Uri uri);
 };
 
 dictionary PrjUriRequest{
@@ -105,8 +96,7 @@ interface PartiallySignedTransaction{
 };
 
 interface Context{
-    [Throws=PayjoinError]
-	PartiallySignedTransaction process_response(  string response);
+
 };
 
 interface Amount{
@@ -118,12 +108,7 @@ interface Amount{
       u64 to_sat();
 };
 
-interface PrjUri{
-      [Throws=PayjoinError]
-      PrjUriRequest create_pj_request(PartiallySignedTransaction psbt, Configuration params);
-      Address address();
-      Amount? amount();
-};
+
 
 interface Txid{
       string as_string();
@@ -146,8 +131,6 @@ interface UncheckedProposal{
       [Name=from_request, Throws=PayjoinError]
       constructor(sequence<u8> body, string query, Headers headers);
       Transaction extract_tx_to_schedule_broadcast();
-      [Throws=PayjoinError]
-      MaybeInputsOwned check_can_broadcast(CanBroadcast can_broadcast);
       MaybeInputsOwned assume_interactive_receiver();
 };
 

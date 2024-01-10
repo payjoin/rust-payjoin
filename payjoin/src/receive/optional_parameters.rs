@@ -4,6 +4,11 @@ use std::fmt;
 use bitcoin::FeeRate;
 use log::warn;
 
+#[cfg(feature = "v2")]
+pub(crate) const SUPPORTED_VERSIONS: [&str; 2] = ["1", "2"];
+#[cfg(not(feature = "v2"))]
+pub(crate) const SUPPORTED_VERSIONS: [&str; 1] = ["1"];
+
 #[derive(Debug, Clone)]
 pub(crate) struct Params {
     // version
@@ -42,7 +47,7 @@ impl Params {
         for (k, v) in pairs {
             match (k.borrow(), v.borrow()) {
                 ("v", v) =>
-                    if v != "1" {
+                    if !SUPPORTED_VERSIONS.contains(&v) {
                         return Err(Error::UnknownVersion);
                     },
                 ("additionalfeeoutputindex", index) =>

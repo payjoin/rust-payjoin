@@ -124,6 +124,7 @@ impl App {
 
     #[cfg(feature = "v2")]
     pub async fn receive_payjoin(self, amount_arg: &str, is_retry: bool) -> Result<()> {
+        use payjoin::PayjoinUriBuilder;
         use v2::Enroller;
 
         let mut enrolled = if !is_retry {
@@ -153,13 +154,25 @@ impl App {
 
         log::debug!("Enrolled receiver");
 
-        let pj_uri_string =
-            self.construct_payjoin_uri(amount_arg, Some(&enrolled.fallback_target()))?;
+        let amount = Amount::from_sat(amount_arg.parse()?);
+        let ohttp_config = {
+            payjoin::KeyConfig::decode(&bitcoin::base64::decode_config(
+                &self.config.ohttp_config,
+                bitcoin::base64::URL_SAFE,
+            )?)?
+        };
+        let mut pj_uri = PayjoinUriBuilder::new(
+            self.bitcoind()?.get_new_address(None, None)?.assume_checked(),
+            enrolled.fallback_target().parse()?,
+            Some(ohttp_config),
+        );
+        pj_uri.amount(amount);
+        let pj_uri = pj_uri.build();
         println!(
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
             self.config.pj_host
         );
-        println!("{}", pj_uri_string);
+        println!("{}", pj_uri.to_string());
 
         log::debug!("Awaiting proposal");
         let res = self.long_poll_fallback(&mut enrolled).await?;
@@ -183,12 +196,19 @@ impl App {
 
     #[cfg(not(feature = "v2"))]
     pub async fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
-        let pj_uri_string = self.construct_payjoin_uri(amount_arg, None)?;
+        use payjoin::PayjoinUriBuilder;
+        let amount = Amount::from_sat(amount_arg.parse()?);
+        let mut pj_uri = PayjoinUriBuilder::new(
+            self.bitcoind()?.get_new_address(None, None)?.assume_checked(),
+            self.config.pj_endpoint.parse()?,
+        );
+        pj_uri.amount(amount);
+        let pj_uri = pj_uri.build();
         println!(
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
             self.config.pj_host
         );
-        println!("{}", pj_uri_string);
+        println!("{}", pj_uri.to_string());
 
         self.start_http_server().await?;
         Ok(())
@@ -359,35 +379,6 @@ impl App {
         Ok(())
     }
 
-    fn construct_payjoin_uri(
-        &self,
-        amount_arg: &str,
-        fallback_target: Option<&str>,
-    ) -> Result<String> {
-        let pj_receiver_address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
-        let amount = Amount::from_sat(amount_arg.parse()?);
-        let pj_part = match fallback_target {
-            Some(target) => target,
-            None => self.config.pj_endpoint.as_str(),
-        };
-
-        let pj_uri_string = format!(
-            "{}?amount={}&pj={}",
-            pj_receiver_address.to_qr_uri(),
-            amount.to_btc(),
-            pj_part,
-        );
-
-        #[cfg(feature = "v2")]
-        let pj_uri_string = format!("{}&ohttp={}", pj_uri_string, self.config.ohttp_config,);
-
-        // to check uri validity
-        let _pj_uri = PayjoinUri::try_from(pj_uri_string.as_str())
-            .map_err(|e| anyhow!("Constructed a bad URI string from args: {}", e))?;
-
-        Ok(pj_uri_string)
-    }
-
     #[cfg(not(feature = "v2"))]
     async fn handle_web_request(self, req: Request<Body>) -> Result<Response<Body>> {
         log::debug!("Received request: {:?}", req);
@@ -434,27 +425,23 @@ impl App {
 
     #[cfg(not(feature = "v2"))]
     fn handle_get_bip21(&self, amount: Option<Amount>) -> Result<Response<Body>, Error> {
+        use payjoin::{PayjoinUriBuilder, Url};
+
         let address = self
             .bitcoind()
             .map_err(|e| Error::Server(e.into()))?
             .get_new_address(None, None)
             .map_err(|e| Error::Server(e.into()))?
             .assume_checked();
-        let uri_string = if let Some(amount) = amount {
-            format!(
-                "{}?amount={}&pj={}",
-                address.to_qr_uri(),
-                amount.to_btc(),
-                self.config.pj_endpoint
-            )
-        } else {
-            format!("{}?pj={}", address.to_qr_uri(), self.config.pj_endpoint)
-        };
-        let uri = PayjoinUri::try_from(uri_string.as_str())
-            .map_err(|_| Error::Server(anyhow!("Could not parse payjoin URI string.").into()))?;
-        let _ = uri.assume_checked(); // we just got it from bitcoind above
+        let pj_endpoint =
+            Url::parse(&self.config.pj_endpoint).map_err(|e| Error::Server(e.into()))?;
+        let mut pj_uri = PayjoinUriBuilder::new(address, pj_endpoint);
+        if let Some(amount) = amount {
+            pj_uri.amount(amount);
+        }
+        let pj_uri = pj_uri.build();
 
-        Ok(Response::new(Body::from(uri_string)))
+        Ok(Response::new(Body::from(pj_uri.to_string())))
     }
 
     #[cfg(not(feature = "v2"))]

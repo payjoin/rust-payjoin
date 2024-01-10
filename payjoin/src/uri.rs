@@ -130,10 +130,10 @@ impl Payjoin {
 
 #[derive(Clone)]
 pub struct PayjoinParams {
-    pub(crate) endpoint: Url,
-    pub(crate) disable_output_substitution: bool,
+    endpoint: Url,
+    disable_output_substitution: bool,
     #[cfg(feature = "v2")]
-    pub(crate) ohttp_config: Option<ohttp::KeyConfig>,
+    ohttp_config: Option<ohttp::KeyConfig>,
 }
 
 impl PayjoinParams {

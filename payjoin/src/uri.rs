@@ -431,6 +431,7 @@ impl PayjoinUriBuilder {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
     use std::convert::TryFrom;
 
     use crate::PayjoinUri;
@@ -496,5 +497,44 @@ mod tests {
             .inner
             .extras
             .pj_is_supported());
+    }
+
+    #[test]
+    fn test_payjoin_uri_builder() {
+        use std::str::FromStr;
+
+        use url::Url;
+
+        use crate::PayjoinUriBuilder;
+        let https = "https://example.com/";
+        let onion = "http://vjdpwgybvubne5hda6v4c5iaeeevhge6jvo3w2cl6eocbwwvwxp7b7qd.onion/";
+        let base58 = "12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX";
+        let bech32_upper = "TB1Q6D3A2W975YNY0ASUVD9A67NER4NKS58FF0Q8G4";
+        let bech32_lower = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
+
+        for address in vec![base58, bech32_upper, bech32_lower] {
+            for pj in [https, onion].iter() {
+                let address = bitcoin::Address::from_str(address).unwrap().assume_checked();
+                let amount = bitcoin::Amount::ONE_BTC;
+                let mut uri = PayjoinUriBuilder::new(
+                    address.clone(),
+                    Url::parse(pj).unwrap(),
+                    #[cfg(feature = "v2")]
+                    None,
+                );
+                uri.amount(amount);
+                uri.message("message".to_string());
+                uri.label("label".to_string());
+                let uri = uri.build();
+                assert_eq!(uri.inner.address, address);
+                assert_eq!(uri.inner.amount.unwrap(), bitcoin::Amount::ONE_BTC);
+                let label: Cow<'_, str> = uri.inner.label.clone().unwrap().try_into().unwrap();
+                let message: Cow<'_, str> = uri.inner.message.clone().unwrap().try_into().unwrap();
+                assert_eq!(label, "label");
+                assert_eq!(message, "message");
+                assert_eq!(uri.inner.extras.pj_is_supported(), true);
+                assert_eq!(uri.inner.extras.endpoint().unwrap().to_string(), pj.to_string());
+            }
+        }
     }
 }

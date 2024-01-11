@@ -166,7 +166,7 @@ type InternalResult<T> = Result<T, InternalValidationError>;
 #[derive(Clone)]
 pub struct RequestBuilder<'a> {
     psbt: Psbt,
-    uri: PayjoinUri<'a, NetworkChecked, crate::uri::Payjoin>,
+    uri: PayjoinUri<'a, NetworkChecked>,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
     clamp_fee_contribution: bool,
@@ -181,11 +181,8 @@ impl<'a> RequestBuilder<'a> {
     /// to keep them separated.
     pub fn from_psbt_and_uri(
         psbt: Psbt,
-        uri: PayjoinUri<'a, NetworkChecked, crate::uri::Payjoin>,
+        uri: PayjoinUri<'a, NetworkChecked>,
     ) -> Result<Self, CreateRequestError> {
-        if !uri.inner.extras.pj_is_supported() {
-            return Err(InternalCreateRequestError::UriDoesNotSupportPayjoin.into());
-        }
         Ok(Self {
             psbt,
             uri,
@@ -314,7 +311,6 @@ impl<'a> RequestBuilder<'a> {
             self.psbt.validate().map_err(InternalCreateRequestError::InconsistentOriginalPsbt)?;
         psbt.validate_input_utxos(true)
             .map_err(InternalCreateRequestError::InvalidOriginalInput)?;
-        let endpoint = self.uri.inner.extras.endpoint().clone();
         #[cfg(feature = "v2")]
         let ohttp_config = self.uri.inner.extras.ohttp_config();
         let disable_output_substitution =
@@ -346,7 +342,7 @@ impl<'a> RequestBuilder<'a> {
 
         Ok(RequestContext {
             psbt,
-            endpoint: endpoint.unwrap().clone(),
+            endpoint: self.uri.inner.extras.endpoint().clone(),
             #[cfg(feature = "v2")]
             ohttp_config: ohttp_config.cloned(),
             disable_output_substitution,

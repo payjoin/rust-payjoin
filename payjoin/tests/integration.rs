@@ -13,7 +13,7 @@ mod integration {
     use log::{debug, log_enabled, Level};
     use payjoin::bitcoin::base64;
     use payjoin::send::{Request, RequestBuilder};
-    use payjoin::{Payjoin, PayjoinUri};
+    use payjoin::PayjoinUri;
 
     type BoxError = Box<dyn std::error::Error>;
 
@@ -650,7 +650,7 @@ mod integration {
 
     fn build_original_psbt(
         sender: &bitcoincore_rpc::Client,
-        pj_uri: &PayjoinUri<'_, NetworkChecked, Payjoin>,
+        pj_uri: &PayjoinUri<'_, NetworkChecked>,
     ) -> Result<Psbt, BoxError> {
         let mut outputs = HashMap::with_capacity(1);
         outputs.insert(pj_uri.inner.address.to_string(), pj_uri.inner.amount.unwrap());

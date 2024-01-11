@@ -43,4 +43,4 @@ pub(crate) mod weight;
 pub use bitcoin::base64;
 #[cfg(feature = "v2")]
 pub use ohttp::KeyConfig;
-pub use uri::{Payjoin, PayjoinUri, PayjoinUriBuilder, PjParseError};
+pub use uri::{PayjoinUri, PayjoinUriBuilder, PjParseError};

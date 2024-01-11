@@ -4,6 +4,11 @@ use std::fmt;
 use bitcoin::FeeRate;
 use log::warn;
 
+#[cfg(feature = "v2")]
+pub(crate) const SUPPORTED_VERSIONS: [&str; 2] = ["1", "2"];
+#[cfg(not(feature = "v2"))]
+pub(crate) const SUPPORTED_VERSIONS: [&str; 1] = ["1"];
+
 #[derive(Debug, Clone)]
 pub(crate) struct Params {
     // version
@@ -42,10 +47,11 @@ impl Params {
         for (k, v) in pairs {
             match (k.borrow(), v.borrow()) {
                 ("v", v) => {
-                    if v != "1" {
+                    if !SUPPORTED_VERSIONS.contains(&v) {
                         return Err(Error::UnknownVersion);
                     }
                 }
+
                 ("additionalfeeoutputindex", index) => {
                     additional_fee_output_index = match index.parse::<usize>() {
                         Ok(index) => Some(index),
@@ -56,7 +62,7 @@ impl Params {
                             );
                             None
                         }
-                    }
+                    };
                 }
                 ("maxadditionalfeecontribution", fee) => {
                     max_additional_fee_contribution =
@@ -69,7 +75,7 @@ impl Params {
                                 );
                                 None
                             }
-                        }
+                        };
                 }
                 ("minfeerate", feerate) => {
                     params.min_feerate = match feerate.parse::<f32>() {
@@ -79,11 +85,13 @@ impl Params {
                             // since it's a minnimum, we want to round up
                             FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64)
                         }
-                        Err(e) => return Err(Error::FeeRate(e.to_string())),
-                    }
+                        Err(e) => {
+                            return Err(Error::FeeRate(e.to_string()));
+                        }
+                    };
                 }
                 ("disableoutputsubstitution", v) => {
-                    params.disable_output_substitution = v == "true"
+                    params.disable_output_substitution = v == "true";
                 }
                 _ => (),
             }
@@ -91,7 +99,7 @@ impl Params {
 
         match (max_additional_fee_contribution, additional_fee_output_index) {
             (Some(amount), Some(index)) => {
-                params.additional_fee_contribution = Some((amount, index))
+                params.additional_fee_contribution = Some((amount, index));
             }
             (Some(_), None) | (None, Some(_)) => {
                 warn!("only one additional-fee parameter specified: {:?}", params);

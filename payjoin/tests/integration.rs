@@ -61,9 +61,7 @@ mod integration {
         struct HeaderMock(HashMap<String, String>);
 
         impl Headers for HeaderMock {
-            fn get_header(&self, key: &str) -> Option<&str> {
-                self.0.get(key).map(|e| e.as_str())
-            }
+            fn get_header(&self, key: &str) -> Option<&str> { self.0.get(key).map(|e| e.as_str()) }
         }
 
         impl HeaderMock {
@@ -688,7 +686,5 @@ mod integration {
         Ok(payjoin_psbt.extract_tx())
     }
 
-    fn is_success(status: u16) -> bool {
-        status >= 200 && status < 300
-    }
+    fn is_success(status: u16) -> bool { status >= 200 && status < 300 }
 }

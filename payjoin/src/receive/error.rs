@@ -35,22 +35,16 @@ impl error::Error for Error {
 }
 
 impl From<RequestError> for Error {
-    fn from(e: RequestError) -> Self {
-        Error::BadRequest(e)
-    }
+    fn from(e: RequestError) -> Self { Error::BadRequest(e) }
 }
 
 impl From<InternalRequestError> for Error {
-    fn from(e: InternalRequestError) -> Self {
-        Error::BadRequest(e.into())
-    }
+    fn from(e: InternalRequestError) -> Self { Error::BadRequest(e.into()) }
 }
 
 #[cfg(feature = "v2")]
 impl From<crate::v2::Error> for Error {
-    fn from(e: crate::v2::Error) -> Self {
-        Error::V2(e)
-    }
+    fn from(e: crate::v2::Error) -> Self { Error::V2(e) }
 }
 
 /// Error that may occur when the request from sender is malformed.
@@ -101,9 +95,7 @@ pub(crate) enum InternalRequestError {
 }
 
 impl From<InternalRequestError> for RequestError {
-    fn from(value: InternalRequestError) -> Self {
-        RequestError(value)
-    }
+    fn from(value: InternalRequestError) -> Self { RequestError(value) }
 }
 
 impl fmt::Display for RequestError {
@@ -116,17 +108,15 @@ impl fmt::Display for RequestError {
             InternalRequestError::Psbt(e) => write_error(f, "psbt-error", e),
             InternalRequestError::Base64(e) => write_error(f, "base64-decode-error", e),
             InternalRequestError::Io(e) => write_error(f, "io-error", e),
-            InternalRequestError::MissingHeader(header) => {
-                write_error(f, "missing-header", &format!("Missing header: {}", header))
-            }
+            InternalRequestError::MissingHeader(header) =>
+                write_error(f, "missing-header", &format!("Missing header: {}", header)),
             InternalRequestError::InvalidContentType(content_type) => write_error(
                 f,
                 "invalid-content-type",
                 &format!("Invalid content type: {}", content_type),
             ),
-            InternalRequestError::InvalidContentLength(e) => {
-                write_error(f, "invalid-content-length", e)
-            }
+            InternalRequestError::InvalidContentLength(e) =>
+                write_error(f, "invalid-content-length", e),
             InternalRequestError::ContentLengthTooLarge(length) => write_error(
                 f,
                 "content-length-too-large",
@@ -147,34 +137,28 @@ impl fmt::Display for RequestError {
                 }
                 _ => write_error(f, "sender-params-error", e),
             },
-            InternalRequestError::InconsistentPsbt(e) => {
-                write_error(f, "original-psbt-rejected", e)
-            }
-            InternalRequestError::PrevTxOut(e) => {
-                write_error(f, "original-psbt-rejected", &format!("PrevTxOut Error: {}", e))
-            }
-            InternalRequestError::MissingPayment => {
-                write_error(f, "original-psbt-rejected", "Missing payment.")
-            }
+            InternalRequestError::InconsistentPsbt(e) =>
+                write_error(f, "original-psbt-rejected", e),
+            InternalRequestError::PrevTxOut(e) =>
+                write_error(f, "original-psbt-rejected", &format!("PrevTxOut Error: {}", e)),
+            InternalRequestError::MissingPayment =>
+                write_error(f, "original-psbt-rejected", "Missing payment."),
             InternalRequestError::OriginalPsbtNotBroadcastable => write_error(
                 f,
                 "original-psbt-rejected",
                 "Can't broadcast. PSBT rejected by mempool.",
             ),
-            InternalRequestError::InputOwned(_) => {
-                write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT.")
-            }
+            InternalRequestError::InputOwned(_) =>
+                write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
             InternalRequestError::MixedInputScripts(type_a, type_b) => write_error(
                 f,
                 "original-psbt-rejected",
                 &format!("Mixed input scripts: {}; {}.", type_a, type_b),
             ),
-            InternalRequestError::InputType(e) => {
-                write_error(f, "original-psbt-rejected", &format!("Input Type Error: {}.", e))
-            }
-            InternalRequestError::InputSeen(_) => {
-                write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT.")
-            }
+            InternalRequestError::InputType(e) =>
+                write_error(f, "original-psbt-rejected", &format!("Input Type Error: {}.", e)),
+            InternalRequestError::InputSeen(_) =>
+                write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
             #[cfg(feature = "v2")]
             InternalRequestError::ParsePsbt(e) => write_error(f, "Error parsing PSBT:", e),
             #[cfg(feature = "v2")]
@@ -212,7 +196,5 @@ pub(crate) enum InternalSelectionError {
 }
 
 impl From<InternalSelectionError> for SelectionError {
-    fn from(value: InternalSelectionError) -> Self {
-        SelectionError(value)
-    }
+    fn from(value: InternalSelectionError) -> Self { SelectionError(value) }
 }

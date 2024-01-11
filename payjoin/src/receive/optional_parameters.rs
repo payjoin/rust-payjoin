@@ -46,11 +46,10 @@ impl Params {
 
         for (k, v) in pairs {
             match (k.borrow(), v.borrow()) {
-                ("v", v) => {
+                ("v", v) =>
                     if !SUPPORTED_VERSIONS.contains(&v) {
                         return Err(Error::UnknownVersion);
-                    }
-                }
+                    },
 
                 ("additionalfeeoutputindex", index) => {
                     additional_fee_output_index = match index.parse::<usize>() {
@@ -128,7 +127,5 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
 }

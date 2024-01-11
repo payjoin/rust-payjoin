@@ -433,9 +433,8 @@ impl MaybeInputsOwned {
             })
             .find_map(|script| match is_owned(&script) {
                 Ok(false) => None,
-                Ok(true) => {
-                    Some(Error::BadRequest(InternalRequestError::InputOwned(script).into()))
-                }
+                Ok(true) =>
+                    Some(Error::BadRequest(InternalRequestError::InputOwned(script).into())),
                 Err(e) => Some(Error::Server(e.into())),
             })
         {
@@ -849,13 +848,9 @@ impl PayjoinProposal {
         self.params.disable_output_substitution
     }
 
-    pub fn owned_vouts(&self) -> &Vec<usize> {
-        &self.owned_vouts
-    }
+    pub fn owned_vouts(&self) -> &Vec<usize> { &self.owned_vouts }
 
-    pub fn psbt(&self) -> &Psbt {
-        &self.payjoin_psbt
-    }
+    pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
 }
 
 #[cfg(test)]
@@ -868,9 +863,7 @@ mod test {
 
     impl MockHeaders {
         #[cfg(test)]
-        fn new(length: u64) -> MockHeaders {
-            MockHeaders { length: length.to_string() }
-        }
+        fn new(length: u64) -> MockHeaders { MockHeaders { length: length.to_string() } }
     }
 
     impl Headers for MockHeaders {

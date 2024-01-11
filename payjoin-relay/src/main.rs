@@ -128,9 +128,8 @@ async fn handle_ohttp_gateway(
     debug!("handle_ohttp_gateway: {:?}", &path_segments);
     let mut response = match (parts.method, path_segments.as_slice()) {
         (Method::POST, ["", ""]) => handle_ohttp(body, pool, ohttp).await,
-        (Method::GET, ["", "ohttp-config"]) => {
-            Ok(get_ohttp_config(ohttp_config(&ohttp).await?).await)
-        }
+        (Method::GET, ["", "ohttp-config"]) =>
+            Ok(get_ohttp_config(ohttp_config(&ohttp).await?).await),
         (Method::POST, ["", id]) => post_fallback_v1(id, query, body, pool).await,
         _ => Ok(not_found()),
     }
@@ -242,9 +241,7 @@ impl HandlerError {
 }
 
 impl From<hyper::http::Error> for HandlerError {
-    fn from(e: hyper::http::Error) -> Self {
-        HandlerError::InternalServerError(e.into())
-    }
+    fn from(e: hyper::http::Error) -> Self { HandlerError::InternalServerError(e.into()) }
 }
 
 async fn post_enroll(body: Body) -> Result<Response<Body>, HandlerError> {
@@ -365,9 +362,7 @@ async fn get_ohttp_config(config: String) -> Response<Body> {
     res
 }
 
-fn shorten_string(input: &str) -> String {
-    input.chars().take(8).collect()
-}
+fn shorten_string(input: &str) -> String { input.chars().take(8).collect() }
 
 async fn ohttp_config(server: &Arc<Mutex<ohttp::Server>>) -> Result<String> {
     let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);

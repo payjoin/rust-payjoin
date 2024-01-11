@@ -1,10 +1,10 @@
 use std::borrow::Cow;
 use std::convert::TryFrom;
+#[cfg(feature = "v2")]
+use std::sync::Arc;
 
 use bitcoin::address::{Error, NetworkChecked, NetworkUnchecked};
 use bitcoin::Network;
-#[cfg(feature = "v2")]
-use std::sync::Arc;
 use url::Url;
 #[derive(Clone)]
 pub enum Payjoin {
@@ -110,9 +110,7 @@ impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
 }
 
 impl PayjoinParams {
-    pub fn is_output_substitution_disabled(&self) -> bool {
-        self.disable_output_substitution
-    }
+    pub fn is_output_substitution_disabled(&self) -> bool { self.disable_output_substitution }
 }
 
 impl bip21::de::DeserializationError for Payjoin {
@@ -135,17 +133,13 @@ pub struct DeserializationState {
 pub struct PjParseError(InternalPjParseError);
 
 impl From<InternalPjParseError> for PjParseError {
-    fn from(value: InternalPjParseError) -> Self {
-        PjParseError(value)
-    }
+    fn from(value: InternalPjParseError) -> Self { PjParseError(value) }
 }
 
 impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
     type Value = Payjoin;
 
-    fn is_param_known(&self, param: &str) -> bool {
-        matches!(param, "pj" | "pjos")
-    }
+    fn is_param_known(&self, param: &str) -> bool { matches!(param, "pj" | "pjos") }
 
     fn deserialize_temp(
         &mut self,

@@ -66,9 +66,7 @@ impl Enroller {
         base64::encode_config(pubkey, b64_config)
     }
 
-    pub fn payjoin_subdir(&self) -> String {
-        format!("{}/{}", self.subdirectory(), "payjoin")
-    }
+    pub fn payjoin_subdir(&self) -> String { format!("{}/{}", self.subdirectory(), "payjoin") }
 
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), crate::v2::Error> {
         let url = self.ohttp_proxy.clone();
@@ -307,9 +305,7 @@ impl Enrolled {
         crate::v2::ohttp_encapsulate(&self.ohttp_config, "GET", &self.fallback_target(), None)
     }
 
-    pub fn pubkey(&self) -> [u8; 33] {
-        self.s.public_key().serialize()
-    }
+    pub fn pubkey(&self) -> [u8; 33] { self.s.public_key().serialize() }
 
     pub fn fallback_target(&self) -> String {
         let pubkey = &self.s.public_key().serialize();
@@ -538,17 +534,11 @@ impl PayjoinProposal {
         self.inner.is_output_substitution_disabled()
     }
 
-    pub fn owned_vouts(&self) -> &Vec<usize> {
-        self.inner.owned_vouts()
-    }
+    pub fn owned_vouts(&self) -> &Vec<usize> { self.inner.owned_vouts() }
 
-    pub fn psbt(&self) -> &Psbt {
-        self.inner.psbt()
-    }
+    pub fn psbt(&self) -> &Psbt { self.inner.psbt() }
 
-    pub fn extract_v1_req(&self) -> String {
-        base64::encode(self.inner.payjoin_psbt.serialize())
-    }
+    pub fn extract_v1_req(&self) -> String { base64::encode(self.inner.payjoin_psbt.serialize()) }
 
     #[cfg(feature = "v2")]
     pub fn extract_v2_req(&self) -> Result<(Request, ohttp::ClientResponse), Error> {

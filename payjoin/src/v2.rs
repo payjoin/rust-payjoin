@@ -126,27 +126,19 @@ pub(crate) enum InternalError {
 }
 
 impl From<ohttp::Error> for Error {
-    fn from(value: ohttp::Error) -> Self {
-        Self(InternalError::Ohttp(value))
-    }
+    fn from(value: ohttp::Error) -> Self { Self(InternalError::Ohttp(value)) }
 }
 
 impl From<bhttp::Error> for Error {
-    fn from(value: bhttp::Error) -> Self {
-        Self(InternalError::Bhttp(value))
-    }
+    fn from(value: bhttp::Error) -> Self { Self(InternalError::Bhttp(value)) }
 }
 
 impl From<url::ParseError> for Error {
-    fn from(value: url::ParseError) -> Self {
-        Self(InternalError::ParseUrl(value))
-    }
+    fn from(value: url::ParseError) -> Self { Self(InternalError::ParseUrl(value)) }
 }
 
 impl From<bitcoin::secp256k1::Error> for Error {
-    fn from(value: bitcoin::secp256k1::Error) -> Self {
-        Self(InternalError::Secp256k1(value))
-    }
+    fn from(value: bitcoin::secp256k1::Error) -> Self { Self(InternalError::Secp256k1(value)) }
 }
 
 impl From<chacha20poly1305::aead::Error> for Error {
@@ -188,9 +180,7 @@ impl error::Error for Error {
 }
 
 impl From<InternalError> for Error {
-    fn from(value: InternalError) -> Self {
-        Self(value)
-    }
+    fn from(value: InternalError) -> Self { Self(value) }
 }
 
 pub fn ohttp_encapsulate(

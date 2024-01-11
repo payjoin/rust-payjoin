@@ -136,6 +136,8 @@
 //! 📤 Sending payjoin is just that simple.
 
 use std::str::FromStr;
+#[cfg(feature = "v2")]
+use std::sync::Arc;
 
 use bitcoin::address::NetworkChecked;
 use bitcoin::psbt::Psbt;
@@ -155,8 +157,6 @@ use crate::psbt::PsbtExt;
 use crate::uri::UriExt;
 use crate::weight::{varint_size, ComputeWeight};
 use crate::PjUri;
-#[cfg(feature = "v2")]
-use std::sync::Arc;
 
 // See usize casts
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -704,9 +704,8 @@ pub struct ContextV2 {
 macro_rules! check_eq {
     ($proposed:expr, $original:expr, $error:ident) => {
         match ($proposed, $original) {
-            (proposed, original) if proposed != original => {
-                return Err(InternalValidationError::$error { proposed, original })
-            }
+            (proposed, original) if proposed != original =>
+                return Err(InternalValidationError::$error { proposed, original }),
             _ => (),
         }
     };
@@ -1131,9 +1130,8 @@ fn determine_fee_contribution(
 ) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
     Ok(match fee_contribution {
         Some((fee, None)) => find_change_index(psbt, payee, fee, clamp_fee_contribution)?,
-        Some((fee, Some(index))) => {
-            Some(check_change_index(psbt, payee, fee, index, clamp_fee_contribution)?)
-        }
+        Some((fee, Some(index))) =>
+            Some(check_change_index(psbt, payee, fee, index, clamp_fee_contribution)?),
         None => None,
     })
 }

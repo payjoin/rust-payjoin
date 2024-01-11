@@ -32,9 +32,7 @@ pub(crate) fn witness_weight(witness: &Witness) -> Weight {
 }
 
 impl ComputeSize for Script {
-    fn encoded_size(&self) -> u64 {
-        (self.len() as u64) + varint_size(self.len() as u64)
-    }
+    fn encoded_size(&self) -> u64 { (self.len() as u64) + varint_size(self.len() as u64) }
 }
 
 impl ComputeWeight for TxIn {

@@ -764,13 +764,9 @@ struct OutPointSet(HashSet<bitcoin::OutPoint>);
 
 use std::fs::OpenOptions;
 impl OutPointSet {
-    fn new() -> Self {
-        Self(HashSet::new())
-    }
+    fn new() -> Self { Self(HashSet::new()) }
 
-    fn insert(&mut self, input: bitcoin::OutPoint) -> bool {
-        self.0.insert(input)
-    }
+    fn insert(&mut self, input: bitcoin::OutPoint) -> bool { self.0.insert(input) }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -887,9 +883,7 @@ impl payjoin::receive::Headers for Headers<'_> {
     }
 }
 
-fn serialize_psbt(psbt: &Psbt) -> String {
-    base64::encode(psbt.serialize())
-}
+fn serialize_psbt(psbt: &Psbt) -> String { base64::encode(psbt.serialize()) }
 
 #[cfg(feature = "danger-local-https")]
 fn http_agent() -> Result<ureq::Agent> {
@@ -911,9 +905,7 @@ fn http_agent() -> Result<ureq::Agent> {
 }
 
 #[cfg(not(feature = "danger-local-https"))]
-fn http_agent() -> Result<ureq::Agent> {
-    Ok(ureq::Agent::new())
-}
+fn http_agent() -> Result<ureq::Agent> { Ok(ureq::Agent::new()) }
 
 fn map_ureq_err(e: ureq::Error) -> anyhow::Error {
     let e_string = e.to_string();

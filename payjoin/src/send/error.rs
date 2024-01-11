@@ -63,14 +63,10 @@ pub(crate) enum InternalValidationError {
 }
 
 impl From<InternalValidationError> for ValidationError {
-    fn from(value: InternalValidationError) -> Self {
-        ValidationError { internal: value }
-    }
+    fn from(value: InternalValidationError) -> Self { ValidationError { internal: value } }
 }
 impl From<InputTypeError> for InternalValidationError {
-    fn from(value: InputTypeError) -> Self {
-        InternalValidationError::InvalidInputType(value)
-    }
+    fn from(value: InputTypeError) -> Self { InternalValidationError::InvalidInputType(value) }
 }
 
 impl fmt::Display for ValidationError {
@@ -340,9 +336,7 @@ impl std::error::Error for CreateRequestError {
 }
 
 impl From<InternalCreateRequestError> for CreateRequestError {
-    fn from(value: InternalCreateRequestError) -> Self {
-        CreateRequestError(value)
-    }
+    fn from(value: InternalCreateRequestError) -> Self { CreateRequestError(value) }
 }
 
 /// Represent an error returned by the receiver.
@@ -418,9 +412,7 @@ impl ResponseError {
 impl std::error::Error for ResponseError {}
 
 impl From<WellKnownError> for ResponseError {
-    fn from(value: WellKnownError) -> Self {
-        Self::WellKnown(value)
-    }
+    fn from(value: WellKnownError) -> Self { Self::WellKnown(value) }
 }
 
 impl From<InternalValidationError> for ResponseError {

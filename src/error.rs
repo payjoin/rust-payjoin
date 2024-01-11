@@ -12,6 +12,8 @@ pub enum PayjoinError {
 	#[error("Error while parsing the script: {message}")]
 	InvalidScript { message: String },
 
+	#[error("{message}")]
+	NetworkValidation { message: String },
 	#[error("Error encountered while decoding PSBT: {message} ")]
 	PsbtParseError { message: String },
 
@@ -66,7 +68,7 @@ impl From<Error> for PayjoinError {
 		match value {
 			Error::BadRequest(e) => e.into(),
 			Error::Server(e) => PayjoinError::ServerError { message: e.to_string() },
-			// Error::V2(e) => PayjoinError::V2Error {message: format!("{:?}", e), }
+			Error::V2(e) => PayjoinError::V2Error {message: format!("{:?}", e), }
 		}
 	}
 }

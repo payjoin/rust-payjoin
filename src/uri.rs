@@ -1,12 +1,12 @@
-use std::{str::FromStr, sync::Arc};
 use bitcoin::address::NetworkValidation;
+use std::{str::FromStr, sync::Arc};
 
-use payjoin::{bitcoin::address::NetworkChecked};
+use payjoin::bitcoin::address::NetworkChecked;
 use payjoin::bitcoin::address::NetworkUnchecked;
 
 use crate::{
 	error::PayjoinError,
-	send::{RequestBuilder, Context, Request},
+	send::{Context, Request, RequestBuilder},
 	transaction::PartiallySignedTransaction,
 	Address,
 };
@@ -27,18 +27,18 @@ impl From<payjoin::Uri<'static, NetworkUnchecked>> for Uri {
 	}
 }
 #[derive(Clone)]
-pub struct Uri (PayjoinUriWrapper);
+pub struct Uri(PayjoinUriWrapper);
 #[derive(Clone)]
 enum PayjoinUriWrapper {
 	Checked(payjoin::Uri<'static, NetworkChecked>),
-	UnChecked(payjoin::Uri<'static, NetworkUnchecked>)
+	UnChecked(payjoin::Uri<'static, NetworkUnchecked>),
 }
 
 impl From<Uri> for payjoin::Uri<'static, NetworkChecked> {
 	fn from(uri: Uri) -> Self {
 		match uri.0 {
 			PayjoinUriWrapper::Checked(e) => e,
-			PayjoinUriWrapper::UnChecked(e) => e.assume_checked()
+			PayjoinUriWrapper::UnChecked(e) => e.assume_checked(),
 		}
 	}
 }
@@ -62,17 +62,12 @@ impl Uri {
 	pub fn assume_checked(&self) -> Result<Self, PayjoinError> {
 		match self.clone().0 {
 			PayjoinUriWrapper::Checked(e) => Ok(e.into()),
-			PayjoinUriWrapper::UnChecked(e) => Ok(e.assume_checked().into())
+			PayjoinUriWrapper::UnChecked(e) => Ok(e.assume_checked().into()),
 		}
 	}
 }
 
 pub struct PjUri(payjoin::PjUri<'static>);
-
-
-
-
-
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Amount {

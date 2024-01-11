@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex, MutexGuard};
 use payjoin::send::CreateRequestError;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::error::PayjoinError;
 use crate::transaction::PartiallySignedTransaction;
@@ -15,28 +15,28 @@ pub struct RequestBuilder {
 }
 
 impl From<PdkRequestBuilder<'static>> for RequestBuilder {
-	fn from(value:PdkRequestBuilder<'static>) -> Self {
+	fn from(value: PdkRequestBuilder<'static>) -> Self {
 		Self { internal: value }
 	}
 }
 
 impl RequestBuilder {
-
 	/// Prepare an HTTP request and request context to process the response
 	///
 	/// An HTTP client will own the Request data while Context sticks around so
 	/// a `(Request, Context)` tuple is returned from `RequestBuilder::build()`
 	/// to keep them separated.
 	pub fn from_psbt_and_uri(
-		psbt: Arc<PartiallySignedTransaction>,
-		uri: Arc<Uri>
+		psbt: Arc<PartiallySignedTransaction>, uri: Arc<Uri>,
 	) -> Result<Self, PayjoinError> {
-		match PdkRequestBuilder::from_psbt_and_uri((*psbt).clone().into(), uri.assume_checked()?.into()){
+		match PdkRequestBuilder::from_psbt_and_uri(
+			(*psbt).clone().into(),
+			uri.assume_checked()?.into(),
+		) {
 			Ok(e) => Ok(e.into()),
-			Err(e) => Err(e.into())
+			Err(e) => Err(e.into()),
 		}
 	}
-
 }
 
 ///Data required for validation of response.
@@ -52,8 +52,6 @@ impl Context {
 		let mut data_guard = self.internal.lock().unwrap();
 		Option::take(&mut *data_guard)
 	}
-
-
 }
 
 impl From<payjoin::send::ContextV1> for Context {
@@ -90,8 +88,5 @@ mod tests {
 		let pj_uri_string = "BITCOIN:BCRT1Q7WXQ0R2JHJKX8HQS3SHLKFAEAEF38C38SYKGZY?amount=1&pj=https://example.comOriginal".to_string();
 		let _uri = crate::Uri::new(pj_uri_string).unwrap();
 		eprintln!("address: {:#?}", _uri.address().as_string());
-
-
-
 	}
 }

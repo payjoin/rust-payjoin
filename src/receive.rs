@@ -97,7 +97,6 @@ impl UncheckedProposal {
 	/// Call this after checking downstream.
 	/// TODO; Implement `Copy` trait UncheckedProposal to solve "to move occurs because `self.internal` has type `payjoin::receive::UncheckedProposal`, which does not implement the `Copy` trait"
 
-
 	/// Call this method if the only way to initiate a Payjoin with this receiver requires manual intervention, as in most consumer wallets.
 	///
 	/// So-called “non-interactive” receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks. Those receivers call get_transaction_to_check_broadcast() and attest_tested_and_scheduled_broadcast() after making those checks downstream.

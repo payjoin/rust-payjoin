@@ -1,9 +1,9 @@
+use bitcoincore_rpc::bitcoin::block::ValidationError;
 use payjoin::bitcoin::psbt::PsbtParseError;
 use payjoin::receive::RequestError;
+use payjoin::send::{CreateRequestError, ResponseError as PdkResponseError};
 use payjoin::Error;
 use std::fmt::Debug;
-use bitcoincore_rpc::bitcoin::block::ValidationError;
-use payjoin::send::{CreateRequestError, ResponseError as PdkResponseError};
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PayjoinError {
@@ -16,7 +16,7 @@ pub enum PayjoinError {
 	PsbtParseError { message: String },
 
 	#[error("Response error: {message}")]
-	ResponseError{ message: String },
+	ResponseError { message: String },
 
 	///Error that may occur when the request from sender is malformed.
 	///This is currently opaque type because we aren’t sure which variants will stay. You can only display it.
@@ -61,8 +61,6 @@ impl From<PsbtParseError> for PayjoinError {
 	}
 }
 
-
-
 impl From<Error> for PayjoinError {
 	fn from(value: Error) -> Self {
 		match value {
@@ -81,17 +79,17 @@ impl From<RequestError> for PayjoinError {
 
 impl From<PdkResponseError> for PayjoinError {
 	fn from(value: PdkResponseError) -> Self {
-		PayjoinError::ResponseError {message: value.to_string()}
+		PayjoinError::ResponseError { message: value.to_string() }
 	}
 }
 impl From<ValidationError> for PayjoinError {
 	fn from(value: ValidationError) -> Self {
-		PayjoinError::ValidationError {message: value.to_string()}
+		PayjoinError::ValidationError { message: value.to_string() }
 	}
 }
 impl From<CreateRequestError> for PayjoinError {
 	fn from(value: CreateRequestError) -> Self {
-		PayjoinError::CreateRequestError {message: value.to_string()}
+		PayjoinError::CreateRequestError { message: value.to_string() }
 	}
 }
 impl From<uniffi::UnexpectedUniFFICallbackError> for PayjoinError {

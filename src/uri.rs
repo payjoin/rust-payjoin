@@ -46,7 +46,7 @@ impl From<Uri> for payjoin::Uri<'static, NetworkUnchecked> {
 	fn from(uri: Uri) -> Self {
 		match uri.0 {
 			PayjoinUriWrapper::UnChecked(e) => e,
-			PayjoinUriWrapper::Checked(e) => e,
+			PayjoinUriWrapper::Checked(e) => panic!("Network already validated!"),
 		}
 	}
 }

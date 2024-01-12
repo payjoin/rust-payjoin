@@ -4,12 +4,7 @@ use std::{str::FromStr, sync::Arc};
 use payjoin::bitcoin::address::NetworkChecked;
 use payjoin::bitcoin::address::NetworkUnchecked;
 
-use crate::{
-	error::PayjoinError,
-	send::{Context, Request, RequestBuilder},
-	transaction::PartiallySignedTransaction,
-	Address,
-};
+use crate::{error::PayjoinError, send::{Context, Request, RequestBuilder}, transaction::PartiallySignedTransaction, Address, Network};
 
 pub struct PrjUriRequest {
 	pub request: Request,
@@ -46,25 +41,33 @@ impl From<Uri> for payjoin::Uri<'static, NetworkUnchecked> {
 	fn from(uri: Uri) -> Self {
 		match uri.0 {
 			PayjoinUriWrapper::UnChecked(e) => e,
-			PayjoinUriWrapper::Checked(e) => panic!("Network already validated!"),
+			PayjoinUriWrapper::Checked(e) => panic!("Uri's network validated!"),
 		}
 	}
 }
 
 impl Uri {
-	pub fn new(uri: String) -> Result<Self, PayjoinError> {
+
+	pub fn from_str(uri: String) -> Result<Self, PayjoinError> {
 		match payjoin::Uri::from_str(uri.as_str()) {
 			Ok(e) => Ok(e.into()),
 			Err(e) => Err(PayjoinError::PjParseError { message: e.to_string() }),
 		}
 	}
 
-	pub fn assume_checked(&self) -> Result<Self, PayjoinError> {
+	pub fn assume_checked(&self) -> Result<Arc<Self>, PayjoinError> {
 		match self.clone().0 {
-			PayjoinUriWrapper::Checked(e) => Ok(e.into()),
-			PayjoinUriWrapper::UnChecked(e) => Ok(e.assume_checked().into()),
+			PayjoinUriWrapper::Checked(e)  => Ok(Arc::new(e.into())),
+			PayjoinUriWrapper::UnChecked(e) => Ok(Arc::new(e.assume_checked().into())),
 		}
 	}
+	pub fn require_network(&self, network:Network) -> Result<Arc<Self>, PayjoinError> {
+		match self.clone().0 {
+			PayjoinUriWrapper::Checked(_) => Err(PayjoinError::NetworkValidation {message: "Uri's network validated!".to_string()}),
+			PayjoinUriWrapper::UnChecked(e) => Ok(Arc::new(e.require_network(network.into()).unwrap().into())),
+		}
+	}
+
 }
 
 pub struct PjUri(payjoin::PjUri<'static>);

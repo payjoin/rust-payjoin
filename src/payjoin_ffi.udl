@@ -17,30 +17,46 @@ interface PayjoinError {
     TransactionError(string message);
     UnexpectedError(string message);
     ServerError(string message);
+    NetworkValidation(string message);
+};
+
+callback interface CanBroadcast {
+        [Throws=PayjoinError]
+        boolean test_mempool_accept(sequence<u8> tx);
+};
+callback interface IsScriptOwned {
+        [Throws=PayjoinError]
+        boolean is_owned(ScriptBuf script);
+};
+callback interface IsOutputKnown {
+    [Throws=PayjoinError]
+    boolean is_known(OutPoint outpoint);
+};
+callback interface ProcessPartiallySignedTransaction {
+        [Throws=PayjoinError]
+        string process_psbt(PartiallySignedTransaction psbt);
 };
 
 dictionary OutPoint {
   string txid;
-	u32 vout;
+  u32 vout;
 };
+
 
 dictionary TxOut{
     u64 value;
     ScriptBuf script_pubkey;
 };
-
 dictionary Request {
     Url url;
 	sequence<u8> body;
 };
-
 enum Network {
 	"Bitcoin",
 	"Testnet",
 	"Signet",
 	"Regtest",
 };
-
 interface ScriptBuf {
       constructor(sequence<u8> raw_output_script);
       [Name=from_string, Throws=PayjoinError]
@@ -50,7 +66,6 @@ interface ScriptBuf {
       string as_string();
       string to_asm_string();
 };
-
 interface Address{
       [Throws=PayjoinError]
       constructor(string address);
@@ -58,118 +73,16 @@ interface Address{
       constructor(ScriptBuf script , Network network);
       string as_string();
 };
-
 interface Headers {
       [Name=from_vec]
       constructor(sequence<u8> body);
       record<string, string> get_map();
 };
-
 interface Url {
       [Throws=PayjoinError]
       constructor(string input);
       string? query();
 };
-
-interface Uri {
-      [Throws=PayjoinError]
-      constructor(string uri);
-};
-
-
-interface RequestBuilder{
-      [Throws=PayjoinError, Name=from_psbt_and_uri]
-      constructor(PartiallySignedTransaction psbt, Uri uri);
-};
-
-dictionary PrjUriRequest{
-      Context context;
-      Request request;
-};
-
-interface PartiallySignedTransaction{
-      [Name=from_string,Throws=PayjoinError]
-      constructor(string psbt_base64);
-      sequence<u8> serialize();
-      Transaction extract_tx();
-      string as_string();
-};
-
-interface Context{
-
-};
-
-interface Amount{
-      [Name=from_sat]
-      constructor(u64 sats);
-      [Name=from_btc]
-      constructor(double btc);
-      double to_btc();
-      u64 to_sat();
-};
-
-
-
-interface Txid{
-      string as_string();
-};
-
-interface Transaction{
-      [Throws=PayjoinError]
-      constructor(sequence<u8> transaction_bytes);
-      Txid txid();
-      sequence<u8> serialize();
-};
-
-
-callback interface CanBroadcast {
-        [Throws=PayjoinError]
-        boolean test_mempool_accept(sequence<u8> tx);
-};
-
-interface UncheckedProposal{
-      [Name=from_request, Throws=PayjoinError]
-      constructor(sequence<u8> body, string query, Headers headers);
-      Transaction extract_tx_to_schedule_broadcast();
-      MaybeInputsOwned assume_interactive_receiver();
-};
-
-
-callback interface IsScriptOwned {
-        [Throws=PayjoinError]
-        boolean is_owned(ScriptBuf script);
-};
-
-interface MaybeInputsOwned{
-     [Throws=PayjoinError]
-     MaybeMixedInputScripts check_inputs_not_owned(IsScriptOwned is_owned);
-};
-
-interface MaybeMixedInputScripts{
-     [Throws=PayjoinError]
-     MaybeInputsSeen check_no_mixed_input_scripts();
-};
-
-callback interface IsOutputKnown {
-    [Throws=PayjoinError]
-    boolean is_known(OutPoint outpoint);
-};
-
-interface MaybeInputsSeen{
-     [Throws=PayjoinError]
-     OutputsUnknown check_no_inputs_seen_before(IsOutputKnown is_known);
-};
-
-interface OutputsUnknown {
-     [Throws=PayjoinError]
-     ProvisionalProposal identify_receiver_outputs(IsScriptOwned is_receiver_output);
-};
-
-callback interface ProcessPartiallySignedTransaction {
-        [Throws=PayjoinError]
-        string process_psbt(PartiallySignedTransaction psbt);
-};
-
 interface FeeRate{
       [Name=zero]
       constructor();
@@ -185,6 +98,54 @@ interface FeeRate{
       constructor(u64 sat_kwu);
 
 };
+interface PartiallySignedTransaction{
+      [Name=from_string,Throws=PayjoinError]
+      constructor(string psbt_base64);
+      sequence<u8> serialize();
+      Transaction extract_tx();
+      string as_string();
+};
+interface Amount{
+      [Name=from_sat]
+      constructor(u64 sats);
+      [Name=from_btc]
+      constructor(double btc);
+      double to_btc();
+      u64 to_sat();
+};
+interface Txid{
+      string as_string();
+};
+interface Transaction{
+      [Throws=PayjoinError]
+      constructor(sequence<u8> transaction_bytes);
+      Txid txid();
+      sequence<u8> serialize();
+};
+
+
+interface UncheckedProposal{
+      [Name=from_request, Throws=PayjoinError]
+      constructor(sequence<u8> body, string query, Headers headers);
+      Transaction extract_tx_to_schedule_broadcast();
+      MaybeInputsOwned assume_interactive_receiver();
+};
+interface MaybeInputsOwned{
+     [Throws=PayjoinError]
+     MaybeMixedInputScripts check_inputs_not_owned(IsScriptOwned is_owned);
+};
+interface MaybeMixedInputScripts{
+     [Throws=PayjoinError]
+     MaybeInputsSeen check_no_mixed_input_scripts();
+};
+interface MaybeInputsSeen{
+     [Throws=PayjoinError]
+     OutputsUnknown check_no_inputs_seen_before(IsOutputKnown is_known);
+};
+interface OutputsUnknown {
+     [Throws=PayjoinError]
+     ProvisionalProposal identify_receiver_outputs(IsScriptOwned is_receiver_output);
+};
 interface ProvisionalProposal{
       void contribute_witness_input(TxOut txout, OutPoint outpoint);
       void contribute_non_witness_input(Transaction tx, OutPoint outpoint);
@@ -194,13 +155,38 @@ interface ProvisionalProposal{
       [Throws=PayjoinError]
       PayjoinProposal finalize_proposal(ProcessPartiallySignedTransaction process_psbt, FeeRate? min_feerate_sat_per_vb);
 };
-
 interface PayjoinProposal{
         sequence<OutPoint> utxos_to_be_locked();
         boolean is_output_substitution_disabled();
         sequence<u64> owned_vouts();
         PartiallySignedTransaction psbt();
 };
+
+
+interface Uri {
+      [Throws=PayjoinError,Name=from_str]
+      constructor(string uri);
+      [Throws=PayjoinError]
+      Uri assume_checked();
+      [Throws=PayjoinError]
+      Uri require_network(Network network);
+};
+
+
+interface RequestBuilder{
+      [Throws=PayjoinError, Name=from_psbt_and_uri]
+      constructor(PartiallySignedTransaction psbt, Uri uri);
+};
+dictionary PrjUriRequest{
+      Context context;
+      Request request;
+};
+interface Context{
+
+};
+
+
+
 
 
 

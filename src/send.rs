@@ -31,7 +31,7 @@ impl RequestBuilder {
 	) -> Result<Self, PayjoinError> {
 		match PdkRequestBuilder::from_psbt_and_uri(
 			(*psbt).clone().into(),
-			uri.assume_checked()?.into(),
+			(*uri).clone().into(),
 		) {
 			Ok(e) => Ok(e.into()),
 			Err(e) => Err(e.into()),

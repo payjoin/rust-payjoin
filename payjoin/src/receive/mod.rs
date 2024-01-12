@@ -292,7 +292,7 @@ pub trait Headers {
 
 /// The sender's original PSBT and optional parameters
 ///
-/// This type is used to proces the request. It is returned by
+/// This type is used to process the request. It is returned by
 /// [`UncheckedProposal::from_request()`](crate::receive::UncheckedProposal::from_request()).
 ///
 /// If you are implementing an interactive payment processor, you should get extract the original
@@ -584,9 +584,9 @@ impl ProvisionalProposal {
     /// Return the input chosen that has been applied to the Proposal.
     ///
     /// Proper coin selection allows payjoin to resemble ordinary transactions.
-    /// To ensure the resemblence, a number of heuristics must be avoided.
+    /// To ensure the resemblance, a number of heuristics must be avoided.
     ///
-    /// UIH "Unecessary input heuristic" is one class of them to avoid. We define
+    /// UIH "Unnecessary input heuristic" is one class of them to avoid. We define
     /// UIH1 and UIH2 according to the BlockSci practice
     /// BlockSci UIH1 and UIH2:
     // if min(out) < min(in) then UIH1 else UIH2

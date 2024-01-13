@@ -74,6 +74,19 @@ pub struct Request {
 	pub body: Vec<u8>,
 }
 
+impl From<payjoin::receive::v2::Request> for Request{
+	fn from(value: payjoin::receive::v2::Request) -> Self {
+		Self{ url: Arc::new(value.url.into()), body: value.body }
+	}
+}
+impl From<payjoin::send::Request> for Request{
+	fn from(value: payjoin::send::Request) -> Self {
+		Self{ url: Arc::new(value.url.into()), body: value.body }
+	}
+}
+
+
+
 #[cfg(test)]
 mod tests {
 	use crate::PartiallySignedTransaction;

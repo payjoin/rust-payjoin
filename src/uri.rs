@@ -1,4 +1,4 @@
-use bitcoin::address::NetworkValidation;
+use payjoin::bitcoin::address::NetworkValidation;
 use std::{str::FromStr, sync::Arc};
 
 use payjoin::bitcoin::address::NetworkChecked;
@@ -41,7 +41,7 @@ impl From<Uri> for payjoin::Uri<'static, NetworkUnchecked> {
 	fn from(uri: Uri) -> Self {
 		match uri.0 {
 			PayjoinUriWrapper::UnChecked(e) => e,
-			PayjoinUriWrapper::Checked(e) => panic!("Uri's network validated!"),
+			PayjoinUriWrapper::Checked(_) => panic!("Uri's network validated!"),
 		}
 	}
 }
@@ -73,44 +73,45 @@ impl Uri {
 pub struct PjUri(payjoin::PjUri<'static>);
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Amount {
-	internal: u64,
-}
+pub struct Amount (u64);
 
 impl From<Amount> for payjoin::bitcoin::Amount {
 	fn from(value: Amount) -> Self {
-		payjoin::bitcoin::Amount::from_sat(value.internal)
+		payjoin::bitcoin::Amount::from_sat(value.0)
 	}
 }
 
 impl Amount {
 	pub fn from_sat(sats: u64) -> Self {
-		Self { internal: sats }
+		Self(sats)
 	}
 	pub fn from_btc(btc: f64) -> Self {
-		Self { internal: (btc as u64) * 100000000 }
+		Self ((btc as u64) * 100000000)
 	}
 	pub fn to_sat(&self) -> u64 {
-		self.internal
+		self.0
 	}
 	pub fn to_btc(&self) -> f64 {
-		(self.internal as f64) / (100000000f64)
+		(self.0 as f64) / (100000000f64)
 	}
 }
 
-pub struct Url {
-	internal: url::Url,
+impl From<url::Url> for Url{
+	fn from(value: url::Url) -> Self {
+		Self(value)
+	}
 }
+pub struct Url (url::Url);
 
 impl Url {
 	pub fn new(input: String) -> Result<Url, PayjoinError> {
 		match url::Url::from_str(input.as_str()) {
-			Ok(e) => Ok(Self { internal: e }),
+			Ok(e) => Ok(Self(e)),
 			Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
 		}
 	}
 	pub fn query(&self) -> Option<String> {
-		self.internal.query().map(|x| x.to_string())
+		self.0.query().map(|x| x.to_string())
 	}
 }
 

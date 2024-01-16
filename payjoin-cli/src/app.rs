@@ -370,12 +370,14 @@ impl App {
         };
 
         let pj_uri_string = format!(
-            "{}?amount={}&pj={}&ohttp={}",
+            "{}?amount={}&pj={}",
             pj_receiver_address.to_qr_uri(),
             amount.to_btc(),
             pj_part,
-            self.config.ohttp_config,
         );
+
+        #[cfg(feature = "v2")]
+        let pj_uri_string = format!("{}&ohttp={}", pj_uri_string, self.config.ohttp_config,);
 
         // to check uri validity
         let _pj_uri = payjoin::Uri::from_str(&pj_uri_string)
@@ -775,6 +777,7 @@ pub(crate) struct AppConfig {
     pub bitcoind_cookie: Option<String>,
     pub bitcoind_rpcuser: String,
     pub bitcoind_rpcpass: String,
+    #[cfg(feature = "v2")]
     pub ohttp_config: String,
     #[cfg(feature = "v2")]
     pub ohttp_proxy: String,
@@ -808,6 +811,14 @@ impl AppConfig {
                 "bitcoind_rpcpass",
                 matches.get_one::<String>("rpcpass").map(|s| s.as_str()),
             )?
+            // Subcommand defaults without which file serialization fails.
+            .set_default("pj_host", "0.0.0.0:3000")?
+            .set_default("pj_endpoint", "https://localhost:3000")?
+            .set_default("sub_only", false)?
+            .add_source(File::new("config.toml", FileFormat::Toml).required(false));
+
+        #[cfg(feature = "v2")]
+        let builder = builder
             .set_default("ohttp_config", "")?
             .set_override_option(
                 "ohttp_config",
@@ -817,12 +828,7 @@ impl AppConfig {
             .set_override_option(
                 "ohttp_proxy",
                 matches.get_one::<String>("ohttp_proxy").map(|s| s.as_str()),
-            )?
-            // Subcommand defaults without which file serialization fails.
-            .set_default("pj_host", "0.0.0.0:3000")?
-            .set_default("pj_endpoint", "https://localhost:3000")?
-            .set_default("sub_only", false)?
-            .add_source(File::new("config.toml", FileFormat::Toml).required(false));
+            )?;
 
         let builder = match matches.subcommand() {
             Some(("send", _)) => builder,

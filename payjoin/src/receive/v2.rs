@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use super::{Error, InternalRequestError, RequestError, SelectionError};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
+
 /// Represents data that needs to be transmitted to the payjoin relay.
 ///
 /// You need to send this request over HTTP(S) to the relay.

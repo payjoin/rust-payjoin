@@ -292,7 +292,7 @@ pub trait Headers {
 
 /// The sender's original PSBT and optional parameters
 ///
-/// This type is used to proces the request. It is returned by
+/// This type is used to process the request. It is returned by
 /// [`UncheckedProposal::from_request()`](crate::receive::UncheckedProposal::from_request()).
 ///
 /// If you are implementing an interactive payment processor, you should get extract the original
@@ -519,17 +519,12 @@ impl MaybeInputsSeen {
         self.psbt.input_pairs().try_for_each(|input| {
             match is_known(&input.txin.previous_output) {
                 Ok(false) => Ok::<(), Error>(()),
-                Ok(true) => {
-                    log::warn!(
-                        "Request contains an input we've seen before: {}. Preventing possible probing attack.",
-                        input.txin.previous_output
-                    );
-                    Err(
-                        Error::BadRequest(
-                            InternalRequestError::InputSeen(input.txin.previous_output).into()
-                        )
-                    )?
-                }
+                Ok(true) =>  {
+                    log::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
+                    Err(Error::BadRequest(
+                        InternalRequestError::InputSeen(input.txin.previous_output).into(),
+                    ))?
+                },
                 Err(e) => Err(Error::Server(e.into()))?,
             }
         })?;

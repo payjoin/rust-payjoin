@@ -66,7 +66,7 @@ impl UncheckedProposal {
             (*headers).clone(),
         ) {
             Ok(e) => Ok(e.into()),
-            Err(e) => Err(PayjoinError::RequestError { message: e.to_string() }),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -295,7 +295,7 @@ impl ProvisionalProposal {
             min_feerate_sat_per_vb.map(|x| (*x).into()),
         ) {
             Ok(e) => Ok(Arc::new(PayjoinProposal(e))),
-            Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
+            Err(e) => Err(e.into()),
         }
     }
 }

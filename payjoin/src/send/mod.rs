@@ -136,8 +136,6 @@
 //! 📤 Sending payjoin is just that simple.
 
 use std::str::FromStr;
-#[cfg(feature = "v2")]
-use std::sync::Arc;
 
 use bitcoin::address::NetworkChecked;
 use bitcoin::psbt::Psbt;
@@ -351,7 +349,7 @@ impl<'a> RequestBuilder<'a> {
             psbt,
             endpoint,
             #[cfg(feature = "v2")]
-            ohttp_config: ohttp_config.map(|x| Arc::new(x)),
+            ohttp_config,
             disable_output_substitution,
             fee_contribution,
             payee,
@@ -368,7 +366,7 @@ pub struct RequestContext {
     psbt: Psbt,
     endpoint: Url,
     #[cfg(feature = "v2")]
-    ohttp_config: Option<Arc<ohttp::KeyConfig>>,
+    ohttp_config: Option<ohttp::KeyConfig>,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
@@ -630,7 +628,7 @@ impl<'de> Deserialize<'de> for RequestContext {
                 Ok(RequestContext {
                     psbt: psbt.ok_or_else(|| de::Error::missing_field("psbt"))?,
                     endpoint: endpoint.ok_or_else(|| de::Error::missing_field("endpoint"))?,
-                    ohttp_config: ohttp_config.map(|x| Arc::new(x)),
+                    ohttp_config,
                     disable_output_substitution: disable_output_substitution
                         .ok_or_else(|| de::Error::missing_field("disable_output_substitution"))?,
                     fee_contribution,

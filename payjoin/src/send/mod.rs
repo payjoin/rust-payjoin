@@ -465,7 +465,7 @@ impl RequestContext {
             url.as_str(),
             Some(&body),
         )
-            .map_err(InternalCreateRequestError::V2)?;
+        .map_err(InternalCreateRequestError::V2)?;
         log::debug!("ohttp_proxy_url: {:?}", ohttp_proxy_url);
         let url = Url::parse(ohttp_proxy_url).map_err(InternalCreateRequestError::Url)?;
         Ok((
@@ -509,8 +509,8 @@ impl Clone for RequestContext {
 #[cfg(feature = "v2")]
 impl Serialize for RequestContext {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
+    where
+        S: Serializer,
     {
         let mut state = serializer.serialize_struct("RequestContext", 8)?;
         state.serialize_field("psbt", &self.psbt.to_string())?;
@@ -539,8 +539,8 @@ impl Serialize for RequestContext {
 #[cfg(feature = "v2")]
 impl<'de> Deserialize<'de> for RequestContext {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         struct RequestContextVisitor;
 
@@ -601,7 +601,7 @@ impl<'de> Deserialize<'de> for RequestContext {
                                             .map_err(de::Error::custom)?
                                             .as_slice(),
                                     )
-                                        .map_err(de::Error::custom)?,
+                                    .map_err(de::Error::custom)?,
                                 )
                             };
                         }
@@ -802,9 +802,9 @@ impl ContextV1 {
             } else {
                 weight_without_witnesses
                     + Weight::from_wu(
-                    (proposal.unsigned_tx.input.len() - in_stats.inputs_with_witnesses + 2)
-                        as u64,
-                )
+                        (proposal.unsigned_tx.input.len() - in_stats.inputs_with_witnesses + 2)
+                            as u64,
+                    )
             };
             ensure!(proposed_psbt_fee / total_weight >= self.min_fee_rate, FeeRateBelowMinimum);
         }
@@ -840,38 +840,38 @@ impl ContextV1 {
             match original_inputs.peek() {
                 // our (sender)
                 Some(original)
-                if proposed.txin.previous_output == original.txin.previous_output =>
-                    {
-                        check_eq!(
+                    if proposed.txin.previous_output == original.txin.previous_output =>
+                {
+                    check_eq!(
                         proposed.txin.sequence,
                         original.txin.sequence,
                         SenderTxinSequenceChanged
                     );
-                        ensure!(
+                    ensure!(
                         proposed.psbtin.non_witness_utxo.is_none(),
                         SenderTxinContainsNonWitnessUtxo
                     );
-                        ensure!(proposed.psbtin.witness_utxo.is_none(), SenderTxinContainsWitnessUtxo);
-                        ensure!(
+                    ensure!(proposed.psbtin.witness_utxo.is_none(), SenderTxinContainsWitnessUtxo);
+                    ensure!(
                         proposed.psbtin.final_script_sig.is_none(),
                         SenderTxinContainsFinalScriptSig
                     );
-                        ensure!(
+                    ensure!(
                         proposed.psbtin.final_script_witness.is_none(),
                         SenderTxinContainsFinalScriptWitness
                     );
-                        let prevout = original.previous_txout().expect("We've validated this before");
-                        total_value += bitcoin::Amount::from_sat(prevout.value);
-                        // We assume the signture will be the same size
-                        // I know sigs can be slightly different size but there isn't much to do about
-                        // it other than prefer Taproot.
-                        total_weight += original.txin.weight();
-                        if !original.txin.witness.is_empty() {
-                            inputs_with_witnesses += 1;
-                        }
-
-                        original_inputs.next();
+                    let prevout = original.previous_txout().expect("We've validated this before");
+                    total_value += bitcoin::Amount::from_sat(prevout.value);
+                    // We assume the signture will be the same size
+                    // I know sigs can be slightly different size but there isn't much to do about
+                    // it other than prefer Taproot.
+                    total_weight += original.txin.weight();
+                    if !original.txin.witness.is_empty() {
+                        inputs_with_witnesses += 1;
                     }
+
+                    original_inputs.next();
+                }
                 // theirs (receiver)
                 None | Some(_) => {
                     // Verify the PSBT input is finalized
@@ -1124,7 +1124,7 @@ fn serialize_v2_body(
         fee_contribution,
         min_feerate,
     )
-        .map_err(InternalCreateRequestError::Url)?;
+    .map_err(InternalCreateRequestError::Url)?;
     let query_params = placeholder_url.query().unwrap_or_default();
     let base64 = psbt.to_string();
     Ok(format!("{}\n{}", base64, query_params).into_bytes())
@@ -1234,7 +1234,7 @@ mod test {
             "errorCode": "version-unsupported",
             "message": "This version of payjoin is not supported."
         })
-            .to_string();
+        .to_string();
         match ctx.process_response(&mut known_json_error.as_bytes()) {
             Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported(_, _))) =>
                 assert!(true),
@@ -1246,7 +1246,7 @@ mod test {
             "err": "random",
             "message": "This version of payjoin is not supported."
         })
-            .to_string();
+        .to_string();
         match ctx.process_response(&mut invalid_json_error.as_bytes()) {
             Err(ResponseError::Validation(_)) => assert!(true),
             _ => panic!("Expected unrecognized JSON error"),

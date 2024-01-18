@@ -181,7 +181,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
             (Some(endpoint), pjos, None) => {
                 if endpoint.scheme() == "https"
                     || endpoint.scheme() == "http"
-                    && endpoint.domain().unwrap_or_default().ends_with(".onion")
+                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
                 {
                     Ok(Payjoin::Supported(PayjoinParams {
                         _endpoint: endpoint,
@@ -195,7 +195,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
             (Some(endpoint), pjos, Some(ohttp)) => {
                 if endpoint.scheme() == "https"
                     || endpoint.scheme() == "http"
-                    && endpoint.domain().unwrap_or_default().ends_with(".onion")
+                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
                 {
                     Ok(Payjoin::Supported(PayjoinParams {
                         _endpoint: endpoint,
@@ -225,7 +225,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
             (Some(endpoint), pjos) => {
                 if endpoint.scheme() == "https"
                     || endpoint.scheme() == "http"
-                    && endpoint.domain().unwrap_or_default().ends_with(".onion")
+                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
                 {
                     Ok(Payjoin::Supported(PayjoinParams {
                         _endpoint: endpoint,

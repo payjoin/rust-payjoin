@@ -34,10 +34,10 @@ impl Default for Params {
 impl Params {
     #[cfg(feature = "receive")]
     pub fn from_query_pairs<K, V, I>(pairs: I) -> Result<Self, Error>
-        where
-            I: Iterator<Item = (K, V)>,
-            K: Borrow<str> + Into<String>,
-            V: Borrow<str> + Into<String>,
+    where
+        I: Iterator<Item = (K, V)>,
+        K: Borrow<str> + Into<String>,
+        V: Borrow<str> + Into<String>,
     {
         let mut params = Params::default();
 

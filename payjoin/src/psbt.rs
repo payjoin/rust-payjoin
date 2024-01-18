@@ -152,7 +152,7 @@ impl<'a> InputPair<'a> {
                         output_count: tx.output.len(),
                         index: self.txin.previous_output.vout,
                     }
-                        .into()
+                    .into()
                 })
                 .map(drop),
             (Some(_), None) => Err(PsbtInputError::UnequalTxid),

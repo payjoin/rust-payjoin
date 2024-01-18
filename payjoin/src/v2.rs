@@ -158,8 +158,9 @@ impl fmt::Display for Error {
             Secp256k1(e) => e.fmt(f),
             ChaCha20Poly1305(e) => e.fmt(f),
             InvalidKeyLength => write!(f, "Invalid Length"),
-            PayloadTooLarge =>
-                write!(f, "Payload too large, max size is {} bytes", PADDED_MESSAGE_BYTES),
+            PayloadTooLarge => {
+                write!(f, "Payload too large, max size is {} bytes", PADDED_MESSAGE_BYTES)
+            }
         }
     }
 }

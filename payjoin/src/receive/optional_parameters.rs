@@ -50,7 +50,8 @@ impl Params {
                     if !SUPPORTED_VERSIONS.contains(&v) {
                         return Err(Error::UnknownVersion);
                     },
-                ("additionalfeeoutputindex", index) =>
+
+                ("additionalfeeoutputindex", index) => {
                     additional_fee_output_index = match index.parse::<usize>() {
                         Ok(index) => Some(index),
                         Err(_error) => {
@@ -60,8 +61,9 @@ impl Params {
                             );
                             None
                         }
-                    },
-                ("maxadditionalfeecontribution", fee) =>
+                    };
+                }
+                ("maxadditionalfeecontribution", fee) => {
                     max_additional_fee_contribution =
                         match bitcoin::Amount::from_str_in(fee, bitcoin::Denomination::Satoshi) {
                             Ok(contribution) => Some(contribution),
@@ -72,8 +74,9 @@ impl Params {
                                 );
                                 None
                             }
-                        },
-                ("minfeerate", feerate) =>
+                        };
+                }
+                ("minfeerate", feerate) => {
                     params.min_feerate = match feerate.parse::<f32>() {
                         Ok(fee_rate_sat_per_vb) => {
                             // TODO Parse with serde when rust-bitcoin supports it
@@ -81,17 +84,22 @@ impl Params {
                             // since it's a minnimum, we want to round up
                             FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64)
                         }
-                        Err(e) => return Err(Error::FeeRate(e.to_string())),
-                    },
-                ("disableoutputsubstitution", v) =>
-                    params.disable_output_substitution = v == "true",
+                        Err(e) => {
+                            return Err(Error::FeeRate(e.to_string()));
+                        }
+                    };
+                }
+                ("disableoutputsubstitution", v) => {
+                    params.disable_output_substitution = v == "true";
+                }
                 _ => (),
             }
         }
 
         match (max_additional_fee_contribution, additional_fee_output_index) {
-            (Some(amount), Some(index)) =>
-                params.additional_fee_contribution = Some((amount, index)),
+            (Some(amount), Some(index)) => {
+                params.additional_fee_contribution = Some((amount, index));
+            }
             (Some(_), None) | (None, Some(_)) => {
                 warn!("only one additional-fee parameter specified: {:?}", params);
             }

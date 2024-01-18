@@ -41,8 +41,8 @@ impl serde::Serialize for InputType {
 #[cfg(feature = "v2")]
 impl<'de> serde::Deserialize<'de> for InputType {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
+        where
+            D: serde::Deserializer<'de>,
     {
         use InputType::*;
 
@@ -245,7 +245,7 @@ mod tests {
             &TxOut { script_pubkey: ScriptBuf::new_p2sh(&script.script_hash()), value: 42 },
             &PsbtInput { final_script_sig: Some(script), ..Default::default() },
         )
-        .unwrap();
+            .unwrap();
         assert_eq!(input_type, InputType::P2Sh);
     }
 
@@ -262,7 +262,7 @@ mod tests {
             &TxOut { script_pubkey: ScriptBuf::new_v0_p2wsh(&script.wscript_hash()), value: 42 },
             &PsbtInput { final_script_sig: Some(script), ..Default::default() },
         )
-        .unwrap();
+            .unwrap();
         assert_eq!(input_type, InputType::SegWitV0 { ty: SegWitV0Type::Script, nested: false });
     }
 
@@ -276,7 +276,7 @@ mod tests {
             &TxOut { script_pubkey: ScriptBuf::new_p2sh(&segwit_script_hash), value: 42 },
             &PsbtInput { final_script_sig: Some(script_sig), ..Default::default() },
         )
-        .unwrap();
+            .unwrap();
         assert_eq!(input_type, InputType::SegWitV0 { ty: SegWitV0Type::Pubkey, nested: true });
     }
 
@@ -291,7 +291,7 @@ mod tests {
             &TxOut { script_pubkey: ScriptBuf::new_p2sh(&segwit_script_hash), value: 42 },
             &PsbtInput { final_script_sig: Some(script_sig), ..Default::default() },
         )
-        .unwrap();
+            .unwrap();
         assert_eq!(input_type, InputType::SegWitV0 { ty: SegWitV0Type::Script, nested: true });
     }
 

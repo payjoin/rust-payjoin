@@ -74,34 +74,100 @@ impl fmt::Display for ValidationError {
         use InternalValidationError::*;
 
         match &self.internal {
-            Parse => write!(f, "couldn't decode as PSBT or JSON",),
+            Parse => write!(f, "couldn't decode as PSBT or JSON"),
             Io(e) => write!(f, "couldn't read PSBT: {}", e),
             InvalidInputType(e) => write!(f, "invalid transaction input type: {}", e),
             InvalidProposedInput(e) => write!(f, "invalid proposed transaction input: {}", e),
-            VersionsDontMatch { proposed, original, } => write!(f, "proposed transaction version {} doesn't match the original {}", proposed, original),
-            LockTimesDontMatch { proposed, original, } => write!(f, "proposed transaction lock time {} doesn't match the original {}", proposed, original),
-            SenderTxinSequenceChanged { proposed, original, } => write!(f, "proposed transaction sequence number {} doesn't match the original {}", proposed, original),
-            SenderTxinContainsNonWitnessUtxo => write!(f, "an input in proposed transaction belonging to the sender contains non-witness UTXO information"),
-            SenderTxinContainsWitnessUtxo => write!(f, "an input in proposed transaction belonging to the sender contains witness UTXO information"),
-            SenderTxinContainsFinalScriptSig => write!(f, "an input in proposed transaction belonging to the sender contains finalized non-witness signature"),
-            SenderTxinContainsFinalScriptWitness => write!(f, "an input in proposed transaction belonging to the sender contains finalized witness signature"),
+            VersionsDontMatch { proposed, original } =>
+                write!(
+                    f,
+                    "proposed transaction version {} doesn't match the original {}",
+                    proposed,
+                    original
+                ),
+            LockTimesDontMatch { proposed, original } =>
+                write!(
+                    f,
+                    "proposed transaction lock time {} doesn't match the original {}",
+                    proposed,
+                    original
+                ),
+            SenderTxinSequenceChanged { proposed, original } =>
+                write!(
+                    f,
+                    "proposed transaction sequence number {} doesn't match the original {}",
+                    proposed,
+                    original
+                ),
+            SenderTxinContainsNonWitnessUtxo =>
+                write!(
+                    f,
+                    "an input in proposed transaction belonging to the sender contains non-witness UTXO information"
+                ),
+            SenderTxinContainsWitnessUtxo =>
+                write!(
+                    f,
+                    "an input in proposed transaction belonging to the sender contains witness UTXO information"
+                ),
+            SenderTxinContainsFinalScriptSig =>
+                write!(
+                    f,
+                    "an input in proposed transaction belonging to the sender contains finalized non-witness signature"
+                ),
+            SenderTxinContainsFinalScriptWitness =>
+                write!(
+                    f,
+                    "an input in proposed transaction belonging to the sender contains finalized witness signature"
+                ),
             TxInContainsKeyPaths => write!(f, "proposed transaction inputs contain key paths"),
-            ContainsPartialSigs => write!(f, "an input in proposed transaction belonging to the sender contains partial signatures"),
-            ReceiverTxinNotFinalized => write!(f, "an input in proposed transaction belonging to the receiver is not finalized"),
-            ReceiverTxinMissingUtxoInfo => write!(f, "an input in proposed transaction belonging to the receiver is missing UTXO information"),
-            MixedSequence => write!(f, "inputs of proposed transaction contain mixed sequence numbers"),
-            MixedInputTypes { proposed, original, } => write!(f, "proposed transaction contains input of type {:?} while original contains inputs of type {:?}", proposed, original),
-            MissingOrShuffledInputs => write!(f, "proposed transaction is missing inputs of the sender or they are shuffled"),
+            ContainsPartialSigs =>
+                write!(
+                    f,
+                    "an input in proposed transaction belonging to the sender contains partial signatures"
+                ),
+            ReceiverTxinNotFinalized =>
+                write!(
+                    f,
+                    "an input in proposed transaction belonging to the receiver is not finalized"
+                ),
+            ReceiverTxinMissingUtxoInfo =>
+                write!(
+                    f,
+                    "an input in proposed transaction belonging to the receiver is missing UTXO information"
+                ),
+            MixedSequence =>
+                write!(f, "inputs of proposed transaction contain mixed sequence numbers"),
+            MixedInputTypes { proposed, original } =>
+                write!(
+                    f,
+                    "proposed transaction contains input of type {:?} while original contains inputs of type {:?}",
+                    proposed,
+                    original
+                ),
+            MissingOrShuffledInputs =>
+                write!(
+                    f,
+                    "proposed transaction is missing inputs of the sender or they are shuffled"
+                ),
             TxOutContainsKeyPaths => write!(f, "proposed transaction outputs contain key paths"),
             FeeContributionExceedsMaximum => write!(f, "fee contribution exceeds allowed maximum"),
-            DisallowedOutputSubstitution => write!(f, "the receiver change output despite it being disallowed"),
+            DisallowedOutputSubstitution =>
+                write!(f, "the receiver change output despite it being disallowed"),
             OutputValueDecreased => write!(f, "the amount in our non-fee output was decreased"),
-            MissingOrShuffledOutputs => write!(f, "proposed transaction is missing outputs of the sender or they are shuffled"),
+            MissingOrShuffledOutputs =>
+                write!(
+                    f,
+                    "proposed transaction is missing outputs of the sender or they are shuffled"
+                ),
             Inflation => write!(f, "proposed transaction is attempting inflation"),
-            AbsoluteFeeDecreased => write!(f, "abslute fee of proposed transaction is lower than original"),
-            PayeeTookContributedFee => write!(f, "payee tried to take fee contribution for himself"),
-            FeeContributionPaysOutputSizeIncrease => write!(f, "fee contribution pays for additional outputs"),
-            FeeRateBelowMinimum =>  write!(f, "the fee rate of proposed transaction is below minimum"),
+            AbsoluteFeeDecreased =>
+                write!(f, "abslute fee of proposed transaction is lower than original"),
+            PayeeTookContributedFee =>
+                write!(f, "payee tried to take fee contribution for himself"),
+            FeeContributionPaysOutputSizeIncrease =>
+                write!(f, "fee contribution pays for additional outputs"),
+            FeeRateBelowMinimum =>
+                write!(f, "the fee rate of proposed transaction is below minimum"),
             #[cfg(feature = "v2")]
             V2(e) => write!(f, "v2 error: {}", e),
             #[cfg(feature = "v2")]
@@ -191,17 +257,34 @@ impl fmt::Display for CreateRequestError {
         use InternalCreateRequestError::*;
 
         match &self.0 {
-            InvalidOriginalInput(e) => write!(f, "an input in the original transaction is invalid: {:#?}", e),
-            InconsistentOriginalPsbt(e) => write!(f, "the original transaction is inconsistent: {:#?}", e),
+            InvalidOriginalInput(e) =>
+                write!(f, "an input in the original transaction is invalid: {:#?}", e),
+            InconsistentOriginalPsbt(e) =>
+                write!(f, "the original transaction is inconsistent: {:#?}", e),
             NoInputs => write!(f, "the original transaction has no inputs"),
-            PayeeValueNotEqual => write!(f, "the value in original transaction doesn't equal value requested in the payment link"),
+            PayeeValueNotEqual =>
+                write!(
+                    f,
+                    "the value in original transaction doesn't equal value requested in the payment link"
+                ),
             NoOutputs => write!(f, "the original transaction has no outputs"),
-            MultiplePayeeOutputs => write!(f, "the original transaction has more than one output belonging to the payee"),
-            MissingPayeeOutput => write!(f, "the output belonging to payee is missing from the original transaction"),
-            FeeOutputValueLowerThanFeeContribution => write!(f, "the value of fee output is lower than maximum allowed contribution"),
-            AmbiguousChangeOutput => write!(f, "can not determine which output is change because there's more than two outputs"),
+            MultiplePayeeOutputs =>
+                write!(
+                    f,
+                    "the original transaction has more than one output belonging to the payee"
+                ),
+            MissingPayeeOutput =>
+                write!(f, "the output belonging to payee is missing from the original transaction"),
+            FeeOutputValueLowerThanFeeContribution =>
+                write!(f, "the value of fee output is lower than maximum allowed contribution"),
+            AmbiguousChangeOutput =>
+                write!(
+                    f,
+                    "can not determine which output is change because there's more than two outputs"
+                ),
             ChangeIndexOutOfBounds => write!(f, "fee output index is points out of bounds"),
-            ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
+            ChangeIndexPointsAtPayee =>
+                write!(f, "fee output index is points at output belonging to the payee"),
             Url(e) => write!(f, "cannot parse url: {:#?}", e),
             UriDoesNotSupportPayjoin => write!(f, "the URI does not support payjoin"),
             PrevTxOut(e) => write!(f, "invalid previous transaction output: {}", e),
@@ -211,9 +294,11 @@ impl fmt::Display for CreateRequestError {
             #[cfg(feature = "v2")]
             SubdirectoryNotBase64(e) => write!(f, "subdirectory is not valid base64 error: {}", e),
             #[cfg(feature = "v2")]
-            SubdirectoryInvalidPubkey(e) => write!(f, "subdirectory does not represent a valid pubkey: {}", e),
+            SubdirectoryInvalidPubkey(e) =>
+                write!(f, "subdirectory does not represent a valid pubkey: {}", e),
             #[cfg(feature = "v2")]
-            MissingOhttpConfig => write!(f, "no ohttp configuration with which to make a v2 request available"),
+            MissingOhttpConfig =>
+                write!(f, "no ohttp configuration with which to make a v2 request available"),
         }
     }
 }
@@ -299,10 +384,14 @@ impl ResponseError {
                         .unwrap_or_default();
                     return WellKnownError::VersionUnsupported(message, supported).into();
                 }
-                "unavailable" => return WellKnownError::Unavailable(message).into(),
+                "unavailable" => {
+                    return WellKnownError::Unavailable(message).into();
+                }
                 "not-enough-money" => WellKnownError::NotEnoughMoney(message).into(),
                 "original-psbt-rejected" => WellKnownError::OriginalPsbtRejected(message).into(),
-                _ => return Self::Unrecognized(error_code.to_string(), message),
+                _ => {
+                    return Self::Unrecognized(error_code.to_string(), message);
+                }
             }
         } else {
             return InternalValidationError::Parse.into();
@@ -395,8 +484,13 @@ impl Display for WellKnownError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Unavailable(_) => write!(f, "The payjoin endpoint is not available for now."),
-            Self::NotEnoughMoney(_) => write!(f, "The receiver added some inputs but could not bump the fee of the payjoin proposal."),
-            Self::VersionUnsupported(_, v) => write!(f, "This version of payjoin is not supported. Use version {:?}.", v),
+            Self::NotEnoughMoney(_) =>
+                write!(
+                    f,
+                    "The receiver added some inputs but could not bump the fee of the payjoin proposal."
+                ),
+            Self::VersionUnsupported(_, v) =>
+                write!(f, "This version of payjoin is not supported. Use version {:?}.", v),
             Self::OriginalPsbtRejected(_) => write!(f, "The receiver rejected the original PSBT."),
         }
     }
@@ -422,7 +516,7 @@ mod tests {
                 );
             }
             _ => panic!("Expected WellKnown error"),
-        };
+        }
         let unrecognized_error = r#"{"errorCode":"random", "message":"random"}"#;
         assert_eq!(
             ResponseError::from_str(unrecognized_error).to_string(),

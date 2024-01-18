@@ -351,7 +351,7 @@ impl<'a> RequestBuilder<'a> {
             psbt,
             endpoint,
             #[cfg(feature = "v2")]
-            ohttp_config,
+            ohttp_config: ohttp_config.map(|x| Arc::new(x)),
             disable_output_substitution,
             fee_contribution,
             payee,
@@ -382,18 +382,17 @@ pub struct RequestContext {
 #[cfg(feature = "v2")]
 impl PartialEq for RequestContext {
     fn eq(&self, other: &Self) -> bool {
-        self.psbt == other.psbt &&
-            self.endpoint == other.endpoint &&
+        self.psbt == other.psbt
+            && self.endpoint == other.endpoint
             // KeyConfig is not yet PartialEq
-            self.ohttp_config.as_ref().map(|cfg| cfg.encode().unwrap_or(Vec::new())) ==
-                other.ohttp_config.as_ref().map(|cfg| cfg.encode().unwrap_or(Vec::new())) &&
-            self.disable_output_substitution == other.disable_output_substitution &&
-            self.fee_contribution == other.fee_contribution &&
-            self.min_fee_rate == other.min_fee_rate &&
-            self.input_type == other.input_type &&
-            self.sequence == other.sequence &&
-            self.payee == other.payee &&
-            self.e == other.e
+            && self.ohttp_config.as_ref().map(|cfg| cfg.encode().unwrap_or(Vec::new())) == other.ohttp_config.as_ref().map(|cfg| cfg.encode().unwrap_or(Vec::new()))
+            && self.disable_output_substitution == other.disable_output_substitution
+            && self.fee_contribution == other.fee_contribution
+            && self.min_fee_rate == other.min_fee_rate
+            && self.input_type == other.input_type
+            && self.sequence == other.sequence
+            && self.payee == other.payee
+            && self.e == other.e
     }
 }
 
@@ -466,7 +465,7 @@ impl RequestContext {
             url.as_str(),
             Some(&body),
         )
-        .map_err(InternalCreateRequestError::V2)?;
+            .map_err(InternalCreateRequestError::V2)?;
         log::debug!("ohttp_proxy_url: {:?}", ohttp_proxy_url);
         let url = Url::parse(ohttp_proxy_url).map_err(InternalCreateRequestError::Url)?;
         Ok((
@@ -510,8 +509,8 @@ impl Clone for RequestContext {
 #[cfg(feature = "v2")]
 impl Serialize for RequestContext {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
+        where
+            S: Serializer,
     {
         let mut state = serializer.serialize_struct("RequestContext", 8)?;
         state.serialize_field("psbt", &self.psbt.to_string())?;
@@ -540,8 +539,8 @@ impl Serialize for RequestContext {
 #[cfg(feature = "v2")]
 impl<'de> Deserialize<'de> for RequestContext {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
+        where
+            D: Deserializer<'de>,
     {
         struct RequestContextVisitor;
 
@@ -586,12 +585,11 @@ impl<'de> Deserialize<'de> for RequestContext {
                             let buf: String = map.next_value::<String>()?;
                             psbt = Some(Psbt::from_str(&buf).map_err(de::Error::custom)?);
                         }
-                        "endpoint" => {
+                        "endpoint" =>
                             endpoint = Some(
                                 url::Url::from_str(&map.next_value::<String>()?)
                                     .map_err(de::Error::custom)?,
-                            );
-                        }
+                            ),
                         "ohttp_config" => {
                             let ohttp_base64: String = map.next_value()?;
                             ohttp_config = if ohttp_base64.is_empty() {
@@ -603,30 +601,21 @@ impl<'de> Deserialize<'de> for RequestContext {
                                             .map_err(de::Error::custom)?
                                             .as_slice(),
                                     )
-                                    .map_err(de::Error::custom)?,
+                                        .map_err(de::Error::custom)?,
                                 )
                             };
                         }
-                        "disable_output_substitution" => {
-                            disable_output_substitution = Some(map.next_value()?);
-                        }
+                        "disable_output_substitution" =>
+                            disable_output_substitution = Some(map.next_value()?),
                         "fee_contribution" => {
                             let fc: Option<(u64, usize)> = map.next_value()?;
                             fee_contribution = fc
                                 .map(|(amount, index)| (bitcoin::Amount::from_sat(amount), index));
                         }
-                        "min_fee_rate" => {
-                            min_fee_rate = Some(map.next_value()?);
-                        }
-                        "input_type" => {
-                            input_type = Some(map.next_value()?);
-                        }
-                        "sequence" => {
-                            sequence = Some(map.next_value()?);
-                        }
-                        "payee" => {
-                            payee = Some(map.next_value()?);
-                        }
+                        "min_fee_rate" => min_fee_rate = Some(map.next_value()?),
+                        "input_type" => input_type = Some(map.next_value()?),
+                        "sequence" => sequence = Some(map.next_value()?),
+                        "payee" => payee = Some(map.next_value()?),
                         "e" => {
                             let secret_bytes: Vec<u8> = map.next_value()?;
                             e = Some(
@@ -634,9 +623,7 @@ impl<'de> Deserialize<'de> for RequestContext {
                                     .map_err(de::Error::custom)?,
                             );
                         }
-                        _ => {
-                            return Err(de::Error::unknown_field(key.as_str(), FIELDS));
-                        }
+                        _ => return Err(de::Error::unknown_field(key.as_str(), FIELDS)),
                     }
                 }
 
@@ -801,11 +788,11 @@ impl ContextV1 {
             let non_input_output_size =
                 // version
                 4 +
-                // count variants
-                varint_size(proposal.unsigned_tx.input.len() as u64) +
-                varint_size(proposal.unsigned_tx.output.len() as u64) +
-                // lock time
-                4;
+                    // count variants
+                    varint_size(proposal.unsigned_tx.input.len() as u64) +
+                    varint_size(proposal.unsigned_tx.output.len() as u64) +
+                    // lock time
+                    4;
             let weight_without_witnesses =
                 Weight::from_non_witness_data_size(non_input_output_size)
                     + in_stats.total_weight
@@ -815,9 +802,9 @@ impl ContextV1 {
             } else {
                 weight_without_witnesses
                     + Weight::from_wu(
-                        (proposal.unsigned_tx.input.len() - in_stats.inputs_with_witnesses + 2)
-                            as u64,
-                    )
+                    (proposal.unsigned_tx.input.len() - in_stats.inputs_with_witnesses + 2)
+                        as u64,
+                )
             };
             ensure!(proposed_psbt_fee / total_weight >= self.min_fee_rate, FeeRateBelowMinimum);
         }
@@ -853,38 +840,38 @@ impl ContextV1 {
             match original_inputs.peek() {
                 // our (sender)
                 Some(original)
-                    if proposed.txin.previous_output == original.txin.previous_output =>
-                {
-                    check_eq!(
+                if proposed.txin.previous_output == original.txin.previous_output =>
+                    {
+                        check_eq!(
                         proposed.txin.sequence,
                         original.txin.sequence,
                         SenderTxinSequenceChanged
                     );
-                    ensure!(
+                        ensure!(
                         proposed.psbtin.non_witness_utxo.is_none(),
                         SenderTxinContainsNonWitnessUtxo
                     );
-                    ensure!(proposed.psbtin.witness_utxo.is_none(), SenderTxinContainsWitnessUtxo);
-                    ensure!(
+                        ensure!(proposed.psbtin.witness_utxo.is_none(), SenderTxinContainsWitnessUtxo);
+                        ensure!(
                         proposed.psbtin.final_script_sig.is_none(),
                         SenderTxinContainsFinalScriptSig
                     );
-                    ensure!(
+                        ensure!(
                         proposed.psbtin.final_script_witness.is_none(),
                         SenderTxinContainsFinalScriptWitness
                     );
-                    let prevout = original.previous_txout().expect("We've validated this before");
-                    total_value += bitcoin::Amount::from_sat(prevout.value);
-                    // We assume the signture will be the same size
-                    // I know sigs can be slightly different size but there isn't much to do about
-                    // it other than prefer Taproot.
-                    total_weight += original.txin.weight();
-                    if !original.txin.witness.is_empty() {
-                        inputs_with_witnesses += 1;
-                    }
+                        let prevout = original.previous_txout().expect("We've validated this before");
+                        total_value += bitcoin::Amount::from_sat(prevout.value);
+                        // We assume the signture will be the same size
+                        // I know sigs can be slightly different size but there isn't much to do about
+                        // it other than prefer Taproot.
+                        total_weight += original.txin.weight();
+                        if !original.txin.witness.is_empty() {
+                            inputs_with_witnesses += 1;
+                        }
 
-                    original_inputs.next();
-                }
+                        original_inputs.next();
+                    }
                 // theirs (receiver)
                 None | Some(_) => {
                     // Verify the PSBT input is finalized
@@ -897,17 +884,14 @@ impl ContextV1 {
                         // The weight of the TxIn when it's included in a legacy transaction
                         // (i.e., a transaction having only legacy inputs).
                         total_weight += Weight::from_non_witness_data_size(
-                            32 /* txid */ +
-                                4 /* vout */ +
-                                4 /* sequence */ +
-                                script_sig.encoded_size(),
+                            32 /* txid */ + 4 /* vout */ + 4 /* sequence */ + script_sig.encoded_size(),
                         );
                     }
                     if let Some(script_witness) = &proposed.psbtin.final_script_witness {
                         if !script_witness.is_empty() {
                             inputs_with_witnesses += 1;
                             total_weight += crate::weight::witness_weight(script_witness);
-                        }
+                        };
                     }
 
                     // Verify that non_witness_utxo or witness_utxo are filled in.
@@ -1052,7 +1036,6 @@ fn clear_unneeded_fields(psbt: &mut Psbt) {
         output.unknown.clear();
     }
 }
-
 fn check_fee_output_amount(
     output: &TxOut,
     fee: bitcoin::Amount,
@@ -1076,22 +1059,13 @@ fn find_change_index(
     clamp_fee_contribution: bool,
 ) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
     match (psbt.unsigned_tx.output.len(), clamp_fee_contribution) {
-        (0, _) => {
-            return Err(InternalCreateRequestError::NoOutputs);
-        }
-        (1, false) if psbt.unsigned_tx.output[0].script_pubkey == *payee => {
-            return Err(InternalCreateRequestError::FeeOutputValueLowerThanFeeContribution);
-        }
-        (1, true) if psbt.unsigned_tx.output[0].script_pubkey == *payee => {
-            return Ok(None);
-        }
-        (1, _) => {
-            return Err(InternalCreateRequestError::MissingPayeeOutput);
-        }
+        (0, _) => return Err(InternalCreateRequestError::NoOutputs),
+        (1, false) if psbt.unsigned_tx.output[0].script_pubkey == *payee =>
+            return Err(InternalCreateRequestError::FeeOutputValueLowerThanFeeContribution),
+        (1, true) if psbt.unsigned_tx.output[0].script_pubkey == *payee => return Ok(None),
+        (1, _) => return Err(InternalCreateRequestError::MissingPayeeOutput),
         (2, _) => (),
-        _ => {
-            return Err(InternalCreateRequestError::AmbiguousChangeOutput);
-        }
+        _ => return Err(InternalCreateRequestError::AmbiguousChangeOutput),
     }
     let (index, output) = psbt
         .unsigned_tx
@@ -1150,7 +1124,7 @@ fn serialize_v2_body(
         fee_contribution,
         min_feerate,
     )
-    .map_err(InternalCreateRequestError::Url)?;
+        .map_err(InternalCreateRequestError::Url)?;
     let query_params = placeholder_url.query().unwrap_or_default();
     let base64 = psbt.to_string();
     Ok(format!("{}\n{}", base64, query_params).into_bytes())
@@ -1174,7 +1148,7 @@ fn serialize_url(
     }
     if min_fee_rate > FeeRate::ZERO {
         // TODO serialize in rust-bitcoin <https://github.com/rust-bitcoin/rust-bitcoin/pull/1787/files#diff-c2ea40075e93ccd068673873166cfa3312ec7439d6bc5a4cbc03e972c7e045c4>
-        let float_fee_rate = (min_fee_rate.to_sat_per_kwu() as f32) / 250.0_f32;
+        let float_fee_rate = min_fee_rate.to_sat_per_kwu() as f32 / 250.0_f32;
         url.query_pairs_mut().append_pair("minfeerate", &float_fee_rate.to_string());
     }
     Ok(url)
@@ -1260,11 +1234,10 @@ mod test {
             "errorCode": "version-unsupported",
             "message": "This version of payjoin is not supported."
         })
-        .to_string();
+            .to_string();
         match ctx.process_response(&mut known_json_error.as_bytes()) {
-            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported(_, _))) => {
-                assert!(true)
-            }
+            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported(_, _))) =>
+                assert!(true),
             _ => panic!("Expected WellKnownError"),
         }
 
@@ -1273,7 +1246,7 @@ mod test {
             "err": "random",
             "message": "This version of payjoin is not supported."
         })
-        .to_string();
+            .to_string();
         match ctx.process_response(&mut invalid_json_error.as_bytes()) {
             Err(ResponseError::Validation(_)) => assert!(true),
             _ => panic!("Expected unrecognized JSON error"),

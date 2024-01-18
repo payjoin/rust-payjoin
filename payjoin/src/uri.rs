@@ -8,7 +8,6 @@ use url::Url;
 #[derive(Clone)]
 pub enum MaybePayjoinExtras {
     Supported(PayjoinExtras),
-    V2Only(PayjoinExtras),
     Unsupported,
 }
 
@@ -16,7 +15,6 @@ impl MaybePayjoinExtras {
     pub fn pj_is_supported(&self) -> bool {
         match self {
             MaybePayjoinExtras::Supported(_) => true,
-            MaybePayjoinExtras::V2Only(_) => true,
             MaybePayjoinExtras::Unsupported => false,
         }
     }
@@ -78,7 +76,7 @@ impl<'a> UriExtNetworkUnchecked<'a> for Uri<'a, NetworkUnchecked> {
 impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
     fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>> {
         match self.extras {
-            MaybePayjoinExtras::Supported(payjoin) | MaybePayjoinExtras::V2Only(payjoin) => {
+            MaybePayjoinExtras::Supported(payjoin) => {
                 let mut uri = bip21::Uri::with_extras(self.address, payjoin);
                 uri.amount = self.amount;
                 uri.label = self.label;
@@ -173,51 +171,6 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
         }
     }
 
-    #[cfg(feature = "v2")]
-    fn finalize(
-        self,
-    ) -> std::result::Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
-        match (self.pj, self.pjos, self.ohttp) {
-            (None, None, _) => Ok(MaybePayjoinExtras::Unsupported),
-            (None, Some(_), _) => Err(PjParseError(InternalPjParseError::MissingEndpoint)),
-            (Some(endpoint), pjos, None) => {
-                if endpoint.scheme() == "https"
-                    || endpoint.scheme() == "http"
-                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
-                {
-                    Ok(MaybePayjoinExtras::Supported(PayjoinExtras {
-                        endpoint,
-                        disable_output_substitution: pjos.unwrap_or(false),
-                        ohttp_config: None,
-                    }))
-                } else {
-                    Err(PjParseError(InternalPjParseError::UnsecureEndpoint))
-                }
-            }
-            (Some(endpoint), pjos, Some(ohttp)) => {
-                if endpoint.scheme() == "https"
-                    || endpoint.scheme() == "http"
-                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
-                {
-                    Ok(MaybePayjoinExtras::Supported(PayjoinExtras {
-                        endpoint,
-                        disable_output_substitution: pjos.unwrap_or(false),
-                        ohttp_config: Some(ohttp),
-                    }))
-                } else if endpoint.scheme() == "http" {
-                    Ok(MaybePayjoinExtras::V2Only(PayjoinExtras {
-                        endpoint,
-                        disable_output_substitution: pjos.unwrap_or(false),
-                        ohttp_config: Some(ohttp),
-                    }))
-                } else {
-                    Err(PjParseError(InternalPjParseError::UnsecureEndpoint))
-                }
-            }
-        }
-    }
-
-    #[cfg(not(feature = "v2"))]
     fn finalize(
         self,
     ) -> std::result::Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
@@ -232,6 +185,8 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
                     Ok(MaybePayjoinExtras::Supported(PayjoinExtras {
                         endpoint,
                         disable_output_substitution: pjos.unwrap_or(false),
+                        #[cfg(feature = "v2")]
+                        ohttp_config: self.ohttp,
                     }))
                 } else {
                     Err(PjParseError(InternalPjParseError::UnsecureEndpoint))

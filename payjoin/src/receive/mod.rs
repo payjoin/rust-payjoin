@@ -292,7 +292,7 @@ pub trait Headers {
 
 /// The sender's original PSBT and optional parameters
 ///
-/// This type is used to proces the request. It is returned by
+/// This type is used to process the request. It is returned by
 /// [`UncheckedProposal::from_request()`](crate::receive::UncheckedProposal::from_request()).
 ///
 /// If you are implementing an interactive payment processor, you should get extract the original

@@ -801,11 +801,11 @@ impl ContextV1 {
             let non_input_output_size =
                 // version
                 4 +
-                // count variants
-                varint_size(proposal.unsigned_tx.input.len() as u64) +
-                varint_size(proposal.unsigned_tx.output.len() as u64) +
-                // lock time
-                4;
+                    // count variants
+                    varint_size(proposal.unsigned_tx.input.len() as u64) +
+                    varint_size(proposal.unsigned_tx.output.len() as u64) +
+                    // lock time
+                    4;
             let weight_without_witnesses =
                 Weight::from_non_witness_data_size(non_input_output_size)
                     + in_stats.total_weight
@@ -1052,7 +1052,6 @@ fn clear_unneeded_fields(psbt: &mut Psbt) {
         output.unknown.clear();
     }
 }
-
 fn check_fee_output_amount(
     output: &TxOut,
     fee: bitcoin::Amount,

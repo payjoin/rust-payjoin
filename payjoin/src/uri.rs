@@ -23,6 +23,7 @@ impl Payjoin {
     }
 }
 
+#[derive(Clone)]
 pub struct PayjoinParams {
     pub(crate) _endpoint: Url,
     pub(crate) disable_output_substitution: bool,

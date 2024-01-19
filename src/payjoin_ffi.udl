@@ -18,7 +18,9 @@ interface PayjoinError {
     UnexpectedError(string message);
     ServerError(string message);
     NetworkValidation(string message);
+    OhttpError(string message);
 };
+
 
 callback interface CanBroadcast {
         [Throws=PayjoinError]
@@ -83,6 +85,21 @@ interface Url {
       constructor(string input);
       string? query();
 };
+interface Uri {
+      [Throws=PayjoinError,Name=from_str]
+      constructor(string uri);
+      [Throws=PayjoinError]
+      Uri assume_checked();
+      [Throws=PayjoinError]
+      Uri require_network(Network network);
+};
+interface ClientResponse{};
+
+dictionary ExtractReq {
+   Request request;
+   ClientResponse client_response;
+};
+
 interface FeeRate{
       [Name=zero]
       constructor();
@@ -128,6 +145,8 @@ interface UncheckedProposal{
       [Name=from_request, Throws=PayjoinError]
       constructor(sequence<u8> body, string query, Headers headers);
       Transaction extract_tx_to_schedule_broadcast();
+      [Throws=PayjoinError]
+      MaybeInputsOwned check_broadcast_suitability(FeeRate? min_fee_rate,CanBroadcast can_broadcast);
       MaybeInputsOwned assume_interactive_receiver();
 };
 interface MaybeInputsOwned{
@@ -163,14 +182,54 @@ interface PayjoinProposal{
 };
 
 
-interface Uri {
-      [Throws=PayjoinError,Name=from_str]
-      constructor(string uri);
-      [Throws=PayjoinError]
-      Uri assume_checked();
-      [Throws=PayjoinError]
-      Uri require_network(Network network);
+interface Enrolled {
+     [Throws=PayjoinError]
+     ExtractReq extract_req();
+     string fallback_target();
+     sequence<u8> pubkey();
 };
+
+interface V2UncheckedProposal{
+      Transaction extract_tx_to_schedule_broadcast();
+      V2MaybeInputsOwned assume_interactive_receiver();
+      [Throws=PayjoinError]
+      V2MaybeInputsOwned check_broadcast_suitability(FeeRate? min_fee_rate,CanBroadcast can_broadcast);
+};
+interface V2MaybeInputsOwned{
+     [Throws=PayjoinError]
+     V2MaybeMixedInputScripts check_inputs_not_owned(IsScriptOwned is_owned);
+};
+interface V2MaybeMixedInputScripts{
+    [Throws=PayjoinError]
+    V2MaybeInputsSeen check_no_mixed_input_scripts();
+};
+interface V2MaybeInputsSeen{
+    [Throws=PayjoinError]
+     V2OutputsUnknown check_no_inputs_seen_before(IsOutputKnown is_known);
+};
+interface V2OutputsUnknown{
+   [Throws=PayjoinError]
+   V2ProvisionalProposal identify_receiver_outputs(IsScriptOwned is_receiver_output);
+};
+
+interface V2ProvisionalProposal{
+   void contribute_witness_input(TxOut txout, OutPoint outpoint);
+   void contribute_non_witness_input(Transaction tx, OutPoint outpoint);
+   void substitute_output_address(Address substitute_address);
+   [Throws=PayjoinError]
+   OutPoint try_preserving_privacy(record<u64, OutPoint> candidate_inputs);
+   [Throws=PayjoinError]
+   V2PayjoinProposal finalize_proposal(ProcessPartiallySignedTransaction process_psbt, FeeRate? min_feerate_sat_per_vb);
+};
+
+interface V2PayjoinProposal{
+        sequence<OutPoint> utxos_to_be_locked();
+        boolean is_output_substitution_disabled();
+        sequence<u64> owned_vouts();
+        PartiallySignedTransaction psbt();
+};
+
+
 
 
 interface RequestBuilder{

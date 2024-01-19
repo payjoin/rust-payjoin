@@ -16,7 +16,8 @@ use payjoin::bitcoin::{Address as BitcoinAddress, ScriptBuf as BitcoinScriptBuf}
 use serde::{Deserialize, Serialize};
 
 use crate::receive::v2::{
-    ClientResponse, Enrolled, ExtractReq, V2MaybeInputsOwned, V2UncheckedProposal,
+    ClientResponse, Enrolled, ExtractReq, V2MaybeInputsOwned, V2UncheckedProposal, V2MaybeMixedInputScripts, V2MaybeInputsSeen, V2ProvisionalProposal, V2OutputsUnknown,
+    V2PayjoinProposal
 };
 use crate::receive::{
     CanBroadcast, Headers, IsOutputKnown, IsScriptOwned, MaybeInputsOwned, MaybeInputsSeen,

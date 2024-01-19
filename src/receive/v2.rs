@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::str::FromStr;
-use std::sync::{Arc};
-use ohttp::KeyConfig;
+use std::sync::Arc;
 
-use payjoin::{Error as PdkError};
+use ohttp::KeyConfig;
 use payjoin::bitcoin::psbt::Psbt;
+use payjoin::Error as PdkError;
 
 use crate::error::PayjoinError;
-use crate::receive::{CanBroadcast, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction};
+use crate::receive::{
+    CanBroadcast, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction,
+};
 use crate::send::Request;
 use crate::transaction::{PartiallySignedTransaction, Transaction};
 use crate::{Address, FeeRate, OutPoint, ScriptBuf, TxOut};
@@ -32,16 +34,20 @@ impl From<payjoin::receive::v2::Enroller> for Enroller {
         Self(value)
     }
 }
-impl Enroller{
+impl Enroller {
     pub fn from_relay_config(
         relay_url: String,
         ohttp_config_base64: String,
-        ohttp_proxy_url: String
-    ) -> Self{
-       payjoin::receive::v2::Enroller::from_relay_config(relay_url.as_str(), ohttp_config_base64.as_str(), ohttp_proxy_url.as_str()).into()
+        ohttp_proxy_url: String,
+    ) -> Self {
+        payjoin::receive::v2::Enroller::from_relay_config(
+            relay_url.as_str(),
+            ohttp_config_base64.as_str(),
+            ohttp_proxy_url.as_str(),
+        )
+        .into()
     }
-    pub fn subdirectory(&self) -> String{
-
+    pub fn subdirectory(&self) -> String {
         self.0.clone().subdirectory()
     }
 }
@@ -51,7 +57,6 @@ pub struct Enrolled(payjoin::receive::v2::Enrolled);
 
 impl Enrolled {
     pub fn extract_req(&self) -> Result<ExtractReq, PayjoinError> {
-
         match self.0.extract_req() {
             Ok(e) => Ok(ExtractReq { request: e.0.into(), client_response: Arc::new(e.1.into()) }),
             Err(e) => Err(e.into()),
@@ -65,17 +70,17 @@ impl Enrolled {
         self.0.fallback_target()
     }
 
-//     pub fn process_res(
-//         &self,
-//         body: Vec<u8>,
-//         context: ClientResponse
-//     ) -> Result<Option<Arc<V2UncheckedProposal>>, PayjoinError>{
-//         match self.0.process_res(Cursor::new(body), context.0){
-//             Ok(e) => Ok(e.map(|x| Arc::new(x.into()))),
-//             Err(e) => Err(e.into())
-//         }
-//     }
- }
+    //     pub fn process_res(
+    //         &self,
+    //         body: Vec<u8>,
+    //         context: ClientResponse
+    //     ) -> Result<Option<Arc<V2UncheckedProposal>>, PayjoinError>{
+    //         match self.0.process_res(Cursor::new(body), context.0){
+    //             Ok(e) => Ok(e.map(|x| Arc::new(x.into()))),
+    //             Err(e) => Err(e.into())
+    //         }
+    //     }
+}
 #[derive(Clone)]
 pub struct V2UncheckedProposal(payjoin::receive::v2::UncheckedProposal);
 
@@ -136,7 +141,7 @@ impl From<payjoin::receive::v2::MaybeInputsOwned> for V2MaybeInputsOwned {
         Self(value)
     }
 }
-impl V2MaybeInputsOwned{
+impl V2MaybeInputsOwned {
     /// Make sure that the original transaction inputs have never been seen before. This prevents probing attacks. This prevents reentrant Payjoin, where a sender proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
     pub fn check_inputs_not_owned(
         &self,
@@ -183,7 +188,7 @@ impl From<payjoin::receive::v2::MaybeInputsSeen> for V2MaybeInputsSeen {
     }
 }
 
-impl  V2MaybeInputsSeen {
+impl V2MaybeInputsSeen {
     /// Make sure that the original transaction inputs have never been seen before. This prevents probing attacks. This prevents reentrant Payjoin, where a sender proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
     pub fn check_no_inputs_seen_before(
         &self,
@@ -229,7 +234,7 @@ impl V2OutputsUnknown {
         }
     }
 }
- pub struct V2ProvisionalProposal(payjoin::receive::v2::ProvisionalProposal);
+pub struct V2ProvisionalProposal(payjoin::receive::v2::ProvisionalProposal);
 
 impl From<payjoin::receive::v2::ProvisionalProposal> for V2ProvisionalProposal {
     fn from(value: payjoin::receive::v2::ProvisionalProposal) -> Self {
@@ -284,7 +289,7 @@ impl V2ProvisionalProposal {
             },
             min_feerate_sat_per_vb.map(|x| (*x).into()),
         ) {
-            Ok(e) => Ok(Arc::new( V2PayjoinProposal(e))),
+            Ok(e) => Ok(Arc::new(V2PayjoinProposal(e))),
             Err(e) => Err(e.into()),
         }
     }
@@ -295,7 +300,7 @@ impl From<payjoin::receive::v2::PayjoinProposal> for V2PayjoinProposal {
         Self(value)
     }
 }
-impl V2PayjoinProposal{
+impl V2PayjoinProposal {
     pub fn utxos_to_be_locked(&self) -> Vec<OutPoint> {
         let mut outpoints: Vec<OutPoint> = Vec::new();
         for e in self.0.utxos_to_be_locked() {

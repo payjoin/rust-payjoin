@@ -1,19 +1,19 @@
 use std::sync::{Arc, Mutex};
+
 pub use payjoin::send::RequestBuilder as PdkRequestBuilder;
 
 use crate::error::PayjoinError;
 use crate::transaction::PartiallySignedTransaction;
 use crate::uri::{Uri, Url};
 
-
 ///Builder for sender-side payjoin parameters
 ///
 ///These parameters define how client wants to handle Payjoin.
-pub struct RequestBuilder ( PdkRequestBuilder<'static>);
+pub struct RequestBuilder(PdkRequestBuilder<'static>);
 
 impl From<PdkRequestBuilder<'static>> for RequestBuilder {
     fn from(value: PdkRequestBuilder<'static>) -> Self {
-        Self (value)
+        Self(value)
     }
 }
 
@@ -49,7 +49,7 @@ impl Context {
 
 impl From<payjoin::send::ContextV1> for Context {
     fn from(value: payjoin::send::ContextV1) -> Self {
-        Self (Mutex::new(Some(value)))
+        Self(Mutex::new(Some(value)))
     }
 }
 

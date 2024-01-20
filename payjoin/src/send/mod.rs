@@ -362,6 +362,7 @@ impl<'a> RequestBuilder<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct RequestContext {
     psbt: Psbt,
     endpoint: Url,

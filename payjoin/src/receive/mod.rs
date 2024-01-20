@@ -405,6 +405,7 @@ impl UncheckedProposal {
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
 /// Call [`check_no_receiver_owned_inputs()`](struct.UncheckedProposal.html#method.check_no_receiver_owned_inputs) to proceed.
+#[derive(Clone)]
 pub struct MaybeInputsOwned {
     psbt: Psbt,
     params: Params,
@@ -448,6 +449,7 @@ impl MaybeInputsOwned {
 /// Typestate to validate that the Original PSBT has no mixed input types.
 ///
 /// Call [`check_no_mixed_input_types`](struct.UncheckedProposal.html#method.check_no_mixed_input_scripts) to proceed.
+#[derive(Clone)]
 pub struct MaybeMixedInputScripts {
     psbt: Psbt,
     params: Params,
@@ -500,6 +502,7 @@ impl MaybeMixedInputScripts {
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
 /// Call [`check_no_inputs_seen`](struct.MaybeInputsSeen.html#method.check_no_inputs_seen_before) to proceed.
+#[derive(Clone)]
 pub struct MaybeInputsSeen {
     psbt: Psbt,
     params: Params,
@@ -533,6 +536,7 @@ impl MaybeInputsSeen {
 ///
 /// Only accept PSBTs that send us money.
 /// Identify those outputs with `identify_receiver_outputs()` to proceed
+#[derive(Clone)]
 pub struct OutputsUnknown {
     psbt: Psbt,
     params: Params,
@@ -571,7 +575,7 @@ impl OutputsUnknown {
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProvisionalProposal {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,
@@ -822,6 +826,7 @@ impl ProvisionalProposal {
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+#[derive(Clone)]
 pub struct PayjoinProposal {
     payjoin_psbt: Psbt,
     params: Params,

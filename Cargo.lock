@@ -1169,6 +1169,7 @@ version = "0.13.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "base64",
  "bip21",
  "bitcoincore-rpc",
  "bitcoind",
@@ -1176,6 +1177,7 @@ dependencies = [
  "log",
  "ohttp",
  "payjoin",
+ "rand",
  "serde",
  "serde_json",
  "thiserror",

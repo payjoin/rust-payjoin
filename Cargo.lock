@@ -230,6 +230,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bhttp"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ef06386f8f092c3419e153a657396e53cafbb901de445a5c54d96ab2ff8c7b2"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "bip21"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1619,6 +1628,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "ohttp"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "578cb11a3fb5c85697ed8bb850d5ad1cbf819d3eea05c2b253cf1d240fbb10c5"
+dependencies = [
+ "aead 0.4.3",
+ "aes-gcm 0.9.4",
+ "byteorder",
+ "chacha20poly1305 0.8.0",
+ "hex",
+ "hkdf 0.11.0",
+ "hpke",
+ "lazy_static",
+ "log",
+ "rand",
+ "serde",
+ "serde_derive",
+ "sha2 0.9.9",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1697,14 +1729,14 @@ checksum = "8835116a5c179084a830efb3adc117ab007512b535bc1a21c991d3b32a6b44dd"
 name = "payjoin"
 version = "0.13.0"
 dependencies = [
- "bhttp",
+ "bhttp 0.5.1",
  "bip21",
  "bitcoin",
  "bitcoind",
  "chacha20poly1305 0.10.1",
  "env_logger",
  "log",
- "ohttp",
+ "ohttp 0.5.1",
  "rand",
  "rustls",
  "serde",
@@ -1744,11 +1776,11 @@ name = "payjoin-relay"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "bhttp",
+ "bhttp 0.4.0",
  "bitcoin",
  "hyper",
  "hyper-rustls",
- "ohttp",
+ "ohttp 0.4.0",
  "rcgen",
  "rustls",
  "sqlx",

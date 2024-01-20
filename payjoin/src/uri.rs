@@ -22,7 +22,7 @@ impl Payjoin {
 }
 
 pub struct PayjoinParams {
-    pub(crate) _endpoint: Url,
+    pub(crate) endpoint: Url,
     pub(crate) disable_output_substitution: bool,
     #[cfg(feature = "v2")]
     pub(crate) ohttp_config: Option<ohttp::KeyConfig>,
@@ -184,7 +184,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
                         && endpoint.domain().unwrap_or_default().ends_with(".onion")
                 {
                     Ok(Payjoin::Supported(PayjoinParams {
-                        _endpoint: endpoint,
+                        endpoint,
                         disable_output_substitution: pjos.unwrap_or(false),
                         ohttp_config: None,
                     }))
@@ -198,13 +198,13 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
                         && endpoint.domain().unwrap_or_default().ends_with(".onion")
                 {
                     Ok(Payjoin::Supported(PayjoinParams {
-                        _endpoint: endpoint,
+                        endpoint,
                         disable_output_substitution: pjos.unwrap_or(false),
                         ohttp_config: Some(ohttp),
                     }))
                 } else if endpoint.scheme() == "http" {
                     Ok(Payjoin::V2Only(PayjoinParams {
-                        _endpoint: endpoint,
+                        endpoint,
                         disable_output_substitution: pjos.unwrap_or(false),
                         ohttp_config: Some(ohttp),
                     }))
@@ -228,7 +228,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
                         && endpoint.domain().unwrap_or_default().ends_with(".onion")
                 {
                     Ok(Payjoin::Supported(PayjoinParams {
-                        _endpoint: endpoint,
+                        endpoint,
                         disable_output_substitution: pjos.unwrap_or(false),
                     }))
                 } else {

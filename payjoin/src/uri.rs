@@ -5,6 +5,7 @@ use bitcoin::address::{Error, NetworkChecked, NetworkUnchecked};
 use bitcoin::Network;
 use url::Url;
 
+#[derive(Clone)]
 pub enum Payjoin {
     Supported(PayjoinParams),
     V2Only(PayjoinParams),
@@ -21,6 +22,7 @@ impl Payjoin {
     }
 }
 
+#[derive(Clone)]
 pub struct PayjoinParams {
     pub(crate) _endpoint: Url,
     pub(crate) disable_output_substitution: bool,

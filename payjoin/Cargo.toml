@@ -18,14 +18,14 @@ exclude = ["tests"]
 send = []
 receive = ["rand"]
 base64 = ["bitcoin/base64"]
-v2 = ["bitcoin/rand-std", "chacha20poly1305", "ohttp", "bhttp", "serde"]
+v2 = ["bitcoin/rand-std", "bitcoin/serde", "chacha20poly1305", "ohttp", "bhttp", "serde"]
 
 [dependencies]
 bitcoin = { version = "0.30.0", features = ["base64"] }
 bip21 = "0.3.1"
 chacha20poly1305 = { version = "0.10.1", optional = true }
 log = { version = "0.4.14"}
-ohttp = { version = "0.4.0", optional = true }
+ohttp = { version = "0.5.1", optional = true }
 bhttp = { version = "0.4.0", optional = true }
 rand = { version = "0.8.4", optional = true }
 serde = { version = "1.0.186", default-features = false, optional = true }

@@ -3,7 +3,6 @@ use std::io::Cursor;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use ohttp::KeyConfig;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::Error as PdkError;
 
@@ -15,72 +14,147 @@ use crate::send::Request;
 use crate::transaction::{PartiallySignedTransaction, Transaction};
 use crate::{Address, FeeRate, OutPoint, ScriptBuf, TxOut};
 
-pub struct ClientResponse(ohttp::ClientResponse);
+// pub struct ClientResponse(ohttp::ClientResponse);
+//
+// impl From<ohttp::ClientResponse> for ClientResponse {
+//     fn from(value: ohttp::ClientResponse) -> Self {
+//         Self(value)
+//     }
+// }
 
-impl From<ohttp::ClientResponse> for ClientResponse {
-    fn from(value: ohttp::ClientResponse) -> Self {
-        Self(value)
+#[derive(Clone, Debug)]
+pub struct ClientResponse {
+    pub ohttp_config: Vec<u8>,
+    pub method: String,
+    pub target_resource: url::Url,
+    pub body: Option<Vec<u8>>,
+}
+
+impl ClientResponse {
+    fn ohttp_encapsulate(&self) -> Result<ohttp::ClientResponse, PayjoinError> {
+        match payjoin::v2::ohttp_encapsulate(
+            self.ohttp_config.as_slice(),
+            self.method.as_str(),
+            self.target_resource.as_str(),
+            self.body.as_ref().map(|x| x.as_slice()),
+        ) {
+            Ok(e) => Ok(e.1),
+            Err(e) => Err(PayjoinError::OhttpError { message: e.to_string() }),
+        }
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct ExtractReq {
     pub request: Request,
     pub client_response: Arc<ClientResponse>,
 }
 
-pub struct Enroller(payjoin::receive::v2::Enroller);
-impl From<payjoin::receive::v2::Enroller> for Enroller {
-    fn from(value: payjoin::receive::v2::Enroller) -> Self {
-        Self(value)
-    }
+#[derive(Clone, Debug)]
+pub struct Enroller {
+    relay_url: url::Url,
+    ohttp_config_base64: String,
+    ohttp_proxy: url::Url,
 }
+
 impl Enroller {
+    fn get_payjon_enroller(&self) -> payjoin::receive::v2::Enroller {
+        payjoin::receive::v2::Enroller::from_relay_config(
+            self.relay_url.as_str(),
+            self.ohttp_config_base64.as_str(),
+            self.ohttp_proxy.as_str(),
+        )
+    }
     pub fn from_relay_config(
         relay_url: String,
         ohttp_config_base64: String,
         ohttp_proxy_url: String,
-    ) -> Self {
-        payjoin::receive::v2::Enroller::from_relay_config(
-            relay_url.as_str(),
-            ohttp_config_base64.as_str(),
-            ohttp_proxy_url.as_str(),
-        )
-        .into()
+    ) -> Result<Self, PayjoinError> {
+        let ohttp_proxy = url::Url::parse(&*ohttp_proxy_url)?;
+        let relay_url = url::Url::parse(&*relay_url)?;
+        Ok(Enroller { ohttp_proxy, relay_url, ohttp_config_base64 })
     }
     pub fn subdirectory(&self) -> String {
-        self.0.clone().subdirectory()
+        self.get_payjon_enroller().subdirectory()
     }
-}
-
-#[derive(Clone)]
-pub struct Enrolled(payjoin::receive::v2::Enrolled);
-
-impl Enrolled {
+    pub fn payjoin_subdir(&self) -> String {
+        self.get_payjon_enroller().payjoin_subdir()
+    }
     pub fn extract_req(&self) -> Result<ExtractReq, PayjoinError> {
-        match self.0.extract_req() {
-            Ok(e) => Ok(ExtractReq { request: e.0.into(), client_response: Arc::new(e.1.into()) }),
+        let ohttp_config =
+            base64::decode_config(self.ohttp_config_base64.clone(), base64::URL_SAFE).unwrap();
+        let (req, _) = self.get_payjon_enroller().extract_req()?;
+        let client_response = ClientResponse {
+            ohttp_config,
+            method: "POST".to_string(),
+            target_resource: self.relay_url.clone(),
+            body: Some(self.subdirectory().as_bytes().to_vec()),
+        };
+        Ok(ExtractReq { request: req.into(), client_response: Arc::new(client_response) })
+    }
+    pub fn process_res(
+        &self,
+        body: Vec<u8>,
+        context: Arc<ClientResponse>,
+    ) -> Result<Arc<Enrolled>, PayjoinError> {
+        match self
+            .get_payjon_enroller()
+            .process_res(Cursor::new(body), context.ohttp_encapsulate()?)
+        {
+            Ok(e) => Ok(Arc::new(e.into())),
             Err(e) => Err(e.into()),
         }
     }
-    ///The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
+}
+
+#[derive(Clone, Debug)]
+pub struct Enrolled(payjoin::receive::v2::Enrolled);
+impl From<Enrolled> for payjoin::receive::v2::Enrolled {
+    fn from(value: Enrolled) -> Self {
+        value.0
+    }
+}
+
+impl From<payjoin::receive::v2::Enrolled> for Enrolled {
+    fn from(value: payjoin::receive::v2::Enrolled) -> Self {
+        Self(value)
+    }
+}
+impl Enrolled {
     pub fn pubkey(&self) -> Vec<u8> {
-        self.0.pubkey().as_slice().to_vec()
+        self.0.pubkey().to_vec()
     }
     pub fn fallback_target(&self) -> String {
         self.0.fallback_target()
     }
-
-    //     pub fn process_res(
-    //         &self,
-    //         body: Vec<u8>,
-    //         context: ClientResponse
-    //     ) -> Result<Option<Arc<V2UncheckedProposal>>, PayjoinError>{
-    //         match self.0.process_res(Cursor::new(body), context.0){
-    //             Ok(e) => Ok(e.map(|x| Arc::new(x.into()))),
-    //             Err(e) => Err(e.into())
-    //         }
+    //TODO; create wrapper function for extract_req & process_res
+    // pub fn extract_req(&self) -> ExtractReq {
+    //     let ohttp_config =
+    //         base64::decode_config(self.ohttp_config_base64.clone(), base64::URL_SAFE).unwrap();
+    //     let (req, _) = self.get_payjon_enroller().extract_req()?;
+    //     let client_response = ClientResponse {
+    //         ohttp_config,
+    //         method: "POST".to_string(),
+    //         target_resource: self.relay_url.clone(),
+    //         body: Some(self.subdirectory().as_bytes().to_vec()),
+    //     };
+    //     ExtractReq { request: req.into(), client_response }
+    // }
+    // pub fn process_res(
+    //     &self,
+    //     body: Vec<u8>,
+    //     context: ClientResponse,
+    // ) -> Result<Enrolled, PayjoinError> {
+    //     match self
+    //         .get_payjon_enroller()
+    //         .process_res(Cursor::new(body), context.ohttp_encapsulate()?)
+    //     {
+    //         Ok(e) => Ok(e.into()),
+    //         Err(e) => Err(e.into()),
     //     }
+    // }
 }
+
 #[derive(Clone)]
 pub struct V2UncheckedProposal(payjoin::receive::v2::UncheckedProposal);
 
@@ -317,4 +391,9 @@ impl V2PayjoinProposal {
     pub fn psbt(&self) -> Arc<PartiallySignedTransaction> {
         Arc::new(self.0.psbt().clone().into())
     }
+
+    pub fn extract_v1_req(&self) -> String {
+        self.0.extract_v1_req()
+    }
+    //TODO; Create wrapper function for  deserialize_res & extract_v2_req
 }

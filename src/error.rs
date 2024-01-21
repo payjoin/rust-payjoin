@@ -5,6 +5,7 @@ use payjoin::bitcoin::psbt::PsbtParseError;
 use payjoin::receive::{RequestError, SelectionError};
 use payjoin::send::{CreateRequestError, ResponseError as PdkResponseError};
 use payjoin::Error;
+use url::ParseError;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PayjoinError {
@@ -59,6 +60,9 @@ pub enum PayjoinError {
 
     #[error("{message}")]
     OhttpError { message: String },
+
+    #[error("{message}")]
+    UrlError { message: String },
 }
 
 // #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -118,6 +122,12 @@ pub enum PayjoinError {
 // 	}
 // }
 
+impl From<ParseError> for PayjoinError {
+    fn from(value: ParseError) -> Self {
+        PayjoinError::UrlError { message: value.to_string() }
+    }
+}
+
 impl From<ohttp::Error> for PayjoinError {
     fn from(value: ohttp::Error) -> Self {
         PayjoinError::OhttpError { message: value.to_string() }
@@ -136,6 +146,11 @@ impl From<Error> for PayjoinError {
             Error::Server(e) => PayjoinError::ServerError { message: e.to_string() },
             Error::V2(e) => PayjoinError::V2Error { message: format!("{:?}", e) },
         }
+    }
+}
+impl From<payjoin::v2::Error> for PayjoinError {
+    fn from(value: payjoin::v2::Error) -> Self {
+        PayjoinError::V2Error { message: format!("{:?}", value.to_string()) }
     }
 }
 

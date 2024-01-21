@@ -5,6 +5,7 @@ pub use payjoin::send::RequestBuilder as PdkRequestBuilder;
 use crate::error::PayjoinError;
 use crate::transaction::PartiallySignedTransaction;
 use crate::uri::{Uri, Url};
+use crate::FeeRate;
 
 ///Builder for sender-side payjoin parameters
 ///
@@ -16,6 +17,12 @@ impl From<PdkRequestBuilder<'static>> for RequestBuilder {
         Self(value)
     }
 }
+
+// impl <'a>From<PdkRequestBuilder<'a>> for RequestBuilder {
+//     fn from(value: PdkRequestBuilder<'a>) -> Self {
+//             Self(value)
+//     }
+// }
 
 impl RequestBuilder {
     /// Prepare an HTTP request and request context to process the response
@@ -32,6 +39,38 @@ impl RequestBuilder {
             Err(e) => Err(e.into()),
         }
     }
+
+    /// Disable output substitution even if the receiver didn't.
+    ///
+    /// This forbids receiver switching output or decreasing amount.
+    /// It is generally **not** recommended to set this as it may prevent the receiver from
+    /// doing advanced operations such as opening LN channels and it also guarantees the
+    /// receiver will **not** reward the sender with a discount.
+    pub fn always_disable_output_substitution(&self, disable: bool) -> Arc<Self> {
+        Arc::new(self.0.clone().always_disable_output_substitution(disable).into())
+    }
+    // Calculate the recommended fee contribution for an Original PSBT.
+    //
+    // BIP 78 recommends contributing `originalPSBTFeeRate * vsize(sender_input_type)`.
+    // The minfeerate parameter is set if the contribution is available in change.
+    //
+    // This method fails if no recommendation can be made or if the PSBT is malformed.
+    pub fn build_recommended(
+        &self,
+        min_fee_rate: Arc<FeeRate>,
+    ) -> Result<Arc<RequestContext>, PayjoinError> {
+        match self.0.clone().build_recommended((*min_fee_rate).into()) {
+            Ok(e) => Ok(Arc::new(e.into())),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+pub struct RequestContext(payjoin::send::RequestContext);
+
+impl From<payjoin::send::RequestContext> for RequestContext {
+    fn from(value: payjoin::send::RequestContext) -> Self {
+        RequestContext(value)
+    }
 }
 
 ///Data required for validation of response.
@@ -41,7 +80,7 @@ impl RequestBuilder {
 pub struct Context(Mutex<Option<payjoin::send::ContextV1>>);
 
 impl Context {
-    fn get_context(&self) -> Option<payjoin::send::ContextV1> {
+    fn _get_context(&self) -> Option<payjoin::send::ContextV1> {
         let mut data_guard = self.0.lock().unwrap();
         Option::take(&mut *data_guard)
     }
@@ -56,6 +95,7 @@ impl From<payjoin::send::ContextV1> for Context {
 ///Represents data that needs to be transmitted to the receiver.
 
 ///You need to send this request over HTTP(S) to the receiver.
+#[derive(Clone, Debug)]
 pub struct Request {
     ///URL to send the request to.
     ///

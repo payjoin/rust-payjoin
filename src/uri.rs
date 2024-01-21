@@ -1,11 +1,10 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use payjoin::bitcoin::address::{NetworkChecked, NetworkUnchecked, NetworkValidation};
+use payjoin::bitcoin::address::{NetworkChecked, NetworkUnchecked};
 
 use crate::error::PayjoinError;
-use crate::send::{Context, Request, RequestBuilder};
-use crate::transaction::PartiallySignedTransaction;
+use crate::send::{Context, Request};
 use crate::{Address, Network};
 
 pub struct PrjUriRequest {
@@ -62,6 +61,18 @@ impl Uri {
             PayjoinUriWrapper::UnChecked(e) => Ok(Arc::new(e.assume_checked().into())),
         }
     }
+    pub fn address(&self) -> Arc<Address> {
+        match self.clone().0 {
+            PayjoinUriWrapper::Checked(e) => Arc::new(e.address.into()),
+            PayjoinUriWrapper::UnChecked(e) => Arc::new(e.address.assume_checked().into()),
+        }
+    }
+    pub fn amount(&self) -> Option<Arc<Amount>> {
+        match self.clone().0 {
+            PayjoinUriWrapper::Checked(e) => e.amount.map(|x| Arc::new(x.into())),
+            PayjoinUriWrapper::UnChecked(e) => e.amount.map(|x| Arc::new(x.into())),
+        }
+    }
     pub fn require_network(&self, network: Network) -> Result<Arc<Self>, PayjoinError> {
         match self.clone().0 {
             PayjoinUriWrapper::Checked(_) => {
@@ -86,6 +97,11 @@ impl From<Amount> for payjoin::bitcoin::Amount {
         payjoin::bitcoin::Amount::from_sat(value.0)
     }
 }
+impl From<payjoin::bitcoin::Amount> for Amount {
+    fn from(value: payjoin::bitcoin::Amount) -> Self {
+        Amount(value.to_sat())
+    }
+}
 
 impl Amount {
     pub fn from_sat(sats: u64) -> Self {
@@ -107,6 +123,7 @@ impl From<url::Url> for Url {
         Self(value)
     }
 }
+#[derive(Clone, Debug)]
 pub struct Url(url::Url);
 
 impl Url {

@@ -164,6 +164,7 @@ mod error;
 
 type InternalResult<T> = Result<T, InternalValidationError>;
 
+#[derive(Clone)]
 pub struct RequestBuilder<'a> {
     psbt: Psbt,
     uri: PjUri<'a>,
@@ -361,6 +362,7 @@ impl<'a> RequestBuilder<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct RequestContext {
     psbt: Psbt,
     endpoint: Url,

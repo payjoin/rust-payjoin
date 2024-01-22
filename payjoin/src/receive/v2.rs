@@ -24,7 +24,7 @@ pub struct Request {
     pub body: Vec<u8>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct V2Context {
     relay_url: url::Url,
     ohttp_config: Vec<u8>,
@@ -33,7 +33,7 @@ pub struct V2Context {
     e: Option<bitcoin::secp256k1::PublicKey>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Enroller {
     relay_url: url::Url,
     ohttp_config: Vec<u8>,
@@ -325,6 +325,7 @@ impl Enrolled {
 /// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
 /// that the transaction can be broadcast with check_broadcast_suitability. Otherwise it is safe to
 /// call assume_interactive_receive to proceed with validation.
+#[derive(Clone)]
 pub struct UncheckedProposal {
     inner: super::UncheckedProposal,
     context: V2Context,
@@ -387,6 +388,7 @@ impl UncheckedProposal {
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
 /// Call [`check_no_receiver_owned_inputs()`](struct.UncheckedProposal.html#method.check_no_receiver_owned_inputs) to proceed.
+#[derive(Clone)]
 pub struct MaybeInputsOwned {
     inner: super::MaybeInputsOwned,
     context: V2Context,
@@ -409,6 +411,7 @@ impl MaybeInputsOwned {
 /// Typestate to validate that the Original PSBT has no mixed input types.
 ///
 /// Call [`check_no_mixed_input_types`](struct.UncheckedProposal.html#method.check_no_mixed_input_scripts) to proceed.
+#[derive(Clone)]
 pub struct MaybeMixedInputScripts {
     inner: super::MaybeMixedInputScripts,
     context: V2Context,
@@ -429,6 +432,7 @@ impl MaybeMixedInputScripts {
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
 /// Call [`check_no_inputs_seen`](struct.MaybeInputsSeen.html#method.check_no_inputs_seen_before) to proceed.
+#[derive(Clone)]
 pub struct MaybeInputsSeen {
     inner: super::MaybeInputsSeen,
     context: V2Context,
@@ -451,6 +455,7 @@ impl MaybeInputsSeen {
 ///
 /// Only accept PSBTs that send us money.
 /// Identify those outputs with `identify_receiver_outputs()` to proceed
+#[derive(Clone)]
 pub struct OutputsUnknown {
     inner: super::OutputsUnknown,
     context: V2Context,
@@ -468,7 +473,7 @@ impl OutputsUnknown {
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProvisionalProposal {
     pub inner: super::ProvisionalProposal,
     context: V2Context,
@@ -517,6 +522,7 @@ impl ProvisionalProposal {
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+#[derive(Clone)]
 pub struct PayjoinProposal {
     inner: super::PayjoinProposal,
     context: V2Context,

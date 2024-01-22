@@ -1,5 +1,10 @@
 use std::{error, fmt};
 
+use bitcoin::secp256k1::ecdh::SharedSecret;
+use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
+use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
+use chacha20poly1305::{AeadCore, ChaCha20Poly1305, Nonce};
+
 pub const PADDED_MESSAGE_BYTES: usize = 7168; // 7KB
 
 pub fn subdir(path: &str) -> String {
@@ -20,11 +25,6 @@ pub fn subdir(path: &str) -> String {
     }
     pubkey_id
 }
-
-use bitcoin::secp256k1::ecdh::SharedSecret;
-use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
-use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
-use chacha20poly1305::{AeadCore, ChaCha20Poly1305, Nonce};
 
 /// crypto context
 ///

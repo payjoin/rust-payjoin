@@ -1,6 +1,5 @@
 use std::{error, fmt};
 
-pub const MAX_BUFFER_SIZE: usize = 65536;
 pub const PADDED_MESSAGE_BYTES: usize = 7168; // 7KB
 
 pub fn subdir(path: &str) -> String {

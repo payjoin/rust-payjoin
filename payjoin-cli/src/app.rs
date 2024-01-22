@@ -913,6 +913,7 @@ fn http_agent() -> Result<ureq::Agent> {
 #[cfg(not(feature = "danger-local-https"))]
 fn http_agent() -> Result<ureq::Agent> { Ok(ureq::Agent::new()) }
 
+#[cfg(feature = "v2")]
 fn map_ureq_err(e: ureq::Error) -> anyhow::Error {
     let e_string = e.to_string();
     match e.into_response() {

@@ -1,6 +1,10 @@
 use std::{error, fmt};
 
-pub const MAX_BUFFER_SIZE: usize = 65536;
+use bitcoin::secp256k1::ecdh::SharedSecret;
+use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
+use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
+use chacha20poly1305::{AeadCore, ChaCha20Poly1305, Nonce};
+
 pub const PADDED_MESSAGE_BYTES: usize = 7168; // 7KB
 
 pub fn subdir(path: &str) -> String {
@@ -22,16 +26,12 @@ pub fn subdir(path: &str) -> String {
     pubkey_id
 }
 
-use bitcoin::secp256k1::ecdh::SharedSecret;
-use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
-use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
-use chacha20poly1305::{AeadCore, ChaCha20Poly1305, Nonce};
-
 /// crypto context
 ///
 /// <- Receiver S
 /// -> Sender E, ES(payload), payload protected by knowledge of receiver key
 /// <- Receiver E, EE(payload), payload protected by knowledge of sender & receiver key
+#[cfg(feature = "send")]
 pub fn encrypt_message_a(
     mut raw_msg: Vec<u8>,
     e_sec: SecretKey,
@@ -53,6 +53,7 @@ pub fn encrypt_message_a(
     Ok(message_a)
 }
 
+#[cfg(feature = "receive")]
 pub fn decrypt_message_a(message_a: &[u8], s: SecretKey) -> Result<(Vec<u8>, PublicKey), Error> {
     // let message a = [pubkey/AD][nonce][authentication tag][ciphertext]
     let e = PublicKey::from_slice(&message_a[..33])?;
@@ -67,6 +68,7 @@ pub fn decrypt_message_a(message_a: &[u8], s: SecretKey) -> Result<(Vec<u8>, Pub
     Ok((buffer, e))
 }
 
+#[cfg(feature = "receive")]
 pub fn encrypt_message_b(raw_msg: &mut Vec<u8>, re_pub: PublicKey) -> Result<Vec<u8>, Error> {
     // let message b = [pubkey/AD][nonce][authentication tag][ciphertext]
     let secp = Secp256k1::new();
@@ -85,6 +87,7 @@ pub fn encrypt_message_b(raw_msg: &mut Vec<u8>, re_pub: PublicKey) -> Result<Vec
     Ok(message_b)
 }
 
+#[cfg(feature = "send")]
 pub fn decrypt_message_b(message_b: &mut [u8], e: SecretKey) -> Result<Vec<u8>, Error> {
     // let message b = [pubkey/AD][nonce][authentication tag][ciphertext]
     let re = PublicKey::from_slice(&message_b[..33])?;

@@ -297,22 +297,22 @@ impl ResponseError {
                         .and_then(|v| v.as_array())
                         .map(|array| array.iter().filter_map(|v| v.as_u64()).collect::<Vec<u64>>())
                         .unwrap_or_default();
-                    return WellKnownError::VersionUnsupported(message, supported).into();
+                    WellKnownError::VersionUnsupported(message, supported).into()
                 }
-                "unavailable" => return WellKnownError::Unavailable(message).into(),
+                "unavailable" => WellKnownError::Unavailable(message).into(),
                 "not-enough-money" => WellKnownError::NotEnoughMoney(message).into(),
                 "original-psbt-rejected" => WellKnownError::OriginalPsbtRejected(message).into(),
-                _ => return Self::Unrecognized(error_code.to_string(), message),
+                _ => Self::Unrecognized(error_code.to_string(), message),
             }
         } else {
-            return InternalValidationError::Parse.into();
+            InternalValidationError::Parse.into()
         }
     }
 
     /// Parse a response from the receiver.
     ///
     /// response must be valid JSON string.
-    pub fn from_str(response: &str) -> Self {
+    pub fn parse(response: &str) -> Self {
         match serde_json::from_str(response) {
             Ok(json) => Self::from_json(json),
             Err(_) => InternalValidationError::Parse.into(),
@@ -411,7 +411,7 @@ mod tests {
     #[test]
     fn test_parse_json() {
         let known_str_error = r#"{"errorCode":"version-unsupported", "message":"custom message here", "supported": [1, 2]}"#;
-        let error = ResponseError::from_str(known_str_error);
+        let error = ResponseError::parse(known_str_error);
         match error {
             ResponseError::WellKnown(e) => {
                 assert_eq!(e.error_code(), "version-unsupported");
@@ -425,7 +425,7 @@ mod tests {
         };
         let unrecognized_error = r#"{"errorCode":"random", "message":"random"}"#;
         assert_eq!(
-            ResponseError::from_str(unrecognized_error).to_string(),
+            ResponseError::parse(unrecognized_error).to_string(),
             "The receiver sent an unrecognized error."
         );
         let invalid_json_error = json!({

@@ -238,8 +238,8 @@ impl<'a> RequestBuilder<'a> {
                 .map(|input| {
                     let txo =
                         input.previous_txout().map_err(InternalCreateRequestError::PrevTxOut)?;
-                    Ok(InputType::from_spent_input(txo, input.psbtin)
-                        .map_err(InternalCreateRequestError::InputType)?)
+                    InputType::from_spent_input(txo, input.psbtin)
+                        .map_err(InternalCreateRequestError::InputType)
                 })
                 .collect::<Result<Vec<InputType>, InternalCreateRequestError>>()?;
 
@@ -384,7 +384,7 @@ impl PartialEq for RequestContext {
         self.psbt == other.psbt
             && self.endpoint == other.endpoint
             // KeyConfig is not yet PartialEq
-            && self.ohttp_config.as_ref().map(|cfg| cfg.encode().unwrap_or(Vec::new())) == other.ohttp_config.as_ref().map(|cfg| cfg.encode().unwrap_or(Vec::new()))
+            && self.ohttp_config.as_ref().map(|cfg| cfg.encode().unwrap_or_default()) == other.ohttp_config.as_ref().map(|cfg| cfg.encode().unwrap_or_default())
             && self.disable_output_substitution == other.disable_output_substitution
             && self.fee_contribution == other.fee_contribution
             && self.min_fee_rate == other.min_fee_rate
@@ -500,7 +500,7 @@ impl Serialize for RequestContext {
             config
                 .encode()
                 .map_err(|e| serde::ser::Error::custom(format!("ohttp-keys encoding error: {}", e)))
-                .map(|encoded| bitcoin::base64::encode(encoded))
+                .map(bitcoin::base64::encode)
         })?;
         state.serialize_field("ohttp_config", &ohttp_string)?;
         state.serialize_field("disable_output_substitution", &self.disable_output_substitution)?;
@@ -727,8 +727,7 @@ impl ContextV1 {
     ) -> Result<Psbt, ResponseError> {
         let mut res_str = String::new();
         response.read_to_string(&mut res_str).map_err(InternalValidationError::Io)?;
-        let proposal =
-            Psbt::from_str(&res_str).or_else(|_| Err(ResponseError::from_str(&res_str)))?;
+        let proposal = Psbt::from_str(&res_str).map_err(|_| ResponseError::parse(&res_str))?;
         self.process_proposal(proposal).map(Into::into).map_err(Into::into)
     }
 

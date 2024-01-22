@@ -1,12 +1,12 @@
 #![crate_name = "payjoin_ffi"]
 
-mod error;
-mod receive;
-mod send;
+pub mod error;
+pub mod receive;
+pub mod send;
 #[cfg(test)]
 mod test;
-mod transaction;
-mod uri;
+pub mod transaction;
+pub mod uri;
 
 use std::str::FromStr;
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use payjoin::bitcoin::{Address as BitcoinAddress, ScriptBuf as BitcoinScriptBuf}
 use serde::{Deserialize, Serialize};
 
 use crate::receive::v2::{
-    ClientResponse, Enrolled, ExtractReq, V2MaybeInputsOwned, V2MaybeInputsSeen,
+    ClientResponse, Enrolled, Enroller, ExtractReq, V2MaybeInputsOwned, V2MaybeInputsSeen,
     V2MaybeMixedInputScripts, V2OutputsUnknown, V2PayjoinProposal, V2ProvisionalProposal,
     V2UncheckedProposal,
 };
@@ -25,7 +25,7 @@ use crate::receive::{
     MaybeMixedInputScripts, OutputsUnknown, PayjoinProposal, ProcessPartiallySignedTransaction,
     ProvisionalProposal, UncheckedProposal,
 };
-use crate::send::{Context, Request, RequestBuilder};
+use crate::send::{Context, Request, RequestBuilder, RequestContext};
 use crate::transaction::{PartiallySignedTransaction, Transaction, Txid};
 use crate::uri::{Amount, PjUri, PrjUriRequest, Uri, Url};
 
@@ -56,13 +56,11 @@ impl From<payjoin::bitcoin::OutPoint> for OutPoint {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Address {
-    internal: BitcoinAddress,
-}
+pub struct Address(BitcoinAddress);
 
 impl From<payjoin::bitcoin::Address> for Address {
     fn from(value: payjoin::bitcoin::Address) -> Self {
-        Address { internal: value }
+        Self(value)
     }
 }
 
@@ -81,13 +79,13 @@ impl Address {
         }
     }
     pub fn as_string(&self) -> String {
-        self.internal.to_string()
+        self.0.to_string()
     }
 }
 
 impl From<Address> for payjoin::bitcoin::Address {
     fn from(value: Address) -> Self {
-        value.internal
+        value.0
     }
 }
 

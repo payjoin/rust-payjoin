@@ -28,7 +28,7 @@ pub use crate::receive::Error;
 pub mod send;
 
 #[cfg(feature = "v2")]
-pub mod v2;
+pub(crate) mod v2;
 
 #[cfg(any(feature = "send", feature = "receive"))]
 pub(crate) mod input_type;

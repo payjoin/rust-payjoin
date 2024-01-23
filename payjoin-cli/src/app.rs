@@ -79,12 +79,12 @@ impl App {
         let req_ctx = if is_retry {
             log::debug!("Resuming session");
             // Get a reference to RequestContext
-            session.req_ctx.as_ref().expect("RequestContext is missing")
+            session.req_ctx.as_mut().expect("RequestContext is missing")
         } else {
             let req_ctx = self.create_pj_request(bip21, fee_rate)?;
             session.write(req_ctx)?;
             log::debug!("Writing req_ctx");
-            session.req_ctx.as_ref().expect("RequestContext is missing")
+            session.req_ctx.as_mut().expect("RequestContext is missing")
         };
         log::debug!("Awaiting response");
         let res = self.long_poll_post(req_ctx).await?;
@@ -163,7 +163,7 @@ impl App {
         log::debug!("Awaiting proposal");
         let res = self.long_poll_fallback(&mut enrolled).await?;
         log::debug!("Received request");
-        let payjoin_proposal = self
+        let mut payjoin_proposal = self
             .process_v2_proposal(res)
             .map_err(|e| anyhow!("Failed to process proposal {}", e))?;
         log::debug!("Posting payjoin back");
@@ -194,7 +194,7 @@ impl App {
     }
 
     #[cfg(feature = "v2")]
-    async fn long_poll_post(&self, req_ctx: &payjoin::send::RequestContext) -> Result<Psbt> {
+    async fn long_poll_post(&self, req_ctx: &mut payjoin::send::RequestContext) -> Result<Psbt> {
         loop {
             let (req, ctx) = req_ctx.extract_v2(&self.config.ohttp_proxy)?;
             println!("Sending fallback request to {}", &req.url);

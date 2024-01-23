@@ -186,12 +186,12 @@ impl From<InternalError> for Error {
 }
 
 pub fn ohttp_encapsulate(
-    ohttp_config: &[u8],
+    ohttp_keys: &mut ohttp::KeyConfig,
     method: &str,
     target_resource: &str,
     body: Option<&[u8]>,
 ) -> Result<(Vec<u8>, ohttp::ClientResponse), Error> {
-    let ctx = ohttp::ClientRequest::from_encoded_config(ohttp_config)?;
+    let ctx = ohttp::ClientRequest::from_config(ohttp_keys)?;
     let url = url::Url::parse(target_resource)?;
     let mut bhttp_message = bhttp::Message::request(
         method.as_bytes().to_vec(),

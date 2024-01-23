@@ -431,7 +431,7 @@ impl RequestContext {
     /// The `ohttp_proxy` merely passes the encrypted payload to the ohttp gateway of the receiver
     #[cfg(feature = "v2")]
     pub fn extract_v2(
-        &self,
+        &mut self,
         ohttp_proxy_url: &str,
     ) -> Result<(Request, ContextV2), CreateRequestError> {
         let rs_base64 = crate::v2::subdir(self.endpoint.as_str()).to_string();
@@ -454,12 +454,7 @@ impl RequestContext {
         let body = crate::v2::encrypt_message_a(body, self.e, rs)
             .map_err(InternalCreateRequestError::V2)?;
         let (body, ohttp_res) = crate::v2::ohttp_encapsulate(
-            &self
-                .ohttp_config
-                .as_ref()
-                .ok_or(InternalCreateRequestError::MissingOhttpConfig)?
-                .encode()
-                .map_err(|e| InternalCreateRequestError::V2(e.into()))?,
+            self.ohttp_config.as_mut().ok_or(InternalCreateRequestError::MissingOhttpConfig)?,
             "POST",
             url.as_str(),
             Some(&body),

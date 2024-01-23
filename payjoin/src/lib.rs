@@ -29,6 +29,8 @@ pub mod send;
 
 #[cfg(feature = "v2")]
 pub(crate) mod v2;
+#[cfg(feature = "v2")]
+pub use ohttp::KeyConfig as OhttpKeys;
 
 #[cfg(any(feature = "send", feature = "receive"))]
 pub(crate) mod input_type;

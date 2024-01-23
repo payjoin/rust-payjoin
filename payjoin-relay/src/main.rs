@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bitcoin::{self, base64};
-use hyper::header::HeaderValue;
+use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
 use hyper::server::conn::AddrIncoming;
 use hyper::server::Builder;
 use hyper::service::{make_service_fn, service_fn};
@@ -111,7 +111,7 @@ fn init_ohttp() -> Result<ohttp::Server> {
         encoded_config,
         base64::Config::new(base64::CharacterSet::UrlSafe, false),
     );
-    info!("ohttp server config base64 UrlSafe: {:?}", b64_config);
+    info!("ohttp-keys server config base64 UrlSafe: {:?}", b64_config);
     Ok(ohttp::Server::new(server_config)?)
 }
 
@@ -128,17 +128,14 @@ async fn handle_ohttp_gateway(
     debug!("handle_ohttp_gateway: {:?}", &path_segments);
     let mut response = match (parts.method, path_segments.as_slice()) {
         (Method::POST, ["", ""]) => handle_ohttp(body, pool, ohttp).await,
-        (Method::GET, ["", "ohttp-config"]) =>
-            Ok(get_ohttp_config(ohttp_config(&ohttp).await?).await),
+        (Method::GET, ["", "ohttp-keys"]) => get_ohttp_keys(&ohttp).await,
         (Method::POST, ["", id]) => post_fallback_v1(id, query, body, pool).await,
         _ => Ok(not_found()),
     }
     .unwrap_or_else(|e| e.to_response());
 
     // Allow CORS for third-party access
-    response
-        .headers_mut()
-        .insert("Access-Control-Allow-Origin", hyper::header::HeaderValue::from_static("*"));
+    response.headers_mut().insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
 
     Ok(response)
 }
@@ -227,7 +224,7 @@ impl HandlerError {
                 error!("Bad request: Key configuration rejected: {}", e);
                 *res.status_mut() = StatusCode::BAD_REQUEST;
                 res.headers_mut()
-                    .insert("Content-Type", HeaderValue::from_static("application/problem+json"));
+                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 *res.body_mut() = Body::from(OHTTP_KEY_REJECTION_RES_JSON);
             }
             HandlerError::BadRequest(e) => {
@@ -355,18 +352,17 @@ fn not_found() -> Response<Body> {
     res
 }
 
-async fn get_ohttp_config(config: String) -> Response<Body> {
-    trace!("GET ohttp config: {:?}", config);
+async fn get_ohttp_keys(ohttp: &Arc<Mutex<ohttp::Server>>) -> Result<Response<Body>, HandlerError> {
     let mut res = Response::default();
-    *res.body_mut() = Body::from(config);
-    res
+    res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/ohttp-keys"));
+    let ohttp_keys = ohttp
+        .lock()
+        .await
+        .config()
+        .encode()
+        .map_err(|e| HandlerError::InternalServerError(e.into()))?;
+    *res.body_mut() = Body::from(ohttp_keys);
+    Ok(res)
 }
 
 fn shorten_string(input: &str) -> String { input.chars().take(8).collect() }
-
-async fn ohttp_config(server: &Arc<Mutex<ohttp::Server>>) -> Result<String> {
-    let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-    let server = server.lock().await;
-    let encoded_config = server.config().encode()?;
-    Ok(base64::encode_config(encoded_config, b64_config))
-}

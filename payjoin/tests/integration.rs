@@ -199,7 +199,7 @@ mod integration {
         use super::*;
 
         const PJ_RELAY_URL: &str = "https://localhost:8088";
-        const BAD_OHTTP_CONFIG: &str = "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM";
+        const BAD_OHTTP_KEYS: &str = "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM";
         const OH_RELAY_URL: &str = "https://localhost:8088";
         const LOCAL_CERT_FILE: &str = "localhost.der";
 
@@ -213,21 +213,31 @@ mod integration {
 
             // **********************
             // From a connection distinct from the client, perhaps a service provider, or over a VPN or Tor
-            // get ohttp-config at PJ_RELAY_URL in spawn_blocking
+            // get ohttp-keys at PJ_RELAY_URL in spawn_blocking
             let ohttp_config = {
-                let response = spawn_blocking(move || {
-                    http_agent().get(&format!("{}/ohttp-config", PJ_RELAY_URL)).call()
+                use std::io::Read;
+                let resp = spawn_blocking(move || {
+                    http_agent().get(&format!("{}/ohttp-keys", PJ_RELAY_URL)).call()
                 })
                 .await??;
-                response.into_string()?
+                let len =
+                    resp.header("Content-Length").and_then(|s| s.parse::<usize>().ok()).unwrap();
+
+                let mut bytes: Vec<u8> = Vec::with_capacity(len);
+                resp.into_reader().take(10_000_000).read_to_end(&mut bytes)?;
+                let ohttp_keys = payjoin::OhttpKeys::decode(&bytes)?;
+                base64::encode_config(
+                    ohttp_keys.encode()?,
+                    base64::Config::new(base64::CharacterSet::UrlSafe, false),
+                )
             };
-            debug!("GET'd ohttp-config: {}", ohttp_config);
+            debug!("GET'd ohttp-keys: {}", ohttp_config);
 
             // **********************
             // Inside the Receiver:
-            // Try enroll with bad relay ohttp-config
+            // Try enroll with bad relay ohttp-keys
             let mut bad_enroller =
-                Enroller::from_relay_config(&PJ_RELAY_URL, &BAD_OHTTP_CONFIG, &OH_RELAY_URL);
+                Enroller::from_relay_config(&PJ_RELAY_URL, &BAD_OHTTP_KEYS, &OH_RELAY_URL);
             let (req, _ctx) = bad_enroller.extract_req()?;
             let res =
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
@@ -246,7 +256,7 @@ mod integration {
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
                     .await??;
             assert!(is_success(res.status()));
-            let enrolled = enroller.process_res(res.into_reader(), ctx)?;
+            let mut enrolled = enroller.process_res(res.into_reader(), ctx)?;
             let fallback_target = enrolled.fallback_target();
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
@@ -293,7 +303,7 @@ mod integration {
 
             // POST payjoin
             let proposal = enrolled.process_res(response.into_reader(), ctx)?.unwrap();
-            let payjoin_proposal = handle_relay_proposal(receiver, proposal);
+            let mut payjoin_proposal = handle_relay_proposal(receiver, proposal);
             let (req, ctx) = payjoin_proposal.extract_v2_req()?;
             let response =
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
@@ -336,13 +346,23 @@ mod integration {
             // From a connection distinct from the client, perhaps a service provider, or over a VPN or Tor
             // get ohttp-config at PJ_RELAY_URL in spawn_blocking
             let ohttp_config = {
-                let response = spawn_blocking(move || {
-                    http_agent().get(&format!("{}/ohttp-config", PJ_RELAY_URL)).call()
+                use std::io::Read;
+                let resp = spawn_blocking(move || {
+                    http_agent().get(&format!("{}/ohttp-keys", PJ_RELAY_URL)).call()
                 })
                 .await??;
-                response.into_string()?
+                let len =
+                    resp.header("Content-Length").and_then(|s| s.parse::<usize>().ok()).unwrap();
+
+                let mut bytes: Vec<u8> = Vec::with_capacity(len);
+                resp.into_reader().take(10_000_000).read_to_end(&mut bytes)?;
+                let ohttp_keys = payjoin::OhttpKeys::decode(&bytes)?;
+                base64::encode_config(
+                    ohttp_keys.encode()?,
+                    base64::Config::new(base64::CharacterSet::UrlSafe, false),
+                )
             };
-            debug!("GET'd ohttp-config: {}", ohttp_config);
+            debug!("GET'd ohttp-keys: {}", ohttp_config);
 
             // **********************
             // Inside the Receiver:
@@ -354,7 +374,7 @@ mod integration {
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
                     .await??;
             assert!(is_success(res.status()));
-            let enrolled = enroller.process_res(res.into_reader(), ctx)?;
+            let mut enrolled = enroller.process_res(res.into_reader(), ctx)?;
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
@@ -415,7 +435,7 @@ mod integration {
                 };
                 debug!("handle relay response");
                 let proposal = enrolled.process_res(response, ctx).unwrap().unwrap();
-                let payjoin_proposal = handle_relay_proposal(receiver, proposal);
+                let mut payjoin_proposal = handle_relay_proposal(receiver, proposal);
                 // Respond with payjoin psbt within the time window the sender is willing to wait
                 // this response would be returned as http response to the sender
                 let (req, ctx) = payjoin_proposal.extract_v2_req().unwrap();

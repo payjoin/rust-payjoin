@@ -19,6 +19,7 @@ interface PayjoinError {
     ServerError(string message);
     NetworkValidation(string message);
     OhttpError(string message);
+    UrlError(string message);
 };
 
 
@@ -92,6 +93,13 @@ interface Uri {
       Uri assume_checked();
       [Throws=PayjoinError]
       Uri require_network(Network network);
+      Address address();
+      Amount? amount();
+};
+interface PjUri{};
+dictionary PrjUriRequest{
+      Context context;
+      Request request;
 };
 interface ClientResponse{};
 
@@ -99,7 +107,6 @@ dictionary ExtractReq {
    Request request;
    ClientResponse client_response;
 };
-
 interface FeeRate{
       [Name=zero]
       constructor();
@@ -140,7 +147,6 @@ interface Transaction{
       sequence<u8> serialize();
 };
 
-
 interface UncheckedProposal{
       [Name=from_request, Throws=PayjoinError]
       constructor(sequence<u8> body, string query, Headers headers);
@@ -180,11 +186,43 @@ interface PayjoinProposal{
         sequence<u64> owned_vouts();
         PartiallySignedTransaction psbt();
 };
+interface RequestBuilder{
+      [Throws=PayjoinError, Name=from_psbt_and_uri]
+      constructor(PartiallySignedTransaction psbt, Uri uri);
+      RequestBuilder always_disable_output_substitution( boolean disable );
+       [Throws=PayjoinError]
+      RequestContext build_recommended( FeeRate min_fee_rate);
+};
 
+interface RequestContext{};
+interface Context{
+
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+interface Enroller{
+   [Throws=PayjoinError,Name=from_relay_config]
+   constructor(string relay_url, string ohttp_config_base64, string ohttp_proxy_url);
+   string subdirectory();
+   string payjoin_subdir();
+   [Throws=PayjoinError]
+   ExtractReq extract_req();
+   [Throws=PayjoinError]
+   Enrolled process_res( sequence<u8> body, ClientResponse context);
+};
 
 interface Enrolled {
-     [Throws=PayjoinError]
-     ExtractReq extract_req();
      string fallback_target();
      sequence<u8> pubkey();
 };
@@ -230,19 +268,6 @@ interface V2PayjoinProposal{
 };
 
 
-
-
-interface RequestBuilder{
-      [Throws=PayjoinError, Name=from_psbt_and_uri]
-      constructor(PartiallySignedTransaction psbt, Uri uri);
-};
-dictionary PrjUriRequest{
-      Context context;
-      Request request;
-};
-interface Context{
-
-};
 
 
 

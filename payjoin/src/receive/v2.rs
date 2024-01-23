@@ -27,7 +27,7 @@ pub struct Request {
 #[derive(Debug, Clone)]
 pub struct V2Context {
     relay_url: url::Url,
-    ohttp_config: Vec<u8>,
+    ohttp_keys: ohttp::KeyConfig,
     ohttp_proxy: url::Url,
     s: bitcoin::secp256k1::KeyPair,
     e: Option<bitcoin::secp256k1::PublicKey>,
@@ -36,7 +36,7 @@ pub struct V2Context {
 #[derive(Debug, Clone)]
 pub struct Enroller {
     relay_url: url::Url,
-    ohttp_config: Vec<u8>,
+    ohttp_keys: ohttp::KeyConfig,
     ohttp_proxy: url::Url,
     s: bitcoin::secp256k1::KeyPair,
 }
@@ -49,14 +49,15 @@ impl Enroller {
         ohttp_proxy_url: &str,
     ) -> Self {
         let ohttp_config = base64::decode_config(ohttp_config_base64, base64::URL_SAFE).unwrap();
+        let ohttp_keys = ohttp::KeyConfig::decode(&ohttp_config).unwrap();
         let ohttp_proxy = url::Url::parse(ohttp_proxy_url).unwrap();
         let relay_url = url::Url::parse(relay_url).unwrap();
         let secp = bitcoin::secp256k1::Secp256k1::new();
         let (sk, _) = secp.generate_keypair(&mut rand::rngs::OsRng);
         Enroller {
-            ohttp_config,
-            ohttp_proxy,
             relay_url,
+            ohttp_keys,
+            ohttp_proxy,
             s: bitcoin::secp256k1::KeyPair::from_secret_key(&secp, &sk),
         }
     }
@@ -73,7 +74,7 @@ impl Enroller {
         let url = self.ohttp_proxy.clone();
         let subdirectory = self.subdirectory();
         let (body, ctx) = crate::v2::ohttp_encapsulate(
-            &self.ohttp_config,
+            &mut self.ohttp_keys,
             "POST",
             self.relay_url.as_str(),
             Some(subdirectory.as_bytes()),
@@ -94,7 +95,7 @@ impl Enroller {
 
         let ctx = Enrolled {
             relay_url: self.relay_url,
-            ohttp_config: self.ohttp_config,
+            ohttp_keys: self.ohttp_keys,
             ohttp_proxy: self.ohttp_proxy,
             s: self.s,
         };
@@ -108,22 +109,37 @@ fn subdirectory(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
     base64::encode_config(pubkey, b64_config)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub struct Enrolled {
     relay_url: url::Url,
-    ohttp_config: Vec<u8>,
+    ohttp_keys: ohttp::KeyConfig,
     ohttp_proxy: url::Url,
     s: bitcoin::secp256k1::KeyPair,
 }
+
+impl PartialEq for Enrolled {
+    fn eq(&self, other: &Self) -> bool {
+        self.relay_url == other.relay_url
+            && self.ohttp_keys.encode().unwrap() == other.ohttp_keys.encode().unwrap()
+            && self.ohttp_proxy == other.ohttp_proxy
+            && self.s == other.s
+    }
+}
+
+impl Eq for Enrolled {}
 
 impl Serialize for Enrolled {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
+        use serde::ser::Error;
+
         let mut state = serializer.serialize_struct("Enrolled", 4)?;
         state.serialize_field("relay_url", &self.relay_url.to_string())?;
-        state.serialize_field("ohttp_config", &self.ohttp_config)?;
+        let ohttp_keys =
+            self.ohttp_keys.encode().map_err(|_| S::Error::custom("ohttp_key encoding failed"))?;
+        state.serialize_field("ohttp_keys", &ohttp_keys)?;
         state.serialize_field("ohttp_proxy", &self.ohttp_proxy.to_string())?;
         state.serialize_field("s", &self.s.secret_key().secret_bytes())?;
 
@@ -159,7 +175,7 @@ impl<'de> Deserialize<'de> for Enrolled {
                     type Value = Field;
 
                     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                        formatter.write_str("`relay_url`, `ohttp_config`, `ohttp_proxy`, or `s`")
+                        formatter.write_str("`relay_url`, `ohttp_keys`, `ohttp_proxy`, or `s`")
                     }
 
                     fn visit_str<E>(self, value: &str) -> Result<Field, E>
@@ -168,7 +184,7 @@ impl<'de> Deserialize<'de> for Enrolled {
                     {
                         match value {
                             "relay_url" => Ok(Field::RelayUrl),
-                            "ohttp_config" => Ok(Field::OhttpConfig),
+                            "ohttp_keys" => Ok(Field::OhttpConfig),
                             "ohttp_proxy" => Ok(Field::OhttpProxy),
                             "s" => Ok(Field::S),
                             _ => Err(de::Error::unknown_field(value, FIELDS)),
@@ -194,7 +210,7 @@ impl<'de> Deserialize<'de> for Enrolled {
                 V: MapAccess<'de>,
             {
                 let mut relay_url = None;
-                let mut ohttp_config = None;
+                let mut ohttp_keys = None;
                 let mut ohttp_proxy = None;
                 let mut s = None;
                 while let Some(key) = map.next_key()? {
@@ -207,10 +223,14 @@ impl<'de> Deserialize<'de> for Enrolled {
                             relay_url = Some(url::Url::parse(&url_str).map_err(de::Error::custom)?);
                         }
                         Field::OhttpConfig => {
-                            if ohttp_config.is_some() {
-                                return Err(de::Error::duplicate_field("ohttp_config"));
+                            if ohttp_keys.is_some() {
+                                return Err(de::Error::duplicate_field("ohttp_keys"));
                             }
-                            ohttp_config = Some(map.next_value()?);
+                            let ohttp_keys_bytes: Vec<u8> = map.next_value()?;
+                            ohttp_keys = Some(
+                                ohttp::KeyConfig::decode(&ohttp_keys_bytes)
+                                    .map_err(|_| de::Error::custom("ohttp_key decoding failed"))?,
+                            );
                         }
                         Field::OhttpProxy => {
                             if ohttp_proxy.is_some() {
@@ -234,12 +254,12 @@ impl<'de> Deserialize<'de> for Enrolled {
                     }
                 }
                 let relay_url = relay_url.ok_or_else(|| de::Error::missing_field("relay_url"))?;
-                let ohttp_config =
-                    ohttp_config.ok_or_else(|| de::Error::missing_field("ohttp_config"))?;
+                let ohttp_keys =
+                    ohttp_keys.ok_or_else(|| de::Error::missing_field("ohttp_keys"))?;
                 let ohttp_proxy =
                     ohttp_proxy.ok_or_else(|| de::Error::missing_field("ohttp_proxy"))?;
                 let s = s.ok_or_else(|| de::Error::missing_field("s"))?;
-                Ok(Enrolled { relay_url, ohttp_config, ohttp_proxy, s })
+                Ok(Enrolled { relay_url, ohttp_keys, ohttp_proxy, s })
             }
         }
 
@@ -249,7 +269,7 @@ impl<'de> Deserialize<'de> for Enrolled {
 }
 
 impl Enrolled {
-    pub fn extract_req(&self) -> Result<(Request, ohttp::ClientResponse), Error> {
+    pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
         let (body, ohttp_ctx) = self.fallback_req_body()?;
         let url = self.ohttp_proxy.clone();
         let req = Request { url, body };
@@ -276,7 +296,7 @@ impl Enrolled {
             Ok(proposal) => {
                 let context = V2Context {
                     relay_url: self.relay_url.clone(),
-                    ohttp_config: self.ohttp_config.clone(),
+                    ohttp_keys: self.ohttp_keys.clone(),
                     ohttp_proxy: self.ohttp_proxy.clone(),
                     s: self.s,
                     e: None,
@@ -289,7 +309,7 @@ impl Enrolled {
                 log::debug!("Some e: {}", e);
                 let context = V2Context {
                     relay_url: self.relay_url.clone(),
-                    ohttp_config: self.ohttp_config.clone(),
+                    ohttp_keys: self.ohttp_keys.clone(),
                     ohttp_proxy: self.ohttp_proxy.clone(),
                     s: self.s,
                     e: Some(e),
@@ -301,10 +321,11 @@ impl Enrolled {
         }
     }
 
-    fn fallback_req_body(&self) -> Result<(Vec<u8>, ohttp::ClientResponse), crate::v2::Error> {
+    fn fallback_req_body(&mut self) -> Result<(Vec<u8>, ohttp::ClientResponse), crate::v2::Error> {
         let fallback_target = format!("{}{}", &self.relay_url, self.fallback_target());
         log::trace!("Fallback request target: {}", fallback_target.as_str());
-        crate::v2::ohttp_encapsulate(&self.ohttp_config, "GET", &self.fallback_target(), None)
+        let fallback_target = self.fallback_target();
+        crate::v2::ohttp_encapsulate(&mut self.ohttp_keys, "GET", &fallback_target, None)
     }
 
     pub fn pubkey(&self) -> [u8; 33] { self.s.public_key().serialize() }
@@ -545,7 +566,7 @@ impl PayjoinProposal {
     pub fn extract_v1_req(&self) -> String { base64::encode(self.inner.payjoin_psbt.serialize()) }
 
     #[cfg(feature = "v2")]
-    pub fn extract_v2_req(&self) -> Result<(Request, ohttp::ClientResponse), Error> {
+    pub fn extract_v2_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
         let body = match self.context.e {
             Some(e) => {
                 let mut payjoin_bytes = self.inner.payjoin_psbt.serialize();
@@ -561,7 +582,7 @@ impl PayjoinProposal {
         );
         log::debug!("Payjoin post target: {}", post_payjoin_target.as_str());
         let (body, ctx) = crate::v2::ohttp_encapsulate(
-            &self.context.ohttp_config,
+            &mut self.context.ohttp_keys,
             "POST",
             &post_payjoin_target,
             Some(&body),
@@ -591,9 +612,16 @@ mod test {
     #[test]
     #[cfg(feature = "v2")]
     fn enrolled_ser_de_roundtrip() {
+        use ohttp::hpke::{Aead, Kdf, Kem};
+        use ohttp::{KeyId, SymmetricSuite};
+        const KEY_ID: KeyId = 1;
+        const KEM: Kem = Kem::X25519Sha256;
+        const SYMMETRIC: &[SymmetricSuite] =
+            &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
+
         let enrolled = Enrolled {
             relay_url: url::Url::parse("https://relay.com").unwrap(),
-            ohttp_config: vec![1, 2, 3],
+            ohttp_keys: ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap(),
             ohttp_proxy: url::Url::parse("https://proxy.com").unwrap(),
             s: bitcoin::secp256k1::KeyPair::from_secret_key(
                 &bitcoin::secp256k1::Secp256k1::new(),
@@ -601,7 +629,7 @@ mod test {
             ),
         };
         let serialized = serde_json::to_string(&enrolled).unwrap();
-        let deserialized = serde_json::from_str(&serialized).unwrap();
+        let deserialized: Enrolled = serde_json::from_str(&serialized).unwrap();
         assert!(enrolled == deserialized);
     }
 }

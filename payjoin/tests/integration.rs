@@ -256,7 +256,7 @@ mod integration {
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
                     .await??;
             assert!(is_success(res.status()));
-            let enrolled = enroller.process_res(res.into_reader(), ctx)?;
+            let mut enrolled = enroller.process_res(res.into_reader(), ctx)?;
             let fallback_target = enrolled.fallback_target();
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
@@ -303,7 +303,7 @@ mod integration {
 
             // POST payjoin
             let proposal = enrolled.process_res(response.into_reader(), ctx)?.unwrap();
-            let payjoin_proposal = handle_relay_proposal(receiver, proposal);
+            let mut payjoin_proposal = handle_relay_proposal(receiver, proposal);
             let (req, ctx) = payjoin_proposal.extract_v2_req()?;
             let response =
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
@@ -374,7 +374,7 @@ mod integration {
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
                     .await??;
             assert!(is_success(res.status()));
-            let enrolled = enroller.process_res(res.into_reader(), ctx)?;
+            let mut enrolled = enroller.process_res(res.into_reader(), ctx)?;
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
@@ -435,7 +435,7 @@ mod integration {
                 };
                 debug!("handle relay response");
                 let proposal = enrolled.process_res(response, ctx).unwrap().unwrap();
-                let payjoin_proposal = handle_relay_proposal(receiver, proposal);
+                let mut payjoin_proposal = handle_relay_proposal(receiver, proposal);
                 // Respond with payjoin psbt within the time window the sender is willing to wait
                 // this response would be returned as http response to the sender
                 let (req, ctx) = payjoin_proposal.extract_v2_req().unwrap();

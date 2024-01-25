@@ -3,9 +3,8 @@
 pub mod error;
 pub mod receive;
 pub mod send;
-#[cfg(test)]
-mod test;
 pub mod transaction;
+mod types;
 pub mod uri;
 
 use std::str::FromStr;
@@ -15,8 +14,11 @@ use error::PayjoinError;
 use payjoin::bitcoin::{Address as BitcoinAddress, ScriptBuf as BitcoinScriptBuf};
 use serde::{Deserialize, Serialize};
 
+#[allow(unused_imports)]
 use crate::receive::v2::{
-    ClientResponse, Enrolled, Enroller, ExtractReq, V2MaybeInputsOwned, V2MaybeInputsSeen,
+    ClientResponse,
+    ExtractReq,
+    Enrolled, Enroller,  V2MaybeInputsOwned, V2MaybeInputsSeen,
     V2MaybeMixedInputScripts, V2OutputsUnknown, V2PayjoinProposal, V2ProvisionalProposal,
     V2UncheckedProposal,
 };
@@ -25,9 +27,10 @@ use crate::receive::{
     MaybeMixedInputScripts, OutputsUnknown, PayjoinProposal, ProcessPartiallySignedTransaction,
     ProvisionalProposal, UncheckedProposal,
 };
-use crate::send::{Context, Request, RequestBuilder, RequestContext};
+use crate::send::v2::ContextV2;
+use crate::send::{ContextV1, Request, RequestBuilder, RequestContext, RequestContextV1};
 use crate::transaction::{PartiallySignedTransaction, Transaction, Txid};
-use crate::uri::{Amount, PjUri, PrjUriRequest, Uri, Url};
+use crate::uri::{Amount, PjUri, Uri, Url};
 
 uniffi::include_scaffolding!("payjoin_ffi");
 

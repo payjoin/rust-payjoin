@@ -4,9 +4,7 @@ use std::sync::Arc;
 use payjoin::bitcoin::address::{NetworkChecked, NetworkUnchecked};
 
 use crate::error::PayjoinError;
-
 use crate::types::{Address, Amount, Network};
-
 
 impl From<payjoin::Uri<'static, NetworkChecked>> for Uri {
     fn from(value: payjoin::Uri<'static, NetworkChecked>) -> Self {
@@ -84,8 +82,6 @@ impl Uri {
 }
 
 pub struct PjUri(payjoin::PjUri<'static>);
-
-
 
 impl From<url::Url> for Url {
     fn from(value: url::Url) -> Self {

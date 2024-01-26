@@ -1,9 +1,11 @@
 use std::str::FromStr;
 use std::sync::Arc;
+
+use payjoin::bitcoin::{Address as BitcoinAddress, ScriptBuf as BitcoinScriptBuf};
 use serde::{Deserialize, Serialize};
+
 use crate::error::PayjoinError;
 use crate::uri::Url;
-use payjoin::bitcoin::{Address as BitcoinAddress, ScriptBuf as BitcoinScriptBuf};
 ///Represents data that needs to be transmitted to the receiver.
 ///You need to send this request over HTTP(S) to the receiver.
 #[derive(Clone, Debug)]
@@ -30,7 +32,7 @@ impl From<payjoin::send::Request> for Request {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct  Amount(pub u64);
+pub struct Amount(pub u64);
 
 impl From<Amount> for payjoin::bitcoin::Amount {
     fn from(value: Amount) -> Self {
@@ -124,18 +126,18 @@ impl From<Address> for payjoin::bitcoin::Address {
 
 /// A Bitcoin script.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ScriptBuf (pub BitcoinScriptBuf);
+pub struct ScriptBuf(pub BitcoinScriptBuf);
 
 impl ScriptBuf {
     pub fn new(raw_output_script: Vec<u8>) -> Self {
         let buf = BitcoinScriptBuf::from_bytes(raw_output_script);
-        ScriptBuf (buf)
+        ScriptBuf(buf)
     }
 
     pub fn from_string(script: String) -> anyhow::Result<Self, PayjoinError> {
         let buf = BitcoinScriptBuf::from_hex(&script);
         match buf {
-            Ok(e) => Ok(Self (e)),
+            Ok(e) => Ok(Self(e)),
             Err(e) => Err(PayjoinError::InvalidScript { message: e.to_string() }),
         }
     }
@@ -162,7 +164,7 @@ impl From<ScriptBuf> for payjoin::bitcoin::ScriptBuf {
 
 impl From<payjoin::bitcoin::ScriptBuf> for ScriptBuf {
     fn from(value: payjoin::bitcoin::ScriptBuf) -> Self {
-        ScriptBuf (value)
+        ScriptBuf(value)
     }
 }
 
@@ -185,10 +187,7 @@ impl From<TxOut> for payjoin::bitcoin::TxOut {
 
 impl From<payjoin::bitcoin::TxOut> for TxOut {
     fn from(tx_out: payjoin::bitcoin::TxOut) -> Self {
-        TxOut {
-            value: tx_out.value,
-            script_pubkey: Arc::new(ScriptBuf (tx_out.script_pubkey)),
-        }
+        TxOut { value: tx_out.value, script_pubkey: Arc::new(ScriptBuf(tx_out.script_pubkey)) }
     }
 }
 

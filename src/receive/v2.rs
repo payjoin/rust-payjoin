@@ -13,8 +13,6 @@ use crate::receive::{
 use crate::transaction::{PartiallySignedTransaction, Transaction};
 use crate::types::{Address, FeeRate, OutPoint, Request, ScriptBuf, TxOut};
 
-
-
 #[derive(Clone, Debug)]
 pub struct ClientResponse {
     pub ohttp_config: Vec<u8>,
@@ -216,7 +214,7 @@ impl V2MaybeInputsOwned {
     ) -> Result<Arc<V2MaybeMixedInputScripts>, PayjoinError> {
         let owned_inputs = self.0.clone();
         match owned_inputs.check_inputs_not_owned(|input| {
-            let res = is_owned.is_owned(Arc::new(ScriptBuf (input.to_owned())));
+            let res = is_owned.is_owned(Arc::new(ScriptBuf(input.to_owned())));
             match res {
                 Ok(e) => Ok(e),
                 Err(e) => Err(PdkError::Server(e.into())),
@@ -289,8 +287,7 @@ impl V2OutputsUnknown {
         is_receiver_output: Box<dyn IsScriptOwned>,
     ) -> Result<Arc<V2ProvisionalProposal>, PayjoinError> {
         match self.0.clone().identify_receiver_outputs(|output_script| {
-            let res = is_receiver_output
-                .is_owned(Arc::new(ScriptBuf (output_script.to_owned())));
+            let res = is_receiver_output.is_owned(Arc::new(ScriptBuf(output_script.to_owned())));
             match res {
                 Ok(e) => Ok(e),
                 Err(e) => Err(PdkError::Server(e.into())),

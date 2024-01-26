@@ -6,11 +6,10 @@ use std::sync::Arc;
 pub use payjoin::send::RequestBuilder as PdkRequestBuilder;
 
 use crate::error::PayjoinError;
-use crate::transaction::PartiallySignedTransaction;
-use crate::uri::Uri;
-
 use crate::send::v2::ContextV2;
+use crate::transaction::PartiallySignedTransaction;
 use crate::types::{Amount, FeeRate, Request};
+use crate::uri::Uri;
 
 ///Builder for sender-side payjoin parameters
 ///
@@ -22,8 +21,6 @@ impl From<PdkRequestBuilder<'static>> for RequestBuilder {
         Self(value)
     }
 }
-
-
 
 impl RequestBuilder {
     /// Prepare an HTTP request and request context to process the response
@@ -137,13 +134,12 @@ impl RequestContext {
     ///Extract serialized Request and Context from a Payjoin Proposal.
     /// In order to support polling, this may need to be called many times to be encrypted with new unique nonces to make independent OHTTP requests.
     /// The ohttp_proxy merely passes the encrypted payload to the ohttp gateway of the receiver
-    pub fn extract_v2(&self,  ohttp_proxy_url:String ) -> Result<RequestContextV2, PayjoinError> {
+    pub fn extract_v2(&self, ohttp_proxy_url: String) -> Result<RequestContextV2, PayjoinError> {
         match self.0.clone().extract_v2(ohttp_proxy_url.as_str()) {
             Ok(e) => Ok(RequestContextV2 { request: e.0.into(), context_v2: Arc::new(e.1.into()) }),
             Err(e) => Err(e.into()),
         }
     }
-
 }
 ///Data required for validation of response.
 /// This type is used to process the response. Get it from RequestBuilder's build methods. Then you only need to call .process_response() on it to continue BIP78 flow.
@@ -168,5 +164,3 @@ impl ContextV1 {
         }
     }
 }
-
-

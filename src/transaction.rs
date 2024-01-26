@@ -76,5 +76,3 @@ impl From<BitcoinTransaction> for Transaction {
         Self { internal: value }
     }
 }
-
-

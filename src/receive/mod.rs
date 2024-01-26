@@ -12,9 +12,10 @@ use payjoin::receive::{
     UncheckedProposal as PdkUncheckedProposal,
 };
 use payjoin::Error as PdkError;
+use crate::error::PayjoinError;
 
 use crate::transaction::{PartiallySignedTransaction, Transaction};
-use crate::{Address, FeeRate, OutPoint, PayjoinError, ScriptBuf, TxOut};
+use crate::types::{Address, FeeRate, OutPoint,  ScriptBuf, TxOut};
 
 pub trait CanBroadcast: Send + Sync {
     fn test_mempool_accept(&self, tx: Vec<u8>) -> Result<bool, PayjoinError>;
@@ -132,7 +133,7 @@ impl MaybeInputsOwned {
     ) -> Result<Arc<MaybeMixedInputScripts>, PayjoinError> {
         let owned_inputs = self.0.clone();
         match owned_inputs.check_inputs_not_owned(|input| {
-            let res = is_owned.is_owned(Arc::new(ScriptBuf { internal: input.to_owned() }));
+            let res = is_owned.is_owned(Arc::new(ScriptBuf(input.to_owned())));
             match res {
                 Ok(e) => Ok(e),
                 Err(e) => Err(PdkError::Server(e.into())),
@@ -221,7 +222,7 @@ impl OutputsUnknown {
     ) -> Result<Arc<ProvisionalProposal>, PayjoinError> {
         match self.0.clone().identify_receiver_outputs(|output_script| {
             let res = is_receiver_output
-                .is_owned(Arc::new(ScriptBuf { internal: output_script.to_owned() }));
+                .is_owned(Arc::new(ScriptBuf(output_script.to_owned())));
             match res {
                 Ok(e) => Ok(e),
                 Err(e) => Err(PdkError::Server(e.into())),
@@ -331,9 +332,10 @@ impl PayjoinProposal {
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
+    use crate::types::Network;
 
     use super::*;
-    use crate::Network;
+
 
     fn get_proposal_from_test_vector() -> Result<UncheckedProposal, PayjoinError> {
         // OriginalPSBT Test Vector from BIP

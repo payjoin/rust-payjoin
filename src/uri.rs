@@ -4,13 +4,9 @@ use std::sync::Arc;
 use payjoin::bitcoin::address::{NetworkChecked, NetworkUnchecked};
 
 use crate::error::PayjoinError;
-use crate::send::{Context, Request};
-use crate::{Address, Network};
 
-pub struct PrjUriRequest {
-    pub request: Request,
-    pub context: Arc<Context>,
-}
+use crate::types::{Address, Amount, Network};
+
 
 impl From<payjoin::Uri<'static, NetworkChecked>> for Uri {
     fn from(value: payjoin::Uri<'static, NetworkChecked>) -> Self {
@@ -89,34 +85,7 @@ impl Uri {
 
 pub struct PjUri(payjoin::PjUri<'static>);
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Amount(u64);
 
-impl From<Amount> for payjoin::bitcoin::Amount {
-    fn from(value: Amount) -> Self {
-        payjoin::bitcoin::Amount::from_sat(value.0)
-    }
-}
-impl From<payjoin::bitcoin::Amount> for Amount {
-    fn from(value: payjoin::bitcoin::Amount) -> Self {
-        Amount(value.to_sat())
-    }
-}
-
-impl Amount {
-    pub fn from_sat(sats: u64) -> Self {
-        Self(sats)
-    }
-    pub fn from_btc(btc: f64) -> Self {
-        Self((btc as u64) * 100000000)
-    }
-    pub fn to_sat(&self) -> u64 {
-        self.0
-    }
-    pub fn to_btc(&self) -> f64 {
-        (self.0 as f64) / (100000000f64)
-    }
-}
 
 impl From<url::Url> for Url {
     fn from(value: url::Url) -> Self {

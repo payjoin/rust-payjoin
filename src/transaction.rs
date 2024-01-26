@@ -7,6 +7,7 @@ use payjoin::bitcoin::consensus::Decodable;
 use payjoin::bitcoin::psbt::PartiallySignedTransaction as BitcoinPsbt;
 
 use crate::error::PayjoinError;
+use crate::types::Txid;
 
 ///
 /// Partially signed transaction, commonly referred to as a PSBT.
@@ -76,10 +77,4 @@ impl From<BitcoinTransaction> for Transaction {
     }
 }
 
-pub struct Txid(String);
 
-impl Txid {
-    pub fn as_string(&self) -> String {
-        self.0.clone()
-    }
-}

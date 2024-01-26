@@ -10,17 +10,10 @@ use crate::error::PayjoinError;
 use crate::receive::{
     CanBroadcast, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction,
 };
-use crate::send::Request;
 use crate::transaction::{PartiallySignedTransaction, Transaction};
-use crate::{Address, FeeRate, OutPoint, ScriptBuf, TxOut};
+use crate::types::{Address, FeeRate, OutPoint, Request, ScriptBuf, TxOut};
 
-// pub struct ClientResponse(ohttp::ClientResponse);
-//
-// impl From<ohttp::ClientResponse> for ClientResponse {
-//     fn from(value: ohttp::ClientResponse) -> Self {
-//         Self(value)
-//     }
-// }
+
 
 #[derive(Clone, Debug)]
 pub struct ClientResponse {
@@ -223,7 +216,7 @@ impl V2MaybeInputsOwned {
     ) -> Result<Arc<V2MaybeMixedInputScripts>, PayjoinError> {
         let owned_inputs = self.0.clone();
         match owned_inputs.check_inputs_not_owned(|input| {
-            let res = is_owned.is_owned(Arc::new(ScriptBuf { internal: input.to_owned() }));
+            let res = is_owned.is_owned(Arc::new(ScriptBuf (input.to_owned())));
             match res {
                 Ok(e) => Ok(e),
                 Err(e) => Err(PdkError::Server(e.into())),
@@ -297,7 +290,7 @@ impl V2OutputsUnknown {
     ) -> Result<Arc<V2ProvisionalProposal>, PayjoinError> {
         match self.0.clone().identify_receiver_outputs(|output_script| {
             let res = is_receiver_output
-                .is_owned(Arc::new(ScriptBuf { internal: output_script.to_owned() }));
+                .is_owned(Arc::new(ScriptBuf (output_script.to_owned())));
             match res {
                 Ok(e) => Ok(e),
                 Err(e) => Err(PdkError::Server(e.into())),

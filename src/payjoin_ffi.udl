@@ -97,10 +97,7 @@ interface Uri {
       Amount? amount();
 };
 interface PjUri{};
-dictionary PrjUriRequest{
-      Context context;
-      Request request;
-};
+
 interface ClientResponse{};
 
 dictionary ExtractReq {
@@ -190,82 +187,54 @@ interface RequestBuilder{
       [Throws=PayjoinError, Name=from_psbt_and_uri]
       constructor(PartiallySignedTransaction psbt, Uri uri);
       RequestBuilder always_disable_output_substitution( boolean disable );
-       [Throws=PayjoinError]
-      RequestContext build_recommended( FeeRate min_fee_rate);
-};
-
-interface RequestContext{};
-interface Context{
-
-};
-
-
-
-
-
-
-
-
-
-
-
-
-
-interface Enroller{
-   [Throws=PayjoinError,Name=from_relay_config]
-   constructor(string relay_url, string ohttp_config_base64, string ohttp_proxy_url);
-   string subdirectory();
-   string payjoin_subdir();
-   [Throws=PayjoinError]
-   ExtractReq extract_req();
-   [Throws=PayjoinError]
-   Enrolled process_res( sequence<u8> body, ClientResponse context);
-};
-
-interface Enrolled {
-     string fallback_target();
-     sequence<u8> pubkey();
-};
-
-interface V2UncheckedProposal{
-      Transaction extract_tx_to_schedule_broadcast();
-      V2MaybeInputsOwned assume_interactive_receiver();
       [Throws=PayjoinError]
-      V2MaybeInputsOwned check_broadcast_suitability(FeeRate? min_fee_rate,CanBroadcast can_broadcast);
-};
-interface V2MaybeInputsOwned{
-     [Throws=PayjoinError]
-     V2MaybeMixedInputScripts check_inputs_not_owned(IsScriptOwned is_owned);
-};
-interface V2MaybeMixedInputScripts{
-    [Throws=PayjoinError]
-    V2MaybeInputsSeen check_no_mixed_input_scripts();
-};
-interface V2MaybeInputsSeen{
-    [Throws=PayjoinError]
-     V2OutputsUnknown check_no_inputs_seen_before(IsOutputKnown is_known);
-};
-interface V2OutputsUnknown{
-   [Throws=PayjoinError]
-   V2ProvisionalProposal identify_receiver_outputs(IsScriptOwned is_receiver_output);
+      RequestContext build_recommended( FeeRate min_fee_rate);
+      [Throws=PayjoinError]
+      RequestContext build_with_additional_fee( Amount max_fee_contribution, u8? change_index, FeeRate min_fee_rate, boolean clamp_fee_contribution );
+      [Throws=PayjoinError]
+      RequestContext build_non_incentivizing();
 };
 
-interface V2ProvisionalProposal{
-   void contribute_witness_input(TxOut txout, OutPoint outpoint);
-   void contribute_non_witness_input(Transaction tx, OutPoint outpoint);
-   void substitute_output_address(Address substitute_address);
-   [Throws=PayjoinError]
-   OutPoint try_preserving_privacy(record<u64, OutPoint> candidate_inputs);
-   [Throws=PayjoinError]
-   V2PayjoinProposal finalize_proposal(ProcessPartiallySignedTransaction process_psbt, FeeRate? min_feerate_sat_per_vb);
+interface RequestContext{
+    [Throws=PayjoinError]
+    RequestContextV1 extract_v1();
+    [Throws=PayjoinError]
+    RequestContextV2 extract_v2( string  ohttp_proxy_url);
 };
 
-interface V2PayjoinProposal{
-        sequence<OutPoint> utxos_to_be_locked();
-        boolean is_output_substitution_disabled();
-        sequence<u64> owned_vouts();
-        PartiallySignedTransaction psbt();
+dictionary RequestContextV1{
+   Request request;
+   ContextV1 context_v1;
 };
+
+dictionary RequestContextV2{
+   Request request;
+   ContextV2 context_v2;
+};
+
+interface ContextV1{
+    [Throws=PayjoinError]
+    PartiallySignedTransaction  process_response( sequence<u8> response );
+};
+
+interface ContextV2{
+    [Throws=PayjoinError]
+    PartiallySignedTransaction?  process_response( sequence<u8> response );
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

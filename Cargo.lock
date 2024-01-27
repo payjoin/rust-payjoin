@@ -1090,9 +1090,9 @@ dependencies = [
 
 [[package]]
 name = "ohttp"
-version = "0.4.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eef3e1559d017cef55f296e593737811b65106eb822bac13622ed49cbfebcf62"
+checksum = "578cb11a3fb5c85697ed8bb850d5ad1cbf819d3eea05c2b253cf1d240fbb10c5"
 dependencies = [
  "aead 0.4.3",
  "aes-gcm 0.9.2",
@@ -1149,7 +1149,7 @@ checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
 [[package]]
 name = "payjoin"
 version = "0.13.0"
-source = "git+https://github.com/LtbLightning/rust-payjoin?branch=ffi#370b013627d5b23b3df068ab1e910f5520846df0"
+source = "git+https://github.com/LtbLightning/rust-payjoin?branch=ffi-update#e75e16ad4c70a1af7b9dcb1f7e2eca887ef0bd02"
 dependencies = [
  "bhttp",
  "bip21",

@@ -47,6 +47,7 @@ impl payjoin::receive::Headers for Headers {
 /// This type is used to proces the request. It is returned by UncheckedProposal::from_request().
 ///
 /// If you are implementing an interactive payment processor, you should get extract the original transaction with get_transaction_to_schedule_broadcast() and schedule, followed by checking that the transaction can be broadcast with check_can_broadcast. Otherwise it is safe to call assume_interactive_receive to proceed with validation.
+#[derive(Clone)]
 pub struct UncheckedProposal(PdkUncheckedProposal);
 
 impl From<PdkUncheckedProposal> for UncheckedProposal {
@@ -114,6 +115,7 @@ impl UncheckedProposal {
 /// Type state to validate that the Original PSBT has no receiver-owned inputs.
 
 /// Call check_no_receiver_owned_inputs() to proceed.
+#[derive(Clone)]
 pub struct MaybeInputsOwned(PdkMaybeInputsOwned);
 
 impl From<PdkMaybeInputsOwned> for MaybeInputsOwned {
@@ -148,6 +150,7 @@ impl MaybeInputsOwned {
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
 /// Call check_no_inputs_seen to proceed.
+#[derive(Clone)]
 pub struct MaybeMixedInputScripts(PdkMaybeMixedInputScripts);
 
 impl From<PdkMaybeMixedInputScripts> for MaybeMixedInputScripts {
@@ -175,6 +178,7 @@ pub trait IsOutputKnown {
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
 /// Call check_no_inputs_seen to proceed.
+#[derive(Clone)]
 pub struct MaybeInputsSeen(PdkMaybeInputsSeen);
 
 impl From<PdkMaybeInputsSeen> for MaybeInputsSeen {
@@ -205,7 +209,7 @@ impl MaybeInputsSeen {
 /// The receiver has not yet identified which outputs belong to the receiver.
 ///
 /// Only accept PSBTs that send us money. Identify those outputs with identify_receiver_outputs() to proceed
-
+#[derive(Clone)]
 pub struct OutputsUnknown(PdkOutputsUnknown);
 
 impl From<PdkOutputsUnknown> for OutputsUnknown {
@@ -234,6 +238,7 @@ impl OutputsUnknown {
 }
 
 ///A mutable checked proposal that the receiver may contribute inputs to make a payjoin.
+#[derive(Clone)]
 pub struct ProvisionalProposal(PdkProvisionalProposal);
 
 impl From<PdkProvisionalProposal> for ProvisionalProposal {
@@ -301,11 +306,17 @@ impl ProvisionalProposal {
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+#[derive(Clone)]
 pub struct PayjoinProposal(PdkPayjoinProposal);
 
 impl From<PdkPayjoinProposal> for PayjoinProposal {
     fn from(value: PdkPayjoinProposal) -> Self {
         Self(value)
+    }
+}
+impl From<PayjoinProposal> for PdkPayjoinProposal {
+    fn from(value: PayjoinProposal) -> Self {
+        value.0
     }
 }
 

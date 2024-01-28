@@ -389,6 +389,18 @@ impl WellKnownError {
             WellKnownError::OriginalPsbtRejected(m) => m,
         }
     }
+    /// Returns additional data for the error.
+    ///
+    /// Currently only `VersionUnsupported` variant could have additional data.
+    /// If so, it returns the list of supported versions.
+    pub fn additional_data(&self) -> Option<&Vec<u64>> {
+        match self {
+            WellKnownError::Unavailable(_) => None,
+            WellKnownError::NotEnoughMoney(_) => None,
+            WellKnownError::VersionUnsupported(_, v) => Some(v),
+            WellKnownError::OriginalPsbtRejected(_) => None,
+        }
+    }
 }
 
 impl Display for WellKnownError {
@@ -416,6 +428,7 @@ mod tests {
             ResponseError::WellKnown(e) => {
                 assert_eq!(e.error_code(), "version-unsupported");
                 assert_eq!(e.message(), "custom message here");
+                assert_eq!(e.additional_data(), Some(&vec![1, 2]));
                 assert_eq!(
                     e.to_string(),
                     "This version of payjoin is not supported. Use version [1, 2]."

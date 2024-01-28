@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use payjoin::bitcoin::psbt::Psbt;
+use payjoin::receive::v2::V2Context;
 use payjoin::Error as PdkError;
 
 use crate::error::PayjoinError;
@@ -17,26 +18,26 @@ use crate::types::{Address, FeeRate, OutPoint, Request, ScriptBuf, TxOut};
 pub struct ClientResponse {
     pub ohttp_config: Vec<u8>,
     pub method: String,
-    pub target_resource: url::Url,
+    pub target_resource: String,
     pub body: Option<Vec<u8>>,
 }
 
 impl ClientResponse {
-    fn ohttp_encapsulate(&self) -> Result<ohttp::ClientResponse, PayjoinError> {
+    fn ohttp_encapsulate(&self) -> Result<(ohttp::ClientResponse, Vec<u8>), PayjoinError> {
         match payjoin::v2::ohttp_encapsulate(
             self.ohttp_config.as_slice(),
             self.method.as_str(),
             self.target_resource.as_str(),
             self.body.as_ref().map(|x| x.as_slice()),
         ) {
-            Ok(e) => Ok(e.1),
+            Ok(e) => Ok((e.1, e.0)),
             Err(e) => Err(PayjoinError::OhttpError { message: e.to_string() }),
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct ExtractReq {
+pub struct RequestResponse {
     pub request: Request,
     pub client_response: Arc<ClientResponse>,
 }
@@ -44,53 +45,69 @@ pub struct ExtractReq {
 #[derive(Clone, Debug)]
 pub struct Enroller {
     relay_url: url::Url,
-    ohttp_config_base64: String,
+    ohttp_config: Vec<u8>,
     ohttp_proxy: url::Url,
+    pub s: payjoin::bitcoin::secp256k1::KeyPair,
+}
+impl From<Enroller> for payjoin::receive::v2::Enroller {
+    fn from(value: Enroller) -> Self {
+        Self {
+            relay_url: value.relay_url,
+            ohttp_config: value.ohttp_config,
+            ohttp_proxy: value.ohttp_proxy,
+            s: value.s,
+        }
+    }
+}
+
+impl From<payjoin::receive::v2::Enroller> for Enroller {
+    fn from(value: payjoin::receive::v2::Enroller) -> Self {
+        Self {
+            relay_url: value.relay_url,
+            ohttp_config: value.ohttp_config,
+            ohttp_proxy: value.ohttp_proxy,
+            s: value.s,
+        }
+    }
 }
 
 impl Enroller {
-    fn get_payjon_enroller(&self) -> payjoin::receive::v2::Enroller {
-        payjoin::receive::v2::Enroller::from_relay_config(
-            self.relay_url.as_str(),
-            self.ohttp_config_base64.as_str(),
-            self.ohttp_proxy.as_str(),
-        )
-    }
     pub fn from_relay_config(
         relay_url: String,
         ohttp_config_base64: String,
         ohttp_proxy_url: String,
-    ) -> Result<Self, PayjoinError> {
-        let ohttp_proxy = url::Url::parse(&*ohttp_proxy_url)?;
-        let relay_url = url::Url::parse(&*relay_url)?;
-        Ok(Enroller { ohttp_proxy, relay_url, ohttp_config_base64 })
+    ) -> Self {
+        payjoin::receive::v2::Enroller::from_relay_config(
+            relay_url.as_str(),
+            ohttp_config_base64.as_str(),
+            ohttp_proxy_url.as_str(),
+        )
+        .into()
     }
     pub fn subdirectory(&self) -> String {
-        self.get_payjon_enroller().subdirectory()
+        <Enroller as Into<payjoin::receive::v2::Enroller>>::into(self.clone()).subdirectory()
     }
     pub fn payjoin_subdir(&self) -> String {
-        self.get_payjon_enroller().payjoin_subdir()
+        <Enroller as Into<payjoin::receive::v2::Enroller>>::into(self.clone()).payjoin_subdir()
     }
-    pub fn extract_req(&self) -> Result<ExtractReq, PayjoinError> {
-        let ohttp_config =
-            base64::decode_config(self.ohttp_config_base64.clone(), base64::URL_SAFE).unwrap();
-        let (req, _) = self.get_payjon_enroller().extract_req()?;
+    pub fn extract_req(&self) -> Result<RequestResponse, PayjoinError> {
         let client_response = ClientResponse {
-            ohttp_config,
+            ohttp_config: self.ohttp_config.clone(),
             method: "POST".to_string(),
-            target_resource: self.relay_url.clone(),
+            target_resource: self.relay_url.to_string(),
             body: Some(self.subdirectory().as_bytes().to_vec()),
         };
-        Ok(ExtractReq { request: req.into(), client_response: Arc::new(client_response) })
+        let (_, body) = client_response.ohttp_encapsulate()?;
+        let req = Request { url: Arc::new(self.ohttp_proxy.clone().into()), body };
+        Ok(RequestResponse { request: req, client_response: Arc::new(client_response) })
     }
     pub fn process_res(
         &self,
         body: Vec<u8>,
         context: Arc<ClientResponse>,
     ) -> Result<Arc<Enrolled>, PayjoinError> {
-        match self
-            .get_payjon_enroller()
-            .process_res(Cursor::new(body), context.ohttp_encapsulate()?)
+        match <Enroller as Into<payjoin::receive::v2::Enroller>>::into(self.clone())
+            .process_res(Cursor::new(body), context.ohttp_encapsulate()?.0)
         {
             Ok(e) => Ok(Arc::new(e.into())),
             Err(e) => Err(e.into()),
@@ -99,51 +116,70 @@ impl Enroller {
 }
 
 #[derive(Clone, Debug)]
-pub struct Enrolled(payjoin::receive::v2::Enrolled);
+pub struct Enrolled {
+    pub relay_url: url::Url,
+    pub ohttp_config: Vec<u8>,
+    pub ohttp_proxy: url::Url,
+    pub s: payjoin::bitcoin::secp256k1::KeyPair,
+}
 impl From<Enrolled> for payjoin::receive::v2::Enrolled {
     fn from(value: Enrolled) -> Self {
-        value.0
+        Self {
+            relay_url: value.relay_url,
+            ohttp_config: value.ohttp_config,
+            ohttp_proxy: value.ohttp_proxy,
+            s: value.s,
+        }
     }
 }
 
 impl From<payjoin::receive::v2::Enrolled> for Enrolled {
     fn from(value: payjoin::receive::v2::Enrolled) -> Self {
-        Self(value)
+        Self {
+            relay_url: value.relay_url,
+            ohttp_config: value.ohttp_config,
+            ohttp_proxy: value.ohttp_proxy,
+            s: value.s,
+        }
     }
 }
 impl Enrolled {
     pub fn pubkey(&self) -> Vec<u8> {
-        self.0.pubkey().to_vec()
+        <Enrolled as Into<payjoin::receive::v2::Enrolled>>::into(self.clone()).pubkey().to_vec()
     }
     pub fn fallback_target(&self) -> String {
-        self.0.fallback_target()
+        <Enrolled as Into<payjoin::receive::v2::Enrolled>>::into(self.clone()).fallback_target()
     }
-    //TODO; create wrapper function for extract_req & process_res
-    // pub fn extract_req(&self) -> ExtractReq {
-    //     let ohttp_config =
-    //         base64::decode_config(self.ohttp_config_base64.clone(), base64::URL_SAFE).unwrap();
-    //     let (req, _) = self.get_payjon_enroller().extract_req()?;
-    //     let client_response = ClientResponse {
-    //         ohttp_config,
-    //         method: "POST".to_string(),
-    //         target_resource: self.relay_url.clone(),
-    //         body: Some(self.subdirectory().as_bytes().to_vec()),
-    //     };
-    //     ExtractReq { request: req.into(), client_response }
-    // }
-    // pub fn process_res(
-    //     &self,
-    //     body: Vec<u8>,
-    //     context: ClientResponse,
-    // ) -> Result<Enrolled, PayjoinError> {
-    //     match self
-    //         .get_payjon_enroller()
-    //         .process_res(Cursor::new(body), context.ohttp_encapsulate()?)
-    //     {
-    //         Ok(e) => Ok(e.into()),
-    //         Err(e) => Err(e.into()),
-    //     }
-    // }
+
+    fn fallback_req_body(&self) -> Result<(Vec<u8>, ClientResponse), PayjoinError> {
+        let fallback_target = format!("{}{}", &self.relay_url, self.fallback_target());
+
+        let client_response = ClientResponse {
+            ohttp_config: self.ohttp_config.clone(),
+            method: "GET".to_string(),
+            target_resource: fallback_target,
+            body: None,
+        };
+        let (_, body) = client_response.ohttp_encapsulate()?;
+        Ok((body, client_response))
+    }
+    pub fn extract_req(&self) -> Result<RequestResponse, PayjoinError> {
+        let (body, ohttp_ctx) = self.fallback_req_body()?;
+        let req = Request { url: Arc::new(self.ohttp_proxy.clone().into()), body };
+        Ok(RequestResponse { request: req, client_response: Arc::new(ohttp_ctx) })
+    }
+    pub fn process_res(
+        &self,
+        body: Vec<u8>,
+        context: Arc<ClientResponse>,
+    ) -> Result<Option<Arc<V2UncheckedProposal>>, PayjoinError> {
+        match <Enrolled as Into<payjoin::receive::v2::Enrolled>>::into(self.clone())
+            .process_res(Cursor::new(body), context.ohttp_encapsulate()?.0)
+        {
+            Ok(e) => Ok(e.map(|x| Arc::new(x.into()))),
+            Err(e) => Err(e.into()),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -167,9 +203,14 @@ impl V2UncheckedProposal {
 
     /// Call after checking that the Original PSBT can be broadcast.
     ///
-    /// Receiver MUST check that the Original PSBT from the sender can be broadcast, i.e. testmempoolaccept bitcoind rpc returns { “allowed”: true,.. } for get_transaction_to_check_broadcast() before calling this method.
+    /// Receiver MUST check that the Original PSBT from the sender
+    /// can be broadcast, i.e. `testmempoolaccept` bitcoind rpc returns { "allowed": true,.. }
+    /// for `extract_tx_to_sheculed_broadcast()` before calling this method.
     ///
-    /// Do this check if you generate bitcoin uri to receive Payjoin on sender request without manual human approval, like a payment processor. Such so called “non-interactive” receivers are otherwise vulnerable to probing attacks. If a sender can make requests at will, they can learn which bitcoin the receiver owns at no cost. Broadcasting the Original PSBT after some time in the failure case makes incurs sender cost and prevents probing.
+    /// Do this check if you generate bitcoin uri to receive Payjoin on sender request without manual human approval, like a payment processor.
+    /// Such so called "non-interactive" receivers are otherwise vulnerable to probing attacks.
+    /// If a sender can make requests at will, they can learn which bitcoin the receiver owns at no cost.
+    /// Broadcasting the Original PSBT after some time in the failure case makes incurs sender cost and prevents probing.
     ///
     /// Call this after checking downstream.
     pub fn check_broadcast_suitability(
@@ -192,9 +233,11 @@ impl V2UncheckedProposal {
         }
     }
 
-    /// Call this method if the only way to initiate a Payjoin with this receiver requires manual intervention, as in most consumer wallets.
+    /// Call this method if the only way to initiate a Payjoin with this receiver
+    /// requires manual intervention, as in most consumer wallets.
     ///
-    /// So-called “non-interactive” receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks. Those receivers call get_transaction_to_check_broadcast() and attest_tested_and_scheduled_broadcast() after making those checks downstream.
+    /// So-called "non-interactive" receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks.
+    /// Those receivers call `extract_tx_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
     pub fn assume_interactive_receiver(&self) -> Arc<V2MaybeInputsOwned> {
         Arc::new(self.0.clone().assume_interactive_receiver().into())
     }
@@ -207,7 +250,8 @@ impl From<payjoin::receive::v2::MaybeInputsOwned> for V2MaybeInputsOwned {
     }
 }
 impl V2MaybeInputsOwned {
-    /// Make sure that the original transaction inputs have never been seen before. This prevents probing attacks. This prevents reentrant Payjoin, where a sender proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
+    ///Check that the Original PSBT has no receiver-owned inputs. Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
+    // An attacker could try to spend receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         &self,
         is_owned: Box<dyn IsScriptOwned>,
@@ -235,9 +279,11 @@ impl From<payjoin::receive::v2::MaybeMixedInputScripts> for V2MaybeMixedInputScr
 }
 
 impl V2MaybeMixedInputScripts {
-    /// Verify the original transaction did not have mixed input types Call this after checking downstream.
+    /// Verify the original transaction did not have mixed input types
+    /// Call this after checking downstream.
     ///
-    /// Note: mixed spends do not necessarily indicate distinct wallet fingerprints. This check is intended to prevent some types of wallet fingerprinting.
+    /// Note: mixed spends do not necessarily indicate distinct wallet fingerprints.
+    /// This check is intended to prevent some types of wallet fingerprinting.
     pub fn check_no_mixed_input_scripts(&self) -> Result<Arc<V2MaybeInputsSeen>, PayjoinError> {
         match self.0.clone().check_no_mixed_input_scripts() {
             Ok(e) => Ok(Arc::new(e.into())),
@@ -254,7 +300,9 @@ impl From<payjoin::receive::v2::MaybeInputsSeen> for V2MaybeInputsSeen {
 }
 
 impl V2MaybeInputsSeen {
-    /// Make sure that the original transaction inputs have never been seen before. This prevents probing attacks. This prevents reentrant Payjoin, where a sender proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
+    /// Make sure that the original transaction inputs have never been seen before.
+    /// This prevents probing attacks. This prevents reentrant Payjoin, where a sender
+    /// proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
     pub fn check_no_inputs_seen_before(
         &self,
         is_known: Box<dyn IsOutputKnown>,
@@ -272,6 +320,11 @@ impl V2MaybeInputsSeen {
     }
 }
 
+/// The receiver has not yet identified which outputs belong to the receiver.
+///
+/// Only accept PSBTs that send us money.
+/// Identify those outputs with `identify_receiver_outputs()` to proceed
+#[derive(Clone)]
 pub struct V2OutputsUnknown(payjoin::receive::v2::OutputsUnknown);
 
 impl From<payjoin::receive::v2::OutputsUnknown> for V2OutputsUnknown {
@@ -306,6 +359,7 @@ impl From<payjoin::receive::v2::ProvisionalProposal> for V2ProvisionalProposal {
     }
 }
 
+/// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
 impl V2ProvisionalProposal {
     pub fn substitute_output_address(&self, substitute_address: Arc<Address>) {
         self.0.clone().substitute_output_address((*substitute_address).clone().into())
@@ -316,11 +370,17 @@ impl V2ProvisionalProposal {
     pub fn contribute_non_witness_input(&self, tx: Arc<Transaction>, outpoint: OutPoint) {
         self.0.clone().contribute_non_witness_input((*tx).clone().into(), outpoint.into())
     }
-    /// Select receiver input such that the payjoin avoids surveillance. Return the input chosen that has been applied to the Proposal.
+    /// Select receiver input such that the payjoin avoids surveillance.
+    /// Return the input chosen that has been applied to the Proposal.
     ///
-    /// Proper coin selection allows payjoin to resemble ordinary transactions. To ensure the resemblance, a number of heuristics must be avoided.
+    /// Proper coin selection allows payjoin to resemble ordinary transactions.
+    /// To ensure the resemblance, a number of heuristics must be avoided.
     ///
-    /// UIH “Unnecessary input heuristic” is one class of them to avoid. We define UIH1 and UIH2 according to the BlockSci practice BlockSci UIH1 and UIH2:
+    /// UIH "Unnecessary input heuristic" is one class of them to avoid. We define
+    /// UIH1 and UIH2 according to the BlockSci practice
+    /// BlockSci UIH1 and UIH2:
+    // if min(out) < min(in) then UIH1 else UIH2
+    // https://eprint.iacr.org/2022/589.pdf
     pub fn try_preserving_privacy(
         &self,
         candidate_inputs: HashMap<u64, OutPoint>,
@@ -353,37 +413,105 @@ impl V2ProvisionalProposal {
             },
             min_feerate_sat_per_vb.map(|x| (*x).into()),
         ) {
-            Ok(e) => Ok(Arc::new(V2PayjoinProposal(e))),
+            Ok(e) => Ok(Arc::new(e.into())),
             Err(e) => Err(e.into()),
         }
     }
 }
-pub struct V2PayjoinProposal(payjoin::receive::v2::PayjoinProposal);
+
+/// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+
+#[derive(Clone)]
+pub struct V2PayjoinProposal {
+    pub inner: crate::PayjoinProposal,
+    pub context: V2Context,
+}
 impl From<payjoin::receive::v2::PayjoinProposal> for V2PayjoinProposal {
     fn from(value: payjoin::receive::v2::PayjoinProposal) -> Self {
-        Self(value)
+        Self { inner: value.inner.into(), context: value.context }
     }
 }
+impl From<V2PayjoinProposal> for payjoin::receive::v2::PayjoinProposal {
+    fn from(value: V2PayjoinProposal) -> Self {
+        Self { inner: value.inner.0, context: value.context }
+    }
+}
+
 impl V2PayjoinProposal {
     pub fn utxos_to_be_locked(&self) -> Vec<OutPoint> {
         let mut outpoints: Vec<OutPoint> = Vec::new();
-        for e in self.0.utxos_to_be_locked() {
+        for e in
+            <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
+                .utxos_to_be_locked()
+        {
             outpoints.push((e.to_owned()).into())
         }
         outpoints
     }
     pub fn is_output_substitution_disabled(&self) -> bool {
-        self.0.is_output_substitution_disabled()
+        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
+            .is_output_substitution_disabled()
     }
     pub fn owned_vouts(&self) -> Vec<u64> {
-        self.0.owned_vouts().iter().map(|x| *x as u64).collect()
+        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
+            .owned_vouts()
+            .iter()
+            .map(|x| *x as u64)
+            .collect()
     }
     pub fn psbt(&self) -> Arc<PartiallySignedTransaction> {
-        Arc::new(self.0.psbt().clone().into())
+        Arc::new(
+            <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
+                .psbt()
+                .clone()
+                .into(),
+        )
     }
 
     pub fn extract_v1_req(&self) -> String {
-        self.0.extract_v1_req()
+        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
+            .extract_v1_req()
     }
-    //TODO; Create wrapper function for  deserialize_res & extract_v2_req
+    pub fn extract_v2_req(&self) -> Result<RequestResponse, PayjoinError> {
+        let body = match self.context.e {
+            Some(e) => {
+                let mut payjoin_bytes = self.inner.0.psbt().serialize();
+                payjoin::v2::encrypt_message_b(&mut payjoin_bytes, e)
+            }
+            None => Ok(self.extract_v1_req().as_bytes().to_vec()),
+        }?;
+        let post_payjoin_target = format!(
+            "{}{}/payjoin",
+            self.context.relay_url.as_str(),
+            subdirectory(&self.context.s.public_key())
+        );
+        let client_response = ClientResponse {
+            ohttp_config: self.context.ohttp_config.clone(),
+            method: "POST".to_string(),
+            target_resource: post_payjoin_target,
+            body: Some(body),
+        };
+        let (_, body) = client_response.ohttp_encapsulate()?;
+        let url = self.context.ohttp_proxy.clone();
+        let req = Request { url: Arc::new(url.into()), body };
+        Ok(RequestResponse { request: req, client_response: Arc::new(client_response) })
+    }
+
+    pub fn deserialize_res(
+        &self,
+        res: Vec<u8>,
+        ohttp_context: Arc<ClientResponse>,
+    ) -> Result<Vec<u8>, PayjoinError> {
+        match <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
+            .deserialize_res(res, ohttp_context.ohttp_encapsulate()?.0)
+        {
+            Ok(e) => Ok(e),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+fn subdirectory(pubkey: &payjoin::bitcoin::secp256k1::PublicKey) -> String {
+    let pubkey = pubkey.serialize();
+    let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
+    base64::encode_config(pubkey, b64_config)
 }

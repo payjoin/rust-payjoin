@@ -195,6 +195,22 @@ impl App {
     }
 
     #[cfg(feature = "v2")]
+    async fn try_v1(&self, req_ctx: &mut payjoin::send::RequestContext) -> Result<Psbt> {
+        let (req, ctx) = req_ctx.clone().extract_v1().unwrap();
+        let http = http_agent()?;
+        println!("Sending fallback v1 request to {} after v2 request attempt fail", &req.url);
+        let response = spawn_blocking(move || {
+            http.post(req.url.as_ref())
+                .set("Content-Type", "text/plain")
+                .send_bytes(&req.body)
+                .map_err(map_ureq_err)
+        })
+        .await??;
+        println!("Sent fallback v1 request");
+        Ok(ctx.process_response(&mut response.into_reader())?)
+    }
+
+    #[cfg(feature = "v2")]
     async fn long_poll_post(&self, req_ctx: &mut payjoin::send::RequestContext) -> Result<Psbt> {
         loop {
             let (req, ctx) = req_ctx.extract_v2(&self.config.ohttp_proxy)?;
@@ -211,12 +227,18 @@ impl App {
             println!("Sent fallback transaction");
             match ctx.process_response(&mut response.into_reader()) {
                 Ok(Some(psbt)) => return Ok(psbt),
-                Ok(None) => std::thread::sleep(std::time::Duration::from_secs(5)),
-                Err(re) => {
-                    println!("{}", re);
-                    log::debug!("{:?}", re);
+                Ok(None) => {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    continue;
                 }
-            }
+                Err(error) => {
+                    if error.is_version_supported(&1) {
+                        return self.try_v1(req_ctx).await;
+                    };
+                    println!("{}", error);
+                    log::debug!("{:?}", error);
+                }
+            };
         }
     }
 

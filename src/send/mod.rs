@@ -14,6 +14,7 @@ use crate::uri::Uri;
 ///Builder for sender-side payjoin parameters
 ///
 ///These parameters define how client wants to handle Payjoin.
+#[derive(Clone)]
 pub struct RequestBuilder(PdkRequestBuilder<'static>);
 
 impl From<PdkRequestBuilder<'static>> for RequestBuilder {
@@ -103,6 +104,7 @@ impl RequestBuilder {
         }
     }
 }
+#[derive(Clone)]
 pub struct RequestContext(payjoin::send::RequestContext);
 
 impl From<payjoin::send::RequestContext> for RequestContext {
@@ -131,9 +133,12 @@ impl RequestContext {
             Err(e) => Err(e.into()),
         }
     }
-    ///Extract serialized Request and Context from a Payjoin Proposal.
-    /// In order to support polling, this may need to be called many times to be encrypted with new unique nonces to make independent OHTTP requests.
-    /// The ohttp_proxy merely passes the encrypted payload to the ohttp gateway of the receiver
+    /// Extract serialized Request and Context from a Payjoin Proposal.
+    ///
+    /// In order to support polling, this may need to be called many times to be encrypted with
+    /// new unique nonces to make independent OHTTP requests.
+    ///
+    /// The `ohttp_proxy` merely passes the encrypted payload to the ohttp gateway of the receiver
     pub fn extract_v2(&self, ohttp_proxy_url: String) -> Result<RequestContextV2, PayjoinError> {
         match self.0.clone().extract_v2(ohttp_proxy_url.as_str()) {
             Ok(e) => Ok(RequestContextV2 { request: e.0.into(), context_v2: Arc::new(e.1.into()) }),

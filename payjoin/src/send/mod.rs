@@ -400,9 +400,9 @@ impl Eq for RequestContext {}
 
 impl RequestContext {
     /// Extract serialized V1 Request and Context froma Payjoin Proposal
-    pub fn extract_v1(self) -> Result<(Request, ContextV1), CreateRequestError> {
+    pub fn extract_v1(&self) -> Result<(Request, ContextV1), CreateRequestError> {
         let url = serialize_url(
-            self.endpoint.into(),
+            self.endpoint.clone(),
             self.disable_output_substitution,
             self.fee_contribution,
             self.min_fee_rate,
@@ -412,10 +412,10 @@ impl RequestContext {
         Ok((
             Request { url, body },
             ContextV1 {
-                original_psbt: self.psbt,
+                original_psbt: self.psbt.clone(),
                 disable_output_substitution: self.disable_output_substitution,
                 fee_contribution: self.fee_contribution,
-                payee: self.payee,
+                payee: self.payee.clone(),
                 input_type: self.input_type,
                 sequence: self.sequence,
                 min_fee_rate: self.min_fee_rate,
@@ -1098,7 +1098,7 @@ fn serialize_v2_body(
 ) -> Result<Vec<u8>, CreateRequestError> {
     // Grug say localhost base be discarded anyway. no big brain needed.
     let placeholder_url = serialize_url(
-        "http:/localhost".to_string(),
+        Url::parse("http://localhost").map_err(InternalCreateRequestError::Url)?,
         disable_output_substitution,
         fee_contribution,
         min_feerate,
@@ -1110,12 +1110,11 @@ fn serialize_v2_body(
 }
 
 fn serialize_url(
-    endpoint: String,
+    mut url: Url,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
 ) -> Result<Url, url::ParseError> {
-    let mut url = Url::parse(&endpoint)?;
     url.query_pairs_mut().append_pair("v", "1");
     if disable_output_substitution {
         url.query_pairs_mut().append_pair("disableoutputsubstitution", "1");
@@ -1215,8 +1214,9 @@ mod test {
         })
         .to_string();
         match ctx.process_response(&mut known_json_error.as_bytes()) {
-            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported(_, _))) =>
-                assert!(true),
+            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported(_, _))) => {
+                assert!(true)
+            }
             _ => panic!("Expected WellKnownError"),
         }
 

@@ -10,7 +10,7 @@ pub mod uri;
 use crate::error::PayjoinError;
 #[allow(unused_imports)]
 use crate::receive::v2::{
-    ClientResponse, Enrolled, Enroller, ExtractReq, V2MaybeInputsOwned, V2MaybeInputsSeen,
+    ClientResponse, Enrolled, Enroller, RequestResponse, V2MaybeInputsOwned, V2MaybeInputsSeen,
     V2MaybeMixedInputScripts, V2OutputsUnknown, V2PayjoinProposal, V2ProvisionalProposal,
     V2UncheckedProposal,
 };

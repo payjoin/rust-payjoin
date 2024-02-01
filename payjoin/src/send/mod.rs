@@ -43,7 +43,7 @@ use crate::input_type::InputType;
 use crate::psbt::PsbtExt;
 use crate::uri::UriExt;
 use crate::weight::{varint_size, ComputeWeight};
-use crate::PjUri;
+use crate::{PjUri, Uri};
 
 // See usize casts
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -71,7 +71,7 @@ impl<'a> RequestBuilder<'a> {
     /// to keep them separated.
     pub fn from_psbt_and_uri(
         psbt: Psbt,
-        uri: crate::Uri<'a, NetworkChecked>,
+        uri: Uri<'a, NetworkChecked>,
     ) -> Result<Self, CreateRequestError> {
         let uri = uri
             .check_pj_supported()

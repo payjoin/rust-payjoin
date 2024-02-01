@@ -83,7 +83,7 @@ mod e2e {
                 .await
                 .expect("Failed to write to stdout");
 
-            if line.starts_with("BITCOIN") {
+            if line.to_ascii_uppercase().starts_with("BITCOIN") {
                 bip21 = line;
                 break;
             }

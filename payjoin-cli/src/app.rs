@@ -23,6 +23,7 @@ use payjoin::receive::Error;
 #[cfg(not(feature = "v2"))]
 use payjoin::receive::{PayjoinProposal, UncheckedProposal};
 use payjoin::send::RequestContext;
+use payjoin::{PjUriBuilder, Uri};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "v2")]
 use tokio::sync::Mutex as AsyncMutex;
@@ -246,8 +247,8 @@ impl App {
     }
 
     fn create_pj_request(&self, bip21: &str, fee_rate: &f32) -> Result<RequestContext> {
-        let uri = payjoin::Uri::try_from(bip21)
-            .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
+        let uri =
+            Uri::try_from(bip21).map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
 
         let uri = uri.assume_checked();
 
@@ -368,22 +369,22 @@ impl App {
             Some(target) => target,
             None => self.config.pj_endpoint.as_str(),
         };
+        let pj_part = payjoin::Url::parse(pj_part)
+            .map_err(|e| anyhow!("Failed to parse pj_endpoint: {}", e))?;
 
-        let pj_uri_string = format!(
-            "{}?amount={}&pj={}",
-            pj_receiver_address.to_qr_uri(),
-            amount.to_btc(),
-            pj_part,
-        );
+        #[cfg(not(feature = "v2"))]
+        let pj_uri = PjUriBuilder::new(pj_receiver_address, pj_part).amount(amount).build();
 
         #[cfg(feature = "v2")]
-        let pj_uri_string = format!("{}&ohttp={}", pj_uri_string, self.config.ohttp_config,);
+        let pj_uri = {
+            let ohttp_keys = payjoin::OhttpKeys::decode(&base64::decode_config(
+                &self.config.ohttp_config,
+                base64::URL_SAFE,
+            )?)?;
+            PjUriBuilder::new(pj_receiver_address, pj_part, Some(ohttp_keys)).amount(amount).build()
+        };
 
-        // to check uri validity
-        let _pj_uri = payjoin::Uri::from_str(&pj_uri_string)
-            .map_err(|e| anyhow!("Constructed a bad URI string from args: {}", e))?;
-
-        Ok(pj_uri_string)
+        Ok(pj_uri.to_string())
     }
 
     #[cfg(not(feature = "v2"))]

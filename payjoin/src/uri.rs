@@ -2,36 +2,34 @@ use std::borrow::Cow;
 use std::convert::TryFrom;
 
 use bitcoin::address::{Error, NetworkChecked, NetworkUnchecked};
-use bitcoin::Network;
+use bitcoin::{Address, Amount, Network};
 use url::Url;
 
 #[derive(Clone)]
-pub enum Payjoin {
-    Supported(PayjoinParams),
-    V2Only(PayjoinParams),
+pub enum MaybePayjoinExtras {
+    Supported(PayjoinExtras),
     Unsupported,
 }
 
-impl Payjoin {
+impl MaybePayjoinExtras {
     pub fn pj_is_supported(&self) -> bool {
         match self {
-            Payjoin::Supported(_) => true,
-            Payjoin::V2Only(_) => true,
-            Payjoin::Unsupported => false,
+            MaybePayjoinExtras::Supported(_) => true,
+            MaybePayjoinExtras::Unsupported => false,
         }
     }
 }
 
 #[derive(Clone)]
-pub struct PayjoinParams {
+pub struct PayjoinExtras {
     pub(crate) endpoint: Url,
     pub(crate) disable_output_substitution: bool,
     #[cfg(feature = "v2")]
     pub(crate) ohttp_config: Option<ohttp::KeyConfig>,
 }
 
-pub type Uri<'a, NetworkValidation> = bip21::Uri<'a, NetworkValidation, Payjoin>;
-pub type PjUri<'a> = bip21::Uri<'a, NetworkChecked, PayjoinParams>;
+pub type Uri<'a, NetworkValidation> = bip21::Uri<'a, NetworkValidation, MaybePayjoinExtras>;
+pub type PjUri<'a> = bip21::Uri<'a, NetworkChecked, PayjoinExtras>;
 
 mod sealed {
     use bitcoin::address::{NetworkChecked, NetworkUnchecked};
@@ -78,7 +76,7 @@ impl<'a> UriExtNetworkUnchecked<'a> for Uri<'a, NetworkUnchecked> {
 impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
     fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>> {
         match self.extras {
-            Payjoin::Supported(payjoin) | Payjoin::V2Only(payjoin) => {
+            MaybePayjoinExtras::Supported(payjoin) => {
                 let mut uri = bip21::Uri::with_extras(self.address, payjoin);
                 uri.amount = self.amount;
                 uri.label = self.label;
@@ -86,7 +84,7 @@ impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
 
                 Ok(uri)
             }
-            Payjoin::Unsupported => {
+            MaybePayjoinExtras::Unsupported => {
                 let mut uri = bip21::Uri::new(self.address);
                 uri.amount = self.amount;
                 uri.label = self.label;
@@ -98,15 +96,102 @@ impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
     }
 }
 
-impl PayjoinParams {
+/// Build a valid `PjUri`.
+///
+/// Payjoin receiver can use this builder to create a payjoin
+/// uri to send to the sender.
+pub struct PjUriBuilder {
+    /// Address you want to receive funds to.
+    address: Address,
+    /// Amount you want to receive.
+    ///
+    /// If `None` the amount will be left unspecified.
+    amount: Option<Amount>,
+    /// Message
+    message: Option<String>,
+    /// Label
+    label: Option<String>,
+    /// Payjoin endpoint url listening for payjoin requests.
+    pj: Url,
+    /// Whether or not payjoin output substitution is allowed
+    pjos: bool,
+    #[cfg(feature = "v2")]
+    /// Config for ohttp.
+    ///
+    /// Required only for v2 payjoin.
+    ohttp: Option<ohttp::KeyConfig>,
+}
+
+impl PjUriBuilder {
+    /// Create a new `PjUriBuilder` with required parameters.
+    pub fn new(
+        address: Address,
+        pj: Url,
+        #[cfg(feature = "v2")] ohttp_config: Option<ohttp::KeyConfig>,
+    ) -> Self {
+        Self {
+            address,
+            amount: None,
+            message: None,
+            label: None,
+            pj,
+            pjos: false,
+            #[cfg(feature = "v2")]
+            ohttp: ohttp_config,
+        }
+    }
+    /// Set the amount you want to receive.
+    pub fn amount(mut self, amount: Amount) -> Self {
+        self.amount = Some(amount);
+        self
+    }
+
+    /// Set the message.
+    pub fn message(mut self, message: String) -> Self {
+        self.message = Some(message);
+        self
+    }
+
+    /// Set the label.
+    pub fn label(mut self, label: String) -> Self {
+        self.label = Some(label);
+        self
+    }
+
+    /// Set whether or not payjoin output substitution is allowed.
+    pub fn pjos(mut self, pjos: bool) -> Self {
+        self.pjos = pjos;
+        self
+    }
+
+    /// Build payjoin URI.
+    ///
+    /// Constructs a `bip21::Uri` with PayjoinParams from the
+    /// parameters set in the builder.
+    pub fn build<'a>(self) -> PjUri<'a> {
+        let extras = PayjoinExtras {
+            endpoint: self.pj,
+            disable_output_substitution: self.pjos,
+            #[cfg(feature = "v2")]
+            ohttp_config: self.ohttp,
+        };
+        let mut pj_uri = bip21::Uri::with_extras(self.address, extras);
+        pj_uri.amount = self.amount;
+        pj_uri.label = self.label.map(Into::into);
+        pj_uri.message = self.message.map(Into::into);
+        pj_uri
+    }
+}
+
+impl PayjoinExtras {
     pub fn is_output_substitution_disabled(&self) -> bool { self.disable_output_substitution }
 }
 
-impl bip21::de::DeserializationError for Payjoin {
+impl bip21::de::DeserializationError for MaybePayjoinExtras {
     type Error = PjParseError;
 }
 
-impl<'a> bip21::de::DeserializeParams<'a> for Payjoin {
+impl<'a> bip21::de::DeserializeParams<'a> for MaybePayjoinExtras {
     type DeserializationState = DeserializationState;
 }
 
@@ -125,8 +210,43 @@ impl From<InternalPjParseError> for PjParseError {
     fn from(value: InternalPjParseError) -> Self { PjParseError(value) }
 }
 
+impl<'a> bip21::SerializeParams for &'a MaybePayjoinExtras {
+    type Key = &'static str;
+    type Value = String;
+    type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
+
+    fn serialize_params(self) -> Self::Iterator {
+        match self {
+            MaybePayjoinExtras::Supported(extras) => extras.serialize_params(),
+            MaybePayjoinExtras::Unsupported => vec![].into_iter(),
+        }
+    }
+}
+
+impl<'a> bip21::SerializeParams for &'a PayjoinExtras {
+    type Key = &'static str;
+    type Value = String;
+    type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
+
+    fn serialize_params(self) -> Self::Iterator {
+        #[allow(unused_mut)]
+        let mut params = vec![
+            ("pj", self.endpoint.as_str().to_string()),
+            ("pjos", if self.disable_output_substitution { "1" } else { "0" }.to_string()),
+        ];
+        #[cfg(feature = "v2")]
+        if let Some(config) = self.ohttp_config.clone().and_then(|c| c.encode().ok()) {
+            let encoded_config = bitcoin::base64::encode_config(config, bitcoin::base64::URL_SAFE);
+            params.push(("ohttp", encoded_config));
+        } else {
+            log::warn!("Failed to encode ohttp config, ignoring");
+        }
+        params.into_iter()
+    }
+}
+
 impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
-    type Value = Payjoin;
+    type Value = MaybePayjoinExtras;
 
     fn is_param_known(&self, param: &str) -> bool { matches!(param, "pj" | "pjos") }
 
@@ -173,65 +293,22 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
         }
     }
 
-    #[cfg(feature = "v2")]
-    fn finalize(
-        self,
-    ) -> std::result::Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
-        match (self.pj, self.pjos, self.ohttp) {
-            (None, None, _) => Ok(Payjoin::Unsupported),
-            (None, Some(_), _) => Err(PjParseError(InternalPjParseError::MissingEndpoint)),
-            (Some(endpoint), pjos, None) => {
-                if endpoint.scheme() == "https"
-                    || endpoint.scheme() == "http"
-                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
-                {
-                    Ok(Payjoin::Supported(PayjoinParams {
-                        endpoint,
-                        disable_output_substitution: pjos.unwrap_or(false),
-                        ohttp_config: None,
-                    }))
-                } else {
-                    Err(PjParseError(InternalPjParseError::UnsecureEndpoint))
-                }
-            }
-            (Some(endpoint), pjos, Some(ohttp)) => {
-                if endpoint.scheme() == "https"
-                    || endpoint.scheme() == "http"
-                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
-                {
-                    Ok(Payjoin::Supported(PayjoinParams {
-                        endpoint,
-                        disable_output_substitution: pjos.unwrap_or(false),
-                        ohttp_config: Some(ohttp),
-                    }))
-                } else if endpoint.scheme() == "http" {
-                    Ok(Payjoin::V2Only(PayjoinParams {
-                        endpoint,
-                        disable_output_substitution: pjos.unwrap_or(false),
-                        ohttp_config: Some(ohttp),
-                    }))
-                } else {
-                    Err(PjParseError(InternalPjParseError::UnsecureEndpoint))
-                }
-            }
-        }
-    }
-
-    #[cfg(not(feature = "v2"))]
     fn finalize(
         self,
     ) -> std::result::Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
         match (self.pj, self.pjos) {
-            (None, None) => Ok(Payjoin::Unsupported),
+            (None, None) => Ok(MaybePayjoinExtras::Unsupported),
             (None, Some(_)) => Err(PjParseError(InternalPjParseError::MissingEndpoint)),
             (Some(endpoint), pjos) => {
                 if endpoint.scheme() == "https"
                     || endpoint.scheme() == "http"
                         && endpoint.domain().unwrap_or_default().ends_with(".onion")
                 {
-                    Ok(Payjoin::Supported(PayjoinParams {
+                    Ok(MaybePayjoinExtras::Supported(PayjoinExtras {
                         endpoint,
                         disable_output_substitution: pjos.unwrap_or(false),
+                        #[cfg(feature = "v2")]
+                        ohttp_config: self.ohttp,
                     }))
                 } else {
                     Err(PjParseError(InternalPjParseError::UnsecureEndpoint))
@@ -280,7 +357,7 @@ enum InternalPjParseError {
 mod tests {
     use std::convert::TryFrom;
 
-    use crate::Uri;
+    use super::*;
 
     #[test]
     fn test_short() {
@@ -342,5 +419,44 @@ mod tests {
             .unwrap()
             .extras
             .pj_is_supported());
+    }
+
+    #[test]
+    fn test_builder() {
+        use std::str::FromStr;
+
+        use url::Url;
+        use PjUriBuilder;
+        let https = "https://example.com/";
+        let onion = "http://vjdpwgybvubne5hda6v4c5iaeeevhge6jvo3w2cl6eocbwwvwxp7b7qd.onion/";
+        let base58 = "12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX";
+        let bech32_upper = "TB1Q6D3A2W975YNY0ASUVD9A67NER4NKS58FF0Q8G4";
+        let bech32_lower = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
+
+        for address in vec![base58, bech32_upper, bech32_lower] {
+            for pj in vec![https, onion] {
+                let address = bitcoin::Address::from_str(address).unwrap().assume_checked();
+                let amount = bitcoin::Amount::ONE_BTC;
+                let builder = PjUriBuilder::new(
+                    address.clone(),
+                    Url::parse(pj).unwrap(),
+                    #[cfg(feature = "v2")]
+                    None,
+                )
+                .amount(amount)
+                .message("message".to_string())
+                .label("label".to_string())
+                .pjos(true);
+                let uri = builder.build();
+                assert_eq!(uri.address, address);
+                assert_eq!(uri.amount.unwrap(), bitcoin::Amount::ONE_BTC);
+                let label: Cow<'_, str> = uri.label.clone().unwrap().try_into().unwrap();
+                let message: Cow<'_, str> = uri.message.clone().unwrap().try_into().unwrap();
+                assert_eq!(label, "label");
+                assert_eq!(message, "message");
+                assert_eq!(uri.extras.disable_output_substitution, true);
+                assert_eq!(uri.extras.endpoint.to_string(), pj.to_string());
+            }
+        }
     }
 }

@@ -411,8 +411,7 @@ mod tests {
     #[test]
     fn test_parse_json() {
         let known_str_error = r#"{"errorCode":"version-unsupported", "message":"custom message here", "supported": [1, 2]}"#;
-        let error = ResponseError::parse(known_str_error);
-        match error {
+        match ResponseError::parse(known_str_error) {
             ResponseError::WellKnown(e) => {
                 assert_eq!(e.error_code(), "version-unsupported");
                 assert_eq!(e.message(), "custom message here");

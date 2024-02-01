@@ -318,6 +318,20 @@ impl ResponseError {
             Err(_) => InternalValidationError::Parse.into(),
         }
     }
+
+    /// Check whether or not the payjoin receiver supports the supplied version.
+    ///
+    /// This is useful when you support multiple versions of payjoin. For example, if you support
+    /// v1 and v2 (BIP78 and BIP77 respectively) and sent a v2 request that resulted in this error,
+    /// you could pass `1` to test whether or not the receiver might respond well to another
+    /// request using the older version.
+    pub fn is_version_supported(&self, v: &u64) -> bool {
+        if let Self::WellKnown(WellKnownError::VersionUnsupported(_, supported)) = self {
+            supported.contains(v)
+        } else {
+            false
+        }
+    }
 }
 
 impl std::error::Error for ResponseError {}

@@ -231,7 +231,7 @@ interface Enroller{
    [Throws=PayjoinError]
    RequestResponse extract_req();
    [Throws=PayjoinError]
-   Enrolled process_res( sequence<u8> body, ClientResponse context);
+   Enrolled process_res(sequence<u8> body, ClientResponse ctx);
 };
 
 interface Enrolled {
@@ -240,7 +240,7 @@ interface Enrolled {
      [Throws=PayjoinError]
      RequestResponse extract_req();
      [Throws=PayjoinError]
-     V2UncheckedProposal? process_res( sequence<u8> body, ClientResponse context);
+     V2UncheckedProposal? process_res(sequence<u8> body, ClientResponse ctx);
 };
 
 interface V2UncheckedProposal{
@@ -281,8 +281,6 @@ interface V2PayjoinProposal{
         boolean is_output_substitution_disabled();
         sequence<u64> owned_vouts();
         PartiallySignedTransaction psbt();
-        [Throws=PayjoinError]
-        RequestResponse extract_v2_req();
         [Throws=PayjoinError]
         sequence<u8> deserialize_res(sequence<u8> res, ClientResponse ohttp_context);
 };

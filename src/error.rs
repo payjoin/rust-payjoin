@@ -1,9 +1,7 @@
 use std::fmt::Debug;
-
-use bitcoincore_rpc::bitcoin::block::ValidationError;
 use payjoin::bitcoin::psbt::PsbtParseError;
 use payjoin::receive::{RequestError, SelectionError};
-use payjoin::send::{CreateRequestError, ResponseError as PdkResponseError};
+use payjoin::send::{CreateRequestError, ResponseError as PdkResponseError, ValidationError};
 use payjoin::Error;
 use url::ParseError;
 
@@ -148,12 +146,17 @@ impl From<Error> for PayjoinError {
         }
     }
 }
-impl From<payjoin::v2::Error> for PayjoinError {
-    fn from(value: payjoin::v2::Error) -> Self {
-        PayjoinError::V2Error { message: format!("{:?}", value.to_string()) }
+impl From<payjoin::bitcoin::consensus::encode::Error> for PayjoinError {
+    fn from(value: payjoin::bitcoin::consensus::encode::Error) -> Self {
+        PayjoinError::TransactionError { message: value.to_string() }
     }
 }
 
+impl From<payjoin::bitcoin::address::Error> for PayjoinError {
+    fn from(value: payjoin::bitcoin::address::Error) -> Self {
+        PayjoinError::InvalidAddress { message: value.to_string() }
+    }
+}
 impl From<RequestError> for PayjoinError {
     fn from(value: RequestError) -> Self {
         PayjoinError::RequestError { message: value.to_string() }

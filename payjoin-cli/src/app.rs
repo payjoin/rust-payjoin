@@ -325,7 +325,7 @@ impl App {
             use std::io::Write;
 
             use hyper::server::conn::AddrIncoming;
-            use rustls::{Certificate, PrivateKey};
+            use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 
             let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
             let cert_der = cert.serialize_der()?;
@@ -333,8 +333,9 @@ impl App {
             local_cert_path.push(LOCAL_CERT_FILE);
             let mut file = std::fs::File::create(local_cert_path)?;
             file.write_all(&cert_der)?;
-            let key = PrivateKey(cert.serialize_private_key_der());
-            let certs = vec![Certificate(cert.serialize_der()?)];
+            let key =
+                PrivateKeyDer::from(PrivatePkcs8KeyDer::from(cert.serialize_private_key_der()));
+            let certs = vec![CertificateDer::from(cert.serialize_der()?)];
             let incoming = AddrIncoming::bind(&bind_addr.into())?;
             let acceptor = hyper_rustls::TlsAcceptor::builder()
                 .with_single_cert(certs, key)
@@ -895,18 +896,17 @@ fn serialize_psbt(psbt: &Psbt) -> String { base64::encode(psbt.serialize()) }
 #[cfg(feature = "danger-local-https")]
 fn http_agent() -> Result<ureq::Agent> {
     use rustls::client::ClientConfig;
-    use rustls::{Certificate, RootCertStore};
+    use rustls::pki_types::CertificateDer;
+    use rustls::RootCertStore;
     use ureq::AgentBuilder;
 
     let mut local_cert_path = std::env::temp_dir();
     local_cert_path.push(LOCAL_CERT_FILE);
     let cert_der = std::fs::read(local_cert_path)?;
     let mut root_cert_store = RootCertStore::empty();
-    root_cert_store.add(&Certificate(cert_der))?;
-    let client_config = ClientConfig::builder()
-        .with_safe_defaults()
-        .with_root_certificates(root_cert_store)
-        .with_no_client_auth();
+    root_cert_store.add(CertificateDer::from(cert_der.as_slice()))?;
+    let client_config =
+        ClientConfig::builder().with_root_certificates(root_cert_store).with_no_client_auth();
 
     Ok(AgentBuilder::new().tls_config(Arc::new(client_config)).build())
 }

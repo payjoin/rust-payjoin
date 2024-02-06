@@ -7,8 +7,7 @@ pub use payjoin::send::RequestBuilder as PdkRequestBuilder;
 
 use crate::error::PayjoinError;
 use crate::send::v2::ContextV2;
-use crate::transaction::PartiallySignedTransaction;
-use crate::types::{Amount, FeeRate, Request};
+use crate::types::Request;
 use crate::uri::Uri;
 
 ///Builder for sender-side payjoin parameters
@@ -29,11 +28,9 @@ impl RequestBuilder {
     /// An HTTP client will own the Request data while Context sticks around so
     /// a `(Request, Context)` tuple is returned from `RequestBuilder::build()`
     /// to keep them separated.
-    pub fn from_psbt_and_uri(
-        psbt: Arc<PartiallySignedTransaction>,
-        uri: Arc<Uri>,
-    ) -> Result<Self, PayjoinError> {
-        match PdkRequestBuilder::from_psbt_and_uri((*psbt).clone().into(), (*uri).clone().into()) {
+    pub fn from_psbt_and_uri(psbt: String, uri: Arc<Uri>) -> Result<Self, PayjoinError> {
+        let psbt = payjoin::bitcoin::psbt::PartiallySignedTransaction::from_str(psbt.as_str())?;
+        match PdkRequestBuilder::from_psbt_and_uri(psbt, (*uri).clone().into()) {
             Ok(e) => Ok(e.into()),
             Err(e) => Err(e.into()),
         }

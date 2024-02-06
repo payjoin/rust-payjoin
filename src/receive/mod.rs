@@ -14,8 +14,7 @@ use payjoin::receive::{
 use payjoin::Error as PdkError;
 
 use crate::error::PayjoinError;
-use crate::transaction::{PartiallySignedTransaction, Transaction};
-use crate::types::{Address, FeeRate, OutPoint, ScriptBuf, TxOut};
+use crate::types::{OutPoint, TxOut};
 
 pub trait CanBroadcast: Send + Sync {
     fn test_mempool_accept(&self, tx: Vec<u8>) -> Result<bool, PayjoinError>;
@@ -73,8 +72,10 @@ impl UncheckedProposal {
     }
 
     /// The Sender’s Original PSBT
-    pub fn extract_tx_to_schedule_broadcast(&self) -> Arc<Transaction> {
-        Arc::new(self.0.clone().extract_tx_to_schedule_broadcast().into())
+    pub fn extract_tx_to_schedule_broadcast(&self) -> Vec<u8> {
+        payjoin::bitcoin::consensus::encode::serialize(
+            &self.0.clone().extract_tx_to_schedule_broadcast(),
+        )
     }
 
     /// Call after checking that the Original PSBT can be broadcast.

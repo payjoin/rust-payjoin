@@ -3,8 +3,7 @@
 pub mod error;
 pub mod receive;
 pub mod send;
-pub mod transaction;
-mod types;
+pub mod types;
 pub mod uri;
 
 use crate::error::PayjoinError;

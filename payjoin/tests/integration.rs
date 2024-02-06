@@ -620,7 +620,8 @@ mod integration {
 
         fn http_agent() -> ureq::Agent {
             use rustls::client::ClientConfig;
-            use rustls::{Certificate, RootCertStore};
+            use rustls::pki_types::CertificateDer;
+            use rustls::RootCertStore;
             use ureq::AgentBuilder;
 
             let mut local_cert_path = std::env::temp_dir();
@@ -628,9 +629,8 @@ mod integration {
             println!("TEST CERT PATH {:?}", &local_cert_path);
             let cert_der = std::fs::read(local_cert_path).unwrap();
             let mut root_cert_store = RootCertStore::empty();
-            root_cert_store.add(&Certificate(cert_der)).unwrap();
+            root_cert_store.add(CertificateDer::from(cert_der.as_slice())).unwrap();
             let client_config = ClientConfig::builder()
-                .with_safe_defaults()
                 .with_root_certificates(root_cert_store)
                 .with_no_client_auth();
 

@@ -193,10 +193,17 @@ pub fn ohttp_encapsulate(
 ) -> Result<(Vec<u8>, ohttp::ClientResponse), Error> {
     let ctx = ohttp::ClientRequest::from_config(ohttp_keys)?;
     let url = url::Url::parse(target_resource)?;
+    let authority_bytes = url.host().map_or_else(Vec::new, |host| {
+        let mut authority = host.to_string();
+        if let Some(port) = url.port() {
+            authority.push_str(&format!(":{}", port));
+        }
+        authority.into_bytes()
+    });
     let mut bhttp_message = bhttp::Message::request(
         method.as_bytes().to_vec(),
         url.scheme().as_bytes().to_vec(),
-        url.authority().as_bytes().to_vec(),
+        authority_bytes,
         url.path().as_bytes().to_vec(),
     );
     if let Some(body) = body {

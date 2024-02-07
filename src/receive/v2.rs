@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::Error as PdkError;
@@ -10,8 +10,7 @@ use crate::error::PayjoinError;
 use crate::receive::{
     CanBroadcast, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction,
 };
-use crate::transaction::{PartiallySignedTransaction, Transaction};
-use crate::types::{Address, FeeRate, OutPoint, Request, ScriptBuf, TxOut};
+use crate::types::{OutPoint, Request, TxOut};
 
 pub struct ClientResponse(Mutex<Option<ohttp::ClientResponse>>);
 
@@ -66,8 +65,12 @@ impl Enroller {
         <Enroller as Into<payjoin::receive::v2::Enroller>>::into(self.clone()).payjoin_subdir()
     }
     pub fn extract_req(&self) -> Result<RequestResponse, PayjoinError> {
-        let (req, res) = self.0.clone().extract_req()?;
-        Ok(RequestResponse { request: req.into(), client_response: Arc::new(res.into()) })
+        match self.0.clone().extract_req() {
+            Ok(e) => {
+                Ok(RequestResponse { request: e.0.into(), client_response: Arc::new(e.1.into()) })
+            }
+            Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
+        }
     }
     pub fn process_res(
         &self,
@@ -137,8 +140,10 @@ impl From<V2UncheckedProposal> for payjoin::receive::v2::UncheckedProposal {
 }
 impl V2UncheckedProposal {
     ///The Sender’s Original PSBT
-    pub fn extract_tx_to_schedule_broadcast(&self) -> Arc<Transaction> {
-        Arc::new(self.0.clone().extract_tx_to_schedule_broadcast().into())
+    pub fn extract_tx_to_schedule_broadcast(&self) -> Vec<u8> {
+        payjoin::bitcoin::consensus::encode::serialize(
+            &self.0.clone().extract_tx_to_schedule_broadcast(),
+        )
     }
 
     /// Call after checking that the Original PSBT can be broadcast.
@@ -155,18 +160,18 @@ impl V2UncheckedProposal {
     /// Call this after checking downstream.
     pub fn check_broadcast_suitability(
         &self,
-        min_fee_rate: Option<Arc<FeeRate>>,
+        min_fee_rate: Option<u64>,
         can_broadcast: Box<dyn CanBroadcast>,
     ) -> Result<Arc<V2MaybeInputsOwned>, PayjoinError> {
-        let res =
-            self.0.clone().check_broadcast_suitability(min_fee_rate.map(|x| (*x).into()), |tx| {
-                match can_broadcast
-                    .test_mempool_accept(payjoin::bitcoin::consensus::encode::serialize(&tx))
-                {
+        let res = self.0.clone().check_broadcast_suitability(
+            min_fee_rate.map(|x| payjoin::bitcoin::FeeRate::from_sat_per_kwu(x)),
+            |tx| {
+                match can_broadcast.callback(payjoin::bitcoin::consensus::encode::serialize(&tx)) {
                     Ok(e) => Ok(e),
                     Err(e) => Err(PdkError::Server(e.into())),
                 }
-            });
+            },
+        );
         match res {
             Ok(e) => Ok(Arc::new(e.into())),
             Err(e) => Err(e.into()),
@@ -198,7 +203,7 @@ impl V2MaybeInputsOwned {
     ) -> Result<Arc<V2MaybeMixedInputScripts>, PayjoinError> {
         let owned_inputs = self.0.clone();
         match owned_inputs.check_inputs_not_owned(|input| {
-            let res = is_owned.is_owned(Arc::new(ScriptBuf(input.to_owned())));
+            let res = is_owned.callback(input.to_bytes());
             match res {
                 Ok(e) => Ok(e),
                 Err(e) => Err(PdkError::Server(e.into())),
@@ -248,7 +253,7 @@ impl V2MaybeInputsSeen {
         is_known: Box<dyn IsOutputKnown>,
     ) -> Result<Arc<V2OutputsUnknown>, PayjoinError> {
         match self.0.clone().check_no_inputs_seen_before(|outpoint| {
-            let res = is_known.is_known(outpoint.to_owned().into());
+            let res = is_known.callback(outpoint.clone().into());
             match res {
                 Ok(e) => Ok(e),
                 Err(e) => Err(PdkError::Server(e.into())),
@@ -280,7 +285,7 @@ impl V2OutputsUnknown {
         is_receiver_output: Box<dyn IsScriptOwned>,
     ) -> Result<Arc<V2ProvisionalProposal>, PayjoinError> {
         match self.0.clone().identify_receiver_outputs(|output_script| {
-            let res = is_receiver_output.is_owned(Arc::new(ScriptBuf(output_script.to_owned())));
+            let res = is_receiver_output.callback(output_script.to_bytes());
             match res {
                 Ok(e) => Ok(e),
                 Err(e) => Err(PdkError::Server(e.into())),
@@ -291,24 +296,44 @@ impl V2OutputsUnknown {
         }
     }
 }
-pub struct V2ProvisionalProposal(payjoin::receive::v2::ProvisionalProposal);
+pub struct V2ProvisionalProposal(Mutex<payjoin::receive::v2::ProvisionalProposal>);
 
 impl From<payjoin::receive::v2::ProvisionalProposal> for V2ProvisionalProposal {
     fn from(value: payjoin::receive::v2::ProvisionalProposal) -> Self {
-        Self(value)
+        Self(Mutex::new(value))
     }
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
 impl V2ProvisionalProposal {
-    pub fn substitute_output_address(&self, substitute_address: Arc<Address>) {
-        self.0.clone().substitute_output_address((*substitute_address).clone().into())
+    fn mutex_guard(&self) -> MutexGuard<'_, payjoin::receive::v2::ProvisionalProposal> {
+        self.0.lock().unwrap()
     }
-    pub fn contribute_witness_input(&self, txo: TxOut, outpoint: OutPoint) {
-        self.0.clone().contribute_witness_input(txo.into(), outpoint.into())
+    ///Just replace an output address with
+    pub fn substitute_output_address(
+        &self,
+        substitute_address: String,
+    ) -> Result<(), PayjoinError> {
+        let address =
+            payjoin::bitcoin::Address::from_str(substitute_address.as_str())?.assume_checked();
+        Ok(self.mutex_guard().substitute_output_address(address))
     }
-    pub fn contribute_non_witness_input(&self, tx: Arc<Transaction>, outpoint: OutPoint) {
-        self.0.clone().contribute_non_witness_input((*tx).clone().into(), outpoint.into())
+    pub fn contribute_witness_input(
+        &self,
+        txo: TxOut,
+        outpoint: OutPoint,
+    ) -> Result<(), PayjoinError> {
+        let txo: payjoin::bitcoin::blockdata::transaction::TxOut = txo.into();
+        Ok(self.mutex_guard().contribute_witness_input(txo, outpoint.into()))
+    }
+    pub fn contribute_non_witness_input(
+        &self,
+        tx: Vec<u8>,
+        outpoint: OutPoint,
+    ) -> Result<(), PayjoinError> {
+        let tx: payjoin::bitcoin::Transaction =
+            payjoin::bitcoin::consensus::encode::deserialize(&*tx)?;
+        Ok(self.mutex_guard().contribute_non_witness_input(tx, outpoint.into()))
     }
     /// Select receiver input such that the payjoin avoids surveillance.
     /// Return the input chosen that has been applied to the Proposal.
@@ -334,7 +359,7 @@ impl V2ProvisionalProposal {
             );
         }
 
-        match self.0.clone().try_preserving_privacy(_candidate_inputs) {
+        match self.mutex_guard().try_preserving_privacy(_candidate_inputs) {
             Ok(e) => Ok(OutPoint { txid: e.txid.to_string(), vout: e.vout }),
             Err(e) => Err(e.into()),
         }
@@ -342,16 +367,16 @@ impl V2ProvisionalProposal {
     pub fn finalize_proposal(
         &self,
         process_psbt: Box<dyn ProcessPartiallySignedTransaction>,
-        min_feerate_sat_per_vb: Option<Arc<FeeRate>>,
+        min_feerate_sat_per_vb: Option<u64>,
     ) -> Result<Arc<V2PayjoinProposal>, PayjoinError> {
-        match self.0.clone().finalize_proposal(
+        match self.mutex_guard().clone().finalize_proposal(
             |psbt| {
-                match process_psbt.process_psbt(Arc::new(psbt.clone().into())) {
+                match process_psbt.callback(psbt.to_string()) {
                     Ok(e) => Ok(Psbt::from_str(e.as_str()).expect("Invalid process_psbt ")),
                     Err(e) => Err(PdkError::Server(e.into())),
                 }
             },
-            min_feerate_sat_per_vb.map(|x| (*x).into()),
+            min_feerate_sat_per_vb.and_then(|x| payjoin::bitcoin::FeeRate::from_sat_per_vb(x)),
         ) {
             Ok(e) => Ok(Arc::new(e.into())),
             Err(e) => Err(e.into()),
@@ -396,13 +421,11 @@ impl V2PayjoinProposal {
             .map(|x| *x as u64)
             .collect()
     }
-    pub fn psbt(&self) -> Arc<PartiallySignedTransaction> {
-        Arc::new(
-            <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
-                .psbt()
-                .clone()
-                .into(),
-        )
+    pub fn psbt(&self) -> String {
+        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
+            .psbt()
+            .clone()
+            .to_string()
     }
 
     pub fn extract_v1_req(&self) -> String {

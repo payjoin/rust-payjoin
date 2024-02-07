@@ -20,8 +20,7 @@ use crate::receive::{
 };
 use crate::send::v2::ContextV2;
 use crate::send::{ContextV1, RequestBuilder, RequestContext, RequestContextV1, RequestContextV2};
-use crate::transaction::{PartiallySignedTransaction, Transaction};
-use crate::types::{Address, Amount, FeeRate, Network, OutPoint, Request, ScriptBuf, TxOut, Txid};
+use crate::types::{Network, OutPoint, Request, TxOut};
 use crate::uri::{PjUri, Uri, Url};
 
 uniffi::include_scaffolding!("payjoin_ffi");

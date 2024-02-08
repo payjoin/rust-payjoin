@@ -3,6 +3,7 @@ name = "payjoin_ffi"
 version = "0.13.0"
 license = "MIT OR Apache-2.0"
 edition = "2021"
+exclude = ["tests"]
 
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]

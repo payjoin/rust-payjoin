@@ -30,7 +30,7 @@ pub(crate) trait PsbtExt: Sized {
     fn outputs_mut(&mut self) -> &mut [psbt::Output];
     fn xpub_mut(
         &mut self,
-    ) -> &mut BTreeMap<bip32::ExtendedPubKey, (bip32::Fingerprint, bip32::DerivationPath)>;
+    ) -> &mut BTreeMap<bip32::Xpub, (bip32::Fingerprint, bip32::DerivationPath)>;
     fn proprietary_mut(&mut self) -> &mut BTreeMap<psbt::raw::ProprietaryKey, Vec<u8>>;
     fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>>;
     fn input_pairs(&self) -> Box<dyn Iterator<Item = InputPair<'_>> + '_>;
@@ -48,7 +48,7 @@ impl PsbtExt for Psbt {
 
     fn xpub_mut(
         &mut self,
-    ) -> &mut BTreeMap<bip32::ExtendedPubKey, (bip32::Fingerprint, bip32::DerivationPath)> {
+    ) -> &mut BTreeMap<bip32::Xpub, (bip32::Fingerprint, bip32::DerivationPath)> {
         &mut self.xpub
     }
 
@@ -96,11 +96,11 @@ impl PsbtExt for Psbt {
         let mut total_inputs = bitcoin::Amount::ZERO;
 
         for output in &self.unsigned_tx.output {
-            total_outputs += bitcoin::Amount::from_sat(output.value);
+            total_outputs += output.value;
         }
 
         for input in self.input_pairs() {
-            total_inputs += bitcoin::Amount::from_sat(input.previous_txout().unwrap().value);
+            total_inputs += input.previous_txout().unwrap().value;
         }
         log::debug!("  total_inputs:  {}", total_inputs);
         log::debug!("- total_outputs: {}", total_outputs);

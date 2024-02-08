@@ -6,6 +6,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
+use bitcoin::base64::prelude::{Engine as _, BASE64_STANDARD};
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::jsonrpc::serde_json;
 use bitcoincore_rpc::RpcApi;
@@ -16,7 +17,7 @@ use hyper::service::{make_service_fn, service_fn};
 #[cfg(not(feature = "v2"))]
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::bitcoin::{self, base64};
+use payjoin::bitcoin;
 #[cfg(feature = "v2")]
 use payjoin::receive::v2;
 use payjoin::receive::Error;
@@ -377,13 +378,7 @@ impl App {
         let pj_uri = PjUriBuilder::new(pj_receiver_address, pj_part).amount(amount).build();
 
         #[cfg(feature = "v2")]
-        let pj_uri = {
-            let ohttp_keys = payjoin::OhttpKeys::decode(&base64::decode_config(
-                &self.config.ohttp_config,
-                base64::URL_SAFE,
-            )?)?;
-            PjUriBuilder::new(pj_receiver_address, pj_part, Some(ohttp_keys)).amount(amount).build()
-        };
+        let pj_uri = PjUriBuilder::new(pj_receiver_address, pj_part, None).amount(amount).build();
 
         Ok(pj_uri.to_string())
     }
@@ -575,10 +570,7 @@ impl App {
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // The network is used for checks later
-        let network =
-            bitcoind.get_blockchain_info().map_err(|e| Error::Server(e.into())).and_then(
-                |info| bitcoin::Network::from_str(&info.chain).map_err(|e| Error::Server(e.into())),
-            )?;
+        let network = bitcoind.get_blockchain_info().map_err(|e| Error::Server(e.into())).and_then(|info| Ok(info.chain))?;
 
         // Receive Check 1: Can Broadcast
         let proposal = proposal.check_broadcast_suitability(None, |tx| {
@@ -642,7 +634,7 @@ impl App {
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &Psbt| {
                 bitcoind
-                    .wallet_process_psbt(&base64::encode(psbt.serialize()), None, None, Some(false))
+                    .wallet_process_psbt(&BASE64_STANDARD.encode(psbt.serialize()), None, None, Some(false))
                     .map(|res| Psbt::from_str(&res.psbt).map_err(|e| Error::Server(e.into())))
                     .map_err(|e| Error::Server(e.into()))?
             },
@@ -875,7 +867,7 @@ fn try_contributing_inputs(
 
     //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
     let txo_to_contribute = bitcoin::TxOut {
-        value: selected_utxo.amount.to_sat(),
+        value: selected_utxo.amount,
         script_pubkey: selected_utxo.script_pub_key.clone(),
     };
     let outpoint_to_contribute =
@@ -891,7 +883,7 @@ impl payjoin::receive::Headers for Headers<'_> {
     }
 }
 
-fn serialize_psbt(psbt: &Psbt) -> String { base64::encode(psbt.serialize()) }
+fn serialize_psbt(psbt: &Psbt) -> String { BASE64_STANDARD.encode(psbt.serialize()) }
 
 #[cfg(feature = "danger-local-https")]
 fn http_agent() -> Result<ureq::Agent> {

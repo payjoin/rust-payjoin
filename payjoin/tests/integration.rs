@@ -6,12 +6,12 @@ mod integration {
 
     use bitcoin::address::NetworkChecked;
     use bitcoin::psbt::Psbt;
+    use bitcoin::base64::prelude::{Engine as _, BASE64_STANDARD};
     use bitcoin::{Amount, FeeRate, OutPoint};
     use bitcoind::bitcoincore_rpc;
-    use bitcoind::bitcoincore_rpc::core_rpc_json::{AddressType, WalletProcessPsbtResult};
+    use bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::RpcApi;
     use log::{debug, log_enabled, Level};
-    use payjoin::bitcoin::base64;
     use payjoin::send::{Request, RequestBuilder};
     use payjoin::{PjUriBuilder, Uri};
     use url::Url;
@@ -230,12 +230,7 @@ mod integration {
                 let mut bytes: Vec<u8> = Vec::with_capacity(len);
                 resp.into_reader().take(10_000_000).read_to_end(&mut bytes)?;
                 let ohttp_keys = payjoin::OhttpKeys::decode(&bytes)?;
-                base64::encode_config(
-                    ohttp_keys.encode()?,
-                    base64::Config::new(base64::CharacterSet::UrlSafe, false),
-                )
             };
-            debug!("GET'd ohttp-keys: {}", ohttp_config);
 
             // **********************
             // Inside the Receiver:
@@ -254,7 +249,7 @@ mod integration {
 
             // Enroll with relay
             let mut enroller =
-                Enroller::from_relay_config(&PJ_RELAY_URL, &ohttp_config, &OH_RELAY_URL);
+                Enroller::from_relay_config(&PJ_RELAY_URL, "", &OH_RELAY_URL);
             let (req, ctx) = enroller.extract_req()?;
             let res =
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
@@ -264,14 +259,10 @@ mod integration {
             let fallback_target = enrolled.fallback_target();
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let ohttp_keys: ohttp::KeyConfig = ohttp::KeyConfig::decode(&base64::decode_config(
-                &ohttp_config,
-                base64::Config::new(base64::CharacterSet::UrlSafe, false),
-            )?)?;
             let pj_uri_string = PjUriBuilder::new(
                 pj_receiver_address,
                 Url::parse(&fallback_target).unwrap(),
-                Some(ohttp_keys),
+                None,
             )
             .amount(Amount::ONE_BTC)
             .build()
@@ -368,18 +359,13 @@ mod integration {
                 let mut bytes: Vec<u8> = Vec::with_capacity(len);
                 resp.into_reader().take(10_000_000).read_to_end(&mut bytes)?;
                 let ohttp_keys = payjoin::OhttpKeys::decode(&bytes)?;
-                base64::encode_config(
-                    ohttp_keys.encode()?,
-                    base64::Config::new(base64::CharacterSet::UrlSafe, false),
-                )
             };
-            debug!("GET'd ohttp-keys: {}", ohttp_config);
 
             // **********************
             // Inside the Receiver:
             // Enroll with relay
             let mut enroller =
-                Enroller::from_relay_config(&PJ_RELAY_URL, &ohttp_config, &OH_RELAY_URL);
+                Enroller::from_relay_config(&PJ_RELAY_URL, "", &OH_RELAY_URL);
             let (req, ctx) = enroller.extract_req()?;
             let res =
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
@@ -390,14 +376,10 @@ mod integration {
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
             let fallback_target = enrolled.fallback_target();
-            let ohttp_keys: ohttp::KeyConfig = ohttp::KeyConfig::decode(&base64::decode_config(
-                &ohttp_config,
-                base64::Config::new(base64::CharacterSet::UrlSafe, false),
-            )?)?;
             let pj_uri_string = PjUriBuilder::new(
                 pj_receiver_address,
                 Url::parse(&fallback_target).unwrap(),
-                Some(ohttp_keys),
+                None,
             )
             .amount(Amount::ONE_BTC)
             .build()
@@ -585,7 +567,7 @@ mod integration {
 
             //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
             let txo_to_contribute = bitcoin::TxOut {
-                value: selected_utxo.amount.to_sat(),
+                value: selected_utxo.amount,
                 script_pubkey: selected_utxo.script_pub_key.clone(),
             };
             let outpoint_to_contribute =
@@ -600,7 +582,7 @@ mod integration {
                     |psbt: &Psbt| {
                         Ok(receiver
                             .wallet_process_psbt(
-                                &bitcoin::base64::encode(psbt.serialize()),
+                                &BASE64_STANDARD.encode(psbt.serialize()),
                                 None,
                                 None,
                                 Some(false),
@@ -698,14 +680,15 @@ mod integration {
         sender: &bitcoincore_rpc::Client,
         psbt: Psbt,
     ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
-        let payjoin_base64_string = base64::encode(&psbt.serialize());
+        
+        let payjoin_base64_string = BASE64_STANDARD.encode(&psbt.serialize());
         let payjoin_psbt =
             sender.wallet_process_psbt(&payjoin_base64_string, None, None, None)?.psbt;
         let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.unwrap();
         let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
         debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
 
-        Ok(payjoin_psbt.extract_tx())
+        Ok(payjoin_psbt.extract_tx().expect("TODO: Handle this error"))
     }
 
     fn is_success(status: u16) -> bool { status >= 200 && status < 300 }

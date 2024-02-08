@@ -4,3 +4,6 @@ resolver = "2"
 
 [patch.crates-io.payjoin]
 path = "payjoin"
+
+[patch.crates-io.bip21]
+path = "../../bip21/master"

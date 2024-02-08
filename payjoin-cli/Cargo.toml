@@ -25,7 +25,7 @@ v2 = ["payjoin/v2"]
 [dependencies]
 anyhow = "1.0.70"
 bip21 = "0.3.1"
-bitcoincore-rpc = "0.17.0"
+bitcoincore-rpc = "0.18.0"
 clap = { version = "3.2.22", features = ["derive"] }
 config = "0.13.3"
 env_logger = "0.9.0"
@@ -41,5 +41,5 @@ ureq = "2.9.4"
 url = "2.3.1"
 
 [dev-dependencies]
-bitcoind = { version = "0.31.1", features = ["0_21_2"] }
+bitcoind = { version = "0.34.1", features = ["0_21_2"] }
 tokio = { version = "1.12.0", features = ["full"] }

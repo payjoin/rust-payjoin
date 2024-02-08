@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use bitcoin::psbt::Psbt;
-use bitcoin::{base64, Amount, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::base64::prelude::{Engine as _, BASE64_STANDARD};
+use bitcoin::{Amount, FeeRate, OutPoint, Script, TxOut};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -29,7 +30,7 @@ pub struct V2Context {
     relay_url: url::Url,
     ohttp_keys: ohttp::KeyConfig,
     ohttp_proxy: url::Url,
-    s: bitcoin::secp256k1::KeyPair,
+    s: bitcoin::secp256k1::Keypair,
     e: Option<bitcoin::secp256k1::PublicKey>,
 }
 
@@ -38,7 +39,7 @@ pub struct Enroller {
     relay_url: url::Url,
     ohttp_keys: ohttp::KeyConfig,
     ohttp_proxy: url::Url,
-    s: bitcoin::secp256k1::KeyPair,
+    s: bitcoin::secp256k1::Keypair,
 }
 
 #[cfg(feature = "v2")]
@@ -48,7 +49,7 @@ impl Enroller {
         ohttp_config_base64: &str,
         ohttp_proxy_url: &str,
     ) -> Self {
-        let ohttp_config = base64::decode_config(ohttp_config_base64, base64::URL_SAFE).unwrap();
+        let ohttp_config = BASE64_STANDARD.decode(ohttp_config_base64).unwrap();
         let ohttp_keys = ohttp::KeyConfig::decode(&ohttp_config).unwrap();
         let ohttp_proxy = url::Url::parse(ohttp_proxy_url).unwrap();
         let relay_url = url::Url::parse(relay_url).unwrap();
@@ -58,14 +59,13 @@ impl Enroller {
             relay_url,
             ohttp_keys,
             ohttp_proxy,
-            s: bitcoin::secp256k1::KeyPair::from_secret_key(&secp, &sk),
+            s: bitcoin::secp256k1::Keypair::from_secret_key(&secp, &sk),
         }
     }
 
     pub fn subdirectory(&self) -> String {
         let pubkey = &self.s.public_key().serialize();
-        let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-        base64::encode_config(pubkey, b64_config)
+        BASE64_STANDARD.encode(pubkey)
     }
 
     pub fn payjoin_subdir(&self) -> String { format!("{}/{}", self.subdirectory(), "payjoin") }
@@ -105,8 +105,7 @@ impl Enroller {
 
 fn subdirectory(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
     let pubkey = pubkey.serialize();
-    let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-    base64::encode_config(pubkey, b64_config)
+    BASE64_STANDARD.encode(pubkey)
 }
 
 #[derive(Debug, Clone)]
@@ -114,7 +113,7 @@ pub struct Enrolled {
     relay_url: url::Url,
     ohttp_keys: ohttp::KeyConfig,
     ohttp_proxy: url::Url,
-    s: bitcoin::secp256k1::KeyPair,
+    s: bitcoin::secp256k1::Keypair,
 }
 
 impl PartialEq for Enrolled {
@@ -247,7 +246,7 @@ impl<'de> Deserialize<'de> for Enrolled {
                             let s_bytes: Vec<u8> = map.next_value()?;
                             let secp = bitcoin::secp256k1::Secp256k1::new();
                             s = Some(
-                                bitcoin::secp256k1::KeyPair::from_seckey_slice(&secp, &s_bytes)
+                                bitcoin::secp256k1::Keypair::from_seckey_slice(&secp, &s_bytes)
                                     .map_err(de::Error::custom)?,
                             );
                         }
@@ -332,8 +331,7 @@ impl Enrolled {
 
     pub fn fallback_target(&self) -> String {
         let pubkey = &self.s.public_key().serialize();
-        let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-        let pubkey_base64 = base64::encode_config(pubkey, b64_config);
+        let pubkey_base64 = BASE64_STANDARD.encode(pubkey);
         format!("{}{}", &self.relay_url, pubkey_base64)
     }
 }
@@ -563,7 +561,9 @@ impl PayjoinProposal {
 
     pub fn psbt(&self) -> &Psbt { self.inner.psbt() }
 
-    pub fn extract_v1_req(&self) -> String { base64::encode(self.inner.payjoin_psbt.serialize()) }
+    pub fn extract_v1_req(&self) -> String {
+        BASE64_STANDARD.encode(self.inner.payjoin_psbt.serialize())
+    }
 
     #[cfg(feature = "v2")]
     pub fn extract_v2_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
@@ -623,7 +623,7 @@ mod test {
             relay_url: url::Url::parse("https://relay.com").unwrap(),
             ohttp_keys: ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap(),
             ohttp_proxy: url::Url::parse("https://proxy.com").unwrap(),
-            s: bitcoin::secp256k1::KeyPair::from_secret_key(
+            s: bitcoin::secp256k1::Keypair::from_secret_key(
                 &bitcoin::secp256k1::Secp256k1::new(),
                 &bitcoin::secp256k1::SecretKey::from_slice(&[1; 32]).unwrap(),
             ),

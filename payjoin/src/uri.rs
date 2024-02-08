@@ -234,13 +234,6 @@ impl<'a> bip21::SerializeParams for &'a PayjoinExtras {
             ("pj", self.endpoint.as_str().to_string()),
             ("pjos", if self.disable_output_substitution { "1" } else { "0" }.to_string()),
         ];
-        #[cfg(feature = "v2")]
-        if let Some(config) = self.ohttp_config.clone().and_then(|c| c.encode().ok()) {
-            let encoded_config = bitcoin::base64::encode_config(config, bitcoin::base64::URL_SAFE);
-            params.push(("ohttp", encoded_config));
-        } else {
-            log::warn!("Failed to encode ohttp config, ignoring");
-        }
         params.into_iter()
     }
 }
@@ -261,13 +254,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
         match key {
             #[cfg(feature = "v2")]
             "ohttp" if self.ohttp.is_none() => {
-                let base64_config = Cow::try_from(value).map_err(InternalPjParseError::NotUtf8)?;
-                let config_bytes =
-                    bitcoin::base64::decode_config(&*base64_config, bitcoin::base64::URL_SAFE)
-                        .map_err(InternalPjParseError::NotBase64)?;
-                let config = ohttp::KeyConfig::decode(&config_bytes)
-                    .map_err(InternalPjParseError::BadOhttp)?;
-                self.ohttp = Some(config);
+                self.ohttp = None; // TODO: Get rid of this field?
                 Ok(bip21::de::ParamKind::Known)
             }
             #[cfg(feature = "v2")]
@@ -327,11 +314,7 @@ impl std::fmt::Display for PjParseError {
             }
             InternalPjParseError::MissingEndpoint => write!(f, "Missing payjoin endpoint"),
             InternalPjParseError::NotUtf8(_) => write!(f, "Endpoint is not valid UTF-8"),
-            #[cfg(feature = "v2")]
-            InternalPjParseError::NotBase64(_) => write!(f, "ohttp config is not valid base64"),
             InternalPjParseError::BadEndpoint(_) => write!(f, "Endpoint is not valid"),
-            #[cfg(feature = "v2")]
-            InternalPjParseError::BadOhttp(_) => write!(f, "ohttp config is not valid"),
             InternalPjParseError::UnsecureEndpoint => {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }
@@ -345,11 +328,7 @@ enum InternalPjParseError {
     MultipleParams(&'static str),
     MissingEndpoint,
     NotUtf8(core::str::Utf8Error),
-    #[cfg(feature = "v2")]
-    NotBase64(bitcoin::base64::DecodeError),
     BadEndpoint(url::ParseError),
-    #[cfg(feature = "v2")]
-    BadOhttp(ohttp::Error),
     UnsecureEndpoint,
 }
 

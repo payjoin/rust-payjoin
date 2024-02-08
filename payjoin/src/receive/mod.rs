@@ -28,7 +28,8 @@ use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashMap};
 
 use bitcoin::psbt::Psbt;
-use bitcoin::{base64, Amount, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::base64::prelude::{Engine as _, BASE64_STANDARD};
+use bitcoin::{Amount, FeeRate, OutPoint, Script, TxOut};
 
 mod error;
 mod optional_parameters;
@@ -88,7 +89,7 @@ impl UncheckedProposal {
         // enforce the limit
         let mut buf = vec![0; content_length as usize]; // 4_000_000 * 4 / 3 fits in u32
         body.read_exact(&mut buf).map_err(InternalRequestError::Io)?;
-        let base64 = base64::decode(&buf).map_err(InternalRequestError::Base64)?;
+        let base64 = BASE64_STANDARD.decode(&buf).map_err(InternalRequestError::Base64)?;
         let unchecked_psbt = Psbt::deserialize(&base64).map_err(InternalRequestError::Psbt)?;
 
         let psbt = unchecked_psbt.validate().map_err(InternalRequestError::InconsistentPsbt)?;
@@ -105,7 +106,7 @@ impl UncheckedProposal {
 
     /// The Sender's Original PSBT transaction
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
-        self.psbt.clone().extract_tx()
+        self.psbt.clone().extract_tx().expect("TODO: Handle this error")
     }
 
     fn psbt_fee_rate(&self) -> Result<FeeRate, Error> {
@@ -143,7 +144,7 @@ impl UncheckedProposal {
                 .into());
             }
         }
-        if can_broadcast(&self.psbt.clone().extract_tx())? {
+        if can_broadcast(&self.psbt.clone().extract_tx().expect("TODO: Handel this error"))? {
             Ok(MaybeInputsOwned { psbt: self.psbt, params: self.params })
         } else {
             Err(InternalRequestError::OriginalPsbtNotBroadcastable.into())
@@ -373,21 +374,21 @@ impl ProvisionalProposal {
             .iter()
             .map(|output| output.value)
             .min()
-            .unwrap_or_else(|| Amount::MAX_MONEY.to_sat());
+            .unwrap_or_else(|| Amount::MAX_MONEY);
 
         let min_original_in_sats = self
             .payjoin_psbt
             .input_pairs()
             .filter_map(|input| input.previous_txout().ok().map(|txo| txo.value))
             .min()
-            .unwrap_or_else(|| Amount::MAX_MONEY.to_sat());
+            .unwrap_or_else(|| Amount::MAX_MONEY);
 
         // Assume many-input, two output to select the vout for now
         let prior_payment_sats = self.payjoin_psbt.unsigned_tx.output[self.owned_vouts[0]].value;
         for candidate in candidate_inputs {
             // TODO bound loop by timeout / iterations
 
-            let candidate_sats = candidate.0.to_sat();
+            let candidate_sats = candidate.0;
             let candidate_min_out = min(min_original_out_sats, prior_payment_sats + candidate_sats);
             let candidate_min_in = min(min_original_in_sats, candidate_sats);
 
@@ -518,8 +519,7 @@ impl ProvisionalProposal {
             {
                 if !self.owned_vouts.contains(&additional_fee_output_index) {
                     // remove additional miner fee from the sender's specified output
-                    self.payjoin_psbt.unsigned_tx.output[additional_fee_output_index].value -=
-                        additional_fee.to_sat();
+                    self.payjoin_psbt.unsigned_tx.output[additional_fee_output_index].value -= additional_fee;
                 }
             }
         }

@@ -27,6 +27,7 @@
 use std::str::FromStr;
 
 use bitcoin::address::NetworkChecked;
+use bitcoin::base64::prelude::{Engine as _, BASE64_STANDARD};
 use bitcoin::psbt::Psbt;
 use bitcoin::{FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
 pub use error::{CreateRequestError, ResponseError, ValidationError};
@@ -119,7 +120,7 @@ impl<'a> RequestBuilder<'a> {
             .into_iter()
             .enumerate()
             .find(|(_, txo)| payout_scripts.all(|script| script != txo.script_pubkey))
-            .map(|(i, txo)| (i, bitcoin::Amount::from_sat(txo.value)))
+            .map(|(i, txo)| (i, bitcoin::Amount::from_sat(txo.value.to_sat())))
         {
             let input_types = self
                 .psbt
@@ -325,9 +326,7 @@ impl RequestContext {
     ) -> Result<(Request, ContextV2), CreateRequestError> {
         let rs_base64 = crate::v2::subdir(self.endpoint.as_str()).to_string();
         log::debug!("rs_base64: {:?}", rs_base64);
-        let b64_config =
-            bitcoin::base64::Config::new(bitcoin::base64::CharacterSet::UrlSafe, false);
-        let rs = bitcoin::base64::decode_config(rs_base64, b64_config)
+        let rs = BASE64_STANDARD.decode(rs_base64)
             .map_err(InternalCreateRequestError::SubdirectoryNotBase64)?;
         log::debug!("rs: {:?}", rs.len());
         let rs = bitcoin::secp256k1::PublicKey::from_slice(&rs)
@@ -380,12 +379,8 @@ impl Serialize for RequestContext {
         let mut state = serializer.serialize_struct("RequestContext", 8)?;
         state.serialize_field("psbt", &self.psbt.to_string())?;
         state.serialize_field("endpoint", &self.endpoint.as_str())?;
-        let ohttp_string = self.ohttp_config.as_ref().map_or(Ok("".to_string()), |config| {
-            config
-                .encode()
-                .map_err(|e| serde::ser::Error::custom(format!("ohttp-keys encoding error: {}", e)))
-                .map(bitcoin::base64::encode)
-        })?;
+        let ohttp_string = BASE64_STANDARD.encode("");
+
         state.serialize_field("ohttp_config", &ohttp_string)?;
         state.serialize_field("disable_output_substitution", &self.disable_output_substitution)?;
         state.serialize_field(
@@ -460,14 +455,10 @@ impl<'de> Deserialize<'de> for RequestContext {
                             ohttp_config = if ohttp_base64.is_empty() {
                                 None
                             } else {
-                                Some(
-                                    ohttp::KeyConfig::decode(
-                                        bitcoin::base64::decode(&ohttp_base64)
-                                            .map_err(de::Error::custom)?
-                                            .as_slice(),
-                                    )
-                                    .map_err(de::Error::custom)?,
-                                )
+                                let config_bytes = BASE64_STANDARD.decode(&ohttp_base64)
+                                    .map_err(de::Error::custom)?;
+                                Some(ohttp::KeyConfig::decode(&config_bytes)
+                                     .map_err(de::Error::custom)?)
                             };
                         }
                         "disable_output_substitution" =>
@@ -558,6 +549,16 @@ macro_rules! check_eq {
         match ($proposed, $original) {
             (proposed, original) if proposed != original =>
                 return Err(InternalValidationError::$error { proposed, original }),
+            _ => (),
+        }
+    };
+}
+
+macro_rules! check_version_eq {
+    ($proposed:expr, $original:expr, $error:ident) => {
+        match ($proposed, $original) {
+            (proposed, original) if proposed != original =>
+                return Err(InternalValidationError::$error { proposed: proposed.0, original: original.0 }),
             _ => (),
         }
     };
@@ -677,7 +678,7 @@ impl ContextV1 {
 
     // version and lock time
     fn basic_checks(&self, proposal: &Psbt) -> InternalResult<()> {
-        check_eq!(
+        check_version_eq!(
             proposal.unsigned_tx.version,
             self.original_psbt.unsigned_tx.version,
             VersionsDontMatch
@@ -725,7 +726,7 @@ impl ContextV1 {
                         SenderTxinContainsFinalScriptWitness
                     );
                     let prevout = original.previous_txout().expect("We've validated this before");
-                    total_value += bitcoin::Amount::from_sat(prevout.value);
+                    total_value += prevout.value;
                     // We assume the signture will be the same size
                     // I know sigs can be slightly different size but there isn't much to do about
                     // it other than prefer Taproot.
@@ -768,7 +769,7 @@ impl ContextV1 {
                     let txout = proposed
                         .previous_txout()
                         .map_err(InternalValidationError::InvalidProposedInput)?;
-                    total_value += bitcoin::Amount::from_sat(txout.value);
+                    total_value += txout.value;
                     check_eq!(
                         InputType::from_spent_input(txout, proposed.psbtin)?,
                         self.input_type,
@@ -791,8 +792,8 @@ impl ContextV1 {
             proposal.unsigned_tx.output.iter().zip(&proposal.outputs)
         {
             ensure!(proposed_psbtout.bip32_derivation.is_empty(), TxOutContainsKeyPaths);
-            total_value += bitcoin::Amount::from_sat(proposed_txout.value);
-            total_weight += Weight::from_wu(proposed_txout.weight() as u64);
+            total_value += proposed_txout.value;
+            total_weight += proposed_txout.weight();
             match (original_outputs.peek(), self.fee_contribution) {
                 // fee output
                 (
@@ -802,8 +803,8 @@ impl ContextV1 {
                     && *original_output_index == fee_contrib_idx =>
                 {
                     if proposed_txout.value < original_output.value {
-                        contributed_fee =
-                            bitcoin::Amount::from_sat(original_output.value - proposed_txout.value);
+                        contributed_fee = original_output.value - proposed_txout.value;
+                            
                         ensure!(contributed_fee < max_fee_contrib, FeeContributionExceedsMaximum);
                         //The remaining fee checks are done in the caller
                     }
@@ -859,7 +860,7 @@ fn check_single_payee(
     for output in &psbt.unsigned_tx.output {
         if output.script_pubkey == *script_pubkey {
             if let Some(amount) = amount {
-                if output.value != amount.to_sat() {
+                if output.value != amount {
                     return Err(InternalCreateRequestError::PayeeValueNotEqual);
                 }
             }
@@ -904,9 +905,9 @@ fn check_fee_output_amount(
     fee: bitcoin::Amount,
     clamp_fee_contribution: bool,
 ) -> Result<bitcoin::Amount, InternalCreateRequestError> {
-    if output.value < fee.to_sat() {
+    if output.value < fee {
         if clamp_fee_contribution {
-            Ok(bitcoin::Amount::from_sat(output.value))
+            Ok(output.value)
         } else {
             Err(InternalCreateRequestError::FeeOutputValueLowerThanFeeContribution)
         }

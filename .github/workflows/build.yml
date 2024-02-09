@@ -7,9 +7,6 @@ jobs:
     strategy:
       matrix:
         toolchain: [stable, nightly]
-        include:
-          - toolchain: stable
-            check-fmt: true
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source code
@@ -21,7 +18,20 @@ jobs:
           override: true
           profile: minimal
       - name: Build on Rust ${{ matrix.toolchain }}
-        run: cargo build --verbose --color always
-      - name: Check formatting
-        if: matrix.check-fmt
-        run: rustup component add rustfmt && cargo fmt --all -- --check
+        run: cargo build --color always --all-targets
+  fmt:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        package: [ payjoin, payjoin-cli ]
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+      - run: rustup component add rustfmt --toolchain nightly-x86_64-unknown-linux-gnu
+      - name: fmt check
+        run: cargo fmt --all -- --check

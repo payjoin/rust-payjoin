@@ -19,19 +19,6 @@ jobs:
           profile: minimal
       - name: Build on Rust ${{ matrix.toolchain }}
         run: cargo build --color always --all-targets
-  fmt:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        package: [ payjoin, payjoin-cli ]
-
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          override: true
-      - run: rustup component add rustfmt --toolchain nightly-x86_64-unknown-linux-gnu
-      - name: fmt check
-        run: cargo fmt --all -- --check
+      - name: Check formatting (nightly only)
+        if: matrix.rust == 'nightly'
+        run: rustup component add rustfmt && cargo fmt --all -- --check

@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use clap::{arg, value_parser, Arg, ArgMatches, Command};
 
 mod app;
-use app::{App, AppConfig};
+use app::App;
+mod appconf;
+use appconf::AppConfig;
 
 #[tokio::main]
 async fn main() -> Result<()> {

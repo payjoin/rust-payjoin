@@ -240,8 +240,11 @@ mod integration {
             // **********************
             // Inside the Receiver:
             // Try enroll with bad relay ohttp-keys
-            let mut bad_enroller =
-                Enroller::from_relay_config(&PJ_RELAY_URL, &BAD_OHTTP_KEYS, &OH_RELAY_URL);
+            let mut bad_enroller = Enroller::from_relay_config(
+                Url::parse(PJ_RELAY_URL)?,
+                &BAD_OHTTP_KEYS,
+                Url::parse(OH_RELAY_URL)?,
+            );
             let (req, _ctx) = bad_enroller.extract_req()?;
             let res =
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
@@ -253,8 +256,11 @@ mod integration {
             );
 
             // Enroll with relay
-            let mut enroller =
-                Enroller::from_relay_config(&PJ_RELAY_URL, &ohttp_config, &OH_RELAY_URL);
+            let mut enroller = Enroller::from_relay_config(
+                Url::parse(PJ_RELAY_URL)?,
+                &ohttp_config,
+                Url::parse(OH_RELAY_URL)?,
+            );
             let (req, ctx) = enroller.extract_req()?;
             let res =
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
@@ -285,7 +291,7 @@ mod integration {
             debug!("Original psbt: {:#?}", psbt);
             let (send_req, send_ctx) = RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
-                .extract_v2(OH_RELAY_URL)?;
+                .extract_v2(Url::parse(OH_RELAY_URL)?)?;
             log::info!("send fallback v2");
             log::debug!("Request: {:#?}", &send_req.body);
             let response = {
@@ -378,8 +384,11 @@ mod integration {
             // **********************
             // Inside the Receiver:
             // Enroll with relay
-            let mut enroller =
-                Enroller::from_relay_config(&PJ_RELAY_URL, &ohttp_config, &OH_RELAY_URL);
+            let mut enroller = Enroller::from_relay_config(
+                Url::parse(PJ_RELAY_URL)?,
+                &ohttp_config,
+                Url::parse(OH_RELAY_URL)?,
+            );
             let (req, ctx) = enroller.extract_req()?;
             let res =
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))

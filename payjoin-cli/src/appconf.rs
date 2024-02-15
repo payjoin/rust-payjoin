@@ -1,22 +1,23 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::ArgMatches;
 use config::{Config, File, FileFormat};
 use serde::Deserialize;
+use url::Url;
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct AppConfig {
-    pub bitcoind_rpchost: String,
+    pub bitcoind_rpchost: Url,
     pub bitcoind_cookie: Option<String>,
     pub bitcoind_rpcuser: String,
     pub bitcoind_rpcpass: String,
     #[cfg(feature = "v2")]
     pub ohttp_config: String,
     #[cfg(feature = "v2")]
-    pub ohttp_proxy: String,
+    pub ohttp_proxy: Url,
 
     // receive-only
     pub pj_host: String,
-    pub pj_endpoint: String,
+    pub pj_endpoint: Url,
     pub sub_only: bool,
 }
 
@@ -26,7 +27,7 @@ impl AppConfig {
             .set_default("bitcoind_rpchost", "http://localhost:18443")?
             .set_override_option(
                 "bitcoind_rpchost",
-                matches.get_one::<String>("rpchost").map(|s| s.as_str()),
+                matches.get_one::<Url>("rpchost").map(|s| s.as_str()),
             )?
             .set_default("bitcoind_cookie", None::<String>)?
             .set_override_option(
@@ -59,7 +60,7 @@ impl AppConfig {
             .set_default("ohttp_proxy", "")?
             .set_override_option(
                 "ohttp_proxy",
-                matches.get_one::<String>("ohttp_proxy").map(|s| s.as_str()),
+                matches.get_one::<Url>("ohttp_proxy").map(|s| s.as_str()),
             )?;
 
         let builder = match matches.subcommand() {
@@ -71,13 +72,15 @@ impl AppConfig {
                 )?
                 .set_override_option(
                     "pj_endpoint",
-                    matches.get_one::<String>("endpoint").map(|s| s.as_str()),
+                    matches.get_one::<Url>("endpoint").map(|s| s.as_str()),
                 )?
                 .set_override_option("sub_only", matches.get_one::<bool>("sub_only").copied())?,
             _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
         };
-        let app_conf = builder.build()?;
-        log::debug!("App config: {:?}", app_conf);
-        app_conf.try_deserialize().context("Failed to deserialize config")
+
+        let config = builder.build()?;
+        let app_config: AppConfig = config.try_deserialize()?;
+        log::debug!("App config: {:?}", app_config);
+        Ok(app_config)
     }
 }

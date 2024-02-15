@@ -45,8 +45,8 @@ mod e2e {
             "sender doesn't own bitcoin"
         );
 
-        let receiver_rpchost = format!("{}/wallet/receiver", bitcoind.params.rpc_socket);
-        let sender_rpchost = format!("{}/wallet/sender", bitcoind.params.rpc_socket);
+        let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
+        let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
         let cookie_file = &bitcoind.params.cookie_file;
         let pj_host = find_free_port();
         let pj_endpoint = format!("https://localhost:{}", pj_host);

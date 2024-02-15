@@ -60,11 +60,11 @@ impl App {
     pub fn bitcoind(&self) -> Result<bitcoincore_rpc::Client> {
         match &self.config.bitcoind_cookie {
             Some(cookie) => bitcoincore_rpc::Client::new(
-                &self.config.bitcoind_rpchost,
+                self.config.bitcoind_rpchost.as_str(),
                 bitcoincore_rpc::Auth::CookieFile(cookie.into()),
             ),
             None => bitcoincore_rpc::Client::new(
-                &self.config.bitcoind_rpchost,
+                self.config.bitcoind_rpchost.as_str(),
                 bitcoincore_rpc::Auth::UserPass(
                     self.config.bitcoind_rpcuser.clone(),
                     self.config.bitcoind_rpcpass.clone(),
@@ -128,9 +128,9 @@ impl App {
 
         let mut enrolled = if !is_retry {
             let mut enroller = Enroller::from_relay_config(
-                &self.config.pj_endpoint,
+                self.config.pj_endpoint.clone(),
                 &self.config.ohttp_config,
-                &self.config.ohttp_proxy,
+                self.config.ohttp_proxy.clone(),
             );
             let (req, ctx) = enroller.extract_req()?;
             log::debug!("Enrolling receiver");
@@ -197,7 +197,7 @@ impl App {
     #[cfg(feature = "v2")]
     async fn long_poll_post(&self, req_ctx: &mut payjoin::send::RequestContext) -> Result<Psbt> {
         loop {
-            let (req, ctx) = req_ctx.extract_v2(&self.config.ohttp_proxy)?;
+            let (req, ctx) = req_ctx.extract_v2(self.config.ohttp_proxy.clone())?;
             println!("Sending fallback request to {}", &req.url);
             let http = http_agent()?;
             let response = spawn_blocking(move || {

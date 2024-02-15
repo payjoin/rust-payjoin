@@ -6,9 +6,11 @@ use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::jsonrpc::serde_json;
 use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::psbt::Psbt;
+use payjoin::bitcoin::Amount;
 use payjoin::{base64, bitcoin, Error, PjUriBuilder};
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::spawn_blocking;
+use url::Url;
 
 use super::config::AppConfig;
 use super::{App as AppTrait, SeenInputs};
@@ -71,6 +73,8 @@ impl AppTrait for App {
     async fn receive_payjoin(self, amount_arg: &str, is_retry: bool) -> Result<()> {
         use payjoin::receive::v2::Enroller;
 
+        let ohttp_keys =
+            fetch_ohttp_keys(&self.config.ohttp_relay, &self.config.pj_endpoint).await?;
         let mut enrolled = if !is_retry {
             let mut enroller = Enroller::from_directory_config(
                 self.config.pj_endpoint.clone(),
@@ -82,7 +86,10 @@ impl AppTrait for App {
             log::debug!("Enrolling receiver");
             let http = http_agent()?;
             let ohttp_response = spawn_blocking(move || {
-                http.post(req.url.as_ref()).send_bytes(&req.body).map_err(map_ureq_err)
+                http.post(req.url.as_ref())
+                    .set("Content-Type", "message/ohttp-req")
+                    .send_bytes(&req.body)
+                    .map_err(map_ureq_err)
             })
             .await??;
 
@@ -98,9 +105,8 @@ impl AppTrait for App {
         };
 
         log::debug!("Enrolled receiver");
-
         let pj_uri_string =
-            self.construct_payjoin_uri(amount_arg, Some(&enrolled.fallback_target()))?;
+            self.construct_payjoin_uri(amount_arg, &enrolled.fallback_target(), ohttp_keys)?;
         println!(
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
             self.config.pj_host
@@ -118,7 +124,11 @@ impl AppTrait for App {
             .extract_v2_req()
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         let http = http_agent()?;
-        let res = http.post(req.url.as_str()).send_bytes(&req.body).map_err(map_ureq_err)?;
+        let res = http
+            .post(req.url.as_str())
+            .set("Content-Type", "message/ohttp-req")
+            .send_bytes(&req.body)
+            .map_err(map_ureq_err)?;
         let mut buf = Vec::new();
         let _ = res.into_reader().read_to_end(&mut buf)?;
         let res = payjoin_proposal
@@ -134,24 +144,17 @@ impl App {
     fn construct_payjoin_uri(
         &self,
         amount_arg: &str,
-        fallback_target: Option<&str>,
+        fallback_target: &str,
+        ohttp_keys: payjoin::OhttpKeys,
     ) -> Result<String> {
         let pj_receiver_address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
-        let amount = bitcoin::Amount::from_sat(amount_arg.parse()?);
-        let pj_part = match fallback_target {
-            Some(target) => target,
-            None => self.config.pj_endpoint.as_str(),
-        };
-        let pj_part = payjoin::Url::parse(pj_part)
+        let amount = Amount::from_sat(amount_arg.parse()?);
+        let pj_part = payjoin::Url::parse(fallback_target)
             .map_err(|e| anyhow!("Failed to parse pj_endpoint: {}", e))?;
 
-        let pj_uri = {
-            let ohttp_keys = payjoin::OhttpKeys::decode(&base64::decode_config(
-                &self.config.ohttp_config,
-                base64::URL_SAFE,
-            )?)?;
-            PjUriBuilder::new(pj_receiver_address, pj_part, Some(ohttp_keys)).amount(amount).build()
-        };
+        let pj_uri = PjUriBuilder::new(pj_receiver_address, pj_part, Some(ohttp_keys))
+            .amount(amount)
+            .build();
 
         Ok(pj_uri.to_string())
     }
@@ -163,7 +166,7 @@ impl App {
             let http = http_agent()?;
             let response = spawn_blocking(move || {
                 http.post(req.url.as_ref())
-                    .set("Content-Type", "text/plain")
+                    .set("Content-Type", "message/ohttp-req")
                     .send_bytes(&req.body)
                     .map_err(map_ureq_err)
             })
@@ -191,7 +194,10 @@ impl App {
             log::debug!("GET fallback_psbt");
             let http = http_agent()?;
             let ohttp_response = spawn_blocking(move || {
-                http.post(req.url.as_str()).send_bytes(&req.body).map_err(map_ureq_err)
+                http.post(req.url.as_str())
+                    .set("Content-Type", "message/ohttp-req")
+                    .send_bytes(&req.body)
+                    .map_err(map_ureq_err)
             })
             .await??;
 
@@ -301,6 +307,63 @@ impl App {
     }
 }
 
+async fn fetch_ohttp_keys(proxy: &Url, pj_endpoint: &Url) -> Result<payjoin::OhttpKeys> {
+    use anyhow::ensure;
+
+    let proxy = proxy.clone();
+    let ohttp_keys_url = pj_endpoint.join("/ohttp-keys")?;
+    let res = spawn_blocking(move || {
+        http_proxy(&proxy)?.get(ohttp_keys_url.as_str()).call().map_err(map_ureq_err)
+    })
+    .await??;
+
+    ensure!(res.status() == 200, "Failed to connect to target {}", res.status());
+    let mut body = Vec::new();
+    let _ = res.into_reader().read_to_end(&mut body)?;
+    Ok(payjoin::OhttpKeys::decode(&body)?)
+}
+
+/// Normalize the Url to include the port for ureq. ureq has a bug
+/// which makes Proxy::new(...) use port 8080 for all input with scheme
+/// http regardless of the port included in the Url. This prevents that.
+/// https://github.com/algesten/ureq/pull/717
+fn normalize_proxy_url(proxy: &Url) -> Result<String> {
+    let scheme = proxy.scheme();
+    let host = proxy.host_str().ok_or(anyhow!("Failed to parse host"))?;
+
+    if scheme == "http" || scheme == "https" {
+        Ok(format!("{}:{}", host, proxy.port().unwrap_or(80)))
+    } else {
+        Ok(proxy.as_str().to_string())
+    }
+}
+
+#[cfg(feature = "danger-local-https")]
+fn http_proxy(proxy: &Url) -> Result<ureq::Agent> {
+    use rustls::client::ClientConfig;
+    use rustls::pki_types::CertificateDer;
+    use rustls::RootCertStore;
+    use ureq::AgentBuilder;
+
+    let proxy = ureq::Proxy::new(normalize_proxy_url(proxy)?)?;
+
+    let mut local_cert_path = std::env::temp_dir();
+    local_cert_path.push(crate::app::LOCAL_CERT_FILE);
+    let cert_der = std::fs::read(local_cert_path)?;
+    let mut root_cert_store = RootCertStore::empty();
+    root_cert_store.add(CertificateDer::from(cert_der.as_slice()))?;
+    let client_config =
+        ClientConfig::builder().with_root_certificates(root_cert_store).with_no_client_auth();
+
+    Ok(AgentBuilder::new().proxy(proxy).tls_config(Arc::new(client_config)).build())
+}
+
+#[cfg(not(feature = "danger-local-https"))]
+fn http_proxy(proxy: &Url) -> Result<ureq::Agent> {
+    let proxy = ureq::Proxy::new(normalize_proxy_url(proxy)?)?;
+    Ok(ureq::AgentBuilder::new().proxy(proxy).build())
+}
+
 fn map_ureq_err(e: ureq::Error) -> anyhow::Error {
     let e_string = e.to_string();
     match e.into_response() {
@@ -388,5 +451,36 @@ impl ReceiveStore {
         let file = OpenOptions::new().write(true).open("receive_store.json")?;
         file.set_len(0)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[cfg(not(feature = "danger-local-https"))]
+mod test {
+    use http::uri::Uri;
+
+    use super::*;
+
+    /// This test depends on the production payjo.in server being live.
+    /// It is an integration test that should be moved once a payjoin-io
+    /// crate exists
+    #[tokio::test]
+    async fn test_fetch_ohttp_keys() {
+        let relay_port = find_free_port();
+        let relay_url = Url::parse(&format!("http://0.0.0.0:{}", relay_port)).unwrap();
+        let pj_endpoint = Url::parse("https://payjo.in:443").unwrap();
+        tokio::select! {
+            _ = ohttp_relay::listen_tcp(relay_port, Uri::from_static("payjo.in:443")) => {
+                assert!(false, "Relay is long running");
+            }
+            res = fetch_ohttp_keys(&relay_url, &pj_endpoint) => {
+                assert!(res.is_ok());
+            }
+        }
+    }
+
+    fn find_free_port() -> u16 {
+        let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
+        listener.local_addr().unwrap().port()
     }
 }

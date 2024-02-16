@@ -26,7 +26,8 @@ use tokio::sync::Mutex as AsyncMutex;
 #[cfg(feature = "v2")]
 use tokio::task::spawn_blocking;
 
-use crate::AppConfig;
+pub mod config;
+use config::AppConfig;
 
 #[cfg(feature = "danger-local-https")]
 const LOCAL_CERT_FILE: &str = "localhost.der";

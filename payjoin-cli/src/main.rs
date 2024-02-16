@@ -2,9 +2,7 @@ use anyhow::{Context, Result};
 use clap::{arg, value_parser, Arg, ArgMatches, Command};
 
 mod app;
-use app::App;
-mod appconf;
-use appconf::AppConfig;
+use app::{App, config::AppConfig};
 use url::Url;
 
 #[tokio::main]

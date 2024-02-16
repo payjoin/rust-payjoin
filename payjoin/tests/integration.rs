@@ -428,7 +428,6 @@ mod integration {
             println!("Initializing relay server");
             env::set_var("PJ_RELAY_PORT", "8088");
             env::set_var("PJ_RELAY_TIMEOUT_SECS", "2");
-            //env::set_var("PGPASSWORD", "welcome");
             let postgres = docker.run(Postgres::default());
             env::set_var("PJ_DB_HOST", format!("127.0.0.1:{}", postgres.get_host_port_ipv4(5432)));
             println!("Postgres running on {}", postgres.get_host_port_ipv4(5432));

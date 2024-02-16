@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::ArgMatches;
@@ -9,7 +10,7 @@ use url::Url;
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct AppConfig {
     pub bitcoind_rpchost: Url,
-    pub bitcoind_cookie: Option<String>,
+    pub bitcoind_cookie: Option<PathBuf>,
     pub bitcoind_rpcuser: String,
     pub bitcoind_rpcpass: String,
     #[cfg(feature = "v2")]

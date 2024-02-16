@@ -236,21 +236,12 @@ mod integration {
             );
             let mut enrolled = enroll_with_relay(&ohttp_config).await?;
 
-            let fallback_target = enrolled.fallback_target();
-            // Receiver creates the payjoin URI
-            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let ohttp_keys: ohttp::KeyConfig = ohttp::KeyConfig::decode(&base64::decode_config(
+            let pj_uri_string = create_receiver_pj_uri_string(
+                &receiver,
                 &ohttp_config,
-                base64::Config::new(base64::CharacterSet::UrlSafe, false),
-            )?)?;
-            let pj_uri_string = PjUriBuilder::new(
-                pj_receiver_address,
-                Url::parse(&fallback_target).unwrap(),
-                Some(ohttp_keys),
+                &enrolled.fallback_target(),
             )
-            .amount(Amount::ONE_BTC)
-            .build()
-            .to_string();
+            .await?;
 
             // **********************
             // Inside the Sender:
@@ -332,21 +323,12 @@ mod integration {
 
             let mut enrolled = enroll_with_relay(&ohttp_config).await?;
 
-            // Receiver creates the payjoin URI
-            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let fallback_target = enrolled.fallback_target();
-            let ohttp_keys: ohttp::KeyConfig = ohttp::KeyConfig::decode(&base64::decode_config(
+            let pj_uri_string = create_receiver_pj_uri_string(
+                &receiver,
                 &ohttp_config,
-                base64::Config::new(base64::CharacterSet::UrlSafe, false),
-            )?)?;
-            let pj_uri_string = PjUriBuilder::new(
-                pj_receiver_address,
-                Url::parse(&fallback_target).unwrap(),
-                Some(ohttp_keys),
+                &enrolled.fallback_target(),
             )
-            .amount(Amount::ONE_BTC)
-            .build()
-            .to_string();
+            .await?;
 
             // **********************
             // Inside the V1 Sender:
@@ -505,6 +487,27 @@ mod integration {
                     .await??;
             assert!(is_success(res.status()));
             Ok(enroller.process_res(res.into_reader(), ctx)?)
+        }
+
+        /// The receiver outputs a string to be passed to the sender as a string or QR code
+        async fn create_receiver_pj_uri_string(
+            receiver: &bitcoincore_rpc::Client,
+            ohttp_config: &str,
+            fallback_target: &str,
+        ) -> Result<String, BoxError> {
+            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
+            let ohttp_keys: ohttp::KeyConfig = ohttp::KeyConfig::decode(&base64::decode_config(
+                &ohttp_config,
+                base64::Config::new(base64::CharacterSet::UrlSafe, false),
+            )?)?;
+            Ok(PjUriBuilder::new(
+                pj_receiver_address,
+                Url::parse(&fallback_target).unwrap(),
+                Some(ohttp_keys),
+            )
+            .amount(Amount::ONE_BTC)
+            .build()
+            .to_string())
         }
 
         fn handle_relay_proposal(

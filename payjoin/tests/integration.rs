@@ -193,7 +193,7 @@ mod integration {
         use std::process::Stdio;
         use std::sync::Arc;
 
-        use payjoin::receive::v2::{Enroller, PayjoinProposal, UncheckedProposal};
+        use payjoin::receive::v2::{Enrolled, Enroller, PayjoinProposal, UncheckedProposal};
         use testcontainers::Container;
         use testcontainers_modules::postgres::Postgres;
         use testcontainers_modules::testcontainers::clients::Cli;
@@ -234,19 +234,8 @@ mod integration {
                 res.unwrap_err().into_response().unwrap().content_type()
                     == "application/problem+json"
             );
+            let mut enrolled = enroll_with_relay(&ohttp_config).await?;
 
-            // Enroll with relay
-            let mut enroller = Enroller::from_relay_config(
-                Url::parse(PJ_RELAY_URL)?,
-                &ohttp_config,
-                Url::parse(OH_RELAY_URL)?,
-            );
-            let (req, ctx) = enroller.extract_req()?;
-            let res =
-                spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
-                    .await??;
-            assert!(is_success(res.status()));
-            let mut enrolled = enroller.process_res(res.into_reader(), ctx)?;
             let fallback_target = enrolled.fallback_target();
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
@@ -341,20 +330,7 @@ mod integration {
 
             let ohttp_config = fetch_ohttp_config().await?;
 
-            // **********************
-            // Inside the Receiver:
-            // Enroll with relay
-            let mut enroller = Enroller::from_relay_config(
-                Url::parse(PJ_RELAY_URL)?,
-                &ohttp_config,
-                Url::parse(OH_RELAY_URL)?,
-            );
-            let (req, ctx) = enroller.extract_req()?;
-            let res =
-                spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
-                    .await??;
-            assert!(is_success(res.status()));
-            let mut enrolled = enroller.process_res(res.into_reader(), ctx)?;
+            let mut enrolled = enroll_with_relay(&ohttp_config).await?;
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
@@ -515,6 +491,20 @@ mod integration {
                 ohttp_keys.encode()?,
                 base64::Config::new(base64::CharacterSet::UrlSafe, false),
             ))
+        }
+
+        async fn enroll_with_relay(ohttp_config: &str) -> Result<Enrolled, BoxError> {
+            let mut enroller = Enroller::from_relay_config(
+                Url::parse(PJ_RELAY_URL)?,
+                &ohttp_config,
+                Url::parse(OH_RELAY_URL)?,
+            );
+            let (req, ctx) = enroller.extract_req()?;
+            let res =
+                spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
+                    .await??;
+            assert!(is_success(res.status()));
+            Ok(enroller.process_res(res.into_reader(), ctx)?)
         }
 
         fn handle_relay_proposal(

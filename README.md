@@ -86,6 +86,7 @@ cargo update -p which --precise 4.4.0
 ### `payjoin-cli`
 
 ```shell
+cargo update -p clap_lex --precise 0.3.0
 cargo update -p regex --precise 1.9.6
 cargo update -p which --precise 4.4.0
 cargo update -p time@0.3.34 --precise 0.3.20

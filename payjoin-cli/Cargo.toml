@@ -26,7 +26,7 @@ v2 = ["payjoin/v2"]
 anyhow = "1.0.70"
 bip21 = "0.3.1"
 bitcoincore-rpc = "0.17.0"
-clap = { version = "3.2.22", features = ["derive"] }
+clap = { version = "~4.0.32", features = ["derive"] }
 config = "0.13.3"
 env_logger = "0.9.0"
 hyper = { version = "0.14", features = ["full"] }

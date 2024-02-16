@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use anyhow::Result;
 use clap::ArgMatches;
 use config::{Config, File, FileFormat};
@@ -16,7 +18,7 @@ pub(crate) struct AppConfig {
     pub ohttp_proxy: Url,
 
     // receive-only
-    pub pj_host: String,
+    pub pj_host: SocketAddr,
     pub pj_endpoint: Url,
     pub sub_only: bool,
 }

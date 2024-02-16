@@ -1,7 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
-#[cfg(not(feature = "v2"))]
-use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -318,8 +316,6 @@ impl App {
 
     #[cfg(not(feature = "v2"))]
     async fn start_http_server(self) -> Result<()> {
-        let bind_addr: SocketAddr = self.config.pj_host.parse()?;
-
         #[cfg(feature = "danger-local-https")]
         let server = {
             use std::io::Write;
@@ -336,7 +332,7 @@ impl App {
             let key =
                 PrivateKeyDer::from(PrivatePkcs8KeyDer::from(cert.serialize_private_key_der()));
             let certs = vec![CertificateDer::from(cert.serialize_der()?)];
-            let incoming = AddrIncoming::bind(&bind_addr.into())?;
+            let incoming = AddrIncoming::bind(&self.config.pj_host)?;
             let acceptor = hyper_rustls::TlsAcceptor::builder()
                 .with_single_cert(certs, key)
                 .map_err(|e| anyhow::anyhow!("TLS error: {}", e))?
@@ -346,7 +342,7 @@ impl App {
         };
 
         #[cfg(not(feature = "danger-local-https"))]
-        let server = Server::bind(&bind_addr);
+        let server = Server::bind(&self.config.pj_host);
         let app = self.clone();
         let make_svc = make_service_fn(|_| {
             let app = app.clone();

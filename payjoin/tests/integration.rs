@@ -215,27 +215,7 @@ mod integration {
             let (mut relay, _db) = init_relay(&docker).await;
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
 
-            // **********************
-            // From a connection distinct from the client, perhaps a service provider, or over a VPN or Tor
-            // get ohttp-keys at PJ_RELAY_URL in spawn_blocking
-            let ohttp_config = {
-                use std::io::Read;
-                let resp = spawn_blocking(move || {
-                    http_agent().get(&format!("{}/ohttp-keys", PJ_RELAY_URL)).call()
-                })
-                .await??;
-                let len =
-                    resp.header("Content-Length").and_then(|s| s.parse::<usize>().ok()).unwrap();
-
-                let mut bytes: Vec<u8> = Vec::with_capacity(len);
-                resp.into_reader().take(10_000_000).read_to_end(&mut bytes)?;
-                let ohttp_keys = payjoin::OhttpKeys::decode(&bytes)?;
-                base64::encode_config(
-                    ohttp_keys.encode()?,
-                    base64::Config::new(base64::CharacterSet::UrlSafe, false),
-                )
-            };
-            debug!("GET'd ohttp-keys: {}", ohttp_config);
+            let ohttp_config = fetch_ohttp_config().await?;
 
             // **********************
             // Inside the Receiver:
@@ -359,27 +339,7 @@ mod integration {
             let (mut relay, _db) = init_relay(&docker).await;
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
 
-            // **********************
-            // From a connection distinct from the client, perhaps a service provider, or over a VPN or Tor
-            // get ohttp-config at PJ_RELAY_URL in spawn_blocking
-            let ohttp_config = {
-                use std::io::Read;
-                let resp = spawn_blocking(move || {
-                    http_agent().get(&format!("{}/ohttp-keys", PJ_RELAY_URL)).call()
-                })
-                .await??;
-                let len =
-                    resp.header("Content-Length").and_then(|s| s.parse::<usize>().ok()).unwrap();
-
-                let mut bytes: Vec<u8> = Vec::with_capacity(len);
-                resp.into_reader().take(10_000_000).read_to_end(&mut bytes)?;
-                let ohttp_keys = payjoin::OhttpKeys::decode(&bytes)?;
-                base64::encode_config(
-                    ohttp_keys.encode()?,
-                    base64::Config::new(base64::CharacterSet::UrlSafe, false),
-                )
-            };
-            debug!("GET'd ohttp-keys: {}", ohttp_config);
+            let ohttp_config = fetch_ohttp_config().await?;
 
             // **********************
             // Inside the Receiver:
@@ -534,6 +494,27 @@ mod integration {
                 "danger-local-https",
             ]);
             command.spawn().unwrap()
+        }
+
+        /// In production, this must be relayed via ohttp-relay so as not to reveal the IP to the
+        /// payjoin directory.
+        async fn fetch_ohttp_config() -> Result<String, BoxError> {
+            use std::io::Read;
+            let resp = spawn_blocking(move || {
+                http_agent().get(&format!("{}/ohttp-keys", PJ_RELAY_URL)).call()
+            })
+            .await??;
+            debug!("GET'd ohttp-keys");
+
+            let len = resp.header("Content-Length").and_then(|s| s.parse::<usize>().ok()).unwrap();
+
+            let mut bytes: Vec<u8> = Vec::with_capacity(len);
+            resp.into_reader().take(10_000_000).read_to_end(&mut bytes)?;
+            let ohttp_keys = payjoin::OhttpKeys::decode(&bytes)?;
+            Ok(base64::encode_config(
+                ohttp_keys.encode()?,
+                base64::Config::new(base64::CharacterSet::UrlSafe, false),
+            ))
         }
 
         fn handle_relay_proposal(

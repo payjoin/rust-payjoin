@@ -6,10 +6,7 @@ jobs:
   build:
     strategy:
       matrix:
-        toolchain: [stable, beta]
-        include:
-          - toolchain: stable
-            check-fmt: true
+        toolchain: [stable, nightly]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source code
@@ -21,7 +18,7 @@ jobs:
           override: true
           profile: minimal
       - name: Build on Rust ${{ matrix.toolchain }}
-        run: cargo build --verbose --color always
-      - name: Check formatting
-        if: matrix.check-fmt
+        run: cargo build --color always --all-targets
+      - name: Check formatting (nightly only)
+        if: matrix.rust == 'nightly'
         run: rustup component add rustfmt && cargo fmt --all -- --check

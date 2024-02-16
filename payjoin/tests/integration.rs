@@ -260,7 +260,6 @@ mod integration {
                     http_agent()
                         .post(url.as_str())
                         .set("Content-Type", "text/plain")
-                        .set("Async", "true")
                         .send_bytes(&body)
                 })
                 .await??

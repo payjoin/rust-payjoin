@@ -13,8 +13,6 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{self, base64};
-#[cfg(feature = "v2")]
-use payjoin::receive::v2;
 use payjoin::receive::Error;
 #[cfg(not(feature = "v2"))]
 use payjoin::receive::{PayjoinProposal, UncheckedProposal};
@@ -123,7 +121,7 @@ impl App {
 
     #[cfg(feature = "v2")]
     pub async fn receive_payjoin(self, amount_arg: &str, is_retry: bool) -> Result<()> {
-        use v2::Enroller;
+        use payjoin::receive::v2::Enroller;
 
         let mut enrolled = if !is_retry {
             let mut enroller = Enroller::from_relay_config(
@@ -564,8 +562,8 @@ impl App {
     #[cfg(feature = "v2")]
     fn process_v2_proposal(
         &self,
-        proposal: v2::UncheckedProposal,
-    ) -> Result<v2::PayjoinProposal, Error> {
+        proposal: payjoin::receive::v2::UncheckedProposal,
+    ) -> Result<payjoin::receive::v2::PayjoinProposal, Error> {
         let bitcoind = self.bitcoind().map_err(|e| Error::Server(e.into()))?;
 
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx

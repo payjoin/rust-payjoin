@@ -11,6 +11,7 @@ mod integration {
     use bitcoind::bitcoincore_rpc::core_rpc_json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::RpcApi;
     use log::{debug, log_enabled, Level};
+    use once_cell::sync::Lazy;
     use payjoin::bitcoin::base64;
     use payjoin::send::{Request, RequestBuilder};
     use payjoin::{PjUriBuilder, Uri};
@@ -24,7 +25,8 @@ mod integration {
 
         use super::*;
 
-        const EXAMPLE_URL: &str = "https://example.com";
+        static EXAMPLE_URL: Lazy<Url> =
+            Lazy::new(|| Url::parse("https://example.com").expect("Invalid Url"));
 
         #[test]
         fn v1_to_v1() -> Result<(), BoxError> {
@@ -33,7 +35,7 @@ mod integration {
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let pj_uri = PjUriBuilder::new(pj_receiver_address, Url::parse(EXAMPLE_URL)?)
+            let pj_uri = PjUriBuilder::new(pj_receiver_address, EXAMPLE_URL.to_owned())
                 .amount(Amount::ONE_BTC)
                 .build();
 
@@ -202,9 +204,11 @@ mod integration {
 
         use super::*;
 
-        const PJ_RELAY_URL: &str = "https://localhost:8088";
+        static PJ_RELAY: Lazy<Url> =
+            Lazy::new(|| Url::parse("https://localhost:8088").expect("Invalid Url"));
         const BAD_OHTTP_KEYS: &str = "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM";
-        const OH_RELAY_URL: &str = "https://localhost:8088";
+        static OH_RELAY: Lazy<Url> =
+            Lazy::new(|| Url::parse("https://localhost:8088").expect("Invalid Url"));
         const LOCAL_CERT_FILE: &str = "localhost.der";
 
         #[tokio::test]
@@ -221,9 +225,9 @@ mod integration {
             // Inside the Receiver:
             // Try enroll with bad relay ohttp-keys
             let mut bad_enroller = Enroller::from_relay_config(
-                Url::parse(PJ_RELAY_URL)?,
+                PJ_RELAY.to_owned(),
                 &BAD_OHTTP_KEYS,
-                Url::parse(OH_RELAY_URL)?,
+                OH_RELAY.to_owned(),
             );
             let (req, _ctx) = bad_enroller.extract_req()?;
             let res =
@@ -251,7 +255,7 @@ mod integration {
             debug!("Original psbt: {:#?}", psbt);
             let (send_req, send_ctx) = RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
-                .extract_v2(Url::parse(OH_RELAY_URL)?)?;
+                .extract_v2(OH_RELAY.to_owned())?;
             log::info!("send fallback v2");
             log::debug!("Request: {:#?}", &send_req.body);
             let response = {
@@ -457,7 +461,7 @@ mod integration {
         async fn fetch_ohttp_config() -> Result<String, BoxError> {
             use std::io::Read;
             let resp = spawn_blocking(move || {
-                http_agent().get(&format!("{}/ohttp-keys", PJ_RELAY_URL)).call()
+                http_agent().get(&format!("{}ohttp-keys", PJ_RELAY.as_str())).call()
             })
             .await??;
             debug!("GET'd ohttp-keys");
@@ -475,9 +479,9 @@ mod integration {
 
         async fn enroll_with_relay(ohttp_config: &str) -> Result<Enrolled, BoxError> {
             let mut enroller = Enroller::from_relay_config(
-                Url::parse(PJ_RELAY_URL)?,
+                PJ_RELAY.to_owned(),
                 &ohttp_config,
-                Url::parse(OH_RELAY_URL)?,
+                OH_RELAY.to_owned(),
             );
             let (req, ctx) = enroller.extract_req()?;
             let res =

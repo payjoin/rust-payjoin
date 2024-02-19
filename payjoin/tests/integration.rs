@@ -11,6 +11,7 @@ mod integration {
     use bitcoind::bitcoincore_rpc::core_rpc_json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::RpcApi;
     use log::{debug, log_enabled, Level};
+    use once_cell::sync::Lazy;
     use payjoin::bitcoin::base64;
     use payjoin::send::{Request, RequestBuilder};
     use payjoin::{PjUriBuilder, Uri};
@@ -24,7 +25,8 @@ mod integration {
 
         use super::*;
 
-        const EXAMPLE_URL: &str = "https://example.com";
+        static EXAMPLE_URL: Lazy<Url> =
+            Lazy::new(|| Url::parse("https://example.com").expect("Invalid Url"));
 
         #[test]
         fn v1_to_v1() -> Result<(), BoxError> {
@@ -33,7 +35,7 @@ mod integration {
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let pj_uri = PjUriBuilder::new(pj_receiver_address, Url::parse(EXAMPLE_URL)?)
+            let pj_uri = PjUriBuilder::new(pj_receiver_address, EXAMPLE_URL.to_owned())
                 .amount(Amount::ONE_BTC)
                 .build();
 
@@ -193,7 +195,7 @@ mod integration {
         use std::process::Stdio;
         use std::sync::Arc;
 
-        use payjoin::receive::v2::{Enroller, PayjoinProposal, UncheckedProposal};
+        use payjoin::receive::v2::{Enrolled, Enroller, PayjoinProposal, UncheckedProposal};
         use testcontainers::Container;
         use testcontainers_modules::postgres::Postgres;
         use testcontainers_modules::testcontainers::clients::Cli;
@@ -202,9 +204,11 @@ mod integration {
 
         use super::*;
 
-        const PJ_RELAY_URL: &str = "https://localhost:8088";
+        static PJ_RELAY: Lazy<Url> =
+            Lazy::new(|| Url::parse("https://localhost:8088").expect("Invalid Url"));
         const BAD_OHTTP_KEYS: &str = "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM";
-        const OH_RELAY_URL: &str = "https://localhost:8088";
+        static OH_RELAY: Lazy<Url> =
+            Lazy::new(|| Url::parse("https://localhost:8088").expect("Invalid Url"));
         const LOCAL_CERT_FILE: &str = "localhost.der";
 
         #[tokio::test]
@@ -215,35 +219,15 @@ mod integration {
             let (mut relay, _db) = init_relay(&docker).await;
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
 
-            // **********************
-            // From a connection distinct from the client, perhaps a service provider, or over a VPN or Tor
-            // get ohttp-keys at PJ_RELAY_URL in spawn_blocking
-            let ohttp_config = {
-                use std::io::Read;
-                let resp = spawn_blocking(move || {
-                    http_agent().get(&format!("{}/ohttp-keys", PJ_RELAY_URL)).call()
-                })
-                .await??;
-                let len =
-                    resp.header("Content-Length").and_then(|s| s.parse::<usize>().ok()).unwrap();
-
-                let mut bytes: Vec<u8> = Vec::with_capacity(len);
-                resp.into_reader().take(10_000_000).read_to_end(&mut bytes)?;
-                let ohttp_keys = payjoin::OhttpKeys::decode(&bytes)?;
-                base64::encode_config(
-                    ohttp_keys.encode()?,
-                    base64::Config::new(base64::CharacterSet::UrlSafe, false),
-                )
-            };
-            debug!("GET'd ohttp-keys: {}", ohttp_config);
+            let ohttp_config = fetch_ohttp_config().await?;
 
             // **********************
             // Inside the Receiver:
             // Try enroll with bad relay ohttp-keys
             let mut bad_enroller = Enroller::from_relay_config(
-                Url::parse(PJ_RELAY_URL)?,
+                PJ_RELAY.to_owned(),
                 &BAD_OHTTP_KEYS,
-                Url::parse(OH_RELAY_URL)?,
+                OH_RELAY.to_owned(),
             );
             let (req, _ctx) = bad_enroller.extract_req()?;
             let res =
@@ -254,34 +238,14 @@ mod integration {
                 res.unwrap_err().into_response().unwrap().content_type()
                     == "application/problem+json"
             );
+            let mut enrolled = enroll_with_relay(&ohttp_config).await?;
 
-            // Enroll with relay
-            let mut enroller = Enroller::from_relay_config(
-                Url::parse(PJ_RELAY_URL)?,
+            let pj_uri_string = create_receiver_pj_uri_string(
+                &receiver,
                 &ohttp_config,
-                Url::parse(OH_RELAY_URL)?,
-            );
-            let (req, ctx) = enroller.extract_req()?;
-            let res =
-                spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
-                    .await??;
-            assert!(is_success(res.status()));
-            let mut enrolled = enroller.process_res(res.into_reader(), ctx)?;
-            let fallback_target = enrolled.fallback_target();
-            // Receiver creates the payjoin URI
-            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let ohttp_keys: ohttp::KeyConfig = ohttp::KeyConfig::decode(&base64::decode_config(
-                &ohttp_config,
-                base64::Config::new(base64::CharacterSet::UrlSafe, false),
-            )?)?;
-            let pj_uri_string = PjUriBuilder::new(
-                pj_receiver_address,
-                Url::parse(&fallback_target).unwrap(),
-                Some(ohttp_keys),
+                &enrolled.fallback_target(),
             )
-            .amount(Amount::ONE_BTC)
-            .build()
-            .to_string();
+            .await?;
 
             // **********************
             // Inside the Sender:
@@ -291,7 +255,7 @@ mod integration {
             debug!("Original psbt: {:#?}", psbt);
             let (send_req, send_ctx) = RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
-                .extract_v2(Url::parse(OH_RELAY_URL)?)?;
+                .extract_v2(OH_RELAY.to_owned())?;
             log::info!("send fallback v2");
             log::debug!("Request: {:#?}", &send_req.body);
             let response = {
@@ -300,7 +264,6 @@ mod integration {
                     http_agent()
                         .post(url.as_str())
                         .set("Content-Type", "text/plain")
-                        .set("Async", "true")
                         .send_bytes(&body)
                 })
                 .await??
@@ -359,58 +322,16 @@ mod integration {
             let (mut relay, _db) = init_relay(&docker).await;
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
 
-            // **********************
-            // From a connection distinct from the client, perhaps a service provider, or over a VPN or Tor
-            // get ohttp-config at PJ_RELAY_URL in spawn_blocking
-            let ohttp_config = {
-                use std::io::Read;
-                let resp = spawn_blocking(move || {
-                    http_agent().get(&format!("{}/ohttp-keys", PJ_RELAY_URL)).call()
-                })
-                .await??;
-                let len =
-                    resp.header("Content-Length").and_then(|s| s.parse::<usize>().ok()).unwrap();
+            let ohttp_config = fetch_ohttp_config().await?;
 
-                let mut bytes: Vec<u8> = Vec::with_capacity(len);
-                resp.into_reader().take(10_000_000).read_to_end(&mut bytes)?;
-                let ohttp_keys = payjoin::OhttpKeys::decode(&bytes)?;
-                base64::encode_config(
-                    ohttp_keys.encode()?,
-                    base64::Config::new(base64::CharacterSet::UrlSafe, false),
-                )
-            };
-            debug!("GET'd ohttp-keys: {}", ohttp_config);
+            let mut enrolled = enroll_with_relay(&ohttp_config).await?;
 
-            // **********************
-            // Inside the Receiver:
-            // Enroll with relay
-            let mut enroller = Enroller::from_relay_config(
-                Url::parse(PJ_RELAY_URL)?,
+            let pj_uri_string = create_receiver_pj_uri_string(
+                &receiver,
                 &ohttp_config,
-                Url::parse(OH_RELAY_URL)?,
-            );
-            let (req, ctx) = enroller.extract_req()?;
-            let res =
-                spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
-                    .await??;
-            assert!(is_success(res.status()));
-            let mut enrolled = enroller.process_res(res.into_reader(), ctx)?;
-
-            // Receiver creates the payjoin URI
-            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let fallback_target = enrolled.fallback_target();
-            let ohttp_keys: ohttp::KeyConfig = ohttp::KeyConfig::decode(&base64::decode_config(
-                &ohttp_config,
-                base64::Config::new(base64::CharacterSet::UrlSafe, false),
-            )?)?;
-            let pj_uri_string = PjUriBuilder::new(
-                pj_receiver_address,
-                Url::parse(&fallback_target).unwrap(),
-                Some(ohttp_keys),
+                &enrolled.fallback_target(),
             )
-            .amount(Amount::ONE_BTC)
-            .build()
-            .to_string();
+            .await?;
 
             // **********************
             // Inside the V1 Sender:
@@ -511,7 +432,6 @@ mod integration {
             println!("Initializing relay server");
             env::set_var("PJ_RELAY_PORT", "8088");
             env::set_var("PJ_RELAY_TIMEOUT_SECS", "2");
-            //env::set_var("PGPASSWORD", "welcome");
             let postgres = docker.run(Postgres::default());
             env::set_var("PJ_DB_HOST", format!("127.0.0.1:{}", postgres.get_host_port_ipv4(5432)));
             println!("Postgres running on {}", postgres.get_host_port_ipv4(5432));
@@ -534,6 +454,62 @@ mod integration {
                 "danger-local-https",
             ]);
             command.spawn().unwrap()
+        }
+
+        /// In production, this must be relayed via ohttp-relay so as not to reveal the IP to the
+        /// payjoin directory.
+        async fn fetch_ohttp_config() -> Result<String, BoxError> {
+            use std::io::Read;
+            let resp = spawn_blocking(move || {
+                http_agent().get(&format!("{}ohttp-keys", PJ_RELAY.as_str())).call()
+            })
+            .await??;
+            debug!("GET'd ohttp-keys");
+
+            let len = resp.header("Content-Length").and_then(|s| s.parse::<usize>().ok()).unwrap();
+
+            let mut bytes: Vec<u8> = Vec::with_capacity(len);
+            resp.into_reader().take(10_000_000).read_to_end(&mut bytes)?;
+            let ohttp_keys = payjoin::OhttpKeys::decode(&bytes)?;
+            Ok(base64::encode_config(
+                ohttp_keys.encode()?,
+                base64::Config::new(base64::CharacterSet::UrlSafe, false),
+            ))
+        }
+
+        async fn enroll_with_relay(ohttp_config: &str) -> Result<Enrolled, BoxError> {
+            let mut enroller = Enroller::from_relay_config(
+                PJ_RELAY.to_owned(),
+                &ohttp_config,
+                OH_RELAY.to_owned(),
+            );
+            let (req, ctx) = enroller.extract_req()?;
+            let res =
+                spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
+                    .await??;
+            assert!(is_success(res.status()));
+            Ok(enroller.process_res(res.into_reader(), ctx)?)
+        }
+
+        /// The receiver outputs a string to be passed to the sender as a string or QR code
+        async fn create_receiver_pj_uri_string(
+            receiver: &bitcoincore_rpc::Client,
+            ohttp_config: &str,
+            fallback_target: &str,
+        ) -> Result<String, BoxError> {
+            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
+            let ohttp_keys: ohttp::KeyConfig = ohttp::KeyConfig::decode(&base64::decode_config(
+                &ohttp_config,
+                base64::Config::new(base64::CharacterSet::UrlSafe, false),
+            )?)?;
+            Ok(PjUriBuilder::new(
+                pj_receiver_address,
+                Url::parse(&fallback_target).unwrap(),
+                Some(ohttp_keys),
+            )
+            .amount(Amount::ONE_BTC)
+            .build()
+            .to_string())
         }
 
         fn handle_relay_proposal(

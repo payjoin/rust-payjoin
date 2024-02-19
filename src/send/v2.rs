@@ -21,9 +21,11 @@ impl ContextV2 {
     /// If the response is some valid PSBT you should sign and broadcast.
     pub fn process_response(&self, response: Vec<u8>) -> Result<Option<String>, PayjoinError> {
         let mut decoder = Cursor::new(response);
-        <&ContextV2 as Into<payjoin::send::ContextV2>>::into(self)
+        match <&ContextV2 as Into<payjoin::send::ContextV2>>::into(self)
             .process_response(&mut decoder)
-            .map(|e| e.map(|o| o.to_string()))
-            .map_err(|e| e.into())
+        {
+            Ok(e) => Ok(e.map(|x| x.to_string())),
+            Err(e) => Err(e.into()),
+        }
     }
 }

@@ -150,6 +150,7 @@ impl RequestContext {
 }
 ///Data required for validation of response.
 /// This type is used to process the response. Get it from RequestBuilder's build methods. Then you only need to call .process_response() on it to continue BIP78 flow.
+#[derive(Clone)]
 pub struct ContextV1(payjoin::send::ContextV1);
 impl From<payjoin::send::ContextV1> for ContextV1 {
     fn from(value: payjoin::send::ContextV1) -> Self {

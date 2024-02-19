@@ -24,6 +24,7 @@ v2 = ["payjoin/v2"]
 
 [dependencies]
 anyhow = "1.0.70"
+async-trait = "0.1"
 bip21 = "0.3.1"
 bitcoincore-rpc = "0.17.0"
 clap = { version = "~4.0.32", features = ["derive"] }

@@ -321,7 +321,7 @@ impl RequestContext {
     #[cfg(feature = "v2")]
     pub fn extract_v2(
         &mut self,
-        ohttp_proxy_url: &str,
+        ohttp_proxy: Url,
     ) -> Result<(Request, ContextV2), CreateRequestError> {
         let rs_base64 = crate::v2::subdir(self.endpoint.as_str()).to_string();
         log::debug!("rs_base64: {:?}", rs_base64);
@@ -349,10 +349,9 @@ impl RequestContext {
             Some(&body),
         )
         .map_err(InternalCreateRequestError::V2)?;
-        log::debug!("ohttp_proxy_url: {:?}", ohttp_proxy_url);
-        let url = Url::parse(ohttp_proxy_url).map_err(InternalCreateRequestError::Url)?;
+        log::debug!("ohttp_proxy_url: {:?}", ohttp_proxy);
         Ok((
-            Request { url, body },
+            Request { url: ohttp_proxy, body },
             // this method may be called more than once to re-construct the ohttp, therefore we must clone (or TODO memoize)
             ContextV2 {
                 context_v1: ContextV1 {

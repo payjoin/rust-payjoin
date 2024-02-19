@@ -2,7 +2,10 @@ use anyhow::{Context, Result};
 use clap::{arg, value_parser, Arg, ArgMatches, Command};
 
 mod app;
-use app::{App, AppConfig};
+use app::App;
+mod appconf;
+use appconf::AppConfig;
+use url::Url;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -47,7 +50,8 @@ fn cli() -> ArgMatches {
             .long("rpchost")
             .short('r')
             .num_args(1)
-            .help("The port of the bitcoin node"))
+            .help("The port of the bitcoin node")
+            .value_parser(value_parser!(Url)))
         .arg(Arg::new("cookie_file")
             .long("cookie-file")
             .short('c')
@@ -67,7 +71,8 @@ fn cli() -> ArgMatches {
             .help("The ohttp config file"))
         .arg(Arg::new("ohttp_proxy")
             .long("ohttp-proxy")
-            .help("The ohttp proxy url"))
+            .help("The ohttp proxy url")
+            .value_parser(value_parser!(Url)))
         .arg(Arg::new("retry")
             .long("retry")
             .short('e')
@@ -99,7 +104,8 @@ fn cli() -> ArgMatches {
                     .long("endpoint")
                     .short('e')
                     .num_args(1)
-                    .help("The `pj=` endpoint to receive the payjoin request"))
+                    .help("The `pj=` endpoint to receive the payjoin request")
+                    .value_parser(value_parser!(Url)))
                 .arg(Arg::new("sub_only")
                     .long("sub-only")
                     .short('s')

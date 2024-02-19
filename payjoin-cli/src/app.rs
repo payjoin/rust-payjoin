@@ -1,7 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
-#[cfg(not(feature = "v2"))]
-use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -9,8 +7,6 @@ use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::jsonrpc::serde_json;
 use bitcoincore_rpc::RpcApi;
-use clap::ArgMatches;
-use config::{Config, File, FileFormat};
 #[cfg(not(feature = "v2"))]
 use hyper::service::{make_service_fn, service_fn};
 #[cfg(not(feature = "v2"))]
@@ -29,6 +25,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as AsyncMutex;
 #[cfg(feature = "v2")]
 use tokio::task::spawn_blocking;
+
+use crate::AppConfig;
 
 #[cfg(feature = "danger-local-https")]
 const LOCAL_CERT_FILE: &str = "localhost.der";
@@ -60,11 +58,11 @@ impl App {
     pub fn bitcoind(&self) -> Result<bitcoincore_rpc::Client> {
         match &self.config.bitcoind_cookie {
             Some(cookie) => bitcoincore_rpc::Client::new(
-                &self.config.bitcoind_rpchost,
+                self.config.bitcoind_rpchost.as_str(),
                 bitcoincore_rpc::Auth::CookieFile(cookie.into()),
             ),
             None => bitcoincore_rpc::Client::new(
-                &self.config.bitcoind_rpchost,
+                self.config.bitcoind_rpchost.as_str(),
                 bitcoincore_rpc::Auth::UserPass(
                     self.config.bitcoind_rpcuser.clone(),
                     self.config.bitcoind_rpcpass.clone(),
@@ -128,9 +126,9 @@ impl App {
 
         let mut enrolled = if !is_retry {
             let mut enroller = Enroller::from_relay_config(
-                &self.config.pj_endpoint,
+                self.config.pj_endpoint.clone(),
                 &self.config.ohttp_config,
-                &self.config.ohttp_proxy,
+                self.config.ohttp_proxy.clone(),
             );
             let (req, ctx) = enroller.extract_req()?;
             log::debug!("Enrolling receiver");
@@ -197,7 +195,7 @@ impl App {
     #[cfg(feature = "v2")]
     async fn long_poll_post(&self, req_ctx: &mut payjoin::send::RequestContext) -> Result<Psbt> {
         loop {
-            let (req, ctx) = req_ctx.extract_v2(&self.config.ohttp_proxy)?;
+            let (req, ctx) = req_ctx.extract_v2(self.config.ohttp_proxy.clone())?;
             println!("Sending fallback request to {}", &req.url);
             let http = http_agent()?;
             let response = spawn_blocking(move || {
@@ -318,8 +316,6 @@ impl App {
 
     #[cfg(not(feature = "v2"))]
     async fn start_http_server(self) -> Result<()> {
-        let bind_addr: SocketAddr = self.config.pj_host.parse()?;
-
         #[cfg(feature = "danger-local-https")]
         let server = {
             use std::io::Write;
@@ -336,7 +332,7 @@ impl App {
             let key =
                 PrivateKeyDer::from(PrivatePkcs8KeyDer::from(cert.serialize_private_key_der()));
             let certs = vec![CertificateDer::from(cert.serialize_der()?)];
-            let incoming = AddrIncoming::bind(&bind_addr.into())?;
+            let incoming = AddrIncoming::bind(&self.config.pj_host)?;
             let acceptor = hyper_rustls::TlsAcceptor::builder()
                 .with_single_cert(certs, key)
                 .map_err(|e| anyhow::anyhow!("TLS error: {}", e))?
@@ -346,7 +342,7 @@ impl App {
         };
 
         #[cfg(not(feature = "danger-local-https"))]
-        let server = Server::bind(&bind_addr);
+        let server = Server::bind(&self.config.pj_host);
         let app = self.clone();
         let make_svc = make_service_fn(|_| {
             let app = app.clone();
@@ -771,85 +767,6 @@ impl OutPointSet {
     fn new() -> Self { Self(HashSet::new()) }
 
     fn insert(&mut self, input: bitcoin::OutPoint) -> bool { self.0.insert(input) }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct AppConfig {
-    pub bitcoind_rpchost: String,
-    pub bitcoind_cookie: Option<String>,
-    pub bitcoind_rpcuser: String,
-    pub bitcoind_rpcpass: String,
-    #[cfg(feature = "v2")]
-    pub ohttp_config: String,
-    #[cfg(feature = "v2")]
-    pub ohttp_proxy: String,
-
-    // receive-only
-    pub pj_host: String,
-    pub pj_endpoint: String,
-    pub sub_only: bool,
-}
-
-impl AppConfig {
-    pub(crate) fn new(matches: &ArgMatches) -> Result<Self> {
-        let builder = Config::builder()
-            .set_default("bitcoind_rpchost", "http://localhost:18443")?
-            .set_override_option(
-                "bitcoind_rpchost",
-                matches.get_one::<String>("rpchost").map(|s| s.as_str()),
-            )?
-            .set_default("bitcoind_cookie", None::<String>)?
-            .set_override_option(
-                "bitcoind_cookie",
-                matches.get_one::<String>("cookie_file").map(|s| s.as_str()),
-            )?
-            .set_default("bitcoind_rpcuser", "bitcoin")?
-            .set_override_option(
-                "bitcoind_rpcuser",
-                matches.get_one::<String>("rpcuser").map(|s| s.as_str()),
-            )?
-            .set_default("bitcoind_rpcpass", "")?
-            .set_override_option(
-                "bitcoind_rpcpass",
-                matches.get_one::<String>("rpcpass").map(|s| s.as_str()),
-            )?
-            // Subcommand defaults without which file serialization fails.
-            .set_default("pj_host", "0.0.0.0:3000")?
-            .set_default("pj_endpoint", "https://localhost:3000")?
-            .set_default("sub_only", false)?
-            .add_source(File::new("config.toml", FileFormat::Toml).required(false));
-
-        #[cfg(feature = "v2")]
-        let builder = builder
-            .set_default("ohttp_config", "")?
-            .set_override_option(
-                "ohttp_config",
-                matches.get_one::<String>("ohttp_config").map(|s| s.as_str()),
-            )?
-            .set_default("ohttp_proxy", "")?
-            .set_override_option(
-                "ohttp_proxy",
-                matches.get_one::<String>("ohttp_proxy").map(|s| s.as_str()),
-            )?;
-
-        let builder = match matches.subcommand() {
-            Some(("send", _)) => builder,
-            Some(("receive", matches)) => builder
-                .set_override_option(
-                    "pj_host",
-                    matches.get_one::<String>("port").map(|port| format!("0.0.0.0:{}", port)),
-                )?
-                .set_override_option(
-                    "pj_endpoint",
-                    matches.get_one::<String>("endpoint").map(|s| s.as_str()),
-                )?
-                .set_override_option("sub_only", matches.get_one::<bool>("sub_only").copied())?,
-            _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
-        };
-        let app_conf = builder.build()?;
-        log::debug!("App config: {:?}", app_conf);
-        app_conf.try_deserialize().context("Failed to deserialize config")
-    }
 }
 
 fn try_contributing_inputs(

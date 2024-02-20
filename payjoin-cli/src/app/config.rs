@@ -8,7 +8,7 @@ use serde::Deserialize;
 use url::Url;
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct AppConfig {
+pub struct AppConfig {
     pub bitcoind_rpchost: Url,
     pub bitcoind_cookie: Option<PathBuf>,
     pub bitcoind_rpcuser: String,

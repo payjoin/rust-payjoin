@@ -1798,6 +1798,7 @@ name = "payjoin-cli"
 version = "0.0.3-alpha"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bip21",
  "bitcoincore-rpc",
  "bitcoind",

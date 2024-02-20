@@ -1,11 +1,15 @@
 use anyhow::{Context, Result};
+use app::config::AppConfig;
+use app::App as AppTrait;
 use clap::{arg, value_parser, Arg, ArgMatches, Command};
+use url::Url;
 
 mod app;
-use app::App;
-mod appconf;
-use appconf::AppConfig;
-use url::Url;
+
+#[cfg(not(feature = "v2"))]
+use app::v1::App;
+#[cfg(feature = "v2")]
+use app::v2::App;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,22 +24,14 @@ async fn main() -> Result<()> {
             let bip21 = sub_matches.get_one::<String>("BIP21").context("Missing BIP21 argument")?;
             let fee_rate_sat_per_vb =
                 sub_matches.get_one::<f32>("fee_rate").context("Missing --fee-rate argument")?;
-            #[cfg(feature = "v2")]
-            let is_retry = matches.get_one::<bool>("retry").context("Could not read --retry")?;
-            #[cfg(feature = "v2")]
+            let is_retry = matches.get_one::<bool>("retry").unwrap_or(&false);
             app.send_payjoin(bip21, fee_rate_sat_per_vb, *is_retry).await?;
-            #[cfg(not(feature = "v2"))]
-            app.send_payjoin(bip21, fee_rate_sat_per_vb).await?;
         }
         Some(("receive", sub_matches)) => {
             let amount =
                 sub_matches.get_one::<String>("AMOUNT").context("Missing AMOUNT argument")?;
-            #[cfg(feature = "v2")]
-            let is_retry = matches.get_one::<bool>("retry").context("Could not read --retry")?;
-            #[cfg(feature = "v2")]
+            let is_retry = matches.get_one::<bool>("retry").unwrap_or(&false);
             app.receive_payjoin(amount, *is_retry).await?;
-            #[cfg(not(feature = "v2"))]
-            app.receive_payjoin(amount).await?;
         }
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }

@@ -1,3 +1,4 @@
+use std::ops::{Deref, DerefMut};
 use std::{error, fmt};
 
 use bitcoin::secp256k1::ecdh::SharedSecret;
@@ -224,4 +225,81 @@ pub fn ohttp_decapsulate(
     let mut r = std::io::Cursor::new(bhttp_body);
     let response = bhttp::Message::read_bhttp(&mut r)?;
     Ok(response.content().to_vec())
+}
+
+#[derive(Debug, Clone)]
+pub struct OhttpKeys(pub ohttp::KeyConfig);
+
+impl OhttpKeys {
+    pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
+        ohttp::KeyConfig::decode(bytes).map(Self).map_err(Error::from)
+    }
+}
+
+impl PartialEq for OhttpKeys {
+    fn eq(&self, other: &Self) -> bool {
+        match (self.encode(), other.encode()) {
+            (Ok(self_encoded), Ok(other_encoded)) => self_encoded == other_encoded,
+            // If OhttpKeys::encode(&self) is Err, return false
+            _ => false,
+        }
+    }
+}
+
+impl Eq for OhttpKeys {}
+
+impl Deref for OhttpKeys {
+    type Target = ohttp::KeyConfig;
+
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+
+impl DerefMut for OhttpKeys {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
+}
+
+impl<'de> serde::Deserialize<'de> for OhttpKeys {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use bitcoin::base64;
+
+        let base64_string = String::deserialize(deserializer)?;
+        let bytes = base64::decode_config(base64_string, base64::URL_SAFE)
+            .map_err(serde::de::Error::custom)?;
+        Ok(OhttpKeys(ohttp::KeyConfig::decode(&bytes).map_err(serde::de::Error::custom)?))
+    }
+}
+
+impl serde::Serialize for OhttpKeys {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use bitcoin::base64;
+
+        let bytes = self.0.encode().map_err(serde::ser::Error::custom)?;
+        let base64_string = base64::encode_config(bytes, base64::URL_SAFE);
+        base64_string.serialize(serializer)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_ohttp_keys_roundtrip() {
+        use ohttp::hpke::{Aead, Kdf, Kem};
+        use ohttp::{KeyId, SymmetricSuite};
+        const KEY_ID: KeyId = 1;
+        const KEM: Kem = Kem::X25519Sha256;
+        const SYMMETRIC: &[SymmetricSuite] =
+            &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
+        let keys = OhttpKeys(ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap());
+        let serialized = serde_json::to_string(&keys).unwrap();
+        let deserialized: OhttpKeys = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(keys.encode().unwrap(), deserialized.encode().unwrap());
+    }
 }

@@ -73,12 +73,11 @@ impl AppTrait for App {
     async fn receive_payjoin(self, amount_arg: &str, is_retry: bool) -> Result<()> {
         use payjoin::receive::v2::Enroller;
 
-        let ohttp_keys =
-            fetch_ohttp_keys(&self.config.ohttp_relay, &self.config.pj_endpoint).await?;
+        let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
         let mut enrolled = if !is_retry {
             let mut enroller = Enroller::from_directory_config(
                 self.config.pj_endpoint.clone(),
-                &self.config.ohttp_config,
+                ohttp_keys.clone(),
                 self.config.ohttp_relay.clone(),
             );
             let (req, ctx) =
@@ -304,6 +303,14 @@ impl App {
 
     fn insert_input_seen_before(&self, input: bitcoin::OutPoint) -> Result<bool> {
         self.seen_inputs.lock().expect("mutex lock failed").insert(input)
+    }
+}
+
+async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::OhttpKeys> {
+    if let Some(keys) = config.ohttp_keys.clone() {
+        Ok(keys)
+    } else {
+        fetch_ohttp_keys(&config.ohttp_relay, &config.pj_endpoint).await
     }
 }
 

@@ -206,7 +206,7 @@ impl<'a> RequestBuilder<'a> {
             .map_err(InternalCreateRequestError::InvalidOriginalInput)?;
         let endpoint = self.uri.extras.endpoint.clone();
         #[cfg(feature = "v2")]
-        let ohttp_config = self.uri.extras.ohttp_config;
+        let ohttp_keys = self.uri.extras.ohttp_keys;
         let disable_output_substitution =
             self.uri.extras.disable_output_substitution || self.disable_output_substitution;
         let payee = self.uri.address.script_pubkey();
@@ -238,7 +238,7 @@ impl<'a> RequestBuilder<'a> {
             psbt,
             endpoint,
             #[cfg(feature = "v2")]
-            ohttp_config,
+            ohttp_keys,
             disable_output_substitution,
             fee_contribution,
             payee,
@@ -256,7 +256,7 @@ pub struct RequestContext {
     psbt: Psbt,
     endpoint: Url,
     #[cfg(feature = "v2")]
-    ohttp_config: Option<ohttp::KeyConfig>,
+    ohttp_keys: Option<crate::v2::OhttpKeys>,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
@@ -273,7 +273,7 @@ impl PartialEq for RequestContext {
         self.psbt == other.psbt
             && self.endpoint == other.endpoint
             // KeyConfig is not yet PartialEq
-            && self.ohttp_config.as_ref().map(|cfg| cfg.encode().unwrap_or_default()) == other.ohttp_config.as_ref().map(|cfg| cfg.encode().unwrap_or_default())
+            && self.ohttp_keys.as_ref().map(|cfg| cfg.encode().unwrap_or_default()) == other.ohttp_keys.as_ref().map(|cfg| cfg.encode().unwrap_or_default())
             && self.disable_output_substitution == other.disable_output_substitution
             && self.fee_contribution == other.fee_contribution
             && self.min_fee_rate == other.min_fee_rate
@@ -343,7 +343,7 @@ impl RequestContext {
         let body = crate::v2::encrypt_message_a(body, self.e, rs)
             .map_err(InternalCreateRequestError::V2)?;
         let (body, ohttp_res) = crate::v2::ohttp_encapsulate(
-            self.ohttp_config.as_mut().ok_or(InternalCreateRequestError::MissingOhttpConfig)?,
+            self.ohttp_keys.as_mut().ok_or(InternalCreateRequestError::MissingOhttpConfig)?,
             "POST",
             url.as_str(),
             Some(&body),
@@ -379,13 +379,13 @@ impl Serialize for RequestContext {
         let mut state = serializer.serialize_struct("RequestContext", 8)?;
         state.serialize_field("psbt", &self.psbt.to_string())?;
         state.serialize_field("endpoint", &self.endpoint.as_str())?;
-        let ohttp_string = self.ohttp_config.as_ref().map_or(Ok("".to_string()), |config| {
+        let ohttp_string = self.ohttp_keys.as_ref().map_or(Ok("".to_string()), |config| {
             config
                 .encode()
                 .map_err(|e| serde::ser::Error::custom(format!("ohttp-keys encoding error: {}", e)))
                 .map(bitcoin::base64::encode)
         })?;
-        state.serialize_field("ohttp_config", &ohttp_string)?;
+        state.serialize_field("ohttp_keys", &ohttp_string)?;
         state.serialize_field("disable_output_substitution", &self.disable_output_substitution)?;
         state.serialize_field(
             "fee_contribution",
@@ -411,7 +411,7 @@ impl<'de> Deserialize<'de> for RequestContext {
         const FIELDS: &[&str] = &[
             "psbt",
             "endpoint",
-            "ohttp_config",
+            "ohttp_keys",
             "disable_output_substitution",
             "fee_contribution",
             "min_fee_rate",
@@ -434,7 +434,7 @@ impl<'de> Deserialize<'de> for RequestContext {
             {
                 let mut psbt = None;
                 let mut endpoint = None;
-                let mut ohttp_config = None;
+                let mut ohttp_keys = None;
                 let mut disable_output_substitution = None;
                 let mut fee_contribution = None;
                 let mut min_fee_rate = None;
@@ -454,13 +454,13 @@ impl<'de> Deserialize<'de> for RequestContext {
                                 url::Url::from_str(&map.next_value::<String>()?)
                                     .map_err(de::Error::custom)?,
                             ),
-                        "ohttp_config" => {
+                        "ohttp_keys" => {
                             let ohttp_base64: String = map.next_value()?;
-                            ohttp_config = if ohttp_base64.is_empty() {
+                            ohttp_keys = if ohttp_base64.is_empty() {
                                 None
                             } else {
                                 Some(
-                                    ohttp::KeyConfig::decode(
+                                    crate::v2::OhttpKeys::decode(
                                         bitcoin::base64::decode(&ohttp_base64)
                                             .map_err(de::Error::custom)?
                                             .as_slice(),
@@ -494,7 +494,7 @@ impl<'de> Deserialize<'de> for RequestContext {
                 Ok(RequestContext {
                     psbt: psbt.ok_or_else(|| de::Error::missing_field("psbt"))?,
                     endpoint: endpoint.ok_or_else(|| de::Error::missing_field("endpoint"))?,
-                    ohttp_config,
+                    ohttp_keys,
                     disable_output_substitution: disable_output_substitution
                         .ok_or_else(|| de::Error::missing_field("disable_output_substitution"))?,
                     fee_contribution,
@@ -1072,7 +1072,7 @@ mod test {
         let req_ctx = RequestContext {
             psbt: Psbt::from_str(ORIGINAL_PSBT).unwrap(),
             endpoint: Url::parse("http://localhost:1234").unwrap(),
-            ohttp_config: None,
+            ohttp_keys: None,
             disable_output_substitution: false,
             fee_contribution: None,
             min_fee_rate: FeeRate::ZERO,

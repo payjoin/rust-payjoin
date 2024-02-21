@@ -196,6 +196,7 @@ mod integration {
         use std::time::Duration;
 
         use payjoin::receive::v2::{Enrolled, Enroller, PayjoinProposal, UncheckedProposal};
+        use payjoin::OhttpKeys;
         use testcontainers_modules::redis::Redis;
         use testcontainers_modules::testcontainers::clients::Cli;
         use tokio::task::spawn_blocking;
@@ -207,16 +208,22 @@ mod integration {
 
         #[tokio::test]
         async fn test_bad_ohttp_keys() {
-            const BAD_OHTTP_KEYS: &str = "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM";
+            let bad_ohttp_keys = OhttpKeys::decode(
+                &base64::decode_config(
+                    "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM",
+                    base64::URL_SAFE,
+                )
+                .expect("invalid base64"),
+            )
+            .expect("Invalid OhttpKeys");
 
             std::env::set_var("RUST_LOG", "debug");
             let _ = env_logger::builder().is_test(true).try_init();
             let port = find_free_port();
             let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
-            let mock_ohttp_relay = directory.clone(); // pass through to directory
             tokio::select!(
                 _ = init_directory(port) => assert!(false, "Directory server is long running"),
-                res = enroll_with_bad_keys(directory, mock_ohttp_relay) => {
+                res = enroll_with_bad_keys(directory, bad_ohttp_keys) => {
                     assert_eq!(
                         res.unwrap_err().into_response().unwrap().content_type(),
                         "application/problem+json"
@@ -226,11 +233,12 @@ mod integration {
 
             async fn enroll_with_bad_keys(
                 directory: Url,
-                ohttp_relay: Url,
+                bad_ohttp_keys: OhttpKeys,
             ) -> Result<Response, Error> {
                 tokio::time::sleep(Duration::from_secs(2)).await;
+                let mock_ohttp_relay = directory.clone(); // pass through to directory
                 let mut bad_enroller =
-                    Enroller::from_directory_config(directory, &BAD_OHTTP_KEYS, ohttp_relay);
+                    Enroller::from_directory_config(directory, bad_ohttp_keys, mock_ohttp_relay);
                 let (req, _ctx) = bad_enroller.extract_req().expect("Failed to extract request");
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
                     .await
@@ -253,15 +261,16 @@ mod integration {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
 
                 tokio::time::sleep(Duration::from_secs(2)).await;
-                let ohttp_keys = fetch_ohttp_config(directory.to_owned()).await?;
+                let ohttp_keys = fetch_ohttp_keys(directory.to_owned()).await?;
 
                 // **********************
                 // Inside the Receiver:
-                let mut enrolled = enroll_with_directory(directory.clone(), &ohttp_keys).await?;
+                let mut enrolled =
+                    enroll_with_directory(directory.clone(), ohttp_keys.clone()).await?;
                 println!("enrolled: {:#?}", &enrolled);
                 let pj_uri_string = create_receiver_pj_uri_string(
                     &receiver,
-                    &ohttp_keys,
+                    ohttp_keys,
                     &enrolled.fallback_target(),
                 )
                 .await?;
@@ -347,13 +356,13 @@ mod integration {
             async fn do_v1_to_v2(directory: Url) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
                 tokio::time::sleep(Duration::from_secs(2)).await;
-                let ohttp_config = fetch_ohttp_config(directory.clone()).await?;
+                let ohttp_keys = fetch_ohttp_keys(directory.clone()).await?;
 
-                let mut enrolled = enroll_with_directory(directory, &ohttp_config).await?;
+                let mut enrolled = enroll_with_directory(directory, ohttp_keys.clone()).await?;
 
                 let pj_uri_string = create_receiver_pj_uri_string(
                     &receiver,
-                    &ohttp_config,
+                    ohttp_keys,
                     &enrolled.fallback_target(),
                 )
                 .await?;
@@ -465,7 +474,7 @@ mod integration {
 
         /// In production, this must be relayed via ohttp-relay so as not to reveal the IP to the
         /// payjoin directory.
-        async fn fetch_ohttp_config(directory: Url) -> Result<String, BoxError> {
+        async fn fetch_ohttp_keys(directory: Url) -> Result<OhttpKeys, BoxError> {
             use std::io::Read;
             let fetch_url = directory.join("ohttp-keys").unwrap();
             log::debug!("Fetching ohttp keys from {}", fetch_url.as_str());
@@ -477,21 +486,17 @@ mod integration {
             log::debug!("Fetched");
             let mut bytes: Vec<u8> = Vec::with_capacity(len);
             resp.into_reader().take(10_000_000).read_to_end(&mut bytes)?;
-            let ohttp_keys = payjoin::OhttpKeys::decode(&bytes)?;
-            Ok(base64::encode_config(
-                ohttp_keys.encode()?,
-                base64::Config::new(base64::CharacterSet::UrlSafe, false),
-            ))
+            Ok(payjoin::OhttpKeys::decode(&bytes)?)
         }
 
         async fn enroll_with_directory(
             directory: Url,
-            ohttp_config: &str,
+            ohttp_keys: OhttpKeys,
         ) -> Result<Enrolled, BoxError> {
             let mock_ohttp_relay = directory.clone(); // pass through to directory
             let mut enroller = Enroller::from_directory_config(
                 directory.clone(),
-                &ohttp_config,
+                ohttp_keys,
                 mock_ohttp_relay.clone(),
             );
             let (req, ctx) = enroller.extract_req()?;
@@ -506,14 +511,10 @@ mod integration {
         /// The receiver outputs a string to be passed to the sender as a string or QR code
         async fn create_receiver_pj_uri_string(
             receiver: &bitcoincore_rpc::Client,
-            ohttp_config: &str,
+            ohttp_keys: OhttpKeys,
             fallback_target: &str,
         ) -> Result<String, BoxError> {
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let ohttp_keys: ohttp::KeyConfig = ohttp::KeyConfig::decode(&base64::decode_config(
-                &ohttp_config,
-                base64::Config::new(base64::CharacterSet::UrlSafe, false),
-            )?)?;
             Ok(PjUriBuilder::new(
                 pj_receiver_address,
                 Url::parse(&fallback_target).unwrap(),

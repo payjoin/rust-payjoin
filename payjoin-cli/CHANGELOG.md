@@ -1,5 +1,13 @@
 # payjoin-cli Changelog
 
+## 0.0.4-alpha
+
+- Remove annoying duplicate code in tests. (#197)
+- Refactor payjoin-cli v1, v2 features into modules (#198)
+- Parse AppConfig types when they're passed (#195)
+- Use spec OHTTP media types (#160)
+- Handle ResponseError version-unsupported variant supported field (#165)
+
 ## 0.0.3-alpha
 
 - Parse `WellKnownError` `ResponseError` from receivers (#120)

@@ -4,10 +4,9 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::Error as PdkError;
-
+use payjoin::receive as pdk;
 use crate::error::PayjoinError;
-use crate::receive::{
+use crate::receive::v1::{
     CanBroadcast, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction,
 };
 use crate::types::{OutPoint, Request, TxOut};
@@ -168,7 +167,7 @@ impl V2UncheckedProposal {
             |tx| {
                 match can_broadcast.callback(payjoin::bitcoin::consensus::encode::serialize(&tx)) {
                     Ok(e) => Ok(e),
-                    Err(e) => Err(PdkError::Server(e.into())),
+                    Err(e) => Err(pdk::Error::Server(e.into())),
                 }
             },
         );
@@ -206,7 +205,7 @@ impl V2MaybeInputsOwned {
             let res = is_owned.callback(input.to_bytes());
             match res {
                 Ok(e) => Ok(e),
-                Err(e) => Err(PdkError::Server(e.into())),
+                Err(e) => Err(pdk::Error::Server(e.into())),
             }
         }) {
             Ok(e) => Ok(Arc::new(e.into())),
@@ -256,7 +255,7 @@ impl V2MaybeInputsSeen {
             let res = is_known.callback(outpoint.clone().into());
             match res {
                 Ok(e) => Ok(e),
-                Err(e) => Err(PdkError::Server(e.into())),
+                Err(e) => Err(pdk::Error::Server(e.into())),
             }
         }) {
             Ok(e) => Ok(Arc::new(e.into())),
@@ -288,7 +287,7 @@ impl V2OutputsUnknown {
             let res = is_receiver_output.callback(output_script.to_bytes());
             match res {
                 Ok(e) => Ok(e),
-                Err(e) => Err(PdkError::Server(e.into())),
+                Err(e) => Err(pdk::Error::Server(e.into())),
             }
         }) {
             Ok(e) => Ok(Arc::new(e.into())),
@@ -373,7 +372,7 @@ impl V2ProvisionalProposal {
             |psbt| {
                 match process_psbt.callback(psbt.to_string()) {
                     Ok(e) => Ok(Psbt::from_str(e.as_str()).expect("Invalid process_psbt ")),
-                    Err(e) => Err(PdkError::Server(e.into())),
+                    Err(e) => Err(pdk::Error::Server(e.into())),
                 }
             },
             min_feerate_sat_per_vb.and_then(|x| payjoin::bitcoin::FeeRate::from_sat_per_vb(x)),

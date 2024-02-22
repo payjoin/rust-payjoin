@@ -13,13 +13,13 @@ use crate::receive::v2::{
     V2MaybeMixedInputScripts, V2OutputsUnknown, V2PayjoinProposal, V2ProvisionalProposal,
     V2UncheckedProposal,
 };
-use crate::receive::{
+use crate::receive::v1::{
     CanBroadcast, Headers, IsOutputKnown, IsScriptOwned, MaybeInputsOwned, MaybeInputsSeen,
     MaybeMixedInputScripts, OutputsUnknown, PayjoinProposal, ProcessPartiallySignedTransaction,
     ProvisionalProposal, UncheckedProposal,
 };
 use crate::send::v2::ContextV2;
-use crate::send::{ContextV1, RequestBuilder, RequestContext, RequestContextV1, RequestContextV2};
+use crate::send::v1::{ContextV1, RequestBuilder, RequestContext, RequestContextV1, RequestContextV2};
 use crate::types::{Network, OutPoint, Request, TxOut};
 use crate::uri::{PjUri, Uri, Url};
 

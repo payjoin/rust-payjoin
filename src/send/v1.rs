@@ -1,11 +1,13 @@
 use std::io::Cursor;
 use std::str::FromStr;
 use std::sync::Arc;
+
+pub use payjoin::send as pdk;
+
 use crate::error::PayjoinError;
 use crate::send::v2::ContextV2;
 use crate::types::Request;
 use crate::uri::Uri;
-pub use payjoin::send as pdk;
 
 ///Builder for sender-side payjoin parameters
 ///
@@ -27,10 +29,9 @@ impl RequestBuilder {
     /// to keep them separated.
     pub fn from_psbt_and_uri(psbt: String, uri: Arc<Uri>) -> Result<Self, PayjoinError> {
         let psbt = payjoin::bitcoin::psbt::PartiallySignedTransaction::from_str(psbt.as_str())?;
-        match pdk::RequestBuilder::from_psbt_and_uri(psbt, (*uri).clone().into()) {
-            Ok(e) => Ok(e.into()),
-            Err(e) => Err(e.into()),
-        }
+        pdk::RequestBuilder::from_psbt_and_uri(psbt, (*uri).clone().into())
+            .map(|e| e.into())
+            .map_err(|e| e.into())
     }
 
     /// Disable output substitution even if the receiver didn't.
@@ -52,14 +53,11 @@ impl RequestBuilder {
         &self,
         min_fee_rate: u64,
     ) -> Result<Arc<RequestContext>, PayjoinError> {
-        match self
-            .0
+        self.0
             .clone()
             .build_recommended(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate))
-        {
-            Ok(e) => Ok(Arc::new(e.into())),
-            Err(e) => Err(e.into()),
-        }
+            .map(|e| Arc::new(e.into()))
+            .map_err(|e| e.into())
     }
     /// Offer the receiver contribution to pay for his input.
     ///
@@ -81,15 +79,16 @@ impl RequestBuilder {
         min_fee_rate: u64,
         clamp_fee_contribution: bool,
     ) -> Result<Arc<RequestContext>, PayjoinError> {
-        match self.0.clone().build_with_additional_fee(
-            payjoin::bitcoin::Amount::from_sat(max_fee_contribution),
-            change_index.map(|x| x as usize),
-            payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate),
-            clamp_fee_contribution,
-        ) {
-            Ok(e) => Ok(Arc::new(e.into())),
-            Err(e) => Err(e.into()),
-        }
+        self.0
+            .clone()
+            .build_with_additional_fee(
+                payjoin::bitcoin::Amount::from_sat(max_fee_contribution),
+                change_index.map(|x| x as usize),
+                payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate),
+                clamp_fee_contribution,
+            )
+            .map(|e| Arc::new(e.into()))
+            .map_err(|e| e.into())
     }
     /// Perform Payjoin without incentivizing the payee to cooperate.
     ///
@@ -159,9 +158,6 @@ impl ContextV1 {
     /// Call this method with response from receiver to continue BIP78 flow. If the response is valid you will get appropriate PSBT that you should sign and broadcast.
     pub fn process_response(&self, response: Vec<u8>) -> Result<String, PayjoinError> {
         let mut decoder = Cursor::new(response);
-        match self.0.clone().process_response(&mut decoder) {
-            Ok(e) => Ok(e.to_string()),
-            Err(e) => Err(e.into()),
-        }
+        self.0.clone().process_response(&mut decoder).map(|e| e.to_string()).map_err(|e| e.into())
     }
 }

@@ -62,7 +62,6 @@ pub enum PayjoinError {
     UrlError { message: String },
 }
 
-
 macro_rules! impl_from_error {
     ($($src:ty => $variant:ident),* $(,)?) => {
         $(

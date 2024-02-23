@@ -1,5 +1,22 @@
 # Payjoin Changelog
 
+
+## 0.14.0
+
+### API
+
+- Handle `supported` versions in `ResponseError`
+- Make `RequestContext`, `RequestBuilder` `Clone`
+- Expose v2 mod internally to `pub(crate)` only
+- Use typesafe KeyConfig for ohttp d/encapsulation 
+- Use spec OHTTP media types
+- Build PjUri with PjUriBuilder (#185)
+- Parse and pass urls as `Url` instead of `String`
+
+### Fixes
+
+- Remove broken doctests from send and receive mods (#179)
+
 ## 0.13.0
 
 ### API

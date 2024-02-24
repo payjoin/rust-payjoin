@@ -32,9 +32,70 @@ impl Uri {
         self.0.amount.map(|x| x.to_sat())
     }
 }
+#[derive(Clone)]
+pub struct KeyConfig(ohttp::KeyConfig);
+impl From<ohttp::KeyConfig> for KeyConfig {
+    fn from(value: ohttp::KeyConfig) -> Self {
+        Self(value)
+    }
+}
 
-#[allow(dead_code)]
+impl From<KeyConfig> for ohttp::KeyConfig {
+    fn from(value: KeyConfig) -> Self {
+        value.0
+    }
+}
+//TODO; Implement Clone
+// pub struct PjUriBuilder(Mutex<payjoin::PjUriBuilder>);
+//
+// impl From<payjoin::PjUriBuilder> for PjUriBuilder {
+//     fn from(value: payjoin::PjUriBuilder) -> Self {
+//         Self(Mutex::new(value))
+//     }
+// }
+// impl PjUriBuilder{
+//     fn mutex_guard(&self) -> &mut MutexGuard<'_, payjoin::PjUriBuilder> {
+//         self.0.lock().as_mut().unwrap()
+//     }
+//     pub fn new(
+//         address: String,
+//         pj: Arc<Url>,
+//         ohttp_config: Option<Arc<KeyConfig>>,
+//     ) -> Result<PjUriBuilder, PayjoinError>{
+//         let address = payjoin::bitcoin::Address::from_str(address.as_str())?.assume_checked();
+//         Ok(payjoin::PjUriBuilder::new(address, (*pj).clone().0, ohttp_config.map(|c| (*c).clone().into())).into())
+//     }
+//     /// Set the amount you want to receive.
+//     pub fn amount(&self, amount: u64) -> PjUriBuilder {
+//        self.mutex_guard().amount(payjoin::bitcoin::amount::Amount::from_sat(amount)).into()
+//     }
+//     pub fn message(&self, message: String)  -> PjUriBuilder {
+//         self.mutex_guard().message(message).into()
+//     }
+//     pub fn label(&self, label: String) -> PjUriBuilder {
+//         self.mutex_guard().label(label).into()
+//     }
+//
+//     /// Set whether payjoin output substitution is allowed.
+//     pub fn pjos(&self, pjos: bool) -> PjUriBuilder {
+//         self.mutex_guard().pjos(pjos).into()
+//     }
+//
+//     // pub fn build(&self) -> PjUri {
+//     //     PjUri(self.0.lock().unwrap().build())
+//     // }
+// }
 pub struct PjUri(payjoin::PjUri<'static>);
+
+impl PjUri {
+    pub fn address(&self) -> String {
+        self.0.clone().address.to_string()
+    }
+    /// Amount in sats
+    pub fn amount(&self) -> Option<u64> {
+        self.0.clone().amount.map(|e| e.to_sat())
+    }
+}
 
 impl From<url::Url> for Url {
     fn from(value: url::Url) -> Self {

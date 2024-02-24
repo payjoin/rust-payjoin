@@ -3,11 +3,12 @@ use std::io::Cursor;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use bdk::bitcoin::FeeRate;
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::Error as PdkError;
+use payjoin::receive as pdk;
 
 use crate::error::PayjoinError;
-use crate::receive::{
+use crate::receive::v1::{
     CanBroadcast, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction,
 };
 use crate::types::{OutPoint, Request, TxOut};
@@ -77,12 +78,10 @@ impl Enroller {
         body: Vec<u8>,
         ctx: Arc<ClientResponse>,
     ) -> Result<Arc<Enrolled>, PayjoinError> {
-        match <Enroller as Into<payjoin::receive::v2::Enroller>>::into(self.clone())
+        <Enroller as Into<payjoin::receive::v2::Enroller>>::into(self.clone())
             .process_res(Cursor::new(body), ctx.as_ref().into())
-        {
-            Ok(e) => Ok(Arc::new(Enrolled(e))),
-            Err(e) => Err(e.into()),
-        }
+            .map(|e| Arc::new(e.into()))
+            .map_err(|e| e.into())
     }
 }
 #[derive(Clone, Debug)]
@@ -116,12 +115,10 @@ impl Enrolled {
         body: Vec<u8>,
         context: Arc<ClientResponse>,
     ) -> Result<Option<Arc<V2UncheckedProposal>>, PayjoinError> {
-        match <Enrolled as Into<payjoin::receive::v2::Enrolled>>::into(self.clone())
+        <Enrolled as Into<payjoin::receive::v2::Enrolled>>::into(self.clone())
             .process_res(Cursor::new(body), context.as_ref().into())
-        {
-            Ok(e) => Ok(e.map(|x| Arc::new(x.into()))),
-            Err(e) => Err(e.into()),
-        }
+            .map(|e| e.map(|x| Arc::new(x.into())))
+            .map_err(|e| e.into())
     }
 }
 
@@ -163,19 +160,18 @@ impl V2UncheckedProposal {
         min_fee_rate: Option<u64>,
         can_broadcast: Box<dyn CanBroadcast>,
     ) -> Result<Arc<V2MaybeInputsOwned>, PayjoinError> {
-        let res = self.0.clone().check_broadcast_suitability(
-            min_fee_rate.map(|x| payjoin::bitcoin::FeeRate::from_sat_per_kwu(x)),
-            |tx| {
-                match can_broadcast.callback(payjoin::bitcoin::consensus::encode::serialize(&tx)) {
-                    Ok(e) => Ok(e),
-                    Err(e) => Err(PdkError::Server(e.into())),
-                }
-            },
-        );
-        match res {
-            Ok(e) => Ok(Arc::new(e.into())),
-            Err(e) => Err(e.into()),
-        }
+        self.0
+            .clone()
+            .check_broadcast_suitability(
+                min_fee_rate.map(|x| payjoin::bitcoin::FeeRate::from_sat_per_kwu(x)),
+                |tx| {
+                    can_broadcast
+                        .callback(payjoin::bitcoin::consensus::encode::serialize(tx))
+                        .map_err(|e| payjoin::receive::Error::Server(e.into()))
+                },
+            )
+            .map(|e| Arc::new(e.into()))
+            .map_err(|e| e.into())
     }
 
     /// Call this method if the only way to initiate a Payjoin with this receiver
@@ -201,17 +197,15 @@ impl V2MaybeInputsOwned {
         &self,
         is_owned: Box<dyn IsScriptOwned>,
     ) -> Result<Arc<V2MaybeMixedInputScripts>, PayjoinError> {
-        let owned_inputs = self.0.clone();
-        match owned_inputs.check_inputs_not_owned(|input| {
-            let res = is_owned.callback(input.to_bytes());
-            match res {
-                Ok(e) => Ok(e),
-                Err(e) => Err(PdkError::Server(e.into())),
-            }
-        }) {
-            Ok(e) => Ok(Arc::new(e.into())),
-            Err(e) => Err(PayjoinError::ServerError { message: e.to_string() }),
-        }
+        self.0
+            .clone()
+            .check_inputs_not_owned(|input| {
+                is_owned
+                    .callback(input.to_bytes())
+                    .map_err(|e| payjoin::receive::Error::Server(e.into()))
+            })
+            .map(|e| Arc::new(e.into()))
+            .map_err(|e| e.into())
     }
 }
 #[derive(Clone)]
@@ -230,10 +224,11 @@ impl V2MaybeMixedInputScripts {
     /// Note: mixed spends do not necessarily indicate distinct wallet fingerprints.
     /// This check is intended to prevent some types of wallet fingerprinting.
     pub fn check_no_mixed_input_scripts(&self) -> Result<Arc<V2MaybeInputsSeen>, PayjoinError> {
-        match self.0.clone().check_no_mixed_input_scripts() {
-            Ok(e) => Ok(Arc::new(e.into())),
-            Err(e) => Err(e.into()),
-        }
+        self.0
+            .clone()
+            .check_no_mixed_input_scripts()
+            .map(|e| Arc::new(e.into()))
+            .map_err(|e| e.into())
     }
 }
 #[derive(Clone)]
@@ -252,16 +247,13 @@ impl V2MaybeInputsSeen {
         &self,
         is_known: Box<dyn IsOutputKnown>,
     ) -> Result<Arc<V2OutputsUnknown>, PayjoinError> {
-        match self.0.clone().check_no_inputs_seen_before(|outpoint| {
-            let res = is_known.callback(outpoint.clone().into());
-            match res {
-                Ok(e) => Ok(e),
-                Err(e) => Err(PdkError::Server(e.into())),
-            }
-        }) {
-            Ok(e) => Ok(Arc::new(e.into())),
-            Err(e) => Err(e.into()),
-        }
+        self.0
+            .clone()
+            .check_no_inputs_seen_before(|outpoint| {
+                is_known.callback(outpoint.clone().into()).map_err(|e| pdk::Error::Server(e.into()))
+            })
+            .map(|e| Arc::new(e.into()))
+            .map_err(|e| e.into())
     }
 }
 
@@ -284,16 +276,15 @@ impl V2OutputsUnknown {
         &self,
         is_receiver_output: Box<dyn IsScriptOwned>,
     ) -> Result<Arc<V2ProvisionalProposal>, PayjoinError> {
-        match self.0.clone().identify_receiver_outputs(|output_script| {
-            let res = is_receiver_output.callback(output_script.to_bytes());
-            match res {
-                Ok(e) => Ok(e),
-                Err(e) => Err(PdkError::Server(e.into())),
-            }
-        }) {
-            Ok(e) => Ok(Arc::new(e.into())),
-            Err(e) => Err(e.into()),
-        }
+        self.0
+            .clone()
+            .identify_receiver_outputs(|output_script| {
+                is_receiver_output
+                    .callback(output_script.to_bytes())
+                    .map_err(|e| payjoin::receive::Error::Server(e.into()))
+            })
+            .map(|e| Arc::new(e.into()))
+            .map_err(|e| e.into())
     }
 }
 pub struct V2ProvisionalProposal(Mutex<payjoin::receive::v2::ProvisionalProposal>);
@@ -350,16 +341,13 @@ impl V2ProvisionalProposal {
         &self,
         candidate_inputs: HashMap<u64, OutPoint>,
     ) -> Result<OutPoint, PayjoinError> {
-        let mut _candidate_inputs: HashMap<payjoin::bitcoin::Amount, payjoin::bitcoin::OutPoint> =
-            HashMap::new();
-        for (key, value) in candidate_inputs.iter() {
-            _candidate_inputs.insert(
-                payjoin::bitcoin::Amount::from_sat(key.to_owned()),
-                value.to_owned().into(),
-            );
-        }
+        let candidate_inputs: HashMap<payjoin::bitcoin::Amount, payjoin::bitcoin::OutPoint> =
+            candidate_inputs
+                .into_iter()
+                .map(|(key, value)| (payjoin::bitcoin::Amount::from_sat(key), value.into()))
+                .collect();
 
-        match self.mutex_guard().try_preserving_privacy(_candidate_inputs) {
+        match self.mutex_guard().try_preserving_privacy(candidate_inputs) {
             Ok(e) => Ok(OutPoint { txid: e.txid.to_string(), vout: e.vout }),
             Err(e) => Err(e.into()),
         }
@@ -369,18 +357,19 @@ impl V2ProvisionalProposal {
         process_psbt: Box<dyn ProcessPartiallySignedTransaction>,
         min_feerate_sat_per_vb: Option<u64>,
     ) -> Result<Arc<V2PayjoinProposal>, PayjoinError> {
-        match self.mutex_guard().clone().finalize_proposal(
-            |psbt| {
-                match process_psbt.callback(psbt.to_string()) {
-                    Ok(e) => Ok(Psbt::from_str(e.as_str()).expect("Invalid process_psbt ")),
-                    Err(e) => Err(PdkError::Server(e.into())),
-                }
-            },
-            min_feerate_sat_per_vb.and_then(|x| payjoin::bitcoin::FeeRate::from_sat_per_vb(x)),
-        ) {
-            Ok(e) => Ok(Arc::new(e.into())),
-            Err(e) => Err(e.into()),
-        }
+        self.mutex_guard()
+            .clone()
+            .finalize_proposal(
+                |psbt| {
+                    process_psbt
+                        .callback(psbt.to_string())
+                        .map(|e| Psbt::from_str(e.as_str()).expect("Invalid process_psbt "))
+                        .map_err(|e| pdk::Error::Server(e.into()))
+                },
+                min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x)),
+            )
+            .map(|e| Arc::new(e.into()))
+            .map_err(|e| e.into())
     }
 }
 
@@ -442,11 +431,9 @@ impl V2PayjoinProposal {
         res: Vec<u8>,
         ohttp_context: Arc<ClientResponse>,
     ) -> Result<Vec<u8>, PayjoinError> {
-        match <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
+        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
             .deserialize_res(res, ohttp_context.as_ref().into())
-        {
-            Ok(e) => Ok(e),
-            Err(e) => Err(e.into()),
-        }
+            .map(|e| e)
+            .map_err(|e| e.into())
     }
 }

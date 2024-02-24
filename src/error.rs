@@ -62,20 +62,34 @@ pub enum PayjoinError {
     UrlError { message: String },
 }
 
-impl From<ParseError> for PayjoinError {
-    fn from(value: ParseError) -> Self {
-        PayjoinError::UrlError { message: value.to_string() }
-    }
+macro_rules! impl_from_error {
+    ($($src:ty => $variant:ident),* $(,)?) => {
+        $(
+            impl From<$src> for PayjoinError {
+                fn from(value: $src) -> Self {
+                    PayjoinError::$variant { message: value.to_string() }
+                }
+            }
+        )*
+    };
 }
 
-impl From<ohttp::Error> for PayjoinError {
-    fn from(value: ohttp::Error) -> Self {
-        PayjoinError::OhttpError { message: value.to_string() }
-    }
+impl_from_error! {
+    ParseError => UrlError,
+    ohttp::Error => OhttpError,
+    PsbtParseError => PsbtParseError,
+    payjoin::bitcoin::consensus::encode::Error => TransactionError,
+    payjoin::bitcoin::address::Error => InvalidAddress,
+    RequestError => RequestError,
+    PdkResponseError => ResponseError,
+    ValidationError => ValidationError,
+    CreateRequestError => CreateRequestError,
+    uniffi::UnexpectedUniFFICallbackError => UnexpectedError,
 }
-impl From<PsbtParseError> for PayjoinError {
-    fn from(value: PsbtParseError) -> Self {
-        PayjoinError::PsbtParseError { message: value.to_string() }
+
+impl From<SelectionError> for PayjoinError {
+    fn from(value: SelectionError) -> Self {
+        PayjoinError::SelectionError { message: format!("{:?}", value) }
     }
 }
 
@@ -86,46 +100,5 @@ impl From<payjoin::Error> for PayjoinError {
             payjoin::Error::Server(e) => PayjoinError::ServerError { message: e.to_string() },
             payjoin::Error::V2(e) => PayjoinError::V2Error { message: format!("{:?}", e) },
         }
-    }
-}
-impl From<payjoin::bitcoin::consensus::encode::Error> for PayjoinError {
-    fn from(value: payjoin::bitcoin::consensus::encode::Error) -> Self {
-        PayjoinError::TransactionError { message: value.to_string() }
-    }
-}
-
-impl From<payjoin::bitcoin::address::Error> for PayjoinError {
-    fn from(value: payjoin::bitcoin::address::Error) -> Self {
-        PayjoinError::InvalidAddress { message: value.to_string() }
-    }
-}
-impl From<RequestError> for PayjoinError {
-    fn from(value: RequestError) -> Self {
-        PayjoinError::RequestError { message: value.to_string() }
-    }
-}
-impl From<SelectionError> for PayjoinError {
-    fn from(value: SelectionError) -> Self {
-        PayjoinError::SelectionError { message: format!("{:?}", value) }
-    }
-}
-impl From<PdkResponseError> for PayjoinError {
-    fn from(value: PdkResponseError) -> Self {
-        PayjoinError::ResponseError { message: value.to_string() }
-    }
-}
-impl From<ValidationError> for PayjoinError {
-    fn from(value: ValidationError) -> Self {
-        PayjoinError::ValidationError { message: value.to_string() }
-    }
-}
-impl From<CreateRequestError> for PayjoinError {
-    fn from(value: CreateRequestError) -> Self {
-        PayjoinError::CreateRequestError { message: value.to_string() }
-    }
-}
-impl From<uniffi::UnexpectedUniFFICallbackError> for PayjoinError {
-    fn from(e: uniffi::UnexpectedUniFFICallbackError) -> Self {
-        Self::UnexpectedError { message: e.reason }
     }
 }

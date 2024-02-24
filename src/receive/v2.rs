@@ -73,6 +73,22 @@ impl Enroller {
             Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
         }
     }
+    pub fn extract_req_as_tuple(&self) -> Result<(Request, ohttp::ClientResponse), PayjoinError> {
+        match self.0.clone().extract_req() {
+            Ok(e) => Ok((e.0.into(), e.1)),
+            Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
+        }
+    }
+    pub fn process_res_with_ohttp_response(
+        &self,
+        body: Vec<u8>,
+        ctx: ohttp::ClientResponse,
+    ) -> Result<Arc<Enrolled>, PayjoinError> {
+        <Enroller as Into<payjoin::receive::v2::Enroller>>::into(self.clone())
+            .process_res(Cursor::new(body), ctx)
+            .map(|e| Arc::new(e.into()))
+            .map_err(|e| e.into())
+    }
     pub fn process_res(
         &self,
         body: Vec<u8>,
@@ -110,6 +126,13 @@ impl Enrolled {
         let (req, res) = self.0.clone().extract_req()?;
         Ok(RequestResponse { request: req.into(), client_response: Arc::new(res.into()) })
     }
+
+    pub fn extract_req_as_tuple(&self) -> Result<(Request, ohttp::ClientResponse), PayjoinError> {
+        match self.0.clone().extract_req() {
+            Ok(e) => Ok((e.0.into(), e.1)),
+            Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
+        }
+    }
     pub fn process_res(
         &self,
         body: Vec<u8>,
@@ -118,6 +141,16 @@ impl Enrolled {
         <Enrolled as Into<payjoin::receive::v2::Enrolled>>::into(self.clone())
             .process_res(Cursor::new(body), context.as_ref().into())
             .map(|e| e.map(|x| Arc::new(x.into())))
+            .map_err(|e| e.into())
+    }
+    pub fn process_res_with_ohttp_response(
+        &self,
+        body: Vec<u8>,
+        ctx: ohttp::ClientResponse,
+    ) -> Result<Option<V2UncheckedProposal>, PayjoinError> {
+        <Enrolled as Into<payjoin::receive::v2::Enrolled>>::into(self.clone())
+            .process_res(Cursor::new(body), ctx)
+            .map(|e| e.map(|o| o.into()))
             .map_err(|e| e.into())
     }
 }
@@ -174,6 +207,24 @@ impl V2UncheckedProposal {
             .map_err(|e| e.into())
     }
 
+    pub fn check_broadcast_suitability_with_callback(
+        &self,
+        min_fee_rate: Option<u64>,
+        can_broadcast: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
+    ) -> Result<Arc<V2MaybeInputsOwned>, PayjoinError> {
+        self.0
+            .clone()
+            .check_broadcast_suitability(
+                min_fee_rate.map(|x| FeeRate::from_sat_per_kwu(x)),
+                |transaction| {
+                    can_broadcast(&payjoin::bitcoin::consensus::encode::serialize(transaction))
+                        .map_err(|e| payjoin::receive::Error::Server(e.into()))
+                },
+            )
+            .map(|e| Arc::new(e.into()))
+            .map_err(|e| e.into())
+    }
+
     /// Call this method if the only way to initiate a Payjoin with this receiver
     /// requires manual intervention, as in most consumer wallets.
     ///
@@ -192,7 +243,7 @@ impl From<payjoin::receive::v2::MaybeInputsOwned> for V2MaybeInputsOwned {
 }
 impl V2MaybeInputsOwned {
     ///Check that the Original PSBT has no receiver-owned inputs. Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
-    // An attacker could try to spend receiver's own inputs. This check prevents that.
+    /// An attacker could try to spend receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         &self,
         is_owned: Box<dyn IsScriptOwned>,
@@ -206,6 +257,19 @@ impl V2MaybeInputsOwned {
             })
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
+    }
+
+    pub fn check_inputs_not_owned_with_callback(
+        &self,
+        is_owned: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
+    ) -> Result<Arc<V2MaybeMixedInputScripts>, PayjoinError> {
+        self.0
+            .clone()
+            .check_inputs_not_owned(|input| {
+                is_owned(&input.to_bytes()).map_err(|e| payjoin::receive::Error::Server(e.into()))
+            })
+            .map_err(|e| e.into())
+            .map(|e| Arc::new(e.into()))
     }
 }
 #[derive(Clone)]
@@ -255,6 +319,18 @@ impl V2MaybeInputsSeen {
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
     }
+    pub fn check_no_inputs_seen_before_with_callback(
+        &self,
+        is_known: impl Fn(&OutPoint) -> Result<bool, PayjoinError>,
+    ) -> Result<Arc<V2OutputsUnknown>, PayjoinError> {
+        self.0
+            .clone()
+            .check_no_inputs_seen_before(|outpoint| {
+                is_known(&outpoint.clone().into()).map_err(|e| pdk::Error::Server(e.into()))
+            })
+            .map_err(|e| e.into())
+            .map(|e| Arc::new(e.into()))
+    }
 }
 
 /// The receiver has not yet identified which outputs belong to the receiver.
@@ -285,6 +361,20 @@ impl V2OutputsUnknown {
             })
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
+    }
+
+    pub fn identify_receiver_outputs_with_callback(
+        &self,
+        is_receiver_output: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
+    ) -> Result<Arc<V2ProvisionalProposal>, PayjoinError> {
+        self.0
+            .clone()
+            .identify_receiver_outputs(|input| {
+                is_receiver_output(&input.to_bytes())
+                    .map_err(|e| payjoin::receive::Error::Server(e.into()))
+            })
+            .map_err(|e| e.into())
+            .map(|e| Arc::new(e.into()))
     }
 }
 pub struct V2ProvisionalProposal(Mutex<payjoin::receive::v2::ProvisionalProposal>);
@@ -371,6 +461,24 @@ impl V2ProvisionalProposal {
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
     }
+    pub fn finalize_proposal_with_callback(
+        &self,
+        process_psbt: impl Fn(String) -> Result<String, PayjoinError>,
+        min_feerate_sat_per_vb: Option<u64>,
+    ) -> Result<Arc<V2PayjoinProposal>, PayjoinError> {
+        self.mutex_guard()
+            .clone()
+            .finalize_proposal(
+                |psbt| {
+                    process_psbt(psbt.to_string())
+                        .map(|e| Psbt::from_str(e.as_str()).expect("Invalid process_psbt "))
+                        .map_err(|e| pdk::Error::Server(e.into()))
+                },
+                min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x)),
+            )
+            .map(|e| Arc::new(e.into()))
+            .map_err(|e| e.into())
+    }
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
@@ -426,6 +534,24 @@ impl V2PayjoinProposal {
         Ok(RequestResponse { request: req.into(), client_response: Arc::new(res.into()) })
     }
 
+    pub fn extract_v2_req_as_tuple(
+        &self,
+    ) -> Result<(Request, ohttp::ClientResponse), PayjoinError> {
+        match self.0.clone().extract_v2_req() {
+            Ok(e) => Ok((e.0.into(), e.1)),
+            Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
+        }
+    }
+    pub fn deserialize_res_with_ohttp_response(
+        &self,
+        body: Vec<u8>,
+        ctx: ohttp::ClientResponse,
+    ) -> Result<Vec<u8>, PayjoinError> {
+        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
+            .deserialize_res(body, ctx)
+            .map(|e| e.into())
+            .map_err(|e| e.into())
+    }
     pub fn deserialize_res(
         &self,
         res: Vec<u8>,

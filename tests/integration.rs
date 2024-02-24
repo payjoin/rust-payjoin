@@ -11,7 +11,7 @@ use bdk::wallet::AddressIndex;
 use bdk::{FeeRate, LocalUtxo, SignOptions, Wallet as BdkWallet};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin_ffi::error::PayjoinError;
-use payjoin_ffi::receive::{
+use payjoin_ffi::receive::v1::{
     Headers, IsOutputKnown, IsScriptOwned, PayjoinProposal, ProcessPartiallySignedTransaction,
     UncheckedProposal,
 };
@@ -243,7 +243,7 @@ fn build_original_psbt(
 }
 mod v1 {
     use bdk::wallet::AddressIndex;
-    use payjoin_ffi::send::RequestBuilder;
+    use payjoin_ffi::send::v1::RequestBuilder;
 
     use super::*;
 
@@ -287,7 +287,7 @@ mod v1 {
 
 struct MockCanBroadcast();
 
-impl payjoin_ffi::receive::CanBroadcast for MockCanBroadcast {
+impl payjoin_ffi::receive::v1::CanBroadcast for MockCanBroadcast {
     fn callback(&self, tx: Vec<u8>) -> Result<bool, PayjoinError> {
         debug!("{}", serialize_hex(&tx));
         Ok(true)

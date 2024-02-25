@@ -24,7 +24,6 @@ payjoin = { git= "https://github.com/payjoin/rust-payjoin", branch = "master",  
 uniffi = { version = "0.26.1" }
 thiserror = "1.0.47"
 ohttp = { version = "0.5.1" }
-url = "2.5.0"
 [[bin]]
 name = "uniffi-bindgen"
 path = "uniffi-bindgen.rs"

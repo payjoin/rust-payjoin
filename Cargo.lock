@@ -1122,7 +1122,6 @@ dependencies = [
  "payjoin",
  "thiserror",
  "uniffi",
- "url",
 ]
 
 [[package]]

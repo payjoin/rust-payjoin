@@ -14,16 +14,16 @@ uniffi = { version = "0.26.1", features = ["build"] }
 
 [dev-dependencies]
 uniffi = { version = "0.26.1", features = ["bindgen-tests"] }
-
-
+bitcoincore-rpc = "0.18.0"
+bdk = { version = "0.29.0", features = ["all-keys", "use-esplora-ureq", "keys-bip39"] }
 
 [dependencies]
-bdk = { version = "0.29.0", features = ["all-keys", "use-esplora-ureq", "keys-bip39"] }
 #payjoin = { version = "0.13.0", features = ["send", "receive", "base64", "v2"] }
 payjoin = { git= "https://github.com/payjoin/rust-payjoin", branch = "master",  features = ["send", "receive", "base64", "v2"] }
 uniffi = { version = "0.26.1" }
 thiserror = "1.0.47"
 ohttp = { version = "0.5.1" }
+
 [[bin]]
 name = "uniffi-bindgen"
 path = "uniffi-bindgen.rs"

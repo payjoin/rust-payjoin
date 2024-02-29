@@ -3,8 +3,8 @@ use std::io::Cursor;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use bdk::bitcoin::FeeRate;
 use payjoin::bitcoin::psbt::Psbt;
+use payjoin::bitcoin::FeeRate;
 use payjoin::receive as pdk;
 
 use crate::error::PayjoinError;

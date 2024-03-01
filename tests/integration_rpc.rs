@@ -7,7 +7,7 @@ use std::sync::Arc;
 use bdk::bitcoin::Transaction;
 use bitcoincore_rpc::bitcoincore_rpc_json::{AddressType, WalletProcessPsbtResult};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
-use log::debug;
+use bitcoind::bitcoincore_rpc;
 use payjoin_ffi::error::PayjoinError;
 use payjoin_ffi::receive::v1::{
     CanBroadcast, Headers, IsOutputKnown, IsScriptOwned, PayjoinProposal,
@@ -27,24 +27,23 @@ fn v1_to_v1() -> Result<(), BoxError> {
     let pj_receiver_address =
         receiver.get_raw_change_address(Some(AddressType::Bech32)).unwrap().assume_checked();
     let pj_uri_string =
-        format!("{}?amount={}&pj=https://example.com", pj_receiver_address.to_qr_uri(), 1);
+        format!("{}?amount={}&pj=https://example.com", pj_receiver_address.to_qr_uri(), 0.0083285);
     let pj_uri = Uri::from_str(pj_uri_string).unwrap();
 
     // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
     let mut outputs = HashMap::with_capacity(1);
     outputs.insert(
         pj_uri.address(),
-        bitcoincore_rpc::bitcoin::Amount::from_btc(
-            (pj_uri.amount().unwrap().clone() / 100000000) as f64,
-        )
-        .unwrap(),
+        bitcoincore_rpc::bitcoin::Amount::from_sat(pj_uri.amount().unwrap().clone()),
     );
-    println!("outputs: {:?}", outputs);
+
     let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
         lock_unspent: Some(true),
         fee_rate: Some(bitcoincore_rpc::bitcoin::Amount::from_sat(2000)),
         ..Default::default()
     };
+    println!("outputs: {:?}", outputs);
+    println!("sender balance: {:?}", sender.get_balance(None, None));
     let psbt = sender
         .wallet_create_funded_psbt(
             &[], // inputs
@@ -77,7 +76,6 @@ fn v1_to_v1() -> Result<(), BoxError> {
         (*ctx).process_response(response?.as_bytes().to_vec()).expect("process error");
     let tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt);
     let txid = broadcast_tx(&sender, tx);
-
     println!("Broadcast txid: {:?}", txid);
     Ok(())
 }
@@ -125,7 +123,8 @@ fn handle_pj_proposal(proposal: UncheckedProposal, receiver: Arc<Client>) -> Arc
         .iter()
         .map(|i| (i.amount.to_sat(), OutPoint { txid: i.txid.to_string(), vout: i.vout }))
         .collect();
-    let selected_outpoint = payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
+    let selected_outpoint =
+        payjoin.try_preserving_privacy(candidate_inputs).expect("try_preserving_privacy error");
     let selected_utxo = available_inputs
         .iter()
         .find(|i| {
@@ -160,7 +159,7 @@ fn init_rpc_sender_receiver() -> (Client, Client) {
     let sender = get_client("sender");
     let sender_address = receiver.get_new_address(None, None).unwrap().assume_checked();
     let receiver_address = receiver.get_new_address(None, None).unwrap().assume_checked();
-    receiver.generate_to_address(1, &receiver_address).unwrap();
+    receiver.generate_to_address(11, &receiver_address).unwrap();
     sender.generate_to_address(101, &sender_address).unwrap();
     (sender, receiver)
 }
@@ -181,7 +180,7 @@ fn extract_pj_tx(sender: &Client, psbt: String) -> Transaction {
     let payjoin_psbt =
         payjoin::bitcoin::psbt::PartiallySignedTransaction::from_str(payjoin_psbt.as_str())
             .unwrap();
-    debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
+    eprintln!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
     payjoin_psbt.extract_tx()
 }
 fn get_client(wallet_name: &str) -> Client {
@@ -192,8 +191,7 @@ fn get_client(wallet_name: &str) -> Client {
 struct TestBroadcast(Arc<Client>);
 
 impl CanBroadcast for TestBroadcast {
-    fn callback(&self, tx: Vec<u8>) -> Result<bool, PayjoinError> {
-        debug!("{:?}", tx);
+    fn callback(&self, _tx: Vec<u8>) -> Result<bool, PayjoinError> {
         Ok(true)
     }
 }

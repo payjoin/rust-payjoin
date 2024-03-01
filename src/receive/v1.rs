@@ -152,6 +152,18 @@ impl MaybeInputsOwned {
             .map_err(|e| e.into())
             .map(|e| Arc::new(e.into()))
     }
+    pub fn check_inputs_not_owned_with_callback(
+        &self,
+        is_owned: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
+    ) -> Result<Arc<MaybeMixedInputScripts>, PayjoinError> {
+        self.0
+            .clone()
+            .check_inputs_not_owned(|input| {
+                is_owned(&input.to_bytes()).map_err(|e| payjoin::receive::Error::Server(e.into()))
+            })
+            .map_err(|e| e.into())
+            .map(|e| Arc::new(e.into()))
+    }
 }
 
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
@@ -209,6 +221,19 @@ impl MaybeInputsSeen {
             .map_err(|e| e.into())
             .map(|e| Arc::new(e.into()))
     }
+
+    pub fn check_no_inputs_seen_before_with_callback(
+        &self,
+        is_known: impl Fn(&OutPoint) -> Result<bool, PayjoinError>,
+    ) -> Result<Arc<OutputsUnknown>, PayjoinError> {
+        self.0
+            .clone()
+            .check_no_inputs_seen_before(|outpoint| {
+                is_known(&outpoint.clone().into()).map_err(|e| pdk::Error::Server(e.into()))
+            })
+            .map_err(|e| e.into())
+            .map(|e| Arc::new(e.into()))
+    }
 }
 
 /// The receiver has not yet identified which outputs belong to the receiver.
@@ -238,6 +263,19 @@ impl OutputsUnknown {
             })
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
+    }
+    pub fn identify_receiver_outputs_with_callback(
+        &self,
+        is_receiver_output: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
+    ) -> Result<Arc<ProvisionalProposal>, PayjoinError> {
+        self.0
+            .clone()
+            .identify_receiver_outputs(|input| {
+                is_receiver_output(&input.to_bytes())
+                    .map_err(|e| payjoin::receive::Error::Server(e.into()))
+            })
+            .map_err(|e| e.into())
+            .map(|e| Arc::new(e.into()))
     }
 }
 
@@ -299,10 +337,10 @@ impl ProvisionalProposal {
                 .into_iter()
                 .map(|(key, value)| (payjoin::bitcoin::Amount::from_sat(key), value.into()))
                 .collect();
-        match self.mutex_guard().try_preserving_privacy(candidate_inputs) {
-            Ok(e) => Ok(OutPoint { txid: e.txid.to_string(), vout: e.vout }),
-            Err(e) => Err(PayjoinError::SelectionError { message: format!("{:?}", e) }),
-        }
+        self.mutex_guard()
+            .try_preserving_privacy(candidate_inputs)
+            .map_err(|e| PayjoinError::SelectionError { message: format!("{:?}", e) })
+            .map(|o| o.into())
     }
 
     pub fn finalize_proposal(
@@ -316,6 +354,25 @@ impl ProvisionalProposal {
                 |psbt| {
                     process_psbt
                         .callback(psbt.to_string())
+                        .map(|e| Psbt::from_str(e.as_str()).expect("Invalid process_psbt "))
+                        .map_err(|e| pdk::Error::Server(e.into()))
+                },
+                min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x)),
+            )
+            .map(|e| Arc::new(e.into()))
+            .map_err(|e| e.into())
+    }
+
+    pub fn finalize_proposal_with_callback(
+        &self,
+        process_psbt: impl Fn(String) -> Result<String, PayjoinError>,
+        min_feerate_sat_per_vb: Option<u64>,
+    ) -> Result<Arc<PayjoinProposal>, PayjoinError> {
+        self.mutex_guard()
+            .clone()
+            .finalize_proposal(
+                |psbt| {
+                    process_psbt(psbt.to_string())
                         .map(|e| Psbt::from_str(e.as_str()).expect("Invalid process_psbt "))
                         .map_err(|e| pdk::Error::Server(e.into()))
                 },
@@ -357,9 +414,6 @@ impl PayjoinProposal {
     }
     pub fn psbt(&self) -> String {
         self.0.psbt().to_string()
-    }
-    pub fn psbt2(&self) -> Psbt {
-        self.0.psbt().clone()
     }
 }
 

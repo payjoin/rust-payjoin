@@ -3,7 +3,6 @@ use std::fmt::Debug;
 use payjoin::bitcoin::psbt::PsbtParseError;
 use payjoin::receive::{RequestError, SelectionError};
 use payjoin::send::{CreateRequestError, ResponseError as PdkResponseError, ValidationError};
-use url::ParseError;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PayjoinError {
@@ -75,7 +74,6 @@ macro_rules! impl_from_error {
 }
 
 impl_from_error! {
-    ParseError => UrlError,
     ohttp::Error => OhttpError,
     PsbtParseError => PsbtParseError,
     payjoin::bitcoin::consensus::encode::Error => TransactionError,

@@ -120,7 +120,7 @@ impl Serialize for Enrolled {
         state.serialize_field("directory", &self.directory.to_string())?;
         state.serialize_field("ohttp_keys", &self.ohttp_keys)?;
         state.serialize_field("ohttp_relay", &self.ohttp_relay.to_string())?;
-        state.serialize_field("s", &self.s.secret_key().secret_bytes())?;
+        state.serialize_field("s", &self.s)?;
 
         state.end()
     }
@@ -136,43 +136,13 @@ impl<'de> Deserialize<'de> for Enrolled {
     where
         D: Deserializer<'de>,
     {
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "snake_case")]
         enum Field {
-            DirectoryUrl,
+            Directory,
             OhttpKeys,
             OhttpRelay,
             S,
-        }
-
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                struct FieldVisitor;
-
-                impl<'de> Visitor<'de> for FieldVisitor {
-                    type Value = Field;
-
-                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                        formatter.write_str("`directory`, `ohttp_keys`, `ohttp_relay`, or `s`")
-                    }
-
-                    fn visit_str<E>(self, value: &str) -> Result<Field, E>
-                    where
-                        E: de::Error,
-                    {
-                        match value {
-                            "directory" => Ok(Field::DirectoryUrl),
-                            "ohttp_keys" => Ok(Field::OhttpKeys),
-                            "ohttp_relay" => Ok(Field::OhttpRelay),
-                            "s" => Ok(Field::S),
-                            _ => Err(de::Error::unknown_field(value, FIELDS)),
-                        }
-                    }
-                }
-
-                deserializer.deserialize_identifier(FieldVisitor)
-            }
         }
 
         struct EnrolledVisitor;
@@ -194,7 +164,7 @@ impl<'de> Deserialize<'de> for Enrolled {
                 let mut s = None;
                 while let Some(key) = map.next_key()? {
                     match key {
-                        Field::DirectoryUrl => {
+                        Field::Directory => {
                             if directory.is_some() {
                                 return Err(de::Error::duplicate_field("directory"));
                             }
@@ -219,12 +189,7 @@ impl<'de> Deserialize<'de> for Enrolled {
                             if s.is_some() {
                                 return Err(de::Error::duplicate_field("s"));
                             }
-                            let s_bytes: Vec<u8> = map.next_value()?;
-                            let secp = bitcoin::secp256k1::Secp256k1::new();
-                            s = Some(
-                                bitcoin::secp256k1::KeyPair::from_seckey_slice(&secp, &s_bytes)
-                                    .map_err(de::Error::custom)?,
-                            );
+                            s = Some(map.next_value()?);
                         }
                     }
                 }

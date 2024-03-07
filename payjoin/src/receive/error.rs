@@ -7,9 +7,6 @@ pub enum Error {
     BadRequest(RequestError),
     // To be returned as HTTP 500
     Server(Box<dyn error::Error>),
-    // V2 d/encapsulation failed
-    #[cfg(feature = "v2")]
-    V2(crate::v2::Error),
 }
 
 impl fmt::Display for Error {
@@ -17,8 +14,6 @@ impl fmt::Display for Error {
         match &self {
             Self::BadRequest(e) => e.fmt(f),
             Self::Server(e) => write!(f, "Internal Server Error: {}", e),
-            #[cfg(feature = "v2")]
-            Self::V2(e) => e.fmt(f),
         }
     }
 }
@@ -28,8 +23,6 @@ impl error::Error for Error {
         match &self {
             Self::BadRequest(_) => None,
             Self::Server(e) => Some(e.as_ref()),
-            #[cfg(feature = "v2")]
-            Self::V2(e) => Some(e),
         }
     }
 }
@@ -44,7 +37,7 @@ impl From<InternalRequestError> for Error {
 
 #[cfg(feature = "v2")]
 impl From<crate::v2::Error> for Error {
-    fn from(e: crate::v2::Error) -> Self { Error::V2(e) }
+    fn from(e: crate::v2::Error) -> Self { Error::Server(Box::new(e)) }
 }
 
 /// Error that may occur when the request from sender is malformed.

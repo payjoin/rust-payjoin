@@ -77,7 +77,8 @@ impl AppTrait for App {
                 &self.config.ohttp_config,
                 self.config.ohttp_relay.clone(),
             );
-            let (req, ctx) = enroller.extract_req()?;
+            let (req, ctx) =
+                enroller.extract_req().map_err(|e| anyhow!("Failed to extract request {}", e))?;
             log::debug!("Enrolling receiver");
             let http = http_agent()?;
             let ohttp_response = spawn_blocking(move || {

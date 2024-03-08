@@ -51,7 +51,7 @@ pj_endpoint="https://payjo.in"
 # payjo.in's ohttp_config with which ohttp requests will be encrypted
 ohttp_config="AQAgQB9BwO5taMV6Skp4dl9HpFPw5SNUnnd-imKkUm8P5EIABAABAAM"
  # an ohttp relay with ingress to payjo.in
-ohttp_proxy="https://ohttp-relay.obscuravpn.io/payjoin"
+ohttp_relay="https://ohttp-relay.obscuravpn.io/payjoin"
 ```
 
 ### Asynchronous Operation
@@ -83,7 +83,7 @@ From the directory you'll run payjoin-cli, assuming "boom" is the name of the re
 RUST_LOG=debug cargo run --features=danger-local-https -- -r "http://localhost:18443/wallet/boom" receive 10000
 ```
 
-The default configuration listens for payjoin requests at `http://localhost:3000` and expects you to proxy https requests there.
+The default configuration listens for payjoin requests at `http://localhost:3000` and expects you to relay https requests there.
 Payjoin requires a secure endpoint, either https and .onion are valid. In order to receive payjoin in a local testing environment one may enable the  `danger-local-https` feature which will provision a self-signed certificate and host the `https://localhost:3000` endpoint. Emphasis on HTTP**S**.
 
 This will generate a payjoin capable bip21 URI with which to accept payjoin:

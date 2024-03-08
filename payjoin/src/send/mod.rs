@@ -317,11 +317,11 @@ impl RequestContext {
     /// In order to support polling, this may need to be called many times to be encrypted with
     /// new unique nonces to make independent OHTTP requests.
     ///
-    /// The `ohttp_proxy` merely passes the encrypted payload to the ohttp gateway of the receiver
+    /// The `ohttp_relay` merely passes the encrypted payload to the ohttp gateway of the receiver
     #[cfg(feature = "v2")]
     pub fn extract_v2(
         &mut self,
-        ohttp_proxy: Url,
+        ohttp_relay: Url,
     ) -> Result<(Request, ContextV2), CreateRequestError> {
         let rs_base64 = crate::v2::subdir(self.endpoint.as_str()).to_string();
         log::debug!("rs_base64: {:?}", rs_base64);
@@ -349,9 +349,9 @@ impl RequestContext {
             Some(&body),
         )
         .map_err(InternalCreateRequestError::V2)?;
-        log::debug!("ohttp_proxy_url: {:?}", ohttp_proxy);
+        log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
         Ok((
-            Request { url: ohttp_proxy, body },
+            Request { url: ohttp_relay, body },
             // this method may be called more than once to re-construct the ohttp, therefore we must clone (or TODO memoize)
             ContextV2 {
                 context_v1: ContextV1 {
@@ -575,7 +575,7 @@ impl ContextV2 {
     /// Decodes and validates the response.
     ///
     /// Call this method with response from receiver to continue BIP-??? flow.
-    /// A successful response can either be None if the relay has not response yet or Some(Psbt).
+    /// A successful response can either be None if the directory has not response yet or Some(Psbt).
     ///
     /// If the response is some valid PSBT you should sign and broadcast.
     #[inline]

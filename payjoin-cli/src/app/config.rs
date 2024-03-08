@@ -16,7 +16,7 @@ pub struct AppConfig {
     #[cfg(feature = "v2")]
     pub ohttp_config: String,
     #[cfg(feature = "v2")]
-    pub ohttp_proxy: Url,
+    pub ohttp_relay: Url,
 
     // receive-only
     pub pj_host: SocketAddr,
@@ -60,10 +60,10 @@ impl AppConfig {
                 "ohttp_config",
                 matches.get_one::<String>("ohttp_config").map(|s| s.as_str()),
             )?
-            .set_default("ohttp_proxy", "")?
+            .set_default("ohttp_relay", "")?
             .set_override_option(
-                "ohttp_proxy",
-                matches.get_one::<Url>("ohttp_proxy").map(|s| s.as_str()),
+                "ohttp_relay",
+                matches.get_one::<Url>("ohttp_relay").map(|s| s.as_str()),
             )?;
 
         let builder = match matches.subcommand() {

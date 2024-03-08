@@ -14,7 +14,7 @@ use tracing::{debug, error, info, trace};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
-const DEFAULT_RELAY_PORT: &str = "8080";
+const DEFAULT_DIR_PORT: &str = "8080";
 const DEFAULT_DB_HOST: &str = "localhost:5432";
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_BUFFER_SIZE: usize = 65536;
@@ -29,8 +29,8 @@ use crate::db::DbPool;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
 
-    let relay_port = env::var("PJ_RELAY_PORT").unwrap_or_else(|_| DEFAULT_RELAY_PORT.to_string());
-    let timeout_secs = env::var("PJ_RELAY_TIMEOUT_SECS")
+    let dir_port = env::var("PJ_DIR_PORT").unwrap_or_else(|_| DEFAULT_DIR_PORT.to_string());
+    let timeout_secs = env::var("PJ_DIR_TIMEOUT_SECS")
         .map(|s| s.parse().expect("Invalid timeout"))
         .unwrap_or(DEFAULT_TIMEOUT_SECS);
     let timeout = std::time::Duration::from_secs(timeout_secs);
@@ -48,10 +48,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Parse the bind address using the provided port
-    let bind_addr_str = format!("0.0.0.0:{}", relay_port);
+    let bind_addr_str = format!("0.0.0.0:{}", dir_port);
     let bind_addr: SocketAddr = bind_addr_str.parse()?;
     let server = init_server(&bind_addr)?.serve(make_svc);
-    info!("Serverless payjoin relay awaiting HTTP connection at {}", bind_addr_str);
+    info!("Payjoin Directory awaiting HTTP connection at {}", bind_addr_str);
     Ok(server.await?)
 }
 
@@ -81,7 +81,7 @@ fn init_server(bind_addr: &SocketAddr) -> Result<Builder<hyper_rustls::TlsAccept
     let cert_der = cert.serialize_der()?;
     let mut local_cert_path = std::env::temp_dir();
     local_cert_path.push(LOCAL_CERT_FILE);
-    println!("RELAY CERT PATH {:?}", &local_cert_path);
+    println!("DIRECTORY CERT PATH {:?}", &local_cert_path);
     let mut file = std::fs::File::create(local_cert_path)?;
     file.write_all(&cert_der)?;
     let key = PrivateKey(cert.serialize_private_key_der());

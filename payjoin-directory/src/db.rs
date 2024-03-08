@@ -48,7 +48,7 @@ async fn init_postgres(db_host: String) -> Result<PgPool> {
         .await?;
     // Create table if not exist yet
     let (table_exists,): (bool,) =
-        sqlx::query_as("SELECT EXISTS (SELECT FROM pg_tables WHERE tablename = 'relay')")
+        sqlx::query_as("SELECT EXISTS (SELECT FROM pg_tables WHERE tablename = 'directory')")
             .fetch_one(&pool)
             .await?;
 
@@ -56,7 +56,7 @@ async fn init_postgres(db_host: String) -> Result<PgPool> {
         // Create the table
         sqlx::query(
             r#"
-            CREATE TABLE relay (
+            CREATE TABLE directory (
                 pubkey_id VARCHAR PRIMARY KEY,
                 req BYTEA,
                 res BYTEA
@@ -87,8 +87,8 @@ async fn init_postgres(db_host: String) -> Result<PgPool> {
         // Create triggers
         sqlx::query(
             r#"
-            CREATE TRIGGER relay_req_trigger
-            AFTER INSERT OR UPDATE OF req ON relay
+            CREATE TRIGGER directory_req_trigger
+            AFTER INSERT OR UPDATE OF req ON directory
             FOR EACH ROW
             EXECUTE FUNCTION notify_change('req');
         "#,
@@ -98,8 +98,8 @@ async fn init_postgres(db_host: String) -> Result<PgPool> {
 
         sqlx::query(
             r#"
-            CREATE TRIGGER relay_res_trigger
-            AFTER INSERT OR UPDATE OF res ON relay
+            CREATE TRIGGER directory_res_trigger
+            AFTER INSERT OR UPDATE OF res ON directory
             FOR EACH ROW
             EXECUTE FUNCTION notify_change('res');
         "#,
@@ -118,7 +118,7 @@ async fn push(
 ) -> Result<(), sqlx::Error> {
     // Use an UPSERT operation to insert or update the record
     let query = format!(
-        "INSERT INTO relay (pubkey_id, {}) VALUES ($1, $2) \
+        "INSERT INTO directory (pubkey_id, {}) VALUES ($1, $2) \
         ON CONFLICT (pubkey_id) DO UPDATE SET {} = EXCLUDED.{}",
         channel_type, channel_type, channel_type
     );
@@ -144,7 +144,7 @@ async fn peek(
 ) -> Result<Vec<u8>, sqlx::Error> {
     // Step 1: Attempt to fetch existing content for the given pubkey_id and channel_type
     match sqlx::query_as::<Postgres, (Option<Vec<u8>>,)>(&format!(
-        "SELECT {} FROM relay WHERE pubkey_id = $1",
+        "SELECT {} FROM directory WHERE pubkey_id = $1",
         channel_type
     ))
     .bind(pubkey_id)
@@ -175,7 +175,7 @@ async fn peek(
         debug!("Received notification: {:?}", notification);
         if notification.channel() == channel_name {
             let row: (Vec<u8>,) =
-                sqlx::query_as(&format!("SELECT {} FROM relay WHERE pubkey_id = $1", channel_type))
+                sqlx::query_as(&format!("SELECT {} FROM directory WHERE pubkey_id = $1", channel_type))
                     .bind(pubkey_id)
                     .fetch_one(pool)
                     .await?;

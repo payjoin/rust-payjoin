@@ -575,7 +575,7 @@ impl ContextV2 {
     /// Decodes and validates the response.
     ///
     /// Call this method with response from receiver to continue BIP-??? flow.
-    /// A successful response can either be None if the relay has not response yet or Some(Psbt).
+    /// A successful response can either be None if the directory has not response yet or Some(Psbt).
     ///
     /// If the response is some valid PSBT you should sign and broadcast.
     #[inline]

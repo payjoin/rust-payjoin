@@ -72,7 +72,7 @@ impl AppTrait for App {
         use payjoin::receive::v2::Enroller;
 
         let mut enrolled = if !is_retry {
-            let mut enroller = Enroller::from_relay_config(
+            let mut enroller = Enroller::from_directory_config(
                 self.config.pj_endpoint.clone(),
                 &self.config.ohttp_config,
                 self.config.ohttp_proxy.clone(),

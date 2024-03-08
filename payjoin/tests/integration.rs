@@ -204,7 +204,7 @@ mod integration {
 
         use super::*;
 
-        static PJ_RELAY: Lazy<Url> =
+        static PJ_DIR: Lazy<Url> =
             Lazy::new(|| Url::parse("https://localhost:8088").expect("Invalid Url"));
         const BAD_OHTTP_KEYS: &str = "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM";
         static OH_RELAY: Lazy<Url> =
@@ -216,16 +216,16 @@ mod integration {
             std::env::set_var("RUST_LOG", "debug");
             let _ = env_logger::builder().is_test(true).try_init();
             let docker = Cli::default();
-            let (mut relay, _db) = init_relay(&docker).await;
+            let (mut directory, _db) = init_directory(&docker).await;
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
 
             let ohttp_config = fetch_ohttp_config().await?;
 
             // **********************
             // Inside the Receiver:
-            // Try enroll with bad relay ohttp-keys
-            let mut bad_enroller = Enroller::from_relay_config(
-                PJ_RELAY.to_owned(),
+            // Try enroll with bad directory ohttp-keys
+            let mut bad_enroller = Enroller::from_directory_config(
+                PJ_DIR.to_owned(),
                 &BAD_OHTTP_KEYS,
                 OH_RELAY.to_owned(),
             );
@@ -238,7 +238,7 @@ mod integration {
                 res.unwrap_err().into_response().unwrap().content_type()
                     == "application/problem+json"
             );
-            let mut enrolled = enroll_with_relay(&ohttp_config).await?;
+            let mut enrolled = enroll_with_directory(&ohttp_config).await?;
 
             let pj_uri_string = create_receiver_pj_uri_string(
                 &receiver,
@@ -283,7 +283,7 @@ mod integration {
 
             // POST payjoin
             let proposal = enrolled.process_res(response.into_reader(), ctx)?.unwrap();
-            let mut payjoin_proposal = handle_relay_proposal(receiver, proposal);
+            let mut payjoin_proposal = handle_directory_proposal(receiver, proposal);
             let (req, ctx) = payjoin_proposal.extract_v2_req()?;
             let response =
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
@@ -307,8 +307,8 @@ mod integration {
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
             log::info!("sent");
-            relay.kill().await?;
-            let output = &relay.wait_with_output().await?;
+            directory.kill().await?;
+            let output = &directory.wait_with_output().await?;
             log::info!("Status: {}", output.status);
             Ok(())
         }
@@ -319,12 +319,12 @@ mod integration {
             std::env::set_var("RUST_LOG", "debug");
             let _ = env_logger::builder().is_test(true).try_init();
             let docker = Cli::default();
-            let (mut relay, _db) = init_relay(&docker).await;
+            let (mut directory, _db) = init_directory(&docker).await;
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
 
             let ohttp_config = fetch_ohttp_config().await?;
 
-            let mut enrolled = enroll_with_relay(&ohttp_config).await?;
+            let mut enrolled = enroll_with_directory(&ohttp_config).await?;
 
             let pj_uri_string = create_receiver_pj_uri_string(
                 &receiver,
@@ -381,9 +381,9 @@ mod integration {
                         panic!("Unexpected response status: {}", response.status())
                     }
                 };
-                debug!("handle relay response");
+                debug!("handle directory response");
                 let proposal = enrolled.process_res(response, ctx).unwrap().unwrap();
-                let mut payjoin_proposal = handle_relay_proposal(receiver, proposal);
+                let mut payjoin_proposal = handle_directory_proposal(receiver, proposal);
                 // Respond with payjoin psbt within the time window the sender is willing to wait
                 // this response would be returned as http response to the sender
                 let (req, ctx) = payjoin_proposal.extract_v2_req().unwrap();
@@ -394,7 +394,7 @@ mod integration {
                 let mut res = Vec::new();
                 response.into_reader().read_to_end(&mut res)?;
                 let _response = payjoin_proposal.deserialize_res(res, ctx).unwrap();
-                debug!("Post payjoin_psbt to relay");
+                debug!("Post payjoin_psbt to directory");
                 // assert!(_response.status() == 204);
                 Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
             });
@@ -422,34 +422,34 @@ mod integration {
             sender.send_raw_transaction(&payjoin_tx)?;
             log::info!("sent");
             assert!(receiver_loop.await.is_ok(), "The spawned task panicked or returned an error");
-            relay.kill().await?;
-            let output = &relay.wait_with_output().await?;
+            directory.kill().await?;
+            let output = &directory.wait_with_output().await?;
             log::info!("Status: {}", output.status);
             Ok(())
         }
 
-        async fn init_relay<'a>(docker: &'a Cli) -> (Child, Container<'a, Postgres>) {
-            println!("Initializing relay server");
-            env::set_var("PJ_RELAY_PORT", "8088");
-            env::set_var("PJ_RELAY_TIMEOUT_SECS", "2");
+        async fn init_directory<'a>(docker: &'a Cli) -> (Child, Container<'a, Postgres>) {
+            println!("Initializing directory server");
+            env::set_var("PJ_DIR_PORT", "8088");
+            env::set_var("PJ_DIR_TIMEOUT_SECS", "2");
             let postgres = docker.run(Postgres::default());
             env::set_var("PJ_DB_HOST", format!("127.0.0.1:{}", postgres.get_host_port_ipv4(5432)));
             println!("Postgres running on {}", postgres.get_host_port_ipv4(5432));
-            compile_payjoin_relay().await.wait().await.unwrap();
+            compile_payjoin_directory().await.wait().await.unwrap();
             let workspace_root = env::var("CARGO_MANIFEST_DIR").unwrap();
-            let binary_path = format!("{}/../target/debug/payjoin-relay", workspace_root);
+            let binary_path = format!("{}/../target/debug/payjoin-directory", workspace_root);
             let mut command = Command::new(binary_path);
             command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
             (command.spawn().unwrap(), postgres)
         }
 
-        async fn compile_payjoin_relay() -> Child {
-            // set payjoin relay target dir to payjoin-relay
+        async fn compile_payjoin_directory() -> Child {
+            // set payjoin directory target dir to payjoin-directory
             let mut command = Command::new("cargo");
             command.stdout(Stdio::inherit()).stderr(Stdio::inherit()).args([
                 "build",
                 "--package",
-                "payjoin-relay",
+                "payjoin-directory",
                 "--features",
                 "danger-local-https",
             ]);
@@ -461,7 +461,7 @@ mod integration {
         async fn fetch_ohttp_config() -> Result<String, BoxError> {
             use std::io::Read;
             let resp = spawn_blocking(move || {
-                http_agent().get(&format!("{}ohttp-keys", PJ_RELAY.as_str())).call()
+                http_agent().get(&format!("{}ohttp-keys", PJ_DIR.as_str())).call()
             })
             .await??;
             debug!("GET'd ohttp-keys");
@@ -477,9 +477,9 @@ mod integration {
             ))
         }
 
-        async fn enroll_with_relay(ohttp_config: &str) -> Result<Enrolled, BoxError> {
-            let mut enroller = Enroller::from_relay_config(
-                PJ_RELAY.to_owned(),
+        async fn enroll_with_directory(ohttp_config: &str) -> Result<Enrolled, BoxError> {
+            let mut enroller = Enroller::from_directory_config(
+                PJ_DIR.to_owned(),
                 &ohttp_config,
                 OH_RELAY.to_owned(),
             );
@@ -512,7 +512,7 @@ mod integration {
             .to_string())
         }
 
-        fn handle_relay_proposal(
+        fn handle_directory_proposal(
             receiver: bitcoincore_rpc::Client,
             proposal: UncheckedProposal,
         ) -> PayjoinProposal {

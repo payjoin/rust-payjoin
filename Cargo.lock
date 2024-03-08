@@ -1818,7 +1818,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "payjoin-relay"
+name = "payjoin-directory"
 version = "0.0.1"
 dependencies = [
  "anyhow",

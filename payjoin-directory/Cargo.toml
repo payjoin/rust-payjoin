@@ -1,11 +1,11 @@
 [package]
-name = "payjoin-relay"
+name = "payjoin-directory"
 version = "0.0.1"
 authors = ["Dan Gould <d@ngould.dev>"]
-description = "A relay server for Payjoin V2 coordination"
+description = "A directory server for Payjoin V2 coordination"
 repository = "https://github.com/payjoin/rust-payjoin"
 readme = "README.md"
-keywords = ["bip78", "payjoin", "bitcoin", "relay"]
+keywords = ["bip78", "bip77", "payjoin", "bitcoin", "relay"]
 categories = ["cryptography::cryptocurrencies", "network-programming"]
 license = "MITNFA"
 edition = "2021"

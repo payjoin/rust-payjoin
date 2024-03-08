@@ -1,30 +1,59 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use bitcoin::{self, base64};
 use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
 use hyper::server::conn::AddrIncoming;
 use hyper::server::Builder;
+use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode, Uri};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
-pub const DEFAULT_DIR_PORT: &str = "8080";
+pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:5432";
 pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
-pub const MAX_BUFFER_SIZE: usize = 65536;
+
+const MAX_BUFFER_SIZE: usize = 65536;
 
 const V1_REJECT_RES_JSON: &str =
     r#"{{"errorCode": "original-psbt-rejected ", "message": "Body is not a string"}}"#;
 const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message": "V2 receiver offline. V1 sends require synchronous communications."}}"#;
 
-pub mod db;
+mod db;
 use crate::db::DbPool;
 
-pub fn init_logging() {
+pub async fn listen_tcp(
+    port: u16,
+    db_host: String,
+    timeout: Duration,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_logging();
+
+    let pool = DbPool::new(timeout, db_host).await?;
+    let ohttp = Arc::new(Mutex::new(init_ohttp()?));
+    let make_svc = make_service_fn(|_| {
+        let pool = pool.clone();
+        let ohttp = ohttp.clone();
+        async move {
+            let handler = move |req| handle_ohttp_gateway(req, pool.clone(), ohttp.clone());
+            Ok::<_, hyper::Error>(service_fn(handler))
+        }
+    });
+
+    // Parse the bind address using the provided port
+    let bind_addr_str = format!("0.0.0.0:{}", port);
+    let bind_addr: SocketAddr = bind_addr_str.parse()?;
+    let server = init_server(&bind_addr)?.serve(make_svc);
+    info!("Payjoin Directory awaiting HTTP connection at {}", bind_addr_str);
+    Ok(server.await?)
+}
+
+fn init_logging() {
     let env_filter =
         EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy();
 
@@ -34,12 +63,12 @@ pub fn init_logging() {
 }
 
 #[cfg(not(feature = "danger-local-https"))]
-pub fn init_server(bind_addr: &SocketAddr) -> Result<Builder<AddrIncoming>> {
+fn init_server(bind_addr: &SocketAddr) -> Result<Builder<AddrIncoming>> {
     Ok(Server::bind(bind_addr))
 }
 
 #[cfg(feature = "danger-local-https")]
-pub fn init_server(bind_addr: &SocketAddr) -> Result<Builder<hyper_rustls::TlsAcceptor>> {
+fn init_server(bind_addr: &SocketAddr) -> Result<Builder<hyper_rustls::TlsAcceptor>> {
     const LOCAL_CERT_FILE: &str = "localhost.der";
 
     use std::io::Write;
@@ -64,7 +93,7 @@ pub fn init_server(bind_addr: &SocketAddr) -> Result<Builder<hyper_rustls::TlsAc
     Ok(Server::builder(acceptor))
 }
 
-pub fn init_ohttp() -> Result<ohttp::Server> {
+fn init_ohttp() -> Result<ohttp::Server> {
     use ohttp::hpke::{Aead, Kdf, Kem};
     use ohttp::{KeyId, SymmetricSuite};
 
@@ -84,7 +113,7 @@ pub fn init_ohttp() -> Result<ohttp::Server> {
     Ok(ohttp::Server::new(server_config)?)
 }
 
-pub async fn handle_ohttp_gateway(
+async fn handle_ohttp_gateway(
     req: Request<Body>,
     pool: DbPool,
     ohttp: Arc<Mutex<ohttp::Server>>,

@@ -174,11 +174,13 @@ async fn peek(
         let notification = listener.recv().await?;
         debug!("Received notification: {:?}", notification);
         if notification.channel() == channel_name {
-            let row: (Vec<u8>,) =
-                sqlx::query_as(&format!("SELECT {} FROM directory WHERE pubkey_id = $1", channel_type))
-                    .bind(pubkey_id)
-                    .fetch_one(pool)
-                    .await?;
+            let row: (Vec<u8>,) = sqlx::query_as(&format!(
+                "SELECT {} FROM directory WHERE pubkey_id = $1",
+                channel_type
+            ))
+            .bind(pubkey_id)
+            .fetch_one(pool)
+            .await?;
 
             let updated_content = row.0;
             if !updated_content.is_empty() {

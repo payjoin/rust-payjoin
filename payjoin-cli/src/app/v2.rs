@@ -75,7 +75,7 @@ impl AppTrait for App {
             let mut enroller = Enroller::from_directory_config(
                 self.config.pj_endpoint.clone(),
                 &self.config.ohttp_config,
-                self.config.ohttp_proxy.clone(),
+                self.config.ohttp_relay.clone(),
             );
             let (req, ctx) = enroller.extract_req()?;
             log::debug!("Enrolling receiver");
@@ -157,7 +157,7 @@ impl App {
 
     async fn long_poll_post(&self, req_ctx: &mut payjoin::send::RequestContext) -> Result<Psbt> {
         loop {
-            let (req, ctx) = req_ctx.extract_v2(self.config.ohttp_proxy.clone())?;
+            let (req, ctx) = req_ctx.extract_v2(self.config.ohttp_relay.clone())?;
             println!("Sending fallback request to {}", &req.url);
             let http = http_agent()?;
             let response = spawn_blocking(move || {

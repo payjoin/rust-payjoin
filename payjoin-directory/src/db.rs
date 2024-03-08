@@ -8,7 +8,7 @@ use tracing::debug;
 const RES_COLUMN: &str = "res";
 const REQ_COLUMN: &str = "req";
 
-pub(crate) struct DbPool {
+pub struct DbPool {
     pool: Pool<Postgres>,
     timeout: Duration,
 }

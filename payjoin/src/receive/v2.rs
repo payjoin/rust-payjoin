@@ -27,7 +27,7 @@ pub struct Request {
 
 #[derive(Debug, Clone)]
 pub struct V2Context {
-    directory_url: url::Url,
+    directory: url::Url,
     ohttp_keys: ohttp::KeyConfig,
     ohttp_relay: url::Url,
     s: bitcoin::secp256k1::KeyPair,
@@ -135,7 +135,7 @@ impl Serialize for Enrolled {
         use serde::ser::Error;
 
         let mut state = serializer.serialize_struct("Enrolled", 4)?;
-        state.serialize_field("directory_url", &self.directory.to_string())?;
+        state.serialize_field("directory", &self.directory.to_string())?;
         let ohttp_keys =
             self.ohttp_keys.encode().map_err(|_| S::Error::custom("ohttp_key encoding failed"))?;
         state.serialize_field("ohttp_keys", &ohttp_keys)?;
@@ -174,7 +174,7 @@ impl<'de> Deserialize<'de> for Enrolled {
                     type Value = Field;
 
                     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                        formatter.write_str("`directory_url`, `ohttp_keys`, `ohttp_relay`, or `s`")
+                        formatter.write_str("`directory`, `ohttp_keys`, `ohttp_relay`, or `s`")
                     }
 
                     fn visit_str<E>(self, value: &str) -> Result<Field, E>
@@ -182,7 +182,7 @@ impl<'de> Deserialize<'de> for Enrolled {
                         E: de::Error,
                     {
                         match value {
-                            "directory_url" => Ok(Field::DirectoryUrl),
+                            "directory" => Ok(Field::DirectoryUrl),
                             "ohttp_keys" => Ok(Field::OhttpConfig),
                             "ohttp_relay" => Ok(Field::OhttpRelay),
                             "s" => Ok(Field::S),
@@ -208,19 +208,18 @@ impl<'de> Deserialize<'de> for Enrolled {
             where
                 V: MapAccess<'de>,
             {
-                let mut directory_url = None;
+                let mut directory = None;
                 let mut ohttp_keys = None;
                 let mut ohttp_relay = None;
                 let mut s = None;
                 while let Some(key) = map.next_key()? {
                     match key {
                         Field::DirectoryUrl => {
-                            if directory_url.is_some() {
-                                return Err(de::Error::duplicate_field("directory_url"));
+                            if directory.is_some() {
+                                return Err(de::Error::duplicate_field("directory"));
                             }
                             let url_str: String = map.next_value()?;
-                            directory_url =
-                                Some(url::Url::parse(&url_str).map_err(de::Error::custom)?);
+                            directory = Some(url::Url::parse(&url_str).map_err(de::Error::custom)?);
                         }
                         Field::OhttpConfig => {
                             if ohttp_keys.is_some() {
@@ -253,18 +252,17 @@ impl<'de> Deserialize<'de> for Enrolled {
                         }
                     }
                 }
-                let directory_url =
-                    directory_url.ok_or_else(|| de::Error::missing_field("directory_url"))?;
+                let directory = directory.ok_or_else(|| de::Error::missing_field("directory"))?;
                 let ohttp_keys =
                     ohttp_keys.ok_or_else(|| de::Error::missing_field("ohttp_keys"))?;
                 let ohttp_relay =
                     ohttp_relay.ok_or_else(|| de::Error::missing_field("ohttp_relay"))?;
                 let s = s.ok_or_else(|| de::Error::missing_field("s"))?;
-                Ok(Enrolled { directory: directory_url, ohttp_keys, ohttp_relay, s })
+                Ok(Enrolled { directory, ohttp_keys, ohttp_relay, s })
             }
         }
 
-        const FIELDS: &[&str] = &["directory_url", "ohttp_config", "ohttp_relay", "s"];
+        const FIELDS: &[&str] = &["directory", "ohttp_config", "ohttp_relay", "s"];
         deserializer.deserialize_struct("Enrolled", FIELDS, EnrolledVisitor)
     }
 }
@@ -296,7 +294,7 @@ impl Enrolled {
         match String::from_utf8(response.clone()) {
             Ok(proposal) => {
                 let context = V2Context {
-                    directory_url: self.directory.clone(),
+                    directory: self.directory.clone(),
                     ohttp_keys: self.ohttp_keys.clone(),
                     ohttp_relay: self.ohttp_relay.clone(),
                     s: self.s,
@@ -309,7 +307,7 @@ impl Enrolled {
                 let (proposal, e) = crate::v2::decrypt_message_a(&response, self.s.secret_key())?;
                 log::debug!("Some e: {}", e);
                 let context = V2Context {
-                    directory_url: self.directory.clone(),
+                    directory: self.directory.clone(),
                     ohttp_keys: self.ohttp_keys.clone(),
                     ohttp_relay: self.ohttp_relay.clone(),
                     s: self.s,
@@ -578,7 +576,7 @@ impl PayjoinProposal {
         }?;
         let post_payjoin_target = format!(
             "{}{}/payjoin",
-            self.context.directory_url.as_str(),
+            self.context.directory.as_str(),
             subdirectory(&self.context.s.public_key())
         );
         log::debug!("Payjoin post target: {}", post_payjoin_target.as_str());

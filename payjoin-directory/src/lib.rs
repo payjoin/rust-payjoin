@@ -11,8 +11,6 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode, Uri};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
-use tracing_subscriber::filter::LevelFilter;
-use tracing_subscriber::EnvFilter;
 
 pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
@@ -32,8 +30,6 @@ pub async fn listen_tcp(
     db_host: String,
     timeout: Duration,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    init_logging();
-
     let pool = DbPool::new(timeout, db_host).await?;
     let ohttp = Arc::new(Mutex::new(init_ohttp()?));
     let make_svc = make_service_fn(|_| {
@@ -51,15 +47,6 @@ pub async fn listen_tcp(
     let server = init_server(&bind_addr)?.serve(make_svc);
     info!("Payjoin Directory awaiting HTTP connection at {}", bind_addr_str);
     Ok(server.await?)
-}
-
-fn init_logging() {
-    let env_filter =
-        EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy();
-
-    tracing_subscriber::fmt().with_target(true).with_level(true).with_env_filter(env_filter).init();
-
-    println!("Logging initialized");
 }
 
 #[cfg(not(feature = "danger-local-https"))]

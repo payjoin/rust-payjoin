@@ -17,7 +17,7 @@ mod integration {
     use payjoin::{PjUriBuilder, Uri};
     use url::Url;
 
-    type BoxError = Box<dyn std::error::Error>;
+    type BoxError = Box<dyn std::error::Error + 'static>;
 
     #[cfg(not(feature = "v2"))]
     mod v1 {
@@ -194,6 +194,7 @@ mod integration {
     mod v2 {
         use std::process::Stdio;
         use std::sync::Arc;
+        use std::time::Duration;
 
         use payjoin::receive::v2::{Enrolled, Enroller, PayjoinProposal, UncheckedProposal};
         use testcontainers::Container;
@@ -201,15 +202,45 @@ mod integration {
         use testcontainers_modules::testcontainers::clients::Cli;
         use tokio::process::{Child, Command};
         use tokio::task::spawn_blocking;
+        use ureq::{Error, Response};
 
         use super::*;
 
         static PJ_DIR: Lazy<Url> =
             Lazy::new(|| Url::parse("https://localhost:8088").expect("Invalid Url"));
-        const BAD_OHTTP_KEYS: &str = "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM";
         static OH_RELAY: Lazy<Url> =
             Lazy::new(|| Url::parse("https://localhost:8088").expect("Invalid Url"));
         const LOCAL_CERT_FILE: &str = "localhost.der";
+
+        #[tokio::test]
+        async fn test_bad_ohttp_keys() {
+            const BAD_OHTTP_KEYS: &str = "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM";
+
+            std::env::set_var("RUST_LOG", "debug");
+            let _ = env_logger::builder().is_test(true).try_init();
+            tokio::select!(
+                _ = new_init_directory() => assert!(false, "Directory server is long running"),
+                res = enroll_with_bad_keys(PJ_DIR.to_owned(), OH_RELAY.to_owned()) => {
+                    assert_eq!(
+                        res.unwrap_err().into_response().unwrap().content_type(),
+                        "application/problem+json"
+                    );
+                }
+            );
+
+            async fn enroll_with_bad_keys(
+                directory: Url,
+                ohttp_relay: Url,
+            ) -> Result<Response, Error> {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                let mut bad_enroller =
+                    Enroller::from_directory_config(directory, &BAD_OHTTP_KEYS, ohttp_relay);
+                let (req, _ctx) = bad_enroller.extract_req().expect("Failed to extract request");
+                spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
+                    .await
+                    .expect("Failed to send request")
+            }
+        }
 
         #[tokio::test]
         async fn v2_to_v2() -> Result<(), BoxError> {
@@ -219,33 +250,15 @@ mod integration {
             let (mut directory, _db) = init_directory(&docker).await;
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
 
-            let ohttp_config = fetch_ohttp_config().await?;
+            let ohttp_keys = fetch_ohttp_config().await?;
 
             // **********************
             // Inside the Receiver:
-            // Try enroll with bad directory ohttp-keys
-            let mut bad_enroller = Enroller::from_directory_config(
-                PJ_DIR.to_owned(),
-                &BAD_OHTTP_KEYS,
-                OH_RELAY.to_owned(),
-            );
-            let (req, _ctx) = bad_enroller.extract_req()?;
-            let res =
-                spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
-                    .await?;
-            assert!(res.is_err());
-            assert!(
-                res.unwrap_err().into_response().unwrap().content_type()
-                    == "application/problem+json"
-            );
-            let mut enrolled = enroll_with_directory(&ohttp_config).await?;
+            let mut enrolled = enroll_with_directory(&ohttp_keys).await?;
 
-            let pj_uri_string = create_receiver_pj_uri_string(
-                &receiver,
-                &ohttp_config,
-                &enrolled.fallback_target(),
-            )
-            .await?;
+            let pj_uri_string =
+                create_receiver_pj_uri_string(&receiver, &ohttp_keys, &enrolled.fallback_target())
+                    .await?;
 
             // **********************
             // Inside the Sender:
@@ -441,6 +454,16 @@ mod integration {
             let mut command = Command::new(binary_path);
             command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
             (command.spawn().unwrap(), redis)
+        }
+
+        async fn new_init_directory<'a>() -> Result<(), BoxError> {
+            let docker: Cli = Cli::default();
+            let port = 8088; // is relay running here?
+            let timeout = Duration::from_secs(2);
+            let postgres = docker.run(Postgres::default());
+            let db_host = format!("127.0.0.1:{}", postgres.get_host_port_ipv4(5432));
+            println!("Postgres running on {}", postgres.get_host_port_ipv4(5432));
+            payjoin_directory::listen_tcp(port, db_host, timeout).await
         }
 
         async fn compile_payjoin_directory() -> Child {

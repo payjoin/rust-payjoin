@@ -1498,6 +1498,7 @@ dependencies = [
  "log",
  "ohttp 0.5.1",
  "once_cell",
+ "payjoin-directory",
  "rand",
  "rustls 0.22.2",
  "serde",

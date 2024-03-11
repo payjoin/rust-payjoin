@@ -31,13 +31,11 @@ jobs:
           cargo update -p time@0.3.34 --precise 0.3.20
       - name: test payjoin lib
         run: cargo test --package payjoin --verbose --all-features --lib
-      - name: test payjoin v1_to_v1 integration
-        run: cargo test --package payjoin --verbose --features=send,receive --test integration v1_to_v1
-      - name: test payjoin vx_to_v2 integration
+      - name: test payjoin v1 integration
+        run: cargo test --package payjoin --verbose --features=send,receive --test integration
+      - name: test payjoin v2 integration
         if: matrix.rust != '1.63.0'
-        run: |
-          cargo test --package payjoin --verbose --features=send,receive,v2 --test integration v2_to_v2
-          cargo test --package payjoin --verbose --features=send,receive,v2 --test integration v1_to_v2
+        run: cargo test --package payjoin --verbose --features=send,receive,v2 --test integration
       - name: test payjoin-cli bin v1
         run: cargo test --package payjoin-cli --verbose --features=danger-local-https
       - name: build payjoin-cli bin v2

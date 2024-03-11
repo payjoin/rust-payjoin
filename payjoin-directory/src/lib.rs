@@ -57,20 +57,39 @@ fn init_server(bind_addr: &SocketAddr) -> Result<Builder<AddrIncoming>> {
 #[cfg(feature = "danger-local-https")]
 fn init_server(bind_addr: &SocketAddr) -> Result<Builder<hyper_rustls::TlsAcceptor>> {
     const LOCAL_CERT_FILE: &str = "localhost.der";
+    const LOCAL_KEY_FILE: &str = "localhost_key.der";
 
+    use std::fs::{self, File};
     use std::io::Write;
 
     use rustls::{Certificate, PrivateKey};
 
-    let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
-    let cert_der = cert.serialize_der()?;
     let mut local_cert_path = std::env::temp_dir();
     local_cert_path.push(LOCAL_CERT_FILE);
+    let mut local_key_path = std::env::temp_dir();
+    local_key_path.push(LOCAL_KEY_FILE);
+
     println!("DIRECTORY CERT PATH {:?}", &local_cert_path);
-    let mut file = std::fs::File::create(local_cert_path)?;
-    file.write_all(&cert_der)?;
-    let key = PrivateKey(cert.serialize_private_key_der());
-    let certs = vec![Certificate(cert.serialize_der()?)];
+
+    // Attempt to read existing certificate and key
+    let (cert_der, key_der) = match (fs::read(&local_cert_path), fs::read(&local_key_path)) {
+        (Ok(cert), Ok(key)) => (cert, key),
+        _ => {
+            // Generate new certificate if existing ones are not found or readable
+            let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
+            let cert_der = cert.serialize_der()?;
+            let key_der = cert.serialize_private_key_der();
+
+            // Write the new certificate and key to files
+            File::create(&local_cert_path)?.write_all(&cert_der)?;
+            File::create(&local_key_path)?.write_all(&key_der)?;
+
+            (cert_der, key_der)
+        }
+    };
+
+    let key = PrivateKey(key_der);
+    let certs = vec![Certificate(cert_der)];
     let incoming = AddrIncoming::bind(bind_addr)?;
     let acceptor = hyper_rustls::TlsAcceptor::builder()
         .with_single_cert(certs, key)

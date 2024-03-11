@@ -20,6 +20,7 @@ mod integration {
 
     #[cfg(not(feature = "v2"))]
     mod v1 {
+        use once_cell::sync::Lazy;
         use payjoin::receive::{Headers, PayjoinProposal, UncheckedProposal};
 
         use super::*;

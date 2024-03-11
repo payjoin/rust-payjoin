@@ -34,7 +34,6 @@ jobs:
       - name: test payjoin v1 integration
         run: cargo test --package payjoin --verbose --features=send,receive --test integration
       - name: test payjoin v2 integration
-        if: matrix.rust != '1.63.0'
         run: cargo test --package payjoin --verbose --features=send,receive,v2 --test integration
       - name: test payjoin-cli bin v1
         run: cargo test --package payjoin-cli --verbose --features=danger-local-https

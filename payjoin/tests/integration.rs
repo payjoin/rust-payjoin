@@ -634,6 +634,8 @@ mod integration {
             AgentBuilder::new().tls_config(Arc::new(client_config)).build()
         }
 
+        fn is_success(status: u16) -> bool { status >= 200 && status < 300 }
+
         fn find_free_port() -> u16 {
             let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
             listener.local_addr().unwrap().port()
@@ -709,6 +711,4 @@ mod integration {
 
         Ok(payjoin_psbt.extract_tx())
     }
-
-    fn is_success(status: u16) -> bool { status >= 200 && status < 300 }
 }

@@ -69,7 +69,7 @@ impl Enroller {
 
     pub fn payjoin_subdir(&self) -> String { format!("{}/{}", self.subdirectory(), "payjoin") }
 
-    pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), crate::v2::Error> {
+    pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
         let url = self.ohttp_relay.clone();
         let subdirectory = self.subdirectory();
         let (body, ctx) = crate::v2::ohttp_encapsulate(
@@ -90,7 +90,7 @@ impl Enroller {
         // TODO decapsulate enroll response, for now it does no auth or nothing
         let mut buf = Vec::new();
         let _ = res.read_to_end(&mut buf);
-        let _success = crate::v2::ohttp_decapsulate(ctx, &buf).map_err(Error::V2)?;
+        let _success = crate::v2::ohttp_decapsulate(ctx, &buf)?;
 
         let ctx = Enrolled {
             directory: self.directory,
@@ -320,11 +320,11 @@ impl Enrolled {
         }
     }
 
-    fn fallback_req_body(&mut self) -> Result<(Vec<u8>, ohttp::ClientResponse), crate::v2::Error> {
+    fn fallback_req_body(&mut self) -> Result<(Vec<u8>, ohttp::ClientResponse), Error> {
         let fallback_target = format!("{}{}", &self.directory, self.fallback_target());
         log::trace!("Fallback request target: {}", fallback_target.as_str());
         let fallback_target = self.fallback_target();
-        crate::v2::ohttp_encapsulate(&mut self.ohttp_keys, "GET", &fallback_target, None)
+        Ok(crate::v2::ohttp_encapsulate(&mut self.ohttp_keys, "GET", &fallback_target, None)?)
     }
 
     pub fn pubkey(&self) -> [u8; 33] { self.s.public_key().serialize() }

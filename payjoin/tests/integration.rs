@@ -197,7 +197,7 @@ mod integration {
 
         use payjoin::receive::v2::{Enrolled, Enroller, PayjoinProposal, UncheckedProposal};
         use testcontainers::Container;
-        use testcontainers_modules::postgres::Postgres;
+        use testcontainers_modules::redis::Redis;
         use testcontainers_modules::testcontainers::clients::Cli;
         use tokio::process::{Child, Command};
         use tokio::task::spawn_blocking;
@@ -213,7 +213,7 @@ mod integration {
 
         #[tokio::test]
         async fn v2_to_v2() -> Result<(), BoxError> {
-            std::env::set_var("RUST_LOG", "debug");
+            std::env::set_var("RUST_LOG", "info");
             let _ = env_logger::builder().is_test(true).try_init();
             let docker = Cli::default();
             let (mut directory, _db) = init_directory(&docker).await;
@@ -428,19 +428,19 @@ mod integration {
             Ok(())
         }
 
-        async fn init_directory<'a>(docker: &'a Cli) -> (Child, Container<'a, Postgres>) {
+        async fn init_directory<'a>(docker: &'a Cli) -> (Child, Container<'a, Redis>) {
             println!("Initializing directory server");
             env::set_var("PJ_DIR_PORT", "8088");
             env::set_var("PJ_DIR_TIMEOUT_SECS", "2");
-            let postgres = docker.run(Postgres::default());
-            env::set_var("PJ_DB_HOST", format!("127.0.0.1:{}", postgres.get_host_port_ipv4(5432)));
-            println!("Postgres running on {}", postgres.get_host_port_ipv4(5432));
+            let redis = docker.run(Redis::default());
+            env::set_var("PJ_DB_HOST", format!("127.0.0.1:{}", redis.get_host_port_ipv4(6379)));
+            println!("Redis running on {}", redis.get_host_port_ipv4(6379));
             compile_payjoin_directory().await.wait().await.unwrap();
             let workspace_root = env::var("CARGO_MANIFEST_DIR").unwrap();
             let binary_path = format!("{}/../target/debug/payjoin-directory", workspace_root);
             let mut command = Command::new(binary_path);
             command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
-            (command.spawn().unwrap(), postgres)
+            (command.spawn().unwrap(), redis)
         }
 
         async fn compile_payjoin_directory() -> Child {

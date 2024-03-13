@@ -11,8 +11,6 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode, Uri};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
-use tracing_subscriber::filter::LevelFilter;
-use tracing_subscriber::EnvFilter;
 
 pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
@@ -32,8 +30,6 @@ pub async fn listen_tcp(
     db_host: String,
     timeout: Duration,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    init_logging();
-
     let pool = DbPool::new(timeout, db_host).await?;
     let ohttp = Arc::new(Mutex::new(init_ohttp()?));
     let make_svc = make_service_fn(|_| {
@@ -53,15 +49,6 @@ pub async fn listen_tcp(
     Ok(server.await?)
 }
 
-fn init_logging() {
-    let env_filter =
-        EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy();
-
-    tracing_subscriber::fmt().with_target(true).with_level(true).with_env_filter(env_filter).init();
-
-    println!("Logging initialized");
-}
-
 #[cfg(not(feature = "danger-local-https"))]
 fn init_server(bind_addr: &SocketAddr) -> Result<Builder<AddrIncoming>> {
     Ok(Server::bind(bind_addr))
@@ -70,20 +57,39 @@ fn init_server(bind_addr: &SocketAddr) -> Result<Builder<AddrIncoming>> {
 #[cfg(feature = "danger-local-https")]
 fn init_server(bind_addr: &SocketAddr) -> Result<Builder<hyper_rustls::TlsAcceptor>> {
     const LOCAL_CERT_FILE: &str = "localhost.der";
+    const LOCAL_KEY_FILE: &str = "localhost_key.der";
 
+    use std::fs::{self, File};
     use std::io::Write;
 
     use rustls::{Certificate, PrivateKey};
 
-    let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
-    let cert_der = cert.serialize_der()?;
     let mut local_cert_path = std::env::temp_dir();
     local_cert_path.push(LOCAL_CERT_FILE);
+    let mut local_key_path = std::env::temp_dir();
+    local_key_path.push(LOCAL_KEY_FILE);
+
     println!("DIRECTORY CERT PATH {:?}", &local_cert_path);
-    let mut file = std::fs::File::create(local_cert_path)?;
-    file.write_all(&cert_der)?;
-    let key = PrivateKey(cert.serialize_private_key_der());
-    let certs = vec![Certificate(cert.serialize_der()?)];
+
+    // Attempt to read existing certificate and key
+    let (cert_der, key_der) = match (fs::read(&local_cert_path), fs::read(&local_key_path)) {
+        (Ok(cert), Ok(key)) => (cert, key),
+        _ => {
+            // Generate new certificate if existing ones are not found or readable
+            let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
+            let cert_der = cert.serialize_der()?;
+            let key_der = cert.serialize_private_key_der();
+
+            // Write the new certificate and key to files
+            File::create(&local_cert_path)?.write_all(&cert_der)?;
+            File::create(&local_key_path)?.write_all(&key_der)?;
+
+            (cert_der, key_der)
+        }
+    };
+
+    let key = PrivateKey(key_der);
+    let certs = vec![Certificate(cert_der)];
     let incoming = AddrIncoming::bind(bind_addr)?;
     let acceptor = hyper_rustls::TlsAcceptor::builder()
         .with_single_cert(certs, key)

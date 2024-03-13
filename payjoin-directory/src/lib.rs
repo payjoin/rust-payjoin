@@ -15,7 +15,7 @@ use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
 pub const DEFAULT_DIR_PORT: u16 = 8080;
-pub const DEFAULT_DB_HOST: &str = "localhost:5432";
+pub const DEFAULT_DB_HOST: &str = "localhost:6379";
 pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 const MAX_BUFFER_SIZE: usize = 65536;

@@ -250,18 +250,20 @@ mod integration {
         async fn v2_to_v2() {
             std::env::set_var("RUST_LOG", "debug");
             let _ = env_logger::builder().is_test(true).try_init();
-            let port = find_free_port();
-            let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
+            let ohttp_relay =
+                Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
+            let directory = Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
             tokio::select!(
-                _ = init_directory(port) => assert!(false, "Directory server is long running"),
-                res = do_v2_send_receive(directory) => assert!(res.is_ok())
+                _ = ohttp_relay::listen_tcp(ohttp_relay.port().unwrap(), http::Uri::from_str(directory.as_str()).unwrap()) => assert!(false, "Ohttp relay is long running"),
+                _ = init_directory(directory.port().unwrap()) => assert!(false, "Directory server is long running"),
+                res = do_v2_send_receive(ohttp_relay, directory) => assert!(res.is_ok())
             );
 
-            async fn do_v2_send_receive(directory: Url) -> Result<(), BoxError> {
+            async fn do_v2_send_receive(ohttp_relay: Url, directory: Url) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
 
                 tokio::time::sleep(Duration::from_secs(2)).await;
-                let ohttp_keys = fetch_ohttp_keys(directory.to_owned()).await?;
+                let ohttp_keys = fetch_ohttp_keys(&ohttp_relay, &directory).await?;
 
                 // **********************
                 // Inside the Receiver:
@@ -346,17 +348,19 @@ mod integration {
         async fn v1_to_v2() {
             std::env::set_var("RUST_LOG", "debug");
             let _ = env_logger::builder().is_test(true).try_init();
-            let port = find_free_port();
-            let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
+            let ohttp_relay =
+                Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
+            let directory = Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
             tokio::select!(
-                _ = init_directory(port) => assert!(false, "Directory server is long running"),
-                res = do_v1_to_v2(directory) => assert!(res.is_ok()),
+                _ = ohttp_relay::listen_tcp(ohttp_relay.port().unwrap(), http::Uri::from_str(directory.as_str()).unwrap()) => assert!(false, "Ohttp relay is long running"),
+                _ = init_directory(directory.port().unwrap()) => assert!(false, "Directory server is long running"),
+                res = do_v1_to_v2(ohttp_relay, directory) => assert!(res.is_ok()),
             );
 
-            async fn do_v1_to_v2(directory: Url) -> Result<(), BoxError> {
+            async fn do_v1_to_v2(ohttp_relay: Url, directory: Url) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
                 tokio::time::sleep(Duration::from_secs(2)).await;
-                let ohttp_keys = fetch_ohttp_keys(directory.clone()).await?;
+                let ohttp_keys = fetch_ohttp_keys(&ohttp_relay, &directory).await?;
 
                 let mut enrolled = enroll_with_directory(directory, ohttp_keys.clone()).await?;
 
@@ -472,21 +476,35 @@ mod integration {
             payjoin_directory::listen_tcp(port, db_host, timeout).await
         }
 
-        /// In production, this must be relayed via ohttp-relay so as not to reveal the IP to the
-        /// payjoin directory.
-        async fn fetch_ohttp_keys(directory: Url) -> Result<OhttpKeys, BoxError> {
-            use std::io::Read;
-            let fetch_url = directory.join("ohttp-keys").unwrap();
-            log::debug!("Fetching ohttp keys from {}", fetch_url.as_str());
-            let resp = spawn_blocking(move || http_agent().get(fetch_url.as_str()).call())
-                .await
-                .expect("Failed to await fetch ohttp keys")
-                .expect("Failed to fetch ohttp keys");
-            let len = resp.header("Content-Length").and_then(|s| s.parse::<usize>().ok()).unwrap();
-            log::debug!("Fetched");
-            let mut bytes: Vec<u8> = Vec::with_capacity(len);
-            resp.into_reader().take(10_000_000).read_to_end(&mut bytes)?;
-            Ok(payjoin::OhttpKeys::decode(&bytes)?)
+        async fn fetch_ohttp_keys(
+            ohttp_relay: &Url,
+            directory: &Url,
+        ) -> Result<payjoin::OhttpKeys, BoxError> {
+            let ohttp_relay = ohttp_relay.clone();
+            let directory_ohttp_keys = directory.join("/ohttp-keys")?;
+            let res = spawn_blocking(move || {
+                http_proxy(&ohttp_relay).unwrap().get(directory_ohttp_keys.as_str()).call()
+            })
+            .await??;
+            assert_eq!(res.status(), 200, "Failed to connect to target {}", res.status());
+            let mut body = Vec::new();
+            let _ = res.into_reader().read_to_end(&mut body)?;
+            Ok(payjoin::OhttpKeys::decode(&body)?)
+        }
+
+        /// Normalize the Url to include the port for ureq. ureq has a bug
+        /// which makes Proxy::new(...) use port 8080 for all input with scheme
+        /// http regardless of the port included in the Url. This prevents that.
+        /// https://github.com/algesten/ureq/pull/717
+        fn normalize_proxy_url(proxy: &Url) -> Result<String, BoxError> {
+            let scheme = proxy.scheme();
+            let host = proxy.host_str().ok_or("No host")?;
+
+            if scheme == "http" || scheme == "https" {
+                Ok(format!("{}:{}", host, proxy.port().unwrap_or(80)))
+            } else {
+                Ok(proxy.as_str().to_string())
+            }
         }
 
         async fn enroll_with_directory(
@@ -633,6 +651,26 @@ mod integration {
                 .with_no_client_auth();
 
             AgentBuilder::new().tls_config(Arc::new(client_config)).build()
+        }
+
+        fn http_proxy(proxy: &Url) -> Result<ureq::Agent, BoxError> {
+            use rustls::client::ClientConfig;
+            use rustls::pki_types::CertificateDer;
+            use rustls::RootCertStore;
+            use ureq::AgentBuilder;
+
+            let proxy = ureq::Proxy::new(normalize_proxy_url(proxy)?)?;
+
+            let mut local_cert_path = std::env::temp_dir();
+            local_cert_path.push(LOCAL_CERT_FILE);
+            let cert_der = std::fs::read(local_cert_path)?;
+            let mut root_cert_store = RootCertStore::empty();
+            root_cert_store.add(CertificateDer::from(cert_der.as_slice()))?;
+            let client_config = ClientConfig::builder()
+                .with_root_certificates(root_cert_store)
+                .with_no_client_auth();
+
+            Ok(AgentBuilder::new().proxy(proxy).tls_config(Arc::new(client_config)).build())
         }
 
         fn is_success(status: u16) -> bool { status >= 200 && status < 300 }

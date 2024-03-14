@@ -1561,6 +1561,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "ohttp-relay"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee28deebd6f0eaf7f0e1a6857e8bfb0b2f3f1e4e20b38492a4ace3bd695d3243"
+dependencies = [
+ "futures",
+ "http 1.1.0",
+ "http-body-util",
+ "hyper 1.2.0",
+ "hyper-rustls 0.26.0",
+ "hyper-tungstenite",
+ "hyper-util",
+ "once_cell",
+ "rustls 0.22.2",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1639,8 +1661,10 @@ dependencies = [
  "bitcoind",
  "chacha20poly1305 0.10.1",
  "env_logger",
+ "http 1.1.0",
  "log",
  "ohttp 0.5.1",
+ "ohttp-relay 0.0.6",
  "once_cell",
  "payjoin-directory",
  "rand",
@@ -1670,7 +1694,7 @@ dependencies = [
  "hyper 0.14.28",
  "hyper-rustls 0.25.0",
  "log",
- "ohttp-relay",
+ "ohttp-relay 0.0.4",
  "payjoin",
  "rcgen",
  "rustls 0.22.2",

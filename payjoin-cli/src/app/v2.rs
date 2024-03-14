@@ -347,22 +347,8 @@ fn normalize_proxy_url(proxy: &Url) -> Result<String> {
 
 #[cfg(feature = "danger-local-https")]
 fn http_proxy(proxy: &Url) -> Result<ureq::Agent> {
-    use rustls::client::ClientConfig;
-    use rustls::pki_types::CertificateDer;
-    use rustls::RootCertStore;
-    use ureq::AgentBuilder;
-
     let proxy = ureq::Proxy::new(normalize_proxy_url(proxy)?)?;
-
-    let mut local_cert_path = std::env::temp_dir();
-    local_cert_path.push(crate::app::LOCAL_CERT_FILE);
-    let cert_der = std::fs::read(local_cert_path)?;
-    let mut root_cert_store = RootCertStore::empty();
-    root_cert_store.add(CertificateDer::from(cert_der.as_slice()))?;
-    let client_config =
-        ClientConfig::builder().with_root_certificates(root_cert_store).with_no_client_auth();
-
-    Ok(AgentBuilder::new().proxy(proxy).tls_config(Arc::new(client_config)).build())
+    Ok(super::http_agent_builder()?.proxy(proxy).build())
 }
 
 #[cfg(not(feature = "danger-local-https"))]

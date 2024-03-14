@@ -634,7 +634,14 @@ mod integration {
             payjoin_proposal
         }
 
-        fn http_agent() -> ureq::Agent {
+        fn http_agent() -> ureq::Agent { http_agent_builder().build() }
+
+        fn http_proxy(proxy: &Url) -> Result<ureq::Agent, BoxError> {
+            let proxy = ureq::Proxy::new(normalize_proxy_url(proxy)?)?;
+            Ok(http_agent_builder().proxy(proxy).build())
+        }
+
+        fn http_agent_builder() -> ureq::AgentBuilder {
             use rustls::client::ClientConfig;
             use rustls::pki_types::CertificateDer;
             use rustls::RootCertStore;
@@ -642,7 +649,6 @@ mod integration {
 
             let mut local_cert_path = std::env::temp_dir();
             local_cert_path.push(LOCAL_CERT_FILE);
-            println!("TEST CERT PATH {:?}", &local_cert_path);
             let cert_der = std::fs::read(local_cert_path).unwrap();
             let mut root_cert_store = RootCertStore::empty();
             root_cert_store.add(CertificateDer::from(cert_der.as_slice())).unwrap();
@@ -650,27 +656,7 @@ mod integration {
                 .with_root_certificates(root_cert_store)
                 .with_no_client_auth();
 
-            AgentBuilder::new().tls_config(Arc::new(client_config)).build()
-        }
-
-        fn http_proxy(proxy: &Url) -> Result<ureq::Agent, BoxError> {
-            use rustls::client::ClientConfig;
-            use rustls::pki_types::CertificateDer;
-            use rustls::RootCertStore;
-            use ureq::AgentBuilder;
-
-            let proxy = ureq::Proxy::new(normalize_proxy_url(proxy)?)?;
-
-            let mut local_cert_path = std::env::temp_dir();
-            local_cert_path.push(LOCAL_CERT_FILE);
-            let cert_der = std::fs::read(local_cert_path)?;
-            let mut root_cert_store = RootCertStore::empty();
-            root_cert_store.add(CertificateDer::from(cert_der.as_slice()))?;
-            let client_config = ClientConfig::builder()
-                .with_root_certificates(root_cert_store)
-                .with_no_client_auth();
-
-            Ok(AgentBuilder::new().proxy(proxy).tls_config(Arc::new(client_config)).build())
+            AgentBuilder::new().tls_config(Arc::new(client_config))
         }
 
         fn is_success(status: u16) -> bool { status >= 200 && status < 300 }

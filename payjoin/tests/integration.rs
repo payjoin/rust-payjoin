@@ -214,21 +214,20 @@ mod integration {
             let port = find_free_port();
             let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
             let mock_ohttp_relay = directory.clone(); // pass through to directory
-            tokio::select!(
-                _ = init_directory(port) => assert!(false, "Directory server is long running"),
-                res = enroll_with_bad_keys(directory, mock_ohttp_relay) => {
-                    assert_eq!(
-                        res.unwrap_err().into_response().unwrap().content_type(),
-                        "application/problem+json"
-                    );
-                }
+            tokio::spawn(async move {
+                let _ = init_directory(port).await;
+            });
+            wait_for_service_ready(directory.clone()).await.expect("Directory not ready");
+            let res = enroll_with_bad_keys(directory, mock_ohttp_relay).await;
+            assert_eq!(
+                res.unwrap_err().into_response().unwrap().content_type(),
+                "application/problem+json"
             );
 
             async fn enroll_with_bad_keys(
                 directory: Url,
                 ohttp_relay: Url,
             ) -> Result<Response, Error> {
-                tokio::time::sleep(Duration::from_secs(2)).await;
                 let mut bad_enroller =
                     Enroller::from_directory_config(directory, &BAD_OHTTP_KEYS, ohttp_relay);
                 let (req, _ctx) = bad_enroller.extract_req().expect("Failed to extract request");
@@ -244,15 +243,15 @@ mod integration {
             let _ = env_logger::builder().is_test(true).try_init();
             let port = find_free_port();
             let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
-            tokio::select!(
-                _ = init_directory(port) => assert!(false, "Directory server is long running"),
-                res = do_v2_send_receive(directory) => assert!(res.is_ok())
-            );
+            tokio::spawn(async move {
+                let _ = init_directory(port).await;
+            });
+            wait_for_service_ready(directory.clone()).await.expect("Directory not ready");
+            assert!(do_v2_send_receive(directory).await.is_ok());
 
             async fn do_v2_send_receive(directory: Url) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
 
-                tokio::time::sleep(Duration::from_secs(2)).await;
                 let ohttp_keys = fetch_ohttp_config(directory.to_owned()).await?;
 
                 // **********************
@@ -339,14 +338,14 @@ mod integration {
             let _ = env_logger::builder().is_test(true).try_init();
             let port = find_free_port();
             let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
-            tokio::select!(
-                _ = init_directory(port) => assert!(false, "Directory server is long running"),
-                res = do_v1_to_v2(directory) => assert!(res.is_ok()),
-            );
+            tokio::spawn(async move {
+                let _ = init_directory(port).await;
+            });
+            wait_for_service_ready(directory.clone()).await.expect("Directory not ready");
+            assert!(do_v1_to_v2(directory).await.is_ok());
 
             async fn do_v1_to_v2(directory: Url) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
-                tokio::time::sleep(Duration::from_secs(2)).await;
                 let ohttp_config = fetch_ohttp_config(directory.clone()).await?;
 
                 let mut enrolled = enroll_with_directory(directory, &ohttp_config).await?;
@@ -632,6 +631,33 @@ mod integration {
                 .with_no_client_auth();
 
             AgentBuilder::new().tls_config(Arc::new(client_config)).build()
+        }
+
+        const TIMEOUT_SECS: u64 = 10;
+        const INTERVAL_SECS: u64 = 1;
+        async fn wait_for_service_ready(service_url: Url) -> Result<(), &'static str> {
+            let directory_url = service_url.join("/health").map_err(|_| "Invalid URL")?;
+
+            let res = spawn_blocking(move || {
+                let start = std::time::Instant::now();
+                let agent = http_agent();
+
+                while start.elapsed() < Duration::from_secs(TIMEOUT_SECS) {
+                    let request_result = agent.get(directory_url.as_str()).call();
+
+                    match request_result {
+                        Ok(response) if response.status() == 200 => return Ok(()),
+                        Err(Error::Status(404, _)) => return Err("Endpoint not found"),
+                        _ => std::thread::sleep(Duration::from_secs(INTERVAL_SECS)),
+                    }
+                }
+
+                Err("Timeout waiting for service to be ready")
+            })
+            .await
+            .map_err(|_| "JoinError")?;
+
+            res
         }
 
         fn is_success(status: u16) -> bool { status >= 200 && status < 300 }

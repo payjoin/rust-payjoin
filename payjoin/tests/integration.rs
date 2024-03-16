@@ -238,7 +238,7 @@ mod integration {
                 directory: Url,
                 bad_ohttp_keys: OhttpKeys,
             ) -> Result<Response, Error> {
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(Duration::from_secs(6)).await;
                 let mock_ohttp_relay = directory.clone(); // pass through to directory
                 let mut bad_enroller =
                     Enroller::from_directory_config(directory, bad_ohttp_keys, mock_ohttp_relay);
@@ -265,7 +265,7 @@ mod integration {
             async fn do_v2_send_receive(ohttp_relay: Url, directory: Url) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
 
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(Duration::from_secs(6)).await;
                 let ohttp_keys = fetch_ohttp_keys(&ohttp_relay, &directory).await?;
 
                 // **********************
@@ -362,7 +362,7 @@ mod integration {
 
             async fn do_v1_to_v2(ohttp_relay: Url, directory: Url) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(Duration::from_secs(6)).await;
                 let ohttp_keys = fetch_ohttp_keys(&ohttp_relay, &directory).await?;
 
                 let mut enrolled = enroll_with_directory(directory, ohttp_keys.clone()).await?;

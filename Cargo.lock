@@ -1660,7 +1660,6 @@ dependencies = [
  "bitcoin",
  "bitcoind",
  "chacha20poly1305 0.10.1",
- "env_logger",
  "http 1.1.0",
  "log",
  "ohttp 0.5.1",
@@ -1674,6 +1673,8 @@ dependencies = [
  "testcontainers",
  "testcontainers-modules",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "ureq",
  "url",
 ]

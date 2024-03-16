@@ -11,12 +11,16 @@ mod integration {
     use bitcoind::bitcoincore_rpc::core_rpc_json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::RpcApi;
     use log::{debug, log_enabled, Level};
+    use once_cell::sync::OnceCell;
     use payjoin::bitcoin::base64;
     use payjoin::send::{Request, RequestBuilder};
     use payjoin::{PjUriBuilder, Uri};
+    use tracing_subscriber::{EnvFilter, FmtSubscriber};
     use url::Url;
 
     type BoxError = Box<dyn std::error::Error + 'static>;
+
+    static INIT_TRACING: OnceCell<()> = OnceCell::new();
 
     #[cfg(not(feature = "v2"))]
     mod v1 {
@@ -30,7 +34,7 @@ mod integration {
 
         #[test]
         fn v1_to_v1() -> Result<(), BoxError> {
-            let _ = env_logger::try_init();
+            init_tracing();
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
 
             // Receiver creates the payjoin URI
@@ -218,7 +222,6 @@ mod integration {
             .expect("Invalid OhttpKeys");
 
             std::env::set_var("RUST_LOG", "debug");
-            let _ = env_logger::builder().is_test(true).try_init();
             let port = find_free_port();
             let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
             tokio::select!(
@@ -249,7 +252,7 @@ mod integration {
         #[tokio::test]
         async fn v2_to_v2() {
             std::env::set_var("RUST_LOG", "debug");
-            let _ = env_logger::builder().is_test(true).try_init();
+            init_tracing();
             let ohttp_relay =
                 Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
             let directory = Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
@@ -347,7 +350,7 @@ mod integration {
         #[cfg(feature = "v2")]
         async fn v1_to_v2() {
             std::env::set_var("RUST_LOG", "debug");
-            let _ = env_logger::builder().is_test(true).try_init();
+            init_tracing();
             let ohttp_relay =
                 Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
             let directory = Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
@@ -665,6 +668,18 @@ mod integration {
             let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
             listener.local_addr().unwrap().port()
         }
+    }
+
+    fn init_tracing() {
+        INIT_TRACING.get_or_init(|| {
+            let subscriber = FmtSubscriber::builder()
+                .with_env_filter(EnvFilter::from_default_env())
+                .with_test_writer()
+                .finish();
+
+            tracing::subscriber::set_global_default(subscriber)
+                .expect("failed to set global default subscriber");
+        });
     }
 
     fn init_bitcoind_sender_receiver(

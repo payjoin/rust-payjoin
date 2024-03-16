@@ -75,7 +75,10 @@ fn init_server(bind_addr: &SocketAddr) -> Result<Builder<hyper_rustls::TlsAccept
         (Ok(cert), Ok(key)) => (cert, key),
         _ => {
             // Generate new certificate if existing ones are not found or readable
-            let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
+            let cert = rcgen::generate_simple_self_signed(vec![
+                "0.0.0.0".to_string(),
+                "localhost".to_string(),
+            ])?;
             let cert_der = cert.serialize_der()?;
             let key_der = cert.serialize_private_key_der();
 

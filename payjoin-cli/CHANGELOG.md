@@ -1,5 +1,10 @@
 # payjoin-cli Changelog
 
+## 0.0.5-alpha
+
+- fetch ohttp keys through CONNECT tunnel (#194) instead of manual configuration
+- Name payjoin-directory and OHTTP relay according to BIP 77 (#203)
+
 ## 0.0.4-alpha
 
 - Remove annoying duplicate code in tests. (#197)

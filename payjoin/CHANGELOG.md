@@ -1,5 +1,17 @@
 # Payjoin Changelog
 
+## 0.15.0
+
+### API
+
+- Introduce OhttpKeys type (#194)
+- Ser/de Enrolled with serde
+- Expose only public receive::Error (#201)
+- Name payjoin-directory and OHTTP relay according to BIP 77 (#203)
+
+### Fixes
+
+- Encode ohttp_keys in Uri without padding (#214)
 
 ## 0.14.0
 

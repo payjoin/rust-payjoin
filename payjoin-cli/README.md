@@ -10,7 +10,7 @@ Independent audit is welcome.
 ## Install payjoin-cli
 
 ```console
-cargo install payjoin-cli --version 0.0.4-alpha
+cargo install payjoin-cli --version 0.0.5-alpha
 ```
 
 Get a list of commands and options:
@@ -36,7 +36,7 @@ Your configuration details will vary, but you may use this as a template.
 ### Install payjoin-cli with the V2 feature
 
 ```console
-cargo install payjoin-cli --version 0.0.4-alpha --features v2
+cargo install payjoin-cli --version 0.0.5-alpha --features v2
 ```
 
 ### V2 Configuration
@@ -48,10 +48,9 @@ In addition to the rpc configuration above, specify relevant ohttp and payjoin d
 ...
 # a production payjoin directory server
 pj_endpoint="https://payjo.in"
-# payjo.in's ohttp_keys with which ohttp requests will be encrypted
-ohttp_keys="AQAgQB9BwO5taMV6Skp4dl9HpFPw5SNUnnd-imKkUm8P5EIABAABAAM"
+# payjo.in's ohttp_keys can now be fetched rather than configured ahead of time
  # an ohttp relay with ingress to payjo.in
-ohttp_relay="https://ohttp-relay.obscuravpn.io/payjoin"
+ohttp_relay="https://pj.bobspacebkk.com"
 ```
 
 ### Asynchronous Operation

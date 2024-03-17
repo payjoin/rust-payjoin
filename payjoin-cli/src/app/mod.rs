@@ -178,7 +178,13 @@ impl payjoin::receive::Headers for Headers<'_> {
 fn serialize_psbt(psbt: &Psbt) -> String { base64::encode(psbt.serialize()) }
 
 #[cfg(feature = "danger-local-https")]
-fn http_agent() -> Result<ureq::Agent> {
+fn http_agent() -> Result<ureq::Agent> { Ok(http_agent_builder()?.build()) }
+
+#[cfg(not(feature = "danger-local-https"))]
+fn http_agent() -> Result<ureq::Agent> { Ok(ureq::Agent::new()) }
+
+#[cfg(feature = "danger-local-https")]
+fn http_agent_builder() -> Result<ureq::AgentBuilder> {
     use std::sync::Arc;
 
     use rustls::client::ClientConfig;
@@ -193,9 +199,5 @@ fn http_agent() -> Result<ureq::Agent> {
     root_cert_store.add(CertificateDer::from(cert_der.as_slice()))?;
     let client_config =
         ClientConfig::builder().with_root_certificates(root_cert_store).with_no_client_auth();
-
-    Ok(AgentBuilder::new().tls_config(Arc::new(client_config)).build())
+    Ok(AgentBuilder::new().tls_config(Arc::new(client_config)))
 }
-
-#[cfg(not(feature = "danger-local-https"))]
-fn http_agent() -> Result<ureq::Agent> { Ok(ureq::Agent::new()) }

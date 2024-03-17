@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -42,10 +42,9 @@ pub async fn listen_tcp(
     });
 
     // Parse the bind address using the provided port
-    let bind_addr_str = format!("0.0.0.0:{}", port);
-    let bind_addr: SocketAddr = bind_addr_str.parse()?;
+    let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
     let server = init_server(&bind_addr)?.serve(make_svc);
-    info!("Payjoin Directory awaiting HTTP connection at {}", bind_addr_str);
+    info!("Payjoin Directory awaiting HTTP connection at {}", bind_addr);
     Ok(server.await?)
 }
 
@@ -76,7 +75,10 @@ fn init_server(bind_addr: &SocketAddr) -> Result<Builder<hyper_rustls::TlsAccept
         (Ok(cert), Ok(key)) => (cert, key),
         _ => {
             // Generate new certificate if existing ones are not found or readable
-            let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
+            let cert = rcgen::generate_simple_self_signed(vec![
+                "0.0.0.0".to_string(),
+                "localhost".to_string(),
+            ])?;
             let cert_der = cert.serialize_der()?;
             let key_der = cert.serialize_private_key_der();
 

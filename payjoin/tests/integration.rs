@@ -11,12 +11,16 @@ mod integration {
     use bitcoind::bitcoincore_rpc::core_rpc_json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::RpcApi;
     use log::{debug, log_enabled, Level};
+    use once_cell::sync::OnceCell;
     use payjoin::bitcoin::base64;
     use payjoin::send::{Request, RequestBuilder};
     use payjoin::{PjUriBuilder, Uri};
+    use tracing_subscriber::{EnvFilter, FmtSubscriber};
     use url::Url;
 
     type BoxError = Box<dyn std::error::Error + 'static>;
+
+    static INIT_TRACING: OnceCell<()> = OnceCell::new();
 
     #[cfg(not(feature = "v2"))]
     mod v1 {
@@ -30,7 +34,7 @@ mod integration {
 
         #[test]
         fn v1_to_v1() -> Result<(), BoxError> {
-            let _ = env_logger::try_init();
+            init_tracing();
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
 
             // Receiver creates the payjoin URI
@@ -196,6 +200,7 @@ mod integration {
         use std::time::Duration;
 
         use payjoin::receive::v2::{Enrolled, Enroller, PayjoinProposal, UncheckedProposal};
+        use payjoin::OhttpKeys;
         use testcontainers_modules::redis::Redis;
         use testcontainers_modules::testcontainers::clients::Cli;
         use tokio::task::spawn_blocking;
@@ -207,16 +212,21 @@ mod integration {
 
         #[tokio::test]
         async fn test_bad_ohttp_keys() {
-            const BAD_OHTTP_KEYS: &str = "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM";
+            let bad_ohttp_keys = OhttpKeys::decode(
+                &base64::decode_config(
+                    "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM",
+                    base64::URL_SAFE,
+                )
+                .expect("invalid base64"),
+            )
+            .expect("Invalid OhttpKeys");
 
             std::env::set_var("RUST_LOG", "debug");
-            let _ = env_logger::builder().is_test(true).try_init();
             let port = find_free_port();
             let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
-            let mock_ohttp_relay = directory.clone(); // pass through to directory
             tokio::select!(
                 _ = init_directory(port) => assert!(false, "Directory server is long running"),
-                res = enroll_with_bad_keys(directory, mock_ohttp_relay) => {
+                res = enroll_with_bad_keys(directory, bad_ohttp_keys) => {
                     assert_eq!(
                         res.unwrap_err().into_response().unwrap().content_type(),
                         "application/problem+json"
@@ -226,11 +236,12 @@ mod integration {
 
             async fn enroll_with_bad_keys(
                 directory: Url,
-                ohttp_relay: Url,
+                bad_ohttp_keys: OhttpKeys,
             ) -> Result<Response, Error> {
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(Duration::from_secs(6)).await;
+                let mock_ohttp_relay = directory.clone(); // pass through to directory
                 let mut bad_enroller =
-                    Enroller::from_directory_config(directory, &BAD_OHTTP_KEYS, ohttp_relay);
+                    Enroller::from_directory_config(directory, bad_ohttp_keys, mock_ohttp_relay);
                 let (req, _ctx) = bad_enroller.extract_req().expect("Failed to extract request");
                 spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
                     .await
@@ -241,27 +252,30 @@ mod integration {
         #[tokio::test]
         async fn v2_to_v2() {
             std::env::set_var("RUST_LOG", "debug");
-            let _ = env_logger::builder().is_test(true).try_init();
-            let port = find_free_port();
-            let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
+            init_tracing();
+            let ohttp_relay =
+                Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
+            let directory = Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
             tokio::select!(
-                _ = init_directory(port) => assert!(false, "Directory server is long running"),
-                res = do_v2_send_receive(directory) => assert!(res.is_ok())
+                _ = ohttp_relay::listen_tcp(ohttp_relay.port().unwrap(), http::Uri::from_str(directory.as_str()).unwrap()) => assert!(false, "Ohttp relay is long running"),
+                _ = init_directory(directory.port().unwrap()) => assert!(false, "Directory server is long running"),
+                res = do_v2_send_receive(ohttp_relay, directory) => assert!(res.is_ok())
             );
 
-            async fn do_v2_send_receive(directory: Url) -> Result<(), BoxError> {
+            async fn do_v2_send_receive(ohttp_relay: Url, directory: Url) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
 
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                let ohttp_keys = fetch_ohttp_config(directory.to_owned()).await?;
+                tokio::time::sleep(Duration::from_secs(6)).await;
+                let ohttp_keys = fetch_ohttp_keys(&ohttp_relay, &directory).await?;
 
                 // **********************
                 // Inside the Receiver:
-                let mut enrolled = enroll_with_directory(directory.clone(), &ohttp_keys).await?;
+                let mut enrolled =
+                    enroll_with_directory(directory.clone(), ohttp_keys.clone()).await?;
                 println!("enrolled: {:#?}", &enrolled);
                 let pj_uri_string = create_receiver_pj_uri_string(
                     &receiver,
-                    &ohttp_keys,
+                    ohttp_keys,
                     &enrolled.fallback_target(),
                 )
                 .await?;
@@ -336,24 +350,26 @@ mod integration {
         #[cfg(feature = "v2")]
         async fn v1_to_v2() {
             std::env::set_var("RUST_LOG", "debug");
-            let _ = env_logger::builder().is_test(true).try_init();
-            let port = find_free_port();
-            let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
+            init_tracing();
+            let ohttp_relay =
+                Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
+            let directory = Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
             tokio::select!(
-                _ = init_directory(port) => assert!(false, "Directory server is long running"),
-                res = do_v1_to_v2(directory) => assert!(res.is_ok()),
+                _ = ohttp_relay::listen_tcp(ohttp_relay.port().unwrap(), http::Uri::from_str(directory.as_str()).unwrap()) => assert!(false, "Ohttp relay is long running"),
+                _ = init_directory(directory.port().unwrap()) => assert!(false, "Directory server is long running"),
+                res = do_v1_to_v2(ohttp_relay, directory) => assert!(res.is_ok()),
             );
 
-            async fn do_v1_to_v2(directory: Url) -> Result<(), BoxError> {
+            async fn do_v1_to_v2(ohttp_relay: Url, directory: Url) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                let ohttp_config = fetch_ohttp_config(directory.clone()).await?;
+                tokio::time::sleep(Duration::from_secs(6)).await;
+                let ohttp_keys = fetch_ohttp_keys(&ohttp_relay, &directory).await?;
 
-                let mut enrolled = enroll_with_directory(directory, &ohttp_config).await?;
+                let mut enrolled = enroll_with_directory(directory, ohttp_keys.clone()).await?;
 
                 let pj_uri_string = create_receiver_pj_uri_string(
                     &receiver,
-                    &ohttp_config,
+                    ohttp_keys,
                     &enrolled.fallback_target(),
                 )
                 .await?;
@@ -463,35 +479,45 @@ mod integration {
             payjoin_directory::listen_tcp(port, db_host, timeout).await
         }
 
-        /// In production, this must be relayed via ohttp-relay so as not to reveal the IP to the
-        /// payjoin directory.
-        async fn fetch_ohttp_config(directory: Url) -> Result<String, BoxError> {
-            use std::io::Read;
-            let fetch_url = directory.join("ohttp-keys").unwrap();
-            log::debug!("Fetching ohttp keys from {}", fetch_url.as_str());
-            let resp = spawn_blocking(move || http_agent().get(fetch_url.as_str()).call())
-                .await
-                .expect("Failed to await fetch ohttp keys")
-                .expect("Failed to fetch ohttp keys");
-            let len = resp.header("Content-Length").and_then(|s| s.parse::<usize>().ok()).unwrap();
-            log::debug!("Fetched");
-            let mut bytes: Vec<u8> = Vec::with_capacity(len);
-            resp.into_reader().take(10_000_000).read_to_end(&mut bytes)?;
-            let ohttp_keys = payjoin::OhttpKeys::decode(&bytes)?;
-            Ok(base64::encode_config(
-                ohttp_keys.encode()?,
-                base64::Config::new(base64::CharacterSet::UrlSafe, false),
-            ))
+        async fn fetch_ohttp_keys(
+            ohttp_relay: &Url,
+            directory: &Url,
+        ) -> Result<payjoin::OhttpKeys, BoxError> {
+            let ohttp_relay = ohttp_relay.clone();
+            let directory_ohttp_keys = directory.join("/ohttp-keys")?;
+            let res = spawn_blocking(move || {
+                http_proxy(&ohttp_relay).unwrap().get(directory_ohttp_keys.as_str()).call()
+            })
+            .await??;
+            assert_eq!(res.status(), 200, "Failed to connect to target {}", res.status());
+            let mut body = Vec::new();
+            let _ = res.into_reader().read_to_end(&mut body)?;
+            Ok(payjoin::OhttpKeys::decode(&body)?)
+        }
+
+        /// Normalize the Url to include the port for ureq. ureq has a bug
+        /// which makes Proxy::new(...) use port 8080 for all input with scheme
+        /// http regardless of the port included in the Url. This prevents that.
+        /// https://github.com/algesten/ureq/pull/717
+        fn normalize_proxy_url(proxy: &Url) -> Result<String, BoxError> {
+            let scheme = proxy.scheme();
+            let host = proxy.host_str().ok_or("No host")?;
+
+            if scheme == "http" || scheme == "https" {
+                Ok(format!("{}:{}", host, proxy.port().unwrap_or(80)))
+            } else {
+                Ok(proxy.as_str().to_string())
+            }
         }
 
         async fn enroll_with_directory(
             directory: Url,
-            ohttp_config: &str,
+            ohttp_keys: OhttpKeys,
         ) -> Result<Enrolled, BoxError> {
             let mock_ohttp_relay = directory.clone(); // pass through to directory
             let mut enroller = Enroller::from_directory_config(
                 directory.clone(),
-                &ohttp_config,
+                ohttp_keys,
                 mock_ohttp_relay.clone(),
             );
             let (req, ctx) = enroller.extract_req()?;
@@ -506,14 +532,10 @@ mod integration {
         /// The receiver outputs a string to be passed to the sender as a string or QR code
         async fn create_receiver_pj_uri_string(
             receiver: &bitcoincore_rpc::Client,
-            ohttp_config: &str,
+            ohttp_keys: OhttpKeys,
             fallback_target: &str,
         ) -> Result<String, BoxError> {
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let ohttp_keys: ohttp::KeyConfig = ohttp::KeyConfig::decode(&base64::decode_config(
-                &ohttp_config,
-                base64::Config::new(base64::CharacterSet::UrlSafe, false),
-            )?)?;
             Ok(PjUriBuilder::new(
                 pj_receiver_address,
                 Url::parse(&fallback_target).unwrap(),
@@ -615,7 +637,14 @@ mod integration {
             payjoin_proposal
         }
 
-        fn http_agent() -> ureq::Agent {
+        fn http_agent() -> ureq::Agent { http_agent_builder().build() }
+
+        fn http_proxy(proxy: &Url) -> Result<ureq::Agent, BoxError> {
+            let proxy = ureq::Proxy::new(normalize_proxy_url(proxy)?)?;
+            Ok(http_agent_builder().proxy(proxy).build())
+        }
+
+        fn http_agent_builder() -> ureq::AgentBuilder {
             use rustls::client::ClientConfig;
             use rustls::pki_types::CertificateDer;
             use rustls::RootCertStore;
@@ -623,7 +652,6 @@ mod integration {
 
             let mut local_cert_path = std::env::temp_dir();
             local_cert_path.push(LOCAL_CERT_FILE);
-            println!("TEST CERT PATH {:?}", &local_cert_path);
             let cert_der = std::fs::read(local_cert_path).unwrap();
             let mut root_cert_store = RootCertStore::empty();
             root_cert_store.add(CertificateDer::from(cert_der.as_slice())).unwrap();
@@ -631,7 +659,7 @@ mod integration {
                 .with_root_certificates(root_cert_store)
                 .with_no_client_auth();
 
-            AgentBuilder::new().tls_config(Arc::new(client_config)).build()
+            AgentBuilder::new().tls_config(Arc::new(client_config))
         }
 
         fn is_success(status: u16) -> bool { status >= 200 && status < 300 }
@@ -640,6 +668,18 @@ mod integration {
             let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
             listener.local_addr().unwrap().port()
         }
+    }
+
+    fn init_tracing() {
+        INIT_TRACING.get_or_init(|| {
+            let subscriber = FmtSubscriber::builder()
+                .with_env_filter(EnvFilter::from_default_env())
+                .with_test_writer()
+                .finish();
+
+            tracing::subscriber::set_global_default(subscriber)
+                .expect("failed to set global default subscriber");
+        });
     }
 
     fn init_bitcoind_sender_receiver(

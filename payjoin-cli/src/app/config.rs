@@ -14,7 +14,7 @@ pub struct AppConfig {
     pub bitcoind_rpcuser: String,
     pub bitcoind_rpcpass: String,
     #[cfg(feature = "v2")]
-    pub ohttp_config: String,
+    pub ohttp_keys: Option<payjoin::OhttpKeys>,
     #[cfg(feature = "v2")]
     pub ohttp_relay: Url,
 
@@ -55,10 +55,10 @@ impl AppConfig {
 
         #[cfg(feature = "v2")]
         let builder = builder
-            .set_default("ohttp_config", "")?
+            .set_default("ohttp_keys", None::<String>)?
             .set_override_option(
-                "ohttp_config",
-                matches.get_one::<String>("ohttp_config").map(|s| s.as_str()),
+                "ohttp_keys",
+                matches.get_one::<String>("ohttp_keys").map(|s| s.as_str()),
             )?
             .set_default("ohttp_relay", "")?
             .set_override_option(

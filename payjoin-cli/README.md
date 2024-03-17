@@ -48,8 +48,8 @@ In addition to the rpc configuration above, specify relevant ohttp and payjoin d
 ...
 # a production payjoin directory server
 pj_endpoint="https://payjo.in"
-# payjo.in's ohttp_config with which ohttp requests will be encrypted
-ohttp_config="AQAgQB9BwO5taMV6Skp4dl9HpFPw5SNUnnd-imKkUm8P5EIABAABAAM"
+# payjo.in's ohttp_keys with which ohttp requests will be encrypted
+ohttp_keys="AQAgQB9BwO5taMV6Skp4dl9HpFPw5SNUnnd-imKkUm8P5EIABAABAAM"
  # an ohttp relay with ingress to payjo.in
 ohttp_relay="https://ohttp-relay.obscuravpn.io/payjoin"
 ```

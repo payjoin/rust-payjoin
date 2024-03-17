@@ -5,6 +5,9 @@ use bitcoin::address::{Error, NetworkChecked, NetworkUnchecked};
 use bitcoin::{Address, Amount, Network};
 use url::Url;
 
+#[cfg(feature = "v2")]
+use crate::OhttpKeys;
+
 #[derive(Clone)]
 pub enum MaybePayjoinExtras {
     Supported(PayjoinExtras),
@@ -25,7 +28,7 @@ pub struct PayjoinExtras {
     pub(crate) endpoint: Url,
     pub(crate) disable_output_substitution: bool,
     #[cfg(feature = "v2")]
-    pub(crate) ohttp_config: Option<ohttp::KeyConfig>,
+    pub(crate) ohttp_keys: Option<OhttpKeys>,
 }
 
 pub type Uri<'a, NetworkValidation> = bip21::Uri<'a, NetworkValidation, MaybePayjoinExtras>;
@@ -119,7 +122,7 @@ pub struct PjUriBuilder {
     /// Config for ohttp.
     ///
     /// Required only for v2 payjoin.
-    ohttp: Option<ohttp::KeyConfig>,
+    ohttp: Option<OhttpKeys>,
 }
 
 impl PjUriBuilder {
@@ -127,7 +130,7 @@ impl PjUriBuilder {
     pub fn new(
         address: Address,
         pj: Url,
-        #[cfg(feature = "v2")] ohttp_config: Option<ohttp::KeyConfig>,
+        #[cfg(feature = "v2")] ohttp_keys: Option<OhttpKeys>,
     ) -> Self {
         Self {
             address,
@@ -137,7 +140,7 @@ impl PjUriBuilder {
             pj,
             pjos: false,
             #[cfg(feature = "v2")]
-            ohttp: ohttp_config,
+            ohttp: ohttp_keys,
         }
     }
     /// Set the amount you want to receive.
@@ -173,7 +176,7 @@ impl PjUriBuilder {
             endpoint: self.pj,
             disable_output_substitution: self.pjos,
             #[cfg(feature = "v2")]
-            ohttp_config: self.ohttp,
+            ohttp_keys: self.ohttp,
         };
         let mut pj_uri = bip21::Uri::with_extras(self.address, extras);
         pj_uri.amount = self.amount;
@@ -200,7 +203,7 @@ pub struct DeserializationState {
     pj: Option<Url>,
     pjos: Option<bool>,
     #[cfg(feature = "v2")]
-    ohttp: Option<ohttp::KeyConfig>,
+    ohttp: Option<OhttpKeys>,
 }
 
 #[derive(Debug)]
@@ -235,7 +238,7 @@ impl<'a> bip21::SerializeParams for &'a PayjoinExtras {
             ("pjos", if self.disable_output_substitution { "1" } else { "0" }.to_string()),
         ];
         #[cfg(feature = "v2")]
-        if let Some(config) = self.ohttp_config.clone().and_then(|c| c.encode().ok()) {
+        if let Some(config) = self.ohttp_keys.clone().and_then(|c| c.encode().ok()) {
             let encoded_config = bitcoin::base64::encode_config(config, bitcoin::base64::URL_SAFE);
             params.push(("ohttp", encoded_config));
         } else {
@@ -265,8 +268,8 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
                 let config_bytes =
                     bitcoin::base64::decode_config(&*base64_config, bitcoin::base64::URL_SAFE)
                         .map_err(InternalPjParseError::NotBase64)?;
-                let config = ohttp::KeyConfig::decode(&config_bytes)
-                    .map_err(InternalPjParseError::BadOhttp)?;
+                let config =
+                    OhttpKeys::decode(&config_bytes).map_err(InternalPjParseError::BadOhttp)?;
                 self.ohttp = Some(config);
                 Ok(bip21::de::ParamKind::Known)
             }
@@ -308,7 +311,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
                         endpoint,
                         disable_output_substitution: pjos.unwrap_or(false),
                         #[cfg(feature = "v2")]
-                        ohttp_config: self.ohttp,
+                        ohttp_keys: self.ohttp,
                     }))
                 } else {
                     Err(PjParseError(InternalPjParseError::UnsecureEndpoint))
@@ -349,7 +352,7 @@ enum InternalPjParseError {
     NotBase64(bitcoin::base64::DecodeError),
     BadEndpoint(url::ParseError),
     #[cfg(feature = "v2")]
-    BadOhttp(ohttp::Error),
+    BadOhttp(crate::v2::Error),
     UnsecureEndpoint,
 }
 

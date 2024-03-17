@@ -238,9 +238,11 @@ impl<'a> bip21::SerializeParams for &'a PayjoinExtras {
             ("pjos", if self.disable_output_substitution { "1" } else { "0" }.to_string()),
         ];
         #[cfg(feature = "v2")]
-        if let Some(config) = self.ohttp_keys.clone().and_then(|c| c.encode().ok()) {
-            let encoded_config = bitcoin::base64::encode_config(config, bitcoin::base64::URL_SAFE);
-            params.push(("ohttp", encoded_config));
+        if let Some(ohttp_keys) = self.ohttp_keys.clone().and_then(|c| c.encode().ok()) {
+            let config =
+                bitcoin::base64::Config::new(bitcoin::base64::CharacterSet::UrlSafe, false);
+            let base64_ohttp_keys = bitcoin::base64::encode_config(ohttp_keys, config);
+            params.push(("ohttp", base64_ohttp_keys));
         } else {
             log::warn!("Failed to encode ohttp config, ignoring");
         }

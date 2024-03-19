@@ -1562,9 +1562,9 @@ dependencies = [
 
 [[package]]
 name = "ohttp-relay"
-version = "0.0.6"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee28deebd6f0eaf7f0e1a6857e8bfb0b2f3f1e4e20b38492a4ace3bd695d3243"
+checksum = "44b0473bd279cdfaf5983a15fa3d2d7e1826b0cd041f0fc51eb10af901a8bf94"
 dependencies = [
  "futures",
  "http 1.1.0",
@@ -1663,7 +1663,7 @@ dependencies = [
  "http 1.1.0",
  "log",
  "ohttp 0.5.1",
- "ohttp-relay 0.0.6",
+ "ohttp-relay 0.0.7",
  "once_cell",
  "payjoin-directory",
  "rand",

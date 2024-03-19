@@ -11,7 +11,7 @@ mod integration {
     use bitcoind::bitcoincore_rpc::core_rpc_json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::RpcApi;
     use log::{debug, log_enabled, Level};
-    use once_cell::sync::OnceCell;
+    use once_cell::sync::{Lazy, OnceCell};
     use payjoin::bitcoin::base64;
     use payjoin::send::{Request, RequestBuilder};
     use payjoin::{PjUriBuilder, Uri};
@@ -24,7 +24,6 @@ mod integration {
 
     #[cfg(not(feature = "v2"))]
     mod v1 {
-        use once_cell::sync::Lazy;
         use payjoin::receive::{Headers, PayjoinProposal, UncheckedProposal};
 
         use super::*;
@@ -238,14 +237,16 @@ mod integration {
                 directory: Url,
                 bad_ohttp_keys: OhttpKeys,
             ) -> Result<Response, Error> {
-                tokio::time::sleep(Duration::from_secs(6)).await;
+                wait_for_service_ready(directory.clone()).await.unwrap();
                 let mock_ohttp_relay = directory.clone(); // pass through to directory
                 let mut bad_enroller =
                     Enroller::from_directory_config(directory, bad_ohttp_keys, mock_ohttp_relay);
                 let (req, _ctx) = bad_enroller.extract_req().expect("Failed to extract request");
-                spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
-                    .await
-                    .expect("Failed to send request")
+                spawn_blocking(move || {
+                    http_agent().unwrap().post(req.url.as_str()).send_bytes(&req.body)
+                })
+                .await
+                .expect("Failed to send request")
             }
         }
 
@@ -253,19 +254,22 @@ mod integration {
         async fn v2_to_v2() {
             std::env::set_var("RUST_LOG", "debug");
             init_tracing();
+            let ohttp_relay_port = find_free_port();
             let ohttp_relay =
-                Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
-            let directory = Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
+                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
+            let directory_port = find_free_port();
+            let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
+            let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
             tokio::select!(
-                _ = ohttp_relay::listen_tcp(ohttp_relay.port().unwrap(), http::Uri::from_str(directory.as_str()).unwrap()) => assert!(false, "Ohttp relay is long running"),
-                _ = init_directory(directory.port().unwrap()) => assert!(false, "Directory server is long running"),
+                _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => assert!(false, "Ohttp relay is long running"),
+                _ = init_directory(directory_port) => assert!(false, "Directory server is long running"),
                 res = do_v2_send_receive(ohttp_relay, directory) => assert!(res.is_ok())
             );
 
             async fn do_v2_send_receive(ohttp_relay: Url, directory: Url) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
-
-                tokio::time::sleep(Duration::from_secs(6)).await;
+                wait_for_service_ready(ohttp_relay.clone()).await.unwrap();
+                wait_for_service_ready(directory.clone()).await.unwrap();
                 let ohttp_keys = fetch_ohttp_keys(&ohttp_relay, &directory).await?;
 
                 // **********************
@@ -295,6 +299,7 @@ mod integration {
                     let Request { url, body, .. } = send_req.clone();
                     spawn_blocking(move || {
                         http_agent()
+                            .unwrap()
                             .post(url.as_str())
                             .set("Content-Type", "text/plain")
                             .send_bytes(&body)
@@ -311,7 +316,7 @@ mod integration {
                 // GET fallback psbt
                 let (req, ctx) = enrolled.extract_req()?;
                 let response = spawn_blocking(move || {
-                    http_agent().post(req.url.as_str()).send_bytes(&req.body)
+                    http_agent().unwrap().post(req.url.as_str()).send_bytes(&req.body)
                 })
                 .await??;
 
@@ -320,7 +325,7 @@ mod integration {
                 let mut payjoin_proposal = handle_directory_proposal(receiver, proposal);
                 let (req, ctx) = payjoin_proposal.extract_v2_req()?;
                 let response = spawn_blocking(move || {
-                    http_agent().post(req.url.as_str()).send_bytes(&req.body)
+                    http_agent().unwrap().post(req.url.as_str()).send_bytes(&req.body)
                 })
                 .await??;
                 let mut res = Vec::new();
@@ -334,7 +339,7 @@ mod integration {
 
                 // Replay post fallback to get the response
                 let response = spawn_blocking(move || {
-                    http_agent().post(send_req.url.as_str()).send_bytes(&send_req.body)
+                    http_agent().unwrap().post(send_req.url.as_str()).send_bytes(&send_req.body)
                 })
                 .await??;
                 let checked_payjoin_proposal_psbt =
@@ -351,18 +356,22 @@ mod integration {
         async fn v1_to_v2() {
             std::env::set_var("RUST_LOG", "debug");
             init_tracing();
+            let ohttp_relay_port = find_free_port();
             let ohttp_relay =
-                Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
-            let directory = Url::parse(&format!("https://localhost:{}", find_free_port())).unwrap();
+                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
+            let directory_port = find_free_port();
+            let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
+            let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
             tokio::select!(
-                _ = ohttp_relay::listen_tcp(ohttp_relay.port().unwrap(), http::Uri::from_str(directory.as_str()).unwrap()) => assert!(false, "Ohttp relay is long running"),
-                _ = init_directory(directory.port().unwrap()) => assert!(false, "Directory server is long running"),
+                _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => assert!(false, "Ohttp relay is long running"),
+                _ = init_directory(directory_port) => assert!(false, "Directory server is long running"),
                 res = do_v1_to_v2(ohttp_relay, directory) => assert!(res.is_ok()),
             );
 
             async fn do_v1_to_v2(ohttp_relay: Url, directory: Url) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
-                tokio::time::sleep(Duration::from_secs(6)).await;
+                wait_for_service_ready(ohttp_relay.clone()).await.unwrap();
+                wait_for_service_ready(directory.clone()).await.unwrap();
                 let ohttp_keys = fetch_ohttp_keys(&ohttp_relay, &directory).await?;
 
                 let mut enrolled = enroll_with_directory(directory, ohttp_keys.clone()).await?;
@@ -388,6 +397,7 @@ mod integration {
                     let Request { url, body, .. } = send_req.clone();
                     spawn_blocking(move || {
                         http_agent()
+                            .unwrap()
                             .post(url.as_str())
                             .set("Content-Type", "text/plain")
                             .send_bytes(&body)
@@ -405,7 +415,7 @@ mod integration {
                     let (response, ctx) = loop {
                         let (req, ctx) = enrolled.extract_req().unwrap();
                         let response = spawn_blocking(move || {
-                            http_agent().post(req.url.as_str()).send_bytes(&req.body)
+                            http_agent().unwrap().post(req.url.as_str()).send_bytes(&req.body)
                         })
                         .await??;
 
@@ -429,7 +439,7 @@ mod integration {
                     // this response would be returned as http response to the sender
                     let (req, ctx) = payjoin_proposal.extract_v2_req().unwrap();
                     let response = spawn_blocking(move || {
-                        http_agent().post(req.url.as_str()).send_bytes(&req.body)
+                        http_agent().unwrap().post(req.url.as_str()).send_bytes(&req.body)
                     })
                     .await??;
                     let mut res = Vec::new();
@@ -447,6 +457,7 @@ mod integration {
                     let Request { url, body, .. } = send_req.clone();
                     spawn_blocking(move || {
                         http_agent()
+                            .unwrap()
                             .post(url.as_str())
                             .set("Content-Type", "text/plain")
                             .send_bytes(&body)
@@ -522,9 +533,10 @@ mod integration {
             );
             let (req, ctx) = enroller.extract_req()?;
             println!("enroll req: {:#?}", &req);
-            let res =
-                spawn_blocking(move || http_agent().post(req.url.as_str()).send_bytes(&req.body))
-                    .await??;
+            let res = spawn_blocking(move || {
+                http_agent().unwrap().post(req.url.as_str()).send_bytes(&req.body)
+            })
+            .await??;
             assert!(is_success(res.status()));
             Ok(enroller.process_res(res.into_reader(), ctx)?)
         }
@@ -637,14 +649,14 @@ mod integration {
             payjoin_proposal
         }
 
-        fn http_agent() -> ureq::Agent { http_agent_builder().build() }
+        fn http_agent() -> Result<ureq::Agent, BoxError> { Ok(http_agent_builder()?.build()) }
 
         fn http_proxy(proxy: &Url) -> Result<ureq::Agent, BoxError> {
             let proxy = ureq::Proxy::new(normalize_proxy_url(proxy)?)?;
-            Ok(http_agent_builder().proxy(proxy).build())
+            Ok(http_agent_builder()?.proxy(proxy).build())
         }
 
-        fn http_agent_builder() -> ureq::AgentBuilder {
+        fn http_agent_builder() -> Result<ureq::AgentBuilder, BoxError> {
             use rustls::client::ClientConfig;
             use rustls::pki_types::CertificateDer;
             use rustls::RootCertStore;
@@ -652,14 +664,14 @@ mod integration {
 
             let mut local_cert_path = std::env::temp_dir();
             local_cert_path.push(LOCAL_CERT_FILE);
-            let cert_der = std::fs::read(local_cert_path).unwrap();
+            let cert_der = std::fs::read(local_cert_path)?;
             let mut root_cert_store = RootCertStore::empty();
-            root_cert_store.add(CertificateDer::from(cert_der.as_slice())).unwrap();
+            root_cert_store.add(CertificateDer::from(cert_der.as_slice()))?;
             let client_config = ClientConfig::builder()
                 .with_root_certificates(root_cert_store)
                 .with_no_client_auth();
 
-            AgentBuilder::new().tls_config(Arc::new(client_config))
+            Ok(AgentBuilder::new().tls_config(Arc::new(client_config)))
         }
 
         fn is_success(status: u16) -> bool { status >= 200 && status < 300 }
@@ -667,6 +679,37 @@ mod integration {
         fn find_free_port() -> u16 {
             let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
             listener.local_addr().unwrap().port()
+        }
+
+        static TESTS_TIMEOUT: Lazy<Duration> = Lazy::new(|| Duration::from_secs(20));
+        static WAIT_SERVICE_INTERVAL: Lazy<Duration> = Lazy::new(|| Duration::from_secs(3));
+        async fn wait_for_service_ready(service_url: Url) -> Result<(), &'static str> {
+            let health_url = service_url.join("/health").map_err(|_| "Invalid URL")?;
+            let res = spawn_blocking(move || {
+                let start = std::time::Instant::now();
+
+                while start.elapsed() < *TESTS_TIMEOUT {
+                    let agent = match http_agent() {
+                        Ok(agent) => agent,
+                        Err(_) => {
+                            std::thread::sleep(*WAIT_SERVICE_INTERVAL);
+                            continue;
+                        }
+                    };
+                    let request_result = agent.get(health_url.as_str()).call();
+
+                    match request_result {
+                        Ok(response) if response.status() == 200 => return Ok(()),
+                        Err(Error::Status(404, _)) => return Err("Endpoint not found"),
+                        _ => std::thread::sleep(*WAIT_SERVICE_INTERVAL),
+                    }
+                }
+
+                Err("Timeout waiting for service to be ready")
+            })
+            .await
+            .map_err(|_| "JoinError")?;
+            res
         }
     }
 

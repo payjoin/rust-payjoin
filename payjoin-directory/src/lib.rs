@@ -136,6 +136,7 @@ async fn handle_ohttp_gateway(
         (Method::POST, ["", ""]) => handle_ohttp(body, pool, ohttp).await,
         (Method::GET, ["", "ohttp-keys"]) => get_ohttp_keys(&ohttp).await,
         (Method::POST, ["", id]) => post_fallback_v1(id, query, body, pool).await,
+        (Method::GET, ["", "health"]) => health_check().await,
         _ => Ok(not_found()),
     }
     .unwrap_or_else(|e| e.to_response());
@@ -206,6 +207,10 @@ async fn handle_v2(pool: DbPool, req: Request<Body>) -> Result<Response<Body>, H
         (Method::POST, &["", id, "payjoin"]) => post_payjoin(id, body, pool).await,
         _ => Ok(not_found()),
     }
+}
+
+async fn health_check() -> Result<Response<Body>, HandlerError> {
+    Ok(Response::builder().status(StatusCode::OK).body(Body::empty())?)
 }
 
 enum HandlerError {

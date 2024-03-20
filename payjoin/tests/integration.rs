@@ -346,7 +346,7 @@ mod integration {
             }
         }
 
-        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        #[tokio::test]
         #[cfg(feature = "v2")]
         async fn v1_to_v2() {
             std::env::set_var("RUST_LOG", "debug");

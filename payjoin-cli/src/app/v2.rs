@@ -10,7 +10,6 @@ use payjoin::bitcoin::Amount;
 use payjoin::{base64, bitcoin, Error, PjUriBuilder};
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::spawn_blocking;
-use url::Url;
 
 use super::config::AppConfig;
 use super::{App as AppTrait, SeenInputs};
@@ -73,7 +72,7 @@ impl AppTrait for App {
     async fn receive_payjoin(self, amount_arg: &str, is_retry: bool) -> Result<()> {
         use payjoin::receive::v2::Enroller;
 
-        let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
+        let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(self.config.clone()).await?;
         let mut enrolled = if !is_retry {
             let mut enroller = Enroller::from_directory_config(
                 self.config.pj_endpoint.clone(),
@@ -306,55 +305,19 @@ impl App {
     }
 }
 
-async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::OhttpKeys> {
+async fn unwrap_ohttp_keys_or_else_fetch(config: AppConfig) -> Result<payjoin::OhttpKeys> {
     if let Some(keys) = config.ohttp_keys.clone() {
         Ok(keys)
     } else {
-        fetch_ohttp_keys(&config.ohttp_relay, &config.pj_endpoint).await
+        Ok(tokio::task::spawn_blocking(move || {
+            payjoin_defaults::fetch_ohttp_keys(
+                config.ohttp_relay.clone(),
+                config.pj_endpoint.clone(),
+            )
+        })
+        .await
+        .map_err(|e| anyhow!("Failed to fetch ohttp keys: {}", e))??)
     }
-}
-
-async fn fetch_ohttp_keys(proxy: &Url, pj_endpoint: &Url) -> Result<payjoin::OhttpKeys> {
-    use anyhow::ensure;
-
-    let proxy = proxy.clone();
-    let ohttp_keys_url = pj_endpoint.join("/ohttp-keys")?;
-    let res = spawn_blocking(move || {
-        http_proxy(&proxy)?.get(ohttp_keys_url.as_str()).call().map_err(map_ureq_err)
-    })
-    .await??;
-
-    ensure!(res.status() == 200, "Failed to connect to target {}", res.status());
-    let mut body = Vec::new();
-    let _ = res.into_reader().read_to_end(&mut body)?;
-    Ok(payjoin::OhttpKeys::decode(&body)?)
-}
-
-/// Normalize the Url to include the port for ureq. ureq has a bug
-/// which makes Proxy::new(...) use port 8080 for all input with scheme
-/// http regardless of the port included in the Url. This prevents that.
-/// https://github.com/algesten/ureq/pull/717
-fn normalize_proxy_url(proxy: &Url) -> Result<String> {
-    let scheme = proxy.scheme();
-    let host = proxy.host_str().ok_or(anyhow!("Failed to parse host"))?;
-
-    if scheme == "http" || scheme == "https" {
-        Ok(format!("{}:{}", host, proxy.port().unwrap_or(80)))
-    } else {
-        Ok(proxy.as_str().to_string())
-    }
-}
-
-#[cfg(feature = "danger-local-https")]
-fn http_proxy(proxy: &Url) -> Result<ureq::Agent> {
-    let proxy = ureq::Proxy::new(normalize_proxy_url(proxy)?)?;
-    Ok(super::http_agent_builder()?.proxy(proxy).build())
-}
-
-#[cfg(not(feature = "danger-local-https"))]
-fn http_proxy(proxy: &Url) -> Result<ureq::Agent> {
-    let proxy = ureq::Proxy::new(normalize_proxy_url(proxy)?)?;
-    Ok(ureq::AgentBuilder::new().proxy(proxy).build())
 }
 
 fn map_ureq_err(e: ureq::Error) -> anyhow::Error {
@@ -444,36 +407,5 @@ impl ReceiveStore {
         let file = OpenOptions::new().write(true).open("receive_store.json")?;
         file.set_len(0)?;
         Ok(())
-    }
-}
-
-#[cfg(test)]
-#[cfg(not(feature = "danger-local-https"))]
-mod test {
-    use http::uri::Uri;
-
-    use super::*;
-
-    /// This test depends on the production payjo.in server being live.
-    /// It is an integration test that should be moved once a payjoin-io
-    /// crate exists
-    #[tokio::test]
-    async fn test_fetch_ohttp_keys() {
-        let relay_port = find_free_port();
-        let relay_url = Url::parse(&format!("http://0.0.0.0:{}", relay_port)).unwrap();
-        let pj_endpoint = Url::parse("https://payjo.in:443").unwrap();
-        tokio::select! {
-            _ = ohttp_relay::listen_tcp(relay_port, Uri::from_static("payjo.in:443")) => {
-                assert!(false, "Relay is long running");
-            }
-            res = fetch_ohttp_keys(&relay_url, &pj_endpoint) => {
-                assert!(res.is_ok());
-            }
-        }
-    }
-
-    fn find_free_port() -> u16 {
-        let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
-        listener.local_addr().unwrap().port()
     }
 }

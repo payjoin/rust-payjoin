@@ -1698,6 +1698,7 @@ dependencies = [
  "log",
  "ohttp-relay 0.0.4",
  "payjoin",
+ "payjoin-defaults",
  "rcgen",
  "rustls 0.22.3",
  "serde",

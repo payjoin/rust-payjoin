@@ -10,7 +10,14 @@ repository = "https://github.com/payjoin/rust-payjoin"
 resolver = "2"
 version = "0.0.1"
 
+[features]
+danger-local-https = ["rustls"]
+v2 = ["payjoin/v2"]
+
 [dependencies]
+payjoin = { version = "0.15.0", features = ["send", "receive"] }
+rustls = { version = "0.22.2", optional = true }
+ureq = "2.9.4"
 
 [dev-dependencies]
 

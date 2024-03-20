@@ -43,58 +43,47 @@ pub async fn listen_tcp(
 
     // Parse the bind address using the provided port
     let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
-    let server = init_server(&bind_addr)?.serve(make_svc);
+    let server = Server::bind(&bind_addr).serve(make_svc);
     info!("Payjoin Directory awaiting HTTP connection at {}", bind_addr);
     Ok(server.await?)
 }
 
-#[cfg(not(feature = "danger-local-https"))]
-fn init_server(bind_addr: &SocketAddr) -> Result<Builder<AddrIncoming>> {
-    Ok(Server::bind(bind_addr))
+#[cfg(feature = "danger-local-https")]
+pub async fn listen_tcp_with_tls(
+    port: u16,
+    db_host: String,
+    timeout: Duration,
+    tls_config: (Vec<u8>, Vec<u8>),
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = DbPool::new(timeout, db_host).await?;
+    let ohttp = Arc::new(Mutex::new(init_ohttp()?));
+    let make_svc = make_service_fn(|_| {
+        let pool = pool.clone();
+        let ohttp = ohttp.clone();
+        async move {
+            let handler = move |req| handle_ohttp_gateway(req, pool.clone(), ohttp.clone());
+            Ok::<_, hyper::Error>(service_fn(handler))
+        }
+    });
+
+    // Parse the bind address using the provided port
+    let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
+    let server = init_tls_server(&bind_addr, tls_config)?.serve(make_svc);
+    info!("Payjoin Directory awaiting HTTP connection at {}", bind_addr);
+    Ok(server.await?)
 }
 
 #[cfg(feature = "danger-local-https")]
-fn init_server(bind_addr: &SocketAddr) -> Result<Builder<hyper_rustls::TlsAcceptor>> {
-    const LOCAL_CERT_FILE: &str = "localhost.der";
-    const LOCAL_KEY_FILE: &str = "localhost_key.der";
-
-    use std::fs::{self, File};
-    use std::io::Write;
-
-    use rustls::{Certificate, PrivateKey};
-
-    let mut local_cert_path = std::env::temp_dir();
-    local_cert_path.push(LOCAL_CERT_FILE);
-    let mut local_key_path = std::env::temp_dir();
-    local_key_path.push(LOCAL_KEY_FILE);
-
-    println!("DIRECTORY CERT PATH {:?}", &local_cert_path);
-
-    // Attempt to read existing certificate and key
-    let (cert_der, key_der) = match (fs::read(&local_cert_path), fs::read(&local_key_path)) {
-        (Ok(cert), Ok(key)) => (cert, key),
-        _ => {
-            // Generate new certificate if existing ones are not found or readable
-            let cert = rcgen::generate_simple_self_signed(vec![
-                "0.0.0.0".to_string(),
-                "localhost".to_string(),
-            ])?;
-            let cert_der = cert.serialize_der()?;
-            let key_der = cert.serialize_private_key_der();
-
-            // Write the new certificate and key to files
-            File::create(&local_cert_path)?.write_all(&cert_der)?;
-            File::create(&local_key_path)?.write_all(&key_der)?;
-
-            (cert_der, key_der)
-        }
-    };
-
-    let key = PrivateKey(key_der);
-    let certs = vec![Certificate(cert_der)];
+fn init_tls_server(
+    bind_addr: &SocketAddr,
+    cert_key: (Vec<u8>, Vec<u8>),
+) -> Result<Builder<hyper_rustls::TlsAcceptor>> {
+    let (cert, key) = cert_key;
+    let cert = rustls::Certificate(cert);
+    let key = rustls::PrivateKey(key);
     let incoming = AddrIncoming::bind(bind_addr)?;
     let acceptor = hyper_rustls::TlsAcceptor::builder()
-        .with_single_cert(certs, key)
+        .with_single_cert(vec![cert], key)
         .map_err(|e| anyhow::anyhow!("TLS error: {}", e))?
         .with_all_versions_alpn()
         .with_incoming(incoming);
@@ -136,6 +125,7 @@ async fn handle_ohttp_gateway(
         (Method::POST, ["", ""]) => handle_ohttp(body, pool, ohttp).await,
         (Method::GET, ["", "ohttp-keys"]) => get_ohttp_keys(&ohttp).await,
         (Method::POST, ["", id]) => post_fallback_v1(id, query, body, pool).await,
+        (Method::GET, ["", "health"]) => health_check().await,
         _ => Ok(not_found()),
     }
     .unwrap_or_else(|e| e.to_response());
@@ -206,6 +196,10 @@ async fn handle_v2(pool: DbPool, req: Request<Body>) -> Result<Response<Body>, H
         (Method::POST, &["", id, "payjoin"]) => post_payjoin(id, body, pool).await,
         _ => Ok(not_found()),
     }
+}
+
+async fn health_check() -> Result<Response<Body>, HandlerError> {
+    Ok(Response::builder().status(StatusCode::OK).body(Body::empty())?)
 }
 
 enum HandlerError {

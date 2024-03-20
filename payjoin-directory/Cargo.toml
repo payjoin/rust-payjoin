@@ -14,7 +14,7 @@ resolver = "2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-danger-local-https = ["hyper-rustls", "rcgen", "rustls"]
+danger-local-https = ["hyper-rustls", "rustls"]
 
 [dependencies]
 anyhow = "1.0.71"
@@ -24,7 +24,6 @@ futures = "0.3.17"
 hyper = { version = "0.14", features = ["full"] }
 hyper-rustls = { version = "0.24", optional = true }
 ohttp = "0.4.0"
-rcgen = { version = "0.11", optional = true }
 redis = { version = "0.23.3", features = ["aio", "tokio-comp"] }
 rustls = { version = "0.21", optional = true }
 tokio = { version = "1.12.0", features = ["full"] }

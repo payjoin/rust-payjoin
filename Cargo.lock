@@ -1727,6 +1727,15 @@ dependencies = [
 [[package]]
 name = "payjoin-io"
 version = "0.0.1"
+dependencies = [
+ "bhttp 0.5.1",
+ "http 1.1.0",
+ "ohttp 0.5.1",
+ "ohttp-relay 0.0.4",
+ "tokio",
+ "ureq",
+ "url",
+]
 
 [[package]]
 name = "pem"

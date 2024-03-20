@@ -11,6 +11,13 @@ resolver = "2"
 version = "0.0.1"
 
 [dependencies]
+ohttp = { version = "0.5.1" }
+bhttp = { version = "0.5.1" }
+url = "2.2.2"
+tokio = { version = "1.12.0", features = ["full"] }
+ureq = "2.9.4"
 
 [dev-dependencies]
+http = "1"
+ohttp-relay = "0.0.4"
 

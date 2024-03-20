@@ -38,6 +38,7 @@ http = "1"
 payjoin-directory = { path = "../payjoin-directory", features = ["danger-local-https"] }
 ohttp-relay = "0.0.7"
 once_cell = "1"
+rcgen = { version = "0.11" }
 rustls = "0.22.2"
 testcontainers = "0.15.0"
 testcontainers-modules = { version = "0.1.3", features = ["redis"] }

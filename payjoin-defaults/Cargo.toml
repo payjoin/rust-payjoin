@@ -1,0 +1,16 @@
+[package]
+authors = ["jbesraa <jbesraa@gmail.com>"]
+description = "IO utilities for Payjoin"
+edition = "2021"
+keywords = ["bip77", "payjoin", "bitcoin", "networking"]
+license = "MITNFA"
+name = "payjoin-defaults"
+readme = "README.md"
+repository = "https://github.com/payjoin/rust-payjoin"
+resolver = "2"
+version = "0.0.1"
+
+[dependencies]
+
+[dev-dependencies]
+

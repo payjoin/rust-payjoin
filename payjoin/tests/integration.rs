@@ -506,9 +506,9 @@ mod integration {
         ) -> Result<(), BoxError> {
             let docker: Cli = Cli::default();
             let timeout = Duration::from_secs(2);
-            let postgres = docker.run(Redis::default());
-            let db_host = format!("127.0.0.1:{}", postgres.get_host_port_ipv4(6379));
-            println!("Postgres running on {}", postgres.get_host_port_ipv4(6379));
+            let db = docker.run(Redis::default());
+            let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
+            println!("Database running on {}", db.get_host_port_ipv4(6379));
             payjoin_directory::listen_tcp_with_tls(port, db_host, timeout, local_cert_key).await
         }
 

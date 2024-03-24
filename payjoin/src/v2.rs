@@ -42,7 +42,7 @@ pub fn encrypt_message_a(
     let e_pub = e_sec.public_key(&secp);
     let es = SharedSecret::new(&s, &e_sec);
     let cipher = ChaCha20Poly1305::new_from_slice(&es.secret_bytes())
-        .map_err(|_| InternalHpkeError::InvalidKeyLength)?;
+        .map_err(|_| HpkeError::InvalidKeyLength)?;
     let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng); // key es encrypts only 1 message so 0 is unique
     let aad = &e_pub.serialize();
     let msg = pad(&mut raw_msg)?;
@@ -60,16 +60,12 @@ pub fn decrypt_message_a(
     s: SecretKey,
 ) -> Result<(Vec<u8>, PublicKey), HpkeError> {
     // let message a = [pubkey/AD][nonce][authentication tag][ciphertext]
-    let e = PublicKey::from_slice(
-        message_a.get(..33).ok_or(HpkeError(InternalHpkeError::PayloadTooShort))?,
-    )?;
-    let nonce = Nonce::from_slice(
-        message_a.get(33..45).ok_or(HpkeError(InternalHpkeError::PayloadTooShort))?,
-    );
+    let e = PublicKey::from_slice(message_a.get(..33).ok_or(HpkeError::PayloadTooShort)?)?;
+    let nonce = Nonce::from_slice(message_a.get(33..45).ok_or(HpkeError::PayloadTooShort)?);
     let es = SharedSecret::new(&e, &s);
     let cipher = ChaCha20Poly1305::new_from_slice(&es.secret_bytes())
-        .map_err(|_| InternalHpkeError::InvalidKeyLength)?;
-    let c_t = message_a.get(45..).ok_or(HpkeError(InternalHpkeError::PayloadTooShort))?;
+        .map_err(|_| HpkeError::InvalidKeyLength)?;
+    let c_t = message_a.get(45..).ok_or(HpkeError::PayloadTooShort)?;
     let aad = &e.serialize();
     let payload = Payload { msg: c_t, aad };
     let buffer = cipher.decrypt(nonce, payload)?;
@@ -83,7 +79,7 @@ pub fn encrypt_message_b(raw_msg: &mut Vec<u8>, re_pub: PublicKey) -> Result<Vec
     let (e_sec, e_pub) = secp.generate_keypair(&mut OsRng);
     let ee = SharedSecret::new(&re_pub, &e_sec);
     let cipher = ChaCha20Poly1305::new_from_slice(&ee.secret_bytes())
-        .map_err(|_| InternalHpkeError::InvalidKeyLength)?;
+        .map_err(|_| HpkeError::InvalidKeyLength)?;
     let nonce = Nonce::from_slice(&[0u8; 12]); // key es encrypts only 1 message so 0 is unique
     let aad = &e_pub.serialize();
     let msg = pad(raw_msg)?;
@@ -98,17 +94,13 @@ pub fn encrypt_message_b(raw_msg: &mut Vec<u8>, re_pub: PublicKey) -> Result<Vec
 #[cfg(feature = "send")]
 pub fn decrypt_message_b(message_b: &mut [u8], e: SecretKey) -> Result<Vec<u8>, HpkeError> {
     // let message b = [pubkey/AD][nonce][authentication tag][ciphertext]
-    let re = PublicKey::from_slice(
-        message_b.get(..33).ok_or(HpkeError(InternalHpkeError::PayloadTooShort))?,
-    )?;
-    let nonce = Nonce::from_slice(
-        message_b.get(33..45).ok_or(HpkeError(InternalHpkeError::PayloadTooShort))?,
-    );
+    let re = PublicKey::from_slice(message_b.get(..33).ok_or(HpkeError::PayloadTooShort)?)?;
+    let nonce = Nonce::from_slice(message_b.get(33..45).ok_or(HpkeError::PayloadTooShort)?);
     let ee = SharedSecret::new(&re, &e);
     let cipher = ChaCha20Poly1305::new_from_slice(&ee.secret_bytes())
-        .map_err(|_| InternalHpkeError::InvalidKeyLength)?;
+        .map_err(|_| HpkeError::InvalidKeyLength)?;
     let payload = Payload {
-        msg: message_b.get(45..).ok_or(HpkeError(InternalHpkeError::PayloadTooShort))?,
+        msg: message_b.get(45..).ok_or(HpkeError::PayloadTooShort)?,
         aad: &re.serialize(),
     };
     let buffer = cipher.decrypt(nonce, payload)?;
@@ -117,7 +109,7 @@ pub fn decrypt_message_b(message_b: &mut [u8], e: SecretKey) -> Result<Vec<u8>, 
 
 fn pad(msg: &mut Vec<u8>) -> Result<&[u8], HpkeError> {
     if msg.len() > PADDED_MESSAGE_BYTES {
-        return Err(HpkeError(InternalHpkeError::PayloadTooLarge));
+        return Err(HpkeError::PayloadTooLarge);
     }
     while msg.len() < PADDED_MESSAGE_BYTES {
         msg.push(0);
@@ -126,14 +118,8 @@ fn pad(msg: &mut Vec<u8>) -> Result<&[u8], HpkeError> {
 }
 
 /// Error from de/encrypting a v2 Hybrid Public Key Encryption payload.
-///
-/// This is currently opaque type because we aren't sure which variants will stay.
-/// You can only display it.
 #[derive(Debug)]
-pub struct HpkeError(InternalHpkeError);
-
-#[derive(Debug)]
-pub(crate) enum InternalHpkeError {
+pub enum HpkeError {
     Secp256k1(bitcoin::secp256k1::Error),
     ChaCha20Poly1305(chacha20poly1305::aead::Error),
     InvalidKeyLength,
@@ -142,20 +128,18 @@ pub(crate) enum InternalHpkeError {
 }
 
 impl From<bitcoin::secp256k1::Error> for HpkeError {
-    fn from(value: bitcoin::secp256k1::Error) -> Self { Self(InternalHpkeError::Secp256k1(value)) }
+    fn from(value: bitcoin::secp256k1::Error) -> Self { Self::Secp256k1(value) }
 }
 
 impl From<chacha20poly1305::aead::Error> for HpkeError {
-    fn from(value: chacha20poly1305::aead::Error) -> Self {
-        Self(InternalHpkeError::ChaCha20Poly1305(value))
-    }
+    fn from(value: chacha20poly1305::aead::Error) -> Self { Self::ChaCha20Poly1305(value) }
 }
 
 impl fmt::Display for HpkeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use InternalHpkeError::*;
+        use HpkeError::*;
 
-        match &self.0 {
+        match &self {
             Secp256k1(e) => e.fmt(f),
             ChaCha20Poly1305(e) => e.fmt(f),
             InvalidKeyLength => write!(f, "Invalid Length"),
@@ -168,17 +152,13 @@ impl fmt::Display for HpkeError {
 
 impl error::Error for HpkeError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        use InternalHpkeError::*;
+        use HpkeError::*;
 
-        match &self.0 {
+        match &self {
             Secp256k1(e) => Some(e),
             ChaCha20Poly1305(_) | InvalidKeyLength | PayloadTooLarge | PayloadTooShort => None,
         }
     }
-}
-
-impl From<InternalHpkeError> for HpkeError {
-    fn from(value: InternalHpkeError) -> Self { Self(value) }
 }
 
 pub fn ohttp_encapsulate(
@@ -223,38 +203,30 @@ pub fn ohttp_decapsulate(
 }
 
 /// Error from de/encapsulating an Oblivious HTTP request or response.
-///
-/// This is currently opaque type because we aren't sure which variants will stay.
-/// You can only display it.
 #[derive(Debug)]
-pub struct OhttpEncapsulationError(InternalOhttpEncapsulationError);
-
-#[derive(Debug)]
-pub(crate) enum InternalOhttpEncapsulationError {
+pub enum OhttpEncapsulationError {
     Ohttp(ohttp::Error),
     Bhttp(bhttp::Error),
     ParseUrl(url::ParseError),
 }
 
 impl From<ohttp::Error> for OhttpEncapsulationError {
-    fn from(value: ohttp::Error) -> Self { Self(InternalOhttpEncapsulationError::Ohttp(value)) }
+    fn from(value: ohttp::Error) -> Self { Self::Ohttp(value) }
 }
 
 impl From<bhttp::Error> for OhttpEncapsulationError {
-    fn from(value: bhttp::Error) -> Self { Self(InternalOhttpEncapsulationError::Bhttp(value)) }
+    fn from(value: bhttp::Error) -> Self { Self::Bhttp(value) }
 }
 
 impl From<url::ParseError> for OhttpEncapsulationError {
-    fn from(value: url::ParseError) -> Self {
-        Self(InternalOhttpEncapsulationError::ParseUrl(value))
-    }
+    fn from(value: url::ParseError) -> Self { Self::ParseUrl(value) }
 }
 
 impl fmt::Display for OhttpEncapsulationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use InternalOhttpEncapsulationError::*;
+        use OhttpEncapsulationError::*;
 
-        match &self.0 {
+        match &self {
             Ohttp(e) => e.fmt(f),
             Bhttp(e) => e.fmt(f),
             ParseUrl(e) => e.fmt(f),
@@ -264,18 +236,14 @@ impl fmt::Display for OhttpEncapsulationError {
 
 impl error::Error for OhttpEncapsulationError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        use InternalOhttpEncapsulationError::*;
+        use OhttpEncapsulationError::*;
 
-        match &self.0 {
+        match &self {
             Ohttp(e) => Some(e),
             Bhttp(e) => Some(e),
             ParseUrl(e) => Some(e),
         }
     }
-}
-
-impl From<InternalOhttpEncapsulationError> for OhttpEncapsulationError {
-    fn from(value: InternalOhttpEncapsulationError) -> Self { Self(value) }
 }
 
 #[derive(Debug, Clone)]

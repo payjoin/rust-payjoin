@@ -231,8 +231,9 @@ pub fn ohttp_decapsulate(
 pub struct OhttpKeys(pub ohttp::KeyConfig);
 
 impl OhttpKeys {
-    pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
-        ohttp::KeyConfig::decode(bytes).map(Self).map_err(Error::from)
+    /// Decode an OHTTP KeyConfig
+    pub fn decode(bytes: &[u8]) -> Result<Self, ohttp::Error> {
+        ohttp::KeyConfig::decode(bytes).map(Self)
     }
 }
 

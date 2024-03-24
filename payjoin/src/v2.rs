@@ -60,12 +60,16 @@ pub fn decrypt_message_a(
     s: SecretKey,
 ) -> Result<(Vec<u8>, PublicKey), HpkeError> {
     // let message a = [pubkey/AD][nonce][authentication tag][ciphertext]
-    let e = PublicKey::from_slice(&message_a[..33])?;
-    let nonce = Nonce::from_slice(&message_a[33..45]);
+    let e = PublicKey::from_slice(
+        message_a.get(..33).ok_or(HpkeError(InternalHpkeError::PayloadTooShort))?,
+    )?;
+    let nonce = Nonce::from_slice(
+        message_a.get(33..45).ok_or(HpkeError(InternalHpkeError::PayloadTooShort))?,
+    );
     let es = SharedSecret::new(&e, &s);
     let cipher = ChaCha20Poly1305::new_from_slice(&es.secret_bytes())
         .map_err(|_| InternalHpkeError::InvalidKeyLength)?;
-    let c_t = &message_a[45..];
+    let c_t = message_a.get(45..).ok_or(HpkeError(InternalHpkeError::PayloadTooShort))?;
     let aad = &e.serialize();
     let payload = Payload { msg: c_t, aad };
     let buffer = cipher.decrypt(nonce, payload)?;
@@ -94,12 +98,19 @@ pub fn encrypt_message_b(raw_msg: &mut Vec<u8>, re_pub: PublicKey) -> Result<Vec
 #[cfg(feature = "send")]
 pub fn decrypt_message_b(message_b: &mut [u8], e: SecretKey) -> Result<Vec<u8>, HpkeError> {
     // let message b = [pubkey/AD][nonce][authentication tag][ciphertext]
-    let re = PublicKey::from_slice(&message_b[..33])?;
-    let nonce = Nonce::from_slice(&message_b[33..45]);
+    let re = PublicKey::from_slice(
+        message_b.get(..33).ok_or(HpkeError(InternalHpkeError::PayloadTooShort))?,
+    )?;
+    let nonce = Nonce::from_slice(
+        message_b.get(33..45).ok_or(HpkeError(InternalHpkeError::PayloadTooShort))?,
+    );
     let ee = SharedSecret::new(&re, &e);
     let cipher = ChaCha20Poly1305::new_from_slice(&ee.secret_bytes())
         .map_err(|_| InternalHpkeError::InvalidKeyLength)?;
-    let payload = Payload { msg: &message_b[45..], aad: &re.serialize() };
+    let payload = Payload {
+        msg: message_b.get(45..).ok_or(HpkeError(InternalHpkeError::PayloadTooShort))?,
+        aad: &re.serialize(),
+    };
     let buffer = cipher.decrypt(nonce, payload)?;
     Ok(buffer)
 }
@@ -127,6 +138,7 @@ pub(crate) enum InternalHpkeError {
     ChaCha20Poly1305(chacha20poly1305::aead::Error),
     InvalidKeyLength,
     PayloadTooLarge,
+    PayloadTooShort,
 }
 
 impl From<bitcoin::secp256k1::Error> for HpkeError {
@@ -149,6 +161,7 @@ impl fmt::Display for HpkeError {
             InvalidKeyLength => write!(f, "Invalid Length"),
             PayloadTooLarge =>
                 write!(f, "Payload too large, max size is {} bytes", PADDED_MESSAGE_BYTES),
+            PayloadTooShort => write!(f, "Payload too small"),
         }
     }
 }
@@ -159,7 +172,7 @@ impl error::Error for HpkeError {
 
         match &self.0 {
             Secp256k1(e) => Some(e),
-            ChaCha20Poly1305(_) | InvalidKeyLength | PayloadTooLarge => None,
+            ChaCha20Poly1305(_) | InvalidKeyLength | PayloadTooLarge | PayloadTooShort => None,
         }
     }
 }

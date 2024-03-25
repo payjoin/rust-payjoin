@@ -1711,9 +1711,23 @@ dependencies = [
 name = "payjoin-defaults"
 version = "0.0.1"
 dependencies = [
+ "bitcoin",
+ "bitcoind",
+ "http 1.1.0",
+ "log",
+ "ohttp-relay 0.0.7",
+ "once_cell",
  "payjoin",
+ "payjoin-directory",
+ "rcgen",
  "rustls 0.22.3",
+ "testcontainers",
+ "testcontainers-modules",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
  "ureq",
+ "url",
 ]
 
 [[package]]

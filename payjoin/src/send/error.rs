@@ -57,7 +57,9 @@ pub(crate) enum InternalValidationError {
     FeeContributionPaysOutputSizeIncrease,
     FeeRateBelowMinimum,
     #[cfg(feature = "v2")]
-    V2(crate::v2::Error),
+    HpkeError(crate::v2::HpkeError),
+    #[cfg(feature = "v2")]
+    OhttpEncapsulation(crate::v2::OhttpEncapsulationError),
     #[cfg(feature = "v2")]
     Psbt(bitcoin::psbt::Error),
 }
@@ -103,7 +105,9 @@ impl fmt::Display for ValidationError {
             FeeContributionPaysOutputSizeIncrease => write!(f, "fee contribution pays for additional outputs"),
             FeeRateBelowMinimum =>  write!(f, "the fee rate of proposed transaction is below minimum"),
             #[cfg(feature = "v2")]
-            V2(e) => write!(f, "v2 error: {}", e),
+            HpkeError(e) => write!(f, "v2 error: {}", e),
+            #[cfg(feature = "v2")]
+            OhttpEncapsulation(e) => write!(f, "Ohttp encapsulation error: {}", e),
             #[cfg(feature = "v2")]
             Psbt(e) => write!(f, "psbt error: {}", e),
         }
@@ -144,7 +148,9 @@ impl std::error::Error for ValidationError {
             FeeContributionPaysOutputSizeIncrease => None,
             FeeRateBelowMinimum => None,
             #[cfg(feature = "v2")]
-            V2(error) => Some(error),
+            HpkeError(error) => Some(error),
+            #[cfg(feature = "v2")]
+            OhttpEncapsulation(error) => Some(error),
             #[cfg(feature = "v2")]
             Psbt(error) => Some(error),
         }
@@ -177,7 +183,9 @@ pub(crate) enum InternalCreateRequestError {
     PrevTxOut(crate::psbt::PrevTxOutError),
     InputType(crate::input_type::InputTypeError),
     #[cfg(feature = "v2")]
-    V2(crate::v2::Error),
+    Hpke(crate::v2::HpkeError),
+    #[cfg(feature = "v2")]
+    OhttpEncapsulation(crate::v2::OhttpEncapsulationError),
     #[cfg(feature = "v2")]
     SubdirectoryNotBase64(bitcoin::base64::DecodeError),
     #[cfg(feature = "v2")]
@@ -207,7 +215,9 @@ impl fmt::Display for CreateRequestError {
             PrevTxOut(e) => write!(f, "invalid previous transaction output: {}", e),
             InputType(e) => write!(f, "invalid input type: {}", e),
             #[cfg(feature = "v2")]
-            V2(e) => write!(f, "v2 error: {}", e),
+            Hpke(e) => write!(f, "v2 error: {}", e),
+            #[cfg(feature = "v2")]
+            OhttpEncapsulation(e) => write!(f, "v2 error: {}", e),
             #[cfg(feature = "v2")]
             SubdirectoryNotBase64(e) => write!(f, "subdirectory is not valid base64 error: {}", e),
             #[cfg(feature = "v2")]
@@ -239,7 +249,9 @@ impl std::error::Error for CreateRequestError {
             PrevTxOut(error) => Some(error),
             InputType(error) => Some(error),
             #[cfg(feature = "v2")]
-            V2(error) => Some(error),
+            Hpke(error) => Some(error),
+            #[cfg(feature = "v2")]
+            OhttpEncapsulation(error) => Some(error),
             #[cfg(feature = "v2")]
             SubdirectoryNotBase64(error) => Some(error),
             #[cfg(feature = "v2")]

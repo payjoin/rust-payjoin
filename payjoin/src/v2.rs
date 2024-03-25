@@ -37,12 +37,12 @@ pub fn encrypt_message_a(
     mut raw_msg: Vec<u8>,
     e_sec: SecretKey,
     s: PublicKey,
-) -> Result<Vec<u8>, Error> {
+) -> Result<Vec<u8>, HpkeError> {
     let secp = Secp256k1::new();
     let e_pub = e_sec.public_key(&secp);
     let es = SharedSecret::new(&s, &e_sec);
     let cipher = ChaCha20Poly1305::new_from_slice(&es.secret_bytes())
-        .map_err(|_| InternalError::InvalidKeyLength)?;
+        .map_err(|_| HpkeError::InvalidKeyLength)?;
     let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng); // key es encrypts only 1 message so 0 is unique
     let aad = &e_pub.serialize();
     let msg = pad(&mut raw_msg)?;
@@ -55,14 +55,17 @@ pub fn encrypt_message_a(
 }
 
 #[cfg(feature = "receive")]
-pub fn decrypt_message_a(message_a: &[u8], s: SecretKey) -> Result<(Vec<u8>, PublicKey), Error> {
+pub fn decrypt_message_a(
+    message_a: &[u8],
+    s: SecretKey,
+) -> Result<(Vec<u8>, PublicKey), HpkeError> {
     // let message a = [pubkey/AD][nonce][authentication tag][ciphertext]
-    let e = PublicKey::from_slice(&message_a[..33])?;
-    let nonce = Nonce::from_slice(&message_a[33..45]);
+    let e = PublicKey::from_slice(message_a.get(..33).ok_or(HpkeError::PayloadTooShort)?)?;
+    let nonce = Nonce::from_slice(message_a.get(33..45).ok_or(HpkeError::PayloadTooShort)?);
     let es = SharedSecret::new(&e, &s);
     let cipher = ChaCha20Poly1305::new_from_slice(&es.secret_bytes())
-        .map_err(|_| InternalError::InvalidKeyLength)?;
-    let c_t = &message_a[45..];
+        .map_err(|_| HpkeError::InvalidKeyLength)?;
+    let c_t = message_a.get(45..).ok_or(HpkeError::PayloadTooShort)?;
     let aad = &e.serialize();
     let payload = Payload { msg: c_t, aad };
     let buffer = cipher.decrypt(nonce, payload)?;
@@ -70,13 +73,13 @@ pub fn decrypt_message_a(message_a: &[u8], s: SecretKey) -> Result<(Vec<u8>, Pub
 }
 
 #[cfg(feature = "receive")]
-pub fn encrypt_message_b(raw_msg: &mut Vec<u8>, re_pub: PublicKey) -> Result<Vec<u8>, Error> {
+pub fn encrypt_message_b(raw_msg: &mut Vec<u8>, re_pub: PublicKey) -> Result<Vec<u8>, HpkeError> {
     // let message b = [pubkey/AD][nonce][authentication tag][ciphertext]
     let secp = Secp256k1::new();
     let (e_sec, e_pub) = secp.generate_keypair(&mut OsRng);
     let ee = SharedSecret::new(&re_pub, &e_sec);
     let cipher = ChaCha20Poly1305::new_from_slice(&ee.secret_bytes())
-        .map_err(|_| InternalError::InvalidKeyLength)?;
+        .map_err(|_| HpkeError::InvalidKeyLength)?;
     let nonce = Nonce::from_slice(&[0u8; 12]); // key es encrypts only 1 message so 0 is unique
     let aad = &e_pub.serialize();
     let msg = pad(raw_msg)?;
@@ -89,21 +92,24 @@ pub fn encrypt_message_b(raw_msg: &mut Vec<u8>, re_pub: PublicKey) -> Result<Vec
 }
 
 #[cfg(feature = "send")]
-pub fn decrypt_message_b(message_b: &mut [u8], e: SecretKey) -> Result<Vec<u8>, Error> {
+pub fn decrypt_message_b(message_b: &mut [u8], e: SecretKey) -> Result<Vec<u8>, HpkeError> {
     // let message b = [pubkey/AD][nonce][authentication tag][ciphertext]
-    let re = PublicKey::from_slice(&message_b[..33])?;
-    let nonce = Nonce::from_slice(&message_b[33..45]);
+    let re = PublicKey::from_slice(message_b.get(..33).ok_or(HpkeError::PayloadTooShort)?)?;
+    let nonce = Nonce::from_slice(message_b.get(33..45).ok_or(HpkeError::PayloadTooShort)?);
     let ee = SharedSecret::new(&re, &e);
     let cipher = ChaCha20Poly1305::new_from_slice(&ee.secret_bytes())
-        .map_err(|_| InternalError::InvalidKeyLength)?;
-    let payload = Payload { msg: &message_b[45..], aad: &re.serialize() };
+        .map_err(|_| HpkeError::InvalidKeyLength)?;
+    let payload = Payload {
+        msg: message_b.get(45..).ok_or(HpkeError::PayloadTooShort)?,
+        aad: &re.serialize(),
+    };
     let buffer = cipher.decrypt(nonce, payload)?;
     Ok(buffer)
 }
 
-fn pad(msg: &mut Vec<u8>) -> Result<&[u8], Error> {
+fn pad(msg: &mut Vec<u8>) -> Result<&[u8], HpkeError> {
     if msg.len() > PADDED_MESSAGE_BYTES {
-        return Err(Error(InternalError::PayloadTooLarge));
+        return Err(HpkeError::PayloadTooLarge);
     }
     while msg.len() < PADDED_MESSAGE_BYTES {
         msg.push(0);
@@ -111,79 +117,48 @@ fn pad(msg: &mut Vec<u8>) -> Result<&[u8], Error> {
     Ok(msg)
 }
 
-/// Error that may occur when de/encrypting or de/capsulating a v2 message.
-///
-/// This is currently opaque type because we aren't sure which variants will stay.
-/// You can only display it.
+/// Error from de/encrypting a v2 Hybrid Public Key Encryption payload.
 #[derive(Debug)]
-pub struct Error(InternalError);
-
-#[derive(Debug)]
-pub(crate) enum InternalError {
-    Ohttp(ohttp::Error),
-    Bhttp(bhttp::Error),
-    ParseUrl(url::ParseError),
+pub enum HpkeError {
     Secp256k1(bitcoin::secp256k1::Error),
     ChaCha20Poly1305(chacha20poly1305::aead::Error),
     InvalidKeyLength,
     PayloadTooLarge,
+    PayloadTooShort,
 }
 
-impl From<ohttp::Error> for Error {
-    fn from(value: ohttp::Error) -> Self { Self(InternalError::Ohttp(value)) }
+impl From<bitcoin::secp256k1::Error> for HpkeError {
+    fn from(value: bitcoin::secp256k1::Error) -> Self { Self::Secp256k1(value) }
 }
 
-impl From<bhttp::Error> for Error {
-    fn from(value: bhttp::Error) -> Self { Self(InternalError::Bhttp(value)) }
+impl From<chacha20poly1305::aead::Error> for HpkeError {
+    fn from(value: chacha20poly1305::aead::Error) -> Self { Self::ChaCha20Poly1305(value) }
 }
 
-impl From<url::ParseError> for Error {
-    fn from(value: url::ParseError) -> Self { Self(InternalError::ParseUrl(value)) }
-}
-
-impl From<bitcoin::secp256k1::Error> for Error {
-    fn from(value: bitcoin::secp256k1::Error) -> Self { Self(InternalError::Secp256k1(value)) }
-}
-
-impl From<chacha20poly1305::aead::Error> for Error {
-    fn from(value: chacha20poly1305::aead::Error) -> Self {
-        Self(InternalError::ChaCha20Poly1305(value))
-    }
-}
-
-impl fmt::Display for Error {
+impl fmt::Display for HpkeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use InternalError::*;
+        use HpkeError::*;
 
-        match &self.0 {
-            Ohttp(e) => e.fmt(f),
-            Bhttp(e) => e.fmt(f),
-            ParseUrl(e) => e.fmt(f),
+        match &self {
             Secp256k1(e) => e.fmt(f),
             ChaCha20Poly1305(e) => e.fmt(f),
             InvalidKeyLength => write!(f, "Invalid Length"),
             PayloadTooLarge =>
                 write!(f, "Payload too large, max size is {} bytes", PADDED_MESSAGE_BYTES),
+            PayloadTooShort => write!(f, "Payload too small"),
         }
     }
 }
 
-impl error::Error for Error {
+impl error::Error for HpkeError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        use InternalError::*;
+        use HpkeError::*;
 
-        match &self.0 {
-            Ohttp(e) => Some(e),
-            Bhttp(e) => Some(e),
-            ParseUrl(e) => Some(e),
+        match &self {
             Secp256k1(e) => Some(e),
-            ChaCha20Poly1305(_) | InvalidKeyLength | PayloadTooLarge => None,
+            ChaCha20Poly1305(_) | InvalidKeyLength | PayloadTooLarge | PayloadTooShort => None,
         }
     }
-}
-
-impl From<InternalError> for Error {
-    fn from(value: InternalError) -> Self { Self(value) }
 }
 
 pub fn ohttp_encapsulate(
@@ -191,7 +166,7 @@ pub fn ohttp_encapsulate(
     method: &str,
     target_resource: &str,
     body: Option<&[u8]>,
-) -> Result<(Vec<u8>, ohttp::ClientResponse), Error> {
+) -> Result<(Vec<u8>, ohttp::ClientResponse), OhttpEncapsulationError> {
     let ctx = ohttp::ClientRequest::from_config(ohttp_keys)?;
     let url = url::Url::parse(target_resource)?;
     let authority_bytes = url.host().map_or_else(Vec::new, |host| {
@@ -220,19 +195,64 @@ pub fn ohttp_encapsulate(
 pub fn ohttp_decapsulate(
     res_ctx: ohttp::ClientResponse,
     ohttp_body: &[u8],
-) -> Result<Vec<u8>, Error> {
+) -> Result<Vec<u8>, OhttpEncapsulationError> {
     let bhttp_body = res_ctx.decapsulate(ohttp_body)?;
     let mut r = std::io::Cursor::new(bhttp_body);
     let response = bhttp::Message::read_bhttp(&mut r)?;
     Ok(response.content().to_vec())
 }
 
+/// Error from de/encapsulating an Oblivious HTTP request or response.
+#[derive(Debug)]
+pub enum OhttpEncapsulationError {
+    Ohttp(ohttp::Error),
+    Bhttp(bhttp::Error),
+    ParseUrl(url::ParseError),
+}
+
+impl From<ohttp::Error> for OhttpEncapsulationError {
+    fn from(value: ohttp::Error) -> Self { Self::Ohttp(value) }
+}
+
+impl From<bhttp::Error> for OhttpEncapsulationError {
+    fn from(value: bhttp::Error) -> Self { Self::Bhttp(value) }
+}
+
+impl From<url::ParseError> for OhttpEncapsulationError {
+    fn from(value: url::ParseError) -> Self { Self::ParseUrl(value) }
+}
+
+impl fmt::Display for OhttpEncapsulationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use OhttpEncapsulationError::*;
+
+        match &self {
+            Ohttp(e) => e.fmt(f),
+            Bhttp(e) => e.fmt(f),
+            ParseUrl(e) => e.fmt(f),
+        }
+    }
+}
+
+impl error::Error for OhttpEncapsulationError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        use OhttpEncapsulationError::*;
+
+        match &self {
+            Ohttp(e) => Some(e),
+            Bhttp(e) => Some(e),
+            ParseUrl(e) => Some(e),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct OhttpKeys(pub ohttp::KeyConfig);
 
 impl OhttpKeys {
-    pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
-        ohttp::KeyConfig::decode(bytes).map(Self).map_err(Error::from)
+    /// Decode an OHTTP KeyConfig
+    pub fn decode(bytes: &[u8]) -> Result<Self, ohttp::Error> {
+        ohttp::KeyConfig::decode(bytes).map(Self)
     }
 }
 

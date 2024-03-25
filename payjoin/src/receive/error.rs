@@ -36,8 +36,13 @@ impl From<InternalRequestError> for Error {
 }
 
 #[cfg(feature = "v2")]
-impl From<crate::v2::Error> for Error {
-    fn from(e: crate::v2::Error) -> Self { Error::Server(Box::new(e)) }
+impl From<crate::v2::HpkeError> for Error {
+    fn from(e: crate::v2::HpkeError) -> Self { Error::Server(Box::new(e)) }
+}
+
+#[cfg(feature = "v2")]
+impl From<crate::v2::OhttpEncapsulationError> for Error {
+    fn from(e: crate::v2::OhttpEncapsulationError) -> Self { Error::Server(Box::new(e)) }
 }
 
 /// Error that may occur when the request from sender is malformed.

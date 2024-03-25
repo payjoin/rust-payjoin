@@ -341,14 +341,14 @@ impl RequestContext {
             self.min_fee_rate,
         )?;
         let body = crate::v2::encrypt_message_a(body, self.e, rs)
-            .map_err(InternalCreateRequestError::V2)?;
+            .map_err(InternalCreateRequestError::Hpke)?;
         let (body, ohttp_res) = crate::v2::ohttp_encapsulate(
             self.ohttp_keys.as_mut().ok_or(InternalCreateRequestError::MissingOhttpConfig)?,
             "POST",
             url.as_str(),
             Some(&body),
         )
-        .map_err(InternalCreateRequestError::V2)?;
+        .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
         log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
         Ok((
             Request { url: ohttp_relay, body },
@@ -586,9 +586,9 @@ impl ContextV2 {
         let mut res_buf = Vec::new();
         response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
         let mut res_buf = crate::v2::ohttp_decapsulate(self.ohttp_res, &res_buf)
-            .map_err(InternalValidationError::V2)?;
+            .map_err(InternalValidationError::OhttpEncapsulation)?;
         let psbt = crate::v2::decrypt_message_b(&mut res_buf, self.e)
-            .map_err(InternalValidationError::V2)?;
+            .map_err(InternalValidationError::HpkeError)?;
         if psbt.is_empty() {
             return Ok(None);
         }

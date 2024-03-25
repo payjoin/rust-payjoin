@@ -270,8 +270,8 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
                 let config_bytes =
                     bitcoin::base64::decode_config(&*base64_config, bitcoin::base64::URL_SAFE)
                         .map_err(InternalPjParseError::NotBase64)?;
-                let config =
-                    OhttpKeys::decode(&config_bytes).map_err(InternalPjParseError::BadOhttp)?;
+                let config = OhttpKeys::decode(&config_bytes)
+                    .map_err(InternalPjParseError::DecodeOhttpKeys)?;
                 self.ohttp = Some(config);
                 Ok(bip21::de::ParamKind::Known)
             }
@@ -336,7 +336,7 @@ impl std::fmt::Display for PjParseError {
             InternalPjParseError::NotBase64(_) => write!(f, "ohttp config is not valid base64"),
             InternalPjParseError::BadEndpoint(_) => write!(f, "Endpoint is not valid"),
             #[cfg(feature = "v2")]
-            InternalPjParseError::BadOhttp(_) => write!(f, "ohttp config is not valid"),
+            InternalPjParseError::DecodeOhttpKeys(_) => write!(f, "ohttp config is not valid"),
             InternalPjParseError::UnsecureEndpoint => {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }
@@ -354,7 +354,7 @@ enum InternalPjParseError {
     NotBase64(bitcoin::base64::DecodeError),
     BadEndpoint(url::ParseError),
     #[cfg(feature = "v2")]
-    BadOhttp(crate::v2::Error),
+    DecodeOhttpKeys(ohttp::Error),
     UnsecureEndpoint,
 }
 

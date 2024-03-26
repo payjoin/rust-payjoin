@@ -22,6 +22,9 @@ pub struct Request {
     /// This is full URL with scheme etc - you can pass it right to `reqwest` or a similar library.
     pub url: url::Url,
 
+    /// Required Content-Type header
+    pub content_type: String,
+
     /// Bytes to be sent to the receiver.
     pub body: Vec<u8>,
 }
@@ -73,7 +76,8 @@ impl Enroller {
             self.directory.as_str(),
             Some(subdirectory.as_bytes()),
         )?;
-        let req = Request { url, body };
+        let content_type = "message/ohttp-req".to_string();
+        let req = Request { url, content_type, body };
         Ok((req, ctx))
     }
 
@@ -212,7 +216,8 @@ impl Enrolled {
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
         let (body, ohttp_ctx) = self.fallback_req_body()?;
         let url = self.ohttp_relay.clone();
-        let req = Request { url, body };
+        let content_type = "message/ohttp-req".to_string();
+        let req = Request { url, content_type, body };
         Ok((req, ohttp_ctx))
     }
 
@@ -527,8 +532,9 @@ impl PayjoinProposal {
             &post_payjoin_target,
             Some(&body),
         )?;
+        let content_type = "message/ohttp-req".to_string();
         let url = self.context.ohttp_relay.clone();
-        let req = Request { url, body };
+        let req = Request { url, content_type, body };
         Ok((req, ctx))
     }
 

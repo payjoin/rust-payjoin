@@ -24,6 +24,7 @@
 //! [`bitmask-core`](https://github.com/diba-io/bitmask-core) BDK integration. Bring your own
 //! wallet and http client.
 
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use bitcoin::address::NetworkChecked;
@@ -297,9 +298,10 @@ impl RequestContext {
             self.min_fee_rate,
         )
         .map_err(InternalCreateRequestError::Url)?;
+        let content_type = "text/plain".to_string();
         let body = self.psbt.to_string().as_bytes().to_vec();
         Ok((
-            Request { url, body },
+            Request { url, content_type, body },
             ContextV1 {
                 original_psbt: self.psbt,
                 disable_output_substitution: self.disable_output_substitution,
@@ -334,6 +336,7 @@ impl RequestContext {
             .map_err(InternalCreateRequestError::SubdirectoryInvalidPubkey)?;
 
         let url = self.endpoint.clone();
+        let content_type = "message/ohttp-req".to_string();
         let body = serialize_v2_body(
             &self.psbt,
             self.disable_output_substitution,
@@ -351,7 +354,7 @@ impl RequestContext {
         .map_err(InternalCreateRequestError::V2)?;
         log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
         Ok((
-            Request { url: ohttp_relay, body },
+            Request { url: ohttp_relay, content_type, body },
             // this method may be called more than once to re-construct the ohttp, therefore we must clone (or TODO memoize)
             ContextV2 {
                 context_v1: ContextV1 {
@@ -521,6 +524,9 @@ pub struct Request {
     ///
     /// This is full URL with scheme etc - you can pass it right to `reqwest` or a similar library.
     pub url: Url,
+
+    /// Required Content-Type header
+    pub content_type: String,
 
     /// Bytes to be sent to the receiver.
     ///

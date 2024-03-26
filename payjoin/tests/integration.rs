@@ -13,8 +13,8 @@ mod integration {
     use log::{debug, log_enabled, Level};
     use once_cell::sync::{Lazy, OnceCell};
     use payjoin::bitcoin::base64;
-    use payjoin::send::{Request, RequestBuilder};
-    use payjoin::{PjUriBuilder, Uri};
+    use payjoin::send::RequestBuilder;
+    use payjoin::{PjUriBuilder, Request, Uri};
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
     use url::Url;
 

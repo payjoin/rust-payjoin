@@ -9,22 +9,7 @@ use url::Url;
 use super::{Error, InternalRequestError, RequestError, SelectionError};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
-use crate::OhttpKeys;
-
-/// Represents data that needs to be transmitted to the payjoin directory.
-///
-/// You need to send this request over HTTP(S) to the directory.
-#[non_exhaustive]
-#[derive(Debug)]
-pub struct Request {
-    /// URL to send the request to.
-    ///
-    /// This is full URL with scheme etc - you can pass it right to `reqwest` or a similar library.
-    pub url: url::Url,
-
-    /// Bytes to be sent to the receiver.
-    pub body: Vec<u8>,
-}
+use crate::{OhttpKeys, Request};
 
 #[derive(Debug, Clone)]
 pub struct V2Context {

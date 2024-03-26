@@ -43,6 +43,7 @@ use url::Url;
 
 use crate::input_type::InputType;
 use crate::psbt::PsbtExt;
+use crate::request::Request;
 use crate::uri::UriExt;
 use crate::weight::{varint_size, ComputeWeight};
 use crate::{PjUri, Uri};
@@ -529,24 +530,6 @@ impl<'de> Deserialize<'de> for RequestContext {
 
         deserializer.deserialize_struct("RequestContext", FIELDS, RequestContextVisitor)
     }
-}
-/// Represents data that needs to be transmitted to the receiver.
-///
-/// You need to send this request over HTTP(S) to the receiver.
-#[non_exhaustive]
-#[derive(Debug, Clone)]
-pub struct Request {
-    /// URL to send the request to.
-    ///
-    /// This is full URL with scheme etc - you can pass it right to `reqwest` or a similar library.
-    pub url: Url,
-
-    /// Bytes to be sent to the receiver.
-    ///
-    /// This is properly encoded PSBT, already in base64. You only need to make sure `Content-Type`
-    /// is `text/plain` and `Content-Length` is `body.len()` (most libraries do the latter
-    /// automatically).
-    pub body: Vec<u8>,
 }
 
 /// Data required for validation of response.

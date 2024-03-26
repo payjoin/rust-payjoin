@@ -13,8 +13,8 @@ mod integration {
     use log::{debug, log_enabled, Level};
     use once_cell::sync::{Lazy, OnceCell};
     use payjoin::bitcoin::base64;
-    use payjoin::send::{Request, RequestBuilder};
-    use payjoin::{PjUriBuilder, Uri};
+    use payjoin::send::RequestBuilder;
+    use payjoin::{PjUriBuilder, Request, Uri};
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
     use url::Url;
 
@@ -302,12 +302,12 @@ mod integration {
                 log::info!("send fallback v2");
                 log::debug!("Request: {:#?}", &send_req.body);
                 let response = {
-                    let Request { url, body, .. } = send_req.clone();
+                    let Request { url, content_type, body, .. } = send_req.clone();
                     let agent_clone = agent.clone();
                     spawn_blocking(move || {
                         agent_clone
                             .post(url.as_str())
-                            .set("Content-Type", "text/plain")
+                            .set("Content-Type", &content_type)
                             .send_bytes(&body)
                     })
                     .await??
@@ -411,12 +411,12 @@ mod integration {
                     .extract_v1()?;
                 log::info!("send fallback v1 to offline receiver fail");
                 let res = {
-                    let Request { url, body, .. } = send_req.clone();
+                    let Request { url, content_type, body, .. } = send_req.clone();
                     let agent_clone = agent.clone();
                     spawn_blocking(move || {
                         agent_clone
                             .post(url.as_str())
-                            .set("Content-Type", "text/plain")
+                            .set("Content-Type", &content_type)
                             .send_bytes(&body)
                     })
                     .await?
@@ -473,12 +473,12 @@ mod integration {
                 // send fallback v1 to online receiver
                 log::info!("send fallback v1 to online receiver should succeed");
                 let response = {
-                    let Request { url, body, .. } = send_req.clone();
+                    let Request { url, content_type, body, .. } = send_req.clone();
                     let agent_clone = agent.clone();
                     spawn_blocking(move || {
                         agent_clone
                             .post(url.as_str())
-                            .set("Content-Type", "text/plain")
+                            .set("Content-Type", &content_type)
                             .send_bytes(&body)
                             .expect("Failed to send request")
                     })

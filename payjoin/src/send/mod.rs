@@ -24,6 +24,7 @@
 //! [`bitmask-core`](https://github.com/diba-io/bitmask-core) BDK integration. Bring your own
 //! wallet and http client.
 
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use bitcoin::address::NetworkChecked;
@@ -41,6 +42,7 @@ use url::Url;
 
 use crate::input_type::InputType;
 use crate::psbt::PsbtExt;
+use crate::request::Request;
 use crate::uri::UriExt;
 use crate::weight::{varint_size, ComputeWeight};
 use crate::{PjUri, Uri};
@@ -297,9 +299,10 @@ impl RequestContext {
             self.min_fee_rate,
         )
         .map_err(InternalCreateRequestError::Url)?;
+        let content_type = "text/plain".to_string();
         let body = self.psbt.to_string().as_bytes().to_vec();
         Ok((
-            Request { url, body },
+            Request { url, content_type, body },
             ContextV1 {
                 original_psbt: self.psbt,
                 disable_output_substitution: self.disable_output_substitution,
@@ -334,6 +337,7 @@ impl RequestContext {
             .map_err(InternalCreateRequestError::SubdirectoryInvalidPubkey)?;
 
         let url = self.endpoint.clone();
+        let content_type = "message/ohttp-req".to_string();
         let body = serialize_v2_body(
             &self.psbt,
             self.disable_output_substitution,
@@ -351,7 +355,7 @@ impl RequestContext {
         .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
         log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
         Ok((
-            Request { url: ohttp_relay, body },
+            Request { url: ohttp_relay, content_type, body },
             // this method may be called more than once to re-construct the ohttp, therefore we must clone (or TODO memoize)
             ContextV2 {
                 context_v1: ContextV1 {
@@ -510,24 +514,6 @@ impl<'de> Deserialize<'de> for RequestContext {
 
         deserializer.deserialize_struct("RequestContext", FIELDS, RequestContextVisitor)
     }
-}
-/// Represents data that needs to be transmitted to the receiver.
-///
-/// You need to send this request over HTTP(S) to the receiver.
-#[non_exhaustive]
-#[derive(Debug, Clone)]
-pub struct Request {
-    /// URL to send the request to.
-    ///
-    /// This is full URL with scheme etc - you can pass it right to `reqwest` or a similar library.
-    pub url: Url,
-
-    /// Bytes to be sent to the receiver.
-    ///
-    /// This is properly encoded PSBT, already in base64. You only need to make sure `Content-Type`
-    /// is `text/plain` and `Content-Length` is `body.len()` (most libraries do the latter
-    /// automatically).
-    pub body: Vec<u8>,
 }
 
 /// Data required for validation of response.

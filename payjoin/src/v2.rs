@@ -283,10 +283,8 @@ impl<'de> serde::Deserialize<'de> for OhttpKeys {
     where
         D: serde::Deserializer<'de>,
     {
-        use bitcoin::base64;
-
-        let base64_string = String::deserialize(deserializer)?;
-        let bytes = base64::decode_config(base64_string, base64::URL_SAFE)
+        let encoded = String::deserialize(deserializer)?;
+        let bytes = ur::bytewords::decode(&encoded, ur::bytewords::Style::Minimal)
             .map_err(serde::de::Error::custom)?;
         Ok(OhttpKeys(ohttp::KeyConfig::decode(&bytes).map_err(serde::de::Error::custom)?))
     }
@@ -297,11 +295,9 @@ impl serde::Serialize for OhttpKeys {
     where
         S: serde::Serializer,
     {
-        use bitcoin::base64;
-
         let bytes = self.0.encode().map_err(serde::ser::Error::custom)?;
-        let base64_string = base64::encode_config(bytes, base64::URL_SAFE);
-        base64_string.serialize(serializer)
+        let encoded = ur::bytewords::encode(&bytes, ur::bytewords::Style::Minimal);
+        encoded.serialize(serializer)
     }
 }
 

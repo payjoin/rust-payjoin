@@ -58,8 +58,7 @@ impl Enroller {
 
     pub fn subdirectory(&self) -> String {
         let pubkey = &self.s.public_key().serialize();
-        let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-        base64::encode_config(pubkey, b64_config)
+        ur::bytewords::encode(pubkey, ur::bytewords::Style::Minimal)
     }
 
     pub fn payjoin_subdir(&self) -> String { format!("{}/{}", self.subdirectory(), "payjoin") }
@@ -98,9 +97,7 @@ impl Enroller {
 }
 
 fn subdirectory(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
-    let pubkey = pubkey.serialize();
-    let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-    base64::encode_config(pubkey, b64_config)
+    ur::bytewords::encode(&pubkey.serialize(), ur::bytewords::Style::Minimal)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -272,9 +269,8 @@ impl Enrolled {
 
     pub fn fallback_target(&self) -> String {
         let pubkey = &self.s.public_key().serialize();
-        let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-        let pubkey_base64 = base64::encode_config(pubkey, b64_config);
-        format!("{}{}", &self.directory, pubkey_base64)
+        let subdirectory = ur::bytewords::encode(pubkey, ur::bytewords::Style::Minimal);
+        format!("{}{}", &self.directory, subdirectory)
     }
 }
 

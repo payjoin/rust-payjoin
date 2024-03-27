@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use bitcoin::{self, base64};
 use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
 use hyper::server::conn::AddrIncoming;
 use hyper::server::Builder;
@@ -101,12 +100,9 @@ fn init_ohttp() -> Result<ohttp::Server> {
 
     // create or read from file
     let server_config = ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC))?;
-    let encoded_config = server_config.encode()?;
-    let b64_config = base64::encode_config(
-        encoded_config,
-        base64::Config::new(base64::CharacterSet::UrlSafe, false),
-    );
-    info!("ohttp-keys server config base64 UrlSafe: {:?}", b64_config);
+    let encoded_config =
+        ur::bytewords::encode(&server_config.encode()?, ur::bytewords::Style::Minimal);
+    info!("ohttp-keys server config encoded: {:?}", encoded_config);
     Ok(ohttp::Server::new(server_config)?)
 }
 
@@ -242,13 +238,13 @@ impl From<hyper::http::Error> for HandlerError {
 }
 
 async fn post_enroll(body: Body) -> Result<Response<Body>, HandlerError> {
-    let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
     let bytes =
         hyper::body::to_bytes(body).await.map_err(|e| HandlerError::BadRequest(e.into()))?;
-    let base64_id =
+    let encoded_pubkey =
         String::from_utf8(bytes.to_vec()).map_err(|e| HandlerError::BadRequest(e.into()))?;
-    let pubkey_bytes: Vec<u8> = base64::decode_config(base64_id, b64_config)
-        .map_err(|e| HandlerError::BadRequest(e.into()))?;
+    let pubkey_bytes: Vec<u8> =
+        ur::bytewords::decode(&encoded_pubkey, ur::bytewords::Style::Minimal)
+            .map_err(|e| HandlerError::BadRequest(e.into()))?;
     let pubkey = bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
         .map_err(|e| HandlerError::BadRequest(e.into()))?;
     tracing::info!("Enrolled valid pubkey: {:?}", pubkey);

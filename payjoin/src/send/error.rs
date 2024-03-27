@@ -187,7 +187,7 @@ pub(crate) enum InternalCreateRequestError {
     #[cfg(feature = "v2")]
     OhttpEncapsulation(crate::v2::OhttpEncapsulationError),
     #[cfg(feature = "v2")]
-    SubdirectoryNotBase64(bitcoin::base64::DecodeError),
+    PubkeyEncoding,
     #[cfg(feature = "v2")]
     SubdirectoryInvalidPubkey(bitcoin::secp256k1::Error),
     #[cfg(feature = "v2")]
@@ -219,7 +219,7 @@ impl fmt::Display for CreateRequestError {
             #[cfg(feature = "v2")]
             OhttpEncapsulation(e) => write!(f, "v2 error: {}", e),
             #[cfg(feature = "v2")]
-            SubdirectoryNotBase64(e) => write!(f, "subdirectory is not valid base64 error: {}", e),
+            PubkeyEncoding => write!(f, "Bad public key encoding"),
             #[cfg(feature = "v2")]
             SubdirectoryInvalidPubkey(e) => write!(f, "subdirectory does not represent a valid pubkey: {}", e),
             #[cfg(feature = "v2")]
@@ -253,7 +253,7 @@ impl std::error::Error for CreateRequestError {
             #[cfg(feature = "v2")]
             OhttpEncapsulation(error) => Some(error),
             #[cfg(feature = "v2")]
-            SubdirectoryNotBase64(error) => Some(error),
+            PubkeyEncoding => None,
             #[cfg(feature = "v2")]
             SubdirectoryInvalidPubkey(error) => Some(error),
             #[cfg(feature = "v2")]

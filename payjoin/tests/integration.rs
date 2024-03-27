@@ -209,14 +209,10 @@ mod integration {
 
         #[tokio::test]
         async fn test_bad_ohttp_keys() {
-            let bad_ohttp_keys = OhttpKeys::decode(
-                &base64::decode_config(
-                    "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM",
-                    base64::URL_SAFE,
-                )
-                .expect("invalid base64"),
-            )
-            .expect("Invalid OhttpKeys");
+            let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            path.push("tests/ohttp-keys");
+            let file_content = std::fs::read(&path).expect("Failed to read the 'ohttp-keys' file");
+            let bad_ohttp_keys = OhttpKeys::decode(&file_content).expect("Invalid OhttpKeys");
 
             std::env::set_var("RUST_LOG", "debug");
             let (cert, key) = local_cert_key();

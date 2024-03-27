@@ -5,6 +5,7 @@ use bitcoin::secp256k1::ecdh::SharedSecret;
 use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
 use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
 use chacha20poly1305::{AeadCore, ChaCha20Poly1305, Nonce};
+use ur::bytewords;
 
 pub const PADDED_MESSAGE_BYTES: usize = 7168; // 7KB
 
@@ -283,10 +284,8 @@ impl<'de> serde::Deserialize<'de> for OhttpKeys {
     where
         D: serde::Deserializer<'de>,
     {
-        use bitcoin::base64;
-
-        let base64_string = String::deserialize(deserializer)?;
-        let bytes = base64::decode_config(base64_string, base64::URL_SAFE)
+        let encoded = String::deserialize(deserializer)?;
+        let bytes = bytewords::decode(&encoded, bytewords::Style::Minimal)
             .map_err(serde::de::Error::custom)?;
         Ok(OhttpKeys(ohttp::KeyConfig::decode(&bytes).map_err(serde::de::Error::custom)?))
     }
@@ -297,11 +296,9 @@ impl serde::Serialize for OhttpKeys {
     where
         S: serde::Serializer,
     {
-        use bitcoin::base64;
-
         let bytes = self.0.encode().map_err(serde::ser::Error::custom)?;
-        let base64_string = base64::encode_config(bytes, base64::URL_SAFE);
-        base64_string.serialize(serializer)
+        let encoded = bytewords::encode(&bytes, bytewords::Style::Minimal);
+        encoded.serialize(serializer)
     }
 }
 

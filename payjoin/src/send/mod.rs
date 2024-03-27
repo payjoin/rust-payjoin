@@ -37,6 +37,7 @@ use serde::{
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use ur::bytewords;
 use url::Url;
 
 use crate::input_type::InputType;
@@ -325,10 +326,8 @@ impl RequestContext {
     ) -> Result<(Request, ContextV2), CreateRequestError> {
         let rs_base64 = crate::v2::subdir(self.endpoint.as_str()).to_string();
         log::debug!("rs_base64: {:?}", rs_base64);
-        let b64_config =
-            bitcoin::base64::Config::new(bitcoin::base64::CharacterSet::UrlSafe, false);
-        let rs = bitcoin::base64::decode_config(rs_base64, b64_config)
-            .map_err(InternalCreateRequestError::SubdirectoryNotBase64)?;
+        let rs = bytewords::decode(&rs_base64, bytewords::Style::Minimal)
+            .map_err(|_| InternalCreateRequestError::PubkeyEncoding)?;
         log::debug!("rs: {:?}", rs.len());
         let rs = bitcoin::secp256k1::PublicKey::from_slice(&rs)
             .map_err(InternalCreateRequestError::SubdirectoryInvalidPubkey)?;
@@ -383,7 +382,7 @@ impl Serialize for RequestContext {
             config
                 .encode()
                 .map_err(|e| serde::ser::Error::custom(format!("ohttp-keys encoding error: {}", e)))
-                .map(bitcoin::base64::encode)
+                .map(|bytes| bytewords::encode(&bytes, bytewords::Style::Minimal))
         })?;
         state.serialize_field("ohttp_keys", &ohttp_string)?;
         state.serialize_field("disable_output_substitution", &self.disable_output_substitution)?;
@@ -455,15 +454,18 @@ impl<'de> Deserialize<'de> for RequestContext {
                                     .map_err(de::Error::custom)?,
                             ),
                         "ohttp_keys" => {
-                            let ohttp_base64: String = map.next_value()?;
-                            ohttp_keys = if ohttp_base64.is_empty() {
+                            let ohttp_encoded: String = map.next_value()?;
+                            ohttp_keys = if ohttp_encoded.is_empty() {
                                 None
                             } else {
                                 Some(
                                     crate::v2::OhttpKeys::decode(
-                                        bitcoin::base64::decode(&ohttp_base64)
-                                            .map_err(de::Error::custom)?
-                                            .as_slice(),
+                                        bytewords::decode(
+                                            &ohttp_encoded,
+                                            bytewords::Style::Minimal,
+                                        )
+                                        .map_err(de::Error::custom)?
+                                        .as_slice(),
                                     )
                                     .map_err(de::Error::custom)?,
                                 )

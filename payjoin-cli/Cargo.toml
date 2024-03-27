@@ -20,7 +20,7 @@ path = "src/main.rs"
 [features]
 native-certs = ["ureq/native-certs"]
 danger-local-https = ["rcgen", "rustls", "hyper-rustls"]
-v2 = ["payjoin/v2"]
+v2 = ["payjoin/v2", "payjoin-defaults/v2"]
 
 [dependencies]
 anyhow = "1.0.70"
@@ -40,6 +40,7 @@ serde = { version = "1.0.160", features = ["derive"] }
 tokio = { version = "1.12.0", features = ["full"] }
 ureq = "2.9.4"
 url = { version = "2.3.1", features = ["serde"] }
+payjoin-defaults = { path = "../payjoin-defaults" }
 
 [dev-dependencies]
 bitcoind = { version = "0.31.1", features = ["0_21_2"] }

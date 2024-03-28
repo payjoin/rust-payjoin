@@ -28,6 +28,14 @@ pub fn subdir(path: &str) -> String {
     pubkey_id
 }
 
+pub(crate) fn encode_minimal_bytewords(bytes: &[u8]) -> String {
+    bytewords::encode(bytes, bytewords::Style::Minimal)
+}
+
+pub(crate) fn decode_minimal_bytewords(encoded: &str) -> Result<Vec<u8>, bytewords::Error> {
+    bytewords::decode(encoded, bytewords::Style::Minimal)
+}
+
 /// crypto context
 ///
 /// <- Receiver S
@@ -285,8 +293,7 @@ impl<'de> serde::Deserialize<'de> for OhttpKeys {
         D: serde::Deserializer<'de>,
     {
         let encoded = String::deserialize(deserializer)?;
-        let bytes = bytewords::decode(&encoded, bytewords::Style::Minimal)
-            .map_err(serde::de::Error::custom)?;
+        let bytes = decode_minimal_bytewords(&encoded).map_err(serde::de::Error::custom)?;
         Ok(OhttpKeys(ohttp::KeyConfig::decode(&bytes).map_err(serde::de::Error::custom)?))
     }
 }
@@ -297,7 +304,7 @@ impl serde::Serialize for OhttpKeys {
         S: serde::Serializer,
     {
         let bytes = self.0.encode().map_err(serde::ser::Error::custom)?;
-        let encoded = bytewords::encode(&bytes, bytewords::Style::Minimal);
+        let encoded = encode_minimal_bytewords(&bytes);
         encoded.serialize(serializer)
     }
 }

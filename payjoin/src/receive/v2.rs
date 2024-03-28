@@ -4,12 +4,12 @@ use bitcoin::psbt::Psbt;
 use bitcoin::{base64, Amount, FeeRate, OutPoint, Script, TxOut};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
-use ur::bytewords;
 use url::Url;
 
 use super::{Error, InternalRequestError, RequestError, SelectionError};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
+use crate::v2::encode_minimal_bytewords;
 use crate::OhttpKeys;
 
 /// Represents data that needs to be transmitted to the payjoin directory.
@@ -59,7 +59,7 @@ impl Enroller {
 
     pub fn subdirectory(&self) -> String {
         let pubkey = &self.s.public_key().serialize();
-        bytewords::encode(pubkey, bytewords::Style::Minimal)
+        encode_minimal_bytewords(pubkey)
     }
 
     pub fn payjoin_subdir(&self) -> String { format!("{}/{}", self.subdirectory(), "payjoin") }
@@ -98,7 +98,7 @@ impl Enroller {
 }
 
 fn subdirectory(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
-    bytewords::encode(&pubkey.serialize(), bytewords::Style::Minimal)
+    encode_minimal_bytewords(&pubkey.serialize())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -270,7 +270,7 @@ impl Enrolled {
 
     pub fn fallback_target(&self) -> String {
         let pubkey = &self.s.public_key().serialize();
-        let subdirectory = bytewords::encode(pubkey, bytewords::Style::Minimal);
+        let subdirectory = encode_minimal_bytewords(pubkey);
         format!("{}{}", &self.directory, subdirectory)
     }
 }

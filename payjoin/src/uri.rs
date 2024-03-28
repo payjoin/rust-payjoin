@@ -3,9 +3,10 @@ use std::convert::TryFrom;
 
 use bitcoin::address::{Error, NetworkChecked, NetworkUnchecked};
 use bitcoin::{Address, Amount, Network};
-use ur::bytewords;
 use url::Url;
 
+#[cfg(feature = "v2")]
+use crate::v2::{decode_minimal_bytewords, encode_minimal_bytewords};
 #[cfg(feature = "v2")]
 use crate::OhttpKeys;
 
@@ -240,7 +241,7 @@ impl<'a> bip21::SerializeParams for &'a PayjoinExtras {
         ];
         #[cfg(feature = "v2")]
         if let Some(ohttp_keys) = self.ohttp_keys.clone().and_then(|c| c.encode().ok()) {
-            let encoded_ohttp_keys = bytewords::encode(&ohttp_keys, bytewords::Style::Minimal);
+            let encoded_ohttp_keys = encode_minimal_bytewords(&ohttp_keys);
             params.push(("ohttp", encoded_ohttp_keys));
         } else {
             log::warn!("Failed to encode ohttp config, ignoring");
@@ -266,7 +267,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
             #[cfg(feature = "v2")]
             "ohttp" if self.ohttp.is_none() => {
                 let ohttp_encoded = Cow::try_from(value).map_err(InternalPjParseError::NotUtf8)?;
-                let ohttp_bytes = bytewords::decode(&ohttp_encoded, bytewords::Style::Minimal)
+                let ohttp_bytes = decode_minimal_bytewords(&ohttp_encoded)
                     .map_err(|_| InternalPjParseError::BadOhttpEncoding)?;
                 let ohttp_keys = OhttpKeys::decode(&ohttp_bytes)
                     .map_err(InternalPjParseError::DecodeOhttpKeys)?;

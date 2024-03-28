@@ -37,12 +37,13 @@ use serde::{
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use ur::bytewords;
 use url::Url;
 
 use crate::input_type::InputType;
 use crate::psbt::PsbtExt;
 use crate::uri::UriExt;
+#[cfg(feature = "v2")]
+use crate::v2::{decode_minimal_bytewords, encode_minimal_bytewords};
 use crate::weight::{varint_size, ComputeWeight};
 use crate::{PjUri, Uri};
 
@@ -326,7 +327,7 @@ impl RequestContext {
     ) -> Result<(Request, ContextV2), CreateRequestError> {
         let rs_base64 = crate::v2::subdir(self.endpoint.as_str()).to_string();
         log::debug!("rs_base64: {:?}", rs_base64);
-        let rs = bytewords::decode(&rs_base64, bytewords::Style::Minimal)
+        let rs = decode_minimal_bytewords(&rs_base64)
             .map_err(|_| InternalCreateRequestError::PubkeyEncoding)?;
         log::debug!("rs: {:?}", rs.len());
         let rs = bitcoin::secp256k1::PublicKey::from_slice(&rs)
@@ -382,7 +383,7 @@ impl Serialize for RequestContext {
             config
                 .encode()
                 .map_err(|e| serde::ser::Error::custom(format!("ohttp-keys encoding error: {}", e)))
-                .map(|bytes| bytewords::encode(&bytes, bytewords::Style::Minimal))
+                .map(|bytes| encode_minimal_bytewords(&bytes))
         })?;
         state.serialize_field("ohttp_keys", &ohttp_string)?;
         state.serialize_field("disable_output_substitution", &self.disable_output_substitution)?;
@@ -460,12 +461,9 @@ impl<'de> Deserialize<'de> for RequestContext {
                             } else {
                                 Some(
                                     crate::v2::OhttpKeys::decode(
-                                        bytewords::decode(
-                                            &ohttp_encoded,
-                                            bytewords::Style::Minimal,
-                                        )
-                                        .map_err(de::Error::custom)?
-                                        .as_slice(),
+                                        decode_minimal_bytewords(&ohttp_encoded)
+                                            .map_err(de::Error::custom)?
+                                            .as_slice(),
                                     )
                                     .map_err(de::Error::custom)?,
                                 )

@@ -9,6 +9,7 @@ use url::Url;
 use super::{Error, InternalRequestError, RequestError, SelectionError};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
+use crate::v2::encode_bech32_pubkey;
 use crate::OhttpKeys;
 
 /// Represents data that needs to be transmitted to the payjoin directory.
@@ -90,9 +91,7 @@ impl Enroller {
 }
 
 fn subdir_path_from_pubkey(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
-    let pubkey = pubkey.serialize();
-    let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-    base64::encode_config(pubkey, b64_config)
+    encode_bech32_pubkey(&pubkey)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -261,10 +260,8 @@ impl Enrolled {
     }
 
     pub fn fallback_target(&self) -> String {
-        let pubkey = &self.s.public_key().serialize();
-        let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-        let pubkey_base64 = base64::encode_config(pubkey, b64_config);
-        format!("{}{}", &self.directory, pubkey_base64)
+        let subdirectory = encode_bech32_pubkey(&self.s.public_key());
+        format!("{}{}", &self.directory, subdirectory)
     }
 }
 

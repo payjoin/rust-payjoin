@@ -380,11 +380,10 @@ impl RequestContext {
             subdirectory = path_and_query;
         }
 
-        let b64_config =
-            bitcoin::base64::Config::new(bitcoin::base64::CharacterSet::UrlSafe, false);
-        let pubkey_bytes = bitcoin::base64::decode_config(subdirectory, b64_config)
-            .map_err(InternalCreateRequestError::SubdirectoryNotBase64)?;
-        Ok(bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
+        let rs = crate::v2::decode_bech32_pubkey(&subdirectory)
+            .map_err(|_| InternalCreateRequestError::PubkeyEncoding)?;
+        log::debug!("rs: {:?}", rs.len());
+        Ok(bitcoin::secp256k1::PublicKey::from_slice(&rs)
             .map_err(InternalCreateRequestError::SubdirectoryInvalidPubkey)?)
     }
 }
@@ -398,12 +397,8 @@ impl Serialize for RequestContext {
         let mut state = serializer.serialize_struct("RequestContext", 8)?;
         state.serialize_field("psbt", &self.psbt.to_string())?;
         state.serialize_field("endpoint", &self.endpoint.as_str())?;
-        let ohttp_string = self.ohttp_keys.as_ref().map_or(Ok("".to_string()), |config| {
-            config
-                .encode()
-                .map_err(|e| serde::ser::Error::custom(format!("ohttp-keys encoding error: {}", e)))
-                .map(bitcoin::base64::encode)
-        })?;
+        let ohttp_string =
+            self.ohttp_keys.as_ref().map_or_else(|| "".to_string(), |keys| keys.to_string());
         state.serialize_field("ohttp_keys", &ohttp_string)?;
         state.serialize_field("disable_output_substitution", &self.disable_output_substitution)?;
         state.serialize_field(
@@ -474,17 +469,13 @@ impl<'de> Deserialize<'de> for RequestContext {
                                     .map_err(de::Error::custom)?,
                             ),
                         "ohttp_keys" => {
-                            let ohttp_base64: String = map.next_value()?;
-                            ohttp_keys = if ohttp_base64.is_empty() {
+                            let ohttp_encoded: String = map.next_value()?;
+                            ohttp_keys = if ohttp_encoded.is_empty() {
                                 None
                             } else {
                                 Some(
-                                    crate::v2::OhttpKeys::decode(
-                                        bitcoin::base64::decode(&ohttp_base64)
-                                            .map_err(de::Error::custom)?
-                                            .as_slice(),
-                                    )
-                                    .map_err(de::Error::custom)?,
+                                    crate::v2::OhttpKeys::from_str(&ohttp_encoded)
+                                        .map_err(de::Error::custom)?,
                                 )
                             };
                         }

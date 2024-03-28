@@ -1,4 +1,5 @@
 use std::ops::{Deref, DerefMut};
+use std::str::FromStr;
 use std::{error, fmt};
 
 use bitcoin::secp256k1::ecdh::SharedSecret;
@@ -7,6 +8,89 @@ use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
 use chacha20poly1305::{AeadCore, ChaCha20Poly1305, Nonce};
 
 pub const PADDED_MESSAGE_BYTES: usize = 7168; // 7KB
+
+// Bech32 Human Readable Part for OHTTP
+pub const OH_HRP: &str = "oh";
+// Bech32 Human Readable Part for a Public Key
+pub const PK_HRP: &str = "pk";
+
+pub fn subdir(path: &str) -> String {
+    let subdirectory: String;
+
+    if let Some(pos) = path.rfind('/') {
+        subdirectory = path[pos + 1..].to_string();
+    } else {
+        subdirectory = path.to_string();
+    }
+
+    let pubkey_id: String;
+
+    if let Some(pos) = subdirectory.find('?') {
+        pubkey_id = subdirectory[..pos].to_string();
+    } else {
+        pubkey_id = subdirectory;
+    }
+    pubkey_id
+}
+
+pub(crate) fn encode_bech32_pubkey(pubkey: &PublicKey) -> String {
+    encode_bech32(&pubkey.serialize(), PK_HRP)
+        .expect("unlikely bech32 encoding failed, using static HRP and PublicKey has max size")
+}
+
+fn encode_bech32(bytes: &[u8], expected_hrp: &str) -> Result<String, bech32::EncodeError> {
+    use bech32::*;
+    let hrp = Hrp::parse(expected_hrp).expect("Invalid static hrp");
+    bech32::encode::<Bech32m>(hrp, bytes)
+}
+
+pub(crate) fn decode_bech32_pubkey(encoded: &str) -> Result<Vec<u8>, DecodeBech32Error> {
+    decode_bech32(encoded, PK_HRP)
+}
+
+fn decode_bech32(encoded: &str, expected_hrp: &str) -> Result<Vec<u8>, DecodeBech32Error> {
+    let (hrp, data) = bech32::decode(encoded)?;
+    if hrp.as_str() != expected_hrp {
+        Err(DecodeBech32Error::MismatchedHrp(hrp.to_string(), expected_hrp.to_string()))
+    } else {
+        Ok(data)
+    }
+}
+
+#[derive(Debug)]
+pub enum DecodeBech32Error {
+    // The human readable part of the bech32 string did not match the expected value
+    MismatchedHrp(String, String),
+    // The bech32 string could not be decoded
+    Decode(bech32::DecodeError),
+}
+
+impl fmt::Display for DecodeBech32Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use DecodeBech32Error::*;
+
+        match &self {
+            MismatchedHrp(expected, actual) =>
+                write!(f, "Expected HRP: {}, got: {}", expected, actual),
+            Decode(e) => e.fmt(f),
+        }
+    }
+}
+
+impl error::Error for DecodeBech32Error {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        use DecodeBech32Error::*;
+
+        match &self {
+            MismatchedHrp(_, _) => None,
+            Decode(e) => Some(e),
+        }
+    }
+}
+
+impl From<bech32::DecodeError> for DecodeBech32Error {
+    fn from(value: bech32::DecodeError) -> Self { Self::Decode(value) }
+}
 
 /// crypto context
 ///
@@ -259,17 +343,30 @@ impl DerefMut for OhttpKeys {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
 }
 
+impl fmt::Display for OhttpKeys {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let bytes = self.encode().map_err(|_| fmt::Error)?;
+        let bech32 = encode_bech32(&bytes, OH_HRP).map_err(|_| fmt::Error)?;
+        write!(f, "{}", bech32)
+    }
+}
+
+impl FromStr for OhttpKeys {
+    type Err = DecodeOhttpKeysError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = decode_bech32(s, OH_HRP)?;
+        Self::decode(&bytes).map_err(DecodeOhttpKeysError::Ohttp)
+    }
+}
+
 impl<'de> serde::Deserialize<'de> for OhttpKeys {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        use bitcoin::base64;
-
-        let base64_string = String::deserialize(deserializer)?;
-        let bytes = base64::decode_config(base64_string, base64::URL_SAFE)
-            .map_err(serde::de::Error::custom)?;
-        Ok(OhttpKeys(ohttp::KeyConfig::decode(&bytes).map_err(serde::de::Error::custom)?))
+        let encoded = String::deserialize(deserializer)?;
+        Ok(OhttpKeys::from_str(&encoded).map_err(serde::de::Error::custom)?)
     }
 }
 
@@ -278,14 +375,45 @@ impl serde::Serialize for OhttpKeys {
     where
         S: serde::Serializer,
     {
-        use bitcoin::base64;
-
-        let bytes = self.0.encode().map_err(serde::ser::Error::custom)?;
-        let base64_string = base64::encode_config(bytes, base64::URL_SAFE);
-        base64_string.serialize(serializer)
+        self.to_string().serialize(serializer)
     }
 }
 
+#[derive(Debug)]
+pub enum DecodeOhttpKeysError {
+    DecodeBech32(DecodeBech32Error),
+    Ohttp(ohttp::Error),
+}
+
+impl fmt::Display for DecodeOhttpKeysError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use DecodeOhttpKeysError::*;
+
+        match &self {
+            DecodeBech32(e) => e.fmt(f),
+            Ohttp(e) => e.fmt(f),
+        }
+    }
+}
+
+impl error::Error for DecodeOhttpKeysError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        use DecodeOhttpKeysError::*;
+
+        match &self {
+            DecodeBech32(e) => Some(e),
+            Ohttp(e) => Some(e),
+        }
+    }
+}
+
+impl From<DecodeBech32Error> for DecodeOhttpKeysError {
+    fn from(value: DecodeBech32Error) -> Self { Self::DecodeBech32(value) }
+}
+
+impl From<ohttp::Error> for DecodeOhttpKeysError {
+    fn from(value: ohttp::Error) -> Self { Self::Ohttp(value) }
+}
 #[cfg(test)]
 mod test {
     use super::*;

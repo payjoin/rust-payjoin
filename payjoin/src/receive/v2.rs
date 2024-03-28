@@ -260,8 +260,6 @@ impl Enrolled {
         Ok(crate::v2::ohttp_encapsulate(&mut self.ohttp_keys, "GET", &fallback_target, None)?)
     }
 
-    pub fn pubkey(&self) -> [u8; 33] { self.s.public_key().serialize() }
-
     pub fn fallback_target(&self) -> String {
         let pubkey = &self.s.public_key().serialize();
         let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);

@@ -5,8 +5,6 @@ use std::time::Duration;
 use anyhow::Result;
 use bitcoin::{self, base64};
 use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
-use hyper::server::conn::AddrIncoming;
-use hyper::server::Builder;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode, Uri};
 use tokio::sync::Mutex;
@@ -77,7 +75,9 @@ pub async fn listen_tcp_with_tls(
 fn init_tls_server(
     bind_addr: &SocketAddr,
     cert_key: (Vec<u8>, Vec<u8>),
-) -> Result<Builder<hyper_rustls::TlsAcceptor>> {
+) -> Result<hyper::server::Builder<hyper_rustls::TlsAcceptor>> {
+    use hyper::server::conn::AddrIncoming;
+
     let (cert, key) = cert_key;
     let cert = rustls::Certificate(cert);
     let key = rustls::PrivateKey(key);

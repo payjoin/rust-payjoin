@@ -86,7 +86,7 @@ impl AppTrait for App {
             let http = http_agent()?;
             let ohttp_response = spawn_blocking(move || {
                 http.post(req.url.as_ref())
-                    .set("Content-Type", "message/ohttp-req")
+                    .set("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
                     .send_bytes(&req.body)
                     .map_err(map_ureq_err)
             })
@@ -125,7 +125,7 @@ impl AppTrait for App {
         let http = http_agent()?;
         let res = http
             .post(req.url.as_str())
-            .set("Content-Type", "message/ohttp-req")
+            .set("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
             .send_bytes(&req.body)
             .map_err(map_ureq_err)?;
         let mut buf = Vec::new();
@@ -165,7 +165,7 @@ impl App {
             let http = http_agent()?;
             let response = spawn_blocking(move || {
                 http.post(req.url.as_ref())
-                    .set("Content-Type", "message/ohttp-req")
+                    .set("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
                     .send_bytes(&req.body)
                     .map_err(map_ureq_err)
             })
@@ -194,7 +194,7 @@ impl App {
             let http = http_agent()?;
             let ohttp_response = spawn_blocking(move || {
                 http.post(req.url.as_str())
-                    .set("Content-Type", "message/ohttp-req")
+                    .set("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
                     .send_bytes(&req.body)
                     .map_err(map_ureq_err)
             })

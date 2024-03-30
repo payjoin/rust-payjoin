@@ -1,5 +1,10 @@
 use url::Url;
 
+pub const V1_REQ_CONTENT_TYPE: &str = "text/plain";
+
+#[cfg(feature = "v2")]
+pub const V2_REQ_CONTENT_TYPE: &str = "message/ohttp-req";
+
 /// Represents data that needs to be transmitted to the receiver or payjoin directory.
 #[non_exhaustive]
 #[derive(Debug, Clone)]

@@ -39,7 +39,7 @@ pub(crate) mod psbt;
 #[cfg(any(feature = "send", all(feature = "receive", feature = "v2")))]
 mod request;
 #[cfg(any(feature = "send", all(feature = "receive", feature = "v2")))]
-pub use request::Request;
+pub use request::*;
 
 mod uri;
 #[cfg(any(feature = "send", feature = "receive"))]

@@ -8,25 +8,6 @@ use chacha20poly1305::{AeadCore, ChaCha20Poly1305, Nonce};
 
 pub const PADDED_MESSAGE_BYTES: usize = 7168; // 7KB
 
-pub fn subdir(path: &str) -> String {
-    let subdirectory: String;
-
-    if let Some(pos) = path.rfind('/') {
-        subdirectory = path[pos + 1..].to_string();
-    } else {
-        subdirectory = path.to_string();
-    }
-
-    let pubkey_id: String;
-
-    if let Some(pos) = subdirectory.find('?') {
-        pubkey_id = subdirectory[..pos].to_string();
-    } else {
-        pubkey_id = subdirectory;
-    }
-    pubkey_id
-}
-
 /// crypto context
 ///
 /// <- Receiver S

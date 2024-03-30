@@ -28,6 +28,8 @@ use std::str::FromStr;
 
 use bitcoin::address::NetworkChecked;
 use bitcoin::psbt::Psbt;
+#[cfg(feature = "v2")]
+use bitcoin::secp256k1::PublicKey;
 use bitcoin::{FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
 pub use error::{CreateRequestError, ResponseError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
@@ -323,16 +325,7 @@ impl RequestContext {
         &mut self,
         ohttp_relay: Url,
     ) -> Result<(Request, ContextV2), CreateRequestError> {
-        let rs_base64 = crate::v2::subdir(self.endpoint.as_str()).to_string();
-        log::debug!("rs_base64: {:?}", rs_base64);
-        let b64_config =
-            bitcoin::base64::Config::new(bitcoin::base64::CharacterSet::UrlSafe, false);
-        let rs = bitcoin::base64::decode_config(rs_base64, b64_config)
-            .map_err(InternalCreateRequestError::SubdirectoryNotBase64)?;
-        log::debug!("rs: {:?}", rs.len());
-        let rs = bitcoin::secp256k1::PublicKey::from_slice(&rs)
-            .map_err(InternalCreateRequestError::SubdirectoryInvalidPubkey)?;
-
+        let rs = Self::rs_pubkey_from_dir_endpoint(&self.endpoint)?;
         let url = self.endpoint.clone();
         let body = serialize_v2_body(
             &self.psbt,
@@ -367,6 +360,32 @@ impl RequestContext {
                 ohttp_res,
             },
         ))
+    }
+
+    #[cfg(feature = "v2")]
+    fn rs_pubkey_from_dir_endpoint(endpoint: &Url) -> Result<PublicKey, CreateRequestError> {
+        let path_and_query: String;
+
+        if let Some(pos) = endpoint.as_str().rfind('/') {
+            path_and_query = endpoint.as_str()[pos + 1..].to_string();
+        } else {
+            path_and_query = endpoint.to_string();
+        }
+
+        let subdirectory: String;
+
+        if let Some(pos) = path_and_query.find('?') {
+            subdirectory = path_and_query[..pos].to_string();
+        } else {
+            subdirectory = path_and_query;
+        }
+
+        let b64_config =
+            bitcoin::base64::Config::new(bitcoin::base64::CharacterSet::UrlSafe, false);
+        let pubkey_bytes = bitcoin::base64::decode_config(subdirectory, b64_config)
+            .map_err(InternalCreateRequestError::SubdirectoryNotBase64)?;
+        Ok(bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
+            .map_err(InternalCreateRequestError::SubdirectoryInvalidPubkey)?)
     }
 }
 

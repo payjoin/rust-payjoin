@@ -56,17 +56,9 @@ impl Enroller {
         }
     }
 
-    pub fn subdirectory(&self) -> String {
-        let pubkey = &self.s.public_key().serialize();
-        let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-        base64::encode_config(pubkey, b64_config)
-    }
-
-    pub fn payjoin_subdir(&self) -> String { format!("{}/{}", self.subdirectory(), "payjoin") }
-
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
         let url = self.ohttp_relay.clone();
-        let subdirectory = self.subdirectory();
+        let subdirectory = subdir_path_from_pubkey(&self.s.public_key());
         let (body, ctx) = crate::v2::ohttp_encapsulate(
             &mut self.ohttp_keys,
             "POST",
@@ -97,7 +89,7 @@ impl Enroller {
     }
 }
 
-fn subdirectory(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
+fn subdir_path_from_pubkey(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
     let pubkey = pubkey.serialize();
     let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
     base64::encode_config(pubkey, b64_config)
@@ -267,8 +259,6 @@ impl Enrolled {
         let fallback_target = self.fallback_target();
         Ok(crate::v2::ohttp_encapsulate(&mut self.ohttp_keys, "GET", &fallback_target, None)?)
     }
-
-    pub fn pubkey(&self) -> [u8; 33] { self.s.public_key().serialize() }
 
     pub fn fallback_target(&self) -> String {
         let pubkey = &self.s.public_key().serialize();
@@ -518,7 +508,7 @@ impl PayjoinProposal {
         let post_payjoin_target = format!(
             "{}{}/payjoin",
             self.context.directory.as_str(),
-            subdirectory(&self.context.s.public_key())
+            subdir_path_from_pubkey(&self.context.s.public_key())
         );
         log::debug!("Payjoin post target: {}", post_payjoin_target.as_str());
         let (body, ctx) = crate::v2::ohttp_encapsulate(

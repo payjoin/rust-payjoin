@@ -176,6 +176,26 @@ impl fmt::Display for RequestError {
     }
 }
 
+impl std::error::Error for RequestError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self.0 {
+            InternalRequestError::Psbt(e) => Some(e),
+            InternalRequestError::Base64(e) => Some(e),
+            InternalRequestError::Io(e) => Some(e),
+            InternalRequestError::InvalidContentLength(e) => Some(e),
+            InternalRequestError::SenderParams(e) => Some(e),
+            InternalRequestError::InconsistentPsbt(e) => Some(e),
+            InternalRequestError::PrevTxOut(e) => Some(e),
+            #[cfg(feature = "v2")]
+            InternalRequestError::ParsePsbt(e) => Some(e),
+            #[cfg(feature = "v2")]
+            InternalRequestError::Utf8(e) => Some(e),
+            InternalRequestError::PsbtBelowFeeRate(_, _) => None,
+            _ => None,
+        }
+    }
+}
+
 /// Error that may occur when coin selection fails.
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
@@ -191,6 +211,20 @@ pub(crate) enum InternalSelectionError {
     TooManyOutputs,
     /// No selection candidates improve privacy
     NotFound,
+}
+
+impl fmt::Display for SelectionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self.0 {
+            InternalSelectionError::Empty => write!(f, "No candidates available for selection"),
+            InternalSelectionError::TooManyOutputs => write!(
+                f,
+                "Current privacy selection implementation only supports 2-output transactions"
+            ),
+            InternalSelectionError::NotFound =>
+                write!(f, "No selection candidates improve privacy"),
+        }
+    }
 }
 
 impl From<InternalSelectionError> for SelectionError {

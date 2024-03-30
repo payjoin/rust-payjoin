@@ -1,7 +1,6 @@
 //! Utilities to make work with PSBTs easier
 
 use std::collections::BTreeMap;
-use std::convert::TryInto;
 use std::fmt;
 
 use bitcoin::psbt::Psbt;

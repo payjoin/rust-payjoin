@@ -56,7 +56,7 @@ impl AppTrait for App {
         println!("Sending fallback request to {}", &req.url);
         let response = http
             .post(req.url.as_str())
-            .set("Content-Type", "text/plain")
+            .set("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
             .send_string(&body.clone())
             .with_context(|| "HTTP request failed")?;
         let fallback_tx = Psbt::from_str(&body)

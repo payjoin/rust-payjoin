@@ -13,8 +13,8 @@ mod integration {
     use log::{debug, log_enabled, Level};
     use once_cell::sync::{Lazy, OnceCell};
     use payjoin::bitcoin::base64;
-    use payjoin::send::{Request, RequestBuilder};
-    use payjoin::{PjUriBuilder, Uri};
+    use payjoin::send::RequestBuilder;
+    use payjoin::{PjUriBuilder, Request, Uri};
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
     use url::Url;
 
@@ -76,7 +76,7 @@ mod integration {
         impl HeaderMock {
             fn from_vec(body: &[u8]) -> HeaderMock {
                 let mut h = HashMap::new();
-                h.insert("content-type".to_string(), "text/plain".to_string());
+                h.insert("content-type".to_string(), payjoin::V1_REQ_CONTENT_TYPE.to_string());
                 h.insert("content-length".to_string(), body.len().to_string());
                 HeaderMock(h)
             }
@@ -307,7 +307,7 @@ mod integration {
                     spawn_blocking(move || {
                         agent_clone
                             .post(url.as_str())
-                            .set("Content-Type", "text/plain")
+                            .set("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
                             .send_bytes(&body)
                     })
                     .await??
@@ -416,7 +416,7 @@ mod integration {
                     spawn_blocking(move || {
                         agent_clone
                             .post(url.as_str())
-                            .set("Content-Type", "text/plain")
+                            .set("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
                             .send_bytes(&body)
                     })
                     .await?
@@ -478,7 +478,7 @@ mod integration {
                     spawn_blocking(move || {
                         agent_clone
                             .post(url.as_str())
-                            .set("Content-Type", "text/plain")
+                            .set("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
                             .send_bytes(&body)
                             .expect("Failed to send request")
                     })

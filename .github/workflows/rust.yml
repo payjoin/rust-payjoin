@@ -40,6 +40,9 @@ jobs:
       - name: build payjoin-cli bin v2
         if: matrix.rust != '1.63.0'
         run: cargo build --package payjoin-cli --verbose --features=v2
+      - name: build payjoin-cli bin v2 with danger-local-https
+        if: matrix.rust != '1.63.0'
+        run: cargo build --package payjoin-cli --verbose --features=danger-local-https,v2
 
   fmt:
     runs-on: ubuntu-latest

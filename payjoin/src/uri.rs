@@ -1,8 +1,7 @@
 use std::borrow::Cow;
-use std::convert::TryFrom;
 
-use bitcoin::address::{Error, NetworkChecked, NetworkUnchecked};
-use bitcoin::{Address, Amount, Network};
+use bitcoin::address::NetworkChecked;
+use bitcoin::{Address, Amount};
 use url::Url;
 
 #[cfg(feature = "v2")]
@@ -35,45 +34,16 @@ pub type Uri<'a, NetworkValidation> = bip21::Uri<'a, NetworkValidation, MaybePay
 pub type PjUri<'a> = bip21::Uri<'a, NetworkChecked, PayjoinExtras>;
 
 mod sealed {
-    use bitcoin::address::{NetworkChecked, NetworkUnchecked};
+    use bitcoin::address::NetworkChecked;
 
     pub trait UriExt: Sized {}
 
     impl<'a> UriExt for super::Uri<'a, NetworkChecked> {}
     impl<'a> UriExt for super::PjUri<'a> {}
-
-    pub trait UriExtNetworkUnchecked: Sized {}
-
-    impl<'a> UriExtNetworkUnchecked for super::Uri<'a, NetworkUnchecked> {}
-}
-pub trait UriExtNetworkUnchecked<'a>: sealed::UriExtNetworkUnchecked {
-    fn require_network(self, network: Network) -> Result<Uri<'a, NetworkChecked>, Error>;
-
-    fn assume_checked(self) -> Uri<'a, NetworkChecked>;
 }
 
 pub trait UriExt<'a>: sealed::UriExt {
     fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>>;
-}
-
-impl<'a> UriExtNetworkUnchecked<'a> for Uri<'a, NetworkUnchecked> {
-    fn require_network(self, network: Network) -> Result<Uri<'a, NetworkChecked>, Error> {
-        let checked_address = self.address.require_network(network)?;
-        let mut uri = bip21::Uri::with_extras(checked_address, self.extras);
-        uri.amount = self.amount;
-        uri.label = self.label;
-        uri.message = self.message;
-        Ok(uri)
-    }
-
-    fn assume_checked(self) -> Uri<'a, NetworkChecked> {
-        let checked_address = self.address.assume_checked();
-        let mut uri = bip21::Uri::with_extras(checked_address, self.extras);
-        uri.amount = self.amount;
-        uri.label = self.label;
-        uri.message = self.message;
-        uri
-    }
 }
 
 impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
@@ -266,20 +236,21 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
         match key {
             #[cfg(feature = "v2")]
             "ohttp" if self.ohttp.is_none() => {
-                let base64_config = Cow::try_from(value).map_err(InternalPjParseError::NotUtf8)?;
+                let base64_config =
+                    Cow::try_from(value).map_err(|_| InternalPjParseError::NotUtf8)?;
                 let config_bytes =
                     bitcoin::base64::decode_config(&*base64_config, bitcoin::base64::URL_SAFE)
-                        .map_err(InternalPjParseError::NotBase64)?;
+                        .map_err(|_| InternalPjParseError::NotBase64)?;
                 let config = OhttpKeys::decode(&config_bytes)
-                    .map_err(InternalPjParseError::DecodeOhttpKeys)?;
+                    .map_err(|_| InternalPjParseError::DecodeOhttpKeys)?;
                 self.ohttp = Some(config);
                 Ok(bip21::de::ParamKind::Known)
             }
             #[cfg(feature = "v2")]
             "ohttp" => Err(PjParseError(InternalPjParseError::MultipleParams("ohttp"))),
             "pj" if self.pj.is_none() => {
-                let endpoint = Cow::try_from(value).map_err(InternalPjParseError::NotUtf8)?;
-                let url = Url::parse(&endpoint).map_err(InternalPjParseError::BadEndpoint)?;
+                let endpoint = Cow::try_from(value).map_err(|_| InternalPjParseError::NotUtf8)?;
+                let url = Url::parse(&endpoint).map_err(|_| InternalPjParseError::BadEndpoint)?;
                 self.pj = Some(url);
 
                 Ok(bip21::de::ParamKind::Known)
@@ -331,12 +302,12 @@ impl std::fmt::Display for PjParseError {
                 write!(f, "Multiple instances of parameter '{}'", param)
             }
             InternalPjParseError::MissingEndpoint => write!(f, "Missing payjoin endpoint"),
-            InternalPjParseError::NotUtf8(_) => write!(f, "Endpoint is not valid UTF-8"),
+            InternalPjParseError::NotUtf8 => write!(f, "Endpoint is not valid UTF-8"),
             #[cfg(feature = "v2")]
-            InternalPjParseError::NotBase64(_) => write!(f, "ohttp config is not valid base64"),
-            InternalPjParseError::BadEndpoint(_) => write!(f, "Endpoint is not valid"),
+            InternalPjParseError::NotBase64 => write!(f, "ohttp config is not valid base64"),
+            InternalPjParseError::BadEndpoint => write!(f, "Endpoint is not valid"),
             #[cfg(feature = "v2")]
-            InternalPjParseError::DecodeOhttpKeys(_) => write!(f, "ohttp config is not valid"),
+            InternalPjParseError::DecodeOhttpKeys => write!(f, "ohttp config is not valid"),
             InternalPjParseError::UnsecureEndpoint => {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }
@@ -349,12 +320,12 @@ enum InternalPjParseError {
     BadPjOs,
     MultipleParams(&'static str),
     MissingEndpoint,
-    NotUtf8(core::str::Utf8Error),
+    NotUtf8,
     #[cfg(feature = "v2")]
-    NotBase64(bitcoin::base64::DecodeError),
-    BadEndpoint(url::ParseError),
+    NotBase64,
+    BadEndpoint,
     #[cfg(feature = "v2")]
-    DecodeOhttpKeys(ohttp::Error),
+    DecodeOhttpKeys,
     UnsecureEndpoint,
 }
 

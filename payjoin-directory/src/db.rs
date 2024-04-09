@@ -75,8 +75,8 @@ impl DbPool {
             loop {
                 match message_stream.next().await {
                     Some(msg) => {
-                        let _: () = msg.get_payload()?; // Notification received
-                                                        // Try fetching the data again
+                        msg.get_payload()?; // Notification received
+                                            // Try fetching the data again
                         if let Some(data) = conn.get::<_, Option<Vec<u8>>>(&key).await? {
                             if !data.is_empty() {
                                 break data; // Exit the block, returning the data

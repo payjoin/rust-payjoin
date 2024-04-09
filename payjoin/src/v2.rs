@@ -148,12 +148,14 @@ pub fn ohttp_encapsulate(
     target_resource: &str,
     body: Option<&[u8]>,
 ) -> Result<(Vec<u8>, ohttp::ClientResponse), OhttpEncapsulationError> {
+    use std::fmt::Write;
+
     let ctx = ohttp::ClientRequest::from_config(ohttp_keys)?;
     let url = url::Url::parse(target_resource)?;
     let authority_bytes = url.host().map_or_else(Vec::new, |host| {
         let mut authority = host.to_string();
         if let Some(port) = url.port() {
-            authority.push_str(&format!(":{}", port));
+            write!(authority, ":{}", port).unwrap();
         }
         authority.into_bytes()
     });

@@ -81,7 +81,7 @@ impl Params {
                             // since it's a minnimum, we want to round up
                             FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64)
                         }
-                        Err(e) => return Err(Error::FeeRate(e.to_string())),
+                        Err(_) => return Err(Error::FeeRate),
                     },
                 ("disableoutputsubstitution", v) =>
                     params.disable_output_substitution = v == "true",
@@ -106,14 +106,14 @@ impl Params {
 #[derive(Debug)]
 pub(crate) enum Error {
     UnknownVersion,
-    FeeRate(String),
+    FeeRate,
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Error::UnknownVersion => write!(f, "unknown version"),
-            Error::FeeRate(_) => write!(f, "could not parse feerate"),
+            Error::FeeRate => write!(f, "could not parse feerate"),
         }
     }
 }

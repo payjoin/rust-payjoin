@@ -452,6 +452,8 @@ impl ProvisionalProposal {
         self.inner.substitute_output_address(substitute_address)
     }
 
+    pub fn payjoin_amount(&self) -> u64 { self.inner.payjoin_amount() }
+
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, Error>,

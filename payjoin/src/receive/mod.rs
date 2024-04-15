@@ -477,6 +477,15 @@ impl ProvisionalProposal {
         self.params.disable_output_substitution
     }
 
+    /// payjoin request value in satoshis
+    pub fn payjoin_amount(&self) -> u64 {
+        let mut amount = 0;
+        for vout in &self.owned_vouts {
+            amount += self.payjoin_psbt.unsigned_tx.output[*vout].value;
+        }
+        amount
+    }
+
     /// Just replace an output address with
     pub fn substitute_output_address(&mut self, substitute_address: bitcoin::Address) {
         self.payjoin_psbt.unsigned_tx.output[self.owned_vouts[0]].script_pubkey =

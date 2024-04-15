@@ -24,7 +24,7 @@ impl MaybePayjoinExtras {
 
 #[derive(Clone)]
 pub struct PayjoinExtras {
-    pub(crate) endpoint: Url,
+    pub endpoint: Url,
     pub(crate) disable_output_substitution: bool,
     #[cfg(feature = "v2")]
     pub(crate) ohttp_keys: Option<OhttpKeys>,

@@ -360,7 +360,7 @@ impl MaybeMixedInputScripts {
     ///
     /// Note: mixed spends do not necessarily indicate distinct wallet fingerprints.
     /// This check is intended to prevent some types of wallet fingerprinting.
-    pub fn check_no_mixed_input_scripts(self) -> Result<MaybeInputsSeen, RequestError> {
+    pub fn check_no_mixed_input_scripts(self) -> Result<MaybeInputsSeen, Error> {
         let inner = self.inner.check_no_mixed_input_scripts()?;
         Ok(MaybeInputsSeen { inner, context: self.context })
     }

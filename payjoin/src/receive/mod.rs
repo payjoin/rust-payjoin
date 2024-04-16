@@ -68,7 +68,7 @@ impl UncheckedProposal {
         mut body: impl std::io::Read,
         query: &str,
         headers: impl Headers,
-    ) -> Result<Self, RequestError> {
+    ) -> Result<Self, Error> {
         let content_type = headers
             .get_header("content-type")
             .ok_or(InternalRequestError::MissingHeader("Content-Type"))?;
@@ -193,7 +193,7 @@ impl MaybeInputsOwned {
                 Ok(false) => None,
                 Ok(true) =>
                     Some(Error::BadRequest(InternalRequestError::InputOwned(script).into())),
-                Err(e) => Some(Error::Server(e.into())),
+                Err(e) => Some(e),
             })
         {
             return Err(e);
@@ -219,7 +219,7 @@ impl MaybeMixedInputScripts {
     ///
     /// Note: mixed spends do not necessarily indicate distinct wallet fingerprints.
     /// This check is intended to prevent some types of wallet fingerprinting.
-    pub fn check_no_mixed_input_scripts(self) -> Result<MaybeInputsSeen, RequestError> {
+    pub fn check_no_mixed_input_scripts(self) -> Result<MaybeInputsSeen, Error> {
         let mut err = Ok(());
         let input_scripts = self
             .psbt
@@ -282,7 +282,7 @@ impl MaybeInputsSeen {
                         InternalRequestError::InputSeen(input.txin.previous_output).into(),
                     ))?
                 },
-                Err(e) => Err(Error::Server(e.into()))?,
+                Err(e) => Err(e),
             }
         })?;
 
@@ -651,7 +651,7 @@ mod test {
         }
     }
 
-    fn proposal_from_test_vector() -> Result<UncheckedProposal, RequestError> {
+    fn proposal_from_test_vector() -> Result<UncheckedProposal, Error> {
         // OriginalPSBT Test Vector from BIP
         // | InputScriptType | Orginal PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
         // |-----------------|-----------------------|------------------------------|-------------------------|

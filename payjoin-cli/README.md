@@ -103,7 +103,7 @@ Using the previously generated bip21 URI, run the following command
 from the sender directory:
 
 ```console
- RUST_LOG=debug cargo run -- send <BIP21> --fee-rate <FEE_SAT_PER_VB>
+ RUST_LOG=debug cargo run --features=danger-local-https -- send <BIP21> --fee-rate <FEE_SAT_PER_VB>
 ```
 
 You should see the payjoin transaction occur and be able to verify the Partially Signed Bitcoin Transaction (PSBT), inputs, and Unspent Transaction Outputs (UTXOs).

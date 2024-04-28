@@ -16,7 +16,7 @@ mod v2 {
     use once_cell::sync::{Lazy, OnceCell};
     use payjoin::receive::v2::{Enrolled, Enroller, PayjoinProposal, UncheckedProposal};
     use payjoin::send::RequestBuilder;
-    use payjoin::{OhttpKeys, PjUriBuilder, Request, Uri};
+    use payjoin::{OhttpKeys, Request, Uri};
     use testcontainers_modules::redis::Redis;
     use testcontainers_modules::testcontainers::clients::Cli;
     use tokio::task::spawn_blocking;
@@ -105,8 +105,7 @@ mod v2 {
             let mut enrolled =
                 enroll_with_directory(directory.clone(), ohttp_keys.clone(), cert_der).await?;
             println!("enrolled: {:#?}", &enrolled);
-            let pj_uri_string =
-                create_receiver_pj_uri_string(&receiver, ohttp_keys, &enrolled.fallback_target())?;
+            let pj_uri_string = create_receiver_pj_uri_string(&receiver, &enrolled)?;
 
             // **********************
             // Inside the Sender:
@@ -208,8 +207,7 @@ mod v2 {
             let mut enrolled =
                 enroll_with_directory(directory, ohttp_keys.clone(), cert_der.clone()).await?;
 
-            let pj_uri_string =
-                create_receiver_pj_uri_string(&receiver, ohttp_keys, &enrolled.fallback_target())?;
+            let pj_uri_string = create_receiver_pj_uri_string(&receiver, &enrolled)?;
 
             // **********************
             // Inside the V1 Sender:
@@ -367,18 +365,15 @@ mod v2 {
     /// The receiver outputs a string to be passed to the sender as a string or QR code
     fn create_receiver_pj_uri_string(
         receiver: &bitcoincore_rpc::Client,
-        ohttp_keys: OhttpKeys,
-        fallback_target: &str,
+        enrolled: &Enrolled,
     ) -> Result<String, BoxError> {
         let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-        Ok(PjUriBuilder::new(
-            pj_receiver_address,
-            Url::parse(&fallback_target).unwrap(),
-            Some(ohttp_keys),
-        )
-        .amount(Amount::ONE_BTC)
-        .build()
-        .to_string())
+        Ok(enrolled
+            .pj_uri_builder(pj_receiver_address)
+            .unwrap()
+            .amount(Amount::ONE_BTC)
+            .build()
+            .to_string())
     }
 
     fn handle_directory_proposal(

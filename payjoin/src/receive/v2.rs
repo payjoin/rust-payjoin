@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use bitcoin::psbt::Psbt;
-use bitcoin::{base64, Amount, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::{base64, Address, Amount, FeeRate, OutPoint, Script, TxOut};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use url::Url;
@@ -9,7 +9,7 @@ use url::Url;
 use super::{Error, InternalRequestError, RequestError, SelectionError};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
-use crate::{OhttpKeys, Request};
+use crate::{OhttpKeys, PjUri, PjUriBuilder, Request};
 
 #[derive(Debug, Clone)]
 pub struct V2Context {
@@ -238,18 +238,23 @@ impl Enrolled {
         }
     }
 
-    fn fallback_req_body(&mut self) -> Result<(Vec<u8>, ohttp::ClientResponse), Error> {
-        let fallback_target = format!("{}{}", &self.directory, self.fallback_target());
-        log::trace!("Fallback request target: {}", fallback_target.as_str());
-        let fallback_target = self.fallback_target();
-        Ok(crate::v2::ohttp_encapsulate(&mut self.ohttp_keys, "GET", &fallback_target, None)?)
+    pub fn pj_uri_builder(&self, address: Address) -> Result<PjUriBuilder, Error> {
+        let pj_url = self.pj_url().map_err(|e| Error::Server(Box::new(e)))?;
+        Ok(PjUriBuilder::new(address, pj_url, Some(self.ohttp_keys.clone())))
     }
 
-    pub fn fallback_target(&self) -> String {
+    fn fallback_req_body(&mut self) -> Result<(Vec<u8>, ohttp::ClientResponse), Error> {
+        let pj_url = self.pj_url().map_err(|e| Error::Server(Box::new(e)))?;
+        Ok(crate::v2::ohttp_encapsulate(&mut self.ohttp_keys, "GET", pj_url.as_str(), None)?)
+    }
+
+    fn pj_url(&self) -> Result<Url, url::ParseError> {
         let pubkey = &self.s.public_key().serialize();
         let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
         let pubkey_base64 = base64::encode_config(pubkey, b64_config);
-        format!("{}{}", &self.directory, pubkey_base64)
+        let mut url = Url::parse(self.directory.as_str())?;
+        url.set_path(&pubkey_base64);
+        Ok(url)
     }
 }
 

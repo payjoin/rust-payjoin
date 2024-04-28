@@ -7,7 +7,8 @@ use bitcoincore_rpc::jsonrpc::serde_json;
 use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::Amount;
-use payjoin::{base64, bitcoin, Error, PjUriBuilder};
+use payjoin::receive::v2::Enrolled;
+use payjoin::{base64, bitcoin, Error};
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::spawn_blocking;
 
@@ -103,8 +104,7 @@ impl AppTrait for App {
         };
 
         log::debug!("Enrolled receiver");
-        let pj_uri_string =
-            self.construct_payjoin_uri(amount_arg, &enrolled.fallback_target(), ohttp_keys)?;
+        let pj_uri_string = self.construct_payjoin_uri(amount_arg, &enrolled)?;
         println!(
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
             self.config.pj_host
@@ -139,19 +139,12 @@ impl AppTrait for App {
 }
 
 impl App {
-    fn construct_payjoin_uri(
-        &self,
-        amount_arg: &str,
-        fallback_target: &str,
-        ohttp_keys: payjoin::OhttpKeys,
-    ) -> Result<String> {
+    fn construct_payjoin_uri(&self, amount_arg: &str, enrolled: &Enrolled) -> Result<String> {
         let pj_receiver_address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
-        let amount = Amount::from_sat(amount_arg.parse()?);
-        let pj_part = payjoin::Url::parse(fallback_target)
-            .map_err(|e| anyhow!("Failed to parse pj_endpoint: {}", e))?;
-
-        let pj_uri = PjUriBuilder::new(pj_receiver_address, pj_part, Some(ohttp_keys))
-            .amount(amount)
+        let pj_uri = enrolled
+            .pj_uri_builder(pj_receiver_address)
+            .map_err(|e| anyhow!("{}", e))?
+            .amount(Amount::from_sat(amount_arg.parse()?))
             .build();
 
         Ok(pj_uri.to_string())

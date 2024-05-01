@@ -200,7 +200,7 @@ struct MockScriptOwned(Arc<Client>);
 
 struct MockOutputOwned {}
 
-struct MockProcessPartiallySignedTransaction(Arc<bitcoincore_rpc::Client>);
+struct MockProcessPartiallySignedTransaction(Arc<Client>);
 
 impl ProcessPartiallySignedTransaction for MockProcessPartiallySignedTransaction {
     fn callback(&self, psbt: String) -> Result<String, PayjoinError> {

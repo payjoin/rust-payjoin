@@ -443,6 +443,10 @@ impl ProvisionalProposal {
         self.inner.contribute_non_witness_input(tx, outpoint)
     }
 
+    pub fn is_output_substitution_disabled(&self) -> bool {
+        self.inner.is_output_substitution_disabled()
+    }
+
     /// Just replace an output address with
     pub fn substitute_output_address(&mut self, substitute_address: bitcoin::Address) {
         self.inner.substitute_output_address(substitute_address)

@@ -473,6 +473,10 @@ impl ProvisionalProposal {
         );
     }
 
+    pub fn is_output_substitution_disabled(&self) -> bool {
+        self.params.disable_output_substitution
+    }
+
     /// Just replace an output address with
     pub fn substitute_output_address(&mut self, substitute_address: bitcoin::Address) {
         self.payjoin_psbt.unsigned_tx.output[self.owned_vouts[0]].script_pubkey =

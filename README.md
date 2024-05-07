@@ -53,10 +53,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [x] Tested and works with WasabiWallet
 - [x] Tested and works with Blue Wallet
 - [x] Tested and works with Sparrow
-- [x] Tested ~~and works~~ with JoinMarket
-    - Incompatible with sender wallets which don't provide a non_witness_utxo in the PSBT input.
-    See https://github.com/payjoin/rust-payjoin/issues/51#issuecomment-2083231756 and
-    [BIP174](https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki#cite_note-7).
+- [x] Tested with JoinMarket
 - [x] Minimum fee rate enforcement
 - [ ] Discount support
 - [ ] Independent review

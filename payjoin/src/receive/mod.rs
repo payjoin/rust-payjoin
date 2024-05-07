@@ -585,8 +585,10 @@ impl ProvisionalProposal {
         min_feerate_sat_per_vb: Option<FeeRate>,
     ) -> Result<PayjoinProposal, Error> {
         for i in self.sender_input_indexes() {
-            log::trace!("Clearing sender script witness for input {}", i);
+            log::trace!("Clearing sender script signatures for input {}", i);
+            self.payjoin_psbt.inputs[i].final_script_sig = None;
             self.payjoin_psbt.inputs[i].final_script_witness = None;
+            self.payjoin_psbt.inputs[i].tap_key_sig = None;
         }
         let psbt = self.apply_fee(min_feerate_sat_per_vb)?;
         let psbt = wallet_process_psbt(psbt)?;

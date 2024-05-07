@@ -543,8 +543,7 @@ impl ProvisionalProposal {
             input.bip32_derivation = BTreeMap::new();
             input.partial_sigs = BTreeMap::new();
         }
-        let sender_input_indexes = self.get_sender_input_indexes();
-        for i in sender_input_indexes {
+        for i in self.sender_input_indexes() {
             log::trace!("Clearing sender input {}", i);
             self.payjoin_psbt.inputs[i].non_witness_utxo = None;
             self.payjoin_psbt.inputs[i].witness_utxo = None;
@@ -560,7 +559,7 @@ impl ProvisionalProposal {
         })
     }
 
-    fn get_sender_input_indexes(&self) -> Vec<usize> {
+    fn sender_input_indexes(&self) -> Vec<usize> {
         // iterate proposal as mutable WITH the outpoint (previous_output) available too
         let mut original_inputs = self.original_psbt.input_pairs().peekable();
         let mut sender_input_indexes = vec![];
@@ -577,7 +576,7 @@ impl ProvisionalProposal {
                 }
             }
         }
-        return sender_input_indexes;
+        sender_input_indexes
     }
 
     pub fn finalize_proposal(
@@ -585,8 +584,7 @@ impl ProvisionalProposal {
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, Error>,
         min_feerate_sat_per_vb: Option<FeeRate>,
     ) -> Result<PayjoinProposal, Error> {
-        let sender_input_indexes = self.get_sender_input_indexes();
-        for i in sender_input_indexes {
+        for i in self.sender_input_indexes() {
             log::trace!("Clearing sender script witness for input {}", i);
             self.payjoin_psbt.inputs[i].final_script_witness = None;
         }

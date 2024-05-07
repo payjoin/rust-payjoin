@@ -543,6 +543,23 @@ impl ProvisionalProposal {
             input.bip32_derivation = BTreeMap::new();
             input.partial_sigs = BTreeMap::new();
         }
+        for i in self.sender_input_indexes() {
+            log::trace!("Clearing sender input {}", i);
+            self.payjoin_psbt.inputs[i].non_witness_utxo = None;
+            self.payjoin_psbt.inputs[i].witness_utxo = None;
+            self.payjoin_psbt.inputs[i].final_script_sig = None;
+            self.payjoin_psbt.inputs[i].final_script_witness = None;
+            self.payjoin_psbt.inputs[i].tap_key_sig = None;
+        }
+
+        Ok(PayjoinProposal {
+            payjoin_psbt: self.payjoin_psbt,
+            owned_vouts: self.owned_vouts,
+            params: self.params,
+        })
+    }
+
+    fn sender_input_indexes(&self) -> Vec<usize> {
         // iterate proposal as mutable WITH the outpoint (previous_output) available too
         let mut original_inputs = self.original_psbt.input_pairs().peekable();
         let mut sender_input_indexes = vec![];
@@ -559,20 +576,7 @@ impl ProvisionalProposal {
                 }
             }
         }
-
-        for i in sender_input_indexes {
-            log::trace!("Clearing sender input {}", i);
-            self.payjoin_psbt.inputs[i].non_witness_utxo = None;
-            self.payjoin_psbt.inputs[i].witness_utxo = None;
-            self.payjoin_psbt.inputs[i].final_script_sig = None;
-            self.payjoin_psbt.inputs[i].final_script_witness = None;
-            self.payjoin_psbt.inputs[i].tap_key_sig = None;
-        }
-        Ok(PayjoinProposal {
-            payjoin_psbt: self.payjoin_psbt,
-            owned_vouts: self.owned_vouts,
-            params: self.params,
-        })
+        sender_input_indexes
     }
 
     pub fn finalize_proposal(
@@ -580,6 +584,12 @@ impl ProvisionalProposal {
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, Error>,
         min_feerate_sat_per_vb: Option<FeeRate>,
     ) -> Result<PayjoinProposal, Error> {
+        for i in self.sender_input_indexes() {
+            log::trace!("Clearing sender script signatures for input {}", i);
+            self.payjoin_psbt.inputs[i].final_script_sig = None;
+            self.payjoin_psbt.inputs[i].final_script_witness = None;
+            self.payjoin_psbt.inputs[i].tap_key_sig = None;
+        }
         let psbt = self.apply_fee(min_feerate_sat_per_vb)?;
         let psbt = wallet_process_psbt(psbt)?;
         let payjoin_proposal = self.prepare_psbt(psbt)?;

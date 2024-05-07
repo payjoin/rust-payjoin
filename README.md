@@ -53,7 +53,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [x] Tested and works with WasabiWallet
 - [x] Tested and works with Blue Wallet
 - [x] Tested and works with Sparrow
-- [x] Tested with JoinMarket
+- [x] Tested and works with JoinMarket
 - [x] Minimum fee rate enforcement
 - [ ] Discount support
 - [ ] Independent review

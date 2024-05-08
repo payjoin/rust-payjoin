@@ -178,26 +178,23 @@ impl payjoin::receive::Headers for Headers<'_> {
 fn serialize_psbt(psbt: &Psbt) -> String { base64::encode(psbt.serialize()) }
 
 #[cfg(feature = "danger-local-https")]
-fn http_agent() -> Result<ureq::Agent> { Ok(http_agent_builder()?.build()) }
+fn http_agent() -> Result<reqwest::Client> { Ok(http_agent_builder()?.build()?) }
 
 #[cfg(not(feature = "danger-local-https"))]
-fn http_agent() -> Result<ureq::Agent> { Ok(ureq::Agent::new()) }
+fn http_agent() -> Result<reqwest::Client> { Ok(reqwest::Client::new()) }
 
 #[cfg(feature = "danger-local-https")]
-fn http_agent_builder() -> Result<ureq::AgentBuilder> {
-    use std::sync::Arc;
-
-    use rustls::client::ClientConfig;
+fn http_agent_builder() -> Result<reqwest::ClientBuilder> {
     use rustls::pki_types::CertificateDer;
     use rustls::RootCertStore;
-    use ureq::AgentBuilder;
 
     let mut local_cert_path = std::env::temp_dir();
     local_cert_path.push(LOCAL_CERT_FILE);
     let cert_der = std::fs::read(local_cert_path)?;
     let mut root_cert_store = RootCertStore::empty();
     root_cert_store.add(CertificateDer::from(cert_der.as_slice()))?;
-    let client_config =
-        ClientConfig::builder().with_root_certificates(root_cert_store).with_no_client_auth();
-    Ok(AgentBuilder::new().tls_config(Arc::new(client_config)))
+    Ok(reqwest::ClientBuilder::new()
+        .danger_accept_invalid_certs(true)
+        .use_rustls_tls()
+        .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der.as_slice())?))
 }

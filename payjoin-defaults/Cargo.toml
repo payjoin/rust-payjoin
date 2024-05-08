@@ -11,13 +11,13 @@ resolver = "2"
 version = "0.0.1"
 
 [features]
-danger-local-https = ["rustls"]
+danger-local-https = ["reqwest/rustls-tls", "rustls"]
 v2 = ["payjoin/v2"]
 
 [dependencies]
 payjoin = { version = "0.15.0", features = ["send", "receive"] }
 rustls = { version = "0.22.2", optional = true }
-ureq = "2.9.4"
+reqwest = { version = "0.12", default-features = false }
 
 [dev-dependencies]
 bitcoin = { version = "0.30.0", features = ["base64"] }

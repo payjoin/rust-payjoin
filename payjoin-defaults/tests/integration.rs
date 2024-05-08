@@ -17,11 +17,10 @@ mod v2 {
     use payjoin::receive::v2::{Enrolled, Enroller, PayjoinProposal, UncheckedProposal};
     use payjoin::send::RequestBuilder;
     use payjoin::{OhttpKeys, PjUriBuilder, Request, Uri};
+    use reqwest::{Client, ClientBuilder, Error, Response};
     use testcontainers_modules::redis::Redis;
     use testcontainers_modules::testcontainers::clients::Cli;
-    use tokio::task::spawn_blocking;
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
-    use ureq::{Agent, AgentBuilder, Error, Response};
     use url::Url;
 
     static TESTS_TIMEOUT: Lazy<Duration> = Lazy::new(|| Duration::from_secs(20));
@@ -48,10 +47,9 @@ mod v2 {
         tokio::select!(
           _ = init_directory(port, (cert.clone(), key)) => assert!(false, "Directory server is long running"),
           res = enroll_with_bad_keys(directory, bad_ohttp_keys, cert) => {
-            assert_eq!(
-              res.unwrap_err().into_response().unwrap().content_type(),
-              "application/problem+json"
-            );
+              let res = res.unwrap();
+              let header = res.headers().get("content-type").unwrap();
+              assert_eq!(header.to_str().unwrap(), "application/problem+json");
           }
         );
 
@@ -66,9 +64,14 @@ mod v2 {
             let mut bad_enroller =
                 Enroller::from_directory_config(directory, bad_ohttp_keys, mock_ohttp_relay);
             let (req, _ctx) = bad_enroller.extract_req().expect("Failed to extract request");
-            spawn_blocking(move || agent.post(req.url.as_str()).send_bytes(&req.body))
+            let res = agent
+                .post(req.url.as_str())
+                .body(req.body)
+                .send()
                 .await
-                .expect("Failed to send request")
+                .map_err(|e| e.to_string())
+                .unwrap();
+            Ok(res)
         }
     }
 
@@ -119,19 +122,18 @@ mod v2 {
                 .extract_v2(directory.to_owned())?; // Mock since we're not
                                                     // log::info!("send fallback v2");
                                                     // log::debug!("Request: {:#?}", &send_req.body);
-            let response = {
-                let Request { url, body, .. } = send_req.clone();
-                let agent_clone = agent.clone();
-                spawn_blocking(move || {
-                    agent_clone
-                        .post(url.as_str())
-                        .set("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
-                        .send_bytes(&body)
-                })
-                .await??
-            };
+            let Request { url, body, .. } = send_req.clone();
+            let response = agent
+                .clone()
+                .post(url.as_str())
+                .header("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
+                .body(body)
+                .send()
+                .await
+                .unwrap();
             log::info!("Response: {:#?}", &response);
-            assert!(is_success(response.status()));
+            assert!(response.status().is_success());
+            // assert!(is_success(response);
             // no response body yet since we are async and pushed fallback_psbt to the buffer
 
             // **********************
@@ -140,20 +142,17 @@ mod v2 {
             // GET fallback psbt
             let (req, ctx) = enrolled.extract_req()?;
             let agent_clone = agent.clone();
-            let response =
-                spawn_blocking(move || agent_clone.post(req.url.as_str()).send_bytes(&req.body))
-                    .await??;
+            let response = agent_clone.post(req.url.as_str()).body(req.body).send().await?;
 
             // POST payjoin
-            let proposal = enrolled.process_res(response.into_reader(), ctx)?.unwrap();
+
+            let res = response.bytes().await?.to_vec();
+            let proposal = enrolled.process_res(res.as_slice(), ctx)?.unwrap();
             let mut payjoin_proposal = handle_directory_proposal(receiver, proposal);
             let (req, ctx) = payjoin_proposal.extract_v2_req()?;
             let agent_clone = agent.clone();
-            let response =
-                spawn_blocking(move || agent_clone.post(req.url.as_str()).send_bytes(&req.body))
-                    .await??;
-            let mut res = Vec::new();
-            response.into_reader().read_to_end(&mut res)?;
+            let response = agent_clone.post(req.url.as_str()).body(req.body).send().await?;
+            let res = response.bytes().await?.to_vec();
             let _response = payjoin_proposal.deserialize_res(res, ctx)?;
             // response should be 204 http
 
@@ -163,12 +162,12 @@ mod v2 {
 
             // Replay post fallback to get the response
             let agent_clone = agent.clone();
-            let response = spawn_blocking(move || {
-                agent_clone.post(send_req.url.as_str()).send_bytes(&send_req.body)
-            })
-            .await??;
+            let response =
+                agent_clone.post(send_req.url.as_str()).body(send_req.body).send().await?;
+
+            let res = response.bytes().await?.to_vec();
             let checked_payjoin_proposal_psbt =
-                send_ctx.process_response(&mut response.into_reader())?.unwrap();
+                send_ctx.process_response(&mut res.as_slice())?.unwrap();
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
             log::info!("sent");
@@ -177,7 +176,6 @@ mod v2 {
     }
 
     #[tokio::test]
-    #[cfg(feature = "v2")]
     async fn v1_to_v2() {
         std::env::set_var("RUST_LOG", "debug");
         init_tracing();
@@ -190,7 +188,7 @@ mod v2 {
         tokio::select!(
           _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => assert!(false, "Ohttp relay is long running"),
           _ = init_directory(directory_port, (cert.clone(), key)) => assert!(false, "Directory server is long running"),
-          res = do_v1_to_v2(ohttp_relay, directory, cert) => assert!(res.is_ok()),
+          res = do_v1_to_v2(ohttp_relay, directory, cert) => assert!(res.is_ok())
         );
 
         async fn do_v1_to_v2(
@@ -199,9 +197,9 @@ mod v2 {
             cert_der: Vec<u8>,
         ) -> Result<(), BoxError> {
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
-            let agent: Arc<Agent> = Arc::new(http_agent(cert_der.clone())?);
-            wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await.unwrap();
-            wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
+            let agent: Arc<Client> = Arc::new(http_agent(cert_der.clone())?);
+            wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await?;
+            wait_for_service_ready(directory.clone(), agent.clone()).await?;
             let ohttp_keys =
                 fetch_ohttp_keys(ohttp_relay, directory.clone(), cert_der.clone()).await?;
 
@@ -221,21 +219,21 @@ mod v2 {
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             log::info!("send fallback v1 to offline receiver fail");
-            let res = {
-                let Request { url, body, .. } = send_req.clone();
-                let agent_clone = agent.clone();
-                spawn_blocking(move || {
-                    agent_clone
-                        .post(url.as_str())
-                        .set("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
-                        .send_bytes(&body)
-                })
-                .await?
-            };
+            let Request { url, body, .. } = send_req.clone();
+            let agent_clone = agent.clone();
+            let res = agent_clone
+                .post(url.as_str())
+                .header("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
+                .body(body)
+                .send()
+                .await;
             match res {
-                Err(ureq::Error::Status(code, _)) => assert_eq!(code, 503),
+                Ok(r) => {
+                    let code = r.status().as_u16();
+                    assert_eq!(code, 503)
+                }
                 _ => panic!("Expected response status code 503, found {:?}", res),
-            }
+            };
 
             // **********************
             // Inside the Receiver:
@@ -244,14 +242,11 @@ mod v2 {
                 let (response, ctx) = loop {
                     let (req, ctx) = enrolled.extract_req().unwrap();
                     let agent_clone = agent_clone.clone();
-                    let response = spawn_blocking(move || {
-                        agent_clone.post(req.url.as_str()).send_bytes(&req.body)
-                    })
-                    .await??;
+                    let response = agent_clone.post(req.url.as_str()).body(req.body).send().await?;
 
                     if response.status() == 200 {
                         // debug!("GET'd fallback_psbt");
-                        break (response.into_reader(), ctx);
+                        break (response, ctx);
                     } else if response.status() == 202 {
                         log::info!(
                             "No response yet for POST payjoin request, retrying some seconds"
@@ -262,19 +257,18 @@ mod v2 {
                         panic!("Unexpected response status: {}", response.status())
                     }
                 };
+
                 // debug!("handle directory response");
-                let proposal = enrolled.process_res(response, ctx).unwrap().unwrap();
+                let res = response.bytes().await?.to_vec();
+                let proposal = enrolled.process_res(res.as_slice(), ctx).unwrap().unwrap();
                 let mut payjoin_proposal = handle_directory_proposal(receiver, proposal);
                 // Respond with payjoin psbt within the time window the sender is willing to wait
                 // this response would be returned as http response to the sender
                 let (req, ctx) = payjoin_proposal.extract_v2_req().unwrap();
-                let response = spawn_blocking(move || {
-                    agent_clone.post(req.url.as_str()).send_bytes(&req.body)
-                })
-                .await??;
-                let mut res = Vec::new();
-                response.into_reader().read_to_end(&mut res)?;
-                let _response = payjoin_proposal.deserialize_res(res, ctx).unwrap();
+                let response = agent_clone.post(req.url.as_str()).body(req.body).send().await?;
+                let res = response.bytes().await?.to_vec();
+                let _response =
+                    payjoin_proposal.deserialize_res(res, ctx).map_err(|e| e.to_string())?;
                 // debug!("Post payjoin_psbt to directory");
                 // assert!(_response.status() == 204);
                 Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
@@ -283,23 +277,19 @@ mod v2 {
             // **********************
             // send fallback v1 to online receiver
             log::info!("send fallback v1 to online receiver should succeed");
-            let response = {
-                let Request { url, body, .. } = send_req.clone();
-                let agent_clone = agent.clone();
-                spawn_blocking(move || {
-                    agent_clone
-                        .post(url.as_str())
-                        .set("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
-                        .send_bytes(&body)
-                        .expect("Failed to send request")
-                })
-                .await?
-            };
+            let Request { url, body, .. } = send_req.clone();
+            let response = agent
+                .clone()
+                .post(url.as_str())
+                .header("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
+                .body(body)
+                .send()
+                .await?;
             log::info!("Response: {:#?}", &response);
-            assert!(is_success(response.status()));
+            assert!(response.status().is_success());
 
-            let checked_payjoin_proposal_psbt =
-                send_ctx.process_response(&mut response.into_reader())?;
+            let res = response.bytes().await?.to_vec();
+            let checked_payjoin_proposal_psbt = send_ctx.process_response(&mut res.as_slice())?;
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
             log::info!("sent");
@@ -334,12 +324,10 @@ mod v2 {
         directory: Url,
         cert_der: Vec<u8>,
     ) -> Result<payjoin::OhttpKeys, BoxError> {
-        let res = tokio::task::spawn_blocking(move || {
+        let res =
             payjoin_defaults::fetch_ohttp_keys(ohttp_relay.clone(), directory.clone(), cert_der)
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+                .await
+                .map_err(|e| e.to_string())?;
         Ok(res)
     }
 
@@ -356,12 +344,11 @@ mod v2 {
         );
         let (req, ctx) = enroller.extract_req()?;
         println!("enroll req: {:#?}", &req);
-        let res = spawn_blocking(move || {
-            http_agent(cert_der).unwrap().post(req.url.as_str()).send_bytes(&req.body)
-        })
-        .await??;
-        assert!(is_success(res.status()));
-        Ok(enroller.process_res(res.into_reader(), ctx)?)
+        let response =
+            http_agent(cert_der).unwrap().post(req.url.as_str()).body(req.body).send().await?;
+        assert!(response.status().is_success());
+        let body = response.bytes().await?.to_vec();
+        return Ok(enroller.process_res(body.as_slice(), ctx)?);
     }
 
     /// The receiver outputs a string to be passed to the sender as a string or QR code
@@ -472,24 +459,18 @@ mod v2 {
         payjoin_proposal
     }
 
-    fn http_agent(cert_der: Vec<u8>) -> Result<Agent, BoxError> {
-        Ok(http_agent_builder(cert_der)?.build())
+    fn http_agent(cert_der: Vec<u8>) -> Result<Client, BoxError> {
+        Ok(http_agent_builder(cert_der)?.build()?)
     }
 
-    fn http_agent_builder(cert_der: Vec<u8>) -> Result<AgentBuilder, BoxError> {
-        use rustls::client::ClientConfig;
-        use rustls::pki_types::CertificateDer;
-        use rustls::RootCertStore;
-
-        let mut root_cert_store = RootCertStore::empty();
-        root_cert_store.add(CertificateDer::from(cert_der.as_slice()))?;
-        let client_config =
-            ClientConfig::builder().with_root_certificates(root_cert_store).with_no_client_auth();
-
-        Ok(AgentBuilder::new().tls_config(Arc::new(client_config)))
+    fn http_agent_builder(cert_der: Vec<u8>) -> Result<ClientBuilder, BoxError> {
+        Ok(ClientBuilder::new()
+            .danger_accept_invalid_certs(true)
+            .use_rustls_tls()
+            .add_root_certificate(
+                reqwest::tls::Certificate::from_der(cert_der.as_slice()).unwrap(),
+            ))
     }
-
-    fn is_success(status: u16) -> bool { status >= 200 && status < 300 }
 
     fn find_free_port() -> u16 {
         let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
@@ -498,26 +479,30 @@ mod v2 {
 
     async fn wait_for_service_ready(
         service_url: Url,
-        agent: Arc<Agent>,
+        agent: Arc<Client>,
     ) -> Result<(), &'static str> {
         let health_url = service_url.join("/health").map_err(|_| "Invalid URL")?;
-        let res = spawn_blocking(move || {
+        let res = {
             let start = std::time::Instant::now();
 
             while start.elapsed() < *TESTS_TIMEOUT {
-                let request_result = agent.get(health_url.as_str()).call();
+                let request_result = agent.get(health_url.as_str()).send().await;
 
                 match request_result {
                     Ok(response) if response.status() == 200 => return Ok(()),
-                    Err(Error::Status(404, _)) => return Err("Endpoint not found"),
+                    Err(e) => {
+                        if e.status().unwrap().as_u16() == 404 {
+                            return Err("Endpoint not found");
+                        }
+                        std::thread::sleep(*WAIT_SERVICE_INTERVAL);
+                    }
                     _ => std::thread::sleep(*WAIT_SERVICE_INTERVAL),
                 }
             }
 
             Err("Timeout waiting for service to be ready")
-        })
-        .await
-        .map_err(|_| "JoinError")?;
+        };
+
         res
     }
 

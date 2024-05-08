@@ -320,16 +320,10 @@ async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::
             "localhost".to_string(),
         ])?
         .serialize_der()?;
-        Ok(tokio::task::spawn_blocking(move || {
-            payjoin_defaults::fetch_ohttp_keys(
-                ohttp_relay,
-                payjoin_directory,
-                #[cfg(feature = "danger-local-https")]
-                cert_der,
-            )
-        })
-        .await
-        .map_err(|e| anyhow!("Failed to fetch ohttp keys: {}", e))??)
+        #[cfg(not(feature = "danger-local-https"))]
+        return Ok(payjoin_defaults::fetch_ohttp_keys(ohttp_relay, payjoin_directory).await?);
+        #[cfg(feature = "danger-local-https")]
+        Ok(payjoin_defaults::fetch_ohttp_keys(ohttp_relay, payjoin_directory, cert_der).await?)
     }
 }
 

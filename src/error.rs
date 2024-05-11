@@ -31,7 +31,7 @@ pub enum PayjoinError {
     ServerError { message: String },
 
     ///Error that may occur when coin selection fails.
-    #[error("Error that may occur when coin selection fails: {message}")]
+    #[error("Error occurred during coin selection: {message}")]
     SelectionError { message: String },
 
     ///Error returned when request could not be created.
@@ -45,7 +45,7 @@ pub enum PayjoinError {
     #[error("{message}")]
     PjNotSupported { message: String },
 
-    #[error("Malformed response from receiver is : {message}")]
+    #[error("Malformed response from receiver: {message}")]
     ValidationError { message: String },
 
     #[error("V2Error: {message}")]

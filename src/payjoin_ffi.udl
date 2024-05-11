@@ -216,8 +216,6 @@ interface V2ProvisionalProposal{
    void substitute_output_address(string substitute_address);
    [Throws=PayjoinError]
    OutPoint try_preserving_privacy(record<u64, OutPoint> candidate_inputs);
-
-
    [Throws=PayjoinError]
    V2PayjoinProposal finalize_proposal(ProcessPartiallySignedTransaction process_psbt, u64? min_feerate_sat_per_vb);
 };

@@ -30,8 +30,8 @@ impl Uri {
         self.clone().0.address.to_string()
     }
     ///Gets the amount in satoshis.
-    pub fn amount(&self) -> Option<u64> {
-        self.0.amount.map(|x| x.to_sat())
+    pub fn amount(&self) -> Option<f64> {
+        self.0.amount.map(|x| x.to_btc())
     }
 }
 

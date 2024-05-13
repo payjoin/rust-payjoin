@@ -68,6 +68,7 @@ interface Url {
       [Throws=PayjoinError]
       constructor(string input);
       string? query();
+      string as_string();
 };
 interface Uri {
       [Throws=PayjoinError,Name=from_str]

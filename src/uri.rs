@@ -82,6 +82,9 @@ impl Url {
     pub fn query(&self) -> Option<String> {
         self.0.query().map(|x| x.to_string())
     }
+    pub fn as_string(&self) -> String {
+        self.0.to_string()
+    }
 }
 
 #[derive(Clone)]

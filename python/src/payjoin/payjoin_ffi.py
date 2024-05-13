@@ -545,6 +545,8 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_uri_amount() != 4816:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_url_as_string() != 36665:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_url_query() != 37864:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_v2maybeinputsowned_check_inputs_not_owned() != 11015:
@@ -1022,6 +1024,11 @@ _UniffiLib.uniffi_payjoin_ffi_fn_constructor_url_new.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_constructor_url_new.restype = ctypes.c_void_p
+_UniffiLib.uniffi_payjoin_ffi_fn_method_url_as_string.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_url_as_string.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_payjoin_ffi_fn_method_url_query.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1586,6 +1593,9 @@ _UniffiLib.uniffi_payjoin_ffi_checksum_method_uri_address.restype = ctypes.c_uin
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_uri_amount.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_uri_amount.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_url_as_string.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_url_as_string.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_url_query.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_url_query.restype = ctypes.c_uint16
@@ -3277,6 +3287,8 @@ class _UniffiConverterTypeUri:
 
 
 class UrlProtocol(typing.Protocol):
+    def as_string(self, ):
+        raise NotImplementedError
     def query(self, ):
         raise NotImplementedError
 
@@ -3306,6 +3318,16 @@ class Url:
         inst = cls.__new__(cls)
         inst._pointer = pointer
         return inst
+
+
+    def as_string(self, ) -> "str":
+        return _UniffiConverterString.lift(
+            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_url_as_string,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
 
 
     def query(self, ) -> "typing.Optional[str]":

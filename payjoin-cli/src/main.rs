@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
 
 fn cli() -> ArgMatches {
     Command::new("payjoin")
-        .about("Transfer bitcoin and preserve your privacy")
+        .about("Payjoin - bitcoin scaling, savings, and privacy by default")
         .arg(Arg::new("rpchost")
             .long("rpchost")
             .short('r')

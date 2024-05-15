@@ -43,7 +43,7 @@ impl AppTrait for App {
                 self.config.bitcoind_rpchost.as_str(),
                 bitcoincore_rpc::Auth::UserPass(
                     self.config.bitcoind_rpcuser.clone(),
-                    self.config.bitcoind_rpcpass.clone(),
+                    self.config.bitcoind_rpcpassword.clone(),
                 ),
             ),
         }

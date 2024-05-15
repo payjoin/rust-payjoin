@@ -12,7 +12,7 @@ pub struct AppConfig {
     pub bitcoind_rpchost: Url,
     pub bitcoind_cookie: Option<PathBuf>,
     pub bitcoind_rpcuser: String,
-    pub bitcoind_rpcpass: String,
+    pub bitcoind_rpcpassword: String,
     #[cfg(feature = "v2")]
     pub ohttp_keys: Option<payjoin::OhttpKeys>,
     #[cfg(feature = "v2")]
@@ -42,10 +42,10 @@ impl AppConfig {
                 "bitcoind_rpcuser",
                 matches.get_one::<String>("rpcuser").map(|s| s.as_str()),
             )?
-            .set_default("bitcoind_rpcpass", "")?
+            .set_default("bitcoind_rpcpassword", "")?
             .set_override_option(
-                "bitcoind_rpcpass",
-                matches.get_one::<String>("rpcpass").map(|s| s.as_str()),
+                "bitcoind_rpcpassword",
+                matches.get_one::<String>("rpcpassword").map(|s| s.as_str()),
             )?
             // Subcommand defaults without which file serialization fails.
             .set_default("pj_host", "0.0.0.0:3000")?

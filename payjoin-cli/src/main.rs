@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use app::config::AppConfig;
 use app::App as AppTrait;
+use clap::builder::styling::{AnsiColor, Effects};
+use clap::builder::Styles;
 use clap::{arg, value_parser, Arg, ArgMatches, Command};
 use url::Url;
 
@@ -40,7 +42,11 @@ async fn main() -> Result<()> {
 }
 
 fn cli() -> ArgMatches {
+    let styles = Styles::styled()
+        .header(AnsiColor::Magenta.on_default() | Effects::BOLD)
+        .usage(AnsiColor::Magenta.on_default() | Effects::BOLD);
     Command::new("payjoin")
+        .styles(styles)
         .about("Payjoin - bitcoin scaling, savings, and privacy by default")
         .arg(Arg::new("rpchost")
             .long("rpchost")

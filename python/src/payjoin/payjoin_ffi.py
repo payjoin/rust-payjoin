@@ -543,7 +543,9 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_uri_address() != 5138:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_method_uri_amount() != 4816:
+    if lib.uniffi_payjoin_ffi_checksum_method_uri_amount() != 26669:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_url_as_string() != 36665:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_url_query() != 37864:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -1022,6 +1024,11 @@ _UniffiLib.uniffi_payjoin_ffi_fn_constructor_url_new.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_constructor_url_new.restype = ctypes.c_void_p
+_UniffiLib.uniffi_payjoin_ffi_fn_method_url_as_string.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_url_as_string.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_payjoin_ffi_fn_method_url_query.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1586,6 +1593,9 @@ _UniffiLib.uniffi_payjoin_ffi_checksum_method_uri_address.restype = ctypes.c_uin
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_uri_amount.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_uri_amount.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_url_as_string.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_url_as_string.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_url_query.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_url_query.restype = ctypes.c_uint16
@@ -1719,6 +1729,15 @@ class _UniffiConverterUInt64(_UniffiConverterPrimitiveInt):
     @staticmethod
     def write(value, buf):
         buf.write_u64(value)
+
+class _UniffiConverterDouble(_UniffiConverterPrimitiveFloat):
+    @staticmethod
+    def read(buf):
+        return buf.read_double()
+
+    @staticmethod
+    def write(value, buf):
+        buf.write_double(value)
 
 class _UniffiConverterBool:
     @classmethod
@@ -3237,8 +3256,8 @@ class Uri:
 
 
 
-    def amount(self, ) -> "typing.Optional[int]":
-        return _UniffiConverterOptionalUInt64.lift(
+    def amount(self, ) -> "typing.Optional[float]":
+        return _UniffiConverterOptionalDouble.lift(
             _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_uri_amount,self._uniffi_clone_pointer(),)
         )
 
@@ -3277,6 +3296,8 @@ class _UniffiConverterTypeUri:
 
 
 class UrlProtocol(typing.Protocol):
+    def as_string(self, ):
+        raise NotImplementedError
     def query(self, ):
         raise NotImplementedError
 
@@ -3306,6 +3327,16 @@ class Url:
         inst = cls.__new__(cls)
         inst._pointer = pointer
         return inst
+
+
+    def as_string(self, ) -> "str":
+        return _UniffiConverterString.lift(
+            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_url_as_string,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
 
 
     def query(self, ) -> "typing.Optional[str]":
@@ -5045,6 +5076,33 @@ class _UniffiConverterOptionalUInt64(_UniffiConverterRustBuffer):
             return None
         elif flag == 1:
             return _UniffiConverterUInt64.read(buf)
+        else:
+            raise InternalError("Unexpected flag byte for optional type")
+
+
+
+class _UniffiConverterOptionalDouble(_UniffiConverterRustBuffer):
+    @classmethod
+    def check_lower(cls, value):
+        if value is not None:
+            _UniffiConverterDouble.check_lower(value)
+
+    @classmethod
+    def write(cls, value, buf):
+        if value is None:
+            buf.write_u8(0)
+            return
+
+        buf.write_u8(1)
+        _UniffiConverterDouble.write(value, buf)
+
+    @classmethod
+    def read(cls, buf):
+        flag = buf.read_u8()
+        if flag == 0:
+            return None
+        elif flag == 1:
+            return _UniffiConverterDouble.read(buf)
         else:
             raise InternalError("Unexpected flag byte for optional type")
 

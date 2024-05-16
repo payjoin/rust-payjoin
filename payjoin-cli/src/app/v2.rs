@@ -145,7 +145,8 @@ impl App {
         fallback_target: &str,
         ohttp_keys: payjoin::OhttpKeys,
     ) -> Result<String> {
-        let pj_receiver_address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
+        let pj_receiver_address =
+            self.bitcoind()?.get_new_address(None, None).expect("Failed to execute getnewaddress. Is the bitcoind_rpchost specified in config.toml reachable?").assume_checked();
         let amount = Amount::from_sat(amount_arg.parse()?);
         let pj_part = payjoin::Url::parse(fallback_target)
             .map_err(|e| anyhow!("Failed to parse pj_endpoint: {}", e))?;
@@ -284,7 +285,8 @@ impl App {
             // Substitute the receiver output address.
             let receiver_substitute_address = bitcoind
                 .get_new_address(None, None)
-                .map_err(|e| Error::Server(e.into()))?
+                .map_err(|e| Error::Server(e.into()))
+                .expect("testing testing")
                 .assume_checked();
             provisional_payjoin.substitute_output_address(receiver_substitute_address);
         }

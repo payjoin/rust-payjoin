@@ -95,7 +95,8 @@ impl App {
         amount_arg: &str,
         fallback_target: Option<&str>,
     ) -> Result<String> {
-        let pj_receiver_address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
+        let pj_receiver_address =
+            self.bitcoind()?.get_new_address(None, None).expect("Failed to execute getnewaddress. Is the bitcoind_rpchost specified in config.toml reachable?").assume_checked();
         let amount = Amount::from_sat(amount_arg.parse()?);
         let pj_part = match fallback_target {
             Some(target) => target,

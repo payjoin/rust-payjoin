@@ -108,7 +108,7 @@ fn cli() -> ArgMatches {
                 .arg_required_else_help(true)
                 .arg(
                     Arg::new("port")
-                        .long("host-port")
+                        .long("port")
                         .short('p')
                         .num_args(1)
                         .help("The local port to listen on"),

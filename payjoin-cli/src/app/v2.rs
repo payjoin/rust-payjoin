@@ -109,8 +109,8 @@ impl AppTrait for App {
         let pj_uri_string =
             self.construct_payjoin_uri(amount_arg, &enrolled.fallback_target(), ohttp_keys)?;
         println!(
-            "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
-            self.config.pj_host
+            "Listening at port {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
+            self.config.port
         );
         println!("{}", pj_uri_string);
 

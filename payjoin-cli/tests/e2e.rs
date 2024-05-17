@@ -48,8 +48,8 @@ mod e2e {
         let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
         let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
         let cookie_file = &bitcoind.params.cookie_file;
-        let pj_host = find_free_port();
-        let pj_endpoint = format!("https://localhost:{}", pj_host);
+        let port = find_free_port();
+        let pj_endpoint = format!("https://localhost:{}", port);
 
         let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
 
@@ -60,8 +60,8 @@ mod e2e {
             .arg(&cookie_file)
             .arg("receive")
             .arg(RECEIVE_SATS)
-            .arg("--host-port")
-            .arg(&pj_host.to_string())
+            .arg("--port")
+            .arg(&port.to_string())
             .arg("--endpoint")
             .arg(&pj_endpoint)
             .stdout(Stdio::piped())

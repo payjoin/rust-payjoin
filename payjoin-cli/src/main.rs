@@ -101,13 +101,8 @@ fn cli() -> ArgMatches {
                     .short('e')
                     .num_args(1)
                     .help("The `pj=` endpoint to receive the payjoin request")
-                    .value_parser(value_parser!(Url)))
-                .arg(Arg::new("sub_only")
-                    .long("sub-only")
-                    .short('s')
-                    .action(clap::ArgAction::SetTrue)
-                    .hide(true)
-                    .help("Use payjoin like a payment code, no hot wallet required. Only substitute outputs. Don't contribute inputs."))
+                        .value_parser(value_parser!(Url)),
+                )
         )
         .get_matches()
 }

@@ -292,11 +292,8 @@ impl App {
             }
         })?;
 
-        if !self.config.sub_only {
-            // Select receiver payjoin inputs.
-            _ = try_contributing_inputs(&mut provisional_payjoin, &bitcoind)
-                .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
-        }
+        _ = try_contributing_inputs(&mut provisional_payjoin, &bitcoind)
+            .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
 
         if !provisional_payjoin.is_output_substitution_disabled() {
             // Substitute the receiver output address.

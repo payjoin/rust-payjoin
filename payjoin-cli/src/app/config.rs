@@ -21,7 +21,6 @@ pub struct AppConfig {
     // receive-only
     pub pj_host: SocketAddr,
     pub pj_endpoint: Url,
-    pub sub_only: bool,
 }
 
 impl AppConfig {
@@ -50,7 +49,6 @@ impl AppConfig {
             // Subcommand defaults without which file serialization fails.
             .set_default("pj_host", "0.0.0.0:3000")?
             .set_default("pj_endpoint", "https://localhost:3000")?
-            .set_default("sub_only", false)?
             .add_source(File::new("config.toml", FileFormat::Toml).required(false));
 
         #[cfg(feature = "v2")]
@@ -76,8 +74,7 @@ impl AppConfig {
                 .set_override_option(
                     "pj_endpoint",
                     matches.get_one::<Url>("endpoint").map(|s| s.as_str()),
-                )?
-                .set_override_option("sub_only", matches.get_one::<bool>("sub_only").copied())?,
+                )?,
             _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
         };
 

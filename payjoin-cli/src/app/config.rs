@@ -1,9 +1,8 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use anyhow::Result;
 use clap::ArgMatches;
-use config::{Config, File, FileFormat};
+use config::{Config, ConfigError, File, FileFormat};
 use serde::Deserialize;
 use url::Url;
 
@@ -25,7 +24,7 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    pub(crate) fn new(matches: &ArgMatches) -> Result<Self> {
+    pub(crate) fn new(matches: &ArgMatches) -> Result<Self, ConfigError> {
         let builder = Config::builder()
             .set_default("bitcoind_rpchost", "http://localhost:18443")?
             .set_override_option(

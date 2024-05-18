@@ -21,6 +21,13 @@ use payjoin_ffi::types::{Network, OutPoint, Request, TxOut};
 use payjoin_ffi::uri::Uri;
 use uniffi::deps::log::debug;
 
+// Set up RPC connections
+static RPC_USER: &str = "admin1";
+static RPC_PASSWORD: &str = "123";
+static RPC_HOST: &str = "localhost";
+static RPC_PORT: &str = "18443";
+static ESPLORA_URL: &str = "http://0.0.0.0:30000";
+
 pub struct EsploraClient(EsploraBlockchain);
 
 impl EsploraClient {
@@ -51,7 +58,7 @@ fn get_bitcoin_client() -> Client {
 }
 
 fn restore_esplora_client() -> EsploraClient {
-    EsploraClient::new("http://0.0.0.0:30000".to_string())
+    EsploraClient::new(ESPLORA_URL.to_string())
 }
 fn init_sender_receiver_wallet() -> (Wallet, Wallet, Client) {
     let sender = restore_wallet(get_sender_descriptor()).expect("Wallet::new failed");
@@ -189,7 +196,6 @@ fn extract_pj_tx(sender_wallet: &Wallet, psbt: &str) -> Result<Transaction, Box<
 }
 
 
-
 #[allow(dead_code)]
 fn handle_proposal(proposal: UncheckedProposal, receiver: Wallet) -> Arc<PayjoinProposal> {
     let receiver = Arc::new(receiver);
@@ -302,7 +308,7 @@ mod v1 {
     const EXAMPLE_URL: &str = "https://example.com";
 
     #[test]
-    fn v1_to_v1() -> Result<(), Box<dyn Error>> {
+    fn v1_to_v1_full_cycle() -> Result<(), Box<dyn Error>> {
         let (sender, receiver, _btc_client) = init_sender_receiver_wallet();
         let _esplora_client = restore_esplora_client();
 

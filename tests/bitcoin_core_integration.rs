@@ -18,8 +18,13 @@ use payjoin_ffi::uri::Uri;
 
 type BoxError = Box<dyn std::error::Error>;
 
+// Set up RPC connections
+static RPC_USER: &str = "admin1";
+static RPC_PASSWORD: &str = "123";
+static RPC_HOST: &str = "localhost";
+static RPC_PORT: &str = "18443";
 #[test]
-fn v1_to_v1() -> Result<(), BoxError> {
+fn v1_to_v1_full_cycle() -> Result<(), BoxError> {
     let (sender, receiver) = init_rpc_sender_receiver();
 
     // Receiver creates the payjoin URI
@@ -182,8 +187,8 @@ fn extract_pj_tx(sender: &Client, psbt: String) -> Transaction {
     payjoin_psbt.extract_tx()
 }
 fn get_client(wallet_name: &str) -> Client {
-    let url = format!("{}{}{}", "http://localhost:18443", "/wallet/", wallet_name);
-    Client::new(&*url, Auth::UserPass("admin1".to_string(), "123".to_string())).unwrap()
+    let url = format!("http://{}:{}/wallet/{}", RPC_HOST, RPC_PORT, wallet_name);
+    Client::new(&*url, Auth::UserPass(RPC_USER.to_string(), RPC_PASSWORD.to_string())).unwrap()
 }
 #[allow(dead_code)]
 struct TestBroadcast(Arc<Client>);

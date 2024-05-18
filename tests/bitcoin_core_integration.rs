@@ -5,9 +5,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use bdk::bitcoin::Transaction;
-use bitcoincore_rpc::bitcoincore_rpc_json::{AddressType, WalletProcessPsbtResult};
+use bitcoincore_rpc::bitcoincore_rpc_json::{ WalletProcessPsbtResult};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
-use bitcoind::bitcoincore_rpc;
 use payjoin_ffi::error::PayjoinError;
 use payjoin_ffi::receive::v1::{
     CanBroadcast, Headers, IsOutputKnown, IsScriptOwned, PayjoinProposal,
@@ -25,7 +24,7 @@ fn v1_to_v1() -> Result<(), BoxError> {
 
     // Receiver creates the payjoin URI
     let pj_receiver_address =
-        receiver.get_raw_change_address(Some(AddressType::Bech32)).unwrap().assume_checked();
+        receiver.get_new_address(None, None).unwrap().assume_checked();
     let pj_uri_string =
         format!("{}?amount={}&pj=https://example.com", pj_receiver_address.to_qr_uri(), 0.0083285);
     let pj_uri = Uri::from_str(pj_uri_string).unwrap();
@@ -155,7 +154,6 @@ fn handle_pj_proposal(proposal: UncheckedProposal, receiver: Arc<Client>) -> Arc
 
 fn init_rpc_sender_receiver() -> (Client, Client) {
     let receiver = get_client("receiver");
-
     let sender = get_client("sender");
     let sender_address = receiver.get_new_address(None, None).unwrap().assume_checked();
     let receiver_address = receiver.get_new_address(None, None).unwrap().assume_checked();
@@ -206,7 +204,7 @@ impl ProcessPartiallySignedTransaction for MockProcessPartiallySignedTransaction
     fn callback(&self, psbt: String) -> Result<String, PayjoinError> {
         Ok(self
             .0
-            .wallet_process_psbt(psbt.as_str(), None, None, Some(false))
+            .wallet_process_psbt(psbt.as_str(), Some(true), None, Some(false))
             .map(|res: WalletProcessPsbtResult| res.psbt)
             .unwrap())
     }

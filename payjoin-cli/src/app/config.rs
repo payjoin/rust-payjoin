@@ -55,12 +55,10 @@ impl AppConfig {
 
         #[cfg(feature = "v2")]
         let builder = builder
-            .set_default("ohttp_keys", None::<String>)?
             .set_override_option(
                 "ohttp_keys",
                 matches.get_one::<String>("ohttp_keys").map(|s| s.as_str()),
             )?
-            .set_default("ohttp_relay", "")?
             .set_override_option(
                 "ohttp_relay",
                 matches.get_one::<Url>("ohttp_relay").map(|s| s.as_str()),

@@ -5,7 +5,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use bdk::bitcoin::Transaction;
-use bitcoincore_rpc::bitcoincore_rpc_json::{ WalletProcessPsbtResult};
+use bitcoincore_rpc::bitcoincore_rpc_json::WalletProcessPsbtResult;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use payjoin_ffi::error::PayjoinError;
 use payjoin_ffi::receive::v1::{
@@ -28,8 +28,7 @@ fn v1_to_v1_full_cycle() -> Result<(), BoxError> {
     let (sender, receiver) = init_rpc_sender_receiver();
 
     // Receiver creates the payjoin URI
-    let pj_receiver_address =
-        receiver.get_new_address(None, None).unwrap().assume_checked();
+    let pj_receiver_address = receiver.get_new_address(None, None).unwrap().assume_checked();
     let pj_uri_string =
         format!("{}?amount={}&pj=https://example.com", pj_receiver_address.to_qr_uri(), 0.0083285);
     let pj_uri = Uri::from_str(pj_uri_string).unwrap();

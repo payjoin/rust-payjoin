@@ -7,9 +7,9 @@ use bdk::bitcoin::psbt::PartiallySignedTransaction;
 use bdk::bitcoin::{Address, Script, Transaction};
 use bdk::blockchain::EsploraBlockchain;
 use bdk::database::MemoryDatabase;
+use bdk::miniscript::psbt::PsbtExt;
 use bdk::wallet::AddressIndex;
 use bdk::{FeeRate, LocalUtxo, SignOptions, Wallet as BdkWallet};
-use bdk::miniscript::psbt::PsbtExt;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin_ffi::error::PayjoinError;
@@ -53,7 +53,7 @@ fn restore_wallet(descriptor: String) -> Result<Wallet, Box<dyn Error>> {
 }
 
 fn get_bitcoin_client() -> Client {
-    let url = format!("{}", "http://localhost:18443/wallet/", );
+    let url = format!("{}", "http://localhost:18443/wallet/",);
     Client::new(&*url, Auth::UserPass("admin1".to_string(), "123".to_string())).unwrap()
 }
 
@@ -70,24 +70,49 @@ fn init_sender_receiver_wallet() -> (Wallet, Wallet, Client) {
     let sender_balance = sender.get_balance().to_string();
     let receiver_balance = receiver.get_balance().to_string();
 
-    client.send_to_address(&bitcoincore_rpc::bitcoin::address::Address::from_str(&*receiver_address.to_string()).unwrap().assume_checked(), bitcoincore_rpc::bitcoin::Amount::ONE_BTC, None, None, None, None, None, None).unwrap();
-    client.send_to_address(&bitcoincore_rpc::bitcoin::address::Address::from_str(&*sender_address.to_string()).unwrap().assume_checked(), bitcoincore_rpc::bitcoin::Amount::ONE_BTC, None, None, None, None, None, None).unwrap();
-    client.generate_to_address(51, &bitcoincore_rpc::bitcoin::address::Address::from_str(&*receiver_address.to_string()).unwrap().assume_checked()).expect("generate failed");
+    client
+        .send_to_address(
+            &bitcoincore_rpc::bitcoin::address::Address::from_str(&*receiver_address.to_string())
+                .unwrap()
+                .assume_checked(),
+            bitcoincore_rpc::bitcoin::Amount::ONE_BTC,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    client
+        .send_to_address(
+            &bitcoincore_rpc::bitcoin::address::Address::from_str(&*sender_address.to_string())
+                .unwrap()
+                .assume_checked(),
+            bitcoincore_rpc::bitcoin::Amount::ONE_BTC,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    client
+        .generate_to_address(
+            51,
+            &bitcoincore_rpc::bitcoin::address::Address::from_str(&*receiver_address.to_string())
+                .unwrap()
+                .assume_checked(),
+        )
+        .expect("generate failed");
     let _ = sender.sync(&esplora_client);
     let _ = receiver.sync(&esplora_client);
-    println!("\n Sender balance: {:?}",receiver.get_balance() );
+    println!("\n Sender balance: {:?}", receiver.get_balance());
     println!("\n Receiver balance: {:?}", sender.get_balance());
-    assert_ne!(
-        receiver_balance,
-        receiver.get_balance(),
-        "receiver doesn't own bitcoin"
-    );
+    assert_ne!(receiver_balance, receiver.get_balance(), "receiver doesn't own bitcoin");
 
-    assert_ne!(
-        sender_balance,
-        sender.get_balance(),
-        "sender doesn't own bitcoin"
-    );
+    assert_ne!(sender_balance, sender.get_balance(), "sender doesn't own bitcoin");
     (sender, receiver, client)
 }
 
@@ -154,24 +179,23 @@ impl Wallet {
     pub(crate) fn sign(
         &self,
         psbt: &mut PartiallySignedTransaction,
-        remove: bool
+        remove: bool,
     ) -> Result<PartiallySignedTransaction, Box<dyn Error>> {
         let f = psbt.to_string();
-        match self
-            .get_wallet()
-            .sign(psbt, SignOptions { try_finalize:true, trust_witness_utxo:true,  ..Default::default() })
-        {
+        match self.get_wallet().sign(
+            psbt,
+            SignOptions { try_finalize: true, trust_witness_utxo: true, ..Default::default() },
+        ) {
             Ok(e) => {
-
                 println!("PSBT is_finalized: {}", e);
-                if remove{
-                       self.remove_bip32_derivation_paths(psbt);
+                if remove {
+                    self.remove_bip32_derivation_paths(psbt);
                 }
 
                 let g = psbt.to_string();
                 assert_ne!(f, g);
-                return  Ok((*psbt).clone());
-            },
+                return Ok((*psbt).clone());
+            }
             Err(e) => panic!("{}", e.to_string()),
         }
     }
@@ -186,7 +210,7 @@ fn get_receiver_descriptor() -> String {
 fn extract_pj_tx(sender_wallet: &Wallet, psbt: &str) -> Result<Transaction, Box<dyn Error>> {
     let mut psbt: PartiallySignedTransaction =
         PartiallySignedTransaction::from_str(psbt).expect("Invalid psbt");
-    println!("Sender's Payjoin PSBT1: {:#?}",  psbt.to_string());
+    println!("Sender's Payjoin PSBT1: {:#?}", psbt.to_string());
     let f = psbt.to_string();
     let signed_psbt = sender_wallet.sign(&mut psbt, false)?;
     let g = signed_psbt.to_string();
@@ -194,7 +218,6 @@ fn extract_pj_tx(sender_wallet: &Wallet, psbt: &str) -> Result<Transaction, Box<
     println!("Sender's Payjoin PSBT: {:#?}", signed_psbt.to_string());
     Ok(signed_psbt.extract_tx())
 }
-
 
 #[allow(dead_code)]
 fn handle_proposal(proposal: UncheckedProposal, receiver: Wallet) -> Arc<PayjoinProposal> {
@@ -289,12 +312,15 @@ fn build_original_psbt(
         .script_pubkey();
     builder
         .fee_rate(FeeRate::from_sat_per_kwu(2000.0))
-        .add_recipient(script, (pj_uri.amount().unwrap()*100000000.0) as u64)
-        .fee_rate(FeeRate::from_sat_per_vb(5.0)).only_witness_utxo()
-        ;
+        .add_recipient(script, (pj_uri.amount().unwrap() * 100000000.0) as u64)
+        .fee_rate(FeeRate::from_sat_per_vb(5.0))
+        .only_witness_utxo();
     let (mut psbt, _) = builder.finish()?;
     wallet_mutex
-        .sign(&mut psbt, SignOptions { trust_witness_utxo: true, try_finalize:true,..Default::default() })
+        .sign(
+            &mut psbt,
+            SignOptions { trust_witness_utxo: true, try_finalize: true, ..Default::default() },
+        )
         .unwrap();
     sender_wallet.remove_bip32_derivation_paths(&mut psbt);
     Ok(psbt)
@@ -349,7 +375,8 @@ struct MockProcessPartiallySignedTransaction(Arc<Wallet>);
 
 impl ProcessPartiallySignedTransaction for MockProcessPartiallySignedTransaction {
     fn callback(&self, psbt: String) -> Result<String, PayjoinError> {
-        match self.0.sign(&mut PartiallySignedTransaction::from_str(&*psbt.as_str()).unwrap(), true) {
+        match self.0.sign(&mut PartiallySignedTransaction::from_str(&*psbt.as_str()).unwrap(), true)
+        {
             Ok(e) => Ok(e.to_string()),
             Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
         }

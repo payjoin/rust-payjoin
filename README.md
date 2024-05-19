@@ -28,13 +28,13 @@ the [mozilla/uniffi-rs] bindings generator for each supported target language.
 The below directories include instructions for using, building, and
 publishing the native language binding for [Payjoin Dev Kit] supported by this project.
 
-| Language | Platform              | Published Package | Building Documentation | API Docs |
-|----------|-----------------------|-------------------|------------------------|----------|
-| Python   | linux, macOS, Windows | payjoin           | [Readme payjoin](python/README.md)|      |
+| Language | Platform              | Published Package | Building Documentation             | API Docs |
+|----------|-----------------------|-------------------|------------------------------------|----------|
+| Python   | linux, macOS, Windows | payjoin           | [Readme payjoin](python/README.md) |          |
 
 ## Minimum Supported Rust Version (MSRV)
 
-This library should compile with any combination of features with Rust 1.73.0.
+This library should compile with any combination of features with Rust 1.78.0.
 
 ## Using the libraries
 
@@ -43,6 +43,42 @@ This library should compile with any combination of features with Rust 1.73.0.
 ```shell
 pip install payjoin
 ```
+## Run the integration test
+
+First we need to set up the `bitcoin core` and `esplora` locally in the regtest network. If you don't
+have these, please refer to this [page](https://learn.saylor.org/mod/page/view.php?id=36347). Or you can
+install `Nigiri Bitcoin`, which is a tool designed to simplify the process of running local instances of Bitcoin and
+Liquid networks for development and testing purposes. You can refer to
+this [link](https://github.com/vulpemventures/nigiri), to install it on your local machine.
+
+Once the nigiri bitcoin starts running, you need to mine a few blocks. Please refer to the following [link](https://developer.bitcoin.org/reference/rpc/generatetoaddress.html?highlight=generate)
+on how to mine blocks.
+
+Before running the integration tests, please replace following snippet in `tests/bdk_integration_test.rs` and `tests/bitcoin_core_integration_test.rs` with your
+nigiri bitcoin core credentials.
+
+```rust
+static RPC_USER: &str = "admin1";
+static RPC_PASSWORD: &str = "123";
+static RPC_HOST: &str = "localhost";
+static RPC_PORT: &str = "18443";
+```
+
+NB: The default nigiri credentials would be the following
+
+```
+rpc_user = "admin1"
+rpc_password = "123"
+rpc_host = "localhost"
+rpc_port = "18443"
+```
+
+```shell
+#Run the integration test
+cargo test --package payjoin_ffi --test bitcoin_core_integration v1_to_v1_full_cycle
+cargo test --package payjoin_ffi --test bdk_integration v1_to_v1_full_cycle
+```
+
 
 ## 🚨 Warning 🚨
 

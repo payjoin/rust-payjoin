@@ -7,7 +7,6 @@ use bdk::bitcoin::psbt::PartiallySignedTransaction;
 use bdk::bitcoin::{Address, Script, Transaction};
 use bdk::blockchain::EsploraBlockchain;
 use bdk::database::MemoryDatabase;
-use bdk::miniscript::psbt::PsbtExt;
 use bdk::wallet::AddressIndex;
 use bdk::{FeeRate, LocalUtxo, SignOptions, Wallet as BdkWallet};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
@@ -53,8 +52,8 @@ fn restore_wallet(descriptor: String) -> Result<Wallet, Box<dyn Error>> {
 }
 
 fn get_bitcoin_client() -> Client {
-    let url = format!("{}", "http://localhost:18443/wallet/",);
-    Client::new(&*url, Auth::UserPass("admin1".to_string(), "123".to_string())).unwrap()
+    let url = format!("http://{}:{}/wallet/{}", RPC_HOST, RPC_PORT, "");
+    Client::new(&*url, Auth::UserPass(RPC_USER.to_string(), RPC_PASSWORD.to_string())).unwrap()
 }
 
 fn restore_esplora_client() -> EsploraClient {

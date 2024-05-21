@@ -1548,29 +1548,9 @@ dependencies = [
 
 [[package]]
 name = "ohttp-relay"
-version = "0.0.4"
+version = "0.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddab3de76fbc6c40de9ff3abc9bbad398ae3ce247e9fdf579fa42a69d078c76f"
-dependencies = [
- "futures",
- "http 1.1.0",
- "http-body-util",
- "hyper 1.2.0",
- "hyper-rustls 0.26.0",
- "hyper-tungstenite",
- "hyper-util",
- "once_cell",
- "rustls 0.22.3",
- "tokio",
- "tokio-tungstenite",
- "tokio-util",
-]
-
-[[package]]
-name = "ohttp-relay"
-version = "0.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44b0473bd279cdfaf5983a15fa3d2d7e1826b0cd041f0fc51eb10af901a8bf94"
+checksum = "7850c40a0aebcba289d3252c0a45f93cba6ad4b0c46b88a5fc51dba6ddce8632"
 dependencies = [
  "futures",
  "http 1.1.0",
@@ -1669,7 +1649,7 @@ dependencies = [
  "http 1.1.0",
  "log",
  "ohttp 0.5.1",
- "ohttp-relay 0.0.7",
+ "ohttp-relay",
  "once_cell",
  "payjoin-directory",
  "rand",
@@ -1702,7 +1682,7 @@ dependencies = [
  "hyper 0.14.28",
  "hyper-rustls 0.25.0",
  "log",
- "ohttp-relay 0.0.4",
+ "ohttp-relay",
  "payjoin",
  "payjoin-defaults",
  "rcgen",
@@ -1721,7 +1701,7 @@ dependencies = [
  "bitcoind",
  "http 1.1.0",
  "log",
- "ohttp-relay 0.0.7",
+ "ohttp-relay",
  "once_cell",
  "payjoin",
  "payjoin-directory",

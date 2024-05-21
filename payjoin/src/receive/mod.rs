@@ -361,45 +361,50 @@ impl ProvisionalProposal {
             return Err(SelectionError::from(InternalSelectionError::Empty));
         }
 
-        if self.payjoin_psbt.outputs.len() != 2 {
-            // Current UIH techniques only support many-input, two-output transactions.
+        if self.payjoin_psbt.outputs.len() > 2 {
+            // This UIH avoidance function supports only
+            // many-input, n-output transactions such that n <= 2 for now
             return Err(SelectionError::from(InternalSelectionError::TooManyOutputs));
-        }
+        } else if self.payjoin_psbt.outputs.len() == 2 {
+            let min_original_out_sats = self
+                .payjoin_psbt
+                .unsigned_tx
+                .output
+                .iter()
+                .map(|output| output.value)
+                .min()
+                .unwrap_or_else(|| Amount::MAX_MONEY.to_sat());
 
-        let min_original_out_sats = self
-            .payjoin_psbt
-            .unsigned_tx
-            .output
-            .iter()
-            .map(|output| output.value)
-            .min()
-            .unwrap_or_else(|| Amount::MAX_MONEY.to_sat());
+            let min_original_in_sats = self
+                .payjoin_psbt
+                .input_pairs()
+                .filter_map(|input| input.previous_txout().ok().map(|txo| txo.value))
+                .min()
+                .unwrap_or_else(|| Amount::MAX_MONEY.to_sat());
 
-        let min_original_in_sats = self
-            .payjoin_psbt
-            .input_pairs()
-            .filter_map(|input| input.previous_txout().ok().map(|txo| txo.value))
-            .min()
-            .unwrap_or_else(|| Amount::MAX_MONEY.to_sat());
+            // Assume many-input, two output to select the vout for now
+            let prior_payment_sats =
+                self.payjoin_psbt.unsigned_tx.output[self.owned_vouts[0]].value;
+            for candidate in candidate_inputs {
+                // TODO bound loop by timeout / iterations
 
-        // Assume many-input, two output to select the vout for now
-        let prior_payment_sats = self.payjoin_psbt.unsigned_tx.output[self.owned_vouts[0]].value;
-        for candidate in candidate_inputs {
-            // TODO bound loop by timeout / iterations
+                let candidate_sats = candidate.0.to_sat();
+                let candidate_min_out =
+                    min(min_original_out_sats, prior_payment_sats + candidate_sats);
+                let candidate_min_in = min(min_original_in_sats, candidate_sats);
 
-            let candidate_sats = candidate.0.to_sat();
-            let candidate_min_out = min(min_original_out_sats, prior_payment_sats + candidate_sats);
-            let candidate_min_in = min(min_original_in_sats, candidate_sats);
-
-            if candidate_min_out < candidate_min_in {
-                // The candidate avoids UIH2 but conforms to UIH1: Optimal change heuristic.
-                // It implies the smallest output is the sender's change address.
-                return Ok(candidate.1);
-            } else {
-                // The candidate conforms to UIH2: Unnecessary input
-                // and could be identified as a potential payjoin
-                continue;
+                if candidate_min_out < candidate_min_in {
+                    // The candidate avoids UIH2 but conforms to UIH1: Optimal change heuristic.
+                    // It implies the smallest output is the sender's change address.
+                    return Ok(candidate.1);
+                } else {
+                    // The candidate conforms to UIH2: Unnecessary input
+                    // and could be identified as a potential payjoin
+                    continue;
+                }
             }
+        } else {
+            return Ok(candidate_inputs.values().next().expect("empty already checked").clone());
         }
 
         // No suitable privacy preserving selection found

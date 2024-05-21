@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use bitcoin::psbt::Psbt;
+use bitcoin::secp256k1::rand;
 use bitcoin::{base64, Amount, FeeRate, OutPoint, Script, TxOut};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};

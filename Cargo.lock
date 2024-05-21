@@ -1672,7 +1672,6 @@ dependencies = [
  "ohttp-relay 0.0.7",
  "once_cell",
  "payjoin-directory",
- "rand",
  "rcgen",
  "rustls 0.22.3",
  "serde",

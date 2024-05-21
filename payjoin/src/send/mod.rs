@@ -29,6 +29,8 @@ use std::str::FromStr;
 use bitcoin::address::NetworkChecked;
 use bitcoin::psbt::Psbt;
 #[cfg(feature = "v2")]
+use bitcoin::secp256k1::rand;
+#[cfg(feature = "v2")]
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::{FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
 pub use error::{CreateRequestError, ResponseError, ValidationError};

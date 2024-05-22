@@ -30,6 +30,9 @@ impl AppTrait for App {
         let receive_store = Arc::new(AsyncMutex::new(ReceiveStore::new()?));
         let send_store = Arc::new(AsyncMutex::new(SendStore::new()?));
         let app = Self { config, receive_store, send_store, seen_inputs };
+        app.bitcoind()?
+            .get_blockchain_info()
+            .context("Failed to connect to bitcoind. Check config RPC connection.")?;
         Ok(app)
     }
 

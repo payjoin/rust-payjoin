@@ -29,6 +29,9 @@ impl AppTrait for App {
     fn new(config: AppConfig) -> Result<Self> {
         let seen_inputs = Arc::new(Mutex::new(SeenInputs::new()?));
         let app = Self { config, seen_inputs };
+        app.bitcoind()?
+            .get_blockchain_info()
+            .context("Failed to connect to bitcoind. Check config RPC connection.")?;
         Ok(app)
     }
 

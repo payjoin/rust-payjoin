@@ -115,13 +115,10 @@ mod v2 {
             // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let pj_uri = Uri::from_str(&pj_uri_string).unwrap().assume_checked();
             let psbt = build_original_psbt(&sender, &pj_uri)?;
-            // debug!("Original psbt: {:#?}", psbt);
             let (Request { url, body, .. }, send_ctx) =
                 RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
                     .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
-                    .extract_v2(directory.to_owned())?; // Mock since we're not
-                                                        // log::info!("send fallback v2");
-                                                        // log::debug!("Request: {:#?}", &send_req.body);
+                    .extract_v2(directory.to_owned())?;
             let response = agent
                 .post(url.clone())
                 .header("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
@@ -209,7 +206,6 @@ mod v2 {
             // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let pj_uri = Uri::from_str(&pj_uri_string).unwrap().assume_checked();
             let psbt = build_original_psbt(&sender, &pj_uri)?;
-            // debug!("Original psbt: {:#?}", psbt);
             let (Request { url, body, .. }, send_ctx) =
                 RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
                     .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
@@ -233,7 +229,6 @@ mod v2 {
                     let response = agent_clone.post(req.url).body(req.body).send().await?;
 
                     if response.status() == 200 {
-                        // debug!("GET'd fallback_psbt");
                         break (response.bytes().await?.to_vec(), ctx);
                     } else if response.status() == 202 {
                         log::info!(
@@ -245,7 +240,6 @@ mod v2 {
                         panic!("Unexpected response status: {}", response.status())
                     }
                 };
-                // debug!("handle directory response");
                 let proposal = enrolled.process_res(response.as_slice(), ctx).unwrap().unwrap();
                 let mut payjoin_proposal = handle_directory_proposal(receiver, proposal);
                 // Respond with payjoin psbt within the time window the sender is willing to wait
@@ -255,8 +249,6 @@ mod v2 {
                 let _response = payjoin_proposal
                     .deserialize_res(response.bytes().await?.to_vec(), ctx)
                     .map_err(|e| e.to_string())?;
-                // debug!("Post payjoin_psbt to directory");
-                // assert!(_response.status() == 204);
                 Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
             });
 
@@ -425,7 +417,6 @@ mod v2 {
                 Some(bitcoin::FeeRate::MIN),
             )
             .unwrap();
-        // debug!("Receiver's Payjoin proposal PSBT: {:#?}", &payjoin_proposal.psbt());
         payjoin_proposal
     }
 
@@ -517,7 +508,6 @@ mod v2 {
     ) -> Result<Psbt, BoxError> {
         let mut outputs = HashMap::with_capacity(1);
         outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap());
-        // debug!("outputs: {:?}", outputs);
         let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
             lock_unspent: Some(true),
             fee_rate: Some(Amount::from_sat(2000)),
@@ -545,7 +535,6 @@ mod v2 {
             sender.wallet_process_psbt(&payjoin_base64_string, None, None, None)?.psbt;
         let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.unwrap();
         let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
-        // debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
 
         Ok(payjoin_psbt.extract_tx())
     }

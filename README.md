@@ -35,7 +35,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [x] Fee contribution support
 - [x] Example client using bitcoind
 - [x] Tested and works with BTCPayServer
-- [ ] Tested and works with JoinMarket
+- [x] Tested and works with JoinMarket
 - [x] Minimum fee rate enforcement
 - [ ] Independent review
 - [x] Independent testing

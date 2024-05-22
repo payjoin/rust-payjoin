@@ -40,7 +40,9 @@ async fn main() -> Result<()> {
 }
 
 fn cli() -> ArgMatches {
-    Command::new("payjoin")
+    let version = env!("CARGO_PKG_VERSION");
+    Command::new("payjoin-cli")
+        .version(version)
         .about("Payjoin - bitcoin scaling, savings, and privacy by default")
         .arg(Arg::new("rpchost")
             .long("rpchost")

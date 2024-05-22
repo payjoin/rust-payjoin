@@ -1,9 +1,8 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use anyhow::Result;
 use clap::ArgMatches;
-use config::{Config, File, FileFormat};
+use config::{Config, ConfigError, File, FileFormat};
 use serde::Deserialize;
 use url::Url;
 
@@ -25,7 +24,7 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    pub(crate) fn new(matches: &ArgMatches) -> Result<Self> {
+    pub(crate) fn new(matches: &ArgMatches) -> Result<Self, ConfigError> {
         let builder = Config::builder()
             .set_default("bitcoind_rpchost", "http://localhost:18443")?
             .set_override_option(
@@ -55,12 +54,10 @@ impl AppConfig {
 
         #[cfg(feature = "v2")]
         let builder = builder
-            .set_default("ohttp_keys", None::<String>)?
             .set_override_option(
                 "ohttp_keys",
                 matches.get_one::<String>("ohttp_keys").map(|s| s.as_str()),
             )?
-            .set_default("ohttp_relay", "")?
             .set_override_option(
                 "ohttp_relay",
                 matches.get_one::<Url>("ohttp_relay").map(|s| s.as_str()),

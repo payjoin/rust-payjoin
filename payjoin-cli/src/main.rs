@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     let matches = cli();
-    let config = AppConfig::new(&matches)?;
+    let config = AppConfig::new(&matches).with_context(|| "Failed to parse config")?;
     let app = App::new(config)?;
 
     match matches.subcommand() {

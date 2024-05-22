@@ -35,11 +35,11 @@ mod optional_parameters;
 #[cfg(feature = "v2")]
 pub mod v2;
 
+use bitcoin::secp256k1::rand::seq::SliceRandom;
+use bitcoin::secp256k1::rand::{self, Rng};
 pub use error::{Error, RequestError, SelectionError};
 use error::{InternalRequestError, InternalSelectionError};
 use optional_parameters::Params;
-use rand::seq::SliceRandom;
-use rand::Rng;
 
 use crate::input_type::InputType;
 use crate::psbt::PsbtExt;

@@ -1695,35 +1695,11 @@ dependencies = [
  "log",
  "ohttp-relay",
  "payjoin",
- "payjoin-defaults",
  "rcgen",
  "reqwest",
  "rustls 0.22.3",
  "serde",
  "tokio",
- "url",
-]
-
-[[package]]
-name = "payjoin-defaults"
-version = "0.0.1"
-dependencies = [
- "bitcoin",
- "bitcoind",
- "http 1.1.0",
- "log",
- "ohttp-relay",
- "once_cell",
- "payjoin",
- "payjoin-directory",
- "rcgen",
- "reqwest",
- "rustls 0.22.3",
- "testcontainers",
- "testcontainers-modules",
- "tokio",
- "tracing",
- "tracing-subscriber",
  "url",
 ]
 

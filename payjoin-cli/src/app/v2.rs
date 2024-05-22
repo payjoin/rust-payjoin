@@ -319,7 +319,7 @@ async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::
             "localhost".to_string(),
         ])?
         .serialize_der()?;
-        Ok(payjoin_defaults::fetch_ohttp_keys(
+        Ok(payjoin::io::fetch_ohttp_keys(
             ohttp_relay,
             payjoin_directory,
             #[cfg(feature = "danger-local-https")]

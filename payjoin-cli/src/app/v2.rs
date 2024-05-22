@@ -9,7 +9,6 @@ use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::Amount;
 use payjoin::{base64, bitcoin, Error, PjUriBuilder};
 use tokio::sync::Mutex as AsyncMutex;
-use tokio::task::spawn_blocking;
 
 use super::config::AppConfig;
 use super::{App as AppTrait, SeenInputs};
@@ -86,16 +85,16 @@ impl AppTrait for App {
                 enroller.extract_req().map_err(|e| anyhow!("Failed to extract request {}", e))?;
             log::debug!("Enrolling receiver");
             let http = http_agent()?;
-            let ohttp_response = spawn_blocking(move || {
-                http.post(req.url.as_ref())
-                    .set("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
-                    .send_bytes(&req.body)
-                    .map_err(map_ureq_err)
-            })
-            .await??;
+            let ohttp_response = http
+                .post(req.url)
+                .header("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
+                .body(req.body)
+                .send()
+                .await
+                .map_err(map_reqwest_err)?;
 
             let enrolled = enroller
-                .process_res(ohttp_response.into_reader(), ctx)
+                .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), ctx)
                 .map_err(|_| anyhow!("Enrollment failed"))?;
             self.receive_store.lock().await.write(enrolled.clone())?;
             enrolled
@@ -126,14 +125,14 @@ impl AppTrait for App {
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         let http = http_agent()?;
         let res = http
-            .post(req.url.as_str())
-            .set("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
-            .send_bytes(&req.body)
-            .map_err(map_ureq_err)?;
-        let mut buf = Vec::new();
-        let _ = res.into_reader().read_to_end(&mut buf)?;
+            .post(req.url)
+            .header("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
+            .body(req.body)
+            .send()
+            .await
+            .map_err(map_reqwest_err)?;
         let res = payjoin_proposal
-            .deserialize_res(buf, ohttp_ctx)
+            .deserialize_res(res.bytes().await?.to_vec(), ohttp_ctx)
             .map_err(|e| anyhow!("Failed to deserialize response {}", e))?;
         log::debug!("Received response {:?}", res);
         self.receive_store.lock().await.clear()?;
@@ -165,16 +164,16 @@ impl App {
             let (req, ctx) = req_ctx.extract_v2(self.config.ohttp_relay.clone())?;
             println!("Sending fallback request to {}", &req.url);
             let http = http_agent()?;
-            let response = spawn_blocking(move || {
-                http.post(req.url.as_ref())
-                    .set("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
-                    .send_bytes(&req.body)
-                    .map_err(map_ureq_err)
-            })
-            .await??;
+            let response = http
+                .post(req.url)
+                .header("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
+                .body(req.body)
+                .send()
+                .await
+                .map_err(map_reqwest_err)?;
 
             println!("Sent fallback transaction");
-            match ctx.process_response(&mut response.into_reader()) {
+            match ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()) {
                 Ok(Some(psbt)) => return Ok(psbt),
                 Ok(None) => std::thread::sleep(std::time::Duration::from_secs(5)),
                 Err(re) => {
@@ -194,16 +193,16 @@ impl App {
                 enrolled.extract_req().map_err(|_| anyhow!("Failed to extract request"))?;
             log::debug!("GET fallback_psbt");
             let http = http_agent()?;
-            let ohttp_response = spawn_blocking(move || {
-                http.post(req.url.as_str())
-                    .set("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
-                    .send_bytes(&req.body)
-                    .map_err(map_ureq_err)
-            })
-            .await??;
+            let ohttp_response = http
+                .post(req.url)
+                .header("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
+                .body(req.body)
+                .send()
+                .await
+                .map_err(map_reqwest_err)?;
 
             let proposal = enrolled
-                .process_res(ohttp_response.into_reader(), context)
+                .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), context)
                 .map_err(|_| anyhow!("GET fallback failed"))?;
             log::debug!("got response");
             match proposal {
@@ -320,28 +319,20 @@ async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::
             "localhost".to_string(),
         ])?
         .serialize_der()?;
-        Ok(tokio::task::spawn_blocking(move || {
-            payjoin_defaults::fetch_ohttp_keys(
-                ohttp_relay,
-                payjoin_directory,
-                #[cfg(feature = "danger-local-https")]
-                cert_der,
-            )
-        })
-        .await
-        .map_err(|e| anyhow!("Failed to fetch ohttp keys: {}", e))??)
+        Ok(payjoin_defaults::fetch_ohttp_keys(
+            ohttp_relay,
+            payjoin_directory,
+            #[cfg(feature = "danger-local-https")]
+            cert_der,
+        )
+        .await?)
     }
 }
 
-fn map_ureq_err(e: ureq::Error) -> anyhow::Error {
-    let e_string = e.to_string();
-    match e.into_response() {
-        Some(res) => anyhow!(
-            "HTTP request failed: {} {}",
-            res.status(),
-            res.into_string().unwrap_or_default()
-        ),
-        None => anyhow!("No HTTP response: {}", e_string),
+fn map_reqwest_err(e: reqwest::Error) -> anyhow::Error {
+    match e.status() {
+        Some(status_code) => anyhow!("HTTP request failed: {} {}", status_code, e),
+        None => anyhow!("No HTTP response: {}", e),
     }
 }
 

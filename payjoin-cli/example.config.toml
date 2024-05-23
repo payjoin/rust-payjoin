@@ -1,12 +1,20 @@
+##
+## Payjoin config.toml configuration file. Lines beginning with # are comments.
+##
+
+# Bitcoin RPC Connection Settings
+# ------------------------------
+
+
 # The RPC host of the wallet to connect to.
 # For example, if the wallet is "sender", then default values are:
 # 	- mainnet: http://localhost:8332/wallet/sender
 # 	- testnet: http://localhost:18332/wallet/sender
 # 	- regtest: http://localhost:18443/wallet/sender
 # 	- signet: http://localhost:38332/wallet/sender
-# 
-bitcoind_rpchost=
-# ---
+bitcoind_rpchost="user"
+
+
 # The RPC .cookie file used only for local authentication to bitcoind.
 # If rpcuser and rpcpassword are being used, this is not necessary.
 # Found in data directory, which is located:
@@ -14,30 +22,31 @@ bitcoind_rpchost=
 # 	MacOS: ~/Library/Application Support/Bitcoin/<NETWORK>/.cookie
 # 	Windows Vista and later: C:\Users\YourUserName\AppData\Roaming\Bitcoin\<NETWORK>\.cookie
 # 	Windows XP: C:\Documents and Settings\YourUserName\Application Data\Bitcoin\<NETWORK>\.cookie
+# bitcoind_cookie=
 
-bitcoind_cookie=
-# ---
+
 # The rpcuser to connect to (specified in bitcoin.conf).
+bitcoind_rpcuser="user"
 
-# bitcoind_rpcuser=
-# ---
-# The rpcpassword of the user to connect to (specified in bitcoin.conf)
 
-bitcoind_rpcpassword=
-# ---
-# The payjoin endpoint which coordinates the transaction. In v2, this is the payjoin directory
+# The rpcpassword of the user to connect to (specified in bitcoin.conf).
+bitcoind_rpcpassword="password"
 
-pj_endpoint=
-# ---
-# (v2 only) The OHTTP relay which proxies requests to the OHTTP Gateway -> pj_endpoint
+## Payjoin Settings
+## ----------------
 
-ohttp_relay=
-# ---
-# (v2 only, optional) The OHTTP HPKE keys used to encrypt communcation between the OHTTP relay and gateway
 
-ohttp_keys=
-# ---
-# (v1 only) The port for v1 receiving servers to bind to.
+# The payjoin endpoint which coordinates the transaction. In v2, this is the payjoin directory.
+pj_endpoint="https://payjo.in"
 
-port=
 
+# (v2 only) The OHTTP relay which proxies requests to the OHTTP Gateway -> pj_endpoint.
+ohttp_relay="https://pj.bobspacebkk.com"
+
+
+# (v2 only, optional) The OHTTP HPKE keys used to encrypt communcation between the OHTTP relay and gateway.
+ohttp_keys="AQAg3c9qovMZvPzLh8XHgD8q86WG7SmPQvPamCTvEoueKBsABAABAAM"
+
+
+# (v1, receiver only) The port for v1 receiving servers to bind to.
+port="3000"

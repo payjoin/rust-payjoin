@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -87,7 +88,7 @@ impl AppTrait for App {
         let pj_uri_string = self.construct_payjoin_uri(amount_arg, None)?;
         println!(
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
-            self.config.pj_host
+            self.config.port
         );
         println!("{}", pj_uri_string);
 
@@ -117,6 +118,7 @@ impl App {
     }
 
     async fn start_http_server(self) -> Result<()> {
+        let addr = SocketAddr::from(([0, 0, 0, 0], self.config.port));
         #[cfg(feature = "danger-local-https")]
         let server = {
             use std::io::Write;
@@ -133,7 +135,7 @@ impl App {
             let key =
                 PrivateKeyDer::from(PrivatePkcs8KeyDer::from(cert.serialize_private_key_der()));
             let certs = vec![CertificateDer::from(cert.serialize_der()?)];
-            let incoming = AddrIncoming::bind(&self.config.pj_host)?;
+            let incoming = AddrIncoming::bind(&addr)?;
             let acceptor = hyper_rustls::TlsAcceptor::builder()
                 .with_single_cert(certs, key)
                 .map_err(|e| anyhow::anyhow!("TLS error: {}", e))?
@@ -143,7 +145,7 @@ impl App {
         };
 
         #[cfg(not(feature = "danger-local-https"))]
-        let server = Server::bind(&self.config.pj_host);
+        let server = Server::bind(&addr);
         let app = self.clone();
         let make_svc = make_service_fn(|_| {
             let app = app.clone();

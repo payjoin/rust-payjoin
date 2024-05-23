@@ -1,6 +1,6 @@
-use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use anyhow::Result;
 use clap::ArgMatches;
 use config::{Config, ConfigError, File, FileFormat};
 use serde::Deserialize;
@@ -18,7 +18,8 @@ pub struct AppConfig {
     pub ohttp_relay: Url,
 
     // receive-only
-    pub pj_host: SocketAddr,
+    #[cfg(not(feature = "v2"))]
+    pub port: u16,
     pub pj_endpoint: Url,
 }
 
@@ -46,7 +47,7 @@ impl AppConfig {
                 matches.get_one::<String>("rpcpassword").map(|s| s.as_str()),
             )?
             // Subcommand defaults without which file serialization fails.
-            .set_default("pj_host", "0.0.0.0:3000")?
+            .set_default("port", "3000")?
             .set_default("pj_endpoint", "https://localhost:3000")?
             .add_source(File::new("config.toml", FileFormat::Toml).required(false));
 
@@ -63,15 +64,24 @@ impl AppConfig {
 
         let builder = match matches.subcommand() {
             Some(("send", _)) => builder,
-            Some(("receive", matches)) => builder
-                .set_override_option(
-                    "pj_host",
-                    matches.get_one::<String>("port").map(|port| format!("0.0.0.0:{}", port)),
-                )?
-                .set_override_option(
+            Some(("receive", matches)) => {
+                #[cfg(not(feature = "v2"))]
+                let builder = {
+                    let port = matches
+                        .get_one::<String>("port")
+                        .map(|port| port.parse::<u16>())
+                        .transpose()
+                        .map_err(|_| {
+                            ConfigError::Message("\"port\" must be a valid number".to_string())
+                        })?;
+                    builder.set_override_option("port", port)?
+                };
+
+                builder.set_override_option(
                     "pj_endpoint",
                     matches.get_one::<Url>("endpoint").map(|s| s.as_str()),
-                )?,
+                )?
+            }
             _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
         };
 

@@ -107,10 +107,7 @@ impl AppTrait for App {
         log::debug!("Enrolled receiver");
         let pj_uri_string =
             self.construct_payjoin_uri(amount_arg, &enrolled.fallback_target(), ohttp_keys)?;
-        println!(
-            "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
-            self.config.pj_host
-        );
+        println!("Configured to accept payjoin at BIP 21 Payjoin Uri:");
         println!("{}", pj_uri_string);
 
         log::debug!("Awaiting proposal");

@@ -6,13 +6,11 @@ mod integration {
 
     use bitcoin::address::NetworkChecked;
     use bitcoin::psbt::Psbt;
-    use bitcoin::{Amount, FeeRate, OutPoint};
-    use bitcoind::bitcoincore_rpc;
+    use bitcoin::{base64, Amount, FeeRate, OutPoint};
     use bitcoind::bitcoincore_rpc::core_rpc_json::{AddressType, WalletProcessPsbtResult};
-    use bitcoind::bitcoincore_rpc::RpcApi;
-    use log::{debug, log_enabled, Level};
+    use bitcoind::bitcoincore_rpc::{self, RpcApi};
+    use log::{log_enabled, Level};
     use once_cell::sync::{Lazy, OnceCell};
-    use payjoin::bitcoin::base64;
     use payjoin::send::RequestBuilder;
     use payjoin::{PjUriBuilder, Request, Uri};
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
@@ -24,6 +22,7 @@ mod integration {
 
     #[cfg(not(feature = "v2"))]
     mod v1 {
+        use log::debug;
         use payjoin::receive::{Headers, PayjoinProposal, UncheckedProposal};
 
         use super::*;
@@ -280,34 +279,20 @@ mod integration {
     #[cfg(feature = "danger-local-https")]
     #[cfg(feature = "v2")]
     mod v2 {
-        use std::collections::HashMap;
-        use std::env;
-        use std::str::FromStr;
         use std::sync::Arc;
         use std::time::Duration;
 
-        use bitcoin::address::NetworkChecked;
-        use bitcoin::psbt::Psbt;
-        use bitcoin::{base64, Amount, FeeRate, OutPoint};
-        use bitcoind::bitcoincore_rpc::core_rpc_json::{AddressType, WalletProcessPsbtResult};
-        use bitcoind::bitcoincore_rpc::{self, RpcApi};
         use http::StatusCode;
-        use log::{log_enabled, Level};
-        use once_cell::sync::{Lazy, OnceCell};
         use payjoin::receive::v2::{Enrolled, Enroller, PayjoinProposal, UncheckedProposal};
-        use payjoin::send::RequestBuilder;
-        use payjoin::{OhttpKeys, PjUriBuilder, Request, Uri};
+        use payjoin::OhttpKeys;
         use reqwest::{Client, ClientBuilder, Error, Response};
         use testcontainers_modules::redis::Redis;
         use testcontainers_modules::testcontainers::clients::Cli;
-        use tracing_subscriber::{EnvFilter, FmtSubscriber};
-        use url::Url;
+
+        use super::*;
 
         static TESTS_TIMEOUT: Lazy<Duration> = Lazy::new(|| Duration::from_secs(20));
         static WAIT_SERVICE_INTERVAL: Lazy<Duration> = Lazy::new(|| Duration::from_secs(3));
-        static INIT_TRACING: OnceCell<()> = OnceCell::new();
-
-        type BoxError = Box<dyn std::error::Error + 'static>;
 
         #[tokio::test]
         async fn test_bad_ohttp_keys() {

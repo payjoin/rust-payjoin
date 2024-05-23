@@ -434,7 +434,6 @@ mod integration {
         }
 
         #[tokio::test]
-        #[cfg(feature = "v2")]
         async fn v1_to_v2() {
             std::env::set_var("RUST_LOG", "debug");
             init_tracing();

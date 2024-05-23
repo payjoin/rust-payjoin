@@ -34,7 +34,7 @@ jobs:
       - name: test payjoin v1 integration
         run: cargo test --package payjoin --verbose --features=send,receive --test integration
       - name: test payjoin v2 integration
-        run: cargo test --package payjoin-defaults --verbose --features=danger-local-https,v2 --test integration
+        run: cargo test --package payjoin --verbose --features=send,receive,danger-local-https,v2 --test integration
       - name: test payjoin-cli bin v1
         run: cargo test --package payjoin-cli --verbose --features=danger-local-https
       - name: build payjoin-cli bin v2

@@ -19,6 +19,8 @@ send = []
 receive = ["bitcoin/rand"]
 base64 = ["bitcoin/base64"]
 v2 = ["bitcoin/rand", "bitcoin/serde", "chacha20poly1305", "ohttp", "bhttp", "serde"]
+io = ["reqwest"]
+danger-local-https = ["io", "reqwest/rustls-tls", "rustls"]
 
 [dependencies]
 bitcoin = { version = "0.30.0", features = ["base64"] }
@@ -28,6 +30,8 @@ log = { version = "0.4.14"}
 ohttp = { version = "0.5.1", optional = true }
 bhttp = { version = "0.5.1", optional = true }
 serde = { version = "1.0.186", default-features = false, optional = true }
+reqwest = { version = "0.12", default-features = false, optional = true }
+rustls = { version = "0.22.2", optional = true }
 url = "2.2.2"
 serde_json = "1.0.108"
 

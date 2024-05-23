@@ -1,5 +1,5 @@
 #[cfg(feature = "v2")]
-use payjoin::{OhttpKeys, Url};
+use crate::{OhttpKeys, Url};
 
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
 ///
@@ -41,7 +41,7 @@ pub struct Error(InternalError);
 
 #[derive(Debug)]
 enum InternalError {
-    ParseUrl(payjoin::ParseError),
+    ParseUrl(crate::ParseError),
     Reqwest(reqwest::Error),
     Io(std::io::Error),
     #[cfg(feature = "danger-local-https")]
@@ -59,7 +59,7 @@ macro_rules! impl_from_error {
 }
 
 impl_from_error!(reqwest::Error, Reqwest);
-impl_from_error!(payjoin::ParseError, ParseUrl);
+impl_from_error!(crate::ParseError, ParseUrl);
 impl_from_error!(std::io::Error, Io);
 #[cfg(feature = "danger-local-https")]
 impl_from_error!(rustls::Error, Rustls);

@@ -40,11 +40,12 @@ bitcoind_rpcpassword="password"
 pj_endpoint="https://payjo.in"
 
 
-# (v2 only) The OHTTP relay which proxies requests to the OHTTP Gateway -> pj_endpoint.
+# (v2 only) The OHTTP relay that will forward requests to the OHTTP Gateway, which will forward to the pj_endpoint directory.
 ohttp_relay="https://pj.bobspacebkk.com"
 
 
-# (v2 only, optional) The OHTTP HPKE keys used to encrypt communcation between the OHTTP relay and gateway.
+# (v2 only, optional) The HPKE keys which need to be fetched ahead of time from the pj_endpoint for the payjoin packets to be encrypted.
+# These can now be fetched and no longer need to be configured.
 ohttp_keys="AQAg3c9qovMZvPzLh8XHgD8q86WG7SmPQvPamCTvEoueKBsABAABAAM"
 
 

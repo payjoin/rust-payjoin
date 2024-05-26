@@ -1336,7 +1336,7 @@ checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
 [[package]]
 name = "payjoin"
 version = "0.13.0"
-source = "git+https://github.com/payjoin/rust-payjoin?branch=master#603202b1eda03d6cdec9b21283e4e73e8385fdb7"
+source = "git+https://github.com/payjoin/rust-payjoin?rev=e7037b23b0f29beda39f5e161d3d7924d2060dd4#e7037b23b0f29beda39f5e161d3d7924d2060dd4"
 dependencies = [
  "bhttp",
  "bip21",

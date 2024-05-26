@@ -18,8 +18,8 @@ bdk = { version = "0.29.0", features = ["all-keys", "use-esplora-ureq", "keys-bi
 bitcoind = { version = "0.34.1", features = ["0_21_2"] }
 log = "0.4.18"
 [dependencies]
-#payjoin = { version = "0.13.0", features = ["send", "receive", "base64", "v2"] }
-payjoin = { git= "https://github.com/payjoin/rust-payjoin", branch = "master",  features = ["send", "receive", "base64", "v2"] }
+#https://github.com/payjoin/rust-payjoin/commit/e7037b23b0f29beda39f5e161d3d7924d2060dd4
+payjoin = { git= "https://github.com/payjoin/rust-payjoin", rev = "e7037b23b0f29beda39f5e161d3d7924d2060dd4",  features = ["send", "receive", "base64", "v2"] }
 uniffi = { version = "0.26.1" }
 thiserror = "1.0.47"
 ohttp = { version = "0.5.1" }

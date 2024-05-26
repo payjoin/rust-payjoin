@@ -34,7 +34,7 @@ fn v1_to_v1() -> Result<(), BoxError> {
     let mut outputs = HashMap::with_capacity(1);
     outputs.insert(
         pj_uri.address(),
-        bitcoincore_rpc::bitcoin::Amount::from_sat(pj_uri.amount().unwrap().clone()),
+        bitcoincore_rpc::bitcoin::Amount::from_btc(pj_uri.amount().unwrap().clone()).unwrap(),
     );
 
     let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
@@ -200,7 +200,7 @@ struct MockScriptOwned(Arc<Client>);
 
 struct MockOutputOwned {}
 
-struct MockProcessPartiallySignedTransaction(Arc<bitcoincore_rpc::Client>);
+struct MockProcessPartiallySignedTransaction(Arc<Client>);
 
 impl ProcessPartiallySignedTransaction for MockProcessPartiallySignedTransaction {
     fn callback(&self, psbt: String) -> Result<String, PayjoinError> {

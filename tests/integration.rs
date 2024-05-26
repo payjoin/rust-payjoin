@@ -28,7 +28,7 @@ impl EsploraClient {
     }
 
     #[allow(dead_code)]
-    pub fn broadcast(&self, transaction: bdk::bitcoin::Transaction) -> Result<(), Box<dyn Error>> {
+    pub fn broadcast(&self, transaction: Transaction) -> Result<(), Box<dyn Error>> {
         match self.0.broadcast(&transaction) {
             Ok(_) => Ok(()),
             Err(e) => panic!("{}", e.to_string()),

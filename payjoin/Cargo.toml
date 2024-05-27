@@ -19,7 +19,7 @@ send = []
 receive = ["bitcoin/rand"]
 base64 = ["bitcoin/base64"]
 v2 = ["bitcoin/rand", "bitcoin/serde", "chacha20poly1305", "ohttp", "bhttp", "serde"]
-io = ["reqwest"]
+io = ["reqwest/rustls-tls"]
 danger-local-https = ["io", "reqwest/rustls-tls", "rustls"]
 
 [dependencies]

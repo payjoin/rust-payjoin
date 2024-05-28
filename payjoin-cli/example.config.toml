@@ -1,0 +1,53 @@
+##
+## Payjoin config.toml configuration file. Lines beginning with # are comments.
+##
+
+# Bitcoin RPC Connection Settings
+# ------------------------------
+
+
+# The RPC host of the wallet to connect to.
+# For example, if the wallet is "sender", then default values are:
+# 	- mainnet: http://localhost:8332/wallet/sender
+# 	- testnet: http://localhost:18332/wallet/sender
+# 	- regtest: http://localhost:18443/wallet/sender
+# 	- signet: http://localhost:38332/wallet/sender
+bitcoind_rpchost="http://localhost:18443/wallet/sender"
+
+
+# The RPC .cookie file used only for local authentication to bitcoind.
+# If rpcuser and rpcpassword are being used, this is not necessary.
+# Found in data directory, which is located:
+#	Linux: ~/.bitcoin/<NETWORK>/.cookie
+# 	MacOS: ~/Library/Application Support/Bitcoin/<NETWORK>/.cookie
+# 	Windows Vista and later: C:\Users\YourUserName\AppData\Roaming\Bitcoin\<NETWORK>\.cookie
+# 	Windows XP: C:\Documents and Settings\YourUserName\Application Data\Bitcoin\<NETWORK>\.cookie
+# bitcoind_cookie=
+
+
+# The rpcuser to connect to (specified in bitcoin.conf).
+bitcoind_rpcuser="user"
+
+
+# The rpcpassword of the user to connect to (specified in bitcoin.conf).
+bitcoind_rpcpassword="password"
+
+## Payjoin Settings
+## ----------------
+
+
+# The payjoin endpoint which coordinates the transaction. In v2, this is the payjoin directory.
+pj_endpoint="https://payjo.in"
+
+
+# (v2 only) The OHTTP relay that will forward requests to the OHTTP Gateway, which will forward to the pj_endpoint directory.
+ohttp_relay="https://pj.bobspacebkk.com"
+
+
+# (v2 only, optional) The HPKE keys which need to be fetched ahead of time from the pj_endpoint for the payjoin packets to be encrypted.
+# These can now be fetched and no longer need to be configured.
+ohttp_keys="AQAg3c9qovMZvPzLh8XHgD8q86WG7SmPQvPamCTvEoueKBsABAABAAM"
+
+
+# (v1, receiver only) The port for v1 receiving servers to bind to.
+port="3000"

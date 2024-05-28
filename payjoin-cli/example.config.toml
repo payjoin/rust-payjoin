@@ -12,7 +12,7 @@
 # 	- testnet: http://localhost:18332/wallet/sender
 # 	- regtest: http://localhost:18443/wallet/sender
 # 	- signet: http://localhost:38332/wallet/sender
-bitcoind_rpchost="user"
+bitcoind_rpchost="http://localhost:18443/wallet/sender"
 
 
 # The RPC .cookie file used only for local authentication to bitcoind.

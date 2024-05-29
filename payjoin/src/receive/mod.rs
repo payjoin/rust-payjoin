@@ -539,8 +539,15 @@ impl ProvisionalProposal {
     fn prepare_psbt(mut self, processed_psbt: Psbt) -> Result<PayjoinProposal, RequestError> {
         self.payjoin_psbt = processed_psbt;
         log::trace!("Preparing PSBT {:#?}", self.payjoin_psbt);
+        for output in self.payjoin_psbt.outputs_mut() {
+            output.bip32_derivation = BTreeMap::new();
+            output.tap_key_origins = BTreeMap::new();
+            output.tap_internal_key = None;
+        }
         for input in self.payjoin_psbt.inputs_mut() {
             input.bip32_derivation = BTreeMap::new();
+            input.tap_key_origins = BTreeMap::new();
+            input.tap_internal_key = None;
             input.partial_sigs = BTreeMap::new();
         }
         for i in self.sender_input_indexes() {

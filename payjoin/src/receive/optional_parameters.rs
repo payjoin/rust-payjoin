@@ -5,14 +5,14 @@ use bitcoin::FeeRate;
 use log::warn;
 
 #[cfg(feature = "v2")]
-pub(crate) const SUPPORTED_VERSIONS: [&str; 2] = ["1", "2"];
+pub(crate) const SUPPORTED_VERSIONS: [usize; 2] = [1, 2];
 #[cfg(not(feature = "v2"))]
-pub(crate) const SUPPORTED_VERSIONS: [&str; 1] = ["1"];
+pub(crate) const SUPPORTED_VERSIONS: [usize; 1] = [1];
 
 #[derive(Debug, Clone)]
 pub(crate) struct Params {
     // version
-    // v: usize,
+    pub v: usize,
     // disableoutputsubstitution
     pub disable_output_substitution: bool,
     // maxadditionalfeecontribution, additionalfeeoutputindex
@@ -24,6 +24,7 @@ pub(crate) struct Params {
 impl Default for Params {
     fn default() -> Self {
         Params {
+            v: 1,
             disable_output_substitution: false,
             additional_fee_contribution: None,
             min_feerate: FeeRate::ZERO,
@@ -44,11 +45,12 @@ impl Params {
         let mut additional_fee_output_index = None;
         let mut max_additional_fee_contribution = None;
 
-        for (k, v) in pairs {
-            match (k.borrow(), v.borrow()) {
-                ("v", v) =>
-                    if !SUPPORTED_VERSIONS.contains(&v) {
-                        return Err(Error::UnknownVersion);
+        for (key, v) in pairs {
+            match (key.borrow(), v.borrow()) {
+                ("v", version) =>
+                    params.v = match version.parse::<usize>() {
+                        Ok(version) if SUPPORTED_VERSIONS.contains(&version) => version,
+                        _ => return Err(Error::UnknownVersion),
                     },
                 ("additionalfeeoutputindex", index) =>
                     additional_fee_output_index = match index.parse::<usize>() {

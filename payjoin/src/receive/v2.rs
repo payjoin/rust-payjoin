@@ -277,8 +277,21 @@ impl UncheckedProposal {
         let unchecked_psbt = Psbt::from_str(base64).map_err(InternalRequestError::ParsePsbt)?;
         let psbt = unchecked_psbt.validate().map_err(InternalRequestError::InconsistentPsbt)?;
         log::debug!("Received original psbt: {:?}", psbt);
-        let params = Params::from_query_pairs(url::form_urlencoded::parse(query.as_bytes()))
+        let mut params = Params::from_query_pairs(url::form_urlencoded::parse(query.as_bytes()))
             .map_err(InternalRequestError::SenderParams)?;
+
+        // Output substitution must be disabled for V1 sessions in V2 contexts.
+        //
+        // V2 contexts depend on a payjoin directory to store and forward payjoin
+        // proposals. Plaintext V1 proposals are vulnerable to output replacement
+        // attacks by a malicious directory if output substitution is not disabled.
+        // V2 proposals are authenticated and encrypted to prevent such attacks.
+        //
+        // see: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#unsecured-payjoin-server
+        if params.v == 1 {
+            params.disable_output_substitution = true;
+        }
+
         log::debug!("Received request with params: {:?}", params);
         let inner = super::UncheckedProposal { psbt, params };
         Ok(Self { inner, context })

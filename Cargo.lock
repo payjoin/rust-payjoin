@@ -1679,7 +1679,7 @@ dependencies = [
 
 [[package]]
 name = "payjoin-cli"
-version = "0.0.5-alpha"
+version = "0.0.6-alpha"
 dependencies = [
  "anyhow",
  "async-trait",

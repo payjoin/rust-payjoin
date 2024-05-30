@@ -1,5 +1,17 @@
 # Payjoin Changelog
 
+## 0.16.0
+
+- `io` feature introduced to fetch `OhttpKeys`. This feature will include optional networking supplied by reqwest.
+- `V1_REQ_CONTENT_TYPE`, `V2_REQ_CONTENT_TYPE` request headers included
+- `bitcoind/rand` transitive dependency from `secp256k/rand` used for randomness instead of `rand`
+- Sender input signatures removed before processing payjoin PSBT in the receiver
+- `ProvisionalProposal::is_output_substitution_disabled` is exposed
+- `Request` types are consolidated into a single type
+- Remove `Enrolled::pubkey()`
+- `send::Error::V2` replaced with specific HPKE and OhttpEncapsulation error variants
+- HPKE out of bounds errors fixed
+
 ## 0.15.0
 
 ### API

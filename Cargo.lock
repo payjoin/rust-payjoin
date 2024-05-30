@@ -1186,8 +1186,8 @@ checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
 
 [[package]]
 name = "payjoin"
-version = "0.13.0"
-source = "git+https://github.com/payjoin/rust-payjoin?rev=e7037b23b0f29beda39f5e161d3d7924d2060dd4#e7037b23b0f29beda39f5e161d3d7924d2060dd4"
+version = "0.16.0"
+source = "git+https://github.com/payjoin/rust-payjoin?rev=457a0dd5cb212ddd9ea169b7fa3842bfc3d5f373#457a0dd5cb212ddd9ea169b7fa3842bfc3d5f373"
 dependencies = [
  "bhttp",
  "bip21",
@@ -1195,7 +1195,6 @@ dependencies = [
  "chacha20poly1305 0.10.1",
  "log",
  "ohttp",
- "rand",
  "serde",
  "serde_json",
  "url",
@@ -1208,6 +1207,7 @@ dependencies = [
  "base64 0.22.1",
  "bdk",
  "bitcoincore-rpc",
+ "hex",
  "ohttp",
  "payjoin",
  "thiserror",

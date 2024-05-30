@@ -1,19 +1,32 @@
-# Payjoin Language Bindings
+# Payjoin language bindings
 
-Welcome! This repository creates libraries for various programming languages, all using the Rust-based [Payjoin](https://github.com/payjoin/rust-payjoin) as the core implementation of BIP178, sourced from the [Payjoin Dev Kit](https://payjoindevkit.org/).
+This repository creates libraries for various programming languages, all using the
+Rust-based [Payjoin](https://github.com/payjoin/rust-payjoin) as the core implementation of BIP178, sourced from
+the [Payjoin Dev Kit].
 
-Our mission is to provide developers with cross-language libraries that seamlessly integrate with different platform languages. By offering support for multiple languages, we aim to enhance the accessibility and usability of Payjoin, empowering developers to incorporate this privacy-enhancing feature into their applications, no matter their preferred programming language.
+The primary focus of this project is to provide developers with cross-language libraries that seamlessly integrate with
+different platform languages. By offering support for multiple languages, we aim to enhance the accessibility and
+usability of Payjoin, empowering developers to incorporate this privacy-enhancing feature into their applications
+regardless of their preferred programming language.
 
-With a commitment to collaboration and interoperability, this repository strives to foster a more inclusive and diverse ecosystem around Payjoin and BIP178, contributing to the wider adoption of privacy-focused practices within the Bitcoin community. Join us in our mission to build a more private and secure future for Bitcoin transactions through Payjoin and BIP178!
+With a commitment to collaboration and interoperability, this repository strives to foster a more inclusive and diverse
+ecosystem around Payjoin and BIP178, contributing to the wider adoption of privacy-focused practices within the Bitcoin
+community. Join us in our mission to build a more private and secure future for Bitcoin transactions through Payjoin and
+BIP178!
 
 **Current Status:**
-This project is in the pre-alpha stage and currently in the design phase. The first language bindings available will be for Python, followed by Swift and Kotlin. Our ultimate goal is to provide Payjoin implementations for Android, iOS, Java, React, Python Native, Flutter, C#, and Golang.
+This is a pre-alpha stage and is currently in the design phase. The first language bindings available will be for Python
+followed by Swift and Kotlin. The ultimate goal is to have Payjoin implementations for Android, iOS, Java, React, Python
+Native, Flutter, C# and Golang.
 
-## Supported Target Languages and Platforms
+## Supported target languages and platforms
 
-Each supported language and the platform(s) it's packaged for has its own directory. The Rust code in this project is in the `src` directory and is a wrapper around the [Payjoin Dev Kit] to expose its APIs uniformly using the [mozilla/uniffi-rs] bindings generator for each supported target language.
+Each supported language and the platform(s) it's packaged for has its own directory. The Rust code in this project is in
+the src directory and is a wrapper around the [Payjoin Dev Kit] to expose its APIs in a uniform way using
+the [mozilla/uniffi-rs] bindings generator for each supported target language.
 
-The directories below include instructions for using, building, and publishing the native language bindings for [Payjoin Dev Kit] supported by this project.
+The below directories include instructions for using, building, and
+publishing the native language binding for [Payjoin Dev Kit] supported by this project.
 
 | Language | Platform              | Published Package | Building Documentation             | API Docs |
 |----------|-----------------------|-------------------|------------------------------------|----------|
@@ -23,28 +36,32 @@ The directories below include instructions for using, building, and publishing t
 
 This library should compile with any combination of features with Rust 1.78.0.
 
-## Using the Libraries
+## Using the libraries
 
-### Python
+### python
 
 ```shell
 pip install payjoin
-
 ```
-## Running the Integration Test
+## Run the integration test
 
-First, we need to set up bitcoin core and esplora locally in the regtest network. If you don't have these, please refer to this [page](https://learn.saylor.org/mod/page/view.php?id=36347). Alternatively, you can install `Nigiri Bitcoin`, a tool designed to simplify the process of running local instances of Bitcoin and Liquid networks for development and testing purposes. Follow the instructions [here](https://github.com/vulpemventures/nigiri) to install it on your machine.
+First we need to set up the `bitcoin core` and `esplora` locally in the regtest network. If you don't
+have these, please refer to this [page](https://learn.saylor.org/mod/page/view.php?id=36347). Or you can
+install `Nigiri Bitcoin`, which is a tool designed to simplify the process of running local instances of Bitcoin and
+Liquid networks for development and testing purposes. You can refer to
+this [link](https://github.com/vulpemventures/nigiri), to install it on your local machine.
 
-Once Nigiri Bitcoin is up and running, you need to mine a few blocks. Refer to this [link](https://developer.bitcoin.org/reference/rpc/generatetoaddress.html?highlight=generate) on how to mine blocks.
+Once the nigiri bitcoin starts running, you need to mine a few blocks. Please refer to the following [link](https://developer.bitcoin.org/reference/rpc/generatetoaddress.html?highlight=generate)
+on how to mine blocks.
 
-Before running the integration tests, replace the following snippet in `tests/bdk_integration_test.rs` and `tests/bitcoin_core_integration_test.rs` with your Nigiri Bitcoin Core credentials:
+Before running the integration tests, please replace following snippet in `tests/bdk_integration_test.rs` and `tests/bitcoin_core_integration_test.rs` with your
+nigiri bitcoin core credentials.
 
 ```rust
 static RPC_USER: &str = "admin1";
 static RPC_PASSWORD: &str = "123";
 static RPC_HOST: &str = "localhost";
 static RPC_PORT: &str = "18443";
-
 ```
 
 NB: The default nigiri credentials would be the following
@@ -56,20 +73,16 @@ rpc_host = "localhost"
 rpc_port = "18443"
 ```
 
-Now, run the integration tests:
-
 ```shell
-
-# Run the integration test
+#Run the integration test
 cargo test --package payjoin_ffi --test bitcoin_core_integration v1_to_v1_full_cycle
 cargo test --package payjoin_ffi --test bdk_integration v1_to_v1_full_cycle
-
 ```
 
 
 ## 🚨 Warning 🚨
 
-The main branch of this repository is still under development and is incomplete.
+The `main` branch of this repository is still under development and is incomplete.
 
 [Payjoin Dev Kit]: https://payjoindevkit.org/
 

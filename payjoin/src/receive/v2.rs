@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use bitcoin::psbt::Psbt;
-use bitcoin::secp256k1::rand;
+use bitcoin::secp256k1::{rand, PublicKey};
 use bitcoin::{base64, Amount, FeeRate, OutPoint, Script, TxOut};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -209,33 +209,11 @@ impl Enrolled {
             log::debug!("response is empty");
             return Ok(None);
         }
-        // parse v1 or v2 proposal
         match String::from_utf8(response.clone()) {
-            Ok(proposal) => {
-                let context = V2Context {
-                    directory: self.directory.clone(),
-                    ohttp_keys: self.ohttp_keys.clone(),
-                    ohttp_relay: self.ohttp_relay.clone(),
-                    s: self.s,
-                    e: None,
-                };
-                log::debug!("Received proposal: {}", proposal);
-                Ok(Some(UncheckedProposal::from_v2_payload(proposal.into_bytes(), context)?))
-            }
-            Err(_) => {
-                let (proposal, e) = crate::v2::decrypt_message_a(&response, self.s.secret_key())?;
-                log::debug!("Some e: {}", e);
-                let context = V2Context {
-                    directory: self.directory.clone(),
-                    ohttp_keys: self.ohttp_keys.clone(),
-                    ohttp_relay: self.ohttp_relay.clone(),
-                    s: self.s,
-                    e: Some(e),
-                };
-                let proposal = UncheckedProposal::from_v2_payload(proposal, context)?;
-
-                Ok(Some(proposal))
-            }
+            // V1 response bodies are utf8 plaintext
+            Ok(response) => Ok(Some(self.extract_proposal_from_v1(response)?)),
+            // V2 response bodies are encrypted binary
+            Err(_) => Ok(Some(self.extract_proposal_from_v2(response)?)),
         }
     }
 
@@ -246,6 +224,28 @@ impl Enrolled {
         Ok(crate::v2::ohttp_encapsulate(&mut self.ohttp_keys, "GET", &fallback_target, None)?)
     }
 
+    fn extract_proposal_from_v1(&self, response: String) -> Result<UncheckedProposal, Error> {
+        let context = self.build_context(None);
+        Ok(UncheckedProposal::from_payload(response, context)?)
+    }
+
+    fn extract_proposal_from_v2(&self, response: Vec<u8>) -> Result<UncheckedProposal, Error> {
+        let (payload_bytes, e) = crate::v2::decrypt_message_a(&response, self.s.secret_key())?;
+        let context = self.build_context(Some(e));
+        let payload = String::from_utf8(payload_bytes).map_err(InternalRequestError::Utf8)?;
+        Ok(UncheckedProposal::from_payload(payload, context)?)
+    }
+
+    fn build_context(&self, e: Option<PublicKey>) -> V2Context {
+        log::trace!("Building context with e: {:?}", e);
+        V2Context {
+            directory: self.directory.clone(),
+            ohttp_keys: self.ohttp_keys.clone(),
+            ohttp_relay: self.ohttp_relay.clone(),
+            s: self.s,
+            e,
+        }
+    }
     pub fn fallback_target(&self) -> String {
         let pubkey = &self.s.public_key().serialize();
         let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
@@ -270,10 +270,8 @@ pub struct UncheckedProposal {
 }
 
 impl UncheckedProposal {
-    fn from_v2_payload(body: Vec<u8>, context: V2Context) -> Result<Self, RequestError> {
-        let buf_as_string = String::from_utf8(body).map_err(InternalRequestError::Utf8)?;
-        log::debug!("{}", &buf_as_string);
-        let (base64, padded_query) = buf_as_string.split_once('\n').unwrap_or_default();
+    fn from_payload(payload: String, context: V2Context) -> Result<Self, RequestError> {
+        let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
         log::trace!("Received query: {}, base64: {}", query, base64); // my guess is no \n so default is wrong
         let unchecked_psbt = Psbt::from_str(base64).map_err(InternalRequestError::ParsePsbt)?;

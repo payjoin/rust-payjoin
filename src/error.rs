@@ -96,7 +96,6 @@ impl From<payjoin::Error> for PayjoinError {
         match value {
             payjoin::Error::BadRequest(e) => e.into(),
             payjoin::Error::Server(e) => PayjoinError::ServerError { message: e.to_string() },
-            payjoin::Error::V2(e) => PayjoinError::V2Error { message: format!("{:?}", e) },
         }
     }
 }

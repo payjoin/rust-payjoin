@@ -62,7 +62,7 @@ mod e2e {
             .arg(RECEIVE_SATS)
             .arg("--port")
             .arg(&port.to_string())
-            .arg("--endpoint")
+            .arg("--pj_endpoint")
             .arg(&pj_endpoint)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

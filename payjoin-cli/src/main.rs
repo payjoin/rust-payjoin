@@ -115,8 +115,8 @@ fn cli() -> ArgMatches {
                         .help("The local port to listen on"),
                 )
                 .arg(
-                    Arg::new("endpoint")
-                        .long("endpoint")
+                    Arg::new("pj_endpoint")
+                        .long("pj_endpoint")
                         .short('e')
                         .num_args(1)
                         .help("The `pj=` endpoint to receive the payjoin request")

@@ -79,7 +79,7 @@ impl AppConfig {
 
                 builder.set_override_option(
                     "pj_endpoint",
-                    matches.get_one::<Url>("endpoint").map(|s| s.as_str()),
+                    matches.get_one::<Url>("pj_endpoint").map(|s| s.as_str()),
                 )?
             }
             _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()

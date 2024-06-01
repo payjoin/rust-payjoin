@@ -7,11 +7,11 @@ use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 use payjoin::receive as pdk;
 
-use crate::error::PayjoinError;
-use crate::receive::v1::{
-    CanBroadcast, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction,
-};
-use crate::types::{OutPoint, Request, TxOut};
+
+use crate::{OhttpKeys, OutPoint, PayjoinError, Request, TxOut, Url};
+
+#[cfg(feature = "uniffi")]
+use crate::receive::v1::{CanBroadcast, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction};
 
 pub struct ClientResponse(Mutex<Option<ohttp::ClientResponse>>);
 
@@ -47,24 +47,20 @@ impl From<payjoin::receive::v2::Enroller> for Enroller {
 }
 
 impl Enroller {
-    pub fn from_relay_config(
-        relay_url: String,
-        ohttp_config_base64: String,
-        ohttp_proxy_url: String,
+    pub fn from_directory_config(
+        directory: Arc<Url>,
+        ohttp_keys: Arc<OhttpKeys>,
+        ohttp_relay: Arc<Url>,
     ) -> Self {
-        payjoin::receive::v2::Enroller::from_relay_config(
-            relay_url.as_str(),
-            ohttp_config_base64.as_str(),
-            ohttp_proxy_url.as_str(),
+        payjoin::receive::v2::Enroller::from_directory_config(
+            (*directory).clone().into(),
+            (*ohttp_keys).clone().into(),
+            (*ohttp_relay).clone().into(),
         )
         .into()
     }
-    pub fn subdirectory(&self) -> String {
-        <Enroller as Into<payjoin::receive::v2::Enroller>>::into(self.clone()).subdirectory()
-    }
-    pub fn payjoin_subdir(&self) -> String {
-        <Enroller as Into<payjoin::receive::v2::Enroller>>::into(self.clone()).payjoin_subdir()
-    }
+
+    #[cfg(feature = "uniffi")]
     pub fn extract_req(&self) -> Result<RequestResponse, PayjoinError> {
         match self.0.clone().extract_req() {
             Ok(e) => {
@@ -73,13 +69,15 @@ impl Enroller {
             Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
         }
     }
-    pub fn extract_req_as_tuple(&self) -> Result<(Request, ohttp::ClientResponse), PayjoinError> {
+    #[cfg(not(feature = "uniffi"))]
+    pub fn extract_req(&self) -> Result<(Request, ohttp::ClientResponse), PayjoinError> {
         match self.0.clone().extract_req() {
             Ok(e) => Ok((e.0.into(), e.1)),
             Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
         }
     }
-    pub fn process_res_with_ohttp_response(
+    #[cfg(not(feature = "uniffi"))]
+    pub fn process_res(
         &self,
         body: Vec<u8>,
         ctx: ohttp::ClientResponse,
@@ -89,6 +87,7 @@ impl Enroller {
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
     }
+    #[cfg(feature = "uniffi")]
     pub fn process_res(
         &self,
         body: Vec<u8>,
@@ -115,24 +114,27 @@ impl From<payjoin::receive::v2::Enrolled> for Enrolled {
     }
 }
 impl Enrolled {
-    pub fn pubkey(&self) -> Vec<u8> {
-        <Enrolled as Into<payjoin::receive::v2::Enrolled>>::into(self.clone()).pubkey().to_vec()
-    }
     pub fn fallback_target(&self) -> String {
         <Enrolled as Into<payjoin::receive::v2::Enrolled>>::into(self.clone()).fallback_target()
     }
-
+    #[cfg(feature = "uniffi")]
     pub fn extract_req(&self) -> Result<RequestResponse, PayjoinError> {
-        let (req, res) = self.0.clone().extract_req()?;
-        Ok(RequestResponse { request: req.into(), client_response: Arc::new(res.into()) })
+        match self.0.clone().extract_req() {
+            Ok(e) => {
+                Ok(RequestResponse { request: e.0.into(), client_response: Arc::new(e.1.into()) })
+            }
+            Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
+        }
     }
 
-    pub fn extract_req_as_tuple(&self) -> Result<(Request, ohttp::ClientResponse), PayjoinError> {
+    #[cfg(not(feature = "uniffi"))]
+    pub fn extract_req(&self) -> Result<(Request, ohttp::ClientResponse), PayjoinError> {
         match self.0.clone().extract_req() {
             Ok(e) => Ok((e.0.into(), e.1)),
             Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
         }
     }
+    #[cfg(feature = "uniffi")]
     pub fn process_res(
         &self,
         body: Vec<u8>,
@@ -143,7 +145,8 @@ impl Enrolled {
             .map(|e| e.map(|x| Arc::new(x.into())))
             .map_err(|e| e.into())
     }
-    pub fn process_res_with_ohttp_response(
+    #[cfg(not(feature = "uniffi"))]
+    pub fn process_res(
         &self,
         body: Vec<u8>,
         ctx: ohttp::ClientResponse,
@@ -176,6 +179,7 @@ impl V2UncheckedProposal {
         )
     }
 
+    #[cfg(feature = "uniffi")]
     /// Call after checking that the Original PSBT can be broadcast.
     ///
     /// Receiver MUST check that the Original PSBT from the sender
@@ -207,7 +211,8 @@ impl V2UncheckedProposal {
             .map_err(|e| e.into())
     }
 
-    pub fn check_broadcast_suitability_with_callback(
+    #[cfg(not(feature = "uniffi"))]
+    pub fn check_broadcast_suitability(
         &self,
         min_fee_rate: Option<u64>,
         can_broadcast: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
@@ -242,6 +247,7 @@ impl From<payjoin::receive::v2::MaybeInputsOwned> for V2MaybeInputsOwned {
     }
 }
 impl V2MaybeInputsOwned {
+    #[cfg(feature = "uniffi")]
     ///Check that the Original PSBT has no receiver-owned inputs. Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
     /// An attacker could try to spend receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
@@ -258,8 +264,8 @@ impl V2MaybeInputsOwned {
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
     }
-
-    pub fn check_inputs_not_owned_with_callback(
+    #[cfg(not(feature = "uniffi"))]
+    pub fn check_inputs_not_owned(
         &self,
         is_owned: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
     ) -> Result<Arc<V2MaybeMixedInputScripts>, PayjoinError> {
@@ -304,6 +310,7 @@ impl From<payjoin::receive::v2::MaybeInputsSeen> for V2MaybeInputsSeen {
 }
 
 impl V2MaybeInputsSeen {
+    #[cfg(feature = "uniffi")]
     /// Make sure that the original transaction inputs have never been seen before.
     /// This prevents probing attacks. This prevents reentrant Payjoin, where a sender
     /// proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
@@ -319,7 +326,8 @@ impl V2MaybeInputsSeen {
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
     }
-    pub fn check_no_inputs_seen_before_with_callback(
+    #[cfg(not(feature = "uniffi"))]
+    pub fn check_no_inputs_seen_before(
         &self,
         is_known: impl Fn(&OutPoint) -> Result<bool, PayjoinError>,
     ) -> Result<Arc<V2OutputsUnknown>, PayjoinError> {
@@ -347,6 +355,7 @@ impl From<payjoin::receive::v2::OutputsUnknown> for V2OutputsUnknown {
 }
 
 impl V2OutputsUnknown {
+    #[cfg(feature = "uniffi")]
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
         &self,
@@ -362,8 +371,8 @@ impl V2OutputsUnknown {
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
     }
-
-    pub fn identify_receiver_outputs_with_callback(
+    #[cfg(not(feature = "uniffi"))]
+    pub fn identify_receiver_outputs(
         &self,
         is_receiver_output: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
     ) -> Result<Arc<V2ProvisionalProposal>, PayjoinError> {
@@ -442,6 +451,7 @@ impl V2ProvisionalProposal {
             Err(e) => Err(e.into()),
         }
     }
+    #[cfg(feature = "uniffi")]
     pub fn finalize_proposal(
         &self,
         process_psbt: Box<dyn ProcessPartiallySignedTransaction>,
@@ -461,7 +471,8 @@ impl V2ProvisionalProposal {
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
     }
-    pub fn finalize_proposal_with_callback(
+    #[cfg(not(feature = "uniffi"))]
+    pub fn finalize_proposal(
         &self,
         process_psbt: impl Fn(String) -> Result<String, PayjoinError>,
         min_feerate_sat_per_vb: Option<u64>,
@@ -529,20 +540,20 @@ impl V2PayjoinProposal {
         <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
             .extract_v1_req()
     }
+    #[cfg(feature = "uniffi")]
     pub fn extract_v2_req(&self) -> Result<RequestResponse, PayjoinError> {
         let (req, res) = self.0.clone().extract_v2_req()?;
         Ok(RequestResponse { request: req.into(), client_response: Arc::new(res.into()) })
     }
-
-    pub fn extract_v2_req_as_tuple(
-        &self,
-    ) -> Result<(Request, ohttp::ClientResponse), PayjoinError> {
+    #[cfg(not(feature = "uniffi"))]
+    pub fn extract_v2_req(&self) -> Result<(Request, ohttp::ClientResponse), PayjoinError> {
         match self.0.clone().extract_v2_req() {
             Ok(e) => Ok((e.0.into(), e.1)),
             Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
         }
     }
-    pub fn deserialize_res_with_ohttp_response(
+    #[cfg(not(feature = "uniffi"))]
+    pub fn deserialize_res(
         &self,
         body: Vec<u8>,
         ctx: ohttp::ClientResponse,
@@ -552,6 +563,7 @@ impl V2PayjoinProposal {
             .map(|e| e.into())
             .map_err(|e| e.into())
     }
+    #[cfg(feature = "uniffi")]
     pub fn deserialize_res(
         &self,
         res: Vec<u8>,

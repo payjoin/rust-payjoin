@@ -98,7 +98,7 @@ pub trait App {
             .bitcoind()?
             .send_raw_transaction(&tx)
             .with_context(|| "Failed to send raw transaction")?;
-        println!("Payjoin sent: {}", txid);
+        println!("Payjoin sent. TXID: {}", txid);
         Ok(txid)
     }
 }

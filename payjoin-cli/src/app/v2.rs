@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::jsonrpc::serde_json;
 use bitcoincore_rpc::RpcApi;
+use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::Amount;
 use payjoin::{base64, bitcoin, Error, PjUriBuilder};
@@ -83,7 +84,7 @@ impl AppTrait for App {
             );
             let (req, ctx) =
                 enroller.extract_req().map_err(|e| anyhow!("Failed to extract request {}", e))?;
-            log::debug!("Enrolling receiver");
+            println!("Starting new Payjoin session with {}", self.config.pj_endpoint);
             let http = http_agent()?;
             let ohttp_response = http
                 .post(req.url)
@@ -100,26 +101,26 @@ impl AppTrait for App {
             enrolled
         } else {
             let session = self.receive_store.lock().await;
-            log::debug!("Resuming session");
+            println!("Resuming Payjoin session"); // TODO include session pubkey / payjoin directory
             session.session.clone().ok_or(anyhow!("No session found"))?
         };
 
-        log::debug!("Enrolled receiver");
+        println!("Receive session established");
         let pj_uri_string =
             self.construct_payjoin_uri(amount_arg, &enrolled.fallback_target(), ohttp_keys)?;
-        println!("Configured to accept payjoin at BIP 21 Payjoin Uri:");
+        println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{}", pj_uri_string);
 
-        log::debug!("Awaiting proposal");
         let res = self.long_poll_fallback(&mut enrolled).await?;
-        log::debug!("Received request");
+        println!("Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:");
+        println!("{}", serialize_hex(&res.extract_tx_to_schedule_broadcast()));
         let mut payjoin_proposal = self
             .process_v2_proposal(res)
             .map_err(|e| anyhow!("Failed to process proposal {}", e))?;
-        log::debug!("Posting payjoin back");
         let (req, ohttp_ctx) = payjoin_proposal
             .extract_v2_req()
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
+        println!("Got a request from the sender. Responding with a Payjoin proposal.");
         let http = http_agent()?;
         let res = http
             .post(req.url)
@@ -128,10 +129,14 @@ impl AppTrait for App {
             .send()
             .await
             .map_err(map_reqwest_err)?;
-        let res = payjoin_proposal
+        let _res = payjoin_proposal
             .deserialize_res(res.bytes().await?.to_vec(), ohttp_ctx)
             .map_err(|e| anyhow!("Failed to deserialize response {}", e))?;
-        log::debug!("Received response {:?}", res);
+        let payjoin_psbt = payjoin_proposal.psbt().clone();
+        println!(
+            "Response successful. Watch mempool for successful Payjoin. TXID: {}",
+            payjoin_psbt.extract_tx().clone().txid()
+        );
         self.receive_store.lock().await.clear()?;
         Ok(())
     }
@@ -159,7 +164,7 @@ impl App {
     async fn long_poll_post(&self, req_ctx: &mut payjoin::send::RequestContext) -> Result<Psbt> {
         loop {
             let (req, ctx) = req_ctx.extract_v2(self.config.ohttp_relay.clone())?;
-            println!("Sending fallback request to {}", &req.url);
+            println!("Polling send request...");
             let http = http_agent()?;
             let response = http
                 .post(req.url)
@@ -172,11 +177,14 @@ impl App {
             println!("Sent fallback transaction");
             match ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()) {
                 Ok(Some(psbt)) => return Ok(psbt),
-                Ok(None) => std::thread::sleep(std::time::Duration::from_secs(5)),
+                Ok(None) => {
+                    println!("No response yet.");
+                    std::thread::sleep(std::time::Duration::from_secs(5))
+                }
                 Err(re) => {
                     println!("{}", re);
                     log::debug!("{:?}", re);
-                    return Err(anyhow!("Response error").context(re))
+                    return Err(anyhow!("Response error").context(re));
                 }
             }
         }
@@ -189,7 +197,7 @@ impl App {
         loop {
             let (req, context) =
                 enrolled.extract_req().map_err(|_| anyhow!("Failed to extract request"))?;
-            log::debug!("GET fallback_psbt");
+            println!("Polling receive request...");
             let http = http_agent()?;
             let ohttp_response = http
                 .post(req.url)
@@ -307,8 +315,10 @@ impl App {
 
 async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::OhttpKeys> {
     if let Some(keys) = config.ohttp_keys.clone() {
+        println!("Using OHTTP Keys from config");
         Ok(keys)
     } else {
+        println!("Bootstrapping private network transport over Oblivious HTTP");
         let ohttp_relay = config.ohttp_relay.clone();
         let payjoin_directory = config.pj_endpoint.clone();
         #[cfg(feature = "danger-local-https")]

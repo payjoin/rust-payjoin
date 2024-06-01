@@ -176,6 +176,7 @@ impl App {
                 Err(re) => {
                     println!("{}", re);
                     log::debug!("{:?}", re);
+                    return Err(anyhow!("Response error").context(re))
                 }
             }
         }

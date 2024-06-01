@@ -12,14 +12,19 @@ pub struct AppConfig {
     pub bitcoind_cookie: Option<PathBuf>,
     pub bitcoind_rpcuser: String,
     pub bitcoind_rpcpassword: String,
+
+    // v2 only
     #[cfg(feature = "v2")]
     pub ohttp_keys: Option<payjoin::OhttpKeys>,
     #[cfg(feature = "v2")]
     pub ohttp_relay: Url,
+    #[cfg(feature = "v2")]
+    pub pj_directory: Url,
 
-    // receive-only
+    // v1 receive-only
     #[cfg(not(feature = "v2"))]
     pub port: u16,
+    #[cfg(not(feature = "v2"))]
     pub pj_endpoint: Url,
 }
 
@@ -60,7 +65,8 @@ impl AppConfig {
             .set_override_option(
                 "ohttp_relay",
                 matches.get_one::<Url>("ohttp_relay").map(|s| s.as_str()),
-            )?;
+            )?
+            .set_default("pj_directory", "https://payjo.in")?;
 
         let builder = match matches.subcommand() {
             Some(("send", _)) => builder,
@@ -74,13 +80,21 @@ impl AppConfig {
                         .map_err(|_| {
                             ConfigError::Message("\"port\" must be a valid number".to_string())
                         })?;
-                    builder.set_override_option("port", port)?
+                    builder.set_override_option("port", port)?.set_override_option(
+                        "pj_endpoint",
+                        matches.get_one::<Url>("pj_endpoint").map(|s| s.as_str()),
+                    )?
                 };
 
-                builder.set_override_option(
-                    "pj_endpoint",
-                    matches.get_one::<Url>("pj_endpoint").map(|s| s.as_str()),
-                )?
+                #[cfg(feature = "v2")]
+                let builder = {
+                    builder.set_override_option(
+                        "pj_directory",
+                        matches.get_one::<Url>("pj_directory").map(|s| s.as_str()),
+                    )?
+                };
+
+                builder
             }
             _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
         };

@@ -47,7 +47,7 @@ In addition to the rpc configuration above, specify relevant ohttp and payjoin d
 # config.toml
 ...
 # a production payjoin directory server
-pj_endpoint="https://payjo.in"
+pj_directory="https://payjo.in"
 # payjo.in's ohttp_keys can now be fetched rather than configured ahead of time
  # an ohttp relay with ingress to payjo.in
 ohttp_relay="https://pj.bobspacebkk.com"

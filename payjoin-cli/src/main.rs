@@ -121,6 +121,14 @@ fn cli() -> ArgMatches {
                         .num_args(1)
                         .help("The `pj=` endpoint to receive the payjoin request")
                         .value_parser(value_parser!(Url)),
+                )
+                .arg(
+                    Arg::new("pj_directory")
+                        .long("pj_directory")
+                        .short('d')
+                        .num_args(1)
+                        .help("The directory to store payjoin requests")
+                        .value_parser(value_parser!(Url)),
                 ),
         )
         .get_matches()

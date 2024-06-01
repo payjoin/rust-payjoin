@@ -59,10 +59,6 @@ impl AppConfig {
         #[cfg(feature = "v2")]
         let builder = builder
             .set_override_option(
-                "ohttp_keys",
-                matches.get_one::<String>("ohttp_keys").map(|s| s.as_str()),
-            )?
-            .set_override_option(
                 "ohttp_relay",
                 matches.get_one::<Url>("ohttp_relay").map(|s| s.as_str()),
             )?
@@ -88,10 +84,15 @@ impl AppConfig {
 
                 #[cfg(feature = "v2")]
                 let builder = {
-                    builder.set_override_option(
-                        "pj_directory",
-                        matches.get_one::<Url>("pj_directory").map(|s| s.as_str()),
-                    )?
+                    builder
+                        .set_override_option(
+                            "pj_directory",
+                            matches.get_one::<Url>("pj_directory").map(|s| s.as_str()),
+                        )?
+                        .set_override_option(
+                            "ohttp_keys",
+                            matches.get_one::<String>("ohttp_keys").map(|s| s.as_str()),
+                        )?
                 };
 
                 builder

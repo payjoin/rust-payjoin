@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
 }
 
 fn cli() -> ArgMatches {
-    Command::new("payjoin")
+    let mut cmd = Command::new("payjoin")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Payjoin - bitcoin scaling, savings, and privacy by default")
         .arg(
@@ -70,18 +70,6 @@ fn cli() -> ArgMatches {
                 .num_args(1)
                 .help("The password for the bitcoin node"),
         )
-        .subcommand_required(true)
-        .arg(
-            Arg::new("ohttp_keys")
-                .long("ohttp-keys")
-                .help("The ohttp key config as a base64 encoded string"),
-        )
-        .arg(
-            Arg::new("ohttp_relay")
-                .long("ohttp-relay")
-                .help("The ohttp relay url")
-                .value_parser(value_parser!(Url)),
-        )
         .arg(
             Arg::new("retry")
                 .long("retry")
@@ -89,47 +77,74 @@ fn cli() -> ArgMatches {
                 .action(clap::ArgAction::SetTrue)
                 .help("Retry the asynchronous payjoin request if it did not yet complete"),
         )
-        .subcommand(
-            Command::new("send")
-                .arg_required_else_help(true)
-                .arg(arg!(<BIP21> "The `bitcoin:...` payjoin uri to send to"))
-                .arg_required_else_help(true)
-                .arg(
-                    Arg::new("fee_rate")
-                        .long("fee-rate")
-                        .value_name("FEE_SAT_PER_VB")
-                        .help("Fee rate in sat/vB")
-                        .value_parser(value_parser!(f32)),
-                ),
-        )
-        .subcommand(
-            Command::new("receive")
-                .arg_required_else_help(true)
-                .arg(arg!(<AMOUNT> "The amount to receive in satoshis"))
-                .arg_required_else_help(true)
-                .arg(
-                    Arg::new("port")
-                        .long("port")
-                        .short('p')
-                        .num_args(1)
-                        .help("The local port to listen on"),
-                )
-                .arg(
-                    Arg::new("pj_endpoint")
-                        .long("pj_endpoint")
-                        .short('e')
-                        .num_args(1)
-                        .help("The `pj=` endpoint to receive the payjoin request")
-                        .value_parser(value_parser!(Url)),
-                )
-                .arg(
-                    Arg::new("pj_directory")
-                        .long("pj_directory")
-                        .short('d')
-                        .num_args(1)
-                        .help("The directory to store payjoin requests")
-                        .value_parser(value_parser!(Url)),
-                ),
-        )
-        .get_matches()
+        .subcommand_required(true);
+
+    // Conditional arguments based on features
+    #[cfg(feature = "v2")]
+    {
+        cmd = cmd.arg(
+            Arg::new("ohttp_relay")
+                .long("ohttp-relay")
+                .help("The ohttp relay url")
+                .value_parser(value_parser!(Url)),
+        );
+    }
+
+    cmd = cmd.subcommand(
+        Command::new("send")
+            .arg_required_else_help(true)
+            .arg(arg!(<BIP21> "The `bitcoin:...` payjoin uri to send to"))
+            .arg_required_else_help(true)
+            .arg(
+                Arg::new("fee_rate")
+                    .long("fee-rate")
+                    .value_name("FEE_SAT_PER_VB")
+                    .help("Fee rate in sat/vB")
+                    .value_parser(value_parser!(f32)),
+            ),
+    );
+
+    let mut receive_cmd = Command::new("receive")
+        .arg_required_else_help(true)
+        .arg(arg!(<AMOUNT> "The amount to receive in satoshis"))
+        .arg_required_else_help(true);
+
+    // Conditional arguments based on features for the receive subcommand
+    #[cfg(not(feature = "v2"))]
+    {
+        receive_cmd = receive_cmd.arg(
+            Arg::new("port")
+                .long("port")
+                .short('p')
+                .num_args(1)
+                .help("The local port to listen on"),
+        );
+        receive_cmd = receive_cmd.arg(
+            Arg::new("pj_endpoint")
+                .long("pj_endpoint")
+                .short('e')
+                .num_args(1)
+                .help("The `pj=` endpoint to receive the payjoin request")
+                .value_parser(value_parser!(Url)),
+        );
+    }
+
+    #[cfg(feature = "v2")]
+    {
+        receive_cmd = receive_cmd.arg(
+            Arg::new("pj_directory")
+                .long("pj_directory")
+                .num_args(1)
+                .help("The directory to store payjoin requests")
+                .value_parser(value_parser!(Url)),
+        );
+        receive_cmd = receive_cmd.arg(
+            Arg::new("ohttp_keys")
+                .long("ohttp-keys")
+                .help("The ohttp key config as a base64 encoded string"),
+        );
+    }
+
+    cmd = cmd.subcommand(receive_cmd);
+    cmd.get_matches()
 }

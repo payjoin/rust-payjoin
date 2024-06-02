@@ -387,9 +387,12 @@ impl ProvisionalProposal {
         self.inner.is_output_substitution_disabled()
     }
 
-    /// Just replace an output address with
-    pub fn substitute_output_address(&mut self, substitute_address: bitcoin::Address) {
-        self.inner.substitute_output_address(substitute_address)
+    /// If output substitution is enabled, replace the receiver's output address with a new one.
+    pub fn try_substituting_output_address(
+        &mut self,
+        generate_address: impl Fn() -> Result<bitcoin::Address, Error>,
+    ) -> Result<(), Error> {
+        self.inner.try_substituting_output_address(generate_address)
     }
 
     pub fn finalize_proposal(

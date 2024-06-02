@@ -77,7 +77,7 @@ impl AppTrait for App {
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
         let mut enrolled = if !is_retry {
             let mut enroller = Enroller::from_directory_config(
-                self.config.pj_endpoint.clone(),
+                self.config.pj_directory.clone(),
                 ohttp_keys.clone(),
                 self.config.ohttp_relay.clone(),
             );
@@ -147,7 +147,7 @@ impl App {
         let pj_receiver_address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
         let amount = Amount::from_sat(amount_arg.parse()?);
         let pj_part = payjoin::Url::parse(fallback_target)
-            .map_err(|e| anyhow!("Failed to parse pj_endpoint: {}", e))?;
+            .map_err(|e| anyhow!("Failed to parse Payjoin subdirectory target: {}", e))?;
 
         let pj_uri = PjUriBuilder::new(pj_receiver_address, pj_part, Some(ohttp_keys))
             .amount(amount)
@@ -309,7 +309,7 @@ async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::
         Ok(keys)
     } else {
         let ohttp_relay = config.ohttp_relay.clone();
-        let payjoin_directory = config.pj_endpoint.clone();
+        let payjoin_directory = config.pj_directory.clone();
         #[cfg(feature = "danger-local-https")]
         let cert_der = rcgen::generate_simple_self_signed(vec![
             "0.0.0.0".to_string(),

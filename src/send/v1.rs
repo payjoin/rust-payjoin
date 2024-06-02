@@ -7,7 +7,7 @@ pub use payjoin::send as pdk;
 use crate::error::PayjoinError;
 use crate::send::v2::ContextV2;
 use crate::types::Request;
-use crate::uri::Uri;
+use crate::uri::{Uri, Url};
 
 ///Builder for sender-side payjoin parameters
 ///
@@ -136,8 +136,8 @@ impl RequestContext {
     /// new unique nonces to make independent OHTTP requests.
     ///
     /// The `ohttp_proxy` merely passes the encrypted payload to the ohttp gateway of the receiver
-    pub fn extract_v2(&self, ohttp_proxy_url: String) -> Result<RequestContextV2, PayjoinError> {
-        match self.0.clone().extract_v2(ohttp_proxy_url.as_str()) {
+    pub fn extract_v2(&self, ohttp_proxy_url: Arc<Url>) -> Result<RequestContextV2, PayjoinError> {
+        match self.0.clone().extract_v2((*ohttp_proxy_url).clone().into()) {
             Ok(e) => Ok(RequestContextV2 { request: e.0.into(), context_v2: Arc::new(e.1.into()) }),
             Err(e) => Err(e.into()),
         }

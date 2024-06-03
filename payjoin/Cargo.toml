@@ -51,4 +51,4 @@ tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 
 [package.metadata.docs.rs]
-features = ["send", "receive", "base64", "v2"]    
+features = ["send", "receive", "base64", "v2", "io"]

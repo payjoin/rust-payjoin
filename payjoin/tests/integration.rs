@@ -177,7 +177,7 @@ mod integration {
                                 &bitcoin::base64::encode(psbt.serialize()),
                                 None,
                                 None,
-                                Some(false),
+                                Some(true), // check that the receiver properly clears keypaths
                             )
                             .map(|res: WalletProcessPsbtResult| {
                                 let psbt = Psbt::from_str(&res.psbt).unwrap();
@@ -690,7 +690,7 @@ mod integration {
                                 &bitcoin::base64::encode(psbt.serialize()),
                                 None,
                                 None,
-                                Some(false),
+                                Some(true), // check that the receiver properly clears keypaths
                             )
                             .map(|res: WalletProcessPsbtResult| {
                                 let psbt = Psbt::from_str(&res.psbt).unwrap();
@@ -805,7 +805,7 @@ mod integration {
                     &outputs,
                     None, // locktime
                     Some(options),
-                    None,
+                    Some(true), // check that the sender properly clears keypaths
                 )?
                 .psbt;
             let psbt = sender.wallet_process_psbt(&psbt, None, None, None)?.psbt;

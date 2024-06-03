@@ -14,6 +14,7 @@
 - Test with JoinMarket
 - respect `disableoutputsubtitution` send parameter
 - depend on `payjoin-0.16.0`
+- separate V1 `pj_endpoint` and V2 `pj_directory` config params / cli arguments
 
 Contributors:
 

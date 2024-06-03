@@ -11,6 +11,7 @@
 - Remove `Enrolled::pubkey()`
 - `send::Error::V2` replaced with specific HPKE and OhttpEncapsulation error variants
 - HPKE out of bounds errors fixed
+- Disable output substitution from V1 sender as V2 receiver
 
 ## 0.15.0
 

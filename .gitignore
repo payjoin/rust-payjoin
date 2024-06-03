@@ -1,5 +1,4 @@
 target
 *config.toml
 !example.config.toml
-*_store.json
 *payjoin.sled

@@ -23,3 +23,6 @@ impl Database {
         Ok(was_seen_before)
     }
 }
+
+#[cfg(feature = "v2")]
+mod v2;

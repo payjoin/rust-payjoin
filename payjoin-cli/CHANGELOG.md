@@ -1,5 +1,24 @@
 # payjoin-cli Changelog
 
+## 0.0.6-alpha
+
+- fetch ohttp keys from `payjoin/io` feature
+- add example.config.toml
+- Rename config.toml & CLI argument field pj_host to port (#253)
+- add `--version` & `-V` CLI arguments
+- replace dependency on `ureq` with `reqwest`
+- Unify `pj_host`, `--host-port` arguments to `port` for v1 receivers
+- remove `sub_only` CLI argument and config option
+- Include more verbose context when bitcoind fails (#251)
+- Use `*rpcpassword` instead of `*rpcpass` config and option to match bitcoind
+- Test with JoinMarket
+- respect `disableoutputsubtitution` send parameter
+- depend on `payjoin-0.16.0`
+
+Contributors:
+
+@jbesraa, @grizznaut, @thebrandonlucas, @DanGould
+
 ## 0.0.5-alpha
 
 - fetch ohttp keys through CONNECT tunnel (#194) instead of manual configuration

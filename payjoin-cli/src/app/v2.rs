@@ -1,6 +1,6 @@
 use std::fs::OpenOptions;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::jsonrpc::serde_json;
@@ -12,23 +12,24 @@ use payjoin::{base64, bitcoin, Error, PjUriBuilder};
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::config::AppConfig;
-use super::{App as AppTrait, SeenInputs};
+use super::App as AppTrait;
 use crate::app::http_agent;
+use crate::db::Database;
 
 pub(crate) struct App {
     config: AppConfig,
     receive_store: Arc<AsyncMutex<ReceiveStore>>,
     send_store: Arc<AsyncMutex<SendStore>>,
-    seen_inputs: Arc<Mutex<SeenInputs>>,
+    db: Database,
 }
 
 #[async_trait::async_trait]
 impl AppTrait for App {
     fn new(config: AppConfig) -> Result<Self> {
-        let seen_inputs = Arc::new(Mutex::new(SeenInputs::new()?));
+        let db = Database::create(&config.db_path)?;
         let receive_store = Arc::new(AsyncMutex::new(ReceiveStore::new()?));
         let send_store = Arc::new(AsyncMutex::new(SendStore::new()?));
-        let app = Self { config, receive_store, send_store, seen_inputs };
+        let app = Self { config, receive_store, send_store, db };
         app.bitcoind()?
             .get_blockchain_info()
             .context("Failed to connect to bitcoind. Check config RPC connection.")?;
@@ -266,7 +267,7 @@ impl App {
 
         // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let payjoin = proposal.check_no_inputs_seen_before(|input| {
-            Ok(!self.insert_input_seen_before(*input).map_err(|e| Error::Server(e.into()))?)
+            self.db.insert_input_seen_before(*input).map_err(|e| Error::Server(e.into()))
         })?;
         log::trace!("check4");
 
@@ -305,10 +306,6 @@ impl App {
         let payjoin_proposal_psbt = payjoin_proposal.psbt();
         log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
         Ok(payjoin_proposal)
-    }
-
-    fn insert_input_seen_before(&self, input: bitcoin::OutPoint) -> Result<bool> {
-        self.seen_inputs.lock().expect("mutex lock failed").insert(input)
     }
 }
 

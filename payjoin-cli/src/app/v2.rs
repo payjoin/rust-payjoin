@@ -15,7 +15,6 @@ use super::config::AppConfig;
 use super::{App as AppTrait, SeenInputs};
 use crate::app::http_agent;
 
-#[derive(Clone)]
 pub(crate) struct App {
     config: AppConfig,
     receive_store: Arc<AsyncMutex<ReceiveStore>>,

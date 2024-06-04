@@ -249,6 +249,9 @@ impl Enrolled {
         let pubkey_base64 = base64::encode_config(pubkey, b64_config);
         format!("{}{}", &self.directory, pubkey_base64)
     }
+
+    /// The per-session public key to use as an identifier
+    pub fn public_key(&self) -> PublicKey { self.s.public_key() }
 }
 
 /// The sender's original PSBT and optional parameters

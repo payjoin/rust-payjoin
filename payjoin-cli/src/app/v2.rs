@@ -84,7 +84,7 @@ impl AppTrait for App {
             );
             let (req, ctx) =
                 enroller.extract_req().map_err(|e| anyhow!("Failed to extract request {}", e))?;
-            println!("Starting new Payjoin session with {}", self.config.pj_endpoint);
+            println!("Starting new Payjoin session with {}", self.config.pj_directory);
             let http = http_agent()?;
             let ohttp_response = http
                 .post(req.url)

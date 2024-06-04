@@ -1,8 +1,11 @@
 use std::collections::HashMap;
+use std::fmt;
+use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::{rand, PublicKey};
 use bitcoin::{base64, Amount, FeeRate, OutPoint, Script, TxOut};
+use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use url::Url;
@@ -83,110 +86,6 @@ fn subdir_path_from_pubkey(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveSession {
     context: SessionContext,
-}
-
-impl Serialize for SessionContext {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_struct("SessionContext", 4)?;
-        state.serialize_field("directory", &self.directory)?;
-        state.serialize_field("ohttp_keys", &self.ohttp_keys)?;
-        state.serialize_field("ohttp_relay", &self.ohttp_relay)?;
-        state.serialize_field("s", &self.s)?;
-        state.serialize_field("e", &self.e)?;
-
-        state.end()
-    }
-}
-
-use std::fmt;
-use std::str::FromStr;
-
-use serde::de::{self, Deserializer, MapAccess, Visitor};
-
-impl<'de> Deserialize<'de> for SessionContext {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(field_identifier, rename_all = "snake_case")]
-        enum Field {
-            Directory,
-            OhttpKeys,
-            OhttpRelay,
-            S,
-            E,
-        }
-
-        struct SessionContextVisitor;
-
-        impl<'de> Visitor<'de> for SessionContextVisitor {
-            type Value = SessionContext;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("struct ActiveSession")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> Result<SessionContext, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut directory = None;
-                let mut ohttp_keys = None;
-                let mut ohttp_relay = None;
-                let mut s = None;
-                let mut e = None;
-                while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::Directory => {
-                            if directory.is_some() {
-                                return Err(de::Error::duplicate_field("directory"));
-                            }
-                            directory = Some(map.next_value()?);
-                        }
-                        Field::OhttpKeys => {
-                            if ohttp_keys.is_some() {
-                                return Err(de::Error::duplicate_field("ohttp_keys"));
-                            }
-                            ohttp_keys = Some(map.next_value()?);
-                        }
-                        Field::OhttpRelay => {
-                            if ohttp_relay.is_some() {
-                                return Err(de::Error::duplicate_field("ohttp_relay"));
-                            }
-                            ohttp_relay = Some(map.next_value()?);
-                        }
-                        Field::S => {
-                            if s.is_some() {
-                                return Err(de::Error::duplicate_field("s"));
-                            }
-                            s = Some(map.next_value()?);
-                        }
-                        Field::E => {
-                            if e.is_some() {
-                                return Err(de::Error::duplicate_field("e"));
-                            }
-                            e = Some(map.next_value()?);
-                        }
-                    }
-                }
-                let directory = directory.ok_or_else(|| de::Error::missing_field("directory"))?;
-                let ohttp_keys =
-                    ohttp_keys.ok_or_else(|| de::Error::missing_field("ohttp_keys"))?;
-                let ohttp_relay =
-                    ohttp_relay.ok_or_else(|| de::Error::missing_field("ohttp_relay"))?;
-                let s = s.ok_or_else(|| de::Error::missing_field("s"))?;
-                let e = e.ok_or_else(|| de::Error::missing_field("e"))?;
-                Ok(SessionContext { directory, ohttp_keys, ohttp_relay, s, e })
-            }
-        }
-
-        const FIELDS: &[&str] = &["directory", "ohttp_keys", "ohttp_relay", "s", "e"];
-        deserializer.deserialize_struct("SessionContext", FIELDS, SessionContextVisitor)
-    }
 }
 
 impl ActiveSession {
@@ -549,6 +448,104 @@ impl PayjoinProposal {
                     .into(),
             ))
         }
+    }
+}
+impl Serialize for SessionContext {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("SessionContext", 4)?;
+        state.serialize_field("directory", &self.directory)?;
+        state.serialize_field("ohttp_keys", &self.ohttp_keys)?;
+        state.serialize_field("ohttp_relay", &self.ohttp_relay)?;
+        state.serialize_field("s", &self.s)?;
+        state.serialize_field("e", &self.e)?;
+
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for SessionContext {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "snake_case")]
+        enum Field {
+            Directory,
+            OhttpKeys,
+            OhttpRelay,
+            S,
+            E,
+        }
+
+        struct SessionContextVisitor;
+
+        impl<'de> Visitor<'de> for SessionContextVisitor {
+            type Value = SessionContext;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct ActiveSession")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<SessionContext, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut directory = None;
+                let mut ohttp_keys = None;
+                let mut ohttp_relay = None;
+                let mut s = None;
+                let mut e = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Directory => {
+                            if directory.is_some() {
+                                return Err(de::Error::duplicate_field("directory"));
+                            }
+                            directory = Some(map.next_value()?);
+                        }
+                        Field::OhttpKeys => {
+                            if ohttp_keys.is_some() {
+                                return Err(de::Error::duplicate_field("ohttp_keys"));
+                            }
+                            ohttp_keys = Some(map.next_value()?);
+                        }
+                        Field::OhttpRelay => {
+                            if ohttp_relay.is_some() {
+                                return Err(de::Error::duplicate_field("ohttp_relay"));
+                            }
+                            ohttp_relay = Some(map.next_value()?);
+                        }
+                        Field::S => {
+                            if s.is_some() {
+                                return Err(de::Error::duplicate_field("s"));
+                            }
+                            s = Some(map.next_value()?);
+                        }
+                        Field::E => {
+                            if e.is_some() {
+                                return Err(de::Error::duplicate_field("e"));
+                            }
+                            e = Some(map.next_value()?);
+                        }
+                    }
+                }
+                let directory = directory.ok_or_else(|| de::Error::missing_field("directory"))?;
+                let ohttp_keys =
+                    ohttp_keys.ok_or_else(|| de::Error::missing_field("ohttp_keys"))?;
+                let ohttp_relay =
+                    ohttp_relay.ok_or_else(|| de::Error::missing_field("ohttp_relay"))?;
+                let s = s.ok_or_else(|| de::Error::missing_field("s"))?;
+                let e = e.ok_or_else(|| de::Error::missing_field("e"))?;
+                Ok(SessionContext { directory, ohttp_keys, ohttp_relay, s, e })
+            }
+        }
+
+        const FIELDS: &[&str] = &["directory", "ohttp_keys", "ohttp_relay", "s", "e"];
+        deserializer.deserialize_struct("SessionContext", FIELDS, SessionContextVisitor)
     }
 }
 

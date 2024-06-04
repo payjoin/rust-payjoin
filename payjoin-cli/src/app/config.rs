@@ -105,6 +105,8 @@ impl AppConfig {
 
                 builder
             }
+            #[cfg(feature = "v2")]
+            Some(("resume", _)) => builder,
             _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
         };
 

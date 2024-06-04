@@ -28,7 +28,7 @@ pub trait App {
         Self: Sized;
     fn bitcoind(&self) -> Result<bitcoincore_rpc::Client>;
     async fn send_payjoin(&self, bip21: &str, fee_rate: &f32, is_retry: bool) -> Result<()>;
-    async fn receive_payjoin(self, amount_arg: &str, is_retry: bool) -> Result<()>;
+    async fn receive_payjoin(self, amount_arg: &str) -> Result<()>;
 
     fn create_pj_request(&self, bip21: &str, fee_rate: &f32) -> Result<RequestContext> {
         let uri =

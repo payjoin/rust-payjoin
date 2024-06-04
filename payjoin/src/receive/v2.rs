@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
+use std::time::{Duration, SystemTime};
 
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::{rand, PublicKey};
@@ -19,6 +20,7 @@ use crate::{OhttpKeys, Request};
 struct SessionContext {
     directory: url::Url,
     ohttp_keys: OhttpKeys,
+    expiry: SystemTime,
     ohttp_relay: url::Url,
     s: bitcoin::secp256k1::KeyPair,
     e: Option<bitcoin::secp256k1::PublicKey>,
@@ -31,7 +33,12 @@ pub struct SessionInitializer {
 
 #[cfg(feature = "v2")]
 impl SessionInitializer {
-    pub fn from_directory_config(directory: Url, ohttp_keys: OhttpKeys, ohttp_relay: Url) -> Self {
+    pub fn new(
+        directory: Url,
+        ohttp_keys: OhttpKeys,
+        ohttp_relay: Url,
+        expire_after: Duration,
+    ) -> Self {
         let secp = bitcoin::secp256k1::Secp256k1::new();
         let (sk, _) = secp.generate_keypair(&mut rand::rngs::OsRng);
         Self {
@@ -39,6 +46,7 @@ impl SessionInitializer {
                 directory,
                 ohttp_keys,
                 ohttp_relay,
+                expiry: SystemTime::now() + expire_after,
                 s: bitcoin::secp256k1::KeyPair::from_secret_key(&secp, &sk),
                 e: None,
             },
@@ -459,6 +467,7 @@ impl Serialize for SessionContext {
         state.serialize_field("directory", &self.directory)?;
         state.serialize_field("ohttp_keys", &self.ohttp_keys)?;
         state.serialize_field("ohttp_relay", &self.ohttp_relay)?;
+        state.serialize_field("expiry", &self.expiry)?;
         state.serialize_field("s", &self.s)?;
         state.serialize_field("e", &self.e)?;
 
@@ -477,6 +486,7 @@ impl<'de> Deserialize<'de> for SessionContext {
             Directory,
             OhttpKeys,
             OhttpRelay,
+            Expiry,
             S,
             E,
         }
@@ -497,6 +507,7 @@ impl<'de> Deserialize<'de> for SessionContext {
                 let mut directory = None;
                 let mut ohttp_keys = None;
                 let mut ohttp_relay = None;
+                let mut expiry = None;
                 let mut s = None;
                 let mut e = None;
                 while let Some(key) = map.next_key()? {
@@ -519,6 +530,12 @@ impl<'de> Deserialize<'de> for SessionContext {
                             }
                             ohttp_relay = Some(map.next_value()?);
                         }
+                        Field::Expiry => {
+                            if expiry.is_some() {
+                                return Err(de::Error::duplicate_field("expiry"));
+                            }
+                            expiry = Some(map.next_value()?);
+                        }
                         Field::S => {
                             if s.is_some() {
                                 return Err(de::Error::duplicate_field("s"));
@@ -538,13 +555,14 @@ impl<'de> Deserialize<'de> for SessionContext {
                     ohttp_keys.ok_or_else(|| de::Error::missing_field("ohttp_keys"))?;
                 let ohttp_relay =
                     ohttp_relay.ok_or_else(|| de::Error::missing_field("ohttp_relay"))?;
+                let expiry = expiry.ok_or_else(|| de::Error::missing_field("expiry"))?;
                 let s = s.ok_or_else(|| de::Error::missing_field("s"))?;
                 let e = e.ok_or_else(|| de::Error::missing_field("e"))?;
-                Ok(SessionContext { directory, ohttp_keys, ohttp_relay, s, e })
+                Ok(SessionContext { directory, ohttp_keys, ohttp_relay, expiry, s, e })
             }
         }
 
-        const FIELDS: &[&str] = &["directory", "ohttp_keys", "ohttp_relay", "s", "e"];
+        const FIELDS: &[&str] = &["directory", "ohttp_keys", "ohttp_relay", "expiry", "s", "e"];
         deserializer.deserialize_struct("SessionContext", FIELDS, SessionContextVisitor)
     }
 }
@@ -570,6 +588,7 @@ mod test {
                     ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap(),
                 ),
                 ohttp_relay: url::Url::parse("https://relay.com").unwrap(),
+                expiry: SystemTime::now() + Duration::from_secs(60),
                 s: bitcoin::secp256k1::KeyPair::from_secret_key(
                     &bitcoin::secp256k1::Secp256k1::new(),
                     &bitcoin::secp256k1::SecretKey::from_slice(&[1; 32]).unwrap(),

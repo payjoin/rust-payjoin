@@ -67,10 +67,11 @@ impl AppTrait for App {
 
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
         let mut session = if !is_retry {
-            let mut initializer = SessionInitializer::from_directory_config(
+            let mut initializer = SessionInitializer::new(
                 self.config.pj_directory.clone(),
                 ohttp_keys.clone(),
                 self.config.ohttp_relay.clone(),
+                std::time::Duration::from_secs(60 * 60),
             );
             let (req, ctx) = initializer
                 .extract_req()

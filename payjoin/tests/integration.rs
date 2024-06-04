@@ -329,10 +329,11 @@ mod integration {
                 let agent = Arc::new(http_agent(cert_der.clone()).unwrap());
                 wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
                 let mock_ohttp_relay = directory.clone(); // pass through to directory
-                let mut bad_initializer = SessionInitializer::from_directory_config(
+                let mut bad_initializer = SessionInitializer::new(
                     directory,
                     bad_ohttp_keys,
                     mock_ohttp_relay,
+                    Duration::from_secs(60),
                 );
                 let (req, _ctx) = bad_initializer.extract_req().expect("Failed to extract request");
                 agent.post(req.url).body(req.body).send().await
@@ -601,10 +602,11 @@ mod integration {
             cert_der: Vec<u8>,
         ) -> Result<ActiveSession, BoxError> {
             let mock_ohttp_relay = directory.clone(); // pass through to directory
-            let mut initializer = SessionInitializer::from_directory_config(
+            let mut initializer = SessionInitializer::new(
                 directory.clone(),
                 ohttp_keys,
                 mock_ohttp_relay.clone(),
+                Duration::from_secs(60),
             );
             let (req, ctx) = initializer.extract_req()?;
             println!("enroll req: {:#?}", &req);

@@ -25,7 +25,7 @@
 //! [reference implementation](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli)
 
 use std::cmp::{max, min};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use bitcoin::psbt::Psbt;
 use bitcoin::{base64, Amount, FeeRate, OutPoint, Script, TxOut};
@@ -539,9 +539,16 @@ impl ProvisionalProposal {
     fn prepare_psbt(mut self, processed_psbt: Psbt) -> Result<PayjoinProposal, RequestError> {
         self.payjoin_psbt = processed_psbt;
         log::trace!("Preparing PSBT {:#?}", self.payjoin_psbt);
+        for output in self.payjoin_psbt.outputs_mut() {
+            output.bip32_derivation.clear();
+            output.tap_key_origins.clear();
+            output.tap_internal_key = None;
+        }
         for input in self.payjoin_psbt.inputs_mut() {
-            input.bip32_derivation = BTreeMap::new();
-            input.partial_sigs = BTreeMap::new();
+            input.bip32_derivation.clear();
+            input.tap_key_origins.clear();
+            input.tap_internal_key = None;
+            input.partial_sigs.clear();
         }
         for i in self.sender_input_indexes() {
             log::trace!("Clearing sender input {}", i);

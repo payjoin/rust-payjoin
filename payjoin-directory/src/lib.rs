@@ -190,7 +190,7 @@ async fn handle_v2(pool: DbPool, req: Request<Body>) -> Result<Response<Body>, H
     let path_segments: Vec<&str> = path.split('/').collect();
     debug!("handle_v2: {:?}", &path_segments);
     match (parts.method, path_segments.as_slice()) {
-        (Method::POST, &["", ""]) => post_enroll(body).await,
+        (Method::POST, &["", ""]) => post_session(body).await,
         (Method::POST, &["", id]) => post_fallback_v2(id, body, pool).await,
         (Method::GET, &["", id]) => get_fallback(id, pool).await,
         (Method::POST, &["", id, "payjoin"]) => post_payjoin(id, body, pool).await,
@@ -241,7 +241,7 @@ impl From<hyper::http::Error> for HandlerError {
     fn from(e: hyper::http::Error) -> Self { HandlerError::InternalServerError(e.into()) }
 }
 
-async fn post_enroll(body: Body) -> Result<Response<Body>, HandlerError> {
+async fn post_session(body: Body) -> Result<Response<Body>, HandlerError> {
     let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
     let bytes =
         hyper::body::to_bytes(body).await.map_err(|e| HandlerError::BadRequest(e.into()))?;
@@ -251,7 +251,7 @@ async fn post_enroll(body: Body) -> Result<Response<Body>, HandlerError> {
         .map_err(|e| HandlerError::BadRequest(e.into()))?;
     let pubkey = bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
         .map_err(|e| HandlerError::BadRequest(e.into()))?;
-    tracing::info!("Enrolled valid pubkey: {:?}", pubkey);
+    tracing::info!("Initialized session with pubkey: {:?}", pubkey);
     Ok(Response::builder().status(StatusCode::NO_CONTENT).body(Body::empty())?)
 }
 

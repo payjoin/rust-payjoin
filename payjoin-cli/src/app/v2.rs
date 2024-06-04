@@ -5,6 +5,7 @@ use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::Amount;
+use payjoin::receive::v2::ActiveSession;
 use payjoin::{base64, bitcoin, Error};
 
 use super::config::AppConfig;
@@ -62,49 +63,54 @@ impl AppTrait for App {
         Ok(())
     }
 
-    async fn receive_payjoin(self, amount_arg: &str, is_retry: bool) -> Result<()> {
+    async fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
         use payjoin::receive::v2::SessionInitializer;
 
         let address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
         let amount = Amount::from_sat(amount_arg.parse()?);
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
-        let mut session = if !is_retry {
-            let mut initializer = SessionInitializer::new(
-                address,
-                self.config.pj_directory.clone(),
-                ohttp_keys.clone(),
-                self.config.ohttp_relay.clone(),
-                std::time::Duration::from_secs(60 * 60),
-            );
-            let (req, ctx) = initializer
-                .extract_req()
-                .map_err(|e| anyhow!("Failed to extract request {}", e))?;
-            println!("Starting new Payjoin session with {}", self.config.pj_directory);
-            let http = http_agent()?;
-            let ohttp_response = http
-                .post(req.url)
-                .header("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
-                .body(req.body)
-                .send()
-                .await
-                .map_err(map_reqwest_err)?;
+        let mut initializer = SessionInitializer::new(
+            address,
+            self.config.pj_directory.clone(),
+            ohttp_keys.clone(),
+            self.config.ohttp_relay.clone(),
+            std::time::Duration::from_secs(60 * 60),
+        );
+        let (req, ctx) =
+            initializer.extract_req().map_err(|e| anyhow!("Failed to extract request {}", e))?;
+        println!("Starting new Payjoin session with {}", self.config.pj_directory);
+        let http = http_agent()?;
+        let ohttp_response = http
+            .post(req.url)
+            .header("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
+            .body(req.body)
+            .send()
+            .await
+            .map_err(map_reqwest_err)?;
 
-            let session = initializer
-                .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), ctx)
-                .map_err(|_| anyhow!("Enrollment failed"))?;
-            self.db.insert_recv_session(session.clone())?;
-            session
-        } else {
-            let session = self.db.get_recv_session()?;
-            println!("Resuming Payjoin session"); // TODO include session pubkey / payjoin directory
-            session.ok_or(anyhow!("No session found"))?
-        };
+        let session = initializer
+            .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), ctx)
+            .map_err(|_| anyhow!("Enrollment failed"))?;
+        self.db.insert_recv_session(session.clone())?;
+        self.spawn_payjoin_receiver(session, Some(amount)).await
+    }
+}
 
+impl App {
+    async fn spawn_payjoin_receiver(
+        &self,
+        mut session: ActiveSession,
+        amount: Option<Amount>,
+    ) -> Result<()> {
         println!("Receive session established");
-        let pj_uri = session.pj_uri_builder().amount(amount).build();
+        let mut pj_uri_builder = session.pj_uri_builder();
+        if let Some(amount) = amount {
+            pj_uri_builder = pj_uri_builder.amount(amount);
+        }
+        let pj_uri = pj_uri_builder.build();
 
         println!("Request Payjoin by sharing this Payjoin Uri:");
-        println!("{}", pj_uri.to_string());
+        println!("{}", pj_uri);
 
         let res = self.long_poll_fallback(&mut session).await?;
         println!("Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:");
@@ -124,7 +130,7 @@ impl AppTrait for App {
             .send()
             .await
             .map_err(map_reqwest_err)?;
-        let _res = payjoin_proposal
+        payjoin_proposal
             .process_res(res.bytes().await?.to_vec(), ohttp_ctx)
             .map_err(|e| anyhow!("Failed to deserialize response {}", e))?;
         let payjoin_psbt = payjoin_proposal.psbt().clone();
@@ -135,9 +141,13 @@ impl AppTrait for App {
         self.db.clear_recv_session()?;
         Ok(())
     }
-}
 
-impl App {
+    pub async fn resume_payjoins(&self) -> Result<()> {
+        let session = self.db.get_recv_session()?.ok_or(anyhow!("No session found"))?;
+        println!("Resuming Payjoin session: {}", session.public_key());
+        self.spawn_payjoin_receiver(session, None).await
+    }
+
     async fn long_poll_post(&self, req_ctx: &mut payjoin::send::RequestContext) -> Result<Psbt> {
         loop {
             let (req, ctx) = req_ctx.extract_v2(self.config.ohttp_relay.clone())?;

@@ -85,7 +85,7 @@ impl AppTrait for App {
         Ok(())
     }
 
-    async fn receive_payjoin(self, amount_arg: &str, _is_retry: bool) -> Result<()> {
+    async fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
         let pj_uri_string = self.construct_payjoin_uri(amount_arg, None)?;
         println!(
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",

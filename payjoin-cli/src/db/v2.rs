@@ -1,12 +1,12 @@
 use bitcoincore_rpc::jsonrpc::serde_json;
-use payjoin::receive::v2::Enrolled;
+use payjoin::receive::v2::ActiveSession;
 use payjoin::send::RequestContext;
 use sled::{IVec, Tree};
 
 use super::*;
 
 impl Database {
-    pub(crate) fn insert_recv_session(&self, session: Enrolled) -> Result<()> {
+    pub(crate) fn insert_recv_session(&self, session: ActiveSession) -> Result<()> {
         let recv_tree = self.0.open_tree("recv_sessions")?;
         let key = &session.public_key().serialize();
         let value = serde_json::to_string(&session).map_err(Error::Serialize)?;
@@ -15,9 +15,10 @@ impl Database {
         Ok(())
     }
 
-    pub(crate) fn get_recv_session(&self) -> Result<Option<Enrolled>> {
+    pub(crate) fn get_recv_session(&self) -> Result<Option<ActiveSession>> {
         if let Some((_, val)) = self.0.open_tree("recv_sessions")?.first()? {
-            let session: Enrolled = serde_json::from_slice(&val).map_err(Error::Deserialize)?;
+            let session: ActiveSession =
+                serde_json::from_slice(&val).map_err(Error::Deserialize)?;
             Ok(Some(session))
         } else {
             Ok(None)

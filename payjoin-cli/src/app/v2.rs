@@ -63,17 +63,18 @@ impl AppTrait for App {
     }
 
     async fn receive_payjoin(self, amount_arg: &str, is_retry: bool) -> Result<()> {
-        use payjoin::receive::v2::Enroller;
+        use payjoin::receive::v2::SessionInitializer;
 
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
-        let mut enrolled = if !is_retry {
-            let mut enroller = Enroller::from_directory_config(
+        let mut session = if !is_retry {
+            let mut initializer = SessionInitializer::from_directory_config(
                 self.config.pj_directory.clone(),
                 ohttp_keys.clone(),
                 self.config.ohttp_relay.clone(),
             );
-            let (req, ctx) =
-                enroller.extract_req().map_err(|e| anyhow!("Failed to extract request {}", e))?;
+            let (req, ctx) = initializer
+                .extract_req()
+                .map_err(|e| anyhow!("Failed to extract request {}", e))?;
             println!("Starting new Payjoin session with {}", self.config.pj_directory);
             let http = http_agent()?;
             let ohttp_response = http
@@ -84,11 +85,11 @@ impl AppTrait for App {
                 .await
                 .map_err(map_reqwest_err)?;
 
-            let enrolled = enroller
+            let session = initializer
                 .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), ctx)
                 .map_err(|_| anyhow!("Enrollment failed"))?;
-            self.db.insert_recv_session(enrolled.clone())?;
-            enrolled
+            self.db.insert_recv_session(session.clone())?;
+            session
         } else {
             let session = self.db.get_recv_session()?;
             println!("Resuming Payjoin session"); // TODO include session pubkey / payjoin directory
@@ -97,11 +98,11 @@ impl AppTrait for App {
 
         println!("Receive session established");
         let pj_uri_string =
-            self.construct_payjoin_uri(amount_arg, &enrolled.fallback_target(), ohttp_keys)?;
+            self.construct_payjoin_uri(amount_arg, &session.fallback_target(), ohttp_keys)?;
         println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{}", pj_uri_string);
 
-        let res = self.long_poll_fallback(&mut enrolled).await?;
+        let res = self.long_poll_fallback(&mut session).await?;
         println!("Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:");
         println!("{}", serialize_hex(&res.extract_tx_to_schedule_broadcast()));
         let mut payjoin_proposal = self
@@ -182,11 +183,11 @@ impl App {
 
     async fn long_poll_fallback(
         &self,
-        enrolled: &mut payjoin::receive::v2::Enrolled,
+        session: &mut payjoin::receive::v2::ActiveSession,
     ) -> Result<payjoin::receive::v2::UncheckedProposal> {
         loop {
             let (req, context) =
-                enrolled.extract_req().map_err(|_| anyhow!("Failed to extract request"))?;
+                session.extract_req().map_err(|_| anyhow!("Failed to extract request"))?;
             println!("Polling receive request...");
             let http = http_agent()?;
             let ohttp_response = http
@@ -197,7 +198,7 @@ impl App {
                 .await
                 .map_err(map_reqwest_err)?;
 
-            let proposal = enrolled
+            let proposal = session
                 .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), context)
                 .map_err(|_| anyhow!("GET fallback failed"))?;
             log::debug!("got response");

@@ -283,7 +283,9 @@ mod integration {
         use std::time::Duration;
 
         use http::StatusCode;
-        use payjoin::receive::v2::{Enrolled, Enroller, PayjoinProposal, UncheckedProposal};
+        use payjoin::receive::v2::{
+            ActiveSession, PayjoinProposal, SessionInitializer, UncheckedProposal,
+        };
         use payjoin::OhttpKeys;
         use reqwest::{Client, ClientBuilder, Error, Response};
         use testcontainers_modules::redis::Redis;
@@ -327,9 +329,12 @@ mod integration {
                 let agent = Arc::new(http_agent(cert_der.clone()).unwrap());
                 wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
                 let mock_ohttp_relay = directory.clone(); // pass through to directory
-                let mut bad_enroller =
-                    Enroller::from_directory_config(directory, bad_ohttp_keys, mock_ohttp_relay);
-                let (req, _ctx) = bad_enroller.extract_req().expect("Failed to extract request");
+                let mut bad_initializer = SessionInitializer::from_directory_config(
+                    directory,
+                    bad_ohttp_keys,
+                    mock_ohttp_relay,
+                );
+                let (req, _ctx) = bad_initializer.extract_req().expect("Failed to extract request");
                 agent.post(req.url).body(req.body).send().await
             }
         }
@@ -366,21 +371,21 @@ mod integration {
 
                 // **********************
                 // Inside the Receiver:
-                let mut enrolled =
-                    enroll_with_directory(directory.clone(), ohttp_keys.clone(), cert_der).await?;
-                println!("enrolled: {:#?}", &enrolled);
+                let mut session =
+                    initialize_session(directory.clone(), ohttp_keys.clone(), cert_der).await?;
+                println!("session: {:#?}", &session);
                 let pj_uri_string = create_receiver_pj_uri_string(
                     &receiver,
                     ohttp_keys,
-                    &enrolled.fallback_target(),
+                    &session.fallback_target(),
                 )?;
 
                 // Poll receive request
-                let (req, ctx) = enrolled.extract_req()?;
+                let (req, ctx) = session.extract_req()?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 assert!(response.status().is_success());
                 let response_body =
-                    enrolled.process_res(response.bytes().await?.to_vec().as_slice(), ctx).unwrap();
+                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx).unwrap();
                 // No proposal yet since sender has not responded
                 assert!(response_body.is_none());
 
@@ -416,12 +421,11 @@ mod integration {
                 // Inside the Receiver:
 
                 // GET fallback psbt
-                let (req, ctx) = enrolled.extract_req()?;
+                let (req, ctx) = session.extract_req()?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 // POST payjoin
-                let proposal = enrolled
-                    .process_res(response.bytes().await?.to_vec().as_slice(), ctx)?
-                    .unwrap();
+                let proposal =
+                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?.unwrap();
                 let mut payjoin_proposal = handle_directory_proposal(receiver, proposal);
                 let (req, ctx) = payjoin_proposal.extract_v2_req()?;
                 let response = agent.post(req.url).body(req.body).send().await?;
@@ -476,13 +480,13 @@ mod integration {
                     payjoin::io::fetch_ohttp_keys(ohttp_relay, directory.clone(), cert_der.clone())
                         .await?;
 
-                let mut enrolled =
-                    enroll_with_directory(directory, ohttp_keys.clone(), cert_der.clone()).await?;
+                let mut session =
+                    initialize_session(directory, ohttp_keys.clone(), cert_der.clone()).await?;
 
                 let pj_uri_string = create_receiver_pj_uri_string(
                     &receiver,
                     ohttp_keys,
-                    &enrolled.fallback_target(),
+                    &session.fallback_target(),
                 )?;
 
                 // **********************
@@ -514,7 +518,7 @@ mod integration {
                 let receiver_loop = tokio::task::spawn(async move {
                     let agent_clone = agent_clone.clone();
                     let (response, ctx) = loop {
-                        let (req, ctx) = enrolled.extract_req().unwrap();
+                        let (req, ctx) = session.extract_req().unwrap();
                         let response = agent_clone.post(req.url).body(req.body).send().await?;
 
                         if response.status() == 200 {
@@ -529,7 +533,7 @@ mod integration {
                             panic!("Unexpected response status: {}", response.status())
                         }
                     };
-                    let proposal = enrolled.process_res(response.as_slice(), ctx).unwrap().unwrap();
+                    let proposal = session.process_res(response.as_slice(), ctx).unwrap().unwrap();
                     let mut payjoin_proposal = handle_directory_proposal(receiver, proposal);
                     // Respond with payjoin psbt within the time window the sender is willing to wait
                     // this response would be returned as http response to the sender
@@ -591,23 +595,23 @@ mod integration {
             (cert_der, key_der)
         }
 
-        async fn enroll_with_directory(
+        async fn initialize_session(
             directory: Url,
             ohttp_keys: OhttpKeys,
             cert_der: Vec<u8>,
-        ) -> Result<Enrolled, BoxError> {
+        ) -> Result<ActiveSession, BoxError> {
             let mock_ohttp_relay = directory.clone(); // pass through to directory
-            let mut enroller = Enroller::from_directory_config(
+            let mut initializer = SessionInitializer::from_directory_config(
                 directory.clone(),
                 ohttp_keys,
                 mock_ohttp_relay.clone(),
             );
-            let (req, ctx) = enroller.extract_req()?;
+            let (req, ctx) = initializer.extract_req()?;
             println!("enroll req: {:#?}", &req);
             let response =
                 http_agent(cert_der).unwrap().post(req.url).body(req.body).send().await?;
             assert!(response.status().is_success());
-            Ok(enroller.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?)
+            Ok(initializer.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?)
         }
 
         /// The receiver outputs a string to be passed to the sender as a string or QR code

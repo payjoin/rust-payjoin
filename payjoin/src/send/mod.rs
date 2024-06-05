@@ -618,11 +618,12 @@ impl ContextV1 {
         self.process_proposal(proposal).map(Into::into).map_err(Into::into)
     }
 
-    fn process_proposal(self, proposal: Psbt) -> InternalResult<Psbt> {
+    fn process_proposal(self, mut proposal: Psbt) -> InternalResult<Psbt> {
         self.basic_checks(&proposal)?;
         let in_stats = self.check_inputs(&proposal)?;
         let out_stats = self.check_outputs(&proposal)?;
         self.check_fees(&proposal, in_stats, out_stats)?;
+        self.restore_original_utxos(&mut proposal)?;
         Ok(proposal)
     }
 
@@ -782,6 +783,29 @@ impl ContextV1 {
         }
         ensure!(original_inputs.peek().is_none(), MissingOrShuffledInputs);
         Ok(InputStats { total_value, total_weight, inputs_with_witnesses })
+    }
+
+    // Restore Original PSBT utxos that the receiver stripped.
+    // The BIP78 spec requires utxo information to be removed, but many wallets
+    // require it to be present to sign.
+    fn restore_original_utxos(&self, proposal: &mut Psbt) -> InternalResult<()> {
+        let mut original_inputs = self.original_psbt.input_pairs().peekable();
+        let proposal_inputs =
+            proposal.unsigned_tx.input.iter().zip(&mut proposal.inputs).peekable();
+
+        for (proposed_txin, proposed_psbtin) in proposal_inputs {
+            if let Some(original) = original_inputs.peek() {
+                if proposed_txin.previous_output == original.txin.previous_output {
+                    proposed_psbtin.non_witness_utxo = original.psbtin.non_witness_utxo.clone();
+                    proposed_psbtin.witness_utxo = original.psbtin.witness_utxo.clone();
+                    proposed_psbtin.bip32_derivation = original.psbtin.bip32_derivation.clone();
+                    proposed_psbtin.tap_internal_key = original.psbtin.tap_internal_key.clone();
+                    proposed_psbtin.tap_key_origins = original.psbtin.tap_key_origins.clone();
+                    original_inputs.next();
+                }
+            }
+        }
+        Ok(())
     }
 
     fn check_outputs(&self, proposal: &Psbt) -> InternalResult<OutputStats> {

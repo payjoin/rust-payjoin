@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::str::FromStr;
 
 use anyhow::{anyhow, Context, Result};
@@ -8,7 +7,7 @@ use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{self, base64};
 use payjoin::send::RequestContext;
-use payjoin::Uri;
+use payjoin::PjUri;
 
 pub mod config;
 use crate::app::config::AppConfig;
@@ -27,15 +26,10 @@ pub trait App {
     where
         Self: Sized;
     fn bitcoind(&self) -> Result<bitcoincore_rpc::Client>;
-    async fn send_payjoin(&self, bip21: &str, fee_rate: &f32, is_retry: bool) -> Result<()>;
+    async fn send_payjoin(&self, bip21: &str, fee_rate: &f32) -> Result<()>;
     async fn receive_payjoin(self, amount_arg: &str) -> Result<()>;
 
-    fn create_pj_request(&self, bip21: &str, fee_rate: &f32) -> Result<RequestContext> {
-        let uri =
-            Uri::try_from(bip21).map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
-
-        let uri = uri.assume_checked();
-
+    fn create_pj_request(&self, uri: &PjUri, fee_rate: &f32) -> Result<RequestContext> {
         let amount = uri.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
 
         // wallet_create_funded_psbt requires a HashMap<address: String, Amount>
@@ -71,7 +65,7 @@ pub trait App {
             .psbt;
         let psbt = Psbt::from_str(&psbt).with_context(|| "Failed to load PSBT from base64")?;
         log::debug!("Original psbt: {:#?}", psbt);
-        let req_ctx = payjoin::send::RequestBuilder::from_psbt_and_uri(psbt, uri)
+        let req_ctx = payjoin::send::RequestBuilder::from_psbt_and_uri(psbt, uri.clone())
             .with_context(|| "Failed to build payjoin request")?
             .build_recommended(fee_rate)
             .with_context(|| "Failed to build payjoin request")?;

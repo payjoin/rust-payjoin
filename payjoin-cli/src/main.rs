@@ -25,8 +25,7 @@ async fn main() -> Result<()> {
             let bip21 = sub_matches.get_one::<String>("BIP21").context("Missing BIP21 argument")?;
             let fee_rate_sat_per_vb =
                 sub_matches.get_one::<f32>("fee_rate").context("Missing --fee-rate argument")?;
-            let is_retry = matches.get_one::<bool>("retry").unwrap_or(&false);
-            app.send_payjoin(bip21, fee_rate_sat_per_vb, *is_retry).await?;
+            app.send_payjoin(bip21, fee_rate_sat_per_vb).await?;
         }
         Some(("receive", sub_matches)) => {
             let amount =
@@ -74,13 +73,6 @@ fn cli() -> ArgMatches {
                 .long("rpcpassword")
                 .num_args(1)
                 .help("The password for the bitcoin node"),
-        )
-        .arg(
-            Arg::new("retry")
-                .long("retry")
-                .short('e')
-                .action(clap::ArgAction::SetTrue)
-                .help("Retry the asynchronous payjoin request if it did not yet complete"),
         )
         .arg(Arg::new("db_path").short('d').long("db-path").help("Sets a custom database path"))
         .subcommand_required(true);

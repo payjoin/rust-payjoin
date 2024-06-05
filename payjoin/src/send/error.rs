@@ -185,7 +185,6 @@ pub(crate) enum InternalCreateRequestError {
     ChangeIndexOutOfBounds,
     ChangeIndexPointsAtPayee,
     Url(url::ParseError),
-    UriDoesNotSupportPayjoin,
     PrevTxOut(crate::psbt::PrevTxOutError),
     InputType(crate::input_type::InputTypeError),
     #[cfg(feature = "v2")]
@@ -217,7 +216,6 @@ impl fmt::Display for CreateRequestError {
             ChangeIndexOutOfBounds => write!(f, "fee output index is points out of bounds"),
             ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
             Url(e) => write!(f, "cannot parse url: {:#?}", e),
-            UriDoesNotSupportPayjoin => write!(f, "the URI does not support payjoin"),
             PrevTxOut(e) => write!(f, "invalid previous transaction output: {}", e),
             InputType(e) => write!(f, "invalid input type: {}", e),
             #[cfg(feature = "v2")]
@@ -251,7 +249,6 @@ impl std::error::Error for CreateRequestError {
             ChangeIndexOutOfBounds => None,
             ChangeIndexPointsAtPayee => None,
             Url(error) => Some(error),
-            UriDoesNotSupportPayjoin => None,
             PrevTxOut(error) => Some(error),
             InputType(error) => Some(error),
             #[cfg(feature = "v2")]

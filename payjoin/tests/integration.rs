@@ -4,7 +4,6 @@ mod integration {
     use std::env;
     use std::str::FromStr;
 
-    use bitcoin::address::NetworkChecked;
     use bitcoin::psbt::Psbt;
     use bitcoin::{base64, Amount, FeeRate, OutPoint};
     use bitcoind::bitcoincore_rpc::core_rpc_json::{AddressType, WalletProcessPsbtResult};
@@ -24,7 +23,7 @@ mod integration {
     mod v1 {
         use log::debug;
         use payjoin::receive::{Headers, PayjoinProposal, UncheckedProposal};
-        use payjoin::PjUriBuilder;
+        use payjoin::{PjUri, PjUriBuilder, UriExt};
 
         use super::*;
 
@@ -43,7 +42,11 @@ mod integration {
                 .build();
 
             // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-            let uri = Uri::from_str(&pj_uri.to_string()).unwrap().assume_checked();
+            let uri = Uri::from_str(&pj_uri.to_string())
+                .unwrap()
+                .assume_checked()
+                .check_pj_supported()
+                .unwrap();
             let psbt = build_original_psbt(&sender, &uri)?;
             debug!("Original psbt: {:#?}", psbt);
             let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt, uri)?
@@ -239,7 +242,7 @@ mod integration {
 
         fn build_original_psbt(
             sender: &bitcoincore_rpc::Client,
-            pj_uri: &Uri<'_, NetworkChecked>,
+            pj_uri: &PjUri,
         ) -> Result<Psbt, BoxError> {
             let mut outputs = HashMap::with_capacity(1);
             outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap());
@@ -288,7 +291,7 @@ mod integration {
         use payjoin::receive::v2::{
             ActiveSession, PayjoinProposal, SessionInitializer, UncheckedProposal,
         };
-        use payjoin::OhttpKeys;
+        use payjoin::{OhttpKeys, PjUri, UriExt};
         use reqwest::{Client, ClientBuilder, Error, Response};
         use testcontainers_modules::redis::Redis;
         use testcontainers_modules::testcontainers::clients::Cli;
@@ -401,7 +404,11 @@ mod integration {
                 // **********************
                 // Inside the Sender:
                 // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-                let pj_uri = Uri::from_str(&pj_uri_string).unwrap().assume_checked();
+                let pj_uri = Uri::from_str(&pj_uri_string)
+                    .unwrap()
+                    .assume_checked()
+                    .check_pj_supported()
+                    .unwrap();
                 let psbt = build_original_psbt(&sender, &pj_uri)?;
                 let mut req_ctx = RequestBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
                     .build_with_additional_fee(
@@ -499,7 +506,11 @@ mod integration {
                 // **********************
                 // Inside the V1 Sender:
                 // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-                let pj_uri = Uri::from_str(&pj_uri_string).unwrap().assume_checked();
+                let pj_uri = Uri::from_str(&pj_uri_string)
+                    .unwrap()
+                    .assume_checked()
+                    .check_pj_supported()
+                    .unwrap();
                 let psbt = build_original_psbt(&sender, &pj_uri)?;
                 let (Request { url, body, .. }, send_ctx) =
                     RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
@@ -800,7 +811,7 @@ mod integration {
 
         fn build_original_psbt(
             sender: &bitcoincore_rpc::Client,
-            pj_uri: &Uri<'_, NetworkChecked>,
+            pj_uri: &PjUri,
         ) -> Result<Psbt, BoxError> {
             let mut outputs = HashMap::with_capacity(1);
             outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap_or(Amount::ONE_BTC));

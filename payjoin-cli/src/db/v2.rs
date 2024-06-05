@@ -16,14 +16,16 @@ impl Database {
         Ok(())
     }
 
-    pub(crate) fn get_recv_session(&self) -> Result<Option<ActiveSession>> {
-        if let Some((_, val)) = self.0.open_tree("recv_sessions")?.first()? {
+    pub(crate) fn get_recv_sessions(&self) -> Result<Vec<ActiveSession>> {
+        let recv_tree = self.0.open_tree("recv_sessions")?;
+        let mut sessions = Vec::new();
+        for item in recv_tree.iter() {
+            let (_, value) = item?;
             let session: ActiveSession =
-                serde_json::from_slice(&val).map_err(Error::Deserialize)?;
-            Ok(Some(session))
-        } else {
-            Ok(None)
+                serde_json::from_slice(&value).map_err(Error::Deserialize)?;
+            sessions.push(session);
         }
+        Ok(sessions)
     }
 
     pub(crate) fn clear_recv_session(&self) -> Result<()> {
@@ -45,7 +47,19 @@ impl Database {
         Ok(())
     }
 
-    pub(crate) fn get_send_session(&self, pj_url: &url) -> Result<Option<RequestContext>> {
+    pub(crate) fn get_send_sessions(&self) -> Result<Vec<RequestContext>> {
+        let send_tree: Tree = self.0.open_tree("send_sessions")?;
+        let mut sessions = Vec::new();
+        for item in send_tree.iter() {
+            let (_, value) = item?;
+            let session: RequestContext =
+                serde_json::from_slice(&value).map_err(Error::Deserialize)?;
+            sessions.push(session);
+        }
+        Ok(sessions)
+    }
+
+    pub(crate) fn get_send_session(&self, pj_url: &Url) -> Result<Option<RequestContext>> {
         let send_tree = self.0.open_tree("send_sessions")?;
         if let Some(val) = send_tree.get(pj_url.to_string())? {
             let session: RequestContext =
@@ -57,8 +71,9 @@ impl Database {
     }
 
     pub(crate) fn clear_send_session(&self, pj_url: &Url) -> Result<()> {
-        self.0.remove(pj_url.to_string())?;
-        self.0.flush()?;
+        let send_tree: Tree = self.0.open_tree("send_sessions")?;
+        send_tree.remove(pj_url.to_string())?;
+        send_tree.flush()?;
         Ok(())
     }
 }

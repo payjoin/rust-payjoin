@@ -1,9 +1,11 @@
 use std::path::Path;
 
-use anyhow::Result;
 use payjoin::bitcoin::consensus::encode::serialize;
 use payjoin::bitcoin::OutPoint;
 use sled::IVec;
+
+pub(crate) mod error;
+use error::*;
 
 pub(crate) const DB_PATH: &str = "payjoin.sled";
 

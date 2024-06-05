@@ -6,7 +6,8 @@ use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::Amount;
 use payjoin::receive::v2::ActiveSession;
-use payjoin::{base64, bitcoin, Error};
+use payjoin::send::RequestContext;
+use payjoin::{base64, bitcoin, Error, Uri};
 
 use super::config::AppConfig;
 use super::App as AppTrait;
@@ -46,21 +47,23 @@ impl AppTrait for App {
         .with_context(|| "Failed to connect to bitcoind")
     }
 
-    async fn send_payjoin(&self, bip21: &str, fee_rate: &f32, is_retry: bool) -> Result<()> {
-        let mut req_ctx = if is_retry {
-            log::debug!("Resuming session");
-            // Get a reference to RequestContext
-            self.db.get_send_session()?.ok_or(anyhow!("No session found"))?
-        } else {
-            let mut req_ctx = self.create_pj_request(bip21, fee_rate)?;
-            self.db.insert_send_session(&mut req_ctx)?;
-            req_ctx
+    async fn send_payjoin(&self, bip21: &str, fee_rate: &f32) -> Result<()> {
+        use payjoin::UriExt;
+        let uri =
+            Uri::try_from(bip21).map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
+        let uri = uri.assume_checked();
+        let uri = uri.check_pj_supported().map_err(|_| anyhow!("URI does not support Payjoin"))?;
+        let url = uri.extras.endpoint();
+        // match bip21 to send_session public_key
+        let req_ctx = match self.db.get_send_session(url)? {
+            Some(send_session) => send_session,
+            None => {
+                let mut req_ctx = self.create_pj_request(&uri, fee_rate)?;
+                self.db.insert_send_session(&mut req_ctx, url)?;
+                req_ctx
+            }
         };
-        log::debug!("Awaiting response");
-        let res = self.long_poll_post(&mut req_ctx).await?;
-        self.process_pj_response(res)?;
-        self.db.clear_send_session()?;
-        Ok(())
+        self.spawn_payjoin_sender(req_ctx).await
     }
 
     async fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
@@ -97,6 +100,13 @@ impl AppTrait for App {
 }
 
 impl App {
+    async fn spawn_payjoin_sender(&self, mut req_ctx: RequestContext) -> Result<()> {
+        let res = self.long_poll_post(&mut req_ctx).await?;
+        self.process_pj_response(res)?;
+        self.db.clear_send_session(req_ctx.endpoint())?;
+        Ok(())
+    }
+
     async fn spawn_payjoin_receiver(
         &self,
         mut session: ActiveSession,

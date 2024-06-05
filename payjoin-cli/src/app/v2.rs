@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::RpcApi;
@@ -14,15 +15,16 @@ use super::App as AppTrait;
 use crate::app::http_agent;
 use crate::db::Database;
 
+#[derive(Clone)]
 pub(crate) struct App {
     config: AppConfig,
-    db: Database,
+    db: Arc<Database>,
 }
 
 #[async_trait::async_trait]
 impl AppTrait for App {
     fn new(config: AppConfig) -> Result<Self> {
-        let db = Database::create(&config.db_path)?;
+        let db = Arc::new(Database::create(&config.db_path)?);
         let app = Self { config, db };
         app.bitcoind()?
             .get_blockchain_info()
@@ -153,9 +155,28 @@ impl App {
     }
 
     pub async fn resume_payjoins(&self) -> Result<()> {
-        let session = self.db.get_recv_session()?.ok_or(anyhow!("No session found"))?;
-        println!("Resuming Payjoin session: {}", session.public_key());
-        self.spawn_payjoin_receiver(session, None).await
+        let self_clone = self.clone();
+        let mut tasks = Vec::new();
+
+        let recv_sessions = self.db.get_recv_sessions()?;
+        for recv_session in recv_sessions {
+            let self_clone = self_clone.clone();
+            tasks.push(tokio::task::spawn(async move {
+                self_clone.spawn_payjoin_receiver(recv_session, None).await
+            }));
+        }
+        let send_sessions = self.db.get_send_sessions()?;
+        for send_session in send_sessions {
+            let self_clone = self_clone.clone();
+            tasks.push(tokio::task::spawn(async move {
+                self_clone.spawn_payjoin_sender(send_session).await
+            }));
+        }
+        for task in tasks {
+            let _ = task.await?;
+        }
+        println!("All resumed sessions completed.");
+        Ok(())
     }
 
     async fn long_poll_post(&self, req_ctx: &mut payjoin::send::RequestContext) -> Result<Psbt> {

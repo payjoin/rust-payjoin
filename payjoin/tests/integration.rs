@@ -348,7 +348,7 @@ mod integration {
             tokio::select!(
             _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => assert!(false, "Ohttp relay is long running"),
             _ = init_directory(directory_port, (cert.clone(), key)) => assert!(false, "Directory server is long running"),
-            res = do_v2_send_receive(ohttp_relay, directory, cert) => assert!(res.is_ok())
+            res = do_v2_send_receive(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
             async fn do_v2_send_receive(

@@ -589,13 +589,16 @@ impl ContextV2 {
     ) -> Result<Option<Psbt>, ResponseError> {
         let mut res_buf = Vec::new();
         response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
-        let mut res_buf = crate::v2::ohttp_decapsulate(self.ohttp_res, &res_buf)
+        let response = crate::v2::ohttp_decapsulate(self.ohttp_res, &res_buf)
             .map_err(InternalValidationError::OhttpEncapsulation)?;
-        let psbt = crate::v2::decrypt_message_b(&mut res_buf, self.e)
+        let mut body = match response.status() {
+            http::StatusCode::OK => response.body().to_vec(),
+            http::StatusCode::ACCEPTED => return Ok(None),
+            _ => return Err(InternalValidationError::UnexpectedStatusCode)?,
+        };
+        let psbt = crate::v2::decrypt_message_b(&mut body, self.e)
             .map_err(InternalValidationError::HpkeError)?;
-        if psbt.is_empty() {
-            return Ok(None);
-        }
+
         let proposal = Psbt::deserialize(&psbt).map_err(InternalValidationError::Psbt)?;
         let processed_proposal = self.context_v1.process_proposal(proposal)?;
         Ok(Some(processed_proposal))

@@ -5,15 +5,15 @@ import payjoin as payjoin
 class TestURIs(unittest.TestCase):
     def test_todo_url_encoded(self):
         uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao"
-        self.assertTrue(payjoin.Uri(uri), "pj url should be url encoded")
+        self.assertTrue(payjoin.Uri.from_str(uri), "pj url should be url encoded")
 
     def test_valid_url(self):
         uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao"
-        self.assertTrue(payjoin.Uri(uri), "pj is not a valid url")
+        self.assertTrue(payjoin.Uri.from_str(uri), "pj is not a valid url")
 
     def test_missing_amount(self):
         uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://testnet.demo.btcpayserver.org/BTC/pj"
-        self.assertTrue(payjoin.Uri(uri), "missing amount should be ok")
+        self.assertTrue(payjoin.Uri.from_str(uri), "missing amount should be ok")
 
     def test_valid_uris(self):
         https = "https://example.com"
@@ -27,26 +27,26 @@ class TestURIs(unittest.TestCase):
             for pj in [https, onion]:
                 uri = f"{address}?amount=1&pj={pj}"
                 try:
-                    payjoin.Uri(uri)
+                    payjoin.Uri.from_str(uri)
                 except Exception as e:
                     self.fail(f"Failed to create a valid Uri for {uri}. Error: {e}")
                     # recieve module
 
 
-class ScriptOwnershipChecker(payjoin.IsScriptOwned):
+class ScriptOwnershipCallback(payjoin.IsScriptOwned):
     def __init__(self, value):
         self.value = value
 
-    def is_owned(self, script: payjoin.ScriptBuf):
+    def callback(self, script):
         return self.value
 
 
-class OutputOwnershipChecker(payjoin.IsOutputKnown):
+class OutputOwnershipCallback(payjoin.IsOutputKnown):
     def __init__(self, value):
         self.value = value
 
-    def is_known(self, outpoint: payjoin.OutPoint):
-        return self.value
+    def callback(self, outpoint: payjoin.OutPoint):
+        return False
 
 
 class TestReceiveModule(unittest.TestCase):
@@ -95,10 +95,10 @@ class TestReceiveModule(unittest.TestCase):
             )
             proposal = (
                 unchecked_proposal.assume_interactive_receiver()
-                .check_inputs_not_owned(ScriptOwnershipChecker(False))
+                .check_inputs_not_owned(ScriptOwnershipCallback(False))
                 .check_no_mixed_input_scripts()
-                .check_no_inputs_seen_before(OutputOwnershipChecker(False))
-                .identify_receiver_outputs(ScriptOwnershipChecker(True))
+                .check_no_inputs_seen_before(OutputOwnershipCallback(False))
+                .identify_receiver_outputs(ScriptOwnershipCallback(True))
             )
             # payjoin_proposal = proposal.apply_fee(1)
             # print(payjoin_proposal.serialize())

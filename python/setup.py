@@ -21,11 +21,11 @@ setup(
     description="The Python language bindings for the Payjoin Dev Kit",
     long_description=LONG_DESCRIPTION,
     long_description_content_type="text/markdown",
-    include_package_data = True,
+    include_package_data=True,
     zip_safe=False,
     packages=["payjoin"],
     package_dir={"payjoin": "./src/payjoin"},
-    version='0.1.0.dev',
+    version='0.13.dev.0',
     license="MIT or Apache 2.0",
     has_ext_modules=lambda: True,
 )

@@ -10,11 +10,9 @@ use bdk::database::MemoryDatabase;
 use bdk::wallet::AddressIndex;
 use bdk::{FeeRate, LocalUtxo, SignOptions, Wallet as BdkWallet};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
-use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin_ffi::error::PayjoinError;
 use payjoin_ffi::receive::v1::{
-    Headers, IsOutputKnown, IsScriptOwned, PayjoinProposal, ProcessPartiallySignedTransaction,
-    UncheckedProposal,
+    Headers, PayjoinProposal, UncheckedProposal,
 };
 use payjoin_ffi::types::{Network, OutPoint, Request, TxOut};
 use payjoin_ffi::uri::Uri;
@@ -99,7 +97,7 @@ fn init_sender_receiver_wallet() -> (Wallet, Wallet, Client) {
         .unwrap();
     client
         .generate_to_address(
-            51,
+            11,
             &bitcoincore_rpc::bitcoin::address::Address::from_str(&*receiver_address.to_string())
                 .unwrap()
                 .assume_checked(),
@@ -226,12 +224,13 @@ fn handle_proposal(proposal: UncheckedProposal, receiver: Wallet) -> Arc<Payjoin
 
     // Receive Check 1: Can Broadcast
     let proposal = proposal
-        .check_broadcast_suitability(None, Box::new(MockCanBroadcast()))
+        .check_broadcast_suitability(None, |_| Ok(true) )
         .expect("Payjoin proposal should be broadcastable");
 
     // Receive Check 2: receiver can't sign for proposal inputs
     let proposal = proposal
-        .check_inputs_not_owned(Box::new(MockScriptOwned { 0: Arc::clone(&receiver) }))
+        .check_inputs_not_owned(|e| receiver.is_mine(Script::from_bytes(e.as_slice()))
+            .map_err(|x| PayjoinError::UnexpectedError { message: x.to_string() }))
         .expect("Receiver should not own any of the inputs");
 
     // Receive Check 3: receiver can't sign for proposal inputs
@@ -239,9 +238,10 @@ fn handle_proposal(proposal: UncheckedProposal, receiver: Wallet) -> Arc<Payjoin
 
     // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
     let payjoin = proposal
-        .check_no_inputs_seen_before(Box::new(MockOutputOwned {}))
+        .check_no_inputs_seen_before(|_| Ok(false))
         .unwrap()
-        .identify_receiver_outputs(Box::new(MockScriptOwned { 0: Arc::clone(&receiver) }))
+        .identify_receiver_outputs(|e| receiver.is_mine(Script::from_bytes(e.as_slice()))
+            .map_err(|x| PayjoinError::UnexpectedError { message: x.to_string() }))
         .expect("Receiver should have at least one output");
 
     // Select receiver payjoin inputs. TODO Lock them.
@@ -280,7 +280,11 @@ fn handle_proposal(proposal: UncheckedProposal, receiver: Wallet) -> Arc<Payjoin
         .expect("substitute_output_address error");
     let payjoin_proposal = payjoin
         .finalize_proposal(
-            Box::new(MockProcessPartiallySignedTransaction(Arc::clone(&receiver))),
+           |e| match receiver.sign(&mut PartiallySignedTransaction::from_str(&*e.as_str()).unwrap(), true)
+           {
+               Ok(e) => Ok(e.to_string()),
+               Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
+           },
             Some(10),
         )
         .expect("finalize error");
@@ -361,42 +365,9 @@ mod v1 {
     }
 }
 
-struct MockCanBroadcast();
 
-impl payjoin_ffi::receive::v1::CanBroadcast for MockCanBroadcast {
-    fn callback(&self, tx: Vec<u8>) -> Result<bool, PayjoinError> {
-        debug!("{}", serialize_hex(&tx));
-        Ok(true)
-    }
-}
 
-struct MockProcessPartiallySignedTransaction(Arc<Wallet>);
 
-impl ProcessPartiallySignedTransaction for MockProcessPartiallySignedTransaction {
-    fn callback(&self, psbt: String) -> Result<String, PayjoinError> {
-        match self.0.sign(&mut PartiallySignedTransaction::from_str(&*psbt.as_str()).unwrap(), true)
-        {
-            Ok(e) => Ok(e.to_string()),
-            Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
-        }
-    }
-}
 
-struct MockOutputOwned {}
-impl IsOutputKnown for MockOutputOwned {
-    fn callback(&self, outpoint: OutPoint) -> Result<bool, PayjoinError> {
-        debug!("{:?}", outpoint);
-        Ok(false)
-    }
-}
 
-struct MockScriptOwned(Arc<Wallet>);
 
-impl IsScriptOwned for MockScriptOwned {
-    fn callback(&self, script: Vec<u8>) -> Result<bool, PayjoinError> {
-        self.0
-            .clone()
-            .is_mine(Script::from_bytes(script.as_slice()))
-            .map_err(|x| PayjoinError::UnexpectedError { message: x.to_string() })
-    }
-}

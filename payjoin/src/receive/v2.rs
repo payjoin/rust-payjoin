@@ -526,17 +526,27 @@ impl PayjoinProposal {
     }
 
     #[cfg(feature = "v2")]
-    pub fn deserialize_res(
+    /// Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
+    ///
+    /// This function decapsulates the response using the provided OHTTP context. If the response status is successful,
+    /// it indicates that the Payjoin proposal has been accepted. Otherwise, it returns an error with the status code.
+    ///
+    /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or
+    /// choose to broadcast the original PSBT.
+    pub fn process_res(
         &self,
         res: Vec<u8>,
         ohttp_context: ohttp::ClientResponse,
-    ) -> Result<Vec<u8>, Error> {
+    ) -> Result<(), Error> {
         let res = crate::v2::ohttp_decapsulate(ohttp_context, &res)?;
-        res.status().is_success().then(|| res.body().to_vec()).ok_or_else(|| {
-            Error::Server(
-                format!("Enrollment failed, expected Success status, got {}", res.status()).into(),
-            )
-        })
+        if res.status().is_success() {
+            Ok(())
+        } else {
+            Err(Error::Server(
+                format!("Payjoin Post failed, expected Success status, got {}", res.status())
+                    .into(),
+            ))
+        }
     }
 }
 

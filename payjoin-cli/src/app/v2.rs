@@ -5,7 +5,7 @@ use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::Amount;
-use payjoin::{base64, bitcoin, Error, PjUriBuilder};
+use payjoin::{base64, bitcoin, Error};
 
 use super::config::AppConfig;
 use super::App as AppTrait;
@@ -98,10 +98,13 @@ impl AppTrait for App {
         };
 
         println!("Receive session established");
-        let pj_uri_string =
-            self.construct_payjoin_uri(amount_arg, &session.fallback_target(), ohttp_keys)?;
+
+        let address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
+        let amount = Amount::from_sat(amount_arg.parse()?);
+        let pj_uri = session.pj_uri_builder(address).amount(amount).build();
+
         println!("Request Payjoin by sharing this Payjoin Uri:");
-        println!("{}", pj_uri_string);
+        println!("{}", pj_uri.to_string());
 
         let res = self.long_poll_fallback(&mut session).await?;
         println!("Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:");
@@ -135,24 +138,6 @@ impl AppTrait for App {
 }
 
 impl App {
-    fn construct_payjoin_uri(
-        &self,
-        amount_arg: &str,
-        fallback_target: &str,
-        ohttp_keys: payjoin::OhttpKeys,
-    ) -> Result<String> {
-        let pj_receiver_address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
-        let amount = Amount::from_sat(amount_arg.parse()?);
-        let pj_part = payjoin::Url::parse(fallback_target)
-            .map_err(|e| anyhow!("Failed to parse Payjoin subdirectory target: {}", e))?;
-
-        let pj_uri = PjUriBuilder::new(pj_receiver_address, pj_part, Some(ohttp_keys))
-            .amount(amount)
-            .build();
-
-        Ok(pj_uri.to_string())
-    }
-
     async fn long_poll_post(&self, req_ctx: &mut payjoin::send::RequestContext) -> Result<Psbt> {
         loop {
             let (req, ctx) = req_ctx.extract_v2(self.config.ohttp_relay.clone())?;

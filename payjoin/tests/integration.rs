@@ -378,7 +378,7 @@ mod integration {
                 let pj_uri_string = create_receiver_pj_uri_string(
                     &receiver,
                     ohttp_keys,
-                    &session.fallback_target(),
+                    session.pj_url().as_str(),
                 )?;
 
                 // Poll receive request
@@ -487,7 +487,7 @@ mod integration {
                 let pj_uri_string = create_receiver_pj_uri_string(
                     &receiver,
                     ohttp_keys,
-                    &session.fallback_target(),
+                    session.pj_url().as_str(),
                 )?;
 
                 // **********************

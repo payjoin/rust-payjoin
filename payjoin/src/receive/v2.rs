@@ -3,6 +3,7 @@ use std::fmt;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
+use bitcoin::address::NetworkUnchecked;
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::{rand, PublicKey};
 use bitcoin::{base64, Address, Amount, FeeRate, OutPoint, Script, TxOut};
@@ -18,6 +19,7 @@ use crate::{OhttpKeys, PjUriBuilder, Request};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SessionContext {
+    address: Address,
     directory: url::Url,
     ohttp_keys: OhttpKeys,
     expiry: SystemTime,
@@ -34,6 +36,7 @@ pub struct SessionInitializer {
 #[cfg(feature = "v2")]
 impl SessionInitializer {
     pub fn new(
+        address: Address,
         directory: Url,
         ohttp_keys: OhttpKeys,
         ohttp_relay: Url,
@@ -43,6 +46,7 @@ impl SessionInitializer {
         let (sk, _) = secp.generate_keypair(&mut rand::rngs::OsRng);
         Self {
             context: SessionContext {
+                address,
                 directory,
                 ohttp_keys,
                 ohttp_relay,
@@ -179,8 +183,12 @@ impl ActiveSession {
         Ok(UncheckedProposal { inner, context: self.context.clone() })
     }
 
-    pub fn pj_uri_builder(&self, address: Address) -> PjUriBuilder {
-        PjUriBuilder::new(address, self.pj_url(), Some(self.context.ohttp_keys.clone()))
+    pub fn pj_uri_builder(&self) -> PjUriBuilder {
+        PjUriBuilder::new(
+            self.context.address.clone(),
+            self.pj_url(),
+            Some(self.context.ohttp_keys.clone()),
+        )
     }
 
     // The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
@@ -473,6 +481,7 @@ impl Serialize for SessionContext {
         S: Serializer,
     {
         let mut state = serializer.serialize_struct("SessionContext", 4)?;
+        state.serialize_field("address", &self.address)?;
         state.serialize_field("directory", &self.directory)?;
         state.serialize_field("ohttp_keys", &self.ohttp_keys)?;
         state.serialize_field("ohttp_relay", &self.ohttp_relay)?;
@@ -492,6 +501,7 @@ impl<'de> Deserialize<'de> for SessionContext {
         #[derive(Deserialize)]
         #[serde(field_identifier, rename_all = "snake_case")]
         enum Field {
+            Address,
             Directory,
             OhttpKeys,
             OhttpRelay,
@@ -513,6 +523,7 @@ impl<'de> Deserialize<'de> for SessionContext {
             where
                 V: MapAccess<'de>,
             {
+                let mut address: Option<Address<NetworkUnchecked>> = None;
                 let mut directory = None;
                 let mut ohttp_keys = None;
                 let mut ohttp_relay = None;
@@ -521,6 +532,12 @@ impl<'de> Deserialize<'de> for SessionContext {
                 let mut e = None;
                 while let Some(key) = map.next_key()? {
                     match key {
+                        Field::Address => {
+                            if address.is_some() {
+                                return Err(de::Error::duplicate_field("address"));
+                            }
+                            address = Some(map.next_value()?);
+                        }
                         Field::Directory => {
                             if directory.is_some() {
                                 return Err(de::Error::duplicate_field("directory"));
@@ -559,6 +576,9 @@ impl<'de> Deserialize<'de> for SessionContext {
                         }
                     }
                 }
+                let address = address
+                    .ok_or_else(|| de::Error::missing_field("address"))
+                    .map(|a| a.assume_checked())?;
                 let directory = directory.ok_or_else(|| de::Error::missing_field("directory"))?;
                 let ohttp_keys =
                     ohttp_keys.ok_or_else(|| de::Error::missing_field("ohttp_keys"))?;
@@ -567,7 +587,7 @@ impl<'de> Deserialize<'de> for SessionContext {
                 let expiry = expiry.ok_or_else(|| de::Error::missing_field("expiry"))?;
                 let s = s.ok_or_else(|| de::Error::missing_field("s"))?;
                 let e = e.ok_or_else(|| de::Error::missing_field("e"))?;
-                Ok(SessionContext { directory, ohttp_keys, ohttp_relay, expiry, s, e })
+                Ok(SessionContext { address, directory, ohttp_keys, ohttp_relay, expiry, s, e })
             }
         }
 
@@ -592,6 +612,9 @@ mod test {
 
         let session = ActiveSession {
             context: SessionContext {
+                address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
+                    .unwrap()
+                    .assume_checked(),
                 directory: url::Url::parse("https://directory.com").unwrap(),
                 ohttp_keys: OhttpKeys(
                     ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap(),

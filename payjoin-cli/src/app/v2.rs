@@ -65,9 +65,12 @@ impl AppTrait for App {
     async fn receive_payjoin(self, amount_arg: &str, is_retry: bool) -> Result<()> {
         use payjoin::receive::v2::SessionInitializer;
 
+        let address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
+        let amount = Amount::from_sat(amount_arg.parse()?);
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
         let mut session = if !is_retry {
             let mut initializer = SessionInitializer::new(
+                address,
                 self.config.pj_directory.clone(),
                 ohttp_keys.clone(),
                 self.config.ohttp_relay.clone(),
@@ -98,10 +101,7 @@ impl AppTrait for App {
         };
 
         println!("Receive session established");
-
-        let address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
-        let amount = Amount::from_sat(amount_arg.parse()?);
-        let pj_uri = session.pj_uri_builder(address).amount(amount).build();
+        let pj_uri = session.pj_uri_builder().amount(amount).build();
 
         println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{}", pj_uri.to_string());

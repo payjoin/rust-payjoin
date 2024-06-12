@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::{rand, PublicKey};
-use bitcoin::{base64, Amount, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::{base64, Address, Amount, FeeRate, OutPoint, Script, TxOut};
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -14,7 +14,7 @@ use url::Url;
 use super::{Error, InternalRequestError, RequestError, SelectionError};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
-use crate::{OhttpKeys, Request};
+use crate::{OhttpKeys, PjUriBuilder, Request};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SessionContext {
@@ -128,13 +128,11 @@ impl ActiveSession {
     }
 
     fn fallback_req_body(&mut self) -> Result<(Vec<u8>, ohttp::ClientResponse), Error> {
-        let fallback_target = format!("{}{}", &self.context.directory, self.fallback_target());
-        log::trace!("Fallback request target: {}", fallback_target.as_str());
-        let fallback_target = self.fallback_target();
+        let fallback_target = self.pj_url();
         Ok(crate::v2::ohttp_encapsulate(
             &mut self.context.ohttp_keys,
             "GET",
-            &fallback_target,
+            fallback_target.as_str(),
             None,
         )?)
     }
@@ -181,11 +179,22 @@ impl ActiveSession {
         Ok(UncheckedProposal { inner, context: self.context.clone() })
     }
 
-    pub fn fallback_target(&self) -> String {
+    pub fn pj_uri_builder(&self, address: Address) -> PjUriBuilder {
+        PjUriBuilder::new(address, self.pj_url(), Some(self.context.ohttp_keys.clone()))
+    }
+
+    // The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
+    // This identifies a session at the payjoin directory server.
+    pub fn pj_url(&self) -> Url {
         let pubkey = &self.context.s.public_key().serialize();
-        let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-        let pubkey_base64 = base64::encode_config(pubkey, b64_config);
-        format!("{}{}", &self.context.directory, pubkey_base64)
+        let pubkey_base64 = base64::encode_config(pubkey, base64::URL_SAFE_NO_PAD);
+        let mut url = self.context.directory.clone();
+        {
+            let mut path_segments =
+                url.path_segments_mut().expect("Payjoin Directory URL cannot be a base");
+            path_segments.push(&pubkey_base64);
+        }
+        url
     }
 
     /// The per-session public key to use as an identifier

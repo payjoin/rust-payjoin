@@ -18,7 +18,7 @@ exclude = ["tests"]
 send = []
 receive = ["bitcoin/rand"]
 base64 = ["bitcoin/base64"]
-v2 = ["bitcoin/rand", "bitcoin/serde", "chacha20poly1305", "ohttp", "bhttp", "serde"]
+v2 = ["bitcoin/rand", "bitcoin/serde", "chacha20poly1305", "ohttp", "bhttp", "serde", "url/serde"]
 io = ["reqwest/rustls-tls"]
 danger-local-https = ["io", "reqwest/rustls-tls", "rustls"]
 

@@ -95,9 +95,9 @@ impl Serialize for Enrolled {
         S: Serializer,
     {
         let mut state = serializer.serialize_struct("Enrolled", 4)?;
-        state.serialize_field("directory", &self.directory.to_string())?;
+        state.serialize_field("directory", &self.directory)?;
         state.serialize_field("ohttp_keys", &self.ohttp_keys)?;
-        state.serialize_field("ohttp_relay", &self.ohttp_relay.to_string())?;
+        state.serialize_field("ohttp_relay", &self.ohttp_relay)?;
         state.serialize_field("s", &self.s)?;
 
         state.end()
@@ -146,8 +146,7 @@ impl<'de> Deserialize<'de> for Enrolled {
                             if directory.is_some() {
                                 return Err(de::Error::duplicate_field("directory"));
                             }
-                            let url_str: String = map.next_value()?;
-                            directory = Some(url::Url::parse(&url_str).map_err(de::Error::custom)?);
+                            directory = Some(map.next_value()?);
                         }
                         Field::OhttpKeys => {
                             if ohttp_keys.is_some() {
@@ -159,9 +158,7 @@ impl<'de> Deserialize<'de> for Enrolled {
                             if ohttp_relay.is_some() {
                                 return Err(de::Error::duplicate_field("ohttp_relay"));
                             }
-                            let relay_str: String = map.next_value()?;
-                            ohttp_relay =
-                                Some(url::Url::parse(&relay_str).map_err(de::Error::custom)?);
+                            ohttp_relay = Some(map.next_value()?);
                         }
                         Field::S => {
                             if s.is_some() {

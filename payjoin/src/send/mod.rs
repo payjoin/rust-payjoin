@@ -799,7 +799,7 @@ impl ContextV1 {
                     proposed_psbtin.non_witness_utxo = original.psbtin.non_witness_utxo.clone();
                     proposed_psbtin.witness_utxo = original.psbtin.witness_utxo.clone();
                     proposed_psbtin.bip32_derivation = original.psbtin.bip32_derivation.clone();
-                    proposed_psbtin.tap_internal_key = original.psbtin.tap_internal_key.clone();
+                    proposed_psbtin.tap_internal_key = original.psbtin.tap_internal_key;
                     proposed_psbtin.tap_key_origins = original.psbtin.tap_key_origins.clone();
                     original_inputs.next();
                 }

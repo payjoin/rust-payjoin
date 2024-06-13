@@ -12,9 +12,8 @@ use crate::receive::v1::{
 };
 #[allow(unused_imports)]
 use crate::receive::v1::{
-   Headers,  MaybeInputsOwned, MaybeInputsSeen,
-    MaybeMixedInputScripts, OutputsUnknown, PayjoinProposal,
-    ProvisionalProposal, UncheckedProposal,
+    Headers, MaybeInputsOwned, MaybeInputsSeen, MaybeMixedInputScripts, OutputsUnknown,
+    PayjoinProposal, ProvisionalProposal, UncheckedProposal,
 };
 #[allow(unused_imports)]
 use crate::receive::v2::{

@@ -3,11 +3,10 @@ extern crate core;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+
 use bitcoincore_rpc::bitcoincore_rpc_json::WalletProcessPsbtResult;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
-use payjoin_ffi::receive::v1::{
-  Headers,PayjoinProposal, UncheckedProposal,
-};
+use payjoin_ffi::receive::v1::{Headers, PayjoinProposal, UncheckedProposal};
 use payjoin_ffi::send::v1::RequestBuilder;
 use payjoin_ffi::types::{OutPoint, Request, TxOut};
 use payjoin_ffi::uri::{PjUriBuilder, Uri, Url};
@@ -25,7 +24,14 @@ fn v1_to_v1_full_cycle() -> Result<(), BoxError> {
 
     // Receiver creates the payjoin URI
     let pj_receiver_address = receiver.get_new_address(None, None).unwrap().assume_checked();
-    let pj_uri_string = PjUriBuilder::new(pj_receiver_address.to_string(), Url::from_str("https://example.com".to_string())?, None )?.amount( 0.0083285).build().as_string();
+    let pj_uri_string = PjUriBuilder::new(
+        pj_receiver_address.to_string(),
+        Url::from_str("https://example.com".to_string())?,
+        None,
+    )?
+    .amount(0.0083285)
+    .build()
+    .as_string();
     print!("pj_uri {}", pj_uri_string);
 
     let pj_uri = Uri::from_str(pj_uri_string).unwrap();
@@ -54,7 +60,7 @@ fn v1_to_v1_full_cycle() -> Result<(), BoxError> {
         .psbt;
     let psbt_base64 = sender.wallet_process_psbt(&psbt, None, None, None)?.psbt;
     eprintln!("Original psbt: {:#?}", psbt_base64);
-   let req_ctx = RequestBuilder::from_psbt_and_uri(psbt_base64, Arc::new(pj_uri))?
+    let req_ctx = RequestBuilder::from_psbt_and_uri(psbt_base64, Arc::new(pj_uri))?
         .build_with_additional_fee(10000, None, 0, false)?
         .extract_v1()?;
     let req = req_ctx.request;
@@ -95,13 +101,19 @@ fn handle_pj_proposal(proposal: UncheckedProposal, receiver: Arc<Client>) -> Arc
     // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
     let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
     let inputs_owned = proposal
-        .check_broadcast_suitability(None, |tx| Ok(receiver
-            .test_mempool_accept(&[payjoin::bitcoin::consensus::encode::serialize_hex(
-                &payjoin::bitcoin::consensus::encode::deserialize::<payjoin::bitcoin::Transaction>(tx).unwrap())])
-            .unwrap()
-            .first()
-            .unwrap()
-            .allowed))
+        .check_broadcast_suitability(None, |tx| {
+            Ok(receiver
+                .test_mempool_accept(&[payjoin::bitcoin::consensus::encode::serialize_hex(
+                    &payjoin::bitcoin::consensus::encode::deserialize::<
+                        payjoin::bitcoin::Transaction,
+                    >(tx)
+                    .unwrap(),
+                )])
+                .unwrap()
+                .first()
+                .unwrap()
+                .allowed)
+        })
         .expect("Payjoin proposal should be broadcast");
 
     // Receive Check 2: receiver can't sign for proposal inputs
@@ -111,7 +123,7 @@ fn handle_pj_proposal(proposal: UncheckedProposal, receiver: Arc<Client>) -> Arc
                 bitcoincore_rpc::bitcoin::Script::from_bytes(e.as_slice()),
                 bitcoincore_rpc::bitcoin::Network::Regtest,
             )
-                .unwrap();
+            .unwrap();
             Ok(receiver.get_address_info(&addr).unwrap().is_mine.unwrap())
         })
         .expect("Receiver should not own any of the inputs");
@@ -130,7 +142,7 @@ fn handle_pj_proposal(proposal: UncheckedProposal, receiver: Arc<Client>) -> Arc
                     bitcoincore_rpc::bitcoin::Script::from_bytes(e.as_slice()),
                     network,
                 )
-                    .unwrap();
+                .unwrap();
                 Ok(receiver.get_address_info(&addr).unwrap().is_mine.unwrap())
             })
             .expect("Receiver should have at least one output"),
@@ -167,11 +179,15 @@ fn handle_pj_proposal(proposal: UncheckedProposal, receiver: Arc<Client>) -> Arc
         receiver.get_new_address(None, None).unwrap().assume_checked();
     payjoin.substitute_output_address(receiver_substitute_address.to_string()).unwrap();
     let payjoin_proposal = payjoin
-        .finalize_proposal(|e|{
-            Ok(receiver
-                .wallet_process_psbt(e.as_str(), Some(true), None, Some(false))
-                .map(|res: WalletProcessPsbtResult| res.psbt).unwrap())
-        }, Some(1))
+        .finalize_proposal(
+            |e| {
+                Ok(receiver
+                    .wallet_process_psbt(e.as_str(), Some(true), None, Some(false))
+                    .map(|res: WalletProcessPsbtResult| res.psbt)
+                    .unwrap())
+            },
+            Some(1),
+        )
         .expect("Failed to finalize proposal");
     payjoin_proposal
 }

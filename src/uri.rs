@@ -103,18 +103,11 @@ impl PjUriBuilder {
         ohttp_keys: Option<OhttpKeys>,
     ) -> Result<Self, PayjoinError> {
         let address = payjoin::bitcoin::Address::from_str(&address)?.assume_checked();
-        Ok(Self {
-            inner: payjoin::PjUriBuilder::new(
-                address,
-                pj.into(),
-                ohttp_keys.map(|e| e.0),
-            ),
-        })
+        Ok(Self { inner: payjoin::PjUriBuilder::new(address, pj.into(), ohttp_keys.map(|e| e.0)) })
     }
     ///Set the amount in btc you want to receive.
     pub fn amount(self, amount: f64) -> Self {
-
-        let amount = payjoin::bitcoin::Amount::from_sat((amount*100_001_890.0) as u64);
+        let amount = payjoin::bitcoin::Amount::from_sat((amount * 100_001_890.0) as u64);
         Self { inner: self.inner.amount(amount) }
     }
     ///Set the message.

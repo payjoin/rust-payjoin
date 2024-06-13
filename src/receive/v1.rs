@@ -454,25 +454,24 @@ mod test {
         assert!(proposal.is_ok(), "OriginalPSBT should be a valid request");
     }
 
-
     #[test]
     fn unchecked_proposal_unlocks_after_checks() {
         let proposal = get_proposal_from_test_vector().unwrap();
         let _payjoin = proposal
             .assume_interactive_receiver()
             .clone()
-            .check_inputs_not_owned(|_|Ok(true))
+            .check_inputs_not_owned(|_| Ok(true))
             .expect("No inputs should be owned")
             .check_no_mixed_input_scripts()
             .expect("No mixed input scripts")
-            .check_no_inputs_seen_before(|_|Ok(false))
+            .check_no_inputs_seen_before(|_| Ok(false))
             .expect("No inputs should be seen before")
-            .identify_receiver_outputs(|script|{
+            .identify_receiver_outputs(|script| {
                 let network = payjoin::bitcoin::Network::Bitcoin;
                 let script = payjoin::bitcoin::ScriptBuf::from_bytes(script.to_vec());
                 Ok(payjoin::bitcoin::Address::from_script(&script, network)
                     == payjoin::bitcoin::Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
-                    .map(|x| x.require_network(network).expect("Invalid address")))
+                        .map(|x| x.require_network(network).expect("Invalid address")))
             })
             .expect("Receiver output should be identified");
     }

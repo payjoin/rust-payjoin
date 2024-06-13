@@ -11,9 +11,7 @@ use bdk::wallet::AddressIndex;
 use bdk::{FeeRate, LocalUtxo, SignOptions, Wallet as BdkWallet};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use payjoin_ffi::error::PayjoinError;
-use payjoin_ffi::receive::v1::{
-    Headers, PayjoinProposal, UncheckedProposal,
-};
+use payjoin_ffi::receive::v1::{Headers, PayjoinProposal, UncheckedProposal};
 use payjoin_ffi::types::{Network, OutPoint, Request, TxOut};
 use payjoin_ffi::uri::Uri;
 use uniffi::deps::log::debug;
@@ -224,13 +222,16 @@ fn handle_proposal(proposal: UncheckedProposal, receiver: Wallet) -> Arc<Payjoin
 
     // Receive Check 1: Can Broadcast
     let proposal = proposal
-        .check_broadcast_suitability(None, |_| Ok(true) )
+        .check_broadcast_suitability(None, |_| Ok(true))
         .expect("Payjoin proposal should be broadcastable");
 
     // Receive Check 2: receiver can't sign for proposal inputs
     let proposal = proposal
-        .check_inputs_not_owned(|e| receiver.is_mine(Script::from_bytes(e.as_slice()))
-            .map_err(|x| PayjoinError::UnexpectedError { message: x.to_string() }))
+        .check_inputs_not_owned(|e| {
+            receiver
+                .is_mine(Script::from_bytes(e.as_slice()))
+                .map_err(|x| PayjoinError::UnexpectedError { message: x.to_string() })
+        })
         .expect("Receiver should not own any of the inputs");
 
     // Receive Check 3: receiver can't sign for proposal inputs
@@ -240,8 +241,11 @@ fn handle_proposal(proposal: UncheckedProposal, receiver: Wallet) -> Arc<Payjoin
     let payjoin = proposal
         .check_no_inputs_seen_before(|_| Ok(false))
         .unwrap()
-        .identify_receiver_outputs(|e| receiver.is_mine(Script::from_bytes(e.as_slice()))
-            .map_err(|x| PayjoinError::UnexpectedError { message: x.to_string() }))
+        .identify_receiver_outputs(|e| {
+            receiver
+                .is_mine(Script::from_bytes(e.as_slice()))
+                .map_err(|x| PayjoinError::UnexpectedError { message: x.to_string() })
+        })
         .expect("Receiver should have at least one output");
 
     // Select receiver payjoin inputs. TODO Lock them.
@@ -280,11 +284,14 @@ fn handle_proposal(proposal: UncheckedProposal, receiver: Wallet) -> Arc<Payjoin
         .expect("substitute_output_address error");
     let payjoin_proposal = payjoin
         .finalize_proposal(
-           |e| match receiver.sign(&mut PartiallySignedTransaction::from_str(&*e.as_str()).unwrap(), true)
-           {
-               Ok(e) => Ok(e.to_string()),
-               Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
-           },
+            |e| {
+                match receiver
+                    .sign(&mut PartiallySignedTransaction::from_str(&*e.as_str()).unwrap(), true)
+                {
+                    Ok(e) => Ok(e.to_string()),
+                    Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
+                }
+            },
             Some(10),
         )
         .expect("finalize error");
@@ -364,10 +371,3 @@ mod v1 {
         Ok(())
     }
 }
-
-
-
-
-
-
-

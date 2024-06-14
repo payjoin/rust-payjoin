@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
@@ -12,6 +13,7 @@ use crate::receive::v1::{
     CanBroadcast, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction,
 };
 use crate::{OhttpKeys, OutPoint, PayjoinError, Request, TxOut, Url};
+use crate::types::Network;
 
 pub struct ClientResponse(Mutex<Option<ohttp::ClientResponse>>);
 
@@ -33,29 +35,49 @@ pub struct RequestResponse {
 }
 
 #[derive(Clone, Debug)]
-pub struct Enroller(pub payjoin::receive::v2::Enroller);
-impl From<Enroller> for payjoin::receive::v2::Enroller {
-    fn from(value: Enroller) -> Self {
+pub struct SessionInitializer(pub payjoin::receive::v2::SessionInitializer);
+impl From<SessionInitializer> for payjoin::receive::v2::SessionInitializer {
+    fn from(value: SessionInitializer) -> Self {
         value.0
     }
 }
 
-impl From<payjoin::receive::v2::Enroller> for Enroller {
-    fn from(value: payjoin::receive::v2::Enroller) -> Self {
+impl From<payjoin::receive::v2::SessionInitializer> for SessionInitializer {
+    fn from(value: payjoin::receive::v2::SessionInitializer) -> Self {
         Self(value)
     }
 }
 
-impl Enroller {
-    pub fn from_directory_config(
+impl SessionInitializer {
+    /// Creates a new `SessionInitializer` with the provided parameters.
+    ///
+    /// # Parameters
+    /// - `address`: The Bitcoin address for the payjoin session.
+    /// - `directory`: The URL of the store-and-forward payjoin directory.
+    /// - `ohttp_keys`: The OHTTP keys used for encrypting and decrypting HTTP requests and responses.
+    /// - `ohttp_relay`: The URL of the OHTTP relay, used to keep client IP address confidential.
+    /// - `expire_after`: The duration in seconds after which the session expires.
+    ///
+    /// # Returns
+    /// A new instance of `SessionInitializer`.
+    ///
+    /// # References
+    /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
+    pub fn new(
+        address: String,
+        expire_after: u64,
+        network:Network,
         directory: Arc<Url>,
         ohttp_keys: Arc<OhttpKeys>,
         ohttp_relay: Arc<Url>,
     ) -> Self {
-        payjoin::receive::v2::Enroller::from_directory_config(
+        let address = payjoin::bitcoin::Address::from_str(address.as_str())?.require_network(network.into())?;
+        payjoin::receive::v2::SessionInitializer::new(
+            address,
             (*directory).clone().into(),
             (*ohttp_keys).clone().into(),
             (*ohttp_relay).clone().into(),
+            Duration::from_secs(expire_after)
         )
         .into()
     }
@@ -81,10 +103,10 @@ impl Enroller {
         &self,
         body: Vec<u8>,
         ctx: ohttp::ClientResponse,
-    ) -> Result<Arc<Enrolled>, PayjoinError> {
-        <Enroller as Into<payjoin::receive::v2::Enroller>>::into(self.clone())
+    ) -> Result<ActiveSession, PayjoinError> {
+        <SessionInitializer as Into<payjoin::receive::v2::SessionInitializer>>::into(self.clone())
             .process_res(Cursor::new(body), ctx)
-            .map(|e| Arc::new(e.into()))
+            .map(|e| e.into())
             .map_err(|e| e.into())
     }
     #[cfg(feature = "uniffi")]
@@ -92,30 +114,30 @@ impl Enroller {
         &self,
         body: Vec<u8>,
         ctx: Arc<ClientResponse>,
-    ) -> Result<Arc<Enrolled>, PayjoinError> {
-        <Enroller as Into<payjoin::receive::v2::Enroller>>::into(self.clone())
+    ) -> Result<Arc<ActiveSession>, PayjoinError> {
+        <SessionInitializer as Into<payjoin::receive::v2::SessionInitializer>>::into(self.clone())
             .process_res(Cursor::new(body), ctx.as_ref().into())
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
     }
 }
 #[derive(Clone, Debug)]
-pub struct Enrolled(payjoin::receive::v2::Enrolled);
+pub struct ActiveSession(payjoin::receive::v2::ActiveSession);
 
-impl From<Enrolled> for payjoin::receive::v2::Enrolled {
-    fn from(value: Enrolled) -> Self {
+impl From<ActiveSession> for payjoin::receive::v2::ActiveSession {
+    fn from(value: ActiveSession) -> Self {
         value.0
     }
 }
 
-impl From<payjoin::receive::v2::Enrolled> for Enrolled {
-    fn from(value: payjoin::receive::v2::Enrolled) -> Self {
+impl From<payjoin::receive::v2::ActiveSession> for ActiveSession {
+    fn from(value: payjoin::receive::v2::ActiveSession) -> Self {
         Self(value)
     }
 }
-impl Enrolled {
+impl ActiveSession {
     pub fn fallback_target(&self) -> String {
-        <Enrolled as Into<payjoin::receive::v2::Enrolled>>::into(self.clone()).fallback_target()
+        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone()).fallback_target()
     }
     #[cfg(feature = "uniffi")]
     pub fn extract_req(&self) -> Result<RequestResponse, PayjoinError> {
@@ -140,7 +162,7 @@ impl Enrolled {
         body: Vec<u8>,
         context: Arc<ClientResponse>,
     ) -> Result<Option<Arc<V2UncheckedProposal>>, PayjoinError> {
-        <Enrolled as Into<payjoin::receive::v2::Enrolled>>::into(self.clone())
+        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
             .process_res(Cursor::new(body), context.as_ref().into())
             .map(|e| e.map(|x| Arc::new(x.into())))
             .map_err(|e| e.into())
@@ -151,7 +173,7 @@ impl Enrolled {
         body: Vec<u8>,
         ctx: ohttp::ClientResponse,
     ) -> Result<Option<V2UncheckedProposal>, PayjoinError> {
-        <Enrolled as Into<payjoin::receive::v2::Enrolled>>::into(self.clone())
+        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
             .process_res(Cursor::new(body), ctx)
             .map(|e| e.map(|o| o.into()))
             .map_err(|e| e.into())

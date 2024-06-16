@@ -14,6 +14,7 @@ use crate::receive::v1::{
 };
 use crate::{OhttpKeys, OutPoint, PayjoinError, Request, TxOut, Url};
 use crate::types::Network;
+use crate::uri::PjUriBuilder;
 
 pub struct ClientResponse(Mutex<Option<ohttp::ClientResponse>>);
 
@@ -70,16 +71,16 @@ impl SessionInitializer {
         directory: Arc<Url>,
         ohttp_keys: Arc<OhttpKeys>,
         ohttp_relay: Arc<Url>,
-    ) -> Self {
+    ) -> Result<Self, PayjoinError> {
         let address = payjoin::bitcoin::Address::from_str(address.as_str())?.require_network(network.into())?;
-        payjoin::receive::v2::SessionInitializer::new(
+        Ok(payjoin::receive::v2::SessionInitializer::new(
             address,
             (*directory).clone().into(),
             (*ohttp_keys).clone().into(),
             (*ohttp_relay).clone().into(),
             Duration::from_secs(expire_after)
         )
-        .into()
+        .into())
     }
 
     #[cfg(feature = "uniffi")]
@@ -136,9 +137,6 @@ impl From<payjoin::receive::v2::ActiveSession> for ActiveSession {
     }
 }
 impl ActiveSession {
-    pub fn fallback_target(&self) -> String {
-        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone()).fallback_target()
-    }
     #[cfg(feature = "uniffi")]
     pub fn extract_req(&self) -> Result<RequestResponse, PayjoinError> {
         match self.0.clone().extract_req() {
@@ -156,6 +154,7 @@ impl ActiveSession {
             Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
         }
     }
+    ///The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
     #[cfg(feature = "uniffi")]
     pub fn process_res(
         &self,
@@ -167,6 +166,7 @@ impl ActiveSession {
             .map(|e| e.map(|x| Arc::new(x.into())))
             .map_err(|e| e.into())
     }
+    ///The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
     #[cfg(not(feature = "uniffi"))]
     pub fn process_res(
         &self,
@@ -177,6 +177,20 @@ impl ActiveSession {
             .process_res(Cursor::new(body), ctx)
             .map(|e| e.map(|o| o.into()))
             .map_err(|e| e.into())
+    }
+    pub fn pj_uri_builder(&self) -> PjUriBuilder{
+        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
+            .pj_uri_builder().into()
+    }
+    /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
+    /// This identifies a session at the payjoin directory server.
+    pub fn pj_url(&self) -> Url{
+        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
+            .pj_url().into()
+    }
+    ///The per-session public key to use as an identifier
+    pub fn public_key(&self) -> String{
+        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone()).public_key().to_string()
     }
 }
 

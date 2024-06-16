@@ -14,7 +14,7 @@ pip install payjoin
 
 ```shell
 
-git clone https://github.com/XLTBLX-Tech/payjoin-ffi.git
+git clone https://github.com/LtbLightning/payjoin-ffi.git
 cd python
 
 # Install dependencies
@@ -58,7 +58,7 @@ rpc_port = "18443"
 
 ```shell
 
-git clone https://github.com/XLTBLX-Tech/payjoin-ffi.git
+git clone https://github.com/LtbLightning/payjoin-ffi.git
 cd python
 
 # Install dependencies

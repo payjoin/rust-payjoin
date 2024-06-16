@@ -1,6 +1,9 @@
+import base64
 from binascii import unhexlify
 import os
 import sys
+
+from payjoin import *
 
 # The below sys path setting is required to use the 'payjoin' module in the 'src' directory
 # This script is in the 'tests' directory and the 'payjoin' module is in the 'src' directory
@@ -11,7 +14,6 @@ sys.path.insert(
 import hashlib
 import unittest
 from pprint import *
-from payjoin import *
 from bitcoin import SelectParams
 from bitcoin.core import Hash160, CMutableTransaction, CTransaction
 from bitcoin.core.script import (
@@ -42,8 +44,8 @@ def create_and_load_wallet(rpc_connection, wallet_name):
 
 
 # Set up RPC connections
-rpc_user = "bitcoin"
-rpc_password = "bitcoin"
+rpc_user = "admin1"
+rpc_password = "123"
 rpc_host = "localhost"
 rpc_port = "18443"
 
@@ -84,13 +86,13 @@ class TestPayjoin(unittest.TestCase):
 
         pj_uri_address = self.receiver.getnewaddress()
         pj_uri_string = "{}?amount={}&pj=https://example.com".format(
-            f"BITCOIN:{str(pj_uri_address).upper()}", 1
+            f"bitcoin:{str(pj_uri_address)}", 1
         )
         print(f"\npj_uri_string: {pj_uri_string}")
-        prj_uri = Uri(pj_uri_string).check_pj_supported()
+        prj_uri = Uri.from_str(pj_uri_string)
         print(f"\nprj_uri: {prj_uri}")
         outputs = {}
-        outputs[prj_uri.address().as_string()] = prj_uri.amount().to_btc()
+        outputs[prj_uri.address()] = prj_uri.amount()
         pprint(outputs)
         pre_processed_psbt = self.sender._call(
             "walletcreatefundedpsbt",
@@ -99,14 +101,12 @@ class TestPayjoin(unittest.TestCase):
             0,
             {"lockUnspents": True, "feeRate": 0.000020},
         )["psbt"]
-        processed_psbt = self.sender._call("walletprocesspsbt", pre_processed_psbt)[
+        processed_psbt_base64 = self.sender._call("walletprocesspsbt", pre_processed_psbt)[
             "psbt"
         ]
-        psbt = PartiallySignedTransaction.from_string(processed_psbt)
-        pj_params = Configuration.with_fee_contribution(10000, None)
-        prj_uri_req = prj_uri.create_pj_request(psbt, pj_params)
-        req = prj_uri_req.request
-        ctx = prj_uri_req.context
+        req_ctx = RequestBuilder.from_psbt_and_uri(processed_psbt_base64, prj_uri ).build_with_additional_fee(10000, None, 0, False).extract_v1()
+        req = req_ctx.request
+        ctx = req_ctx.context_v1
         headers = Headers.from_vec(req.body)
         # **********************
         # Inside the Receiver:
@@ -121,10 +121,10 @@ class TestPayjoin(unittest.TestCase):
         # **********************
         # Inside the Sender:
         # Sender checks, signs, finalizes, extracts, and broadcasts
-        checked_payjoin_proposal_psbt = ctx.process_response(response)
+        checked_payjoin_proposal_psbt = ctx.process_response(bytes(response, encoding='utf8'))
         payjoin_processed_psbt = self.sender._call(
             "walletprocesspsbt",
-            checked_payjoin_proposal_psbt.as_string(),
+            checked_payjoin_proposal_psbt,
         )["psbt"]
 
         payjoin_tx_hex = self.sender._call(
@@ -138,22 +138,21 @@ class TestPayjoin(unittest.TestCase):
     def handle_pj_request(self, req: Request, headers: Headers, connection: Proxy):
         proposal = UncheckedProposal.from_request(req.body, req.url.query(), headers)
         _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast()
-        maybe_inputs_owned = proposal.check_can_broadcast(
-            can_broadcast=MempoolAcceptanceChecker(connection=connection)
+        maybe_inputs_owned = proposal.check_broadcast_suitability(None,
+            can_broadcast=MempoolAcceptanceCallback(connection=connection)
         )
 
         mixed_inputs_scripts = maybe_inputs_owned.check_inputs_not_owned(
-            ScriptOwnershipChecker(connection)
+            ScriptOwnershipCallback(connection)
         )
         inputs_seen = mixed_inputs_scripts.check_no_mixed_input_scripts()
         payjoin = inputs_seen.check_no_inputs_seen_before(
-            OutputOwnershipChecker()
-        ).identify_receiver_outputs(ScriptOwnershipChecker(connection))
+            OutputOwnershipCallback()
+        ).identify_receiver_outputs(ScriptOwnershipCallback(connection))
         available_inputs = connection._call("listunspent")
         candidate_inputs = {
-            int(int(i["amount"] * 100000000)): OutPoint(str(i["txid"]), i["vout"])
+            int(int(i["amount"] * 100000000)): OutPoint(txid=(str(i["txid"])), vout=i["vout"])
             for i in available_inputs
-            # if int(i["amount"] * 100000000) == 5000000000
         }
 
         selected_outpoint = payjoin.try_preserving_privacy(
@@ -165,63 +164,78 @@ class TestPayjoin(unittest.TestCase):
                 i
                 for i in available_inputs
                 if i["txid"] == selected_outpoint.txid
-                and i["vout"] == selected_outpoint.vout
+                   and i["vout"] == selected_outpoint.vout
             ),
             None,
         )
 
         txo_to_contribute = TxOut(
-            int(selected_utxo["amount"] * 100000000),
-            ScriptBuf([int(byte) for byte in unhexlify(selected_utxo["scriptPubKey"])]),
+            value=int(selected_utxo["amount"] * 100000000),
+            script_pubkey=[int(byte) for byte in unhexlify(selected_utxo["scriptPubKey"])]
         )
         outpoint_to_contribute = OutPoint(
-            selected_utxo["txid"], int(selected_utxo["vout"])
+            txid=selected_utxo["txid"], vout=int(selected_utxo["vout"])
         )
         payjoin.contribute_witness_input(txo_to_contribute, outpoint_to_contribute)
         receiver_substitute_address = connection.getnewaddress()
-        payjoin.substitute_output_address(Address(str(receiver_substitute_address)))
+        payjoin.substitute_output_address(str(receiver_substitute_address))
         payjoin_proposal = payjoin.finalize_proposal(
             ProcessPartiallySignedTransactionCallBack(connection=connection),
-            FeeRate.min(),
+            1,
         )
         psbt = payjoin_proposal.psbt()
-        print(f"\n Receiver's Payjoin proposal PSBT: {psbt.as_string()}")
-        return psbt.as_string()
+        print(f"\n Receiver's Payjoin proposal PSBT: {psbt}")
+        return psbt
 
 
 class ProcessPartiallySignedTransactionCallBack:
     def __init__(self, connection: Proxy):
         self.connection = connection
 
-    def process_psbt(self, psbt: PartiallySignedTransaction):
-        _psbt = self.connection._call(
-            "walletprocesspsbt", psbt.as_string(), True, "NONE", False
-        )["psbt"]
-        return _psbt
+    def callback(self, psbt: str):
+        try:
+            return  self.connection._call(
+                "walletprocesspsbt", psbt, True, "NONE", False
+            )["psbt"]
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            return None   
 
 
-class MempoolAcceptanceChecker(CanBroadcast):
+class MempoolAcceptanceCallback(CanBroadcast):
     def __init__(self, connection: Proxy):
         self.connection = connection
 
-    def test_mempool_accept(self, tx):
-        return self.connection._call("testmempoolaccept", [bytes(tx).hex()])[0][
-            "allowed"
-        ]
+    def callback(self, tx):
+          try:
+                return self.connection._call("testmempoolaccept", [bytes(tx).hex()])[0][
+                    "allowed"
+                ]
+          except Exception as e:
+            print(f"An error occurred: {e}")
+            return None      
 
 
-class OutputOwnershipChecker(IsOutputKnown):
-    def is_known(self, outpoint: OutPoint):
+class OutputOwnershipCallback(IsOutputKnown):
+    def callback(self, outpoint: OutPoint):
         return False
 
 
-class ScriptOwnershipChecker(IsScriptOwned):
+class ScriptOwnershipCallback(IsScriptOwned):
     def __init__(self, connection: Proxy):
         self.connection = connection
 
-    def is_owned(self, script: ScriptBuf):
-        address = Address.from_script(script, network=Network.REGTEST)
-        return self.connection._call("getaddressinfo", address.as_string())["ismine"]
+    def callback(self, script):
+        try:
+            script = CScript(bytes(script))      
+            witness_program = script[2:]   
+            print(witness_program)
+            address = P2WPKHBitcoinAddress.from_bytes(0, witness_program)
+            return self.connection._call("getaddressinfo", str(address))["ismine"]
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            return None
+
 
 
 if __name__ == "__main__":

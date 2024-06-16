@@ -17,13 +17,14 @@ uniffi = { version = "0.27.1", features = ["bindgen-tests"] }
 bdk = { version = "0.29.0", features = ["all-keys", "use-esplora-ureq", "keys-bip39"] }
 bitcoincore-rpc = "0.18.0"
 [dependencies]
-#https://github.com/payjoin/rust-payjoin/commit/e7037b23b0f29beda39f5e161d3d7924d2060dd4
-payjoin = { git= "https://github.com/payjoin/rust-payjoin", rev = "e7037b23b0f29beda39f5e161d3d7924d2060dd4",  features = ["send", "receive", "base64", "v2"] }
+#https://github.com/payjoin/rust-payjoin/commit/457a0dd5cb212ddd9ea169b7fa3842bfc3d5f373
+payjoin = { git= "https://github.com/payjoin/rust-payjoin", rev = "457a0dd5cb212ddd9ea169b7fa3842bfc3d5f373",  features = ["send", "receive", "base64", "v2"] }
 uniffi = { version = "0.27.1" }
 thiserror = "1.0.47"
 ohttp = { version = "0.5.1" }
 url = "2.5.0"
 base64 = "0.22.1"
+hex = "0.4.3"
 
 
 [[bin]]
@@ -40,3 +41,4 @@ strip = true
 
 [features]
 default = ["uniffi/cli"]
+uniffi=[]

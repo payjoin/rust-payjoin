@@ -70,6 +70,7 @@ impl UncheckedProposal {
         )
     }
 
+    #[cfg(feature = "uniffi")]
     /// Call after checking that the Original PSBT can be broadcast.
     ///
     /// Receiver MUST check that the Original PSBT from the sender can be broadcast, i.e. testmempoolaccept bitcoind rpc returns { “allowed”: true,.. } for get_transaction_to_check_broadcast() before calling this method.
@@ -95,8 +96,8 @@ impl UncheckedProposal {
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
     }
-
-    pub fn check_broadcast_suitability_with_callback(
+    #[cfg(not(feature = "uniffi"))]
+    pub fn check_broadcast_suitability(
         &self,
         min_fee_rate: Option<u64>,
         can_broadcast: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
@@ -138,6 +139,9 @@ pub trait IsScriptOwned {
 }
 
 impl MaybeInputsOwned {
+    #[cfg(feature = "uniffi")]
+    ///Check that the Original PSBT has no receiver-owned inputs. Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
+    /// An attacker could try to spend receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         &self,
         is_owned: Box<dyn IsScriptOwned>,
@@ -152,7 +156,8 @@ impl MaybeInputsOwned {
             .map_err(|e| e.into())
             .map(|e| Arc::new(e.into()))
     }
-    pub fn check_inputs_not_owned_with_callback(
+    #[cfg(not(feature = "uniffi"))]
+    pub fn check_inputs_not_owned(
         &self,
         is_owned: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
     ) -> Result<Arc<MaybeMixedInputScripts>, PayjoinError> {
@@ -208,6 +213,7 @@ impl From<pdk::MaybeInputsSeen> for MaybeInputsSeen {
 }
 
 impl MaybeInputsSeen {
+    #[cfg(feature = "uniffi")]
     /// Make sure that the original transaction inputs have never been seen before. This prevents probing attacks. This prevents reentrant Payjoin, where a sender proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
     pub fn check_no_inputs_seen_before(
         &self,
@@ -221,8 +227,8 @@ impl MaybeInputsSeen {
             .map_err(|e| e.into())
             .map(|e| Arc::new(e.into()))
     }
-
-    pub fn check_no_inputs_seen_before_with_callback(
+    #[cfg(not(feature = "uniffi"))]
+    pub fn check_no_inputs_seen_before(
         &self,
         is_known: impl Fn(&OutPoint) -> Result<bool, PayjoinError>,
     ) -> Result<Arc<OutputsUnknown>, PayjoinError> {
@@ -249,6 +255,7 @@ impl From<pdk::OutputsUnknown> for OutputsUnknown {
 }
 
 impl OutputsUnknown {
+    #[cfg(feature = "uniffi")]
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
         &self,
@@ -264,7 +271,8 @@ impl OutputsUnknown {
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
     }
-    pub fn identify_receiver_outputs_with_callback(
+    #[cfg(not(feature = "uniffi"))]
+    pub fn identify_receiver_outputs(
         &self,
         is_receiver_output: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
     ) -> Result<Arc<ProvisionalProposal>, PayjoinError> {
@@ -342,7 +350,7 @@ impl ProvisionalProposal {
             .map_err(|e| PayjoinError::SelectionError { message: format!("{:?}", e) })
             .map(|o| o.into())
     }
-
+    #[cfg(feature = "uniffi")]
     pub fn finalize_proposal(
         &self,
         process_psbt: Box<dyn ProcessPartiallySignedTransaction>,
@@ -362,8 +370,8 @@ impl ProvisionalProposal {
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
     }
-
-    pub fn finalize_proposal_with_callback(
+    #[cfg(not(feature = "uniffi"))]
+    pub fn finalize_proposal(
         &self,
         process_psbt: impl Fn(String) -> Result<String, PayjoinError>,
         min_feerate_sat_per_vb: Option<u64>,
@@ -446,40 +454,25 @@ mod test {
         assert!(proposal.is_ok(), "OriginalPSBT should be a valid request");
     }
 
-    struct MockScriptOwned {}
-
-    struct MockOutputOwned {}
-
-    impl IsOutputKnown for MockOutputOwned {
-        fn callback(&self, outpoint: OutPoint) -> Result<bool, PayjoinError> {
-            println!("{:?}", outpoint);
-            Ok(true)
-        }
-    }
-
-    impl IsScriptOwned for MockScriptOwned {
-        fn callback(&self, script: Vec<u8>) -> Result<bool, PayjoinError> {
-            let network = payjoin::bitcoin::Network::Bitcoin;
-            let script = payjoin::bitcoin::ScriptBuf::from_bytes(script);
-            Ok(payjoin::bitcoin::Address::from_script(&script, network)
-                == payjoin::bitcoin::Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
-                    .map(|x| x.require_network(network).expect("Invalid address")))
-        }
-    }
-
     #[test]
     fn unchecked_proposal_unlocks_after_checks() {
         let proposal = get_proposal_from_test_vector().unwrap();
         let _payjoin = proposal
             .assume_interactive_receiver()
             .clone()
-            .check_inputs_not_owned(Box::new(MockScriptOwned {}))
+            .check_inputs_not_owned(|_| Ok(true))
             .expect("No inputs should be owned")
             .check_no_mixed_input_scripts()
             .expect("No mixed input scripts")
-            .check_no_inputs_seen_before(Box::new(MockOutputOwned {}))
+            .check_no_inputs_seen_before(|_| Ok(false))
             .expect("No inputs should be seen before")
-            .identify_receiver_outputs(Box::new(MockScriptOwned {}))
+            .identify_receiver_outputs(|script| {
+                let network = payjoin::bitcoin::Network::Bitcoin;
+                let script = payjoin::bitcoin::ScriptBuf::from_bytes(script.to_vec());
+                Ok(payjoin::bitcoin::Address::from_script(&script, network)
+                    == payjoin::bitcoin::Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+                        .map(|x| x.require_network(network).expect("Invalid address")))
+            })
             .expect("Receiver output should be identified");
     }
 }

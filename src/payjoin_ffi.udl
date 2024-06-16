@@ -65,7 +65,7 @@ interface Headers {
       record<string, string> get_map();
 };
 interface Url {
-      [Throws=PayjoinError]
+      [Throws=PayjoinError, Name=from_str]
       constructor(string input);
       string? query();
       string as_string();
@@ -77,6 +77,7 @@ interface Uri {
       f64? amount();
 };
 interface PjUri{};
+
 
 interface ClientResponse{};
 
@@ -142,7 +143,7 @@ interface RequestContext{
     [Throws=PayjoinError]
     RequestContextV1 extract_v1();
     [Throws=PayjoinError]
-    RequestContextV2 extract_v2( string  ohttp_proxy_url);
+    RequestContextV2 extract_v2( Url  ohttp_proxy_url);
 };
 
 dictionary RequestContextV1{
@@ -165,11 +166,14 @@ interface ContextV2{
     string?  process_response( sequence<u8> response );
 };
 
+interface OhttpKeys{
+    [Throws=PayjoinError, Name=decode]
+    constructor( sequence<u8> bytes );
+};
+
 interface Enroller{
-   [Name=from_relay_config]
-   constructor(string relay_url, string ohttp_config_base64, string ohttp_proxy_url);
-   string subdirectory();
-   string payjoin_subdir();
+   [Name=from_directory_config]
+   constructor(Url directory, OhttpKeys ohttp_keys, Url ohttp_relay);
    [Throws=PayjoinError]
    RequestResponse extract_req();
    [Throws=PayjoinError]
@@ -178,7 +182,6 @@ interface Enroller{
 
 interface Enrolled {
      string fallback_target();
-     sequence<u8> pubkey();
      [Throws=PayjoinError]
      RequestResponse extract_req();
      [Throws=PayjoinError]
@@ -229,24 +232,3 @@ interface V2PayjoinProposal{
         [Throws=PayjoinError]
         sequence<u8> deserialize_res(sequence<u8> res, ClientResponse ohttp_context);
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

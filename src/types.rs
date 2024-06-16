@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
+use crate::error::PayjoinError;
 use crate::uri::Url;
 ///Represents data that needs to be transmitted to the receiver.
 ///You need to send this request over HTTP(S) to the receiver.
@@ -16,13 +17,8 @@ pub struct Request {
     pub body: Vec<u8>,
 }
 
-impl From<payjoin::receive::v2::Request> for Request {
-    fn from(value: payjoin::receive::v2::Request) -> Self {
-        Self { url: Arc::new(value.url.into()), body: value.body }
-    }
-}
-impl From<payjoin::send::Request> for Request {
-    fn from(value: payjoin::send::Request) -> Self {
+impl From<payjoin::Request> for Request {
+    fn from(value: payjoin::Request) -> Self {
         Self { url: Arc::new(value.url.into()), body: value.body }
     }
 }
@@ -95,5 +91,24 @@ impl From<Network> for payjoin::bitcoin::Network {
             Network::Regtest => payjoin::bitcoin::Network::Regtest,
             Network::Bitcoin => payjoin::bitcoin::Network::Bitcoin,
         }
+    }
+}
+
+impl From<payjoin::OhttpKeys> for OhttpKeys {
+    fn from(value: payjoin::OhttpKeys) -> Self {
+        Self(value)
+    }
+}
+impl From<OhttpKeys> for payjoin::OhttpKeys {
+    fn from(value: OhttpKeys) -> Self {
+        value.0
+    }
+}
+#[derive(Debug, Clone)]
+pub struct OhttpKeys(pub payjoin::OhttpKeys);
+impl OhttpKeys {
+    /// Decode an OHTTP KeyConfig
+    pub fn decode(bytes: Vec<u8>) -> Result<Self, PayjoinError> {
+        payjoin::OhttpKeys::decode(bytes.as_slice()).map(|e| e.into()).map_err(|e| e.into())
     }
 }

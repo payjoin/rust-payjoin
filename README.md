@@ -57,6 +57,8 @@ rpc_port = "18443"
 ```
 
 Now, run the integration tests:
+The integration tests illustrates and verify integration using bitcoin core and with bitcoin dev kit(bdk).
+
 
 ```shell
 

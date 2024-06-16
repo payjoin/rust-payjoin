@@ -90,6 +90,12 @@ impl Url {
         self.0.to_string()
     }
 }
+
+impl From<payjoin::PjUriBuilder> for PjUriBuilder {
+    fn from(value: payjoin::PjUriBuilder) -> Self {
+        Self{inner:value}
+    }
+}
 #[cfg(not(feature = "uniffi"))]
 pub struct PjUriBuilder {
     inner: payjoin::PjUriBuilder,

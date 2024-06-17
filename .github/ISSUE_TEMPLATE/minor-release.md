@@ -31,53 +31,28 @@ branch **development** version is *MAJOR.MINOR.0*.
 Change the `master` branch to the next MINOR+1 version:
 
 - [ ] Switch to the `master` branch.
-- [ ] Create a new PR branch called `bump-<CRATE>-MAJOR-MINOR+1`, eg. `bump-<CRATE>-0-22`.
-- [ ] Bump the `bump-<CRATE>-MAJOR-MINOR+1` branch to the next development MINOR+1 version.
+- [ ] Create a new PR branch called `bump-CRATE-MAJOR-MINOR+1`, eg. `bump-CRATE-0-22`.
+- [ ] Bump the `bump-CRATE-MAJOR-MINOR+1` branch to the next development MINOR+1 version.
   - Change the `Cargo.toml` version value to `MAJOR.MINOR+1.0`.
   - Update the `CHANGELOG.md` file.
-  - The commit message should be "Bump <CRATE> version to MAJOR.MINOR+1.0".
-- [ ] Create PR and merge the `bump-<CRATE>-MAJOR-MINOR+1` branch to `master`.
-  - Title PR "Bump <CRATE> version to MAJOR.MINOR+1.0".
-
-Create a new release branch and release candidate tag:
-
-- [ ] Double check that your local `master` is up-to-date with the upstream repo.
-- [ ] Create a new branch called `release/<CRATE>-MAJOR.MINOR+1` from `master`.
-- [ ] Bump the `release/<CRATE>-MAJOR.MINOR+1` branch to `MAJOR.MINOR+1.0-rc.1` version.
-  - Change the `Cargo.toml` version value to `MAJOR.MINOR+1.0-rc.1`.
-  - The commit message should be "Bump <CRATE> version to MAJOR.MINOR+1.0-rc.1".
-- [ ] Add a tag to the `HEAD` commit in the `release/<CRATE>-MAJOR.MINOR+1` branch.
-  - The tag name should be `<CRATE>-MAJOR.MINOR+1.0-rc.1`
-  - Use message "Release <CRATE>-MAJOR.MINOR+1.0 rc.1".
-  - Make sure the tag is signed, for extra safety use the explicit `--sign` flag, e.g. `git tag -a payjoin-0.10.0-rc.1 -m "Release payjoin-0.10.0-rc.1" --sign`.
-- [ ] Push the `release/<CRATE>-MAJOR.MINOR` branch and new tag to the `payjoin/rust-payjoin` repo.
-  - Use `git push --tags` option to push the new `<CRATE>-MAJOR.MINOR+1.0-rc.1` tag.
+  - The commit message should be "Bump CRATE version to MAJOR.MINOR+1.0".
+- [ ] Create PR for the `bump-CRATE-MAJOR-MINOR+1` branch to `master`.
+  - Title PR "Bump CRATE version to MAJOR.MINOR+1.0".
+- [ ] Merge the `bump-CRATE-MAJOR-MINOR+1` branch to `master`.
 
 If any issues need to be fixed before the *MAJOR.MINOR+1.0* version is released:
 
 - [ ] Merge fix PRs to the `master` branch.
-- [ ] Git cherry-pick fix commits to the `release/<CRATE>-MAJOR.MINOR+1` branch.
-- [ ] Verify fixes in `release/<CRATE>-MAJOR.MINOR+1` branch.
-- [ ] Bump the `release/<CRATE>-MAJOR.MINOR+1` branch to `MAJOR.MINOR+1.0-rc.x+1` version.
-  - Change the `Cargo.toml` version value to `MAJOR.MINOR+1.0-rc.x+1`.
-  - The commit message should be "Bump version to MAJOR.MINOR+1.0-rc.x+1".
-- [ ] Add a tag to the `HEAD` commit in the `release/<CRATE>-MAJOR.MINOR+1` branch.
-  - The tag name should be `<CRATE>-MAJOR.MINOR+1.0-rc.x+1`, where x is the current release candidate number.
-  - Use tag message "Release <CRATE> MAJOR.MINOR+1.0 rc.x+1".
-  - Make sure the tag is signed, for extra safety use the explicit `--sign` flag.
-- [ ] Push the new tag to the `payjoin/rust-payjoin` repo.
-  - Use `git push --tags` option to push the new `<CRATE>-MAJOR.MINOR+1.0-rc.x+1` tag.
+- [ ] Git cherry-pick fix commits to the `bump-CRATE-MAJOR.MINOR+1` branch.
+- [ ] Verify fixes in `bump-CRATE-MAJOR.MINOR+1` branch.
 
 #### On the day of the release
 
 Tag and publish new release:
 
-- [ ] Bump the `release/<CRATE>-MAJOR.MINOR+1` branch to `MAJOR.MINOR+1.0` version.
-  - Change the `Cargo.toml` version value to `MAJOR.MINOR+1.0`.
-  - The commit message should be "Bump <CRATE> version to MAJOR.MINOR+1.0".
-- [ ] Add a tag to the `HEAD` commit in the `release/MAJOR.MINOR+1` branch.
-  - The tag name should be `<CRATE>-MAJOR.MINOR+1.0`
-  - The first line of the tag message should be "Release <CRATE>-MAJOR.MINOR+1.0".
+- [ ] Add a tag to the `HEAD` commit in the `master` branch.
+  - The tag name should be `CRATE-MAJOR.MINOR+1.0`
+  - The first line of the tag message should be "Release CRATE-MAJOR.MINOR+1.0".
   - In the body of the tag message put a copy of the **Summary** and **Changelog** for the release.
   - Make sure the tag is signed, for extra safety use the explicit `--sign` flag.
 - [ ] Wait for the CI to finish one last time.
@@ -86,7 +61,7 @@ Tag and publish new release:
 - [ ] Publish the crate in question crates to crates.io.
 - [ ] Create the release on GitHub.
   - Go to "tags", click on the dots on the right and select "Create Release".
-  - Set the title to `Release <CRATE>-MAJOR.MINOR+1.0`.
+  - Set the title to `Release CRATE-MAJOR.MINOR+1.0`.
   - In the release notes body put the **Summary** and **Changelog**.
   - Use the "+ Auto-generate release notes" button to add details from included PRs.
   - Until we reach a `1.0.0` release check the "Pre-release" box.

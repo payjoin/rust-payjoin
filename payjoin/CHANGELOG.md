@@ -1,5 +1,11 @@
 # Payjoin Changelog
 
+## 0.17.0
+
+- Prepare Payjoin PSBT with no output keypaths ([#270](https://github.com/payjoin/rust-payjoin/pull/270))
+- Restore sender UTXOs before Payjoin Signing ([#280](https://github.com/payjoin/rust-payjoin/pull/280))
+- Deserialize url::Url with url/serde feature instead of custom deserializer ([#286](https://github.com/payjoin/rust-payjoin/pull/286))
+
 ## 0.16.0
 
 - `io` feature introduced to fetch `OhttpKeys`. This feature will include optional networking supplied by reqwest.

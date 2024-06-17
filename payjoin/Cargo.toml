@@ -33,7 +33,7 @@ bhttp = { version = "=0.5.1", optional = true }
 ohttp = { version = "0.5.1", optional = true }
 serde = { version = "1.0.186", default-features = false, optional = true }
 reqwest = { version = "0.12", default-features = false, optional = true }
-rustls = { version = "0.22.2", optional = true }
+rustls = { version = "0.22.4", optional = true }
 url = "2.2.2"
 serde_json = "1.0.108"
 

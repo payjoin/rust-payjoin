@@ -6,12 +6,18 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use http_body_util::combinators::BoxBody;
+use http_body_util::{BodyExt, Full};
+use hyper::body::{Buf, Bytes, Incoming};
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::{Method, Request, Response, StatusCode};
+use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{self};
 use payjoin::receive::{PayjoinProposal, UncheckedProposal};
 use payjoin::{Error, PjUriBuilder, Uri, UriExt};
+use tokio::net::TcpListener;
 
 use super::config::AppConfig;
 use super::App as AppTrait;
@@ -124,46 +130,66 @@ impl App {
 
     async fn start_http_server(self) -> Result<()> {
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.port));
-        #[cfg(feature = "danger-local-https")]
-        let server = {
-            use std::io::Write;
-
-            use hyper::server::conn::AddrIncoming;
-            use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
-
-            let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
-            let cert_der = cert.serialize_der()?;
-            let mut local_cert_path = std::env::temp_dir();
-            local_cert_path.push(LOCAL_CERT_FILE);
-            let mut file = std::fs::File::create(local_cert_path)?;
-            file.write_all(&cert_der)?;
-            let key =
-                PrivateKeyDer::from(PrivatePkcs8KeyDer::from(cert.serialize_private_key_der()));
-            let certs = vec![CertificateDer::from(cert.serialize_der()?)];
-            let incoming = AddrIncoming::bind(&addr)?;
-            let acceptor = hyper_rustls::TlsAcceptor::builder()
-                .with_single_cert(certs, key)
-                .map_err(|e| anyhow::anyhow!("TLS error: {}", e))?
-                .with_all_versions_alpn()
-                .with_incoming(incoming);
-            Server::builder(acceptor)
-        };
-
-        #[cfg(not(feature = "danger-local-https"))]
-        let server = Server::bind(&addr);
+        let listener = TcpListener::bind(addr).await?;
         let app = self.clone();
-        let make_svc = make_service_fn(|_| {
+
+        #[cfg(feature = "danger-local-https")]
+        let tls_acceptor = Self::init_tls_acceptor()?;
+        while let Ok((stream, _)) = listener.accept().await {
             let app = app.clone();
-            async move {
-                let handler = move |req| app.clone().handle_web_request(req);
-                Ok::<_, hyper::Error>(service_fn(handler))
-            }
-        });
-        server.serve(make_svc).await?;
+            #[cfg(feature = "danger-local-https")]
+            let tls_acceptor = tls_acceptor.clone();
+            tokio::spawn(async move {
+                #[cfg(feature = "danger-local-https")]
+                let stream = match tls_acceptor.accept(stream).await {
+                    Ok(tls_stream) => tls_stream,
+                    Err(e) => {
+                        log::error!("TLS accept error: {}", e);
+                        return;
+                    }
+                };
+
+                let _ = http1::Builder::new()
+                    .serve_connection(
+                        TokioIo::new(stream),
+                        service_fn(move |req| app.clone().handle_web_request(req)),
+                    )
+                    .await;
+            });
+        }
         Ok(())
     }
 
-    async fn handle_web_request(self, req: Request<Body>) -> Result<Response<Body>> {
+    #[cfg(feature = "danger-local-https")]
+    fn init_tls_acceptor() -> Result<tokio_rustls::TlsAcceptor> {
+        use std::io::Write;
+
+        use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+        use rustls::ServerConfig;
+        use tokio_rustls::TlsAcceptor;
+
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
+        let cert_der = cert.serialize_der()?;
+        let mut local_cert_path = std::env::temp_dir();
+        local_cert_path.push(LOCAL_CERT_FILE);
+        let mut file = std::fs::File::create(local_cert_path)?;
+        file.write_all(&cert_der)?;
+        let key = PrivateKeyDer::try_from(cert.serialize_private_key_der())
+            .map_err(|e| anyhow::anyhow!("Could not parse key: {}", e))?;
+        let certs = vec![CertificateDer::from(cert_der)];
+        let mut server_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .map_err(|e| anyhow::anyhow!("TLS error: {}", e))?;
+        server_config.alpn_protocols =
+            vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
+        Ok(TlsAcceptor::from(Arc::new(server_config)))
+    }
+
+    async fn handle_web_request(
+        self,
+        req: Request<Incoming>,
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
         log::debug!("Received request: {:?}", req);
         let mut response = match (req.method(), req.uri().path()) {
             (&Method::GET, "/bip21") => {
@@ -177,7 +203,7 @@ impl App {
                 self.handle_get_bip21(amount)
                     .map_err(|e| {
                         log::error!("Error handling request: {}", e);
-                        Response::builder().status(500).body(Body::from(e.to_string())).unwrap()
+                        Response::builder().status(500).body(full(e.to_string())).unwrap()
                     })
                     .unwrap_or_else(|err_resp| err_resp)
             }
@@ -187,18 +213,15 @@ impl App {
                 .map_err(|e| match e {
                     Error::BadRequest(e) => {
                         log::error!("Error handling request: {}", e);
-                        Response::builder().status(400).body(Body::from(e.to_string())).unwrap()
+                        Response::builder().status(400).body(full(e.to_string())).unwrap()
                     }
                     e => {
                         log::error!("Error handling request: {}", e);
-                        Response::builder().status(500).body(Body::from(e.to_string())).unwrap()
+                        Response::builder().status(500).body(full(e.to_string())).unwrap()
                     }
                 })
                 .unwrap_or_else(|err_resp| err_resp),
-            _ => Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::from("Not found"))
-                .unwrap(),
+            _ => Response::builder().status(StatusCode::NOT_FOUND).body(full("Not found")).unwrap(),
         };
         response
             .headers_mut()
@@ -206,7 +229,10 @@ impl App {
         Ok(response)
     }
 
-    fn handle_get_bip21(&self, amount: Option<Amount>) -> Result<Response<Body>, Error> {
+    fn handle_get_bip21(
+        &self,
+        amount: Option<Amount>,
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error> {
         let address = self
             .bitcoind()
             .map_err(|e| Error::Server(e.into()))?
@@ -227,16 +253,17 @@ impl App {
             .map_err(|_| Error::Server(anyhow!("Could not parse payjoin URI string.").into()))?;
         let _ = uri.assume_checked(); // we just got it from bitcoind above
 
-        Ok(Response::new(Body::from(uri_string)))
+        Ok(Response::new(full(uri_string)))
     }
 
-    async fn handle_payjoin_post(&self, req: Request<Body>) -> Result<Response<Body>, Error> {
+    async fn handle_payjoin_post(
+        &self,
+        req: Request<Incoming>,
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error> {
         let (parts, body) = req.into_parts();
         let headers = Headers(&parts.headers);
         let query_string = parts.uri.query().unwrap_or("");
-        let body = std::io::Cursor::new(
-            hyper::body::to_bytes(body).await.map_err(|e| Error::Server(e.into()))?.to_vec(),
-        );
+        let body = body.collect().await.map_err(|e| Error::Server(e.into()))?.aggregate().reader();
         let proposal =
             payjoin::receive::UncheckedProposal::from_request(body, query_string, headers)?;
 
@@ -247,7 +274,7 @@ impl App {
             "Responded with Payjoin proposal {}",
             psbt.clone().extract_tx_unchecked_fee_rate().compute_txid()
         );
-        Ok(Response::new(Body::from(body)))
+        Ok(Response::new(full(body)))
     }
 
     fn process_v1_proposal(&self, proposal: UncheckedProposal) -> Result<PayjoinProposal, Error> {
@@ -331,4 +358,8 @@ impl App {
         )?;
         Ok(payjoin_proposal)
     }
+}
+
+fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
+    Full::new(chunk.into()).map_err(|never| match never {}).boxed()
 }

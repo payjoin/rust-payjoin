@@ -435,15 +435,7 @@ impl V2ProvisionalProposal {
     fn mutex_guard(&self) -> MutexGuard<'_, payjoin::receive::v2::ProvisionalProposal> {
         self.0.lock().unwrap()
     }
-    ///Just replace an output address with
-    pub fn substitute_output_address(
-        &self,
-        substitute_address: String,
-    ) -> Result<(), PayjoinError> {
-        let address =
-            payjoin::bitcoin::Address::from_str(substitute_address.as_str())?.assume_checked();
-        Ok(self.mutex_guard().substitute_output_address(address))
-    }
+
     pub fn contribute_witness_input(
         &self,
         txo: TxOut,
@@ -487,6 +479,31 @@ impl V2ProvisionalProposal {
             Err(e) => Err(e.into()),
         }
     }
+    pub fn is_output_substitution_disabled(&self) -> bool{
+        self.mutex_guard().is_output_substitution_disabled()
+    }
+
+    #[cfg(not(feature = "uniffi"))]
+    ///If output substitution is enabled, replace the receiver’s output script with a new one.
+    pub fn try_substitute_receiver_output(
+        &self,
+        generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>,
+    ) -> Result<(),PayjoinError>{
+        self.mutex_guard()
+            .try_substitute_receiver_output(|| generate_script()
+                .map(|e| payjoin::bitcoin::ScriptBuf::from_bytes(e))
+                .map_err(|e|  payjoin::Error::Server(e.into())))
+            .map_err(|e| e.into())
+    }
+    //TODO; create try_substitute_receiver_output for uniffi build
+    #[cfg(feature = "uniffi")]
+    pub fn try_substitute_receiver_output(
+        &self,
+        generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>,
+    ) -> Result<(),PayjoinError>{
+
+    }
+
     #[cfg(feature = "uniffi")]
     pub fn finalize_proposal(
         &self,

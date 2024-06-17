@@ -31,12 +31,12 @@ clap = { version = "~4.0.32", features = ["derive"] }
 config = "0.13.3"
 env_logger = "0.9.0"
 hyper = { version = "0.14", features = ["full"] }
-hyper-rustls = { version = "0.25", optional = true }
+hyper-rustls = { version = "0.26", optional = true }
 log = "0.4.7"
 payjoin = { version = "0.16.0", features = ["send", "receive", "base64"] }
 rcgen = { version = "0.11.1", optional = true }
 reqwest = { version = "0.12", default-features = false }
-rustls = { version = "0.22.2", optional = true }
+rustls = { version = "0.22.4", optional = true }
 serde = { version = "1.0.160", features = ["derive"] }
 tokio = { version = "1.12.0", features = ["full"] }
 url = { version = "2.3.1", features = ["serde"] }

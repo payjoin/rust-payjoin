@@ -121,7 +121,7 @@ fn cli() -> ArgMatches {
         );
         receive_cmd = receive_cmd.arg(
             Arg::new("pj_endpoint")
-                .long("pj_endpoint")
+                .long("pj-endpoint")
                 .short('e')
                 .num_args(1)
                 .help("The `pj=` endpoint to receive the payjoin request")
@@ -133,7 +133,7 @@ fn cli() -> ArgMatches {
     {
         receive_cmd = receive_cmd.arg(
             Arg::new("pj_directory")
-                .long("pj_directory")
+                .long("pj-directory")
                 .num_args(1)
                 .help("The directory to store payjoin requests")
                 .value_parser(value_parser!(Url)),

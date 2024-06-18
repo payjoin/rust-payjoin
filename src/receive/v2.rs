@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
-use payjoin::receive as pdk;
+use payjoin::{ receive as pdk};
 
 #[cfg(feature = "uniffi")]
 use crate::receive::v1::{
@@ -513,11 +513,15 @@ impl V2ProvisionalProposal {
         self.mutex_guard()
             .clone()
             .finalize_proposal(
-                |psbt| {
-                    process_psbt
-                        .callback(psbt.to_string())
-                        .map(|e| Psbt::from_str(e.as_str()).expect("Invalid process_psbt "))
-                        .map_err(|e| pdk::Error::Server(e.into()))
+                |pre_processed| {
+                    let processed = process_psbt
+                        .callback(pre_processed.to_string())
+                        .map(|e| Psbt::from_str(e.as_str()))
+                        .map_err(|e| pdk::Error::Server(e.into()))?;
+                    match processed{
+                        Ok(e) => Ok(e),
+                        Err(e) => Err(pdk::Error::Server(e.into()))
+                    }
                 },
                 min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x)),
             )
@@ -533,10 +537,15 @@ impl V2ProvisionalProposal {
         self.mutex_guard()
             .clone()
             .finalize_proposal(
-                |psbt| {
-                    process_psbt(psbt.to_string())
-                        .map(|e| Psbt::from_str(e.as_str()).expect("Invalid process_psbt "))
-                        .map_err(|e| pdk::Error::Server(e.into()))
+                |pre_processed| {
+                    let processed = process_psbt(pre_processed.to_string())
+                        .map(|e| Psbt::from_str(e.as_str()))
+                        .map_err(|e| pdk::Error::Server(e.into()))?;
+                    match processed{
+                        Ok(e) => Ok(e),
+                        Err(e) => Err(pdk::Error::Server(e.into()))
+                    }
+
                 },
                 min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x)),
             )

@@ -178,19 +178,27 @@ pub fn ohttp_encapsulate(
 pub fn ohttp_decapsulate(
     res_ctx: ohttp::ClientResponse,
     ohttp_body: &[u8],
-) -> Result<Vec<u8>, OhttpEncapsulationError> {
+) -> Result<http::Response<Vec<u8>>, OhttpEncapsulationError> {
     let bhttp_body = res_ctx.decapsulate(ohttp_body)?;
     let mut r = std::io::Cursor::new(bhttp_body);
-    let response = bhttp::Message::read_bhttp(&mut r)?;
-    Ok(response.content().to_vec())
+    let m: bhttp::Message = bhttp::Message::read_bhttp(&mut r)?;
+    http::Response::builder()
+        .status(m.control().status().unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR.into()))
+        .body(m.content().to_vec())
+        .map_err(OhttpEncapsulationError::Http)
 }
 
 /// Error from de/encapsulating an Oblivious HTTP request or response.
 #[derive(Debug)]
 pub enum OhttpEncapsulationError {
+    Http(http::Error),
     Ohttp(ohttp::Error),
     Bhttp(bhttp::Error),
     ParseUrl(url::ParseError),
+}
+
+impl From<http::Error> for OhttpEncapsulationError {
+    fn from(value: http::Error) -> Self { Self::Http(value) }
 }
 
 impl From<ohttp::Error> for OhttpEncapsulationError {
@@ -210,6 +218,7 @@ impl fmt::Display for OhttpEncapsulationError {
         use OhttpEncapsulationError::*;
 
         match &self {
+            Http(e) => e.fmt(f),
             Ohttp(e) => e.fmt(f),
             Bhttp(e) => e.fmt(f),
             ParseUrl(e) => e.fmt(f),
@@ -222,6 +231,7 @@ impl error::Error for OhttpEncapsulationError {
         use OhttpEncapsulationError::*;
 
         match &self {
+            Http(e) => Some(e),
             Ohttp(e) => Some(e),
             Bhttp(e) => Some(e),
             ParseUrl(e) => Some(e),

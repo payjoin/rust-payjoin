@@ -63,7 +63,12 @@ impl Enroller {
         // TODO decapsulate enroll response, for now it does no auth or nothing
         let mut buf = Vec::new();
         let _ = res.read_to_end(&mut buf);
-        let _success = crate::v2::ohttp_decapsulate(ctx, &buf)?;
+        let response = crate::v2::ohttp_decapsulate(ctx, &buf)?;
+        if !response.status().is_success() {
+            return Err(Error::Server(
+                format!("Enrollment failed, expected success status",).into(),
+            ));
+        }
 
         let ctx = Enrolled {
             directory: self.directory,
@@ -202,15 +207,15 @@ impl Enrolled {
         let _ = body.read_to_end(&mut buf);
         log::trace!("decapsulating directory response");
         let response = crate::v2::ohttp_decapsulate(context, &buf)?;
-        if response.is_empty() {
+        if response.body().is_empty() {
             log::debug!("response is empty");
             return Ok(None);
         }
-        match String::from_utf8(response.clone()) {
+        match String::from_utf8(response.body().to_vec()) {
             // V1 response bodies are utf8 plaintext
             Ok(response) => Ok(Some(self.extract_proposal_from_v1(response)?)),
             // V2 response bodies are encrypted binary
-            Err(_) => Ok(Some(self.extract_proposal_from_v2(response)?)),
+            Err(_) => Ok(Some(self.extract_proposal_from_v2(response.body().to_vec())?)),
         }
     }
 
@@ -521,15 +526,27 @@ impl PayjoinProposal {
     }
 
     #[cfg(feature = "v2")]
-    pub fn deserialize_res(
+    /// Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
+    ///
+    /// This function decapsulates the response using the provided OHTTP context. If the response status is successful,
+    /// it indicates that the Payjoin proposal has been accepted. Otherwise, it returns an error with the status code.
+    ///
+    /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or
+    /// choose to broadcast the original PSBT.
+    pub fn process_res(
         &self,
         res: Vec<u8>,
         ohttp_context: ohttp::ClientResponse,
-    ) -> Result<Vec<u8>, Error> {
-        // TODO return error code
-        // display success or failure
+    ) -> Result<(), Error> {
         let res = crate::v2::ohttp_decapsulate(ohttp_context, &res)?;
-        Ok(res)
+        if res.status().is_success() {
+            Ok(())
+        } else {
+            Err(Error::Server(
+                format!("Payjoin Post failed, expected Success status, got {}", res.status())
+                    .into(),
+            ))
+        }
     }
 }
 

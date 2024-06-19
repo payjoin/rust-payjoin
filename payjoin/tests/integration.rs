@@ -348,7 +348,7 @@ mod integration {
             tokio::select!(
             _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => assert!(false, "Ohttp relay is long running"),
             _ = init_directory(directory_port, (cert.clone(), key)) => assert!(false, "Directory server is long running"),
-            res = do_v2_send_receive(ohttp_relay, directory, cert) => assert!(res.is_ok())
+            res = do_v2_send_receive(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
             async fn do_v2_send_receive(
@@ -414,7 +414,7 @@ mod integration {
                 let (req, ctx) = payjoin_proposal.extract_v2_req()?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 let res = response.bytes().await?.to_vec();
-                let _response = payjoin_proposal.deserialize_res(res, ctx)?;
+                payjoin_proposal.process_res(res, ctx)?;
                 // response should be 204 http
 
                 // **********************
@@ -522,8 +522,8 @@ mod integration {
                     // this response would be returned as http response to the sender
                     let (req, ctx) = payjoin_proposal.extract_v2_req().unwrap();
                     let response = agent_clone.post(req.url).body(req.body).send().await?;
-                    let _response = payjoin_proposal
-                        .deserialize_res(response.bytes().await?.to_vec(), ctx)
+                    payjoin_proposal
+                        .process_res(response.bytes().await?.to_vec(), ctx)
                         .map_err(|e| e.to_string())?;
                     Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
                 });

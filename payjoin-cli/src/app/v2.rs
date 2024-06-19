@@ -130,7 +130,7 @@ impl AppTrait for App {
             .await
             .map_err(map_reqwest_err)?;
         let _res = payjoin_proposal
-            .deserialize_res(res.bytes().await?.to_vec(), ohttp_ctx)
+            .process_res(res.bytes().await?.to_vec(), ohttp_ctx)
             .map_err(|e| anyhow!("Failed to deserialize response {}", e))?;
         let payjoin_psbt = payjoin_proposal.psbt().clone();
         println!(

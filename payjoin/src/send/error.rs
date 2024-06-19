@@ -62,6 +62,8 @@ pub(crate) enum InternalValidationError {
     OhttpEncapsulation(crate::v2::OhttpEncapsulationError),
     #[cfg(feature = "v2")]
     Psbt(bitcoin::psbt::Error),
+    #[cfg(feature = "v2")]
+    UnexpectedStatusCode,
 }
 
 impl From<InternalValidationError> for ValidationError {
@@ -110,6 +112,8 @@ impl fmt::Display for ValidationError {
             OhttpEncapsulation(e) => write!(f, "Ohttp encapsulation error: {}", e),
             #[cfg(feature = "v2")]
             Psbt(e) => write!(f, "psbt error: {}", e),
+            #[cfg(feature = "v2")]
+            UnexpectedStatusCode => write!(f, "unexpected status code"),
         }
     }
 }
@@ -153,6 +157,8 @@ impl std::error::Error for ValidationError {
             OhttpEncapsulation(error) => Some(error),
             #[cfg(feature = "v2")]
             Psbt(error) => Some(error),
+            #[cfg(feature = "v2")]
+            UnexpectedStatusCode => None,
         }
     }
 }

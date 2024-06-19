@@ -615,25 +615,33 @@ impl V2PayjoinProposal {
         }
     }
     #[cfg(not(feature = "uniffi"))]
-    pub fn deserialize_res(
+    ///Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
+    ///
+    /// This function decapsulates the response using the provided OHTTP context. If the response status is successful, it indicates that the Payjoin proposal has been accepted. Otherwise, it returns an error with the status code.
+    ///
+    /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or choose to broadcast the original PSBT.
+    pub fn process_res(
         &self,
         body: Vec<u8>,
         ctx: ohttp::ClientResponse,
-    ) -> Result<Vec<u8>, PayjoinError> {
+    ) -> Result<(), PayjoinError> {
         <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
-            .deserialize_res(body, ctx)
-            .map(|e| e.into())
+            .process_res(body, ctx)
             .map_err(|e| e.into())
     }
     #[cfg(feature = "uniffi")]
-    pub fn deserialize_res(
+    ///Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
+    ///
+    /// This function decapsulates the response using the provided OHTTP context. If the response status is successful, it indicates that the Payjoin proposal has been accepted. Otherwise, it returns an error with the status code.
+    ///
+    /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or choose to broadcast the original PSBT.
+    pub fn process_res(
         &self,
         res: Vec<u8>,
         ohttp_context: Arc<ClientResponse>,
-    ) -> Result<Vec<u8>, PayjoinError> {
+    ) -> Result<(), PayjoinError> {
         <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
-            .deserialize_res(res, ohttp_context.as_ref().into())
-            .map(|e| e)
+            .process_res(res, ohttp_context.as_ref().into())
             .map_err(|e| e.into())
     }
 }

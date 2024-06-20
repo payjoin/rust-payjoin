@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::bitcoin::Amount;
@@ -14,22 +14,23 @@ use payjoin::receive::{PayjoinProposal, UncheckedProposal};
 use payjoin::{base64, Error, PjUriBuilder};
 
 use super::config::AppConfig;
-use super::{App as AppTrait, SeenInputs};
+use super::App as AppTrait;
 use crate::app::{http_agent, try_contributing_inputs, Headers};
+use crate::db::Database;
 #[cfg(feature = "danger-local-https")]
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
 
 #[derive(Clone)]
 pub(crate) struct App {
     config: AppConfig,
-    seen_inputs: Arc<Mutex<SeenInputs>>,
+    db: Arc<Database>,
 }
 
 #[async_trait::async_trait]
 impl AppTrait for App {
     fn new(config: AppConfig) -> Result<Self> {
-        let seen_inputs = Arc::new(Mutex::new(SeenInputs::new()?));
-        let app = Self { config, seen_inputs };
+        let db = Arc::new(Database::create(&config.db_path)?);
+        let app = Self { config, db };
         app.bitcoind()?
             .get_blockchain_info()
             .context("Failed to connect to bitcoind. Check config RPC connection.")?;
@@ -286,7 +287,7 @@ impl App {
 
         // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let payjoin = proposal.check_no_inputs_seen_before(|input| {
-            Ok(!self.insert_input_seen_before(*input).map_err(|e| Error::Server(e.into()))?)
+            self.db.insert_input_seen_before(*input).map_err(|e| Error::Server(e.into()))
         })?;
         log::trace!("check4");
 
@@ -328,9 +329,5 @@ impl App {
             payjoin_proposal_psbt.clone().extract_tx().txid()
         );
         Ok(payjoin_proposal)
-    }
-
-    fn insert_input_seen_before(&self, input: bitcoin::OutPoint) -> Result<bool> {
-        self.seen_inputs.lock().expect("mutex lock failed").insert(input)
     }
 }

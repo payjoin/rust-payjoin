@@ -390,6 +390,12 @@ impl RequestContext {
         Ok(bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
             .map_err(InternalCreateRequestError::SubdirectoryInvalidPubkey)?)
     }
+
+    #[cfg(feature = "v2")]
+    pub fn public_key(&self) -> PublicKey {
+        let secp = bitcoin::secp256k1::Secp256k1::new();
+        self.e.public_key(&secp)
+    }
 }
 
 #[cfg(feature = "v2")]

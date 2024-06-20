@@ -5,6 +5,7 @@ use clap::{arg, value_parser, Arg, ArgMatches, Command};
 use url::Url;
 
 mod app;
+mod db;
 
 #[cfg(not(feature = "v2"))]
 use app::v1::App;
@@ -77,6 +78,7 @@ fn cli() -> ArgMatches {
                 .action(clap::ArgAction::SetTrue)
                 .help("Retry the asynchronous payjoin request if it did not yet complete"),
         )
+        .arg(Arg::new("db_path").short('d').long("db-path").help("Sets a custom database path"))
         .subcommand_required(true);
 
     // Conditional arguments based on features

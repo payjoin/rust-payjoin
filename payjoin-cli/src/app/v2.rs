@@ -1,35 +1,27 @@
-use std::fs::OpenOptions;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
-use bitcoincore_rpc::jsonrpc::serde_json;
 use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::Amount;
 use payjoin::{base64, bitcoin, Error, PjUriBuilder};
-use tokio::sync::Mutex as AsyncMutex;
 
 use super::config::AppConfig;
-use super::{App as AppTrait, SeenInputs};
+use super::App as AppTrait;
 use crate::app::http_agent;
+use crate::db::Database;
 
-#[derive(Clone)]
 pub(crate) struct App {
     config: AppConfig,
-    receive_store: Arc<AsyncMutex<ReceiveStore>>,
-    send_store: Arc<AsyncMutex<SendStore>>,
-    seen_inputs: Arc<Mutex<SeenInputs>>,
+    db: Database,
 }
 
 #[async_trait::async_trait]
 impl AppTrait for App {
     fn new(config: AppConfig) -> Result<Self> {
-        let seen_inputs = Arc::new(Mutex::new(SeenInputs::new()?));
-        let receive_store = Arc::new(AsyncMutex::new(ReceiveStore::new()?));
-        let send_store = Arc::new(AsyncMutex::new(SendStore::new()?));
-        let app = Self { config, receive_store, send_store, seen_inputs };
+        let db = Database::create(&config.db_path)?;
+        let app = Self { config, db };
         app.bitcoind()?
             .get_blockchain_info()
             .context("Failed to connect to bitcoind. Check config RPC connection.")?;
@@ -54,21 +46,19 @@ impl AppTrait for App {
     }
 
     async fn send_payjoin(&self, bip21: &str, fee_rate: &f32, is_retry: bool) -> Result<()> {
-        let mut session = self.send_store.lock().await;
-        let req_ctx = if is_retry {
+        let mut req_ctx = if is_retry {
             log::debug!("Resuming session");
             // Get a reference to RequestContext
-            session.req_ctx.as_mut().expect("RequestContext is missing")
+            self.db.get_send_session()?.ok_or(anyhow!("No session found"))?
         } else {
-            let req_ctx = self.create_pj_request(bip21, fee_rate)?;
-            session.write(req_ctx)?;
-            log::debug!("Writing req_ctx");
-            session.req_ctx.as_mut().expect("RequestContext is missing")
+            let mut req_ctx = self.create_pj_request(bip21, fee_rate)?;
+            self.db.insert_send_session(&mut req_ctx)?;
+            req_ctx
         };
         log::debug!("Awaiting response");
-        let res = self.long_poll_post(req_ctx).await?;
+        let res = self.long_poll_post(&mut req_ctx).await?;
         self.process_pj_response(res)?;
-        session.clear()?;
+        self.db.clear_send_session()?;
         Ok(())
     }
 
@@ -97,12 +87,12 @@ impl AppTrait for App {
             let enrolled = enroller
                 .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), ctx)
                 .map_err(|_| anyhow!("Enrollment failed"))?;
-            self.receive_store.lock().await.write(enrolled.clone())?;
+            self.db.insert_recv_session(enrolled.clone())?;
             enrolled
         } else {
-            let session = self.receive_store.lock().await;
+            let session = self.db.get_recv_session()?;
             println!("Resuming Payjoin session"); // TODO include session pubkey / payjoin directory
-            session.session.clone().ok_or(anyhow!("No session found"))?
+            session.ok_or(anyhow!("No session found"))?
         };
 
         println!("Receive session established");
@@ -137,7 +127,7 @@ impl AppTrait for App {
             "Response successful. Watch mempool for successful Payjoin. TXID: {}",
             payjoin_psbt.extract_tx().clone().txid()
         );
-        self.receive_store.lock().await.clear()?;
+        self.db.clear_recv_session()?;
         Ok(())
     }
 }
@@ -267,7 +257,7 @@ impl App {
 
         // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let payjoin = proposal.check_no_inputs_seen_before(|input| {
-            Ok(!self.insert_input_seen_before(*input).map_err(|e| Error::Server(e.into()))?)
+            self.db.insert_input_seen_before(*input).map_err(|e| Error::Server(e.into()))
         })?;
         log::trace!("check4");
 
@@ -307,10 +297,6 @@ impl App {
         log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
         Ok(payjoin_proposal)
     }
-
-    fn insert_input_seen_before(&self, input: bitcoin::OutPoint) -> Result<bool> {
-        self.seen_inputs.lock().expect("mutex lock failed").insert(input)
-    }
 }
 
 async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::OhttpKeys> {
@@ -341,83 +327,5 @@ fn map_reqwest_err(e: reqwest::Error) -> anyhow::Error {
     match e.status() {
         Some(status_code) => anyhow!("HTTP request failed: {} {}", status_code, e),
         None => anyhow!("No HTTP response: {}", e),
-    }
-}
-
-struct SendStore {
-    req_ctx: Option<payjoin::send::RequestContext>,
-    file: std::fs::File,
-}
-
-impl SendStore {
-    fn new() -> Result<Self> {
-        let mut file =
-            OpenOptions::new().write(true).read(true).create(true).open("send_store.json")?;
-        let session = match serde_json::from_reader(&mut file) {
-            Ok(session) => Some(session),
-            Err(e) => {
-                log::debug!("error reading send session store: {}", e);
-                None
-            }
-        };
-
-        Ok(Self { req_ctx: session, file })
-    }
-
-    fn write(
-        &mut self,
-        session: payjoin::send::RequestContext,
-    ) -> Result<&mut payjoin::send::RequestContext> {
-        use std::io::Write;
-
-        let session = self.req_ctx.insert(session);
-        let serialized = serde_json::to_string(session)?;
-        self.file.write_all(serialized.as_bytes())?;
-        Ok(session)
-    }
-
-    fn clear(&mut self) -> Result<()> {
-        let file = OpenOptions::new().write(true).open("send_store.json")?;
-        file.set_len(0)?;
-        Ok(())
-    }
-}
-
-struct ReceiveStore {
-    session: Option<payjoin::receive::v2::Enrolled>,
-    file: std::fs::File,
-}
-
-impl ReceiveStore {
-    fn new() -> Result<Self> {
-        let mut file =
-            OpenOptions::new().write(true).read(true).create(true).open("receive_store.json")?;
-        let session = match serde_json::from_reader(&mut file) {
-            Ok(session) => Some(session),
-            Err(e) => {
-                log::debug!("error reading receive session store: {}", e);
-                None
-            }
-        };
-
-        Ok(Self { session, file })
-    }
-
-    fn write(
-        &mut self,
-        session: payjoin::receive::v2::Enrolled,
-    ) -> Result<&mut payjoin::receive::v2::Enrolled> {
-        use std::io::Write;
-
-        let session = self.session.insert(session);
-        let serialized = serde_json::to_string(session)?;
-        self.file.write_all(serialized.as_bytes())?;
-        Ok(session)
-    }
-
-    fn clear(&mut self) -> Result<()> {
-        let file = OpenOptions::new().write(true).open("receive_store.json")?;
-        file.set_len(0)?;
-        Ok(())
     }
 }

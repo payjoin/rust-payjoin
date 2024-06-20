@@ -6,12 +6,15 @@ use config::{Config, ConfigError, File, FileFormat};
 use serde::Deserialize;
 use url::Url;
 
+use crate::db;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
     pub bitcoind_rpchost: Url,
     pub bitcoind_cookie: Option<PathBuf>,
     pub bitcoind_rpcuser: String,
     pub bitcoind_rpcpassword: String,
+    pub db_path: PathBuf,
 
     // v2 only
     #[cfg(feature = "v2")]
@@ -50,6 +53,11 @@ impl AppConfig {
             .set_override_option(
                 "bitcoind_rpcpassword",
                 matches.get_one::<String>("rpcpassword").map(|s| s.as_str()),
+            )?
+            .set_default("db_path", db::DB_PATH)?
+            .set_override_option(
+                "db_path",
+                matches.get_one::<String>("db_path").map(|s| s.as_str()),
             )?
             // Subcommand defaults without which file serialization fails.
             .set_default("port", "3000")?

@@ -47,6 +47,9 @@ mod e2e {
 
         let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
         let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
+        let temp_dir = env::temp_dir();
+        let receiver_db_path = temp_dir.join("receiver_db");
+        let sender_db_path = temp_dir.join("sender_db");
         let cookie_file = &bitcoind.params.cookie_file;
         let port = find_free_port();
         let pj_endpoint = format!("https://localhost:{}", port);
@@ -58,6 +61,8 @@ mod e2e {
             .arg(&receiver_rpchost)
             .arg("--cookie-file")
             .arg(&cookie_file)
+            .arg("--db-path")
+            .arg(&receiver_db_path)
             .arg("receive")
             .arg(RECEIVE_SATS)
             .arg("--port")
@@ -95,6 +100,8 @@ mod e2e {
             .arg(&sender_rpchost)
             .arg("--cookie-file")
             .arg(&cookie_file)
+            .arg("--db-path")
+            .arg(&sender_db_path)
             .arg("send")
             .arg(&bip21)
             .arg("--fee-rate")

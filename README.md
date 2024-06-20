@@ -97,6 +97,10 @@ cargo update -p time@0.3.36 --precise 0.3.20
 cargo update -p reqwest --precise 0.12.4
 ```
 
+## Code Formatting
+
+We use the nightly Rust formatter for this project. Please run `rustfmt` using the nightly toolchain before submitting any changes.
+
 ## License
 
 MIT

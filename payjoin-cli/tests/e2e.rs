@@ -1,20 +1,20 @@
-#[cfg(feature = "danger-local-https")]
-#[cfg(not(feature = "v2"))]
 mod e2e {
-    use std::env;
-    use std::process::Stdio;
-
-    use bitcoind::bitcoincore_rpc::core_rpc_json::AddressType;
-    use bitcoind::bitcoincore_rpc::RpcApi;
-    use log::{log_enabled, Level};
-    use payjoin::bitcoin::Amount;
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    use tokio::process::Command;
-
-    const RECEIVE_SATS: &str = "54321";
-
+    #[cfg(feature = "danger-local-https")]
+    #[cfg(not(feature = "v2"))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn send_receive_payjoin() {
+        use std::env;
+        use std::process::Stdio;
+
+        use bitcoind::bitcoincore_rpc::core_rpc_json::AddressType;
+        use bitcoind::bitcoincore_rpc::RpcApi;
+        use log::{log_enabled, Level};
+        use payjoin::bitcoin::Amount;
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::process::Command;
+
+        const RECEIVE_SATS: &str = "54321";
+
         env::set_var("RUST_LOG", "debug");
 
         let bitcoind_exe = env::var("BITCOIND_EXE")
@@ -53,7 +53,6 @@ mod e2e {
         let cookie_file = &bitcoind.params.cookie_file;
         let port = find_free_port();
         let pj_endpoint = format!("https://localhost:{}", port);
-
         let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
 
         let mut cli_receiver = Command::new(payjoin_cli)
@@ -138,10 +137,10 @@ mod e2e {
         cli_sender.kill().await.expect("Failed to kill payjoin-cli");
 
         assert!(payjoin_sent.unwrap_or(Some(false)).unwrap(), "Payjoin send was not detected");
-    }
 
-    fn find_free_port() -> u16 {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.local_addr().unwrap().port()
+        fn find_free_port() -> u16 {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap().port()
+        }
     }
 }

@@ -304,13 +304,24 @@ impl ProvisionalProposal {
     fn mutex_guard(&self) -> MutexGuard<'_, payjoin::receive::ProvisionalProposal> {
         self.0.lock().unwrap()
     }
-    pub fn substitute_output_address(
+    #[cfg(not(feature = "uniffi"))]
+    ///If output substitution is enabled, replace the receiver’s output script with a new one.
+    pub fn try_substitute_receiver_output(
         &self,
-        substitute_address: String,
-    ) -> Result<(), PayjoinError> {
-        let address =
-            payjoin::bitcoin::Address::from_str(substitute_address.as_str())?.assume_checked();
-        Ok(self.mutex_guard().substitute_output_address(address))
+        generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>,
+    ) -> Result<(),PayjoinError>{
+        self.mutex_guard()
+            .try_substitute_receiver_output(|| generate_script()
+                .map(|e| payjoin::bitcoin::ScriptBuf::from_bytes(e))
+                .map_err(|e|  payjoin::Error::Server(e.into())))
+            .map_err(|e| e.into())
+    }
+    #[cfg(feature = "uniffi")]
+    pub fn try_substitute_receiver_output(
+        &self,
+        generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>,
+    ) -> Result<(),PayjoinError>{
+
     }
     pub fn contribute_witness_input(
         &self,

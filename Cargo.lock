@@ -1400,6 +1400,7 @@ dependencies = [
  "log",
  "ohttp",
  "reqwest",
+ "rustls 0.22.4",
  "serde",
  "serde_json",
  "url",

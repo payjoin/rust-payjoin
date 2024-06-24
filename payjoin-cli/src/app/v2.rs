@@ -92,10 +92,9 @@ impl AppTrait for App {
             .send()
             .await
             .map_err(map_reqwest_err)?;
-
         let session = initializer
             .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), ctx)
-            .map_err(|_| anyhow!("Enrollment failed"))?;
+            .map_err(|e| anyhow!("Enrollment failed {}", e))?;
         self.db.insert_recv_session(session.clone())?;
         self.spawn_payjoin_receiver(session, Some(amount)).await
     }
@@ -339,11 +338,7 @@ async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::
         let ohttp_relay = config.ohttp_relay.clone();
         let payjoin_directory = config.pj_directory.clone();
         #[cfg(feature = "danger-local-https")]
-        let cert_der = rcgen::generate_simple_self_signed(vec![
-            "0.0.0.0".to_string(),
-            "localhost".to_string(),
-        ])?
-        .serialize_der()?;
+        let cert_der = crate::app::read_local_cert()?;
         Ok(payjoin::io::fetch_ohttp_keys(
             ohttp_relay,
             payjoin_directory,

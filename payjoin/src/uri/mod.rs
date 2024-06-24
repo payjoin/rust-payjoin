@@ -1,15 +1,15 @@
 use std::borrow::Cow;
-#[cfg(feature = "v2")]
-use std::str::FromStr;
 
 use bitcoin::address::NetworkChecked;
 use bitcoin::{Address, Amount};
+pub use error::PjParseError;
 use url::Url;
 
-#[cfg(feature = "v2")]
-use crate::v2::ParseOhttpKeysError;
+use crate::uri::error::InternalPjParseError;
 #[cfg(feature = "v2")]
 use crate::OhttpKeys;
+
+pub mod error;
 
 #[derive(Clone)]
 pub enum MaybePayjoinExtras {
@@ -184,13 +184,6 @@ pub struct DeserializationState {
     ohttp: Option<OhttpKeys>,
 }
 
-#[derive(Debug)]
-pub struct PjParseError(InternalPjParseError);
-
-impl From<InternalPjParseError> for PjParseError {
-    fn from(value: InternalPjParseError) -> Self { PjParseError(value) }
-}
-
 impl<'a> bip21::SerializeParams for &'a MaybePayjoinExtras {
     type Key = &'static str;
     type Value = String;
@@ -241,15 +234,17 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
         match key {
             #[cfg(feature = "v2")]
             "ohttp" if self.ohttp.is_none() => {
+                use std::str::FromStr;
+
                 let base64_config =
                     Cow::try_from(value).map_err(|_| InternalPjParseError::NotUtf8)?;
                 let config = OhttpKeys::from_str(&base64_config)
-                    .map_err(InternalPjParseError::ParseOhttpKeys)?;
+                    .map_err(InternalPjParseError::BadOhttpKeys)?;
                 self.ohttp = Some(config);
                 Ok(bip21::de::ParamKind::Known)
             }
             #[cfg(feature = "v2")]
-            "ohttp" => Err(PjParseError(InternalPjParseError::MultipleParams("ohttp"))),
+            "ohttp" => Err(InternalPjParseError::MultipleParams("ohttp").into()),
             "pj" if self.pj.is_none() => {
                 let endpoint = Cow::try_from(value).map_err(|_| InternalPjParseError::NotUtf8)?;
                 let url = Url::parse(&endpoint).map_err(|_| InternalPjParseError::BadEndpoint)?;
@@ -276,7 +271,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
     ) -> std::result::Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
         match (self.pj, self.pjos) {
             (None, None) => Ok(MaybePayjoinExtras::Unsupported),
-            (None, Some(_)) => Err(PjParseError(InternalPjParseError::MissingEndpoint)),
+            (None, Some(_)) => Err(InternalPjParseError::MissingEndpoint.into()),
             (Some(endpoint), pjos) => {
                 if endpoint.scheme() == "https"
                     || endpoint.scheme() == "http"
@@ -289,42 +284,11 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
                         ohttp_keys: self.ohttp,
                     }))
                 } else {
-                    Err(PjParseError(InternalPjParseError::UnsecureEndpoint))
+                    Err(InternalPjParseError::UnsecureEndpoint.into())
                 }
             }
         }
     }
-}
-
-impl std::fmt::Display for PjParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.0 {
-            InternalPjParseError::BadPjOs => write!(f, "Bad pjos parameter"),
-            InternalPjParseError::MultipleParams(param) => {
-                write!(f, "Multiple instances of parameter '{}'", param)
-            }
-            InternalPjParseError::MissingEndpoint => write!(f, "Missing payjoin endpoint"),
-            InternalPjParseError::NotUtf8 => write!(f, "Endpoint is not valid UTF-8"),
-            InternalPjParseError::BadEndpoint => write!(f, "Endpoint is not valid"),
-            #[cfg(feature = "v2")]
-            InternalPjParseError::ParseOhttpKeys(e) => write!(f, "OHTTP keys are not valid: {}", e),
-            InternalPjParseError::UnsecureEndpoint => {
-                write!(f, "Endpoint scheme is not secure (https or onion)")
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-enum InternalPjParseError {
-    BadPjOs,
-    MultipleParams(&'static str),
-    MissingEndpoint,
-    NotUtf8,
-    BadEndpoint,
-    #[cfg(feature = "v2")]
-    ParseOhttpKeys(ParseOhttpKeysError),
-    UnsecureEndpoint,
 }
 
 #[cfg(test)]

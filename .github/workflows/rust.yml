@@ -37,14 +37,10 @@ jobs:
         run: cargo test --package payjoin --verbose --features=send,receive --test integration
       - name: test payjoin v2 integration
         run: cargo test --package payjoin --verbose --features=send,receive,danger-local-https,v2 --test integration
+      - name: test payjoin-cli bin v2
+        run: cargo test --package payjoin-cli --verbose --features=danger-local-https,v2 --test e2e
       - name: test payjoin-cli bin v1
         run: cargo test --package payjoin-cli --verbose --features=danger-local-https
-      - name: build payjoin-cli bin v2
-        if: matrix.rust != '1.63.0'
-        run: cargo build --package payjoin-cli --verbose --features=v2
-      - name: build payjoin-cli bin v2 with danger-local-https
-        if: matrix.rust != '1.63.0'
-        run: cargo build --package payjoin-cli --verbose --features=danger-local-https,v2
 
   fmt:
     runs-on: ubuntu-latest

@@ -378,7 +378,6 @@ mod integration {
                 let ohttp_keys =
                     payjoin::io::fetch_ohttp_keys(ohttp_relay, directory.clone(), cert_der.clone())
                         .await?;
-
                 // **********************
                 // Inside the Receiver:
                 let address = receiver.get_new_address(None, None)?.assume_checked();

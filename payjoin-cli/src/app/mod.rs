@@ -147,13 +147,18 @@ fn http_agent_builder() -> Result<reqwest::ClientBuilder> {
     use rustls::pki_types::CertificateDer;
     use rustls::RootCertStore;
 
-    let mut local_cert_path = std::env::temp_dir();
-    local_cert_path.push(LOCAL_CERT_FILE);
-    let cert_der = std::fs::read(local_cert_path)?;
+    let cert_der = read_local_cert()?;
     let mut root_cert_store = RootCertStore::empty();
     root_cert_store.add(CertificateDer::from(cert_der.as_slice()))?;
     Ok(reqwest::ClientBuilder::new()
         .danger_accept_invalid_certs(true)
         .use_rustls_tls()
         .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der.as_slice())?))
+}
+
+#[cfg(feature = "danger-local-https")]
+fn read_local_cert() -> Result<Vec<u8>> {
+    let mut local_cert_path = std::env::temp_dir();
+    local_cert_path.push(LOCAL_CERT_FILE);
+    Ok(std::fs::read(local_cert_path)?)
 }

@@ -197,6 +197,7 @@ pub(crate) enum InternalCreateRequestError {
     SubdirectoryInvalidPubkey(bitcoin::secp256k1::Error),
     #[cfg(feature = "v2")]
     MissingOhttpConfig,
+    Expired(std::time::SystemTime),
 }
 
 impl fmt::Display for CreateRequestError {
@@ -228,6 +229,7 @@ impl fmt::Display for CreateRequestError {
             SubdirectoryInvalidPubkey(e) => write!(f, "subdirectory does not represent a valid pubkey: {}", e),
             #[cfg(feature = "v2")]
             MissingOhttpConfig => write!(f, "no ohttp configuration with which to make a v2 request available"),
+            Expired(expiry) => write!(f, "session expired at {:?}", expiry),
         }
     }
 }
@@ -261,6 +263,7 @@ impl std::error::Error for CreateRequestError {
             SubdirectoryInvalidPubkey(error) => Some(error),
             #[cfg(feature = "v2")]
             MissingOhttpConfig => None,
+            Expired(_) => None,
         }
     }
 }

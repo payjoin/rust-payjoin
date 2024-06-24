@@ -12,10 +12,14 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use url::Url;
 
+use super::v2::error::{InternalSessionError, SessionError};
 use super::{Error, InternalRequestError, RequestError, SelectionError};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
+use crate::v2::OhttpEncapsulationError;
 use crate::{OhttpKeys, PjUriBuilder, Request};
+
+pub(crate) mod error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SessionContext {
@@ -101,8 +105,12 @@ pub struct ActiveSession {
 }
 
 impl ActiveSession {
-    pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
-        let (body, ohttp_ctx) = self.fallback_req_body()?;
+    pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), SessionError> {
+        if SystemTime::now() > self.context.expiry {
+            return Err(InternalSessionError::Expired(self.context.expiry).into());
+        }
+        let (body, ohttp_ctx) =
+            self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulationError)?;
         let url = self.context.ohttp_relay.clone();
         let req = Request { url, body };
         Ok((req, ohttp_ctx))
@@ -131,14 +139,16 @@ impl ActiveSession {
         }
     }
 
-    fn fallback_req_body(&mut self) -> Result<(Vec<u8>, ohttp::ClientResponse), Error> {
+    fn fallback_req_body(
+        &mut self,
+    ) -> Result<(Vec<u8>, ohttp::ClientResponse), OhttpEncapsulationError> {
         let fallback_target = self.pj_url();
-        Ok(crate::v2::ohttp_encapsulate(
+        crate::v2::ohttp_encapsulate(
             &mut self.context.ohttp_keys,
             "GET",
             fallback_target.as_str(),
             None,
-        )?)
+        )
     }
 
     fn extract_proposal_from_v1(&mut self, response: String) -> Result<UncheckedProposal, Error> {

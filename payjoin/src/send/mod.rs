@@ -25,6 +25,7 @@
 //! wallet and http client.
 
 use std::str::FromStr;
+use std::time::SystemTime;
 
 use bitcoin::psbt::Psbt;
 #[cfg(feature = "v2")]
@@ -204,6 +205,7 @@ impl<'a> RequestBuilder<'a> {
         let endpoint = self.uri.extras.endpoint.clone();
         #[cfg(feature = "v2")]
         let ohttp_keys = self.uri.extras.ohttp_keys;
+        let expiry = self.uri.extras.expiry;
         let disable_output_substitution =
             self.uri.extras.disable_output_substitution || self.disable_output_substitution;
         let payee = self.uri.address.script_pubkey();
@@ -236,6 +238,7 @@ impl<'a> RequestBuilder<'a> {
             endpoint,
             #[cfg(feature = "v2")]
             ohttp_keys,
+            expiry,
             disable_output_substitution,
             fee_contribution,
             payee,
@@ -254,6 +257,7 @@ pub struct RequestContext {
     endpoint: Url,
     #[cfg(feature = "v2")]
     ohttp_keys: Option<crate::v2::OhttpKeys>,
+    expiry: Option<SystemTime>,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
@@ -320,6 +324,11 @@ impl RequestContext {
         &mut self,
         ohttp_relay: Url,
     ) -> Result<(Request, ContextV2), CreateRequestError> {
+        if let Some(expiry) = self.expiry {
+            if SystemTime::now() > expiry {
+                return Err(InternalCreateRequestError::Expired(expiry).into());
+            }
+        }
         let rs = Self::rs_pubkey_from_dir_endpoint(&self.endpoint)?;
         let url = self.endpoint.clone();
         let body = serialize_v2_body(
@@ -401,6 +410,7 @@ impl Serialize for RequestContext {
         let mut state = serializer.serialize_struct("RequestContext", 8)?;
         state.serialize_field("psbt", &self.psbt.to_string())?;
         state.serialize_field("endpoint", &self.endpoint.as_str())?;
+        state.serialize_field("expiry", &self.expiry)?;
         let ohttp_string = self.ohttp_keys.as_ref().map_or(Ok("".to_string()), |config| {
             config
                 .encode()
@@ -456,6 +466,7 @@ impl<'de> Deserialize<'de> for RequestContext {
             {
                 let mut psbt = None;
                 let mut endpoint = None;
+                let mut expiry = None;
                 let mut ohttp_keys = None;
                 let mut disable_output_substitution = None;
                 let mut fee_contribution = None;
@@ -476,6 +487,9 @@ impl<'de> Deserialize<'de> for RequestContext {
                                 url::Url::from_str(&map.next_value::<String>()?)
                                     .map_err(de::Error::custom)?,
                             ),
+                        "expiry" => {
+                            expiry = map.next_value()?;
+                        }
                         "ohttp_keys" => {
                             let ohttp_base64: String = map.next_value()?;
                             ohttp_keys = if ohttp_base64.is_empty() {
@@ -526,6 +540,7 @@ impl<'de> Deserialize<'de> for RequestContext {
                     sequence: sequence.ok_or_else(|| de::Error::missing_field("sequence"))?,
                     payee: payee.ok_or_else(|| de::Error::missing_field("payee"))?,
                     e: e.ok_or_else(|| de::Error::missing_field("e"))?,
+                    expiry,
                 })
             }
         }
@@ -1104,6 +1119,7 @@ mod test {
             psbt: Psbt::from_str(ORIGINAL_PSBT).unwrap(),
             endpoint: Url::parse("http://localhost:1234").unwrap(),
             ohttp_keys: None,
+            expiry: None,
             disable_output_substitution: false,
             fee_contribution: None,
             min_fee_rate: FeeRate::ZERO,

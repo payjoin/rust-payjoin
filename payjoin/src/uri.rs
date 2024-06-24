@@ -7,7 +7,11 @@ use url::Url;
 #[cfg(feature = "v2")]
 use crate::OhttpKeys;
 
-#[derive(Clone)]
+#[cfg(feature = "v2")]
+static TWENTY_FOUR_HOURS_DEFAULT_EXPIRY: std::time::Duration =
+    std::time::Duration::from_secs(60 * 60 * 24);
+
+#[derive(Clone, Debug)]
 pub enum MaybePayjoinExtras {
     Supported(PayjoinExtras),
     Unsupported,
@@ -22,12 +26,13 @@ impl MaybePayjoinExtras {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PayjoinExtras {
     pub(crate) endpoint: Url,
     pub(crate) disable_output_substitution: bool,
     #[cfg(feature = "v2")]
     pub(crate) ohttp_keys: Option<OhttpKeys>,
+    pub(crate) expiry: Option<std::time::SystemTime>,
 }
 
 impl PayjoinExtras {
@@ -97,6 +102,10 @@ pub struct PjUriBuilder {
     ///
     /// Required only for v2 payjoin.
     ohttp: Option<OhttpKeys>,
+    #[cfg(feature = "v2")]
+    /// Custom expiry for the payjoin request.
+    /// Default is 24 hours.
+    expiry: std::time::SystemTime,
 }
 
 impl PjUriBuilder {
@@ -115,6 +124,8 @@ impl PjUriBuilder {
             pjos: false,
             #[cfg(feature = "v2")]
             ohttp: ohttp_keys,
+            #[cfg(feature = "v2")]
+            expiry: std::time::SystemTime::now() + TWENTY_FOUR_HOURS_DEFAULT_EXPIRY,
         }
     }
     /// Set the amount you want to receive.
@@ -141,6 +152,13 @@ impl PjUriBuilder {
         self
     }
 
+    #[cfg(feature = "v2")]
+    /// Set custom expiry for the payjoin request.
+    pub fn expiry(mut self, expiry: std::time::SystemTime) -> Self {
+        self.expiry = expiry;
+        self
+    }
+
     /// Build payjoin URI.
     ///
     /// Constructs a `bip21::Uri` with PayjoinParams from the
@@ -151,6 +169,10 @@ impl PjUriBuilder {
             disable_output_substitution: self.pjos,
             #[cfg(feature = "v2")]
             ohttp_keys: self.ohttp,
+            #[cfg(feature = "v2")]
+            expiry: Some(self.expiry),
+            #[cfg(not(feature = "v2"))]
+            expiry: None,
         };
         let mut pj_uri = bip21::Uri::with_extras(self.address, extras);
         pj_uri.amount = self.amount;
@@ -178,6 +200,7 @@ pub struct DeserializationState {
     pjos: Option<bool>,
     #[cfg(feature = "v2")]
     ohttp: Option<OhttpKeys>,
+    expiry: Option<std::time::SystemTime>,
 }
 
 #[derive(Debug)]
@@ -220,6 +243,13 @@ impl<'a> bip21::SerializeParams for &'a PayjoinExtras {
         } else {
             log::warn!("Failed to encode ohttp config, ignoring");
         }
+        if let Some(expiry) = self.expiry {
+            let expiry = expiry
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .expect("expiry is in the past")
+                .as_secs();
+            params.push(("exp", expiry.to_string()));
+        }
         params.into_iter()
     }
 }
@@ -227,7 +257,7 @@ impl<'a> bip21::SerializeParams for &'a PayjoinExtras {
 impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
     type Value = MaybePayjoinExtras;
 
-    fn is_param_known(&self, param: &str) -> bool { matches!(param, "pj" | "pjos") }
+    fn is_param_known(&self, param: &str) -> bool { matches!(param, "pj" | "pjos" | "exp") }
 
     fn deserialize_temp(
         &mut self,
@@ -252,6 +282,19 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
             }
             #[cfg(feature = "v2")]
             "ohttp" => Err(PjParseError(InternalPjParseError::MultipleParams("ohttp"))),
+            "exp" if self.expiry.is_none() => {
+                let expiry = Cow::try_from(value).map_err(|_| InternalPjParseError::NotUtf8)?;
+                let expiry = std::time::SystemTime::UNIX_EPOCH
+                    + std::time::Duration::from_secs(
+                        expiry.parse().map_err(|_| InternalPjParseError::NotUtf8)?,
+                    );
+                if expiry < std::time::SystemTime::now() {
+                    return Err(InternalPjParseError::Expired(expiry).into());
+                }
+                self.expiry = Some(expiry);
+                Ok(bip21::de::ParamKind::Known)
+            }
+            "exp" => Err(PjParseError(InternalPjParseError::MultipleParams("expiry"))),
             "pj" if self.pj.is_none() => {
                 let endpoint = Cow::try_from(value).map_err(|_| InternalPjParseError::NotUtf8)?;
                 let url = Url::parse(&endpoint).map_err(|_| InternalPjParseError::BadEndpoint)?;
@@ -289,6 +332,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
                         disable_output_substitution: pjos.unwrap_or(false),
                         #[cfg(feature = "v2")]
                         ohttp_keys: self.ohttp,
+                        expiry: self.expiry,
                     }))
                 } else {
                     Err(PjParseError(InternalPjParseError::UnsecureEndpoint))
@@ -315,6 +359,9 @@ impl std::fmt::Display for PjParseError {
             InternalPjParseError::UnsecureEndpoint => {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }
+            InternalPjParseError::Expired(expiry) => {
+                write!(f, "Expiry is in the past: {:?}", expiry)
+            }
         }
     }
 }
@@ -331,6 +378,7 @@ enum InternalPjParseError {
     #[cfg(feature = "v2")]
     DecodeOhttpKeys,
     UnsecureEndpoint,
+    Expired(std::time::SystemTime),
 }
 
 #[cfg(test)]
@@ -372,6 +420,13 @@ mod tests {
 
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=ftp://foo.onion";
         assert!(Uri::try_from(uri).is_err(), "unencrypted connection");
+    }
+
+    #[test]
+    fn test_expired() {
+        let uri =
+            "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com&exp=0";
+        assert!(Uri::try_from(uri).is_err(), "expired");
     }
 
     #[test]

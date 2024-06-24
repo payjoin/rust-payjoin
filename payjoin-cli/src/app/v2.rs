@@ -213,8 +213,7 @@ impl App {
         session: &mut payjoin::receive::v2::ActiveSession,
     ) -> Result<payjoin::receive::v2::UncheckedProposal> {
         loop {
-            let (req, context) =
-                session.extract_req().map_err(|_| anyhow!("Failed to extract request"))?;
+            let (req, context) = session.extract_req()?;
             println!("Polling receive request...");
             let http = http_agent()?;
             let ohttp_response = http

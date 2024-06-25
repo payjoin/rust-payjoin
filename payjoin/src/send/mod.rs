@@ -248,7 +248,7 @@ impl<'a> RequestBuilder<'a> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct RequestContext {
     psbt: Psbt,
     endpoint: Url,
@@ -262,23 +262,6 @@ pub struct RequestContext {
     payee: ScriptBuf,
     #[cfg(feature = "v2")]
     e: bitcoin::secp256k1::SecretKey,
-}
-
-#[cfg(feature = "v2")]
-impl PartialEq for RequestContext {
-    fn eq(&self, other: &Self) -> bool {
-        self.psbt == other.psbt
-            && self.endpoint == other.endpoint
-            // KeyConfig is not yet PartialEq
-            && self.ohttp_keys.as_ref().map(|cfg| cfg.encode().unwrap_or_default()) == other.ohttp_keys.as_ref().map(|cfg| cfg.encode().unwrap_or_default())
-            && self.disable_output_substitution == other.disable_output_substitution
-            && self.fee_contribution == other.fee_contribution
-            && self.min_fee_rate == other.min_fee_rate
-            && self.input_type == other.input_type
-            && self.sequence == other.sequence
-            && self.payee == other.payee
-            && self.e == other.e
-    }
 }
 
 #[cfg(feature = "v2")]

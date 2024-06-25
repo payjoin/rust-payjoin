@@ -5,7 +5,7 @@ mod integration {
     use std::str::FromStr;
 
     use bitcoin::psbt::Psbt;
-    use bitcoin::{base64, Amount, FeeRate, OutPoint};
+    use bitcoin::{Amount, FeeRate, OutPoint};
     use bitcoind::bitcoincore_rpc::core_rpc_json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use log::{log_enabled, Level};
@@ -21,6 +21,7 @@ mod integration {
 
     #[cfg(not(feature = "v2"))]
     mod v1 {
+        use bitcoin::base64;
         use log::debug;
         use payjoin::receive::{Headers, PayjoinProposal, UncheckedProposal};
         use payjoin::{PjUri, PjUriBuilder, UriExt};
@@ -303,14 +304,9 @@ mod integration {
 
         #[tokio::test]
         async fn test_bad_ohttp_keys() {
-            let bad_ohttp_keys = OhttpKeys::decode(
-                &base64::decode_config(
-                    "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM",
-                    base64::URL_SAFE,
-                )
-                .expect("invalid base64"),
-            )
-            .expect("Invalid OhttpKeys");
+            let bad_ohttp_keys =
+                OhttpKeys::from_str("AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM")
+                    .expect("Invalid OhttpKeys");
 
             std::env::set_var("RUST_LOG", "debug");
             let (cert, key) = local_cert_key();

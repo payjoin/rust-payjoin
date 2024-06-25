@@ -1,9 +1,13 @@
 use std::borrow::Cow;
+#[cfg(feature = "v2")]
+use std::str::FromStr;
 
 use bitcoin::address::NetworkChecked;
 use bitcoin::{Address, Amount};
 use url::Url;
 
+#[cfg(feature = "v2")]
+use crate::v2::ParseOhttpKeysError;
 #[cfg(feature = "v2")]
 use crate::OhttpKeys;
 
@@ -212,11 +216,8 @@ impl<'a> bip21::SerializeParams for &'a PayjoinExtras {
             ("pjos", if self.disable_output_substitution { "1" } else { "0" }.to_string()),
         ];
         #[cfg(feature = "v2")]
-        if let Some(ohttp_keys) = self.ohttp_keys.clone().and_then(|c| c.encode().ok()) {
-            let config =
-                bitcoin::base64::Config::new(bitcoin::base64::CharacterSet::UrlSafe, false);
-            let base64_ohttp_keys = bitcoin::base64::encode_config(ohttp_keys, config);
-            params.push(("ohttp", base64_ohttp_keys));
+        if let Some(ohttp_keys) = &self.ohttp_keys {
+            params.push(("ohttp", ohttp_keys.to_string()));
         } else {
             log::warn!("Failed to encode ohttp config, ignoring");
         }
@@ -242,11 +243,8 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
             "ohttp" if self.ohttp.is_none() => {
                 let base64_config =
                     Cow::try_from(value).map_err(|_| InternalPjParseError::NotUtf8)?;
-                let config_bytes =
-                    bitcoin::base64::decode_config(&*base64_config, bitcoin::base64::URL_SAFE)
-                        .map_err(|_| InternalPjParseError::NotBase64)?;
-                let config = OhttpKeys::decode(&config_bytes)
-                    .map_err(|_| InternalPjParseError::DecodeOhttpKeys)?;
+                let config = OhttpKeys::from_str(&base64_config)
+                    .map_err(InternalPjParseError::ParseOhttpKeys)?;
                 self.ohttp = Some(config);
                 Ok(bip21::de::ParamKind::Known)
             }
@@ -307,11 +305,9 @@ impl std::fmt::Display for PjParseError {
             }
             InternalPjParseError::MissingEndpoint => write!(f, "Missing payjoin endpoint"),
             InternalPjParseError::NotUtf8 => write!(f, "Endpoint is not valid UTF-8"),
-            #[cfg(feature = "v2")]
-            InternalPjParseError::NotBase64 => write!(f, "ohttp config is not valid base64"),
             InternalPjParseError::BadEndpoint => write!(f, "Endpoint is not valid"),
             #[cfg(feature = "v2")]
-            InternalPjParseError::DecodeOhttpKeys => write!(f, "ohttp config is not valid"),
+            InternalPjParseError::ParseOhttpKeys(e) => write!(f, "OHTTP keys are not valid: {}", e),
             InternalPjParseError::UnsecureEndpoint => {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }
@@ -325,11 +321,9 @@ enum InternalPjParseError {
     MultipleParams(&'static str),
     MissingEndpoint,
     NotUtf8,
-    #[cfg(feature = "v2")]
-    NotBase64,
     BadEndpoint,
     #[cfg(feature = "v2")]
-    DecodeOhttpKeys,
+    ParseOhttpKeys(ParseOhttpKeysError),
     UnsecureEndpoint,
 }
 

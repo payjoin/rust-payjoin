@@ -1,6 +1,7 @@
 use std::ops::{Deref, DerefMut};
 use std::{error, fmt};
 
+use bitcoin::base64;
 use bitcoin::secp256k1::ecdh::SharedSecret;
 use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
 use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
@@ -249,6 +250,24 @@ impl OhttpKeys {
     }
 }
 
+impl fmt::Display for OhttpKeys {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let encoded =
+            base64::encode_config(self.encode().map_err(|_| fmt::Error)?, base64::URL_SAFE_NO_PAD);
+        write!(f, "{}", encoded)
+    }
+}
+
+impl std::str::FromStr for OhttpKeys {
+    type Err = ParseOhttpKeysError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = base64::decode_config(s, base64::URL_SAFE_NO_PAD)
+            .map_err(ParseOhttpKeysError::DecodeBase64)?;
+        OhttpKeys::decode(&bytes).map_err(ParseOhttpKeysError::DecodeKeyConfig)
+    }
+}
+
 impl PartialEq for OhttpKeys {
     fn eq(&self, other: &Self) -> bool {
         match (self.encode(), other.encode()) {
@@ -276,12 +295,8 @@ impl<'de> serde::Deserialize<'de> for OhttpKeys {
     where
         D: serde::Deserializer<'de>,
     {
-        use bitcoin::base64;
-
-        let base64_string = String::deserialize(deserializer)?;
-        let bytes = base64::decode_config(base64_string, base64::URL_SAFE)
-            .map_err(serde::de::Error::custom)?;
-        Ok(OhttpKeys(ohttp::KeyConfig::decode(&bytes).map_err(serde::de::Error::custom)?))
+        let bytes = Vec::<u8>::deserialize(deserializer)?;
+        OhttpKeys::decode(&bytes).map_err(serde::de::Error::custom)
     }
 }
 
@@ -290,11 +305,33 @@ impl serde::Serialize for OhttpKeys {
     where
         S: serde::Serializer,
     {
-        use bitcoin::base64;
+        let bytes = self.encode().map_err(serde::ser::Error::custom)?;
+        bytes.serialize(serializer)
+    }
+}
 
-        let bytes = self.0.encode().map_err(serde::ser::Error::custom)?;
-        let base64_string = base64::encode_config(bytes, base64::URL_SAFE);
-        base64_string.serialize(serializer)
+#[derive(Debug)]
+pub enum ParseOhttpKeysError {
+    DecodeBase64(base64::DecodeError),
+    DecodeKeyConfig(ohttp::Error),
+}
+
+impl std::fmt::Display for ParseOhttpKeysError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParseOhttpKeysError::DecodeBase64(e) => write!(f, "Failed to decode base64: {}", e),
+            ParseOhttpKeysError::DecodeKeyConfig(e) =>
+                write!(f, "Failed to decode KeyConfig: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for ParseOhttpKeysError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ParseOhttpKeysError::DecodeBase64(e) => Some(e),
+            ParseOhttpKeysError::DecodeKeyConfig(e) => Some(e),
+        }
     }
 }
 
@@ -304,6 +341,8 @@ mod test {
 
     #[test]
     fn test_ohttp_keys_roundtrip() {
+        use std::str::FromStr;
+
         use ohttp::hpke::{Aead, Kdf, Kem};
         use ohttp::{KeyId, SymmetricSuite};
         const KEY_ID: KeyId = 1;
@@ -311,8 +350,8 @@ mod test {
         const SYMMETRIC: &[SymmetricSuite] =
             &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
         let keys = OhttpKeys(ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap());
-        let serialized = serde_json::to_string(&keys).unwrap();
-        let deserialized: OhttpKeys = serde_json::from_str(&serialized).unwrap();
+        let serialized = &keys.to_string();
+        let deserialized = OhttpKeys::from_str(serialized).unwrap();
         assert_eq!(keys.encode().unwrap(), deserialized.encode().unwrap());
     }
 }

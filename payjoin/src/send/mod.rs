@@ -401,13 +401,7 @@ impl Serialize for RequestContext {
         let mut state = serializer.serialize_struct("RequestContext", 8)?;
         state.serialize_field("psbt", &self.psbt.to_string())?;
         state.serialize_field("endpoint", &self.endpoint.as_str())?;
-        let ohttp_string = self.ohttp_keys.as_ref().map_or(Ok("".to_string()), |config| {
-            config
-                .encode()
-                .map_err(|e| serde::ser::Error::custom(format!("ohttp-keys encoding error: {}", e)))
-                .map(bitcoin::base64::encode)
-        })?;
-        state.serialize_field("ohttp_keys", &ohttp_string)?;
+        state.serialize_field("ohttp_keys", &self.ohttp_keys)?;
         state.serialize_field("disable_output_substitution", &self.disable_output_substitution)?;
         state.serialize_field(
             "fee_contribution",
@@ -476,21 +470,7 @@ impl<'de> Deserialize<'de> for RequestContext {
                                 url::Url::from_str(&map.next_value::<String>()?)
                                     .map_err(de::Error::custom)?,
                             ),
-                        "ohttp_keys" => {
-                            let ohttp_base64: String = map.next_value()?;
-                            ohttp_keys = if ohttp_base64.is_empty() {
-                                None
-                            } else {
-                                Some(
-                                    crate::v2::OhttpKeys::decode(
-                                        bitcoin::base64::decode(&ohttp_base64)
-                                            .map_err(de::Error::custom)?
-                                            .as_slice(),
-                                    )
-                                    .map_err(de::Error::custom)?,
-                                )
-                            };
-                        }
+                        "ohttp_keys" => ohttp_keys = Some(map.next_value()?),
                         "disable_output_substitution" =>
                             disable_output_substitution = Some(map.next_value()?),
                         "fee_contribution" => {
@@ -516,7 +496,7 @@ impl<'de> Deserialize<'de> for RequestContext {
                 Ok(RequestContext {
                     psbt: psbt.ok_or_else(|| de::Error::missing_field("psbt"))?,
                     endpoint: endpoint.ok_or_else(|| de::Error::missing_field("endpoint"))?,
-                    ohttp_keys,
+                    ohttp_keys: ohttp_keys.ok_or_else(|| de::Error::missing_field("ohttp_keys"))?,
                     disable_output_substitution: disable_output_substitution
                         .ok_or_else(|| de::Error::missing_field("disable_output_substitution"))?,
                     fee_contribution,

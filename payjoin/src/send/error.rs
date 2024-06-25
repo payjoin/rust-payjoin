@@ -192,9 +192,7 @@ pub(crate) enum InternalCreateRequestError {
     #[cfg(feature = "v2")]
     OhttpEncapsulation(crate::v2::OhttpEncapsulationError),
     #[cfg(feature = "v2")]
-    SubdirectoryNotBase64(bitcoin::base64::DecodeError),
-    #[cfg(feature = "v2")]
-    SubdirectoryInvalidPubkey(bitcoin::secp256k1::Error),
+    Subdirectory(crate::uri::error::SubdirParseError),
     #[cfg(feature = "v2")]
     MissingOhttpConfig,
 }
@@ -223,9 +221,7 @@ impl fmt::Display for CreateRequestError {
             #[cfg(feature = "v2")]
             OhttpEncapsulation(e) => write!(f, "v2 error: {}", e),
             #[cfg(feature = "v2")]
-            SubdirectoryNotBase64(e) => write!(f, "subdirectory is not valid base64 error: {}", e),
-            #[cfg(feature = "v2")]
-            SubdirectoryInvalidPubkey(e) => write!(f, "subdirectory does not represent a valid pubkey: {}", e),
+            Subdirectory(e) => write!(f, "cannot parse subdirectory: {}", e),
             #[cfg(feature = "v2")]
             MissingOhttpConfig => write!(f, "no ohttp configuration with which to make a v2 request available"),
         }
@@ -256,9 +252,7 @@ impl std::error::Error for CreateRequestError {
             #[cfg(feature = "v2")]
             OhttpEncapsulation(error) => Some(error),
             #[cfg(feature = "v2")]
-            SubdirectoryNotBase64(error) => Some(error),
-            #[cfg(feature = "v2")]
-            SubdirectoryInvalidPubkey(error) => Some(error),
+            Subdirectory(error) => Some(error),
             #[cfg(feature = "v2")]
             MissingOhttpConfig => None,
         }

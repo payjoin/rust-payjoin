@@ -1,6 +1,3 @@
-#[cfg(feature = "v2")]
-use crate::uri::OhttpKeysParseError;
-
 #[derive(Debug)]
 pub struct PjParseError(InternalPjParseError);
 
@@ -11,8 +8,6 @@ pub(crate) enum InternalPjParseError {
     MissingEndpoint,
     NotUtf8,
     BadEndpoint,
-    #[cfg(feature = "v2")]
-    ParseOhttpKeys(OhttpKeysParseError),
     UnsecureEndpoint,
 }
 
@@ -30,11 +25,44 @@ impl std::fmt::Display for PjParseError {
             InternalPjParseError::MissingEndpoint => write!(f, "Missing payjoin endpoint"),
             InternalPjParseError::NotUtf8 => write!(f, "Endpoint is not valid UTF-8"),
             InternalPjParseError::BadEndpoint => write!(f, "Endpoint is not valid"),
-            #[cfg(feature = "v2")]
-            InternalPjParseError::ParseOhttpKeys(e) => write!(f, "OHTTP Keys are not valid: {}", e),
             InternalPjParseError::UnsecureEndpoint => {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }
+        }
+    }
+}
+
+#[cfg(feature = "v2")]
+#[derive(Debug)]
+pub(crate) enum SubdirParseError {
+    MissingSubdirectory,
+    SubdirectoryNotBase64(bitcoin::base64::DecodeError),
+    SubdirectoryInvalidPubkey(bitcoin::secp256k1::Error),
+}
+
+#[cfg(feature = "v2")]
+impl std::fmt::Display for SubdirParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        use SubdirParseError::*;
+
+        match &self {
+            MissingSubdirectory => write!(f, "subdirectory is missing"),
+            SubdirectoryNotBase64(e) => write!(f, "subdirectory is not valid base64 error: {}", e),
+            SubdirectoryInvalidPubkey(e) =>
+                write!(f, "subdirectory does not represent a valid pubkey: {}", e),
+        }
+    }
+}
+
+#[cfg(feature = "v2")]
+impl std::error::Error for SubdirParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use SubdirParseError::*;
+
+        match &self {
+            MissingSubdirectory => None,
+            SubdirectoryNotBase64(error) => Some(error),
+            SubdirectoryInvalidPubkey(error) => Some(error),
         }
     }
 }

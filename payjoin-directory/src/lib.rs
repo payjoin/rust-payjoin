@@ -144,7 +144,7 @@ async fn handle_ohttp(
     // decapsulate
     let ohttp_body =
         hyper::body::to_bytes(body).await.map_err(|e| HandlerError::BadRequest(e.into()))?;
-    let mut ohttp_locked = ohttp.lock().await;
+    let ohttp_locked = ohttp.lock().await;
     let (bhttp_req, res_ctx) = ohttp_locked
         .decapsulate(&ohttp_body)
         .map_err(|e| HandlerError::OhttpKeyRejection(e.into()))?;

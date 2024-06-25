@@ -28,7 +28,7 @@ bip21 = "0.3.1"
 chacha20poly1305 = { version = "0.10.1", optional = true }
 log = { version = "0.4.14"}
 http = { version = "1", optional = true }
-bhttp = { version = "0.5.1", optional = true }
+bhttp = { version = "=0.5.1", optional = true }
 ohttp = { version = "0.5.1", optional = true }
 serde = { version = "1.0.186", default-features = false, optional = true }
 reqwest = { version = "0.12", default-features = false, optional = true }

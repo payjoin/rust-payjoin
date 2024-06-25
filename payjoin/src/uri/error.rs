@@ -1,6 +1,3 @@
-#[cfg(feature = "v2")]
-use crate::v2::ParseOhttpKeysError;
-
 #[derive(Debug)]
 pub struct PjParseError(InternalPjParseError);
 
@@ -11,8 +8,6 @@ pub(crate) enum InternalPjParseError {
     MissingEndpoint,
     NotUtf8,
     BadEndpoint,
-    #[cfg(feature = "v2")]
-    BadOhttpKeys(ParseOhttpKeysError),
     UnsecureEndpoint,
 }
 
@@ -31,8 +26,6 @@ impl std::fmt::Display for PjParseError {
             MissingEndpoint => write!(f, "Missing payjoin endpoint"),
             NotUtf8 => write!(f, "Endpoint is not valid UTF-8"),
             BadEndpoint => write!(f, "Endpoint is not valid"),
-            #[cfg(feature = "v2")]
-            BadOhttpKeys(e) => write!(f, "OHTTP keys are not valid: {}", e),
             UnsecureEndpoint => {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }

@@ -7,11 +7,15 @@ use url::Url;
 
 use crate::uri::error::InternalPjParseError;
 #[cfg(feature = "v2")]
+pub(crate) use crate::uri::url_ext::UrlExt;
+#[cfg(feature = "v2")]
 use crate::OhttpKeys;
 
 pub mod error;
+#[cfg(feature = "v2")]
+pub(crate) mod url_ext;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum MaybePayjoinExtras {
     Supported(PayjoinExtras),
     Unsupported,
@@ -26,12 +30,10 @@ impl MaybePayjoinExtras {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PayjoinExtras {
     pub(crate) endpoint: Url,
     pub(crate) disable_output_substitution: bool,
-    #[cfg(feature = "v2")]
-    pub(crate) ohttp_keys: Option<OhttpKeys>,
 }
 
 impl PayjoinExtras {
@@ -96,30 +98,25 @@ pub struct PjUriBuilder {
     pj: Url,
     /// Whether or not payjoin output substitution is allowed
     pjos: bool,
-    #[cfg(feature = "v2")]
-    /// Config for ohttp.
-    ///
-    /// Required only for v2 payjoin.
-    ohttp: Option<OhttpKeys>,
 }
 
 impl PjUriBuilder {
     /// Create a new `PjUriBuilder` with required parameters.
+    ///
+    /// ## Parameters
+    /// - `address`: Represents a bitcoin address.
+    /// - `origin`: Represents either the payjoin endpoint in v1 or the directory in v2.
+    /// - `ohttp_keys`: Optional OHTTP keys for v2 (only available if the "v2" feature is enabled).
     pub fn new(
         address: Address,
-        pj: Url,
+        origin: Url,
         #[cfg(feature = "v2")] ohttp_keys: Option<OhttpKeys>,
     ) -> Self {
-        Self {
-            address,
-            amount: None,
-            message: None,
-            label: None,
-            pj,
-            pjos: false,
-            #[cfg(feature = "v2")]
-            ohttp: ohttp_keys,
-        }
+        #[allow(unused_mut)]
+        let mut pj = origin;
+        #[cfg(feature = "v2")]
+        let _ = pj.set_ohttp(ohttp_keys);
+        Self { address, amount: None, message: None, label: None, pj, pjos: false }
     }
     /// Set the amount you want to receive.
     pub fn amount(mut self, amount: Amount) -> Self {
@@ -150,12 +147,7 @@ impl PjUriBuilder {
     /// Constructs a `bip21::Uri` with PayjoinParams from the
     /// parameters set in the builder.
     pub fn build<'a>(self) -> PjUri<'a> {
-        let extras = PayjoinExtras {
-            endpoint: self.pj,
-            disable_output_substitution: self.pjos,
-            #[cfg(feature = "v2")]
-            ohttp_keys: self.ohttp,
-        };
+        let extras = PayjoinExtras { endpoint: self.pj, disable_output_substitution: self.pjos };
         let mut pj_uri = bip21::Uri::with_extras(self.address, extras);
         pj_uri.amount = self.amount;
         pj_uri.label = self.label.map(Into::into);
@@ -180,8 +172,6 @@ impl<'a> bip21::de::DeserializeParams<'a> for MaybePayjoinExtras {
 pub struct DeserializationState {
     pj: Option<Url>,
     pjos: Option<bool>,
-    #[cfg(feature = "v2")]
-    ohttp: Option<OhttpKeys>,
 }
 
 impl<'a> bip21::SerializeParams for &'a MaybePayjoinExtras {
@@ -203,18 +193,11 @@ impl<'a> bip21::SerializeParams for &'a PayjoinExtras {
     type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
 
     fn serialize_params(self) -> Self::Iterator {
-        #[allow(unused_mut)]
-        let mut params = vec![
+        vec![
             ("pj", self.endpoint.as_str().to_string()),
             ("pjos", if self.disable_output_substitution { "1" } else { "0" }.to_string()),
-        ];
-        #[cfg(feature = "v2")]
-        if let Some(ohttp_keys) = &self.ohttp_keys {
-            params.push(("ohttp", ohttp_keys.to_string()));
-        } else {
-            log::warn!("Failed to encode ohttp config, ignoring");
-        }
-        params.into_iter()
+        ]
+        .into_iter()
     }
 }
 
@@ -232,19 +215,6 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
         <Self::Value as bip21::DeserializationError>::Error,
     > {
         match key {
-            #[cfg(feature = "v2")]
-            "ohttp" if self.ohttp.is_none() => {
-                use std::str::FromStr;
-
-                let base64_config =
-                    Cow::try_from(value).map_err(|_| InternalPjParseError::NotUtf8)?;
-                let config = OhttpKeys::from_str(&base64_config)
-                    .map_err(InternalPjParseError::BadOhttpKeys)?;
-                self.ohttp = Some(config);
-                Ok(bip21::de::ParamKind::Known)
-            }
-            #[cfg(feature = "v2")]
-            "ohttp" => Err(InternalPjParseError::DuplicateParams("ohttp").into()),
             "pj" if self.pj.is_none() => {
                 let endpoint = Cow::try_from(value).map_err(|_| InternalPjParseError::NotUtf8)?;
                 let url = Url::parse(&endpoint).map_err(|_| InternalPjParseError::BadEndpoint)?;
@@ -280,8 +250,6 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
                     Ok(MaybePayjoinExtras::Supported(PayjoinExtras {
                         endpoint,
                         disable_output_substitution: pjos.unwrap_or(false),
-                        #[cfg(feature = "v2")]
-                        ohttp_keys: self.ohttp,
                     }))
                 } else {
                     Err(InternalPjParseError::UnsecureEndpoint.into())

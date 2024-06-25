@@ -170,8 +170,8 @@ mod integration {
                 bitcoin::OutPoint { txid: selected_utxo.txid, vout: selected_utxo.vout };
             payjoin.contribute_witness_input(txo_to_contribute, outpoint_to_contribute);
 
-            _ = payjoin.try_substituting_output_address(|| {
-                Ok(receiver.get_new_address(None, None).unwrap().assume_checked())
+            _ = payjoin.try_substitute_receiver_output(|| {
+                Ok(receiver.get_new_address(None, None).unwrap().assume_checked().script_pubkey())
             });
             let payjoin_proposal = payjoin
                 .finalize_proposal(
@@ -699,8 +699,8 @@ mod integration {
                 bitcoin::OutPoint { txid: selected_utxo.txid, vout: selected_utxo.vout };
             payjoin.contribute_witness_input(txo_to_contribute, outpoint_to_contribute);
 
-            _ = payjoin.try_substituting_output_address(|| {
-                Ok(receiver.get_new_address(None, None).unwrap().assume_checked())
+            _ = payjoin.try_substitute_receiver_output(|| {
+                Ok(receiver.get_new_address(None, None).unwrap().assume_checked().script_pubkey())
             });
             let payjoin_proposal = payjoin
                 .finalize_proposal(

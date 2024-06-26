@@ -21,7 +21,6 @@ mod integration {
 
     #[cfg(not(feature = "v2"))]
     mod v1 {
-        use bitcoin::base64;
         use log::debug;
         use payjoin::receive::{Headers, PayjoinProposal, UncheckedProposal};
         use payjoin::{PjUri, PjUriBuilder, UriExt};
@@ -103,7 +102,7 @@ mod integration {
             let proposal = handle_proposal(proposal, receiver);
             let psbt = proposal.psbt();
             debug!("Receiver's Payjoin proposal PSBT: {:#?}", &psbt);
-            base64::encode(&psbt.serialize())
+            psbt.to_string()
         }
 
         fn handle_proposal(
@@ -179,7 +178,7 @@ mod integration {
                     |psbt: &Psbt| {
                         Ok(receiver
                             .wallet_process_psbt(
-                                &bitcoin::base64::encode(psbt.serialize()),
+                                &psbt.to_string(),
                                 None,
                                 None,
                                 Some(true), // check that the receiver properly clears keypaths
@@ -270,9 +269,8 @@ mod integration {
             sender: &bitcoincore_rpc::Client,
             psbt: Psbt,
         ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
-            let payjoin_base64_string = base64::encode(&psbt.serialize());
             let payjoin_psbt =
-                sender.wallet_process_psbt(&payjoin_base64_string, None, None, None)?.psbt;
+                sender.wallet_process_psbt(&psbt.to_string(), None, None, None)?.psbt;
             let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.unwrap();
             let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
             debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
@@ -703,7 +701,7 @@ mod integration {
                     |psbt: &Psbt| {
                         Ok(receiver
                             .wallet_process_psbt(
-                                &bitcoin::base64::encode(psbt.serialize()),
+                                &psbt.to_string(),
                                 None,
                                 None,
                                 Some(true), // check that the receiver properly clears keypaths
@@ -832,9 +830,8 @@ mod integration {
             sender: &bitcoincore_rpc::Client,
             psbt: Psbt,
         ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
-            let payjoin_base64_string = bitcoin::base64::encode(&psbt.serialize());
             let payjoin_psbt =
-                sender.wallet_process_psbt(&payjoin_base64_string, None, None, None)?.psbt;
+                sender.wallet_process_psbt(&psbt.to_string(), None, None, None)?.psbt;
             let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.unwrap();
             let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
 

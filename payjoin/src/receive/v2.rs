@@ -106,9 +106,7 @@ impl SessionInitializer {
 }
 
 fn subdir_path_from_pubkey(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
-    let pubkey = pubkey.serialize();
-    let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-    base64::encode_config(pubkey, b64_config)
+    base64::encode_config(pubkey.serialize(), base64::URL_SAFE_NO_PAD)
 }
 
 /// An active payjoin V2 session, allowing for polled requests to the
@@ -443,7 +441,7 @@ impl PayjoinProposal {
 
     pub fn psbt(&self) -> &Psbt { self.inner.psbt() }
 
-    pub fn extract_v1_req(&self) -> String { base64::encode(self.inner.payjoin_psbt.serialize()) }
+    pub fn extract_v1_req(&self) -> String { self.inner.payjoin_psbt.to_string() }
 
     #[cfg(feature = "v2")]
     pub fn extract_v2_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {

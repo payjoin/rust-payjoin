@@ -11,7 +11,7 @@ use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{self};
 use payjoin::receive::{PayjoinProposal, UncheckedProposal};
-use payjoin::{base64, Error, PjUriBuilder, Uri, UriExt};
+use payjoin::{Error, PjUriBuilder, Uri, UriExt};
 
 use super::config::AppConfig;
 use super::App as AppTrait;
@@ -242,7 +242,7 @@ impl App {
 
         let payjoin_proposal = self.process_v1_proposal(proposal)?;
         let psbt = payjoin_proposal.psbt();
-        let body = base64::encode(psbt.serialize());
+        let body = psbt.to_string();
         println!("Responded with Payjoin proposal {}", psbt.clone().extract_tx().txid());
         Ok(Response::new(Body::from(body)))
     }
@@ -325,7 +325,7 @@ impl App {
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &Psbt| {
                 bitcoind
-                    .wallet_process_psbt(&base64::encode(psbt.serialize()), None, None, Some(false))
+                    .wallet_process_psbt(&psbt.to_string(), None, None, Some(false))
                     .map(|res| Psbt::from_str(&res.psbt).map_err(|e| Error::Server(e.into())))
                     .map_err(|e| Error::Server(e.into()))?
             },

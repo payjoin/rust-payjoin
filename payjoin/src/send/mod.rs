@@ -375,10 +375,9 @@ impl RequestContext {
             subdirectory = path_and_query;
         }
 
-        let b64_config =
-            bitcoin::base64::Config::new(bitcoin::base64::CharacterSet::UrlSafe, false);
-        let pubkey_bytes = bitcoin::base64::decode_config(subdirectory, b64_config)
-            .map_err(InternalCreateRequestError::SubdirectoryNotBase64)?;
+        let pubkey_bytes =
+            bitcoin::base64::decode_config(subdirectory, bitcoin::base64::URL_SAFE_NO_PAD)
+                .map_err(InternalCreateRequestError::SubdirectoryNotBase64)?;
         Ok(bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
             .map_err(InternalCreateRequestError::SubdirectoryInvalidPubkey)?)
     }

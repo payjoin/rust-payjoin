@@ -305,17 +305,6 @@ impl App {
         _ = try_contributing_inputs(&mut provisional_payjoin.inner, &bitcoind)
             .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
 
-        _ = provisional_payjoin
-            .try_substitute_receiver_output(|| {
-                Ok(bitcoind
-                    .get_new_address(None, None)
-                    .map_err(|e| Error::Server(e.into()))?
-                    .require_network(network)
-                    .map_err(|e| Error::Server(e.into()))?
-                    .script_pubkey())
-            })
-            .map_err(|e| log::warn!("Failed to substitute output: {}", e));
-
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &Psbt| {
                 bitcoind

@@ -279,10 +279,7 @@ pub enum ResponseError {
     WellKnown(WellKnownError),
     /// `Unrecognized` errors are errors that are not well known and are only displayed in debug logs.
     /// They are not displayed to end users.
-    ///
-    /// The first `String` is `errorCode`
-    /// The second `String` is `message`.
-    Unrecognized(String, String),
+    Unrecognized { error_code: String, message: String },
     /// `Validation` errors are errors that are caused by malformed responses.
     /// They are only displayed in debug logs.
     Validation(ValidationError),
@@ -312,12 +309,12 @@ impl ResponseError {
                         .and_then(|v| v.as_array())
                         .map(|array| array.iter().filter_map(|v| v.as_u64()).collect::<Vec<u64>>())
                         .unwrap_or_default();
-                    WellKnownError::VersionUnsupported(message, supported).into()
+                    WellKnownError::VersionUnsupported { message, supported }.into()
                 }
                 "unavailable" => WellKnownError::Unavailable(message).into(),
                 "not-enough-money" => WellKnownError::NotEnoughMoney(message).into(),
                 "original-psbt-rejected" => WellKnownError::OriginalPsbtRejected(message).into(),
-                _ => Self::Unrecognized(error_code.to_string(), message),
+                _ => Self::Unrecognized { error_code: error_code.to_string(), message },
             }
         } else {
             InternalValidationError::Parse.into()
@@ -353,7 +350,7 @@ impl Display for ResponseError {
         match self {
             Self::WellKnown(e) => e.fmt(f),
             // Don't display unknowns to end users, only debug logs
-            Self::Unrecognized(_, _) => write!(f, "The receiver sent an unrecognized error."),
+            Self::Unrecognized { .. } => write!(f, "The receiver sent an unrecognized error."),
             Self::Validation(e) => write!(f, "The receiver sent an invalid response: {}", e),
         }
     }
@@ -369,10 +366,10 @@ impl fmt::Debug for ResponseError {
                 e.error_code(),
                 e.message()
             ),
-            Self::Unrecognized(code, msg) => write!(
+            Self::Unrecognized { error_code, message } => write!(
                 f,
                 r#"Unrecognized error: {{ "errorCode": "{}", "message": "{}" }}"#,
-                code, msg
+                error_code, message
             ),
             Self::Validation(e) => write!(f, "Validation({:?})", e),
         }
@@ -383,7 +380,7 @@ impl fmt::Debug for ResponseError {
 pub enum WellKnownError {
     Unavailable(String),
     NotEnoughMoney(String),
-    VersionUnsupported(String, Vec<u64>),
+    VersionUnsupported { message: String, supported: Vec<u64> },
     OriginalPsbtRejected(String),
 }
 
@@ -392,7 +389,7 @@ impl WellKnownError {
         match self {
             WellKnownError::Unavailable(_) => "unavailable",
             WellKnownError::NotEnoughMoney(_) => "not-enough-money",
-            WellKnownError::VersionUnsupported(_, _) => "version-unsupported",
+            WellKnownError::VersionUnsupported { .. } => "version-unsupported",
             WellKnownError::OriginalPsbtRejected(_) => "original-psbt-rejected",
         }
     }
@@ -400,7 +397,7 @@ impl WellKnownError {
         match self {
             WellKnownError::Unavailable(m) => m,
             WellKnownError::NotEnoughMoney(m) => m,
-            WellKnownError::VersionUnsupported(m, _) => m,
+            WellKnownError::VersionUnsupported { message: m, .. } => m,
             WellKnownError::OriginalPsbtRejected(m) => m,
         }
     }
@@ -411,7 +408,7 @@ impl Display for WellKnownError {
         match self {
             Self::Unavailable(_) => write!(f, "The payjoin endpoint is not available for now."),
             Self::NotEnoughMoney(_) => write!(f, "The receiver added some inputs but could not bump the fee of the payjoin proposal."),
-            Self::VersionUnsupported(_, v) => write!(f, "This version of payjoin is not supported. Use version {:?}.", v),
+            Self::VersionUnsupported { supported: v, .. }=> write!(f, "This version of payjoin is not supported. Use version {:?}.", v),
             Self::OriginalPsbtRejected(_) => write!(f, "The receiver rejected the original PSBT."),
         }
     }

@@ -1129,7 +1129,7 @@ mod test {
         })
         .to_string();
         match ctx.process_response(&mut known_json_error.as_bytes()) {
-            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported(_, _))) =>
+            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported { .. })) =>
                 assert!(true),
             _ => panic!("Expected WellKnownError"),
         }

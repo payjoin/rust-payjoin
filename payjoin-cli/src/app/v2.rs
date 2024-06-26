@@ -250,10 +250,12 @@ impl App {
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // The network is used for checks later
-        let network =
-            bitcoind.get_blockchain_info().map_err(|e| Error::Server(e.into())).and_then(
-                |info| bitcoin::Network::from_str(&info.chain).map_err(|e| Error::Server(e.into())),
-            )?;
+        let network = bitcoind
+            .get_blockchain_info()
+            .map_err(|e| Error::Server(e.into()))
+            .and_then(|info| {
+                bitcoin::Network::from_core_arg(&info.chain).map_err(|e| Error::Server(e.into()))
+            })?;
 
         // Receive Check 1: Can Broadcast
         let proposal = proposal.check_broadcast_suitability(None, |tx| {

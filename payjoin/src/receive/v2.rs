@@ -1,8 +1,13 @@
 use std::collections::HashMap;
+use std::fmt;
+use std::str::FromStr;
+use std::time::{Duration, SystemTime};
 
+use bitcoin::address::NetworkUnchecked;
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::{rand, PublicKey};
-use bitcoin::{base64, Amount, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::{base64, Address, Amount, FeeRate, OutPoint, Script, TxOut};
+use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use url::Url;
@@ -10,45 +15,55 @@ use url::Url;
 use super::{Error, InternalRequestError, RequestError, SelectionError};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
-use crate::{OhttpKeys, Request};
+use crate::{OhttpKeys, PjUriBuilder, Request};
 
-#[derive(Debug, Clone)]
-pub struct V2Context {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SessionContext {
+    address: Address,
     directory: url::Url,
     ohttp_keys: OhttpKeys,
+    expiry: SystemTime,
     ohttp_relay: url::Url,
     s: bitcoin::secp256k1::KeyPair,
     e: Option<bitcoin::secp256k1::PublicKey>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Enroller {
-    directory: url::Url,
-    ohttp_keys: OhttpKeys,
-    ohttp_relay: url::Url,
-    s: bitcoin::secp256k1::KeyPair,
+pub struct SessionInitializer {
+    context: SessionContext,
 }
 
 #[cfg(feature = "v2")]
-impl Enroller {
-    pub fn from_directory_config(directory: Url, ohttp_keys: OhttpKeys, ohttp_relay: Url) -> Self {
+impl SessionInitializer {
+    pub fn new(
+        address: Address,
+        directory: Url,
+        ohttp_keys: OhttpKeys,
+        ohttp_relay: Url,
+        expire_after: Duration,
+    ) -> Self {
         let secp = bitcoin::secp256k1::Secp256k1::new();
         let (sk, _) = secp.generate_keypair(&mut rand::rngs::OsRng);
-        Enroller {
-            directory,
-            ohttp_keys,
-            ohttp_relay,
-            s: bitcoin::secp256k1::KeyPair::from_secret_key(&secp, &sk),
+        Self {
+            context: SessionContext {
+                address,
+                directory,
+                ohttp_keys,
+                ohttp_relay,
+                expiry: SystemTime::now() + expire_after,
+                s: bitcoin::secp256k1::KeyPair::from_secret_key(&secp, &sk),
+                e: None,
+            },
         }
     }
 
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
-        let url = self.ohttp_relay.clone();
-        let subdirectory = subdir_path_from_pubkey(&self.s.public_key());
+        let url = self.context.ohttp_relay.clone();
+        let subdirectory = subdir_path_from_pubkey(&self.context.s.public_key());
         let (body, ctx) = crate::v2::ohttp_encapsulate(
-            &mut self.ohttp_keys,
+            &mut self.context.ohttp_keys,
             "POST",
-            self.directory.as_str(),
+            self.context.directory.as_str(),
             Some(subdirectory.as_bytes()),
         )?;
         let req = Request { url, body };
@@ -59,7 +74,7 @@ impl Enroller {
         self,
         mut res: impl std::io::Read,
         ctx: ohttp::ClientResponse,
-    ) -> Result<Enrolled, Error> {
+    ) -> Result<ActiveSession, Error> {
         // TODO decapsulate enroll response, for now it does no auth or nothing
         let mut buf = Vec::new();
         let _ = res.read_to_end(&mut buf);
@@ -70,13 +85,7 @@ impl Enroller {
             ));
         }
 
-        let ctx = Enrolled {
-            directory: self.directory,
-            ohttp_keys: self.ohttp_keys,
-            ohttp_relay: self.ohttp_relay,
-            s: self.s,
-        };
-        Ok(ctx)
+        Ok(ActiveSession { context: self.context.clone() })
     }
 }
 
@@ -86,112 +95,15 @@ fn subdir_path_from_pubkey(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
     base64::encode_config(pubkey, b64_config)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Enrolled {
-    directory: url::Url,
-    ohttp_keys: OhttpKeys,
-    ohttp_relay: url::Url,
-    s: bitcoin::secp256k1::KeyPair,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveSession {
+    context: SessionContext,
 }
 
-impl Serialize for Enrolled {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_struct("Enrolled", 4)?;
-        state.serialize_field("directory", &self.directory)?;
-        state.serialize_field("ohttp_keys", &self.ohttp_keys)?;
-        state.serialize_field("ohttp_relay", &self.ohttp_relay)?;
-        state.serialize_field("s", &self.s)?;
-
-        state.end()
-    }
-}
-
-use std::fmt;
-use std::str::FromStr;
-
-use serde::de::{self, Deserializer, MapAccess, Visitor};
-
-impl<'de> Deserialize<'de> for Enrolled {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(field_identifier, rename_all = "snake_case")]
-        enum Field {
-            Directory,
-            OhttpKeys,
-            OhttpRelay,
-            S,
-        }
-
-        struct EnrolledVisitor;
-
-        impl<'de> Visitor<'de> for EnrolledVisitor {
-            type Value = Enrolled;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("struct Enrolled")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> Result<Enrolled, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut directory = None;
-                let mut ohttp_keys = None;
-                let mut ohttp_relay = None;
-                let mut s = None;
-                while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::Directory => {
-                            if directory.is_some() {
-                                return Err(de::Error::duplicate_field("directory"));
-                            }
-                            directory = Some(map.next_value()?);
-                        }
-                        Field::OhttpKeys => {
-                            if ohttp_keys.is_some() {
-                                return Err(de::Error::duplicate_field("ohttp_keys"));
-                            }
-                            ohttp_keys = Some(map.next_value()?);
-                        }
-                        Field::OhttpRelay => {
-                            if ohttp_relay.is_some() {
-                                return Err(de::Error::duplicate_field("ohttp_relay"));
-                            }
-                            ohttp_relay = Some(map.next_value()?);
-                        }
-                        Field::S => {
-                            if s.is_some() {
-                                return Err(de::Error::duplicate_field("s"));
-                            }
-                            s = Some(map.next_value()?);
-                        }
-                    }
-                }
-                let directory = directory.ok_or_else(|| de::Error::missing_field("directory"))?;
-                let ohttp_keys =
-                    ohttp_keys.ok_or_else(|| de::Error::missing_field("ohttp_keys"))?;
-                let ohttp_relay =
-                    ohttp_relay.ok_or_else(|| de::Error::missing_field("ohttp_relay"))?;
-                let s = s.ok_or_else(|| de::Error::missing_field("s"))?;
-                Ok(Enrolled { directory, ohttp_keys, ohttp_relay, s })
-            }
-        }
-
-        const FIELDS: &[&str] = &["directory", "ohttp_keys", "ohttp_relay", "s"];
-        deserializer.deserialize_struct("Enrolled", FIELDS, EnrolledVisitor)
-    }
-}
-
-impl Enrolled {
+impl ActiveSession {
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
         let (body, ohttp_ctx) = self.fallback_req_body()?;
-        let url = self.ohttp_relay.clone();
+        let url = self.context.ohttp_relay.clone();
         let req = Request { url, body };
         Ok((req, ohttp_ctx))
     }
@@ -199,7 +111,7 @@ impl Enrolled {
     /// The response can either be an UncheckedProposal or an ACCEPTED message
     /// indicating no UncheckedProposal is available yet.
     pub fn process_res(
-        &self,
+        &mut self,
         mut body: impl std::io::Read,
         context: ohttp::ClientResponse,
     ) -> Result<Option<UncheckedProposal>, Error> {
@@ -220,62 +132,31 @@ impl Enrolled {
     }
 
     fn fallback_req_body(&mut self) -> Result<(Vec<u8>, ohttp::ClientResponse), Error> {
-        let fallback_target = format!("{}{}", &self.directory, self.fallback_target());
-        log::trace!("Fallback request target: {}", fallback_target.as_str());
-        let fallback_target = self.fallback_target();
-        Ok(crate::v2::ohttp_encapsulate(&mut self.ohttp_keys, "GET", &fallback_target, None)?)
+        let fallback_target = self.pj_url();
+        Ok(crate::v2::ohttp_encapsulate(
+            &mut self.context.ohttp_keys,
+            "GET",
+            fallback_target.as_str(),
+            None,
+        )?)
     }
 
-    fn extract_proposal_from_v1(&self, response: String) -> Result<UncheckedProposal, Error> {
-        let context = self.build_context(None);
-        Ok(UncheckedProposal::from_payload(response, context)?)
+    fn extract_proposal_from_v1(&mut self, response: String) -> Result<UncheckedProposal, Error> {
+        Ok(self.unchecked_from_payload(response)?)
     }
 
-    fn extract_proposal_from_v2(&self, response: Vec<u8>) -> Result<UncheckedProposal, Error> {
-        let (payload_bytes, e) = crate::v2::decrypt_message_a(&response, self.s.secret_key())?;
-        let context = self.build_context(Some(e));
+    fn extract_proposal_from_v2(&mut self, response: Vec<u8>) -> Result<UncheckedProposal, Error> {
+        let (payload_bytes, e) =
+            crate::v2::decrypt_message_a(&response, self.context.s.secret_key())?;
+        self.context.e = Some(e);
         let payload = String::from_utf8(payload_bytes).map_err(InternalRequestError::Utf8)?;
-        Ok(UncheckedProposal::from_payload(payload, context)?)
+        Ok(self.unchecked_from_payload(payload)?)
     }
 
-    fn build_context(&self, e: Option<PublicKey>) -> V2Context {
-        log::trace!("Building context with e: {:?}", e);
-        V2Context {
-            directory: self.directory.clone(),
-            ohttp_keys: self.ohttp_keys.clone(),
-            ohttp_relay: self.ohttp_relay.clone(),
-            s: self.s,
-            e,
-        }
-    }
-    pub fn fallback_target(&self) -> String {
-        let pubkey = &self.s.public_key().serialize();
-        let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-        let pubkey_base64 = base64::encode_config(pubkey, b64_config);
-        format!("{}{}", &self.directory, pubkey_base64)
-    }
-
-    /// The per-session public key to use as an identifier
-    pub fn public_key(&self) -> PublicKey { self.s.public_key() }
-}
-
-/// The sender's original PSBT and optional parameters
-///
-/// This type is used to process the request. It is returned by
-/// [`UncheckedProposal::from_request()`](super::::UncheckedProposal::from_request()).
-///
-/// If you are implementing an interactive payment processor, you should get extract the original
-/// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
-/// that the transaction can be broadcast with check_broadcast_suitability. Otherwise it is safe to
-/// call assume_interactive_receive to proceed with validation.
-#[derive(Clone)]
-pub struct UncheckedProposal {
-    inner: super::UncheckedProposal,
-    context: V2Context,
-}
-
-impl UncheckedProposal {
-    fn from_payload(payload: String, context: V2Context) -> Result<Self, RequestError> {
+    fn unchecked_from_payload(
+        &mut self,
+        payload: String,
+    ) -> Result<UncheckedProposal, RequestError> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
         log::trace!("Received query: {}, base64: {}", query, base64); // my guess is no \n so default is wrong
@@ -299,9 +180,51 @@ impl UncheckedProposal {
 
         log::debug!("Received request with params: {:?}", params);
         let inner = super::UncheckedProposal { psbt, params };
-        Ok(Self { inner, context })
+        Ok(UncheckedProposal { inner, context: self.context.clone() })
     }
 
+    pub fn pj_uri_builder(&self) -> PjUriBuilder {
+        PjUriBuilder::new(
+            self.context.address.clone(),
+            self.pj_url(),
+            Some(self.context.ohttp_keys.clone()),
+        )
+    }
+
+    // The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
+    // This identifies a session at the payjoin directory server.
+    pub fn pj_url(&self) -> Url {
+        let pubkey = &self.context.s.public_key().serialize();
+        let pubkey_base64 = base64::encode_config(pubkey, base64::URL_SAFE_NO_PAD);
+        let mut url = self.context.directory.clone();
+        {
+            let mut path_segments =
+                url.path_segments_mut().expect("Payjoin Directory URL cannot be a base");
+            path_segments.push(&pubkey_base64);
+        }
+        url
+    }
+
+    /// The per-session public key to use as an identifier
+    pub fn public_key(&self) -> PublicKey { self.context.s.public_key() }
+}
+
+/// The sender's original PSBT and optional parameters
+///
+/// This type is used to process the request. It is returned by
+/// [`UncheckedProposal::from_request()`](super::::UncheckedProposal::from_request()).
+///
+/// If you are implementing an interactive payment processor, you should get extract the original
+/// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
+/// that the transaction can be broadcast with check_broadcast_suitability. Otherwise it is safe to
+/// call assume_interactive_receive to proceed with validation.
+#[derive(Clone)]
+pub struct UncheckedProposal {
+    inner: super::UncheckedProposal,
+    context: SessionContext,
+}
+
+impl UncheckedProposal {
     /// The Sender's Original PSBT
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
         self.inner.extract_tx_to_schedule_broadcast()
@@ -345,7 +268,7 @@ impl UncheckedProposal {
 #[derive(Clone)]
 pub struct MaybeInputsOwned {
     inner: super::MaybeInputsOwned,
-    context: V2Context,
+    context: SessionContext,
 }
 
 impl MaybeInputsOwned {
@@ -368,7 +291,7 @@ impl MaybeInputsOwned {
 #[derive(Clone)]
 pub struct MaybeMixedInputScripts {
     inner: super::MaybeMixedInputScripts,
-    context: V2Context,
+    context: SessionContext,
 }
 
 impl MaybeMixedInputScripts {
@@ -389,7 +312,7 @@ impl MaybeMixedInputScripts {
 #[derive(Clone)]
 pub struct MaybeInputsSeen {
     inner: super::MaybeInputsSeen,
-    context: V2Context,
+    context: SessionContext,
 }
 
 impl MaybeInputsSeen {
@@ -412,7 +335,7 @@ impl MaybeInputsSeen {
 #[derive(Clone)]
 pub struct OutputsUnknown {
     inner: super::OutputsUnknown,
-    context: V2Context,
+    context: SessionContext,
 }
 
 impl OutputsUnknown {
@@ -430,7 +353,7 @@ impl OutputsUnknown {
 #[derive(Debug, Clone)]
 pub struct ProvisionalProposal {
     pub inner: super::ProvisionalProposal,
-    context: V2Context,
+    context: SessionContext,
 }
 
 impl ProvisionalProposal {
@@ -483,7 +406,7 @@ impl ProvisionalProposal {
 #[derive(Clone)]
 pub struct PayjoinProposal {
     inner: super::PayjoinProposal,
-    context: V2Context,
+    context: SessionContext,
 }
 
 impl PayjoinProposal {
@@ -552,6 +475,126 @@ impl PayjoinProposal {
         }
     }
 }
+impl Serialize for SessionContext {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("SessionContext", 4)?;
+        state.serialize_field("address", &self.address)?;
+        state.serialize_field("directory", &self.directory)?;
+        state.serialize_field("ohttp_keys", &self.ohttp_keys)?;
+        state.serialize_field("ohttp_relay", &self.ohttp_relay)?;
+        state.serialize_field("expiry", &self.expiry)?;
+        state.serialize_field("s", &self.s)?;
+        state.serialize_field("e", &self.e)?;
+
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for SessionContext {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "snake_case")]
+        enum Field {
+            Address,
+            Directory,
+            OhttpKeys,
+            OhttpRelay,
+            Expiry,
+            S,
+            E,
+        }
+
+        struct SessionContextVisitor;
+
+        impl<'de> Visitor<'de> for SessionContextVisitor {
+            type Value = SessionContext;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct ActiveSession")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<SessionContext, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut address: Option<Address<NetworkUnchecked>> = None;
+                let mut directory = None;
+                let mut ohttp_keys = None;
+                let mut ohttp_relay = None;
+                let mut expiry = None;
+                let mut s = None;
+                let mut e = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Address => {
+                            if address.is_some() {
+                                return Err(de::Error::duplicate_field("address"));
+                            }
+                            address = Some(map.next_value()?);
+                        }
+                        Field::Directory => {
+                            if directory.is_some() {
+                                return Err(de::Error::duplicate_field("directory"));
+                            }
+                            directory = Some(map.next_value()?);
+                        }
+                        Field::OhttpKeys => {
+                            if ohttp_keys.is_some() {
+                                return Err(de::Error::duplicate_field("ohttp_keys"));
+                            }
+                            ohttp_keys = Some(map.next_value()?);
+                        }
+                        Field::OhttpRelay => {
+                            if ohttp_relay.is_some() {
+                                return Err(de::Error::duplicate_field("ohttp_relay"));
+                            }
+                            ohttp_relay = Some(map.next_value()?);
+                        }
+                        Field::Expiry => {
+                            if expiry.is_some() {
+                                return Err(de::Error::duplicate_field("expiry"));
+                            }
+                            expiry = Some(map.next_value()?);
+                        }
+                        Field::S => {
+                            if s.is_some() {
+                                return Err(de::Error::duplicate_field("s"));
+                            }
+                            s = Some(map.next_value()?);
+                        }
+                        Field::E => {
+                            if e.is_some() {
+                                return Err(de::Error::duplicate_field("e"));
+                            }
+                            e = Some(map.next_value()?);
+                        }
+                    }
+                }
+                let address = address
+                    .ok_or_else(|| de::Error::missing_field("address"))
+                    .map(|a| a.assume_checked())?;
+                let directory = directory.ok_or_else(|| de::Error::missing_field("directory"))?;
+                let ohttp_keys =
+                    ohttp_keys.ok_or_else(|| de::Error::missing_field("ohttp_keys"))?;
+                let ohttp_relay =
+                    ohttp_relay.ok_or_else(|| de::Error::missing_field("ohttp_relay"))?;
+                let expiry = expiry.ok_or_else(|| de::Error::missing_field("expiry"))?;
+                let s = s.ok_or_else(|| de::Error::missing_field("s"))?;
+                let e = e.ok_or_else(|| de::Error::missing_field("e"))?;
+                Ok(SessionContext { address, directory, ohttp_keys, ohttp_relay, expiry, s, e })
+            }
+        }
+
+        const FIELDS: &[&str] = &["directory", "ohttp_keys", "ohttp_relay", "expiry", "s", "e"];
+        deserializer.deserialize_struct("SessionContext", FIELDS, SessionContextVisitor)
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -559,7 +602,7 @@ mod test {
 
     #[test]
     #[cfg(feature = "v2")]
-    fn enrolled_ser_de_roundtrip() {
+    fn active_session_ser_de_roundtrip() {
         use ohttp::hpke::{Aead, Kdf, Kem};
         use ohttp::{KeyId, SymmetricSuite};
         const KEY_ID: KeyId = 1;
@@ -567,19 +610,26 @@ mod test {
         const SYMMETRIC: &[SymmetricSuite] =
             &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
 
-        let enrolled = Enrolled {
-            directory: url::Url::parse("https://directory.com").unwrap(),
-            ohttp_keys: OhttpKeys(
-                ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap(),
-            ),
-            ohttp_relay: url::Url::parse("https://relay.com").unwrap(),
-            s: bitcoin::secp256k1::KeyPair::from_secret_key(
-                &bitcoin::secp256k1::Secp256k1::new(),
-                &bitcoin::secp256k1::SecretKey::from_slice(&[1; 32]).unwrap(),
-            ),
+        let session = ActiveSession {
+            context: SessionContext {
+                address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
+                    .unwrap()
+                    .assume_checked(),
+                directory: url::Url::parse("https://directory.com").unwrap(),
+                ohttp_keys: OhttpKeys(
+                    ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap(),
+                ),
+                ohttp_relay: url::Url::parse("https://relay.com").unwrap(),
+                expiry: SystemTime::now() + Duration::from_secs(60),
+                s: bitcoin::secp256k1::KeyPair::from_secret_key(
+                    &bitcoin::secp256k1::Secp256k1::new(),
+                    &bitcoin::secp256k1::SecretKey::from_slice(&[1; 32]).unwrap(),
+                ),
+                e: None,
+            },
         };
-        let serialized = serde_json::to_string(&enrolled).unwrap();
-        let deserialized: Enrolled = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(enrolled, deserialized);
+        let serialized = serde_json::to_string(&session).unwrap();
+        let deserialized: ActiveSession = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(session, deserialized);
     }
 }

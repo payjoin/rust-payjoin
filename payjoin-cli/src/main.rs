@@ -25,14 +25,17 @@ async fn main() -> Result<()> {
             let bip21 = sub_matches.get_one::<String>("BIP21").context("Missing BIP21 argument")?;
             let fee_rate_sat_per_vb =
                 sub_matches.get_one::<f32>("fee_rate").context("Missing --fee-rate argument")?;
-            let is_retry = matches.get_one::<bool>("retry").unwrap_or(&false);
-            app.send_payjoin(bip21, fee_rate_sat_per_vb, *is_retry).await?;
+            app.send_payjoin(bip21, fee_rate_sat_per_vb).await?;
         }
         Some(("receive", sub_matches)) => {
             let amount =
                 sub_matches.get_one::<String>("AMOUNT").context("Missing AMOUNT argument")?;
-            let is_retry = matches.get_one::<bool>("retry").unwrap_or(&false);
-            app.receive_payjoin(amount, *is_retry).await?;
+            app.receive_payjoin(amount).await?;
+        }
+        #[cfg(feature = "v2")]
+        Some(("resume", _)) => {
+            println!("resume");
+            app.resume_payjoins().await?;
         }
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
@@ -71,13 +74,6 @@ fn cli() -> ArgMatches {
                 .num_args(1)
                 .help("The password for the bitcoin node"),
         )
-        .arg(
-            Arg::new("retry")
-                .long("retry")
-                .short('e')
-                .action(clap::ArgAction::SetTrue)
-                .help("Retry the asynchronous payjoin request if it did not yet complete"),
-        )
         .arg(Arg::new("db_path").short('d').long("db-path").help("Sets a custom database path"))
         .subcommand_required(true);
 
@@ -110,6 +106,9 @@ fn cli() -> ArgMatches {
         .arg_required_else_help(true)
         .arg(arg!(<AMOUNT> "The amount to receive in satoshis"))
         .arg_required_else_help(true);
+
+    #[cfg(feature = "v2")]
+    let mut cmd = cmd.subcommand(Command::new("resume"));
 
     // Conditional arguments based on features for the receive subcommand
     #[cfg(not(feature = "v2"))]

@@ -30,6 +30,10 @@ pub struct PayjoinExtras {
     pub(crate) ohttp_keys: Option<OhttpKeys>,
 }
 
+impl PayjoinExtras {
+    pub fn endpoint(&self) -> &Url { &self.endpoint }
+}
+
 pub type Uri<'a, NetworkValidation> = bip21::Uri<'a, NetworkValidation, MaybePayjoinExtras>;
 pub type PjUri<'a> = bip21::Uri<'a, NetworkChecked, PayjoinExtras>;
 

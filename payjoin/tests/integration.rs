@@ -4,7 +4,6 @@ mod integration {
     use std::env;
     use std::str::FromStr;
 
-    use bitcoin::address::NetworkChecked;
     use bitcoin::psbt::Psbt;
     use bitcoin::{base64, Amount, FeeRate, OutPoint};
     use bitcoind::bitcoincore_rpc::core_rpc_json::{AddressType, WalletProcessPsbtResult};
@@ -12,7 +11,7 @@ mod integration {
     use log::{log_enabled, Level};
     use once_cell::sync::{Lazy, OnceCell};
     use payjoin::send::RequestBuilder;
-    use payjoin::{PjUriBuilder, Request, Uri};
+    use payjoin::{Request, Uri};
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
     use url::Url;
 
@@ -24,6 +23,7 @@ mod integration {
     mod v1 {
         use log::debug;
         use payjoin::receive::{Headers, PayjoinProposal, UncheckedProposal};
+        use payjoin::{PjUri, PjUriBuilder, UriExt};
 
         use super::*;
 
@@ -42,7 +42,11 @@ mod integration {
                 .build();
 
             // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-            let uri = Uri::from_str(&pj_uri.to_string()).unwrap().assume_checked();
+            let uri = Uri::from_str(&pj_uri.to_string())
+                .unwrap()
+                .assume_checked()
+                .check_pj_supported()
+                .unwrap();
             let psbt = build_original_psbt(&sender, &uri)?;
             debug!("Original psbt: {:#?}", psbt);
             let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt, uri)?
@@ -238,7 +242,7 @@ mod integration {
 
         fn build_original_psbt(
             sender: &bitcoincore_rpc::Client,
-            pj_uri: &Uri<'_, NetworkChecked>,
+            pj_uri: &PjUri,
         ) -> Result<Psbt, BoxError> {
             let mut outputs = HashMap::with_capacity(1);
             outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap());
@@ -282,9 +286,12 @@ mod integration {
         use std::sync::Arc;
         use std::time::Duration;
 
+        use bitcoin::Address;
         use http::StatusCode;
-        use payjoin::receive::v2::{Enrolled, Enroller, PayjoinProposal, UncheckedProposal};
-        use payjoin::OhttpKeys;
+        use payjoin::receive::v2::{
+            ActiveSession, PayjoinProposal, SessionInitializer, UncheckedProposal,
+        };
+        use payjoin::{OhttpKeys, PjUri, UriExt};
         use reqwest::{Client, ClientBuilder, Error, Response};
         use testcontainers_modules::redis::Redis;
         use testcontainers_modules::testcontainers::clients::Cli;
@@ -327,9 +334,17 @@ mod integration {
                 let agent = Arc::new(http_agent(cert_der.clone()).unwrap());
                 wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
                 let mock_ohttp_relay = directory.clone(); // pass through to directory
-                let mut bad_enroller =
-                    Enroller::from_directory_config(directory, bad_ohttp_keys, mock_ohttp_relay);
-                let (req, _ctx) = bad_enroller.extract_req().expect("Failed to extract request");
+                let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
+                    .unwrap()
+                    .assume_checked();
+                let mut bad_initializer = SessionInitializer::new(
+                    mock_address,
+                    directory,
+                    bad_ohttp_keys,
+                    mock_ohttp_relay,
+                    Duration::from_secs(60),
+                );
+                let (req, _ctx) = bad_initializer.extract_req().expect("Failed to extract request");
                 agent.post(req.url).body(req.body).send().await
             }
         }
@@ -363,31 +378,36 @@ mod integration {
                 let ohttp_keys =
                     payjoin::io::fetch_ohttp_keys(ohttp_relay, directory.clone(), cert_der.clone())
                         .await?;
-
                 // **********************
                 // Inside the Receiver:
-                let mut enrolled =
-                    enroll_with_directory(directory.clone(), ohttp_keys.clone(), cert_der).await?;
-                println!("enrolled: {:#?}", &enrolled);
-                let pj_uri_string = create_receiver_pj_uri_string(
-                    &receiver,
-                    ohttp_keys,
-                    &enrolled.fallback_target(),
-                )?;
+                let address = receiver.get_new_address(None, None)?.assume_checked();
+                let mut session = initialize_session(
+                    address,
+                    directory.clone(),
+                    ohttp_keys.clone(),
+                    cert_der.clone(),
+                )
+                .await?;
+                println!("session: {:#?}", &session);
+                let pj_uri_string = session.pj_uri_builder().build().to_string();
 
                 // Poll receive request
-                let (req, ctx) = enrolled.extract_req()?;
+                let (req, ctx) = session.extract_req()?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 assert!(response.status().is_success());
                 let response_body =
-                    enrolled.process_res(response.bytes().await?.to_vec().as_slice(), ctx).unwrap();
+                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx).unwrap();
                 // No proposal yet since sender has not responded
                 assert!(response_body.is_none());
 
                 // **********************
                 // Inside the Sender:
                 // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-                let pj_uri = Uri::from_str(&pj_uri_string).unwrap().assume_checked();
+                let pj_uri = Uri::from_str(&pj_uri_string)
+                    .unwrap()
+                    .assume_checked()
+                    .check_pj_supported()
+                    .unwrap();
                 let psbt = build_original_psbt(&sender, &pj_uri)?;
                 let mut req_ctx = RequestBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
                     .build_with_additional_fee(
@@ -416,12 +436,11 @@ mod integration {
                 // Inside the Receiver:
 
                 // GET fallback psbt
-                let (req, ctx) = enrolled.extract_req()?;
+                let (req, ctx) = session.extract_req()?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 // POST payjoin
-                let proposal = enrolled
-                    .process_res(response.bytes().await?.to_vec().as_slice(), ctx)?
-                    .unwrap();
+                let proposal =
+                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?.unwrap();
                 let mut payjoin_proposal = handle_directory_proposal(receiver, proposal);
                 let (req, ctx) = payjoin_proposal.extract_v2_req()?;
                 let response = agent.post(req.url).body(req.body).send().await?;
@@ -475,20 +494,22 @@ mod integration {
                 let ohttp_keys =
                     payjoin::io::fetch_ohttp_keys(ohttp_relay, directory.clone(), cert_der.clone())
                         .await?;
+                let address = receiver.get_new_address(None, None)?.assume_checked();
 
-                let mut enrolled =
-                    enroll_with_directory(directory, ohttp_keys.clone(), cert_der.clone()).await?;
+                let mut session =
+                    initialize_session(address, directory, ohttp_keys.clone(), cert_der.clone())
+                        .await?;
 
-                let pj_uri_string = create_receiver_pj_uri_string(
-                    &receiver,
-                    ohttp_keys,
-                    &enrolled.fallback_target(),
-                )?;
+                let pj_uri_string = session.pj_uri_builder().build().to_string();
 
                 // **********************
                 // Inside the V1 Sender:
                 // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-                let pj_uri = Uri::from_str(&pj_uri_string).unwrap().assume_checked();
+                let pj_uri = Uri::from_str(&pj_uri_string)
+                    .unwrap()
+                    .assume_checked()
+                    .check_pj_supported()
+                    .unwrap();
                 let psbt = build_original_psbt(&sender, &pj_uri)?;
                 let (Request { url, body, .. }, send_ctx) =
                     RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
@@ -514,7 +535,7 @@ mod integration {
                 let receiver_loop = tokio::task::spawn(async move {
                     let agent_clone = agent_clone.clone();
                     let (response, ctx) = loop {
-                        let (req, ctx) = enrolled.extract_req().unwrap();
+                        let (req, ctx) = session.extract_req().unwrap();
                         let response = agent_clone.post(req.url).body(req.body).send().await?;
 
                         if response.status() == 200 {
@@ -529,7 +550,7 @@ mod integration {
                             panic!("Unexpected response status: {}", response.status())
                         }
                     };
-                    let proposal = enrolled.process_res(response.as_slice(), ctx).unwrap().unwrap();
+                    let proposal = session.process_res(response.as_slice(), ctx).unwrap().unwrap();
                     let mut payjoin_proposal = handle_directory_proposal(receiver, proposal);
                     // Respond with payjoin psbt within the time window the sender is willing to wait
                     // this response would be returned as http response to the sender
@@ -591,40 +612,26 @@ mod integration {
             (cert_der, key_der)
         }
 
-        async fn enroll_with_directory(
+        async fn initialize_session(
+            address: Address,
             directory: Url,
             ohttp_keys: OhttpKeys,
             cert_der: Vec<u8>,
-        ) -> Result<Enrolled, BoxError> {
+        ) -> Result<ActiveSession, BoxError> {
             let mock_ohttp_relay = directory.clone(); // pass through to directory
-            let mut enroller = Enroller::from_directory_config(
+            let mut initializer = SessionInitializer::new(
+                address,
                 directory.clone(),
                 ohttp_keys,
                 mock_ohttp_relay.clone(),
+                Duration::from_secs(60),
             );
-            let (req, ctx) = enroller.extract_req()?;
+            let (req, ctx) = initializer.extract_req()?;
             println!("enroll req: {:#?}", &req);
             let response =
                 http_agent(cert_der).unwrap().post(req.url).body(req.body).send().await?;
             assert!(response.status().is_success());
-            Ok(enroller.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?)
-        }
-
-        /// The receiver outputs a string to be passed to the sender as a string or QR code
-        fn create_receiver_pj_uri_string(
-            receiver: &bitcoincore_rpc::Client,
-            ohttp_keys: OhttpKeys,
-            fallback_target: &str,
-        ) -> Result<String, BoxError> {
-            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            Ok(PjUriBuilder::new(
-                pj_receiver_address,
-                Url::parse(&fallback_target).unwrap(),
-                Some(ohttp_keys),
-            )
-            .amount(Amount::ONE_BTC)
-            .build()
-            .to_string())
+            Ok(initializer.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?)
         }
 
         fn handle_directory_proposal(
@@ -803,10 +810,10 @@ mod integration {
 
         fn build_original_psbt(
             sender: &bitcoincore_rpc::Client,
-            pj_uri: &Uri<'_, NetworkChecked>,
+            pj_uri: &PjUri,
         ) -> Result<Psbt, BoxError> {
             let mut outputs = HashMap::with_capacity(1);
-            outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap());
+            outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap_or(Amount::ONE_BTC));
             let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
                 lock_unspent: Some(true),
                 fee_rate: Some(Amount::from_sat(2000)),

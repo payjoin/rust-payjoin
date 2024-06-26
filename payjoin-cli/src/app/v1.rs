@@ -11,7 +11,7 @@ use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{self};
 use payjoin::receive::{PayjoinProposal, UncheckedProposal};
-use payjoin::{base64, Error, PjUriBuilder};
+use payjoin::{base64, Error, PjUriBuilder, Uri, UriExt};
 
 use super::config::AppConfig;
 use super::App as AppTrait;
@@ -54,8 +54,12 @@ impl AppTrait for App {
         .with_context(|| "Failed to connect to bitcoind")
     }
 
-    async fn send_payjoin(&self, bip21: &str, fee_rate: &f32, _is_retry: bool) -> Result<()> {
-        let (req, ctx) = self.create_pj_request(bip21, fee_rate)?.extract_v1()?;
+    async fn send_payjoin(&self, bip21: &str, fee_rate: &f32) -> Result<()> {
+        let uri =
+            Uri::try_from(bip21).map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
+        let uri = uri.assume_checked();
+        let uri = uri.check_pj_supported().map_err(|_| anyhow!("URI does not support Payjoin"))?;
+        let (req, ctx) = self.create_pj_request(&uri, fee_rate)?.extract_v1()?;
         let http = http_agent()?;
         let body = String::from_utf8(req.body.clone()).unwrap();
         println!("Sending fallback request to {}", &req.url);
@@ -85,7 +89,7 @@ impl AppTrait for App {
         Ok(())
     }
 
-    async fn receive_payjoin(self, amount_arg: &str, _is_retry: bool) -> Result<()> {
+    async fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
         let pj_uri_string = self.construct_payjoin_uri(amount_arg, None)?;
         println!(
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",

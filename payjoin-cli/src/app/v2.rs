@@ -1,26 +1,30 @@
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::Amount;
-use payjoin::{base64, bitcoin, Error, PjUriBuilder};
+use payjoin::receive::v2::ActiveSession;
+use payjoin::send::RequestContext;
+use payjoin::{base64, bitcoin, Error, Uri};
 
 use super::config::AppConfig;
 use super::App as AppTrait;
 use crate::app::http_agent;
 use crate::db::Database;
 
+#[derive(Clone)]
 pub(crate) struct App {
     config: AppConfig,
-    db: Database,
+    db: Arc<Database>,
 }
 
 #[async_trait::async_trait]
 impl AppTrait for App {
     fn new(config: AppConfig) -> Result<Self> {
-        let db = Database::create(&config.db_path)?;
+        let db = Arc::new(Database::create(&config.db_path)?);
         let app = Self { config, db };
         app.bitcoind()?
             .get_blockchain_info()
@@ -45,63 +49,81 @@ impl AppTrait for App {
         .with_context(|| "Failed to connect to bitcoind")
     }
 
-    async fn send_payjoin(&self, bip21: &str, fee_rate: &f32, is_retry: bool) -> Result<()> {
-        let mut req_ctx = if is_retry {
-            log::debug!("Resuming session");
-            // Get a reference to RequestContext
-            self.db.get_send_session()?.ok_or(anyhow!("No session found"))?
-        } else {
-            let mut req_ctx = self.create_pj_request(bip21, fee_rate)?;
-            self.db.insert_send_session(&mut req_ctx)?;
-            req_ctx
+    async fn send_payjoin(&self, bip21: &str, fee_rate: &f32) -> Result<()> {
+        use payjoin::UriExt;
+        let uri =
+            Uri::try_from(bip21).map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
+        let uri = uri.assume_checked();
+        let uri = uri.check_pj_supported().map_err(|_| anyhow!("URI does not support Payjoin"))?;
+        let url = uri.extras.endpoint();
+        // match bip21 to send_session public_key
+        let req_ctx = match self.db.get_send_session(url)? {
+            Some(send_session) => send_session,
+            None => {
+                let mut req_ctx = self.create_pj_request(&uri, fee_rate)?;
+                self.db.insert_send_session(&mut req_ctx, url)?;
+                req_ctx
+            }
         };
-        log::debug!("Awaiting response");
+        self.spawn_payjoin_sender(req_ctx).await
+    }
+
+    async fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
+        use payjoin::receive::v2::SessionInitializer;
+
+        let address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
+        let amount = Amount::from_sat(amount_arg.parse()?);
+        let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
+        let mut initializer = SessionInitializer::new(
+            address,
+            self.config.pj_directory.clone(),
+            ohttp_keys.clone(),
+            self.config.ohttp_relay.clone(),
+            std::time::Duration::from_secs(60 * 60),
+        );
+        let (req, ctx) =
+            initializer.extract_req().map_err(|e| anyhow!("Failed to extract request {}", e))?;
+        println!("Starting new Payjoin session with {}", self.config.pj_directory);
+        let http = http_agent()?;
+        let ohttp_response = http
+            .post(req.url)
+            .header("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
+            .body(req.body)
+            .send()
+            .await
+            .map_err(map_reqwest_err)?;
+        let session = initializer
+            .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), ctx)
+            .map_err(|e| anyhow!("Enrollment failed {}", e))?;
+        self.db.insert_recv_session(session.clone())?;
+        self.spawn_payjoin_receiver(session, Some(amount)).await
+    }
+}
+
+impl App {
+    async fn spawn_payjoin_sender(&self, mut req_ctx: RequestContext) -> Result<()> {
         let res = self.long_poll_post(&mut req_ctx).await?;
         self.process_pj_response(res)?;
-        self.db.clear_send_session()?;
+        self.db.clear_send_session(req_ctx.endpoint())?;
         Ok(())
     }
 
-    async fn receive_payjoin(self, amount_arg: &str, is_retry: bool) -> Result<()> {
-        use payjoin::receive::v2::Enroller;
-
-        let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
-        let mut enrolled = if !is_retry {
-            let mut enroller = Enroller::from_directory_config(
-                self.config.pj_directory.clone(),
-                ohttp_keys.clone(),
-                self.config.ohttp_relay.clone(),
-            );
-            let (req, ctx) =
-                enroller.extract_req().map_err(|e| anyhow!("Failed to extract request {}", e))?;
-            println!("Starting new Payjoin session with {}", self.config.pj_directory);
-            let http = http_agent()?;
-            let ohttp_response = http
-                .post(req.url)
-                .header("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
-                .body(req.body)
-                .send()
-                .await
-                .map_err(map_reqwest_err)?;
-
-            let enrolled = enroller
-                .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), ctx)
-                .map_err(|_| anyhow!("Enrollment failed"))?;
-            self.db.insert_recv_session(enrolled.clone())?;
-            enrolled
-        } else {
-            let session = self.db.get_recv_session()?;
-            println!("Resuming Payjoin session"); // TODO include session pubkey / payjoin directory
-            session.ok_or(anyhow!("No session found"))?
-        };
-
+    async fn spawn_payjoin_receiver(
+        &self,
+        mut session: ActiveSession,
+        amount: Option<Amount>,
+    ) -> Result<()> {
         println!("Receive session established");
-        let pj_uri_string =
-            self.construct_payjoin_uri(amount_arg, &enrolled.fallback_target(), ohttp_keys)?;
-        println!("Request Payjoin by sharing this Payjoin Uri:");
-        println!("{}", pj_uri_string);
+        let mut pj_uri_builder = session.pj_uri_builder();
+        if let Some(amount) = amount {
+            pj_uri_builder = pj_uri_builder.amount(amount);
+        }
+        let pj_uri = pj_uri_builder.build();
 
-        let res = self.long_poll_fallback(&mut enrolled).await?;
+        println!("Request Payjoin by sharing this Payjoin Uri:");
+        println!("{}", pj_uri);
+
+        let res = self.long_poll_fallback(&mut session).await?;
         println!("Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:");
         println!("{}", serialize_hex(&res.extract_tx_to_schedule_broadcast()));
         let mut payjoin_proposal = self
@@ -119,7 +141,7 @@ impl AppTrait for App {
             .send()
             .await
             .map_err(map_reqwest_err)?;
-        let _res = payjoin_proposal
+        payjoin_proposal
             .process_res(res.bytes().await?.to_vec(), ohttp_ctx)
             .map_err(|e| anyhow!("Failed to deserialize response {}", e))?;
         let payjoin_psbt = payjoin_proposal.psbt().clone();
@@ -130,25 +152,33 @@ impl AppTrait for App {
         self.db.clear_recv_session()?;
         Ok(())
     }
-}
 
-impl App {
-    fn construct_payjoin_uri(
-        &self,
-        amount_arg: &str,
-        fallback_target: &str,
-        ohttp_keys: payjoin::OhttpKeys,
-    ) -> Result<String> {
-        let pj_receiver_address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
-        let amount = Amount::from_sat(amount_arg.parse()?);
-        let pj_part = payjoin::Url::parse(fallback_target)
-            .map_err(|e| anyhow!("Failed to parse Payjoin subdirectory target: {}", e))?;
+    pub async fn resume_payjoins(&self) -> Result<()> {
+        let mut tasks = Vec::new();
 
-        let pj_uri = PjUriBuilder::new(pj_receiver_address, pj_part, Some(ohttp_keys))
-            .amount(amount)
-            .build();
-
-        Ok(pj_uri.to_string())
+        let recv_sessions = self.db.get_recv_sessions()?;
+        for recv_session in recv_sessions {
+            let self_clone = self.clone();
+            tasks.push(tokio::task::spawn(async move {
+                self_clone.spawn_payjoin_receiver(recv_session, None).await
+            }));
+        }
+        let send_sessions = self.db.get_send_sessions()?;
+        for send_session in send_sessions {
+            let self_clone = self.clone();
+            tasks.push(tokio::task::spawn(async move {
+                self_clone.spawn_payjoin_sender(send_session).await
+            }));
+        }
+        if tasks.is_empty() {
+            println!("No sessions to resume.");
+        } else {
+            for task in tasks {
+                let _ = task.await?;
+            }
+            println!("All resumed sessions completed.");
+        }
+        Ok(())
     }
 
     async fn long_poll_post(&self, req_ctx: &mut payjoin::send::RequestContext) -> Result<Psbt> {
@@ -182,11 +212,11 @@ impl App {
 
     async fn long_poll_fallback(
         &self,
-        enrolled: &mut payjoin::receive::v2::Enrolled,
+        session: &mut payjoin::receive::v2::ActiveSession,
     ) -> Result<payjoin::receive::v2::UncheckedProposal> {
         loop {
             let (req, context) =
-                enrolled.extract_req().map_err(|_| anyhow!("Failed to extract request"))?;
+                session.extract_req().map_err(|_| anyhow!("Failed to extract request"))?;
             println!("Polling receive request...");
             let http = http_agent()?;
             let ohttp_response = http
@@ -197,7 +227,7 @@ impl App {
                 .await
                 .map_err(map_reqwest_err)?;
 
-            let proposal = enrolled
+            let proposal = session
                 .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), context)
                 .map_err(|_| anyhow!("GET fallback failed"))?;
             log::debug!("got response");
@@ -308,11 +338,7 @@ async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::
         let ohttp_relay = config.ohttp_relay.clone();
         let payjoin_directory = config.pj_directory.clone();
         #[cfg(feature = "danger-local-https")]
-        let cert_der = rcgen::generate_simple_self_signed(vec![
-            "0.0.0.0".to_string(),
-            "localhost".to_string(),
-        ])?
-        .serialize_der()?;
+        let cert_der = crate::app::read_local_cert()?;
         Ok(payjoin::io::fetch_ohttp_keys(
             ohttp_relay,
             payjoin_directory,

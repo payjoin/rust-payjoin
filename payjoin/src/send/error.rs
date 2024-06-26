@@ -269,19 +269,24 @@ impl From<InternalCreateRequestError> for CreateRequestError {
     fn from(value: InternalCreateRequestError) -> Self { CreateRequestError(value) }
 }
 
-/// Represent an error returned by the receiver.
+/// Represent an error returned by Payjoin receiver.
 pub enum ResponseError {
-    /// `WellKnown` errors following the BIP78 spec
-    /// https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-Receivers_well_known_errors
-    /// These errors are displayed to end users.
+    /// `WellKnown` Errors are defined in the [`BIP78::ReceiverWellKnownError`] spec.
     ///
-    /// The `WellKnownError` represents `errorCode` and `message`.
+    /// It is safe to display `WellKnown` errors to end users.
+    ///
+    /// [`BIP78::ReceiverWellKnownError`]: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-Receivers_well_known_errors
     WellKnown(WellKnownError),
-    /// `Unrecognized` errors are errors that are not well known and are only displayed in debug logs.
-    /// They are not displayed to end users.
+    /// `Unrecognized` Errors are NOT defined in the [`BIP78::ReceiverWellKnownError`] spec.
+    ///
+    /// Its not safe to display `Unrecognized` errors to end users as they could be used
+    /// maliciously to phish a non technical user. Only display them in debug logs.
+    ///
+    /// [`BIP78::ReceiverWellKnownError`]: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-Receivers_well_known_errors
     Unrecognized { error_code: String, message: String },
-    /// `Validation` errors are errors that are caused by malformed responses.
-    /// They are only displayed in debug logs.
+    /// Errors caused by malformed responses.
+    ///
+    /// These errors are only displayed in debug logs.
     Validation(ValidationError),
 }
 
@@ -445,7 +450,7 @@ mod tests {
         });
         assert_eq!(
             ResponseError::from_json(invalid_json_error).to_string(),
-            "The receiver sent an invalid response: couldn't decode as PSBT or JSON"
+            "The receiver sent an invalid response."
         );
     }
 }

@@ -46,7 +46,9 @@ impl<'a> From<PjUri> for payjoin::PjUri<'a> {
         value.0
     }
 }
-pub struct PjUri(payjoin::PjUri<'static>);
+
+#[derive(Clone)]
+pub struct PjUri(pub payjoin::PjUri<'static>);
 
 impl PjUri {
     pub fn address(&self) -> String {

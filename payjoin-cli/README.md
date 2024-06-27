@@ -10,8 +10,10 @@ Independent audit is welcome.
 ## Install payjoin-cli
 
 ```console
-cargo install payjoin-cli --version 0.0.6-alpha
+cargo install payjoin-cli --version $VERSION
 ```
+
+where `$VERSION` is the latest version of the payjoin-cli you wish to install.
 
 Get a list of commands and options:
 
@@ -36,7 +38,7 @@ Your configuration details will vary, but you may use this as a template.
 ### Install payjoin-cli with the V2 feature
 
 ```console
-cargo install payjoin-cli --version 0.0.6-alpha --features v2
+cargo install payjoin-cli --version $VERSION --features v2
 ```
 
 ### V2 Configuration
@@ -55,13 +57,11 @@ ohttp_relay="https://pj.bobspacebkk.com"
 
 ### Asynchronous Operation
 
-Send and receiver state is saved to json files in the directory from which payjoin-cli is run. Once a send or receive session is started, it may resume using the `--retry` argument if the payjoin has not yet complete.
+Send and receiver state is saved to a database in the directory from which payjoin-cli is run. Once a send or receive session is started, it may resume using the `resume` argument if prior payjoin sessions have not yet complete.
 
 ```console
-payjoin-cli --retry <subcommmand>
+payjoin-cli resume
 ```
-
-`<subcommand>` should be either send or receive followed by the same arguments as the first time it was called.
 
 ## Manual End to End Regtest Testing
 

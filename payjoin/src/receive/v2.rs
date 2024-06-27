@@ -17,6 +17,8 @@ use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
 use crate::{OhttpKeys, PjUriBuilder, Request};
 
+/// The state for a payjoin V2 receive session, including necessary
+/// information for communication and cryptographic operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SessionContext {
     address: Address,
@@ -28,6 +30,8 @@ struct SessionContext {
     e: Option<bitcoin::secp256k1::PublicKey>,
 }
 
+/// Initializes a new payjoin session, including necessary context
+/// information for communication and cryptographic operations.
 #[derive(Debug, Clone)]
 pub struct SessionInitializer {
     context: SessionContext,
@@ -35,6 +39,20 @@ pub struct SessionInitializer {
 
 #[cfg(feature = "v2")]
 impl SessionInitializer {
+    /// Creates a new `SessionInitializer` with the provided parameters.
+    ///
+    /// # Parameters
+    /// - `address`: The Bitcoin address for the payjoin session.
+    /// - `directory`: The URL of the store-and-forward payjoin directory.
+    /// - `ohttp_keys`: The OHTTP keys used for encrypting and decrypting HTTP requests and responses.
+    /// - `ohttp_relay`: The URL of the OHTTP relay, used to keep client IP address confidential.
+    /// - `expire_after`: The duration after which the session expires.
+    ///
+    /// # Returns
+    /// A new instance of `SessionInitializer`.
+    ///
+    /// # References
+    /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
     pub fn new(
         address: Address,
         directory: Url,
@@ -95,6 +113,8 @@ fn subdir_path_from_pubkey(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
     base64::encode_config(pubkey, b64_config)
 }
 
+/// An active payjoin V2 session, allowing for polled requests to the
+/// payjoin directory and response processing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveSession {
     context: SessionContext,

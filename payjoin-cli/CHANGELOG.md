@@ -1,5 +1,19 @@
 # payjoin-cli Changelog
 
+## 0.0.7-alpha
+
+- Resume multiple payjoins easily with the `resume` subcommand. A repeat `send`
+  subcommand will also resume an existing session ([#283](https://github.com/payjoin/rust-payjoin/pull/283))
+- Normalize dash-separated long args ([#295](https://github.com/payjoin/rust-payjoin/pull/295))
+- Use sled database. Old .json storage files will no longer be read and should be deleted.
+- read Network::from_core_arg ([#304](https://github.com/payjoin/rust-payjoin/pull/304))
+- Don't needlessly substitute outputs for v2 receivers ([#277](https://github.com/payjoin/rust-payjoin/pull/277))
+- Print instructions and info on interrupt ([#303](https://github.com/payjoin/rust-payjoin/pull/303))
+
+### Contributors:
+
+@DanGould, @grizznaut, @thebrandonlucas
+
 ## 0.0.6-alpha
 
 - fetch ohttp keys from `payjoin/io` feature

@@ -477,10 +477,17 @@ impl ProvisionalProposal {
         self.params.disable_output_substitution
     }
 
-    /// Just replace an output address with
-    pub fn substitute_output_address(&mut self, substitute_address: bitcoin::Address) {
-        self.payjoin_psbt.unsigned_tx.output[self.owned_vouts[0]].script_pubkey =
-            substitute_address.script_pubkey();
+    /// If output substitution is enabled, replace the receiver's output script with a new one.
+    pub fn try_substitute_receiver_output(
+        &mut self,
+        generate_script: impl Fn() -> Result<bitcoin::ScriptBuf, Error>,
+    ) -> Result<(), Error> {
+        if self.params.disable_output_substitution {
+            return Err(Error::Server("Output substitution is disabled.".into()));
+        }
+        let substitute_script = generate_script()?;
+        self.payjoin_psbt.unsigned_tx.output[self.owned_vouts[0]].script_pubkey = substitute_script;
+        Ok(())
     }
 
     /// Apply additional fee contribution now that the receiver has contributed input

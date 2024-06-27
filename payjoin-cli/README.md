@@ -57,13 +57,11 @@ ohttp_relay="https://pj.bobspacebkk.com"
 
 ### Asynchronous Operation
 
-Send and receiver state is saved to json files in the directory from which payjoin-cli is run. Once a send or receive session is started, it may resume using the `--retry` argument if the payjoin has not yet complete.
+Send and receiver state is saved to a database in the directory from which payjoin-cli is run. Once a send or receive session is started, it may resume using the `resume` argument if prior payjoin sessions have not yet complete.
 
 ```console
-payjoin-cli --retry <subcommmand>
+payjoin-cli resume
 ```
-
-`<subcommand>` should be either send or receive followed by the same arguments as the first time it was called.
 
 ## Manual End to End Regtest Testing
 

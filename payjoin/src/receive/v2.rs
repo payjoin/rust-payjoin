@@ -98,9 +98,7 @@ impl SessionInitializer {
         let _ = res.read_to_end(&mut buf);
         let response = crate::v2::ohttp_decapsulate(ctx, &buf)?;
         if !response.status().is_success() {
-            return Err(Error::Server(
-                format!("Enrollment failed, expected success status",).into(),
-            ));
+            return Err(Error::Server("Enrollment failed, expected success status".into()));
         }
 
         Ok(ActiveSession { context: self.context.clone() })

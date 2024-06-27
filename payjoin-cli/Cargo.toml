@@ -1,6 +1,6 @@
 [package]
 name = "payjoin-cli"
-version = "0.0.6-alpha"
+version = "0.0.7-alpha"
 authors = ["Dan Gould <d@ngould.dev>"]
 description = "A command-line Payjoin client for Bitcoin Core"
 repository = "https://github.com/payjoin/rust-payjoin"

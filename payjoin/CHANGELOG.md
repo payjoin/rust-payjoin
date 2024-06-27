@@ -1,5 +1,23 @@
 # Payjoin Changelog
 
+## 0.18.0
+
+- Handle OHTTP encapsulated response status ([#284](https://github.com/payjoin/rust-payjoin/pull/284))
+- Upgrade `receive::v2` Typestate machine to resume multiple payjoins simultaneously ([#283](https://github.com/payjoin/rust-payjoin/pull/283))
+    - `Enroller` became `SessionInitializer`
+    - `Enrolled` became `ActiveSession`
+        - `fallback_target()` became `pj_url()`
+        - `pj_url_builder()` was introduced
+    - `ContextV2` became `SessionContext`
+        - Include a bitcoin address in `SessionContext`
+    - Document it all ([#308](https://github.com/payjoin/rust-payjoin/pull/308))
+- `send::ResponseError` variants fields got explicit names ([#304](https://github.com/payjoin/rust-payjoin/pull/304))
+- Refactor output substitution with new fallable `try_substitute_outputs` ([#277](https://github.com/payjoin/rust-payjoin/pull/277))
+
+### Contributors:
+
+@DanGould, @grizznaut, @jbesraa, @thebrandonlucas
+
 ## 0.17.0
 
 - Prepare Payjoin PSBT with no output keypaths ([#270](https://github.com/payjoin/rust-payjoin/pull/270))

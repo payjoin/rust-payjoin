@@ -16,9 +16,10 @@ use crate::uri::Url;
 pub async fn fetch_ohttp_keys(
     ohttp_relay: Url,
     payjoin_directory: Url,
-     cert_der: Vec<u8>,
+    cert_der: Vec<u8>,
 ) -> Result<OhttpKeys, PayjoinError> {
-    payjoin::io::fetch_ohttp_keys(ohttp_relay.into(), payjoin_directory.into(), cert_der).await
+    payjoin::io::fetch_ohttp_keys(ohttp_relay.into(), payjoin_directory.into(), cert_der)
+        .await
         .map(|e| e.into())
         .map_err(|e| e.into())
 }

@@ -1,11 +1,11 @@
 #![crate_name = "payjoin_ffi"]
 
 pub mod error;
+pub mod io;
 pub mod receive;
 pub mod send;
 pub mod types;
 pub mod uri;
-pub mod io;
 
 use crate::error::PayjoinError;
 #[cfg(feature = "uniffi")]
@@ -19,9 +19,9 @@ use crate::receive::v1::{
 };
 #[allow(unused_imports)]
 use crate::receive::v2::{
-    ClientResponse, SessionInitializer, ActiveSession, RequestResponse, V2MaybeInputsOwned, V2MaybeInputsSeen,
-    V2MaybeMixedInputScripts, V2OutputsUnknown, V2PayjoinProposal, V2ProvisionalProposal,
-    V2UncheckedProposal,
+    ActiveSession, ClientResponse, RequestResponse, SessionInitializer, V2MaybeInputsOwned,
+    V2MaybeInputsSeen, V2MaybeMixedInputScripts, V2OutputsUnknown, V2PayjoinProposal,
+    V2ProvisionalProposal, V2UncheckedProposal,
 };
 #[allow(unused_imports)]
 use crate::send::v1::{

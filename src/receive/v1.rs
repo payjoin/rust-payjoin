@@ -309,19 +309,20 @@ impl ProvisionalProposal {
     pub fn try_substitute_receiver_output(
         &self,
         generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>,
-    ) -> Result<(),PayjoinError>{
+    ) -> Result<(), PayjoinError> {
         self.mutex_guard()
-            .try_substitute_receiver_output(|| generate_script()
-                .map(|e| payjoin::bitcoin::ScriptBuf::from_bytes(e))
-                .map_err(|e|  payjoin::Error::Server(e.into())))
+            .try_substitute_receiver_output(|| {
+                generate_script()
+                    .map(|e| payjoin::bitcoin::ScriptBuf::from_bytes(e))
+                    .map_err(|e| payjoin::Error::Server(e.into()))
+            })
             .map_err(|e| e.into())
     }
     #[cfg(feature = "uniffi")]
     pub fn try_substitute_receiver_output(
         &self,
         generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>,
-    ) -> Result<(),PayjoinError>{
-
+    ) -> Result<(), PayjoinError> {
     }
     pub fn contribute_witness_input(
         &self,

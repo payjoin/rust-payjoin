@@ -95,7 +95,7 @@ impl Url {
 
 impl From<payjoin::PjUriBuilder> for PjUriBuilder {
     fn from(value: payjoin::PjUriBuilder) -> Self {
-        Self{inner:value}
+        Self { inner: value }
     }
 }
 #[cfg(not(feature = "uniffi"))]

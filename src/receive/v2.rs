@@ -6,15 +6,15 @@ use std::time::Duration;
 
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
-use payjoin::{ receive as pdk};
+use payjoin::receive as pdk;
 
 #[cfg(feature = "uniffi")]
 use crate::receive::v1::{
     CanBroadcast, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction,
 };
-use crate::{OhttpKeys, OutPoint, PayjoinError, Request, TxOut, Url};
 use crate::types::Network;
 use crate::uri::PjUriBuilder;
+use crate::{OhttpKeys, OutPoint, PayjoinError, Request, TxOut, Url};
 
 pub struct ClientResponse(Mutex<Option<ohttp::ClientResponse>>);
 
@@ -67,18 +67,19 @@ impl SessionInitializer {
     pub fn new(
         address: String,
         expire_after: u64,
-        network:Network,
+        network: Network,
         directory: Arc<Url>,
         ohttp_keys: Arc<OhttpKeys>,
         ohttp_relay: Arc<Url>,
     ) -> Result<Self, PayjoinError> {
-        let address = payjoin::bitcoin::Address::from_str(address.as_str())?.require_network(network.into())?;
+        let address = payjoin::bitcoin::Address::from_str(address.as_str())?
+            .require_network(network.into())?;
         Ok(payjoin::receive::v2::SessionInitializer::new(
             address,
             (*directory).clone().into(),
             (*ohttp_keys).clone().into(),
             (*ohttp_relay).clone().into(),
-            Duration::from_secs(expire_after)
+            Duration::from_secs(expire_after),
         )
         .into())
     }
@@ -178,19 +179,23 @@ impl ActiveSession {
             .map(|e| e.map(|o| o.into()))
             .map_err(|e| e.into())
     }
-    pub fn pj_uri_builder(&self) -> PjUriBuilder{
+    pub fn pj_uri_builder(&self) -> PjUriBuilder {
         <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
-            .pj_uri_builder().into()
+            .pj_uri_builder()
+            .into()
     }
     /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
     /// This identifies a session at the payjoin directory server.
-    pub fn pj_url(&self) -> Url{
+    pub fn pj_url(&self) -> Url {
         <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
-            .pj_url().into()
+            .pj_url()
+            .into()
     }
     ///The per-session public key to use as an identifier
-    pub fn public_key(&self) -> String{
-        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone()).public_key().to_string()
+    pub fn public_key(&self) -> String {
+        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
+            .public_key()
+            .to_string()
     }
 }
 
@@ -479,7 +484,7 @@ impl V2ProvisionalProposal {
             Err(e) => Err(e.into()),
         }
     }
-    pub fn is_output_substitution_disabled(&self) -> bool{
+    pub fn is_output_substitution_disabled(&self) -> bool {
         self.mutex_guard().is_output_substitution_disabled()
     }
 
@@ -488,11 +493,13 @@ impl V2ProvisionalProposal {
     pub fn try_substitute_receiver_output(
         &self,
         generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>,
-    ) -> Result<(),PayjoinError>{
+    ) -> Result<(), PayjoinError> {
         self.mutex_guard()
-            .try_substitute_receiver_output(|| generate_script()
-                .map(|e| payjoin::bitcoin::ScriptBuf::from_bytes(e))
-                .map_err(|e|  payjoin::Error::Server(e.into())))
+            .try_substitute_receiver_output(|| {
+                generate_script()
+                    .map(|e| payjoin::bitcoin::ScriptBuf::from_bytes(e))
+                    .map_err(|e| payjoin::Error::Server(e.into()))
+            })
             .map_err(|e| e.into())
     }
     //TODO; create try_substitute_receiver_output for uniffi build
@@ -500,8 +507,7 @@ impl V2ProvisionalProposal {
     pub fn try_substitute_receiver_output(
         &self,
         generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>,
-    ) -> Result<(),PayjoinError>{
-
+    ) -> Result<(), PayjoinError> {
     }
 
     #[cfg(feature = "uniffi")]
@@ -518,9 +524,9 @@ impl V2ProvisionalProposal {
                         .callback(pre_processed.to_string())
                         .map(|e| Psbt::from_str(e.as_str()))
                         .map_err(|e| pdk::Error::Server(e.into()))?;
-                    match processed{
+                    match processed {
                         Ok(e) => Ok(e),
-                        Err(e) => Err(pdk::Error::Server(e.into()))
+                        Err(e) => Err(pdk::Error::Server(e.into())),
                     }
                 },
                 min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x)),
@@ -541,11 +547,10 @@ impl V2ProvisionalProposal {
                     let processed = process_psbt(pre_processed.to_string())
                         .map(|e| Psbt::from_str(e.as_str()))
                         .map_err(|e| pdk::Error::Server(e.into()))?;
-                    match processed{
+                    match processed {
                         Ok(e) => Ok(e),
-                        Err(e) => Err(pdk::Error::Server(e.into()))
+                        Err(e) => Err(pdk::Error::Server(e.into())),
                     }
-
                 },
                 min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x)),
             )

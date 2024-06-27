@@ -105,6 +105,6 @@ impl From<payjoin::Error> for PayjoinError {
 
 impl From<payjoin::io::Error> for PayjoinError {
     fn from(value: payjoin::io::Error) -> Self {
-        PayjoinError::IoError {message: value.to_string()}
+        PayjoinError::IoError { message: value.to_string() }
     }
 }

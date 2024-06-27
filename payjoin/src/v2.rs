@@ -296,7 +296,7 @@ impl<'de> serde::Deserialize<'de> for OhttpKeys {
         D: serde::Deserializer<'de>,
     {
         let bytes = Vec::<u8>::deserialize(deserializer)?;
-        OhttpKeys::decode(&bytes).map_err(serde::de::Error::custom)
+        Ok(OhttpKeys::decode(&bytes).map_err(serde::de::Error::custom)?)
     }
 }
 
@@ -305,7 +305,7 @@ impl serde::Serialize for OhttpKeys {
     where
         S: serde::Serializer,
     {
-        let bytes = self.0.encode().map_err(serde::ser::Error::custom)?;
+        let bytes = self.encode().map_err(serde::ser::Error::custom)?;
         bytes.serialize(serializer)
     }
 }

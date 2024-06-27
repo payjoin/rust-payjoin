@@ -1,31 +1,34 @@
-# Payjoin implementation in Rust
+# Rust-Payjoin
+
+Supercharged payment batching to save you fees and preserve your privacy.
 
 ## About
 
-This is a library and a client binary for bitcoind implementing BIP78 Payjoin.
+### `payjoin`
 
-The library is perfectly IO-agnostic—in fact, it does no IO.
-The primary goal of such design is to be easy to unit test.
-While not there yet, it already has infinitely more tests than the [Payjoin PR against Electrum](https://github.com/spesmilo/electrum/pull/6804). :P
+The Payjoin Dev Kit `payjoin` library implements both [BIP 78 Payjoin V1](https://github.com/shesek/bips/blob/master/bip-0078.mediawiki) and [BIP 77 Payjoin V2](https://github.com/bitcoin/bips/pull/1483).
 
-It doesn't care whether you use `async`, blocking, `tokio`, `sync-std` `hyper`, `actix` or whatever.
-There are already too many frameworks in Rust so it's best avoiding directly introducing them into library code.
-The library currently only contains sender implementation and a partial receiver.
+The `payjoin` crate is compatible with many wallets lilke LND in [nolooking](https://github.com/chaincase-app/nolooking) and Bitcoin Dev Kit in [Mutiny Wallet](https://github.com/MutinyWallet/mutiny-node) and in [BitMask](https://github.com/diba-io/bitmask-core)
 
-The payjoin-cli binary performs no-frills Payjoin using Bitcoin Core wallet.
-The payjoin crate also supports other wallet software [like LND](https://github.com/chaincase-app/nolooking).
+### `payjoin-cli`
+
+The [`payjoin-cli`](https://github.com/payjoin/rust-payjoin/tree/main/payjoin-cli) crate performs no-frills Payjoin as a reference implementation using Bitcoin Core wallet.
+
+### `payjoin-directory`
+
+The [`payjoin-directory`](https://github.com/payjoin/rust-payjoin/tree/main/payjoin-directory) crate implements the Payjoin Directory store-and-forward server required for Payjoin V2's asynchronous operation.
 
 ### Disclaimer ⚠️ WIP
 
-**Use at your own risk. this crate has not yet been reviewed by independent Rust and Bitcoin security professionals.**
+**Use at your own risk. This crate has not yet been reviewed by independent Rust and Bitcoin security professionals.**
 
-While I don't think there is a *huge* risk running it, don't rely on its security for now!
+While I don't think there is a *huge* risk running it, be careful relying on its security for now!
 
 Seeking review of the code that verifies there is no overpayment. Contributions are welcome!
 
 ### Development status
 
-#### Sender (beta)
+#### Sender (V1 beta, V2 alpha)
 
 - [x] Basic logic
 - [x] Most checks implemented
@@ -40,7 +43,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [ ] Independent review
 - [x] Independent testing
 
-#### Receiver (beta)
+#### Receiver (V1 beta, V2 alpha)
 
 - [x] Basic logic
 - [x] Most checks implemented

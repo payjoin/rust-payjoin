@@ -10,8 +10,10 @@ Independent audit is welcome.
 ## Install payjoin-cli
 
 ```console
-cargo install payjoin-cli --version 0.0.6-alpha
+cargo install payjoin-cli --version $VERSION
 ```
+
+where `$VERSION` is the latest version of the payjoin-cli you wish to install.
 
 Get a list of commands and options:
 
@@ -36,7 +38,7 @@ Your configuration details will vary, but you may use this as a template.
 ### Install payjoin-cli with the V2 feature
 
 ```console
-cargo install payjoin-cli --version 0.0.6-alpha --features v2
+cargo install payjoin-cli --version $VERSION --features v2
 ```
 
 ### V2 Configuration

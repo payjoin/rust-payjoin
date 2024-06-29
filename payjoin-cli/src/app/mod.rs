@@ -5,9 +5,8 @@ use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::bitcoin::{self, base64};
 use payjoin::send::RequestContext;
-use payjoin::PjUri;
+use payjoin::{bitcoin, PjUri};
 
 pub mod config;
 use crate::app::config::AppConfig;
@@ -77,7 +76,7 @@ pub trait App {
         log::debug!("Proposed psbt: {:#?}", psbt);
         let psbt = self
             .bitcoind()?
-            .wallet_process_psbt(&serialize_psbt(&psbt), None, None, None)
+            .wallet_process_psbt(&psbt.to_string(), None, None, None)
             .with_context(|| "Failed to process PSBT")?
             .psbt;
         let tx = self
@@ -133,8 +132,6 @@ impl payjoin::receive::Headers for Headers<'_> {
         self.0.get(key).map(|v| v.to_str()).transpose().ok().flatten()
     }
 }
-
-fn serialize_psbt(psbt: &Psbt) -> String { base64::encode(psbt.serialize()) }
 
 #[cfg(feature = "danger-local-https")]
 fn http_agent() -> Result<reqwest::Client> { Ok(http_agent_builder()?.build()?) }

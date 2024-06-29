@@ -248,7 +248,7 @@ impl<'a> RequestBuilder<'a> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct RequestContext {
     psbt: Psbt,
     endpoint: Url,
@@ -262,23 +262,6 @@ pub struct RequestContext {
     payee: ScriptBuf,
     #[cfg(feature = "v2")]
     e: bitcoin::secp256k1::SecretKey,
-}
-
-#[cfg(feature = "v2")]
-impl PartialEq for RequestContext {
-    fn eq(&self, other: &Self) -> bool {
-        self.psbt == other.psbt
-            && self.endpoint == other.endpoint
-            // KeyConfig is not yet PartialEq
-            && self.ohttp_keys.as_ref().map(|cfg| cfg.encode().unwrap_or_default()) == other.ohttp_keys.as_ref().map(|cfg| cfg.encode().unwrap_or_default())
-            && self.disable_output_substitution == other.disable_output_substitution
-            && self.fee_contribution == other.fee_contribution
-            && self.min_fee_rate == other.min_fee_rate
-            && self.input_type == other.input_type
-            && self.sequence == other.sequence
-            && self.payee == other.payee
-            && self.e == other.e
-    }
 }
 
 #[cfg(feature = "v2")]
@@ -375,10 +358,9 @@ impl RequestContext {
             subdirectory = path_and_query;
         }
 
-        let b64_config =
-            bitcoin::base64::Config::new(bitcoin::base64::CharacterSet::UrlSafe, false);
-        let pubkey_bytes = bitcoin::base64::decode_config(subdirectory, b64_config)
-            .map_err(InternalCreateRequestError::SubdirectoryNotBase64)?;
+        let pubkey_bytes =
+            bitcoin::base64::decode_config(subdirectory, bitcoin::base64::URL_SAFE_NO_PAD)
+                .map_err(InternalCreateRequestError::SubdirectoryNotBase64)?;
         Ok(bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
             .map_err(InternalCreateRequestError::SubdirectoryInvalidPubkey)?)
     }
@@ -401,13 +383,7 @@ impl Serialize for RequestContext {
         let mut state = serializer.serialize_struct("RequestContext", 8)?;
         state.serialize_field("psbt", &self.psbt.to_string())?;
         state.serialize_field("endpoint", &self.endpoint.as_str())?;
-        let ohttp_string = self.ohttp_keys.as_ref().map_or(Ok("".to_string()), |config| {
-            config
-                .encode()
-                .map_err(|e| serde::ser::Error::custom(format!("ohttp-keys encoding error: {}", e)))
-                .map(bitcoin::base64::encode)
-        })?;
-        state.serialize_field("ohttp_keys", &ohttp_string)?;
+        state.serialize_field("ohttp_keys", &self.ohttp_keys)?;
         state.serialize_field("disable_output_substitution", &self.disable_output_substitution)?;
         state.serialize_field(
             "fee_contribution",
@@ -476,21 +452,7 @@ impl<'de> Deserialize<'de> for RequestContext {
                                 url::Url::from_str(&map.next_value::<String>()?)
                                     .map_err(de::Error::custom)?,
                             ),
-                        "ohttp_keys" => {
-                            let ohttp_base64: String = map.next_value()?;
-                            ohttp_keys = if ohttp_base64.is_empty() {
-                                None
-                            } else {
-                                Some(
-                                    crate::v2::OhttpKeys::decode(
-                                        bitcoin::base64::decode(&ohttp_base64)
-                                            .map_err(de::Error::custom)?
-                                            .as_slice(),
-                                    )
-                                    .map_err(de::Error::custom)?,
-                                )
-                            };
-                        }
+                        "ohttp_keys" => ohttp_keys = Some(map.next_value()?),
                         "disable_output_substitution" =>
                             disable_output_substitution = Some(map.next_value()?),
                         "fee_contribution" => {
@@ -516,7 +478,7 @@ impl<'de> Deserialize<'de> for RequestContext {
                 Ok(RequestContext {
                     psbt: psbt.ok_or_else(|| de::Error::missing_field("psbt"))?,
                     endpoint: endpoint.ok_or_else(|| de::Error::missing_field("endpoint"))?,
-                    ohttp_keys,
+                    ohttp_keys: ohttp_keys.ok_or_else(|| de::Error::missing_field("ohttp_keys"))?,
                     disable_output_substitution: disable_output_substitution
                         .ok_or_else(|| de::Error::missing_field("disable_output_substitution"))?,
                     fee_contribution,

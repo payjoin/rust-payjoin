@@ -31,16 +31,8 @@ jobs:
           cargo update -p which --precise 4.4.0
           cargo update -p time@0.3.36 --precise 0.3.20
           cargo update -p reqwest --precise 0.12.4
-      - name: test payjoin lib
-        run: cargo test --package payjoin --verbose --all-features --lib
-      - name: test payjoin v1 integration
-        run: cargo test --package payjoin --verbose --features=send,receive --test integration
-      - name: test payjoin v2 integration
-        run: cargo test --package payjoin --verbose --features=send,receive,danger-local-https,v2 --test integration
-      - name: test payjoin-cli bin v2
-        run: cargo test --package payjoin-cli --verbose --features=danger-local-https,v2 --test e2e
-      - name: test payjoin-cli bin v1
-        run: cargo test --package payjoin-cli --verbose --features=danger-local-https
+      - name: Run tests
+        run: bash contrib/test.sh
 
   rustfmt:
     runs-on: ubuntu-latest

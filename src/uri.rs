@@ -140,6 +140,7 @@ impl PjUriBuilder {
 #[cfg(test)]
 mod tests {
     use bdk::bitcoin;
+
     use crate::uri::{PjUriBuilder, Url};
     #[test]
     fn test_ffi_builder() {
@@ -155,19 +156,19 @@ mod tests {
                 let builder = PjUriBuilder::new(
                     address.to_string(),
                     Url::from_str(pj.to_string()).unwrap(),
-                        None,
-                ).unwrap()
-                    .amount(amount.to_sat())
-                    .message("message".to_string())
-                    .label("label".to_string())
-                    .pjos(true);
+                    None,
+                )
+                .unwrap()
+                .amount(amount.to_sat())
+                .message("message".to_string())
+                .label("label".to_string())
+                .pjos(true);
                 let uri = builder.build();
                 assert_eq!(uri.amount(), Some(bitcoin::Amount::ONE_BTC.to_btc()));
-             print!("\n {}", uri.as_string());
+                print!("\n {}", uri.as_string());
                 // assert_eq!(uri.extras()disable_output_substitution, true);
                 // assert_eq!(uri.extras.endpoint.to_string(), pj.to_string());
             }
         }
     }
-
 }

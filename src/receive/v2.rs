@@ -64,6 +64,7 @@ impl SessionInitializer {
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
+    #[cfg(feature = "uniffi")]
     pub fn new(
         address: String,
         expire_after: u64,
@@ -82,6 +83,25 @@ impl SessionInitializer {
             Duration::from_secs(expire_after),
         )
         .into())
+    }
+    pub fn new(
+        address: String,
+        expire_after: u64,
+        network: p,
+        directory: Arc<Url>,
+        ohttp_keys: Arc<OhttpKeys>,
+        ohttp_relay: Arc<Url>,
+    ) -> Result<Self, PayjoinError> {
+        let address = payjoin::bitcoin::Address::from_str(address.as_str())?
+            .require_network(network.into())?;
+        Ok(payjoin::receive::v2::SessionInitializer::new(
+            address,
+            (*directory).clone().into(),
+            (*ohttp_keys).clone().into(),
+            (*ohttp_relay).clone().into(),
+            Duration::from_secs(expire_after),
+        )
+            .into())
     }
 
     #[cfg(feature = "uniffi")]

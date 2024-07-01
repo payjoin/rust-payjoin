@@ -351,7 +351,7 @@ impl Display for ResponseError {
             Self::WellKnown(e) => e.fmt(f),
             // Don't display unknowns to end users, only debug logs
             Self::Unrecognized { .. } => write!(f, "The receiver sent an unrecognized error."),
-            Self::Validation(e) => write!(f, "The receiver sent an invalid response: {}", e),
+            Self::Validation(_) => write!(f, "The receiver sent an invalid response."),
         }
     }
 }

@@ -87,7 +87,7 @@ impl SessionInitializer {
     pub fn new(
         address: String,
         expire_after: u64,
-        network: p,
+        network: Network,
         directory: Arc<Url>,
         ohttp_keys: Arc<OhttpKeys>,
         ohttp_relay: Arc<Url>,

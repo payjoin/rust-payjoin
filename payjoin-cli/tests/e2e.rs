@@ -148,7 +148,6 @@ mod e2e {
 
         use http::StatusCode;
         use once_cell::sync::{Lazy, OnceCell};
-        use payjoin::base64;
         use reqwest::{Client, ClientBuilder};
         use testcontainers::clients::Cli;
         use testcontainers_modules::redis::Redis;
@@ -220,8 +219,6 @@ mod e2e {
             let ohttp_keys =
                 payjoin::io::fetch_ohttp_keys(ohttp_relay.clone(), directory.clone(), cert.clone())
                     .await?;
-            let bytes = ohttp_keys.0.encode()?;
-            let ohttp_keys = base64::encode_config(bytes, base64::URL_SAFE);
 
             let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
             let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
@@ -250,7 +247,7 @@ mod e2e {
                 .arg("--pj-directory")
                 .arg(&directory)
                 .arg("--ohttp-keys")
-                .arg(&ohttp_keys)
+                .arg(&ohttp_keys.to_string())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
                 .spawn()

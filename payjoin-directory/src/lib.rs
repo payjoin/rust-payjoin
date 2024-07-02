@@ -102,10 +102,7 @@ fn init_ohttp() -> Result<ohttp::Server> {
     // create or read from file
     let server_config = ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC))?;
     let encoded_config = server_config.encode()?;
-    let b64_config = base64::encode_config(
-        encoded_config,
-        base64::Config::new(base64::CharacterSet::UrlSafe, false),
-    );
+    let b64_config = base64::encode_config(encoded_config, base64::URL_SAFE_NO_PAD);
     info!("ohttp-keys server config base64 UrlSafe: {:?}", b64_config);
     Ok(ohttp::Server::new(server_config)?)
 }
@@ -242,12 +239,11 @@ impl From<hyper::http::Error> for HandlerError {
 }
 
 async fn post_session(body: Body) -> Result<Response<Body>, HandlerError> {
-    let b64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
     let bytes =
         hyper::body::to_bytes(body).await.map_err(|e| HandlerError::BadRequest(e.into()))?;
     let base64_id =
         String::from_utf8(bytes.to_vec()).map_err(|e| HandlerError::BadRequest(e.into()))?;
-    let pubkey_bytes: Vec<u8> = base64::decode_config(base64_id, b64_config)
+    let pubkey_bytes: Vec<u8> = base64::decode_config(base64_id, base64::URL_SAFE_NO_PAD)
         .map_err(|e| HandlerError::BadRequest(e.into()))?;
     let pubkey = bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
         .map_err(|e| HandlerError::BadRequest(e.into()))?;

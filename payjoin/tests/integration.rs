@@ -5,7 +5,7 @@ mod integration {
     use std::str::FromStr;
 
     use bitcoin::psbt::Psbt;
-    use bitcoin::{base64, Amount, FeeRate, OutPoint};
+    use bitcoin::{Amount, FeeRate, OutPoint};
     use bitcoind::bitcoincore_rpc::core_rpc_json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use log::{log_enabled, Level};
@@ -102,7 +102,7 @@ mod integration {
             let proposal = handle_proposal(proposal, receiver);
             let psbt = proposal.psbt();
             debug!("Receiver's Payjoin proposal PSBT: {:#?}", &psbt);
-            base64::encode(&psbt.serialize())
+            psbt.to_string()
         }
 
         fn handle_proposal(
@@ -178,7 +178,7 @@ mod integration {
                     |psbt: &Psbt| {
                         Ok(receiver
                             .wallet_process_psbt(
-                                &bitcoin::base64::encode(psbt.serialize()),
+                                &psbt.to_string(),
                                 None,
                                 None,
                                 Some(true), // check that the receiver properly clears keypaths
@@ -269,9 +269,8 @@ mod integration {
             sender: &bitcoincore_rpc::Client,
             psbt: Psbt,
         ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
-            let payjoin_base64_string = base64::encode(&psbt.serialize());
             let payjoin_psbt =
-                sender.wallet_process_psbt(&payjoin_base64_string, None, None, None)?.psbt;
+                sender.wallet_process_psbt(&psbt.to_string(), None, None, None)?.psbt;
             let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.unwrap();
             let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
             debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
@@ -303,14 +302,9 @@ mod integration {
 
         #[tokio::test]
         async fn test_bad_ohttp_keys() {
-            let bad_ohttp_keys = OhttpKeys::decode(
-                &base64::decode_config(
-                    "AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM",
-                    base64::URL_SAFE,
-                )
-                .expect("invalid base64"),
-            )
-            .expect("Invalid OhttpKeys");
+            let bad_ohttp_keys =
+                OhttpKeys::from_str("AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM")
+                    .expect("Invalid OhttpKeys");
 
             std::env::set_var("RUST_LOG", "debug");
             let (cert, key) = local_cert_key();
@@ -707,7 +701,7 @@ mod integration {
                     |psbt: &Psbt| {
                         Ok(receiver
                             .wallet_process_psbt(
-                                &bitcoin::base64::encode(psbt.serialize()),
+                                &psbt.to_string(),
                                 None,
                                 None,
                                 Some(true), // check that the receiver properly clears keypaths
@@ -836,9 +830,8 @@ mod integration {
             sender: &bitcoincore_rpc::Client,
             psbt: Psbt,
         ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
-            let payjoin_base64_string = bitcoin::base64::encode(&psbt.serialize());
             let payjoin_psbt =
-                sender.wallet_process_psbt(&payjoin_base64_string, None, None, None)?.psbt;
+                sender.wallet_process_psbt(&psbt.to_string(), None, None, None)?.psbt;
             let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.unwrap();
             let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
 

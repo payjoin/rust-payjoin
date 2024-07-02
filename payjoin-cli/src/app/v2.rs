@@ -8,7 +8,7 @@ use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::Amount;
 use payjoin::receive::v2::ActiveSession;
 use payjoin::send::RequestContext;
-use payjoin::{base64, bitcoin, Error, Uri};
+use payjoin::{bitcoin, Error, Uri};
 use tokio::signal;
 use tokio::sync::watch;
 
@@ -341,7 +341,7 @@ impl App {
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &Psbt| {
                 bitcoind
-                    .wallet_process_psbt(&base64::encode(psbt.serialize()), None, None, Some(false))
+                    .wallet_process_psbt(&psbt.to_string(), None, None, Some(false))
                     .map(|res| Psbt::from_str(&res.psbt).map_err(|e| Error::Server(e.into())))
                     .map_err(|e| Error::Server(e.into()))?
             },

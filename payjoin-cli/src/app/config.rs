@@ -99,7 +99,14 @@ impl AppConfig {
                         )?
                         .set_override_option(
                             "ohttp_keys",
-                            matches.get_one::<String>("ohttp_keys").map(|s| s.as_str()),
+                            matches.get_one::<String>("ohttp_keys").and_then(|s| {
+                                payjoin::base64::decode_config(s, payjoin::base64::URL_SAFE_NO_PAD)
+                                    .map_err(|e| {
+                                        log::error!("Failed to decode ohttp_keys: {}", e);
+                                        ConfigError::Message(format!("Invalid ohttp_keys: {}", e))
+                                    })
+                                    .ok()
+                            }),
                         )?
                 };
 

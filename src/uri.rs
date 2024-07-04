@@ -1,4 +1,6 @@
+
 use std::str::FromStr;
+use std::sync::{Mutex, MutexGuard};
 
 use payjoin::bitcoin::address::NetworkChecked;
 
@@ -93,19 +95,19 @@ impl Url {
     }
 }
 
-impl From<payjoin::PjUriBuilder> for PjUriBuilder {
-    fn from(value: payjoin::PjUriBuilder) -> Self {
-        Self { inner: value }
-    }
-}
 ///Build a valid PjUri.
 // Payjoin receiver can use this builder to create a payjoin uri to send to the sender.
 #[cfg(not(feature = "uniffi"))]
-pub struct PjUriBuilder {
-    inner: payjoin::PjUriBuilder,
+pub struct PjUriBuilder (pub Mutex<payjoin::PjUriBuilder>);
+
+impl From<payjoin::PjUriBuilder> for PjUriBuilder {
+    fn from(value: payjoin::PjUriBuilder) -> Self {
+        Self(Mutex::new(value))
+    }
 }
 #[cfg(not(feature = "uniffi"))]
 impl PjUriBuilder {
+
     ///Create a new PjUriBuilder with required parameters.
     pub fn new(
         address: String,
@@ -113,30 +115,40 @@ impl PjUriBuilder {
         ohttp_keys: Option<OhttpKeys>,
     ) -> Result<Self, PayjoinError> {
         let address = payjoin::bitcoin::Address::from_str(&address)?.assume_checked();
-        Ok(Self { inner: payjoin::PjUriBuilder::new(address, pj.into(), ohttp_keys.map(|e| e.0)) })
+        Ok(payjoin::PjUriBuilder::new(address, pj.into(), ohttp_keys.map(|e| e.0)).into())
+    }
+    fn lock(&self) -> MutexGuard<'_, payjoin::PjUriBuilder> {
+        self.0.lock().unwrap()
     }
     ///Accepts the amount you want to receive in sats and sets it in btc .
-    pub fn amount(self, amount: u64) -> Self {
+    pub fn amount(&self, amount: u64) -> &PjUriBuilder {
         let amount = payjoin::bitcoin::Amount::from_sat(amount);
-        Self { inner: self.inner.amount(amount) }
+        *self.lock() = self.lock().clone().amount(amount);
+        self
     }
     ///Set the message.
-    pub fn message(self, message: String) -> Self {
-        Self { inner: self.inner.message(message) }
+    pub fn message(&self, message: String) -> &PjUriBuilder {
+        *self.lock() = self.lock().clone().message(message);
+        self
     }
     ///Set the label.
-    pub fn label(self, label: String) -> Self {
-        Self { inner: self.inner.label(label) }
+    pub fn label(&self, label: String) -> &PjUriBuilder {
+        *self.lock() = self.lock().clone().label(label);
+        self
     }
     ///Set whether payjoin output substitution is allowed.
-    pub fn pjos(self, pjos: bool) -> Self {
-        Self { inner: self.inner.pjos(pjos) }
+    pub fn pjos(&self, pjos: bool) -> &PjUriBuilder {
+        *self.lock() = self.lock().clone().pjos(pjos);
+        self
     }
     ///Constructs a Uri with PayjoinParams from the parameters set in the builder.
-    pub fn build(self) -> PjUri {
-        self.inner.build().into()
+    pub fn build(&self) -> PjUri {
+        self.lock().clone().build().into()
     }
 }
+
+
+
 #[cfg(test)]
 mod tests {
     use bdk::bitcoin;

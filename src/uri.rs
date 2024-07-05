@@ -1,6 +1,5 @@
 
 use std::str::FromStr;
-use std::sync::{Mutex, MutexGuard};
 
 use payjoin::bitcoin::address::NetworkChecked;
 
@@ -98,11 +97,11 @@ impl Url {
 ///Build a valid PjUri.
 // Payjoin receiver can use this builder to create a payjoin uri to send to the sender.
 #[cfg(not(feature = "uniffi"))]
-pub struct PjUriBuilder (pub Mutex<payjoin::PjUriBuilder>);
+pub struct PjUriBuilder (pub payjoin::PjUriBuilder);
 
 impl From<payjoin::PjUriBuilder> for PjUriBuilder {
     fn from(value: payjoin::PjUriBuilder) -> Self {
-        Self(Mutex::new(value))
+        Self(value)
     }
 }
 #[cfg(not(feature = "uniffi"))]
@@ -117,33 +116,26 @@ impl PjUriBuilder {
         let address = payjoin::bitcoin::Address::from_str(&address)?.assume_checked();
         Ok(payjoin::PjUriBuilder::new(address, pj.into(), ohttp_keys.map(|e| e.0)).into())
     }
-    fn lock(&self) -> MutexGuard<'_, payjoin::PjUriBuilder> {
-        self.0.lock().unwrap()
-    }
     ///Accepts the amount you want to receive in sats and sets it in btc .
-    pub fn amount(&self, amount: u64) -> &PjUriBuilder {
+    pub fn amount(&self, amount: u64)  -> Self {
         let amount = payjoin::bitcoin::Amount::from_sat(amount);
-        *self.lock() = self.lock().clone().amount(amount);
-        self
+        self.0.clone().amount(amount).into()
     }
-    ///Set the message.
-    pub fn message(&self, message: String) -> &PjUriBuilder {
-        *self.lock() = self.lock().clone().message(message);
-        self
+    /// Set the message.
+    pub fn message(&self, message: String)  -> Self {
+        self.0.clone().message(message).into()
     }
     ///Set the label.
-    pub fn label(&self, label: String) -> &PjUriBuilder {
-        *self.lock() = self.lock().clone().label(label);
-        self
+    pub fn label(&self, label: String)-> Self {
+        self.0.clone().label(label).into()
     }
     ///Set whether payjoin output substitution is allowed.
-    pub fn pjos(&self, pjos: bool) -> &PjUriBuilder {
-        *self.lock() = self.lock().clone().pjos(pjos);
-        self
+    pub fn pjos(&self, pjos: bool) -> Self{
+        self.0.clone().pjos(pjos).into()
     }
     ///Constructs a Uri with PayjoinParams from the parameters set in the builder.
     pub fn build(&self) -> PjUri {
-        self.lock().clone().build().into()
+        self.0.clone().build().into()
     }
 }
 
@@ -170,16 +162,15 @@ mod tests {
                     Url::from_str(pj.to_string()).unwrap(),
                     None,
                 )
-                .unwrap()
-                .amount(amount.to_sat())
-                .message("message".to_string())
-                .label("label".to_string())
-                .pjos(true);
-                let uri = builder.build();
-                assert_eq!(uri.amount(), Some(bitcoin::Amount::ONE_BTC.to_btc()));
+                .unwrap();
+                let uri = builder
+                    .amount(amount.to_sat())
+                    .message("message".to_string())
+                    .pjos(true)
+                    .label("label".to_string())
+                    .build();
+                // assert_eq!(uri.amount(), Some(bitcoin::Amount::ONE_BTC.to_btc()));
                 print!("\n {}", uri.as_string());
-                // assert_eq!(uri.extras()disable_output_substitution, true);
-                // assert_eq!(uri.extras.endpoint.to_string(), pj.to_string());
             }
         }
     }

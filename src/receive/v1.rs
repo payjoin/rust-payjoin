@@ -275,7 +275,7 @@ impl OutputsUnknown {
     pub fn identify_receiver_outputs(
         &self,
         is_receiver_output: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
-    ) -> Result<Arc<ProvisionalProposal>, PayjoinError> {
+    ) -> Result<ProvisionalProposal, PayjoinError> {
         self.0
             .clone()
             .identify_receiver_outputs(|input| {
@@ -283,7 +283,7 @@ impl OutputsUnknown {
                     .map_err(|e| payjoin::receive::Error::Server(e.into()))
             })
             .map_err(|e| e.into())
-            .map(|e| Arc::new(e.into()))
+            .map(|e| e.into())
     }
 }
 

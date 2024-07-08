@@ -62,6 +62,11 @@ pub struct RequestBuilder<'a> {
     uri: PjUri<'a>,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
+    /// Decreases the fee contribution instead of erroring.
+    ///
+    /// If this option is true and a transaction with change amount lower than fee
+    /// contribution is provided then instead of returning error the fee contribution will
+    /// be just lowered in the request to match the change amount.
     clamp_fee_contribution: bool,
     min_fee_rate: FeeRate,
 }

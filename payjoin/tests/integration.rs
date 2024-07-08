@@ -402,14 +402,9 @@ mod integration {
                     .assume_checked()
                     .check_pj_supported()
                     .unwrap();
-                let psbt = build_original_psbt(&sender, &pj_uri)?;
+                let psbt = build_sweep_psbt(&sender, &pj_uri)?;
                 let mut req_ctx = RequestBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
-                    .build_with_additional_fee(
-                        Amount::from_sat(10000),
-                        None,
-                        FeeRate::ZERO,
-                        false,
-                    )?;
+                    .build_non_incentivizing()?;
                 let (Request { url, body, .. }, send_ctx) =
                     req_ctx.extract_v2(directory.to_owned())?;
                 let response = agent
@@ -811,6 +806,31 @@ mod integration {
             let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
                 lock_unspent: Some(true),
                 fee_rate: Some(Amount::from_sat(2000)),
+                ..Default::default()
+            };
+            let psbt = sender
+                .wallet_create_funded_psbt(
+                    &[], // inputs
+                    &outputs,
+                    None, // locktime
+                    Some(options),
+                    Some(true), // check that the sender properly clears keypaths
+                )?
+                .psbt;
+            let psbt = sender.wallet_process_psbt(&psbt, None, None, None)?.psbt;
+            Ok(Psbt::from_str(&psbt)?)
+        }
+
+        fn build_sweep_psbt(
+            sender: &bitcoincore_rpc::Client,
+            pj_uri: &PjUri,
+        ) -> Result<Psbt, BoxError> {
+            let mut outputs = HashMap::with_capacity(1);
+            outputs.insert(pj_uri.address.to_string(), Amount::from_btc(50.0)?);
+            let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
+                lock_unspent: Some(true),
+                fee_rate: Some(Amount::from_sat(2000)),
+                subtract_fee_from_outputs: vec![0],
                 ..Default::default()
             };
             let psbt = sender

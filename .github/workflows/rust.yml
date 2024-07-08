@@ -25,6 +25,7 @@ jobs:
         if: matrix.rust == '1.63.0'
         run: |
           cargo update
+          cargo update -p cc --precise 1.0.105
           cargo update -p clap_lex --precise 0.3.0
           cargo update -p regex --precise 1.9.6
           cargo update -p url --precise 2.5.0

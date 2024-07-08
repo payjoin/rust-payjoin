@@ -94,8 +94,15 @@ impl RequestBuilder {
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
-    pub fn build_non_incentivizing(&self,  min_fee_rate: u64,) -> Result<Arc<RequestContext>, PayjoinError> {
-        match self.0.clone().build_non_incentivizing( payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate)) {
+    pub fn build_non_incentivizing(
+        &self,
+        min_fee_rate: u64,
+    ) -> Result<Arc<RequestContext>, PayjoinError> {
+        match self
+            .0
+            .clone()
+            .build_non_incentivizing(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate))
+        {
             Ok(e) => Ok(Arc::new(e.into())),
             Err(e) => Err(e.into()),
         }

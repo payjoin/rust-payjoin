@@ -101,7 +101,7 @@ impl SessionInitializer {
             (*ohttp_relay).clone().into(),
             Duration::from_secs(expire_after),
         )
-            .into())
+        .into())
     }
 
     #[cfg(feature = "uniffi")]

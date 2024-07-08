@@ -1,4 +1,3 @@
-
 use std::str::FromStr;
 
 use payjoin::bitcoin::address::NetworkChecked;
@@ -97,7 +96,7 @@ impl Url {
 ///Build a valid PjUri.
 // Payjoin receiver can use this builder to create a payjoin uri to send to the sender.
 #[cfg(not(feature = "uniffi"))]
-pub struct PjUriBuilder (pub payjoin::PjUriBuilder);
+pub struct PjUriBuilder(pub payjoin::PjUriBuilder);
 
 impl From<payjoin::PjUriBuilder> for PjUriBuilder {
     fn from(value: payjoin::PjUriBuilder) -> Self {
@@ -106,7 +105,6 @@ impl From<payjoin::PjUriBuilder> for PjUriBuilder {
 }
 #[cfg(not(feature = "uniffi"))]
 impl PjUriBuilder {
-
     ///Create a new PjUriBuilder with required parameters.
     pub fn new(
         address: String,
@@ -117,20 +115,20 @@ impl PjUriBuilder {
         Ok(payjoin::PjUriBuilder::new(address, pj.into(), ohttp_keys.map(|e| e.0)).into())
     }
     ///Accepts the amount you want to receive in sats and sets it in btc .
-    pub fn amount(&self, amount: u64)  -> Self {
+    pub fn amount(&self, amount: u64) -> Self {
         let amount = payjoin::bitcoin::Amount::from_sat(amount);
         self.0.clone().amount(amount).into()
     }
     /// Set the message.
-    pub fn message(&self, message: String)  -> Self {
+    pub fn message(&self, message: String) -> Self {
         self.0.clone().message(message).into()
     }
     ///Set the label.
-    pub fn label(&self, label: String)-> Self {
+    pub fn label(&self, label: String) -> Self {
         self.0.clone().label(label).into()
     }
     ///Set whether payjoin output substitution is allowed.
-    pub fn pjos(&self, pjos: bool) -> Self{
+    pub fn pjos(&self, pjos: bool) -> Self {
         self.0.clone().pjos(pjos).into()
     }
     ///Constructs a Uri with PayjoinParams from the parameters set in the builder.
@@ -138,8 +136,6 @@ impl PjUriBuilder {
         self.0.clone().build().into()
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {

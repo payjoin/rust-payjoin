@@ -374,7 +374,7 @@ impl ProvisionalProposal {
     /// UIH "Unnecessary input heuristic" is one class of heuristics to avoid. We define
     /// UIH1 and UIH2 according to the BlockSci practice
     /// BlockSci UIH1 and UIH2:
-    // if min(out) < min(in) then UIH1 else UIH2
+    // if min(in) > min(out) then UIH1 else UIH2
     // https://eprint.iacr.org/2022/589.pdf
     fn avoid_uih(
         &self,
@@ -403,7 +403,7 @@ impl ProvisionalProposal {
             let candidate_min_out = min(min_original_out_sats, prior_payment_sats + candidate_sats);
             let candidate_min_in = min(min_original_in_sats, candidate_sats);
 
-            if candidate_min_out < candidate_min_in {
+            if candidate_min_in > candidate_min_out {
                 // The candidate avoids UIH2 but conforms to UIH1: Optimal change heuristic.
                 // It implies the smallest output is the sender's change address.
                 return Ok(candidate.1);

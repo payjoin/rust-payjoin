@@ -7,7 +7,7 @@ pub struct PjParseError(InternalPjParseError);
 #[derive(Debug)]
 pub(crate) enum InternalPjParseError {
     BadPjOs,
-    MultipleParams(&'static str),
+    DuplicateParams(&'static str),
     MissingEndpoint,
     NotUtf8,
     BadEndpoint,
@@ -24,7 +24,7 @@ impl std::fmt::Display for PjParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.0 {
             InternalPjParseError::BadPjOs => write!(f, "Bad pjos parameter"),
-            InternalPjParseError::MultipleParams(param) => {
+            InternalPjParseError::DuplicateParams(param) => {
                 write!(f, "Multiple instances of parameter '{}'", param)
             }
             InternalPjParseError::MissingEndpoint => write!(f, "Missing payjoin endpoint"),

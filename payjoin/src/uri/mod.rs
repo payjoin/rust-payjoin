@@ -244,7 +244,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
                 Ok(bip21::de::ParamKind::Known)
             }
             #[cfg(feature = "v2")]
-            "ohttp" => Err(InternalPjParseError::MultipleParams("ohttp").into()),
+            "ohttp" => Err(InternalPjParseError::DuplicateParams("ohttp").into()),
             "pj" if self.pj.is_none() => {
                 let endpoint = Cow::try_from(value).map_err(|_| InternalPjParseError::NotUtf8)?;
                 let url = Url::parse(&endpoint).map_err(|_| InternalPjParseError::BadEndpoint)?;
@@ -252,7 +252,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
 
                 Ok(bip21::de::ParamKind::Known)
             }
-            "pj" => Err(InternalPjParseError::MultipleParams("pj").into()),
+            "pj" => Err(InternalPjParseError::DuplicateParams("pj").into()),
             "pjos" if self.pjos.is_none() => {
                 match &*Cow::try_from(value).map_err(|_| InternalPjParseError::BadPjOs)? {
                     "0" => self.pjos = Some(false),
@@ -261,7 +261,7 @@ impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
                 }
                 Ok(bip21::de::ParamKind::Known)
             }
-            "pjos" => Err(InternalPjParseError::MultipleParams("pjos").into()),
+            "pjos" => Err(InternalPjParseError::DuplicateParams("pjos").into()),
             _ => Ok(bip21::de::ParamKind::Unknown),
         }
     }

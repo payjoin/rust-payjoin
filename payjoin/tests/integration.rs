@@ -404,7 +404,7 @@ mod integration {
                     .unwrap();
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
                 let mut req_ctx = RequestBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
-                    .build_non_incentivizing()?;
+                    .build_recommended(payjoin::bitcoin::FeeRate::BROADCAST_MIN)?;
                 let (Request { url, body, .. }, send_ctx) =
                     req_ctx.extract_v2(directory.to_owned())?;
                 let response = agent

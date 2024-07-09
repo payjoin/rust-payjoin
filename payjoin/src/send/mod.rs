@@ -113,6 +113,14 @@ impl<'a> RequestBuilder<'a> {
         // TODO support optional batched payout scripts. This would require a change to
         // build() which now checks for a single payee.
         let mut payout_scripts = std::iter::once(self.uri.address.script_pubkey());
+
+        // Check if the PSBT is a sweep transaction with only one output that's a payout script and no change
+        if self.psbt.unsigned_tx.output.len() == 1
+            && payout_scripts.all(|script| script == self.psbt.unsigned_tx.output[0].script_pubkey)
+        {
+            return self.build_non_incentivizing();
+        }
+
         if let Some((additional_fee_index, fee_available)) = self
             .psbt
             .unsigned_tx

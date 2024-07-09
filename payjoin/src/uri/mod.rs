@@ -311,10 +311,14 @@ mod tests {
 
         for address in [base58, bech32_upper, bech32_lower].iter() {
             for pj in [https, onion].iter() {
-                // TODO add with and without amount
-                // TODO shuffle params
-                let uri = format!("{}?amount=1&pj={}", address, pj);
-                assert!(Uri::try_from(&*uri).is_ok());
+                let uri_with_amount = format!("{}?amount=1&pj={}", address, pj);
+                assert!(Uri::try_from(uri_with_amount).is_ok());
+
+                let uri_without_amount = format!("{}?pj={}", address, pj);
+                assert!(Uri::try_from(uri_without_amount).is_ok());
+
+                let uri_shuffled_params = format!("{}?pj={}&amount=1", address, pj);
+                assert!(Uri::try_from(uri_shuffled_params).is_ok());
             }
         }
     }

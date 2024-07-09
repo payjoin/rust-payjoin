@@ -269,6 +269,7 @@ impl RequestContext {
             self.disable_output_substitution,
             self.fee_contribution,
             self.min_fee_rate,
+            "1", // payjoin version
         )
         .map_err(InternalCreateRequestError::Url)?;
         let body = self.psbt.to_string().as_bytes().to_vec();
@@ -959,6 +960,7 @@ fn serialize_v2_body(
         disable_output_substitution,
         fee_contribution,
         min_feerate,
+        "2", // payjoin version
     )
     .map_err(InternalCreateRequestError::Url)?;
     let query_params = placeholder_url.query().unwrap_or_default();
@@ -971,9 +973,10 @@ fn serialize_url(
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
+    version: &str,
 ) -> Result<Url, url::ParseError> {
     let mut url = endpoint;
-    url.query_pairs_mut().append_pair("v", "1");
+    url.query_pairs_mut().append_pair("v", version);
     if disable_output_substitution {
         url.query_pairs_mut().append_pair("disableoutputsubstitution", "1");
     }

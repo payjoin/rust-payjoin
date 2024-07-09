@@ -100,6 +100,7 @@ mod integration {
             )
             .unwrap();
             let proposal = handle_proposal(proposal, receiver);
+            assert!(!proposal.is_output_substitution_disabled());
             let psbt = proposal.psbt();
             debug!("Receiver's Payjoin proposal PSBT: {:#?}", &psbt);
             psbt.to_string()
@@ -436,6 +437,7 @@ mod integration {
                 let proposal =
                     session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?.unwrap();
                 let mut payjoin_proposal = handle_directory_proposal(receiver, proposal);
+                assert!(!payjoin_proposal.is_output_substitution_disabled());
                 let (req, ctx) = payjoin_proposal.extract_v2_req()?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 let res = response.bytes().await?.to_vec();
@@ -546,6 +548,7 @@ mod integration {
                     };
                     let proposal = session.process_res(response.as_slice(), ctx).unwrap().unwrap();
                     let mut payjoin_proposal = handle_directory_proposal(receiver, proposal);
+                    assert!(payjoin_proposal.is_output_substitution_disabled());
                     // Respond with payjoin psbt within the time window the sender is willing to wait
                     // this response would be returned as http response to the sender
                     let (req, ctx) = payjoin_proposal.extract_v2_req().unwrap();

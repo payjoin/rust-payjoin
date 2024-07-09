@@ -118,7 +118,7 @@ impl<'a> RequestBuilder<'a> {
         if self.psbt.unsigned_tx.output.len() == 1
             && payout_scripts.all(|script| script == self.psbt.unsigned_tx.output[0].script_pubkey)
         {
-            return self.build_non_incentivizing();
+            return self.build_non_incentivizing(min_fee_rate);
         }
 
         if let Some((additional_fee_index, fee_available)) = self
@@ -167,7 +167,7 @@ impl<'a> RequestBuilder<'a> {
                 false,
             );
         }
-        self.build_non_incentivizing()
+        self.build_non_incentivizing(min_fee_rate)
     }
 
     /// Offer the receiver contribution to pay for his input.
@@ -200,12 +200,15 @@ impl<'a> RequestBuilder<'a> {
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
-    pub fn build_non_incentivizing(mut self) -> Result<RequestContext, CreateRequestError> {
+    pub fn build_non_incentivizing(
+        mut self,
+        min_fee_rate: FeeRate,
+    ) -> Result<RequestContext, CreateRequestError> {
         // since this is a builder, these should already be cleared
         // but we'll reset them to be sure
         self.fee_contribution = None;
         self.clamp_fee_contribution = false;
-        self.min_fee_rate = FeeRate::ZERO;
+        self.min_fee_rate = min_fee_rate;
         self.build()
     }
 

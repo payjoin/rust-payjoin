@@ -22,17 +22,18 @@ impl From<InternalPjParseError> for PjParseError {
 
 impl std::fmt::Display for PjParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use InternalPjParseError::*;
         match &self.0 {
-            InternalPjParseError::BadPjOs => write!(f, "Bad pjos parameter"),
-            InternalPjParseError::DuplicateParams(param) => {
+            BadPjOs => write!(f, "Bad pjos parameter"),
+            DuplicateParams(param) => {
                 write!(f, "Multiple instances of parameter '{}'", param)
             }
-            InternalPjParseError::MissingEndpoint => write!(f, "Missing payjoin endpoint"),
-            InternalPjParseError::NotUtf8 => write!(f, "Endpoint is not valid UTF-8"),
-            InternalPjParseError::BadEndpoint => write!(f, "Endpoint is not valid"),
+            MissingEndpoint => write!(f, "Missing payjoin endpoint"),
+            NotUtf8 => write!(f, "Endpoint is not valid UTF-8"),
+            BadEndpoint => write!(f, "Endpoint is not valid"),
             #[cfg(feature = "v2")]
-            InternalPjParseError::BadOhttpKeys(e) => write!(f, "OHTTP keys are not valid: {}", e),
-            InternalPjParseError::UnsecureEndpoint => {
+            BadOhttpKeys(e) => write!(f, "OHTTP keys are not valid: {}", e),
+            UnsecureEndpoint => {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }
         }

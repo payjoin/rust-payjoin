@@ -202,8 +202,6 @@ impl<'a> RequestBuilder<'a> {
         psbt.validate_input_utxos(true)
             .map_err(InternalCreateRequestError::InvalidOriginalInput)?;
         let endpoint = self.uri.extras.endpoint.clone();
-        #[cfg(feature = "v2")]
-        let ohttp_keys = self.uri.extras.ohttp_keys;
         let disable_output_substitution =
             self.uri.extras.disable_output_substitution || self.disable_output_substitution;
         let payee = self.uri.address.script_pubkey();
@@ -234,8 +232,6 @@ impl<'a> RequestBuilder<'a> {
         Ok(RequestContext {
             psbt,
             endpoint,
-            #[cfg(feature = "v2")]
-            ohttp_keys,
             disable_output_substitution,
             fee_contribution,
             payee,
@@ -252,8 +248,6 @@ impl<'a> RequestBuilder<'a> {
 pub struct RequestContext {
     psbt: Psbt,
     endpoint: Url,
-    #[cfg(feature = "v2")]
-    ohttp_keys: Option<crate::v2::OhttpKeys>,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
@@ -271,7 +265,7 @@ impl RequestContext {
     /// Extract serialized V1 Request and Context froma Payjoin Proposal
     pub fn extract_v1(self) -> Result<(Request, ContextV1), CreateRequestError> {
         let url = serialize_url(
-            self.endpoint.into(),
+            self.endpoint,
             self.disable_output_substitution,
             self.fee_contribution,
             self.min_fee_rate,
@@ -303,6 +297,7 @@ impl RequestContext {
         &mut self,
         ohttp_relay: Url,
     ) -> Result<(Request, ContextV2), CreateRequestError> {
+        use crate::uri::UrlExt;
         let rs = Self::rs_pubkey_from_dir_endpoint(&self.endpoint)?;
         let url = self.endpoint.clone();
         let body = serialize_v2_body(
@@ -313,13 +308,14 @@ impl RequestContext {
         )?;
         let body = crate::v2::encrypt_message_a(body, self.e, rs)
             .map_err(InternalCreateRequestError::Hpke)?;
-        let (body, ohttp_res) = crate::v2::ohttp_encapsulate(
-            self.ohttp_keys.as_mut().ok_or(InternalCreateRequestError::MissingOhttpConfig)?,
-            "POST",
-            url.as_str(),
-            Some(&body),
-        )
-        .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
+        let mut ohttp = self
+            .endpoint
+            .ohttp()
+            .map_err(|_| InternalCreateRequestError::PercentEncoding)?
+            .ok_or(InternalCreateRequestError::MissingOhttpConfig)?;
+        let (body, ohttp_res) =
+            crate::v2::ohttp_encapsulate(&mut ohttp, "POST", url.as_str(), Some(&body))
+                .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
         log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
         Ok((
             Request { url: ohttp_relay, body },
@@ -342,33 +338,22 @@ impl RequestContext {
 
     #[cfg(feature = "v2")]
     fn rs_pubkey_from_dir_endpoint(endpoint: &Url) -> Result<PublicKey, CreateRequestError> {
-        let path_and_query: String;
+        use bitcoin::base64;
 
-        if let Some(pos) = endpoint.as_str().rfind('/') {
-            path_and_query = endpoint.as_str()[pos + 1..].to_string();
-        } else {
-            path_and_query = endpoint.to_string();
-        }
+        use crate::send::error::ParseSubdirectoryError;
 
-        let subdirectory: String;
+        let subdirectory = endpoint
+            .path_segments()
+            .ok_or(ParseSubdirectoryError::MissingSubdirectory)?
+            .next()
+            .ok_or(ParseSubdirectoryError::MissingSubdirectory)?
+            .to_string();
 
-        if let Some(pos) = path_and_query.find('?') {
-            subdirectory = path_and_query[..pos].to_string();
-        } else {
-            subdirectory = path_and_query;
-        }
-
-        let pubkey_bytes =
-            bitcoin::base64::decode_config(subdirectory, bitcoin::base64::URL_SAFE_NO_PAD)
-                .map_err(InternalCreateRequestError::SubdirectoryNotBase64)?;
-        Ok(bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
-            .map_err(InternalCreateRequestError::SubdirectoryInvalidPubkey)?)
-    }
-
-    #[cfg(feature = "v2")]
-    pub fn public_key(&self) -> PublicKey {
-        let secp = bitcoin::secp256k1::Secp256k1::new();
-        self.e.public_key(&secp)
+        let pubkey_bytes = base64::decode_config(subdirectory, base64::URL_SAFE_NO_PAD)
+            .map_err(ParseSubdirectoryError::SubdirectoryNotBase64)?;
+        bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
+            .map_err(ParseSubdirectoryError::SubdirectoryInvalidPubkey)
+            .map_err(CreateRequestError::from)
     }
 
     pub fn endpoint(&self) -> &Url { &self.endpoint }
@@ -383,7 +368,6 @@ impl Serialize for RequestContext {
         let mut state = serializer.serialize_struct("RequestContext", 8)?;
         state.serialize_field("psbt", &self.psbt.to_string())?;
         state.serialize_field("endpoint", &self.endpoint.as_str())?;
-        state.serialize_field("ohttp_keys", &self.ohttp_keys)?;
         state.serialize_field("disable_output_substitution", &self.disable_output_substitution)?;
         state.serialize_field(
             "fee_contribution",
@@ -432,7 +416,6 @@ impl<'de> Deserialize<'de> for RequestContext {
             {
                 let mut psbt = None;
                 let mut endpoint = None;
-                let mut ohttp_keys = None;
                 let mut disable_output_substitution = None;
                 let mut fee_contribution = None;
                 let mut min_fee_rate = None;
@@ -452,7 +435,6 @@ impl<'de> Deserialize<'de> for RequestContext {
                                 url::Url::from_str(&map.next_value::<String>()?)
                                     .map_err(de::Error::custom)?,
                             ),
-                        "ohttp_keys" => ohttp_keys = Some(map.next_value()?),
                         "disable_output_substitution" =>
                             disable_output_substitution = Some(map.next_value()?),
                         "fee_contribution" => {
@@ -478,7 +460,6 @@ impl<'de> Deserialize<'de> for RequestContext {
                 Ok(RequestContext {
                     psbt: psbt.ok_or_else(|| de::Error::missing_field("psbt"))?,
                     endpoint: endpoint.ok_or_else(|| de::Error::missing_field("endpoint"))?,
-                    ohttp_keys: ohttp_keys.ok_or_else(|| de::Error::missing_field("ohttp_keys"))?,
                     disable_output_substitution: disable_output_substitution
                         .ok_or_else(|| de::Error::missing_field("disable_output_substitution"))?,
                     fee_contribution,
@@ -974,7 +955,7 @@ fn serialize_v2_body(
 ) -> Result<Vec<u8>, CreateRequestError> {
     // Grug say localhost base be discarded anyway. no big brain needed.
     let placeholder_url = serialize_url(
-        "http:/localhost".to_string(),
+        Url::parse("http://localhost").unwrap(),
         disable_output_substitution,
         fee_contribution,
         min_feerate,
@@ -986,12 +967,12 @@ fn serialize_v2_body(
 }
 
 fn serialize_url(
-    endpoint: String,
+    endpoint: Url,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
 ) -> Result<Url, url::ParseError> {
-    let mut url = Url::parse(&endpoint)?;
+    let mut url = endpoint;
     url.query_pairs_mut().append_pair("v", "1");
     if disable_output_substitution {
         url.query_pairs_mut().append_pair("disableoutputsubstitution", "1");
@@ -1065,7 +1046,6 @@ mod test {
         let req_ctx = RequestContext {
             psbt: Psbt::from_str(ORIGINAL_PSBT).unwrap(),
             endpoint: Url::parse("http://localhost:1234").unwrap(),
-            ohttp_keys: None,
             disable_output_substitution: false,
             fee_contribution: None,
             min_fee_rate: FeeRate::ZERO,

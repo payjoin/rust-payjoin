@@ -1737,6 +1737,7 @@ dependencies = [
  "ohttp-relay",
  "once_cell",
  "payjoin-directory",
+ "percent-encoding-rfc3986",
  "rcgen",
  "reqwest",
  "rustls 0.22.4",

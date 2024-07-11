@@ -192,11 +192,11 @@ pub(crate) enum InternalCreateRequestError {
     #[cfg(feature = "v2")]
     OhttpEncapsulation(crate::v2::OhttpEncapsulationError),
     #[cfg(feature = "v2")]
-    SubdirectoryNotBase64(bitcoin::base64::DecodeError),
-    #[cfg(feature = "v2")]
-    SubdirectoryInvalidPubkey(bitcoin::secp256k1::Error),
+    ParseSubdirectory(ParseSubdirectoryError),
     #[cfg(feature = "v2")]
     MissingOhttpConfig,
+    #[cfg(feature = "v2")]
+    PercentEncoding,
 }
 
 impl fmt::Display for CreateRequestError {
@@ -223,11 +223,11 @@ impl fmt::Display for CreateRequestError {
             #[cfg(feature = "v2")]
             OhttpEncapsulation(e) => write!(f, "v2 error: {}", e),
             #[cfg(feature = "v2")]
-            SubdirectoryNotBase64(e) => write!(f, "subdirectory is not valid base64 error: {}", e),
-            #[cfg(feature = "v2")]
-            SubdirectoryInvalidPubkey(e) => write!(f, "subdirectory does not represent a valid pubkey: {}", e),
+            ParseSubdirectory(e) => write!(f, "cannot parse subdirectory: {}", e),
             #[cfg(feature = "v2")]
             MissingOhttpConfig => write!(f, "no ohttp configuration with which to make a v2 request available"),
+            #[cfg(feature = "v2")]
+            PercentEncoding => write!(f, "fragment is not RFC 3986 percent-encoded"),
         }
     }
 }
@@ -256,17 +256,59 @@ impl std::error::Error for CreateRequestError {
             #[cfg(feature = "v2")]
             OhttpEncapsulation(error) => Some(error),
             #[cfg(feature = "v2")]
-            SubdirectoryNotBase64(error) => Some(error),
-            #[cfg(feature = "v2")]
-            SubdirectoryInvalidPubkey(error) => Some(error),
+            ParseSubdirectory(error) => Some(error),
             #[cfg(feature = "v2")]
             MissingOhttpConfig => None,
+            #[cfg(feature = "v2")]
+            PercentEncoding => None,
         }
     }
 }
 
 impl From<InternalCreateRequestError> for CreateRequestError {
     fn from(value: InternalCreateRequestError) -> Self { CreateRequestError(value) }
+}
+
+#[cfg(feature = "v2")]
+impl From<ParseSubdirectoryError> for CreateRequestError {
+    fn from(value: ParseSubdirectoryError) -> Self {
+        CreateRequestError(InternalCreateRequestError::ParseSubdirectory(value))
+    }
+}
+
+#[cfg(feature = "v2")]
+#[derive(Debug)]
+pub(crate) enum ParseSubdirectoryError {
+    MissingSubdirectory,
+    SubdirectoryNotBase64(bitcoin::base64::DecodeError),
+    SubdirectoryInvalidPubkey(bitcoin::secp256k1::Error),
+}
+
+#[cfg(feature = "v2")]
+impl std::fmt::Display for ParseSubdirectoryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        use ParseSubdirectoryError::*;
+
+        match &self {
+            MissingSubdirectory => write!(f, "subdirectory is missing"),
+            SubdirectoryNotBase64(e) => write!(f, "subdirectory is not valid base64: {}", e),
+            SubdirectoryInvalidPubkey(e) =>
+                write!(f, "subdirectory does not represent a valid pubkey: {}", e),
+        }
+    }
+}
+
+#[cfg(feature = "v2")]
+impl std::error::Error for ParseSubdirectoryError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use ParseSubdirectoryError::*;
+
+        match &self {
+            MissingSubdirectory => None,
+            SubdirectoryNotBase64(error) => Some(error),
+            SubdirectoryInvalidPubkey(error) => Some(error),
+        }
+    }
 }
 
 /// Represent an error returned by Payjoin receiver.

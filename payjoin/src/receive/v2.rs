@@ -234,7 +234,7 @@ impl ActiveSession {
 /// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
 /// that the transaction can be broadcast with check_broadcast_suitability. Otherwise it is safe to
 /// call assume_interactive_receive to proceed with validation.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct UncheckedProposal {
     inner: super::UncheckedProposal,
     context: SessionContext,

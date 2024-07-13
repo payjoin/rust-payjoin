@@ -42,7 +42,8 @@ pub enum PayjoinError {
     #[error("Error parsing the Pj URL: {message}")]
     PjParseError { message: String },
 
-    PjUrlNotSupported,
+    #[error("Uri doesn't support payjoin")]
+    PjNotSupported,
 
     #[error("Malformed response from receiver: {message}")]
     ValidationError { message: String },

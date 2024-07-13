@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use payjoin::bitcoin::address::NetworkChecked;
+use payjoin::UriExt;
 
 use crate::error::PayjoinError;
 #[cfg(not(feature = "uniffi"))]
@@ -31,7 +32,17 @@ impl Uri {
     }
     ///Gets the amount in satoshis.
     pub fn amount(&self) -> Option<f64> {
+
         self.0.amount.map(|x| x.to_btc())
+    }
+    pub fn check_pj_supported(&self) -> Result<PjUri,PayjoinError > {
+        match self.0.clone().check_pj_supported(){
+            Ok(e) => Ok(e.into()),
+            Err(_) => Err(PayjoinError::PjUrlNotSupported)
+        }
+    }
+    pub fn as_string(&self) -> String {
+        self.0.clone().to_string()
     }
 }
 

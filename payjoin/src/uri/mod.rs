@@ -107,15 +107,19 @@ impl PjUriBuilder {
     /// - `address`: Represents a bitcoin address.
     /// - `origin`: Represents either the payjoin endpoint in v1 or the directory in v2.
     /// - `ohttp_keys`: Optional OHTTP keys for v2 (only available if the "v2" feature is enabled).
+    /// - `expiry`: Optional non-default expiry for the payjoin session (only available if the "v2" feature is enabled).
     pub fn new(
         address: Address,
         origin: Url,
         #[cfg(feature = "v2")] ohttp_keys: Option<OhttpKeys>,
+        #[cfg(feature = "v2")] expiry: Option<std::time::SystemTime>,
     ) -> Self {
         #[allow(unused_mut)]
         let mut pj = origin;
         #[cfg(feature = "v2")]
         pj.set_ohttp(ohttp_keys);
+        #[cfg(feature = "v2")]
+        pj.set_exp(expiry);
         Self { address, amount: None, message: None, label: None, pj, pjos: false }
     }
     /// Set the amount you want to receive.
@@ -350,6 +354,8 @@ mod tests {
                 let builder = PjUriBuilder::new(
                     address.clone(),
                     Url::parse(pj).unwrap(),
+                    #[cfg(feature = "v2")]
+                    None,
                     #[cfg(feature = "v2")]
                     None,
                 )

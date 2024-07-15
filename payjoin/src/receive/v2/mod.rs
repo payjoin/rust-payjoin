@@ -12,13 +12,17 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use url::Url;
 
+use super::v2::error::{InternalSessionError, SessionError};
 use super::{Error, InternalRequestError, RequestError, SelectionError};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
+use crate::v2::OhttpEncapsulationError;
 use crate::{OhttpKeys, PjUriBuilder, Request};
 
-/// The state for a payjoin V2 receive session, including necessary
-/// information for communication and cryptographic operations.
+pub(crate) mod error;
+
+static TWENTY_FOUR_HOURS_DEFAULT_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SessionContext {
     address: Address,
@@ -58,7 +62,7 @@ impl SessionInitializer {
         directory: Url,
         ohttp_keys: OhttpKeys,
         ohttp_relay: Url,
-        expire_after: Duration,
+        expire_after: Option<Duration>,
     ) -> Self {
         let secp = bitcoin::secp256k1::Secp256k1::new();
         let (sk, _) = secp.generate_keypair(&mut rand::rngs::OsRng);
@@ -68,7 +72,8 @@ impl SessionInitializer {
                 directory,
                 ohttp_keys,
                 ohttp_relay,
-                expiry: SystemTime::now() + expire_after,
+                expiry: SystemTime::now()
+                    + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
                 s: bitcoin::secp256k1::KeyPair::from_secret_key(&secp, &sk),
                 e: None,
             },
@@ -116,8 +121,12 @@ pub struct ActiveSession {
 }
 
 impl ActiveSession {
-    pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
-        let (body, ohttp_ctx) = self.fallback_req_body()?;
+    pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), SessionError> {
+        if SystemTime::now() > self.context.expiry {
+            return Err(InternalSessionError::Expired(self.context.expiry).into());
+        }
+        let (body, ohttp_ctx) =
+            self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulationError)?;
         let url = self.context.ohttp_relay.clone();
         let req = Request { url, body };
         Ok((req, ohttp_ctx))
@@ -146,14 +155,16 @@ impl ActiveSession {
         }
     }
 
-    fn fallback_req_body(&mut self) -> Result<(Vec<u8>, ohttp::ClientResponse), Error> {
+    fn fallback_req_body(
+        &mut self,
+    ) -> Result<(Vec<u8>, ohttp::ClientResponse), OhttpEncapsulationError> {
         let fallback_target = self.pj_url();
-        Ok(crate::v2::ohttp_encapsulate(
+        crate::v2::ohttp_encapsulate(
             &mut self.context.ohttp_keys,
             "GET",
             fallback_target.as_str(),
             None,
-        )?)
+        )
     }
 
     fn extract_proposal_from_v1(&mut self, response: String) -> Result<UncheckedProposal, Error> {
@@ -203,6 +214,7 @@ impl ActiveSession {
             self.context.address.clone(),
             self.pj_url(),
             Some(self.context.ohttp_keys.clone()),
+            Some(self.context.expiry),
         )
     }
 

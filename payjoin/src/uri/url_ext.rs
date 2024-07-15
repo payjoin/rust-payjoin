@@ -8,6 +8,8 @@ use crate::OhttpKeys;
 pub(crate) trait UrlExt {
     fn ohttp(&self) -> Option<OhttpKeys>;
     fn set_ohttp(&mut self, ohttp: Option<OhttpKeys>);
+    fn exp(&self) -> Option<std::time::SystemTime>;
+    fn set_exp(&mut self, exp: Option<std::time::SystemTime>);
 }
 
 impl UrlExt for Url {
@@ -44,6 +46,43 @@ impl UrlExt for Url {
         }
         self.set_fragment(if fragment.is_empty() { None } else { Some(&fragment) });
     }
+
+    /// Retrieve the exp parameter from the URL fragment
+    fn exp(&self) -> Option<std::time::SystemTime> {
+        if let Some(fragment) = self.fragment() {
+            for param in fragment.split('&') {
+                if let Some(value) = param.strip_prefix("exp=") {
+                    if let Ok(timestamp) = value.parse::<u64>() {
+                        return Some(
+                            std::time::UNIX_EPOCH + std::time::Duration::from_secs(timestamp),
+                        );
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Set the exp parameter in the URL fragment
+    fn set_exp(&mut self, exp: Option<std::time::SystemTime>) {
+        let mut fragment = self.fragment().unwrap_or("").to_string();
+        if let Some(start) = fragment.find("exp=") {
+            let end = fragment[start..].find('&').map_or(fragment.len(), |i| start + i);
+            fragment.replace_range(start..end, "");
+            if fragment.ends_with('&') {
+                fragment.pop();
+            }
+        }
+        if let Some(exp) = exp {
+            let timestamp = exp.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+            let new_exp = format!("exp={}", timestamp);
+            if !fragment.is_empty() {
+                fragment.push('&');
+            }
+            fragment.push_str(&new_exp);
+        }
+        self.set_fragment(if fragment.is_empty() { None } else { Some(&fragment) });
+    }
 }
 
 #[cfg(test)]
@@ -70,6 +109,21 @@ mod tests {
         assert_eq!(url.ohttp(), Some(ohttp_keys));
 
         let _ = url.set_ohttp(None);
+        assert_eq!(url.fragment(), None);
+    }
+
+    #[test]
+    fn test_exp_get_set() {
+        let mut url = Url::parse("https://example.com").unwrap();
+
+        let exp_time =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1720547781);
+        let _ = url.set_exp(Some(exp_time));
+        assert_eq!(url.fragment(), Some("exp=1720547781"));
+
+        assert_eq!(url.exp(), Some(exp_time));
+
+        let _ = url.set_exp(None);
         assert_eq!(url.fragment(), None);
     }
 

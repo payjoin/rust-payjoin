@@ -84,7 +84,7 @@ impl AppTrait for App {
             self.config.pj_directory.clone(),
             ohttp_keys.clone(),
             self.config.ohttp_relay.clone(),
-            std::time::Duration::from_secs(60 * 60),
+            None,
         );
         let (req, ctx) =
             initializer.extract_req().map_err(|e| anyhow!("Failed to extract request {}", e))?;
@@ -246,8 +246,7 @@ impl App {
         session: &mut payjoin::receive::v2::ActiveSession,
     ) -> Result<payjoin::receive::v2::UncheckedProposal> {
         loop {
-            let (req, context) =
-                session.extract_req().map_err(|_| anyhow!("Failed to extract request"))?;
+            let (req, context) = session.extract_req()?;
             println!("Polling receive request...");
             let http = http_agent()?;
             let ohttp_response = http

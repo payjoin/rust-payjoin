@@ -38,7 +38,7 @@ impl Uri {
     pub fn check_pj_supported(&self) -> Result<PjUri,PayjoinError > {
         match self.0.clone().check_pj_supported(){
             Ok(e) => Ok(e.into()),
-            Err(_) => Err(PayjoinError::PjNotSupported)
+            Err(_) => Err(PayjoinError::PjNotSupported{message:"Uri doesn't support payjoin".to_string()})
         }
     }
     pub fn as_string(&self) -> String {

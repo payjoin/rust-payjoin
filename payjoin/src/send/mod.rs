@@ -62,6 +62,11 @@ pub struct RequestBuilder<'a> {
     uri: PjUri<'a>,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
+    /// Decreases the fee contribution instead of erroring.
+    ///
+    /// If this option is true and a transaction with change amount lower than fee
+    /// contribution is provided then instead of returning error the fee contribution will
+    /// be just lowered in the request to match the change amount.
     clamp_fee_contribution: bool,
     min_fee_rate: FeeRate,
 }
@@ -108,6 +113,14 @@ impl<'a> RequestBuilder<'a> {
         // TODO support optional batched payout scripts. This would require a change to
         // build() which now checks for a single payee.
         let mut payout_scripts = std::iter::once(self.uri.address.script_pubkey());
+
+        // Check if the PSBT is a sweep transaction with only one output that's a payout script and no change
+        if self.psbt.unsigned_tx.output.len() == 1
+            && payout_scripts.all(|script| script == self.psbt.unsigned_tx.output[0].script_pubkey)
+        {
+            return self.build_non_incentivizing(min_fee_rate);
+        }
+
         if let Some((additional_fee_index, fee_available)) = self
             .psbt
             .unsigned_tx
@@ -154,7 +167,7 @@ impl<'a> RequestBuilder<'a> {
                 false,
             );
         }
-        self.build_non_incentivizing()
+        self.build_non_incentivizing(min_fee_rate)
     }
 
     /// Offer the receiver contribution to pay for his input.
@@ -187,12 +200,15 @@ impl<'a> RequestBuilder<'a> {
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
-    pub fn build_non_incentivizing(mut self) -> Result<RequestContext, CreateRequestError> {
+    pub fn build_non_incentivizing(
+        mut self,
+        min_fee_rate: FeeRate,
+    ) -> Result<RequestContext, CreateRequestError> {
         // since this is a builder, these should already be cleared
         // but we'll reset them to be sure
         self.fee_contribution = None;
         self.clamp_fee_contribution = false;
-        self.min_fee_rate = FeeRate::ZERO;
+        self.min_fee_rate = min_fee_rate;
         self.build()
     }
 

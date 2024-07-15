@@ -381,7 +381,7 @@ impl ProvisionalProposal {
     /// UIH "Unnecessary input heuristic" is one class of them to avoid. We define
     /// UIH1 and UIH2 according to the BlockSci practice
     /// BlockSci UIH1 and UIH2:
-    // if min(out) < min(in) then UIH1 else UIH2
+    // if min(in) > min(out) then UIH1 else UIH2
     // https://eprint.iacr.org/2022/589.pdf
     pub fn try_preserving_privacy(
         &self,

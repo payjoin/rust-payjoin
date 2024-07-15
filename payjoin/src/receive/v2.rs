@@ -93,7 +93,6 @@ impl SessionInitializer {
         mut res: impl std::io::Read,
         ctx: ohttp::ClientResponse,
     ) -> Result<ActiveSession, Error> {
-        // TODO decapsulate enroll response, for now it does no auth or nothing
         let mut buf = Vec::new();
         let _ = res.read_to_end(&mut buf);
         let response = crate::v2::ohttp_decapsulate(ctx, &buf)?;

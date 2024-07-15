@@ -115,7 +115,7 @@ impl PjUriBuilder {
         #[allow(unused_mut)]
         let mut pj = origin;
         #[cfg(feature = "v2")]
-        let _ = pj.set_ohttp(ohttp_keys);
+        pj.set_ohttp(ohttp_keys);
         Self { address, amount: None, message: None, label: None, pj, pjos: false }
     }
     /// Set the amount you want to receive.

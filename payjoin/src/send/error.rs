@@ -195,8 +195,6 @@ pub(crate) enum InternalCreateRequestError {
     ParseSubdirectory(ParseSubdirectoryError),
     #[cfg(feature = "v2")]
     MissingOhttpConfig,
-    #[cfg(feature = "v2")]
-    PercentEncoding,
 }
 
 impl fmt::Display for CreateRequestError {
@@ -226,9 +224,7 @@ impl fmt::Display for CreateRequestError {
             ParseSubdirectory(e) => write!(f, "cannot parse subdirectory: {}", e),
             #[cfg(feature = "v2")]
             MissingOhttpConfig => write!(f, "no ohttp configuration with which to make a v2 request available"),
-            #[cfg(feature = "v2")]
-            PercentEncoding => write!(f, "fragment is not RFC 3986 percent-encoded"),
-        }
+}
     }
 }
 
@@ -259,8 +255,6 @@ impl std::error::Error for CreateRequestError {
             ParseSubdirectory(error) => Some(error),
             #[cfg(feature = "v2")]
             MissingOhttpConfig => None,
-            #[cfg(feature = "v2")]
-            PercentEncoding => None,
         }
     }
 }

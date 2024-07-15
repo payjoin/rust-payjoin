@@ -325,11 +325,8 @@ impl RequestContext {
         )?;
         let body = crate::v2::encrypt_message_a(body, self.e, rs)
             .map_err(InternalCreateRequestError::Hpke)?;
-        let mut ohttp = self
-            .endpoint
-            .ohttp()
-            .map_err(|_| InternalCreateRequestError::PercentEncoding)?
-            .ok_or(InternalCreateRequestError::MissingOhttpConfig)?;
+        let mut ohttp =
+            self.endpoint.ohttp().ok_or(InternalCreateRequestError::MissingOhttpConfig)?;
         let (body, ohttp_res) =
             crate::v2::ohttp_encapsulate(&mut ohttp, "POST", url.as_str(), Some(&body))
                 .map_err(InternalCreateRequestError::OhttpEncapsulation)?;

@@ -1,41 +1,33 @@
 use std::borrow::Cow;
 
-use percent_encoding::{AsciiSet, PercentDecodeError, CONTROLS};
 use url::Url;
 
 use crate::OhttpKeys;
 
 /// Parse and set fragment parameters from `&pj=` URI parameter URLs
 pub(crate) trait UrlExt {
-    fn ohttp(&self) -> Result<Option<OhttpKeys>, PercentDecodeError>;
-    fn set_ohttp(&mut self, ohttp: Option<OhttpKeys>) -> Result<(), PercentDecodeError>;
+    fn ohttp(&self) -> Option<OhttpKeys>;
+    fn set_ohttp(&mut self, ohttp: Option<OhttpKeys>);
 }
-
-// Characters '=' and '&' conflict with BIP21 URI parameters and must be percent-encoded
-const BIP21_CONFLICTING: &AsciiSet = &CONTROLS.add(b'=').add(b'&');
 
 impl UrlExt for Url {
     /// Retrieve the ohttp parameter from the URL fragment
-    fn ohttp(&self) -> Result<Option<OhttpKeys>, PercentDecodeError> {
+    fn ohttp(&self) -> Option<OhttpKeys> {
         use std::str::FromStr;
         if let Some(fragment) = self.fragment() {
-            let decoded_fragment =
-                percent_encoding::percent_decode_str(fragment)?.decode_utf8_lossy();
-            for param in decoded_fragment.split('&') {
+            for param in fragment.split('&') {
                 if let Some(value) = param.strip_prefix("ohttp=") {
                     let ohttp = Cow::from(value);
-                    return Ok(OhttpKeys::from_str(&ohttp).ok());
+                    return OhttpKeys::from_str(&ohttp).ok();
                 }
             }
         }
-        Ok(None)
+        None
     }
 
     /// Set the ohttp parameter in the URL fragment
-    fn set_ohttp(&mut self, ohttp: Option<OhttpKeys>) -> Result<(), PercentDecodeError> {
-        let fragment = self.fragment().unwrap_or("").to_string();
-        let mut fragment =
-            percent_encoding::percent_decode_str(&fragment)?.decode_utf8_lossy().to_string();
+    fn set_ohttp(&mut self, ohttp: Option<OhttpKeys>) {
+        let mut fragment = self.fragment().unwrap_or("").to_string();
         if let Some(start) = fragment.find("ohttp=") {
             let end = fragment[start..].find('&').map_or(fragment.len(), |i| start + i);
             fragment.replace_range(start..end, "");
@@ -50,10 +42,7 @@ impl UrlExt for Url {
             }
             fragment.push_str(&new_ohttp);
         }
-        let encoded_fragment =
-            percent_encoding::utf8_percent_encode(&fragment, BIP21_CONFLICTING).to_string();
-        self.set_fragment(if encoded_fragment.is_empty() { None } else { Some(&encoded_fragment) });
-        Ok(())
+        self.set_fragment(if fragment.is_empty() { None } else { Some(&fragment) });
     }
 }
 
@@ -75,11 +64,10 @@ mod tests {
         let _ = url.set_ohttp(Some(ohttp_keys.clone()));
         assert_eq!(
             url.fragment(),
-            Some("ohttp%3DAQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM")
+            Some("ohttp=AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM")
         );
 
-        let retrieved_ohttp = url.ohttp().unwrap();
-        assert_eq!(retrieved_ohttp, Some(ohttp_keys));
+        assert_eq!(url.ohttp(), Some(ohttp_keys));
 
         let _ = url.set_ohttp(None);
         assert_eq!(url.fragment(), None);
@@ -92,7 +80,7 @@ mod tests {
                    &pj=https://example.com\
                    #exp=1720547781&ohttp=AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM";
         let uri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
-        assert!(uri.extras.endpoint().ohttp().unwrap().is_none());
+        assert!(uri.extras.endpoint().ohttp().is_none());
     }
 
     #[test]
@@ -101,6 +89,6 @@ mod tests {
                    &pj=https://example.com\
                    #ohttp%3DAQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM%26exp%3D1720547781";
         let uri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
-        assert!(uri.extras.endpoint().ohttp().unwrap().is_some());
+        assert!(uri.extras.endpoint().ohttp().is_some());
     }
 }

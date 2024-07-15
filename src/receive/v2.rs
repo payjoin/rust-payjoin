@@ -265,7 +265,7 @@ impl V2UncheckedProposal {
                 |tx| {
                     can_broadcast
                         .callback(payjoin::bitcoin::consensus::encode::serialize(tx))
-                        .map_err(|e| payjoin::receive::Error::Server(e.into()))
+                        .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
                 },
             )
             .map(|e| Arc::new(e.into()))
@@ -284,7 +284,7 @@ impl V2UncheckedProposal {
                 min_fee_rate.map(|x| FeeRate::from_sat_per_kwu(x)),
                 |transaction| {
                     can_broadcast(&payjoin::bitcoin::consensus::encode::serialize(transaction))
-                        .map_err(|e| payjoin::receive::Error::Server(e.into()))
+                        .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
                 },
             )
             .map(|e| Arc::new(e.into()))
@@ -320,7 +320,7 @@ impl V2MaybeInputsOwned {
             .check_inputs_not_owned(|input| {
                 is_owned
                     .callback(input.to_bytes())
-                    .map_err(|e| payjoin::receive::Error::Server(e.into()))
+                    .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
             })
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
@@ -333,7 +333,7 @@ impl V2MaybeInputsOwned {
         self.0
             .clone()
             .check_inputs_not_owned(|input| {
-                is_owned(&input.to_bytes()).map_err(|e| payjoin::receive::Error::Server(e.into()))
+                is_owned(&input.to_bytes()).map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
             })
             .map_err(|e| e.into())
             .map(|e| Arc::new(e.into()))
@@ -382,7 +382,7 @@ impl V2MaybeInputsSeen {
         self.0
             .clone()
             .check_no_inputs_seen_before(|outpoint| {
-                is_known.callback(outpoint.clone().into()).map_err(|e| pdk::Error::Server(e.into()))
+                is_known.callback(outpoint.clone().into()).map_err(|e| pdk::Error::Server(Box::new(e)))
             })
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
@@ -395,7 +395,7 @@ impl V2MaybeInputsSeen {
         self.0
             .clone()
             .check_no_inputs_seen_before(|outpoint| {
-                is_known(&outpoint.clone().into()).map_err(|e| pdk::Error::Server(e.into()))
+                is_known(&outpoint.clone().into()).map_err(|e| pdk::Error::Server(Box::new(e)))
             })
             .map_err(|e| e.into())
             .map(|e| Arc::new(e.into()))
@@ -427,7 +427,7 @@ impl V2OutputsUnknown {
             .identify_receiver_outputs(|output_script| {
                 is_receiver_output
                     .callback(output_script.to_bytes())
-                    .map_err(|e| payjoin::receive::Error::Server(e.into()))
+                    .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
             })
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
@@ -441,7 +441,7 @@ impl V2OutputsUnknown {
             .clone()
             .identify_receiver_outputs(|input| {
                 is_receiver_output(&input.to_bytes())
-                    .map_err(|e| payjoin::receive::Error::Server(e.into()))
+                    .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
             })
             .map_err(|e| e.into())
             .map(|e| e.into())
@@ -519,7 +519,7 @@ impl V2ProvisionalProposal {
             .try_substitute_receiver_output(|| {
                 generate_script()
                     .map(|e| payjoin::bitcoin::ScriptBuf::from_bytes(e))
-                    .map_err(|e| payjoin::Error::Server(e.into()))
+                    .map_err(|e| payjoin::Error::Server(Box::new(e)))
             })
             .map_err(|e| e.into())
     }
@@ -544,10 +544,10 @@ impl V2ProvisionalProposal {
                     let processed = process_psbt
                         .callback(pre_processed.to_string())
                         .map(|e| Psbt::from_str(e.as_str()))
-                        .map_err(|e| pdk::Error::Server(e.into()))?;
+                        .map_err(|e| pdk::Error::Server(Box::new(e)))?;
                     match processed {
                         Ok(e) => Ok(e),
-                        Err(e) => Err(pdk::Error::Server(e.into())),
+                        Err(e) => Err(pdk::Error::Server(Box::new(e))),
                     }
                 },
                 min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x)),
@@ -567,10 +567,10 @@ impl V2ProvisionalProposal {
                 |pre_processed| {
                     let processed = process_psbt(pre_processed.to_string())
                         .map(|e| Psbt::from_str(e.as_str()))
-                        .map_err(|e| pdk::Error::Server(e.into()))?;
+                        .map_err(|e| pdk::Error::Server(Box::new(e)))?;
                     match processed {
                         Ok(e) => Ok(e),
-                        Err(e) => Err(pdk::Error::Server(e.into())),
+                        Err(e) => Err(pdk::Error::Server(Box::new(e))),
                     }
                 },
                 min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x)),

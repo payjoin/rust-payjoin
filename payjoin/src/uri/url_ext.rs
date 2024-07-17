@@ -1,68 +1,88 @@
-use std::borrow::Cow;
+use std::str::FromStr;
 
-use percent_encoding::{AsciiSet, PercentDecodeError, CONTROLS};
 use url::Url;
 
 use crate::OhttpKeys;
 
 /// Parse and set fragment parameters from `&pj=` URI parameter URLs
 pub(crate) trait UrlExt {
-    fn ohttp(&self) -> Result<Option<OhttpKeys>, PercentDecodeError>;
-    fn set_ohttp(&mut self, ohttp: Option<OhttpKeys>) -> Result<(), PercentDecodeError>;
+    fn ohttp(&self) -> Option<OhttpKeys>;
+    fn set_ohttp(&mut self, ohttp: Option<OhttpKeys>);
+    fn exp(&self) -> Option<std::time::SystemTime>;
+    fn set_exp(&mut self, exp: Option<std::time::SystemTime>);
 }
-
-// Characters '=' and '&' conflict with BIP21 URI parameters and must be percent-encoded
-const BIP21_CONFLICTING: &AsciiSet = &CONTROLS.add(b'=').add(b'&');
 
 impl UrlExt for Url {
     /// Retrieve the ohttp parameter from the URL fragment
-    fn ohttp(&self) -> Result<Option<OhttpKeys>, PercentDecodeError> {
-        use std::str::FromStr;
-        if let Some(fragment) = self.fragment() {
-            let decoded_fragment =
-                percent_encoding::percent_decode_str(fragment)?.decode_utf8_lossy();
-            for param in decoded_fragment.split('&') {
-                if let Some(value) = param.strip_prefix("ohttp=") {
-                    let ohttp = Cow::from(value);
-                    return Ok(OhttpKeys::from_str(&ohttp).ok());
-                }
-            }
-        }
-        Ok(None)
+    fn ohttp(&self) -> Option<OhttpKeys> {
+        get_param(self, "ohttp=", |value| OhttpKeys::from_str(value).ok())
     }
 
     /// Set the ohttp parameter in the URL fragment
-    fn set_ohttp(&mut self, ohttp: Option<OhttpKeys>) -> Result<(), PercentDecodeError> {
-        let fragment = self.fragment().unwrap_or("").to_string();
-        let mut fragment =
-            percent_encoding::percent_decode_str(&fragment)?.decode_utf8_lossy().to_string();
-        if let Some(start) = fragment.find("ohttp=") {
-            let end = fragment[start..].find('&').map_or(fragment.len(), |i| start + i);
-            fragment.replace_range(start..end, "");
-            if fragment.ends_with('&') {
-                fragment.pop();
-            }
-        }
-        if let Some(ohttp) = ohttp {
-            let new_ohttp = format!("ohttp={}", ohttp);
-            if !fragment.is_empty() {
-                fragment.push('&');
-            }
-            fragment.push_str(&new_ohttp);
-        }
-        let encoded_fragment =
-            percent_encoding::utf8_percent_encode(&fragment, BIP21_CONFLICTING).to_string();
-        self.set_fragment(if encoded_fragment.is_empty() { None } else { Some(&encoded_fragment) });
-        Ok(())
+    fn set_ohttp(&mut self, ohttp: Option<OhttpKeys>) {
+        set_param(self, "ohttp=", ohttp.map(|o| o.to_string()))
     }
+
+    /// Retrieve the exp parameter from the URL fragment
+    fn exp(&self) -> Option<std::time::SystemTime> {
+        get_param(self, "exp=", |value| {
+            value
+                .parse::<u64>()
+                .ok()
+                .map(|timestamp| std::time::UNIX_EPOCH + std::time::Duration::from_secs(timestamp))
+        })
+    }
+
+    /// Set the exp parameter in the URL fragment
+    fn set_exp(&mut self, exp: Option<std::time::SystemTime>) {
+        let exp_str = exp.map(|e| {
+            match e.duration_since(std::time::UNIX_EPOCH) {
+                Ok(duration) => duration.as_secs().to_string(),
+                Err(_) => "0".to_string(), // Handle times before Unix epoch by setting to "0"
+            }
+        });
+        set_param(self, "exp=", exp_str)
+    }
+}
+
+fn get_param<F, T>(url: &Url, prefix: &str, parse: F) -> Option<T>
+where
+    F: Fn(&str) -> Option<T>,
+{
+    if let Some(fragment) = url.fragment() {
+        for param in fragment.split('&') {
+            if let Some(value) = param.strip_prefix(prefix) {
+                return parse(value);
+            }
+        }
+    }
+    None
+}
+
+fn set_param(url: &mut Url, prefix: &str, value: Option<String>) {
+    let fragment = url.fragment().unwrap_or("");
+    let mut fragment = fragment.to_string();
+    if let Some(start) = fragment.find(prefix) {
+        let end = fragment[start..].find('&').map_or(fragment.len(), |i| start + i);
+        fragment.replace_range(start..end, "");
+        if fragment.ends_with('&') {
+            fragment.pop();
+        }
+    }
+
+    if let Some(value) = value {
+        let new_param = format!("{}{}", prefix, value);
+        if !fragment.is_empty() {
+            fragment.push('&');
+        }
+        fragment.push_str(&new_param);
+    }
+
+    url.set_fragment(if fragment.is_empty() { None } else { Some(&fragment) });
 }
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
-    use url::Url;
-
     use super::*;
     use crate::{Uri, UriExt};
 
@@ -75,13 +95,27 @@ mod tests {
         let _ = url.set_ohttp(Some(ohttp_keys.clone()));
         assert_eq!(
             url.fragment(),
-            Some("ohttp%3DAQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM")
+            Some("ohttp=AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM")
         );
 
-        let retrieved_ohttp = url.ohttp().unwrap();
-        assert_eq!(retrieved_ohttp, Some(ohttp_keys));
+        assert_eq!(url.ohttp(), Some(ohttp_keys));
 
         let _ = url.set_ohttp(None);
+        assert_eq!(url.fragment(), None);
+    }
+
+    #[test]
+    fn test_exp_get_set() {
+        let mut url = Url::parse("https://example.com").unwrap();
+
+        let exp_time =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1720547781);
+        let _ = url.set_exp(Some(exp_time));
+        assert_eq!(url.fragment(), Some("exp=1720547781"));
+
+        assert_eq!(url.exp(), Some(exp_time));
+
+        let _ = url.set_exp(None);
         assert_eq!(url.fragment(), None);
     }
 
@@ -92,7 +126,7 @@ mod tests {
                    &pj=https://example.com\
                    #exp=1720547781&ohttp=AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM";
         let uri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
-        assert!(uri.extras.endpoint().ohttp().unwrap().is_none());
+        assert!(uri.extras.endpoint().ohttp().is_none());
     }
 
     #[test]
@@ -101,6 +135,6 @@ mod tests {
                    &pj=https://example.com\
                    #ohttp%3DAQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM%26exp%3D1720547781";
         let uri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
-        assert!(uri.extras.endpoint().ohttp().unwrap().is_some());
+        assert!(uri.extras.endpoint().ohttp().is_some());
     }
 }

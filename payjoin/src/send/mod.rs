@@ -315,6 +315,12 @@ impl RequestContext {
         ohttp_relay: Url,
     ) -> Result<(Request, ContextV2), CreateRequestError> {
         use crate::uri::UrlExt;
+
+        if let Some(expiry) = self.endpoint.exp() {
+            if std::time::SystemTime::now() > expiry {
+                return Err(InternalCreateRequestError::Expired(expiry).into());
+            }
+        }
         let rs = Self::rs_pubkey_from_dir_endpoint(&self.endpoint)?;
         let url = self.endpoint.clone();
         let body = serialize_v2_body(
@@ -325,11 +331,8 @@ impl RequestContext {
         )?;
         let body = crate::v2::encrypt_message_a(body, self.e, rs)
             .map_err(InternalCreateRequestError::Hpke)?;
-        let mut ohttp = self
-            .endpoint
-            .ohttp()
-            .map_err(|_| InternalCreateRequestError::PercentEncoding)?
-            .ok_or(InternalCreateRequestError::MissingOhttpConfig)?;
+        let mut ohttp =
+            self.endpoint.ohttp().ok_or(InternalCreateRequestError::MissingOhttpConfig)?;
         let (body, ohttp_res) =
             crate::v2::ohttp_encapsulate(&mut ohttp, "POST", url.as_str(), Some(&body))
                 .map_err(InternalCreateRequestError::OhttpEncapsulation)?;

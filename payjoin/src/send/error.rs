@@ -196,7 +196,7 @@ pub(crate) enum InternalCreateRequestError {
     #[cfg(feature = "v2")]
     MissingOhttpConfig,
     #[cfg(feature = "v2")]
-    PercentEncoding,
+    Expired(std::time::SystemTime),
 }
 
 impl fmt::Display for CreateRequestError {
@@ -227,7 +227,7 @@ impl fmt::Display for CreateRequestError {
             #[cfg(feature = "v2")]
             MissingOhttpConfig => write!(f, "no ohttp configuration with which to make a v2 request available"),
             #[cfg(feature = "v2")]
-            PercentEncoding => write!(f, "fragment is not RFC 3986 percent-encoded"),
+            Expired(expiry) => write!(f, "session expired at {:?}", expiry),
         }
     }
 }
@@ -260,7 +260,7 @@ impl std::error::Error for CreateRequestError {
             #[cfg(feature = "v2")]
             MissingOhttpConfig => None,
             #[cfg(feature = "v2")]
-            PercentEncoding => None,
+            Expired(_) => None,
         }
     }
 }

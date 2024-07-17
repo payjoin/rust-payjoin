@@ -83,6 +83,7 @@ impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
 ///
 /// Payjoin receiver can use this builder to create a payjoin
 /// uri to send to the sender.
+#[derive(Clone)]
 pub struct PjUriBuilder {
     /// Address you want to receive funds to.
     address: Address,

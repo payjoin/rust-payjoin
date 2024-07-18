@@ -90,7 +90,7 @@ impl UncheckedProposal {
                 |transaction| {
                     can_broadcast
                         .callback(payjoin::bitcoin::consensus::encode::serialize(transaction))
-                        .map_err(|e| payjoin::receive::Error::Server(e.into()))
+                        .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
                 },
             )
             .map(|e| Arc::new(e.into()))
@@ -108,7 +108,7 @@ impl UncheckedProposal {
                 min_fee_rate.map(|x| FeeRate::from_sat_per_kwu(x)),
                 |transaction| {
                     can_broadcast(&payjoin::bitcoin::consensus::encode::serialize(transaction))
-                        .map_err(|e| payjoin::receive::Error::Server(e.into()))
+                        .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
                 },
             )
             .map(|e| Arc::new(e.into()))
@@ -151,7 +151,7 @@ impl MaybeInputsOwned {
             .check_inputs_not_owned(|input| {
                 is_owned
                     .callback(input.to_bytes())
-                    .map_err(|e| payjoin::receive::Error::Server(e.into()))
+                    .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
             })
             .map_err(|e| e.into())
             .map(|e| Arc::new(e.into()))
@@ -164,7 +164,7 @@ impl MaybeInputsOwned {
         self.0
             .clone()
             .check_inputs_not_owned(|input| {
-                is_owned(&input.to_bytes()).map_err(|e| payjoin::receive::Error::Server(e.into()))
+                is_owned(&input.to_bytes()).map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
             })
             .map_err(|e| e.into())
             .map(|e| Arc::new(e.into()))
@@ -222,7 +222,7 @@ impl MaybeInputsSeen {
         self.0
             .clone()
             .check_no_inputs_seen_before(|outpoint| {
-                is_known.callback(outpoint.clone().into()).map_err(|e| pdk::Error::Server(e.into()))
+                is_known.callback(outpoint.clone().into()).map_err(|e| pdk::Error::Server(Box::new(e)))
             })
             .map_err(|e| e.into())
             .map(|e| Arc::new(e.into()))
@@ -235,7 +235,7 @@ impl MaybeInputsSeen {
         self.0
             .clone()
             .check_no_inputs_seen_before(|outpoint| {
-                is_known(&outpoint.clone().into()).map_err(|e| pdk::Error::Server(e.into()))
+                is_known(&outpoint.clone().into()).map_err(|e| pdk::Error::Server(Box::new(e)))
             })
             .map_err(|e| e.into())
             .map(|e| Arc::new(e.into()))
@@ -266,7 +266,7 @@ impl OutputsUnknown {
             .identify_receiver_outputs(|output_script| {
                 is_receiver_output
                     .callback(output_script.to_bytes())
-                    .map_err(|e| payjoin::receive::Error::Server(e.into()))
+                    .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
             })
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
@@ -275,15 +275,15 @@ impl OutputsUnknown {
     pub fn identify_receiver_outputs(
         &self,
         is_receiver_output: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
-    ) -> Result<Arc<ProvisionalProposal>, PayjoinError> {
+    ) -> Result<ProvisionalProposal, PayjoinError> {
         self.0
             .clone()
             .identify_receiver_outputs(|input| {
                 is_receiver_output(&input.to_bytes())
-                    .map_err(|e| payjoin::receive::Error::Server(e.into()))
+                    .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
             })
             .map_err(|e| e.into())
-            .map(|e| Arc::new(e.into()))
+            .map(|e| e.into())
     }
 }
 
@@ -304,13 +304,25 @@ impl ProvisionalProposal {
     fn mutex_guard(&self) -> MutexGuard<'_, payjoin::receive::ProvisionalProposal> {
         self.0.lock().unwrap()
     }
-    pub fn substitute_output_address(
+    #[cfg(not(feature = "uniffi"))]
+    ///If output substitution is enabled, replace the receiver’s output script with a new one.
+    pub fn try_substitute_receiver_output(
         &self,
-        substitute_address: String,
+        generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>,
     ) -> Result<(), PayjoinError> {
-        let address =
-            payjoin::bitcoin::Address::from_str(substitute_address.as_str())?.assume_checked();
-        Ok(self.mutex_guard().substitute_output_address(address))
+        self.mutex_guard()
+            .try_substitute_receiver_output(|| {
+                generate_script()
+                    .map(|e| payjoin::bitcoin::ScriptBuf::from_bytes(e))
+                    .map_err(|e| payjoin::Error::Server(Box::new(e)))
+            })
+            .map_err(|e| e.into())
+    }
+    #[cfg(feature = "uniffi")]
+    pub fn try_substitute_receiver_output(
+        &self,
+        generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>,
+    ) -> Result<(), PayjoinError> {
     }
     pub fn contribute_witness_input(
         &self,
@@ -363,7 +375,7 @@ impl ProvisionalProposal {
                     process_psbt
                         .callback(psbt.to_string())
                         .map(|e| Psbt::from_str(e.as_str()).expect("Invalid process_psbt "))
-                        .map_err(|e| pdk::Error::Server(e.into()))
+                        .map_err(|e| pdk::Error::Server(Box::new(e)))
                 },
                 min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x)),
             )
@@ -382,7 +394,7 @@ impl ProvisionalProposal {
                 |psbt| {
                     process_psbt(psbt.to_string())
                         .map(|e| Psbt::from_str(e.as_str()).expect("Invalid process_psbt "))
-                        .map_err(|e| pdk::Error::Server(e.into()))
+                        .map_err(|e| pdk::Error::Server(Box::new(e)))
                 },
                 min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x)),
             )

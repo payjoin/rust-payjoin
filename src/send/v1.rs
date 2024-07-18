@@ -7,7 +7,7 @@ pub use payjoin::send as pdk;
 use crate::error::PayjoinError;
 use crate::send::v2::ContextV2;
 use crate::types::Request;
-use crate::uri::{Uri, Url};
+use crate::uri::{PjUri, Url};
 
 ///Builder for sender-side payjoin parameters
 ///
@@ -27,7 +27,7 @@ impl RequestBuilder {
     /// An HTTP client will own the Request data while Context sticks around so
     /// a `(Request, Context)` tuple is returned from `RequestBuilder::build()`
     /// to keep them separated.
-    pub fn from_psbt_and_uri(psbt: String, uri: Arc<Uri>) -> Result<Self, PayjoinError> {
+    pub fn from_psbt_and_uri(psbt: String, uri: Arc<PjUri>) -> Result<Self, PayjoinError> {
         let psbt = payjoin::bitcoin::psbt::PartiallySignedTransaction::from_str(psbt.as_str())?;
         pdk::RequestBuilder::from_psbt_and_uri(psbt, (*uri).clone().into())
             .map(|e| e.into())
@@ -94,8 +94,15 @@ impl RequestBuilder {
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
-    pub fn build_non_incentivizing(&self) -> Result<Arc<RequestContext>, PayjoinError> {
-        match self.0.clone().build_non_incentivizing() {
+    pub fn build_non_incentivizing(
+        &self,
+        min_fee_rate: u64,
+    ) -> Result<Arc<RequestContext>, PayjoinError> {
+        match self
+            .0
+            .clone()
+            .build_non_incentivizing(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate))
+        {
             Ok(e) => Ok(Arc::new(e.into())),
             Err(e) => Err(e.into()),
         }

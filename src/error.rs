@@ -43,7 +43,7 @@ pub enum PayjoinError {
     PjParseError { message: String },
 
     #[error("{message}")]
-    PjNotSupported { message: String },
+    PjNotSupported{ message: String },
 
     #[error("Malformed response from receiver: {message}")]
     ValidationError { message: String },
@@ -59,6 +59,9 @@ pub enum PayjoinError {
 
     #[error("{message}")]
     UrlError { message: String },
+
+    #[error("{message}")]
+    IoError { message: String },
 }
 
 macro_rules! impl_from_error {
@@ -97,5 +100,11 @@ impl From<payjoin::Error> for PayjoinError {
             payjoin::Error::BadRequest(e) => e.into(),
             payjoin::Error::Server(e) => PayjoinError::ServerError { message: e.to_string() },
         }
+    }
+}
+
+impl From<payjoin::io::Error> for PayjoinError {
+    fn from(value: payjoin::io::Error) -> Self {
+        PayjoinError::IoError { message: value.to_string() }
     }
 }

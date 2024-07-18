@@ -1,6 +1,6 @@
 [package]
 name = "payjoin"
-version = "0.18.0"
+version = "0.19.0"
 authors = ["Dan Gould <d@ngould.dev>"]
 description = "Payjoin Library for the BIP78 Pay to Endpoint protocol."
 repository = "https://github.com/payjoin/rust-payjoin"

@@ -1,5 +1,18 @@
 # Payjoin Changelog
 
+## 0.19.0
+
+This release attempts to stabilize the Payjoin V2 Bitcoin URI format. That includes placing v2-specific parameters in the URI's pj parameter's fragment and including the `exp` expiration parameter.
+
+- Error if send or receive session expires with `exp` parameter [#299](https://github.com/payjoin/rust-payjoin/pull/299)
+- Encode `&ohttp=` and `&exp=` parameters in the `&pj=` URL as a fragment instead of as URI params [#298](https://github.com/payjoin/rust-payjoin/pull/298)
+- Allow receivers to make payjoins out of sweep transactions [#259](https://github.com/payjoin/rust-payjoin/pull/259)
+- Fix: Correctly set v=2 query parameter for v2 senders [#320](https://github.com/payjoin/rust-payjoin/pull/320)
+
+### Contributors:
+
+@DanGould, @spacebear21, @BitcoinZavior
+
 ## 0.18.0
 
 - Handle OHTTP encapsulated response status ([#284](https://github.com/payjoin/rust-payjoin/pull/284))

@@ -33,6 +33,7 @@ impl Uri {
     }
     ///Gets the amount in satoshis.
     pub fn amount(&self) -> Option<f64> {
+
         self.0.amount.map(|x| x.to_btc())
     }
     pub fn check_pj_supported(&self) -> Result<PjUri, PayjoinError> {

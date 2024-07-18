@@ -67,7 +67,7 @@ impl SessionInitializer {
     #[cfg(feature = "uniffi")]
     pub fn new(
         address: String,
-        expire_after: u64,
+        expire_after: Option<u64>,
         network: Network,
         directory: Arc<Url>,
         ohttp_keys: Arc<OhttpKeys>,
@@ -80,13 +80,13 @@ impl SessionInitializer {
             (*directory).clone().into(),
             (*ohttp_keys).clone().into(),
             (*ohttp_relay).clone().into(),
-            Duration::from_secs(expire_after),
+            expire_after.map(|e| Duration::from_secs(e)),
         )
         .into())
     }
     pub fn new(
         address: String,
-        expire_after: u64,
+        expire_after: Option<u64>,
         network: Network,
         directory: Arc<Url>,
         ohttp_keys: Arc<OhttpKeys>,
@@ -99,7 +99,7 @@ impl SessionInitializer {
             (*directory).clone().into(),
             (*ohttp_keys).clone().into(),
             (*ohttp_relay).clone().into(),
-            Duration::from_secs(expire_after),
+            expire_after.map(|e| Duration::from_secs(e)),
         )
         .into())
     }

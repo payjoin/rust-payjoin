@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::time::{Duration,  UNIX_EPOCH};
 
 use payjoin::bitcoin::address::NetworkChecked;
 use payjoin::UriExt;
@@ -117,13 +118,19 @@ impl From<payjoin::PjUriBuilder> for PjUriBuilder {
 #[cfg(not(feature = "uniffi"))]
 impl PjUriBuilder {
     ///Create a new PjUriBuilder with required parameters.
+    /// Parameters
+    // address: Represents a bitcoin address.
+    // origin: Represents either the payjoin endpoint in v1 or the directory in v2.
+    // ohttp_keys: Optional OHTTP keys for v2 (only available if the "v2" feature is enabled).
+    // expiry: Optional non-default duration_since epoch expiry for the payjoin session (only available if the "v2" feature is enabled).
     pub fn new(
         address: String,
         pj: Url,
         ohttp_keys: Option<OhttpKeys>,
+        expiry: Option<u64>,
     ) -> Result<Self, PayjoinError> {
         let address = payjoin::bitcoin::Address::from_str(&address)?.assume_checked();
-        Ok(payjoin::PjUriBuilder::new(address, pj.into(), ohttp_keys.map(|e| e.0)).into())
+        Ok(payjoin::PjUriBuilder::new(address, pj.into(), ohttp_keys.map(|e| e.0),    expiry.map(|e|  UNIX_EPOCH + Duration::from_secs(e)),).into())
     }
     ///Accepts the amount you want to receive in sats and sets it in btc .
     pub fn amount(&self, amount: u64) -> Self {
@@ -168,6 +175,7 @@ mod tests {
                     address.to_string(),
                     Url::from_str(pj.to_string()).unwrap(),
                     None,
+                    None
                 )
                 .unwrap();
                 let uri = builder

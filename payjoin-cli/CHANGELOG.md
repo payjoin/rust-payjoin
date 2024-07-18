@@ -1,5 +1,14 @@
 # payjoin-cli Changelog
 
+## 0.0.8-alpha
+
+This release attempts to stabilize the Payjoin V2 Bitcoin URI format. That includes placing v2-specific parameters in the URI's pj parameter's fragment and including the exp expiration parameter.
+
+- Update to `payjoin-0.19.0`
+  - Error if send or receive session expires with `exp` parameter [#299](https://github.com/payjoin/rust-payjoin/pull/299)
+  - Encode `&ohttp=` and `&exp=` parameters in the `&pj=` URL as a fragment instead of as URI params [#298](https://github.com/payjoin/rust-payjoin/pull/298)
+  - Allow receivers to make payjoins out of sweep transactions [#259](https://github.com/payjoin/rust-payjoin/pull/259)
+
 ## 0.0.7-alpha
 
 - Resume multiple payjoins easily with the `resume` subcommand. A repeat `send`

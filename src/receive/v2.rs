@@ -67,7 +67,7 @@ impl SessionInitializer {
     #[cfg(feature = "uniffi")]
     pub fn new(
         address: String,
-        expire_after: u64,
+        expire_after: Option<u64>,
         network: Network,
         directory: Arc<Url>,
         ohttp_keys: Arc<OhttpKeys>,
@@ -80,13 +80,13 @@ impl SessionInitializer {
             (*directory).clone().into(),
             (*ohttp_keys).clone().into(),
             (*ohttp_relay).clone().into(),
-            Duration::from_secs(expire_after),
+            expire_after.map(|e| Duration::from_secs(e)),
         )
         .into())
     }
     pub fn new(
         address: String,
-        expire_after: u64,
+        expire_after: Option<u64>,
         network: Network,
         directory: Arc<Url>,
         ohttp_keys: Arc<OhttpKeys>,
@@ -99,7 +99,7 @@ impl SessionInitializer {
             (*directory).clone().into(),
             (*ohttp_keys).clone().into(),
             (*ohttp_relay).clone().into(),
-            Duration::from_secs(expire_after),
+            expire_after.map(|e| Duration::from_secs(e)),
         )
         .into())
     }
@@ -333,7 +333,8 @@ impl V2MaybeInputsOwned {
         self.0
             .clone()
             .check_inputs_not_owned(|input| {
-                is_owned(&input.to_bytes()).map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
+                is_owned(&input.to_bytes())
+                    .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
             })
             .map_err(|e| e.into())
             .map(|e| Arc::new(e.into()))
@@ -382,7 +383,9 @@ impl V2MaybeInputsSeen {
         self.0
             .clone()
             .check_no_inputs_seen_before(|outpoint| {
-                is_known.callback(outpoint.clone().into()).map_err(|e| pdk::Error::Server(Box::new(e)))
+                is_known
+                    .callback(outpoint.clone().into())
+                    .map_err(|e| pdk::Error::Server(Box::new(e)))
             })
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())

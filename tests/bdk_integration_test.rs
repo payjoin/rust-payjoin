@@ -278,10 +278,6 @@ fn handle_proposal(proposal: UncheckedProposal, receiver: Wallet) -> Arc<Payjoin
         .contribute_witness_input(txo_to_contribute, outpoint_to_contribute)
         .expect("contribute_witness_input error");
 
-    let receiver_substitute_address = receiver.get_address(AddressIndex::New).to_string();
-    payjoin
-        .substitute_output_address(receiver_substitute_address)
-        .expect("substitute_output_address error");
     let payjoin_proposal = payjoin
         .finalize_proposal(
             |e| {
@@ -355,7 +351,7 @@ mod v1 {
         let psbt = build_original_psbt(&sender, &pj_uri)?;
         println!("\nOriginal sender psbt: {:#?}", psbt.to_string());
 
-        let req_ctx = RequestBuilder::from_psbt_and_uri(psbt.to_string(), Arc::new(pj_uri))?
+        let req_ctx = RequestBuilder::from_psbt_and_uri(psbt.to_string(), Arc::new(pj_uri.check_pj_supported().unwrap()))?
             .build_with_additional_fee(10000, None, 0, false)?
             .extract_v1()?;
         let headers = Headers::from_vec(req_ctx.request.body.clone());

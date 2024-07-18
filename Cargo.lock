@@ -1389,7 +1389,7 @@ checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
 [[package]]
 name = "payjoin"
 version = "0.18.0"
-source = "git+https://github.com/LtbLightning/rust-payjoin?branch=clone-pj-uri-builder#d9c76dd52b04ec7d4f783b54c258706a18801c9f"
+source = "git+https://github.com/LtbLightning/rust-payjoin?branch=clone-pj-uri-builder#3b5bda95fc8ce63f506538f0ff9daed885810488"
 dependencies = [
  "bhttp",
  "bip21",

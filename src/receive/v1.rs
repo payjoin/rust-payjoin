@@ -164,7 +164,8 @@ impl MaybeInputsOwned {
         self.0
             .clone()
             .check_inputs_not_owned(|input| {
-                is_owned(&input.to_bytes()).map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
+                is_owned(&input.to_bytes())
+                    .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
             })
             .map_err(|e| e.into())
             .map(|e| Arc::new(e.into()))
@@ -222,7 +223,9 @@ impl MaybeInputsSeen {
         self.0
             .clone()
             .check_no_inputs_seen_before(|outpoint| {
-                is_known.callback(outpoint.clone().into()).map_err(|e| pdk::Error::Server(Box::new(e)))
+                is_known
+                    .callback(outpoint.clone().into())
+                    .map_err(|e| pdk::Error::Server(Box::new(e)))
             })
             .map_err(|e| e.into())
             .map(|e| Arc::new(e.into()))

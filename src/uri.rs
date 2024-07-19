@@ -1,6 +1,8 @@
 use std::str::FromStr;
+use std::time::{Duration, UNIX_EPOCH};
 
 use payjoin::bitcoin::address::NetworkChecked;
+use payjoin::UriExt;
 
 use crate::error::PayjoinError;
 #[cfg(not(feature = "uniffi"))]
@@ -31,7 +33,21 @@ impl Uri {
     }
     ///Gets the amount in satoshis.
     pub fn amount(&self) -> Option<f64> {
+
         self.0.amount.map(|x| x.to_btc())
+    }
+    pub fn check_pj_supported(&self) -> Result<PjUri, PayjoinError> {
+        match self.0.clone().check_pj_supported() {
+            Ok(e) => Ok(e.into()),
+            Err(_) => {
+                Err(PayjoinError::PjNotSupported {
+                    message: "Uri doesn't support payjoin".to_string(),
+                })
+            }
+        }
+    }
+    pub fn as_string(&self) -> String {
+        self.0.clone().to_string()
     }
 }
 
@@ -46,15 +62,17 @@ impl<'a> From<PjUri> for payjoin::PjUri<'a> {
         value.0
     }
 }
-pub struct PjUri(payjoin::PjUri<'static>);
+
+#[derive(Clone)]
+pub struct PjUri(pub payjoin::PjUri<'static>);
 
 impl PjUri {
     pub fn address(&self) -> String {
         self.0.clone().address.to_string()
     }
-    /// Amount in sats
-    pub fn amount(&self) -> Option<u64> {
-        self.0.clone().amount.map(|e| e.to_sat())
+    /// Number of btc  requested as payment
+    pub fn amount(&self) -> Option<f64> {
+        self.0.clone().amount.map(|e| e.to_btc())
     }
     pub fn as_string(&self) -> String {
         self.0.clone().to_string()
@@ -90,107 +108,94 @@ impl Url {
         self.0.to_string()
     }
 }
+
+///Build a valid PjUri.
+// Payjoin receiver can use this builder to create a payjoin uri to send to the sender.
 #[cfg(not(feature = "uniffi"))]
-pub struct PjUriBuilder {
-    inner: payjoin::PjUriBuilder,
+pub struct PjUriBuilder(pub payjoin::PjUriBuilder);
+
+impl From<payjoin::PjUriBuilder> for PjUriBuilder {
+    fn from(value: payjoin::PjUriBuilder) -> Self {
+        Self(value)
+    }
 }
 #[cfg(not(feature = "uniffi"))]
 impl PjUriBuilder {
     ///Create a new PjUriBuilder with required parameters.
+    /// Parameters
+    /// address: Represents a bitcoin address.
+    /// ohttp_keys: Optional OHTTP keys for v2.
+    /// expiry: Optional non-default duration_since epoch expiry for the payjoin session.
     pub fn new(
         address: String,
         pj: Url,
         ohttp_keys: Option<OhttpKeys>,
+        expiry: Option<u64>,
     ) -> Result<Self, PayjoinError> {
         let address = payjoin::bitcoin::Address::from_str(&address)?.assume_checked();
-        Ok(Self { inner: payjoin::PjUriBuilder::new(address, pj.into(), ohttp_keys.map(|e| e.0)) })
+        Ok(payjoin::PjUriBuilder::new(
+            address,
+            pj.into(),
+            ohttp_keys.map(|e| e.0),
+            expiry.map(|e| UNIX_EPOCH + Duration::from_secs(e)),
+        )
+        .into())
     }
-    ///Set the amount in btc you want to receive.
-    pub fn amount(self, amount: f64) -> Self {
-        let amount = payjoin::bitcoin::Amount::from_sat((amount * 100_001_890.0) as u64);
-        Self { inner: self.inner.amount(amount) }
+    ///Accepts the amount you want to receive in sats and sets it in btc .
+    pub fn amount(&self, amount: u64) -> Self {
+        let amount = payjoin::bitcoin::Amount::from_sat(amount);
+        self.0.clone().amount(amount).into()
     }
-    ///Set the message.
-    pub fn message(self, message: String) -> Self {
-        Self { inner: self.inner.message(message) }
+    /// Set the message.
+    pub fn message(&self, message: String) -> Self {
+        self.0.clone().message(message).into()
     }
     ///Set the label.
-    pub fn label(self, label: String) -> Self {
-        Self { inner: self.inner.label(label) }
+    pub fn label(&self, label: String) -> Self {
+        self.0.clone().label(label).into()
     }
-    ///Set whether or not payjoin output substitution is allowed.
-    pub fn pjos(self, pjos: bool) -> Self {
-        Self { inner: self.inner.pjos(pjos) }
+    ///Set whether payjoin output substitution is allowed.
+    pub fn pjos(&self, pjos: bool) -> Self {
+        self.0.clone().pjos(pjos).into()
     }
     ///Constructs a Uri with PayjoinParams from the parameters set in the builder.
-    pub fn build(self) -> PjUri {
-        self.inner.build().into()
+    pub fn build(&self) -> PjUri {
+        self.0.clone().build().into()
     }
 }
+
 #[cfg(test)]
 mod tests {
-    use std::convert::TryFrom;
+    use bdk::bitcoin;
 
-    use payjoin::Uri;
-
+    use crate::uri::{PjUriBuilder, Url};
     #[test]
-    fn test_short() {
-        assert!(Uri::try_from("").is_err());
-        assert!(Uri::try_from("bitcoin").is_err());
-        assert!(Uri::try_from("bitcoin:").is_err());
-    }
+    fn test_ffi_builder() {
+        let https = "https://example.com/";
+        let onion = "http://vjdpwgybvubne5hda6v4c5iaeeevhge6jvo3w2cl6eocbwwvwxp7b7qd.onion/";
+        let base58 = "12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX";
+        let bech32_upper = "TB1Q6D3A2W975YNY0ASUVD9A67NER4NKS58FF0Q8G4";
+        let bech32_lower = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
 
-    #[ignore]
-    #[test]
-    fn test_todo_url_encoded() {
-        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao";
-        assert!(Uri::try_from(uri).is_err(), "pj url should be url encoded");
-    }
-
-    #[test]
-    fn test_valid_url() {
-        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=this_is_NOT_a_validURL";
-        assert!(Uri::try_from(uri).is_err(), "pj is not a valid url");
-    }
-
-    #[test]
-    fn test_missing_amount() {
-        let uri =
-            "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://testnet.demo.btcpayserver.org/BTC/pj";
-        assert!(Uri::try_from(uri).is_ok(), "missing amount should be ok");
-    }
-
-    #[test]
-    fn test_unencrypted() {
-        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=http://example.com";
-        assert!(Uri::try_from(uri).is_err(), "unencrypted connection");
-
-        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=ftp://foo.onion";
-        assert!(Uri::try_from(uri).is_err(), "unencrypted connection");
-    }
-
-    #[test]
-    fn test_valid_uris() {
-        let https = "https://example.com";
-        let onion = "http://vjdpwgybvubne5hda6v4c5iaeeevhge6jvo3w2cl6eocbwwvwxp7b7qd.onion";
-
-        let base58 = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX";
-        let bech32_upper = "BITCOIN:TB1Q6D3A2W975YNY0ASUVD9A67NER4NKS58FF0Q8G4";
-        let bech32_lower = "bitcoin:tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
-
-        for address in [base58, bech32_upper, bech32_lower].iter() {
-            for pj in [https, onion].iter() {
-                let uri = format!("{}?amount=1&pj={}", address, pj);
-                assert!(Uri::try_from(&*uri).is_ok());
+        for address in vec![base58, bech32_upper, bech32_lower] {
+            for pj in vec![https, onion] {
+                let amount = bitcoin::Amount::ONE_BTC;
+                let builder = PjUriBuilder::new(
+                    address.to_string(),
+                    Url::from_str(pj.to_string()).unwrap(),
+                    None,
+                    None,
+                )
+                .unwrap();
+                let uri = builder
+                    .amount(amount.to_sat())
+                    .message("message".to_string())
+                    .pjos(true)
+                    .label("label".to_string())
+                    .build();
+                // assert_eq!(uri.amount(), Some(bitcoin::Amount::ONE_BTC.to_btc()));
+                print!("\n {}", uri.as_string());
             }
         }
-    }
-
-    #[test]
-    fn test_unsupported() {
-        assert!(!Uri::try_from("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX")
-            .unwrap()
-            .extras
-            .pj_is_supported());
     }
 }

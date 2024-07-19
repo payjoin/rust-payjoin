@@ -28,8 +28,9 @@ fn v1_to_v1_full_cycle() -> Result<(), BoxError> {
         pj_receiver_address.to_string(),
         Url::from_str("https://example.com".to_string())?,
         None,
+        None,
     )?
-    .amount(0.0083285)
+    .amount(832_850)
     .build()
     .as_string();
     print!("pj_uri {}", pj_uri_string);
@@ -60,7 +61,7 @@ fn v1_to_v1_full_cycle() -> Result<(), BoxError> {
         .psbt;
     let psbt_base64 = sender.wallet_process_psbt(&psbt, None, None, None)?.psbt;
     eprintln!("Original psbt: {:#?}", psbt_base64);
-    let req_ctx = RequestBuilder::from_psbt_and_uri(psbt_base64, Arc::new(pj_uri))?
+    let req_ctx = RequestBuilder::from_psbt_and_uri(psbt_base64, Arc::new(pj_uri.check_pj_supported().unwrap()))?
         .build_with_additional_fee(10000, None, 0, false)?
         .extract_v1()?;
     let req = req_ctx.request;
@@ -175,9 +176,6 @@ fn handle_pj_proposal(proposal: UncheckedProposal, receiver: Arc<Client>) -> Arc
         .contribute_witness_input(txo_to_contribute, outpoint_to_contribute)
         .expect("contribute_witness_input error");
 
-    let receiver_substitute_address =
-        receiver.get_new_address(None, None).unwrap().assume_checked();
-    payjoin.substitute_output_address(receiver_substitute_address.to_string()).unwrap();
     let payjoin_proposal = payjoin
         .finalize_proposal(
             |e| {

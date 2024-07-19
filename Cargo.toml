@@ -19,7 +19,7 @@ bitcoincore-rpc = "0.19.0"
 [dependencies]
 
 #payjoin = {version = "=0.18.0",  features = ["send", "receive", "base64", "v2", "io", "danger-local-https"] }
-payjoin={ git = "https://github.com/LtbLightning/rust-payjoin", branch = "clone-pj-uri-builder", features = ["send", "receive", "base64", "v2", "io", "danger-local-https"]}
+payjoin={ git = "https://github.com/payjoin/rust-payjoin", rev = "941a6798f52f60d72061fc0a02b5b42146321453", features = ["send", "receive", "base64", "v2", "io", "danger-local-https"]}
 uniffi = { version = "0.28.0" }
 thiserror = "1.0.47"
 ohttp = { version = "0.5.1" }

@@ -123,10 +123,9 @@ impl From<payjoin::PjUriBuilder> for PjUriBuilder {
 impl PjUriBuilder {
     ///Create a new PjUriBuilder with required parameters.
     /// Parameters
-    // address: Represents a bitcoin address.
-    // origin: Represents either the payjoin endpoint in v1 or the directory in v2.
-    // ohttp_keys: Optional OHTTP keys for v2 (only available if the "v2" feature is enabled).
-    // expiry: Optional non-default duration_since epoch expiry for the payjoin session (only available if the "v2" feature is enabled).
+    /// address: Represents a bitcoin address.
+    /// ohttp_keys: Optional OHTTP keys for v2.
+    /// expiry: Optional non-default duration_since epoch expiry for the payjoin session.
     pub fn new(
         address: String,
         pj: Url,

@@ -8,7 +8,7 @@ Supercharged payment batching to save you fees and preserve your privacy.
 
 The Payjoin Dev Kit `payjoin` library implements both [BIP 78 Payjoin V1](https://github.com/shesek/bips/blob/master/bip-0078.mediawiki) and [BIP 77 Payjoin V2](https://github.com/bitcoin/bips/pull/1483).
 
-The `payjoin` crate is compatible with many wallets lilke LND in [nolooking](https://github.com/chaincase-app/nolooking) and Bitcoin Dev Kit in [Mutiny Wallet](https://github.com/MutinyWallet/mutiny-node) and in [BitMask](https://github.com/diba-io/bitmask-core)
+The `payjoin` crate is compatible with many wallets like LND in [nolooking](https://github.com/chaincase-app/nolooking) and Bitcoin Dev Kit in [Mutiny Wallet](https://github.com/MutinyWallet/mutiny-node) and in [BitMask](https://github.com/diba-io/bitmask-core)
 
 ### `payjoin-cli`
 

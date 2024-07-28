@@ -85,10 +85,10 @@ To build and test with the MSRV you will need to pin the below dependency versio
 ```shell
 cargo update -p cc --precise 1.0.105
 cargo update -p regex --precise 1.9.6
-cargo update -p url --precise 2.5.0
-cargo update -p which --precise 4.4.0
 cargo update -p reqwest --precise 0.12.4
+cargo update -p url --precise 2.5.0
 cargo update -p tokio --precise 1.38.1
+cargo update -p which --precise 4.4.0
 ```
 
 ### `payjoin-cli`
@@ -97,11 +97,11 @@ cargo update -p tokio --precise 1.38.1
 cargo update -p cc --precise 1.0.105
 cargo update -p clap_lex --precise 0.3.0
 cargo update -p regex --precise 1.9.6
+cargo update -p reqwest --precise 0.12.4
+cargo update -p time@0.3.36 --precise 0.3.20
+cargo update -p tokio --precise 1.38.1
 cargo update -p url --precise 2.5.0
 cargo update -p which --precise 4.4.0
-cargo update -p time@0.3.36 --precise 0.3.20
-cargo update -p reqwest --precise 0.12.4
-cargo update -p tokio --precise 1.38.1
 ```
 
 ## Code Formatting

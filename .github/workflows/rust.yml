@@ -34,7 +34,7 @@ jobs:
           cargo update -p url --precise 2.5.0
           cargo update -p which --precise 4.4.0
       - name: Run tests
-        run: bash contrib/test.sh
+        run: RUST_LOG=debug bash contrib/test.sh
 
   rustfmt:
     runs-on: ubuntu-latest

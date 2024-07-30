@@ -21,7 +21,7 @@ use tokio::net::TcpListener;
 
 use super::config::AppConfig;
 use super::App as AppTrait;
-use crate::app::{http_agent, try_contributing_inputs};
+use crate::app::http_agent;
 use crate::db::Database;
 #[cfg(feature = "danger-local-https")]
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
@@ -329,7 +329,7 @@ impl App {
         })?;
         log::trace!("check4");
 
-        let mut provisional_payjoin = payjoin.identify_receiver_outputs(|output_script| {
+        let provisional_payjoin = payjoin.identify_receiver_outputs(|output_script| {
             if let Ok(address) = bitcoin::Address::from_script(output_script, network) {
                 bitcoind
                     .get_address_info(&address)
@@ -340,19 +340,17 @@ impl App {
             }
         })?;
 
-        _ = try_contributing_inputs(&mut provisional_payjoin, &bitcoind)
-            .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
+        let provisional_payjoin = provisional_payjoin.try_substitute_receiver_output(|| {
+            Ok(bitcoind
+                .get_new_address(None, None)
+                .map_err(|e| Error::Server(e.into()))?
+                .require_network(network)
+                .map_err(|e| Error::Server(e.into()))?
+                .script_pubkey())
+        })?;
 
-        _ = provisional_payjoin
-            .try_substitute_receiver_output(|| {
-                Ok(bitcoind
-                    .get_new_address(None, None)
-                    .map_err(|e| Error::Server(e.into()))?
-                    .require_network(network)
-                    .map_err(|e| Error::Server(e.into()))?
-                    .script_pubkey())
-            })
-            .map_err(|e| log::warn!("Failed to substitute output: {}", e));
+        let provisional_payjoin = try_contributing_inputs(provisional_payjoin, &bitcoind)
+            .map_err(|e| Error::Server(e.into()))?;
 
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &Psbt| {
@@ -365,6 +363,35 @@ impl App {
         )?;
         Ok(payjoin_proposal)
     }
+}
+
+fn try_contributing_inputs(
+    payjoin: payjoin::receive::WantsInputs,
+    bitcoind: &bitcoincore_rpc::Client,
+) -> Result<payjoin::receive::ProvisionalProposal> {
+    use bitcoin::OutPoint;
+
+    let available_inputs = bitcoind
+        .list_unspent(None, None, None, None, None)
+        .context("Failed to list unspent from bitcoind")?;
+    let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
+        .iter()
+        .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
+        .collect();
+
+    let selected_outpoint = payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
+    let selected_utxo = available_inputs
+        .iter()
+        .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
+        .context("This shouldn't happen. Failed to retrieve the privacy preserving utxo from those we provided to the seclector.")?;
+    log::debug!("selected utxo: {:#?}", selected_utxo);
+
+    //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
+    let txo_to_contribute = bitcoin::TxOut {
+        value: selected_utxo.amount,
+        script_pubkey: selected_utxo.script_pub_key.clone(),
+    };
+    Ok(payjoin.contribute_witness_input(txo_to_contribute, selected_outpoint))
 }
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {

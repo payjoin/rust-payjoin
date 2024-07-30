@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -272,8 +273,6 @@ impl App {
         &self,
         proposal: payjoin::receive::v2::UncheckedProposal,
     ) -> Result<payjoin::receive::v2::PayjoinProposal, Error> {
-        use crate::app::try_contributing_inputs;
-
         let bitcoind = self.bitcoind().map_err(|e| Error::Server(e.into()))?;
 
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
@@ -317,7 +316,7 @@ impl App {
         })?;
         log::trace!("check4");
 
-        let mut provisional_payjoin = payjoin.identify_receiver_outputs(|output_script| {
+        let provisional_payjoin = payjoin.identify_receiver_outputs(|output_script| {
             if let Ok(address) = bitcoin::Address::from_script(output_script, network) {
                 bitcoind
                     .get_address_info(&address)
@@ -328,8 +327,10 @@ impl App {
             }
         })?;
 
-        _ = try_contributing_inputs(&mut provisional_payjoin.inner, &bitcoind)
-            .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
+        let provisional_payjoin = provisional_payjoin.try_substitute_receiver_outputs(None)?;
+
+        let provisional_payjoin = try_contributing_inputs(provisional_payjoin, &bitcoind)
+            .map_err(|e| Error::Server(e.into()))?;
 
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &Psbt| {
@@ -344,6 +345,35 @@ impl App {
         log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
         Ok(payjoin_proposal)
     }
+}
+
+fn try_contributing_inputs(
+    payjoin: payjoin::receive::v2::WantsInputs,
+    bitcoind: &bitcoincore_rpc::Client,
+) -> Result<payjoin::receive::v2::ProvisionalProposal> {
+    use bitcoin::OutPoint;
+
+    let available_inputs = bitcoind
+        .list_unspent(None, None, None, None, None)
+        .context("Failed to list unspent from bitcoind")?;
+    let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
+        .iter()
+        .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
+        .collect();
+
+    let selected_outpoint = payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
+    let selected_utxo = available_inputs
+        .iter()
+        .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
+        .context("This shouldn't happen. Failed to retrieve the privacy preserving utxo from those we provided to the seclector.")?;
+    log::debug!("selected utxo: {:#?}", selected_utxo);
+
+    //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
+    let txo_to_contribute = bitcoin::TxOut {
+        value: selected_utxo.amount,
+        script_pubkey: selected_utxo.script_pub_key.clone(),
+    };
+    Ok(payjoin.contribute_witness_input(txo_to_contribute, selected_outpoint))
 }
 
 async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::OhttpKeys> {

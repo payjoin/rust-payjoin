@@ -307,7 +307,6 @@ mod integration {
                 OhttpKeys::from_str("AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM")
                     .expect("Invalid OhttpKeys");
 
-            std::env::set_var("RUST_LOG", "debug");
             let (cert, key) = local_cert_key();
             let port = find_free_port();
             let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
@@ -346,7 +345,6 @@ mod integration {
 
         #[tokio::test]
         async fn test_session_expiration() {
-            std::env::set_var("RUST_LOG", "debug");
             init_tracing();
             let (cert, key) = local_cert_key();
             let ohttp_relay_port = find_free_port();
@@ -417,7 +415,6 @@ mod integration {
 
         #[tokio::test]
         async fn v2_to_v2() {
-            std::env::set_var("RUST_LOG", "debug");
             init_tracing();
             let (cert, key) = local_cert_key();
             let ohttp_relay_port = find_free_port();
@@ -531,7 +528,6 @@ mod integration {
 
         #[tokio::test]
         async fn v1_to_v2() {
-            std::env::set_var("RUST_LOG", "debug");
             init_tracing();
             let (cert, key) = local_cert_key();
             let ohttp_relay_port = find_free_port();

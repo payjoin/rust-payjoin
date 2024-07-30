@@ -15,8 +15,6 @@ mod e2e {
     #[cfg(not(feature = "v2"))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn send_receive_payjoin() {
-        env::set_var("RUST_LOG", "debug");
-
         let bitcoind_exe = env::var("BITCOIND_EXE")
             .ok()
             .or_else(|| bitcoind::downloaded_exe_path().ok())
@@ -161,7 +159,6 @@ mod e2e {
         static TESTS_TIMEOUT: Lazy<Duration> = Lazy::new(|| Duration::from_secs(20));
         static WAIT_SERVICE_INTERVAL: Lazy<Duration> = Lazy::new(|| Duration::from_secs(3));
 
-        env::set_var("RUST_LOG", "debug");
         init_tracing();
         let (cert, key) = local_cert_key();
         let ohttp_relay_port = find_free_port();

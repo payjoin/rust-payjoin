@@ -167,7 +167,7 @@ impl App {
         let payjoin_psbt = payjoin_proposal.psbt().clone();
         println!(
             "Response successful. Watch mempool for successful Payjoin. TXID: {}",
-            payjoin_psbt.extract_tx().clone().txid()
+            payjoin_psbt.extract_tx_unchecked_fee_rate().clone().compute_txid()
         );
         self.db.clear_recv_session()?;
         Ok(())
@@ -280,13 +280,7 @@ impl App {
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // The network is used for checks later
-        let network = bitcoind
-            .get_blockchain_info()
-            .map_err(|e| Error::Server(e.into()))
-            .and_then(|info| {
-                bitcoin::Network::from_core_arg(&info.chain).map_err(|e| Error::Server(e.into()))
-            })?;
-
+        let network = bitcoind.get_blockchain_info().map_err(|e| Error::Server(e.into()))?.chain;
         // Receive Check 1: Can Broadcast
         let proposal = proposal.check_broadcast_suitability(None, |tx| {
             let raw_tx = bitcoin::consensus::encode::serialize_hex(&tx);

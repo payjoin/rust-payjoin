@@ -1,7 +1,8 @@
 use std::ops::{Deref, DerefMut};
 use std::{error, fmt};
 
-use bitcoin::base64;
+use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
+use bitcoin::base64::Engine;
 use bitcoin::secp256k1::ecdh::SharedSecret;
 use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
 use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
@@ -252,8 +253,7 @@ impl OhttpKeys {
 
 impl fmt::Display for OhttpKeys {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let encoded =
-            base64::encode_config(self.encode().map_err(|_| fmt::Error)?, base64::URL_SAFE_NO_PAD);
+        let encoded = BASE64_URL_SAFE_NO_PAD.encode(self.encode().map_err(|_| fmt::Error)?);
         write!(f, "{}", encoded)
     }
 }
@@ -262,8 +262,7 @@ impl std::str::FromStr for OhttpKeys {
     type Err = ParseOhttpKeysError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let bytes = base64::decode_config(s, base64::URL_SAFE_NO_PAD)
-            .map_err(ParseOhttpKeysError::DecodeBase64)?;
+        let bytes = BASE64_URL_SAFE_NO_PAD.decode(s).map_err(ParseOhttpKeysError::DecodeBase64)?;
         OhttpKeys::decode(&bytes).map_err(ParseOhttpKeysError::DecodeKeyConfig)
     }
 }
@@ -312,7 +311,7 @@ impl serde::Serialize for OhttpKeys {
 
 #[derive(Debug)]
 pub enum ParseOhttpKeysError {
-    DecodeBase64(base64::DecodeError),
+    DecodeBase64(bitcoin::base64::DecodeError),
     DecodeKeyConfig(ohttp::Error),
 }
 

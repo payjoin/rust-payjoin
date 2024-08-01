@@ -29,7 +29,7 @@ pub(crate) trait PsbtExt: Sized {
     fn outputs_mut(&mut self) -> &mut [psbt::Output];
     fn xpub_mut(
         &mut self,
-    ) -> &mut BTreeMap<bip32::ExtendedPubKey, (bip32::Fingerprint, bip32::DerivationPath)>;
+    ) -> &mut BTreeMap<bip32::Xpub, (bip32::Fingerprint, bip32::DerivationPath)>;
     fn proprietary_mut(&mut self) -> &mut BTreeMap<psbt::raw::ProprietaryKey, Vec<u8>>;
     fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>>;
     fn input_pairs(&self) -> Box<dyn Iterator<Item = InputPair<'_>> + '_>;
@@ -47,7 +47,7 @@ impl PsbtExt for Psbt {
 
     fn xpub_mut(
         &mut self,
-    ) -> &mut BTreeMap<bip32::ExtendedPubKey, (bip32::Fingerprint, bip32::DerivationPath)> {
+    ) -> &mut BTreeMap<bip32::Xpub, (bip32::Fingerprint, bip32::DerivationPath)> {
         &mut self.xpub
     }
 
@@ -95,11 +95,11 @@ impl PsbtExt for Psbt {
         let mut total_inputs = bitcoin::Amount::ZERO;
 
         for output in &self.unsigned_tx.output {
-            total_outputs += bitcoin::Amount::from_sat(output.value);
+            total_outputs += output.value;
         }
 
         for input in self.input_pairs() {
-            total_inputs += bitcoin::Amount::from_sat(input.previous_txout().unwrap().value);
+            total_inputs += input.previous_txout().unwrap().value;
         }
         log::debug!("  total_inputs:  {}", total_inputs);
         log::debug!("- total_outputs: {}", total_outputs);
@@ -138,7 +138,7 @@ impl<'a> InputPair<'a> {
             (None, None) if treat_missing_as_error =>
                 Err(PsbtInputError::PrevTxOut(PrevTxOutError::MissingUtxoInformation)),
             (None, None) => Ok(()),
-            (Some(tx), None) if tx.txid() == self.txin.previous_output.txid => tx
+            (Some(tx), None) if tx.compute_txid() == self.txin.previous_output.txid => tx
                 .output
                 .get::<usize>(self.txin.previous_output.vout.try_into().map_err(|_| {
                     PrevTxOutError::IndexOutOfBounds {
@@ -156,7 +156,9 @@ impl<'a> InputPair<'a> {
                 .map(drop),
             (Some(_), None) => Err(PsbtInputError::UnequalTxid),
             (None, Some(_)) => Ok(()),
-            (Some(tx), Some(witness_txout)) if tx.txid() == self.txin.previous_output.txid => {
+            (Some(tx), Some(witness_txout))
+                if tx.compute_txid() == self.txin.previous_output.txid =>
+            {
                 let non_witness_txout = tx
                     .output
                     .get::<usize>(self.txin.previous_output.vout.try_into().map_err(|_| {

@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use bitcoin::{self, base64};
+use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
+use bitcoin::base64::Engine;
 use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode, Uri};
@@ -102,7 +103,7 @@ fn init_ohttp() -> Result<ohttp::Server> {
     // create or read from file
     let server_config = ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC))?;
     let encoded_config = server_config.encode()?;
-    let b64_config = base64::encode_config(encoded_config, base64::URL_SAFE_NO_PAD);
+    let b64_config = BASE64_URL_SAFE_NO_PAD.encode(encoded_config);
     info!("ohttp-keys server config base64 UrlSafe: {:?}", b64_config);
     Ok(ohttp::Server::new(server_config)?)
 }
@@ -243,8 +244,8 @@ async fn post_session(body: Body) -> Result<Response<Body>, HandlerError> {
         hyper::body::to_bytes(body).await.map_err(|e| HandlerError::BadRequest(e.into()))?;
     let base64_id =
         String::from_utf8(bytes.to_vec()).map_err(|e| HandlerError::BadRequest(e.into()))?;
-    let pubkey_bytes: Vec<u8> = base64::decode_config(base64_id, base64::URL_SAFE_NO_PAD)
-        .map_err(|e| HandlerError::BadRequest(e.into()))?;
+    let pubkey_bytes: Vec<u8> =
+        BASE64_URL_SAFE_NO_PAD.decode(base64_id).map_err(|e| HandlerError::BadRequest(e.into()))?;
     let pubkey = bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
         .map_err(|e| HandlerError::BadRequest(e.into()))?;
     tracing::info!("Initialized session with pubkey: {:?}", pubkey);

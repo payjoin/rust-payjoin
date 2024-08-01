@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use bitcoin::locktime::absolute::LockTime;
+use bitcoin::transaction::Version;
 use bitcoin::Sequence;
 
 use crate::input_type::{InputType, InputTypeError};
@@ -21,8 +22,8 @@ pub(crate) enum InternalValidationError {
     InvalidInputType(InputTypeError),
     InvalidProposedInput(crate::psbt::PrevTxOutError),
     VersionsDontMatch {
-        proposed: i32,
-        original: i32,
+        proposed: Version,
+        original: Version,
     },
     LockTimesDontMatch {
         proposed: LockTime,

@@ -4,9 +4,11 @@ use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
 use bitcoin::address::NetworkUnchecked;
+use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
+use bitcoin::base64::Engine;
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::{rand, PublicKey};
-use bitcoin::{base64, Address, Amount, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut};
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -30,7 +32,7 @@ struct SessionContext {
     ohttp_keys: OhttpKeys,
     expiry: SystemTime,
     ohttp_relay: url::Url,
-    s: bitcoin::secp256k1::KeyPair,
+    s: bitcoin::secp256k1::Keypair,
     e: Option<bitcoin::secp256k1::PublicKey>,
 }
 
@@ -74,7 +76,7 @@ impl SessionInitializer {
                 ohttp_relay,
                 expiry: SystemTime::now()
                     + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
-                s: bitcoin::secp256k1::KeyPair::from_secret_key(&secp, &sk),
+                s: bitcoin::secp256k1::Keypair::from_secret_key(&secp, &sk),
                 e: None,
             },
         }
@@ -110,7 +112,7 @@ impl SessionInitializer {
 }
 
 fn subdir_path_from_pubkey(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
-    base64::encode_config(pubkey.serialize(), base64::URL_SAFE_NO_PAD)
+    BASE64_URL_SAFE_NO_PAD.encode(pubkey.serialize())
 }
 
 /// An active payjoin V2 session, allowing for polled requests to the
@@ -222,7 +224,7 @@ impl ActiveSession {
     // This identifies a session at the payjoin directory server.
     pub fn pj_url(&self) -> Url {
         let pubkey = &self.context.s.public_key().serialize();
-        let pubkey_base64 = base64::encode_config(pubkey, base64::URL_SAFE_NO_PAD);
+        let pubkey_base64 = BASE64_URL_SAFE_NO_PAD.encode(pubkey);
         let mut url = self.context.directory.clone();
         {
             let mut path_segments =
@@ -651,7 +653,7 @@ mod test {
                 ),
                 ohttp_relay: url::Url::parse("https://relay.com").unwrap(),
                 expiry: SystemTime::now() + Duration::from_secs(60),
-                s: bitcoin::secp256k1::KeyPair::from_secret_key(
+                s: bitcoin::secp256k1::Keypair::from_secret_key(
                     &bitcoin::secp256k1::Secp256k1::new(),
                     &bitcoin::secp256k1::SecretKey::from_slice(&[1; 32]).unwrap(),
                 ),

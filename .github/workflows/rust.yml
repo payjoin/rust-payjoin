@@ -33,6 +33,7 @@ jobs:
           cargo update -p tokio --precise 1.38.1
           cargo update -p url --precise 2.5.0
           cargo update -p which --precise 4.4.0
+          cargo update -p zstd-sys --precise 2.0.8+zstd.1.5.5
       - name: Run tests
         run: RUST_LOG=debug bash contrib/test.sh
 

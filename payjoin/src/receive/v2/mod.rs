@@ -445,8 +445,11 @@ impl WantsInputs {
         self.inner.try_preserving_privacy(candidate_inputs)
     }
 
-    pub fn contribute_witness_input(self, txo: TxOut, outpoint: OutPoint) -> ProvisionalProposal {
-        let inner = self.inner.contribute_witness_input(txo, outpoint);
+    pub fn contribute_witness_inputs(
+        self,
+        inputs: impl IntoIterator<Item = (OutPoint, TxOut)>,
+    ) -> ProvisionalProposal {
+        let inner = self.inner.contribute_witness_inputs(inputs);
         ProvisionalProposal { inner, context: self.context }
     }
 }

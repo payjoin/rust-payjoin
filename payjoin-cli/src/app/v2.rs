@@ -367,13 +367,12 @@ fn try_contributing_inputs(
         .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
         .context("This shouldn't happen. Failed to retrieve the privacy preserving utxo from those we provided to the seclector.")?;
     log::debug!("selected utxo: {:#?}", selected_utxo);
-
-    //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
     let txo_to_contribute = bitcoin::TxOut {
         value: selected_utxo.amount,
         script_pubkey: selected_utxo.script_pub_key.clone(),
     };
-    Ok(payjoin.contribute_witness_input(txo_to_contribute, selected_outpoint))
+
+    Ok(payjoin.contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)]))
 }
 
 async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::OhttpKeys> {

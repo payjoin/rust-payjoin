@@ -642,17 +642,15 @@ mod integration {
                 .iter()
                 .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
                 .unwrap();
-
-            //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
             let txo_to_contribute = bitcoin::TxOut {
                 value: selected_utxo.amount,
                 script_pubkey: selected_utxo.script_pub_key.clone(),
             };
-            let outpoint_to_contribute =
-                bitcoin::OutPoint { txid: selected_utxo.txid, vout: selected_utxo.vout };
-            let payjoin =
-                payjoin.contribute_witness_input(txo_to_contribute, outpoint_to_contribute);
 
+            let payjoin =
+                payjoin.contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)]);
+
+            // Sign and finalize the proposal PSBT
             let payjoin_proposal = payjoin
                 .finalize_proposal(
                     |psbt: &Psbt| {
@@ -864,7 +862,7 @@ mod integration {
         let proposal = proposal.check_no_mixed_input_scripts().unwrap();
 
         // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
-        let mut payjoin = proposal
+        let payjoin = proposal
             .check_no_inputs_seen_before(|_| Ok(false))
             .unwrap()
             .identify_receiver_outputs(|output_script| {
@@ -893,15 +891,13 @@ mod integration {
             .iter()
             .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
             .unwrap();
-
-        //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
         let txo_to_contribute = bitcoin::TxOut {
             value: selected_utxo.amount,
             script_pubkey: selected_utxo.script_pub_key.clone(),
         };
-        let outpoint_to_contribute =
-            bitcoin::OutPoint { txid: selected_utxo.txid, vout: selected_utxo.vout };
-        let payjoin = payjoin.contribute_witness_input(txo_to_contribute, outpoint_to_contribute);
+
+        let payjoin =
+            payjoin.contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)]);
 
         let payjoin_proposal = payjoin
             .finalize_proposal(

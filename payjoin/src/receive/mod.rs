@@ -485,10 +485,13 @@ impl WantsInputs {
             .values()
             .next()
             .cloned()
-            .ok_or_else(|| SelectionError::from(InternalSelectionError::NotFound))
+            .ok_or(SelectionError::from(InternalSelectionError::NotFound))
     }
 
-    pub fn contribute_witness_input(self, txo: TxOut, outpoint: OutPoint) -> ProvisionalProposal {
+    pub fn contribute_witness_inputs(
+        self,
+        inputs: impl IntoIterator<Item = (OutPoint, TxOut)>,
+    ) -> ProvisionalProposal {
         let mut payjoin_psbt = self.payjoin_psbt.clone();
         // The payjoin proposal must not introduce mixed input sequence numbers
         let original_sequence = self
@@ -499,26 +502,39 @@ impl WantsInputs {
             .map(|input| input.sequence)
             .unwrap_or_default();
 
-        // Add the value of new receiver input to receiver output
-        let txo_value = txo.value;
-        let vout_to_augment =
-            self.owned_vouts.choose(&mut rand::thread_rng()).expect("owned_vouts is empty");
-        payjoin_psbt.unsigned_tx.output[*vout_to_augment].value += txo_value;
-
-        // Insert contribution at random index for privacy
+        // Insert contributions at random indices for privacy
         let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
-        payjoin_psbt
-            .inputs
-            .insert(index, bitcoin::psbt::Input { witness_utxo: Some(txo), ..Default::default() });
-        payjoin_psbt.unsigned_tx.input.insert(
-            index,
-            bitcoin::TxIn {
-                previous_output: outpoint,
-                sequence: original_sequence,
-                ..Default::default()
-            },
-        );
+        let mut receiver_input_amount = Amount::ZERO;
+        for (outpoint, txo) in inputs.into_iter() {
+            receiver_input_amount += txo.value;
+            let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
+            payjoin_psbt.inputs.insert(
+                index,
+                bitcoin::psbt::Input { witness_utxo: Some(txo), ..Default::default() },
+            );
+            payjoin_psbt.unsigned_tx.input.insert(
+                index,
+                bitcoin::TxIn {
+                    previous_output: outpoint,
+                    sequence: original_sequence,
+                    ..Default::default()
+                },
+            );
+        }
+
+        // Add the receiver change amount to the receiver change output, if applicable
+        let receiver_min_input_amount = self.receiver_min_input_amount();
+        if receiver_input_amount >= receiver_min_input_amount {
+            let change_amount = receiver_input_amount - receiver_min_input_amount;
+            // TODO: ensure that owned_vouts only refers to outpoints actually owned by the
+            // receiver (e.g. not a forwarded payment)
+            let vout_to_augment =
+                self.owned_vouts.choose(&mut rand::thread_rng()).expect("owned_vouts is empty");
+            payjoin_psbt.unsigned_tx.output[*vout_to_augment].value += change_amount;
+        } else {
+            todo!("Return an error?");
+        }
+
         ProvisionalProposal {
             original_psbt: self.original_psbt,
             payjoin_psbt,
@@ -527,14 +543,21 @@ impl WantsInputs {
         }
     }
 
-    // TODO: temporary workaround
-    fn skip_contribute_inputs(self) -> ProvisionalProposal {
-        ProvisionalProposal {
-            original_psbt: self.original_psbt,
-            payjoin_psbt: self.payjoin_psbt,
-            params: self.params,
-            owned_vouts: self.owned_vouts,
-        }
+    // Compute the minimum amount that the receiver must contribute to the transaction as input
+    fn receiver_min_input_amount(&self) -> Amount {
+        let output_amount = self
+            .payjoin_psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .fold(Amount::ZERO, |acc, output| acc + output.value);
+        let original_output_amount = self
+            .original_psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .fold(Amount::ZERO, |acc, output| acc + output.value);
+        max(Amount::ZERO, output_amount - original_output_amount)
     }
 }
 
@@ -762,7 +785,7 @@ mod test {
             .expect("Receiver output should be identified")
             .try_substitute_receiver_outputs(None)
             .expect("Substitute outputs should do nothing")
-            .skip_contribute_inputs(); // TODO: temporary workaround
+            .contribute_witness_inputs(vec![]);
 
         let payjoin = payjoin.apply_fee(None);
 

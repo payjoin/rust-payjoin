@@ -92,6 +92,8 @@ impl AppConfig {
 
                 #[cfg(feature = "v2")]
                 let builder = {
+                    use payjoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
+                    use payjoin::base64::Engine;
                     builder
                         .set_override_option(
                             "pj_directory",
@@ -100,7 +102,8 @@ impl AppConfig {
                         .set_override_option(
                             "ohttp_keys",
                             matches.get_one::<String>("ohttp_keys").and_then(|s| {
-                                payjoin::base64::decode_config(s, payjoin::base64::URL_SAFE_NO_PAD)
+                                BASE64_URL_SAFE_NO_PAD
+                                    .decode(s)
                                     .map_err(|e| {
                                         log::error!("Failed to decode ohttp_keys: {}", e);
                                         ConfigError::Message(format!("Invalid ohttp_keys: {}", e))

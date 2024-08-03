@@ -89,6 +89,7 @@ cargo update -p reqwest --precise 0.12.4
 cargo update -p url --precise 2.5.0
 cargo update -p tokio --precise 1.38.1
 cargo update -p which --precise 4.4.0
+cargo update -p zstd-sys --precise 2.0.8+zstd.1.5.5
 ```
 
 ### `payjoin-cli`
@@ -102,6 +103,7 @@ cargo update -p time@0.3.36 --precise 0.3.20
 cargo update -p tokio --precise 1.38.1
 cargo update -p url --precise 2.5.0
 cargo update -p which --precise 4.4.0
+cargo update -p zstd-sys --precise 2.0.8+zstd.1.5.5
 ```
 
 ## Code Formatting

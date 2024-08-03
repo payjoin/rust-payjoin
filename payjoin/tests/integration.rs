@@ -6,7 +6,7 @@ mod integration {
 
     use bitcoin::psbt::Psbt;
     use bitcoin::{Amount, FeeRate, OutPoint};
-    use bitcoind::bitcoincore_rpc::core_rpc_json::{AddressType, WalletProcessPsbtResult};
+    use bitcoind::bitcoincore_rpc::json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use log::{log_enabled, Level};
     use once_cell::sync::{Lazy, OnceCell};
@@ -164,7 +164,7 @@ mod integration {
 
             //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
             let txo_to_contribute = bitcoin::TxOut {
-                value: selected_utxo.amount.to_sat(),
+                value: selected_utxo.amount,
                 script_pubkey: selected_utxo.script_pub_key.clone(),
             };
             let outpoint_to_contribute =
@@ -276,7 +276,7 @@ mod integration {
             let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
             debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
 
-            Ok(payjoin_psbt.extract_tx())
+            Ok(payjoin_psbt.extract_tx()?)
         }
     }
 
@@ -759,7 +759,7 @@ mod integration {
 
             //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
             let txo_to_contribute = bitcoin::TxOut {
-                value: selected_utxo.amount.to_sat(),
+                value: selected_utxo.amount,
                 script_pubkey: selected_utxo.script_pub_key.clone(),
             };
             let outpoint_to_contribute =
@@ -932,8 +932,7 @@ mod integration {
                 sender.wallet_process_psbt(&psbt.to_string(), None, None, None)?.psbt;
             let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.unwrap();
             let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
-
-            Ok(payjoin_psbt.extract_tx())
+            Ok(payjoin_psbt.extract_tx()?)
         }
     }
 }

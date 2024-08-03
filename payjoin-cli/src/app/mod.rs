@@ -117,7 +117,7 @@ fn try_contributing_inputs(
 
     //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
     let txo_to_contribute = bitcoin::TxOut {
-        value: selected_utxo.amount.to_sat(),
+        value: selected_utxo.amount,
         script_pubkey: selected_utxo.script_pub_key.clone(),
     };
     let outpoint_to_contribute =

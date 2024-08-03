@@ -129,7 +129,7 @@ impl<'a> RequestBuilder<'a> {
             .into_iter()
             .enumerate()
             .find(|(_, txo)| payout_scripts.all(|script| script != txo.script_pubkey))
-            .map(|(i, txo)| (i, bitcoin::Amount::from_sat(txo.value)))
+            .map(|(i, txo)| (i, txo.value))
         {
             let input_types = self
                 .psbt
@@ -358,7 +358,8 @@ impl RequestContext {
 
     #[cfg(feature = "v2")]
     fn rs_pubkey_from_dir_endpoint(endpoint: &Url) -> Result<PublicKey, CreateRequestError> {
-        use bitcoin::base64;
+        use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
+        use bitcoin::base64::Engine;
 
         use crate::send::error::ParseSubdirectoryError;
 
@@ -369,7 +370,8 @@ impl RequestContext {
             .ok_or(ParseSubdirectoryError::MissingSubdirectory)?
             .to_string();
 
-        let pubkey_bytes = base64::decode_config(subdirectory, base64::URL_SAFE_NO_PAD)
+        let pubkey_bytes = BASE64_URL_SAFE_NO_PAD
+            .decode(subdirectory)
             .map_err(ParseSubdirectoryError::SubdirectoryNotBase64)?;
         bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
             .map_err(ParseSubdirectoryError::SubdirectoryInvalidPubkey)
@@ -695,7 +697,7 @@ impl ContextV1 {
                         SenderTxinContainsFinalScriptWitness
                     );
                     let prevout = original.previous_txout().expect("We've validated this before");
-                    total_value += bitcoin::Amount::from_sat(prevout.value);
+                    total_value += prevout.value;
                     // We assume the signture will be the same size
                     // I know sigs can be slightly different size but there isn't much to do about
                     // it other than prefer Taproot.
@@ -738,7 +740,7 @@ impl ContextV1 {
                     let txout = proposed
                         .previous_txout()
                         .map_err(InternalValidationError::InvalidProposedInput)?;
-                    total_value += bitcoin::Amount::from_sat(txout.value);
+                    total_value += txout.value;
                     check_eq!(
                         InputType::from_spent_input(txout, proposed.psbtin)?,
                         self.input_type,
@@ -784,8 +786,8 @@ impl ContextV1 {
             proposal.unsigned_tx.output.iter().zip(&proposal.outputs)
         {
             ensure!(proposed_psbtout.bip32_derivation.is_empty(), TxOutContainsKeyPaths);
-            total_value += bitcoin::Amount::from_sat(proposed_txout.value);
-            total_weight += Weight::from_wu(proposed_txout.weight() as u64);
+            total_value += proposed_txout.value;
+            total_weight += proposed_txout.weight();
             match (original_outputs.peek(), self.fee_contribution) {
                 // fee output
                 (
@@ -795,8 +797,7 @@ impl ContextV1 {
                     && *original_output_index == fee_contrib_idx =>
                 {
                     if proposed_txout.value < original_output.value {
-                        contributed_fee =
-                            bitcoin::Amount::from_sat(original_output.value - proposed_txout.value);
+                        contributed_fee = original_output.value - proposed_txout.value;
                         ensure!(contributed_fee < max_fee_contrib, FeeContributionExceedsMaximum);
                         //The remaining fee checks are done in the caller
                     }
@@ -852,7 +853,7 @@ fn check_single_payee(
     for output in &psbt.unsigned_tx.output {
         if output.script_pubkey == *script_pubkey {
             if let Some(amount) = amount {
-                if output.value != amount.to_sat() {
+                if output.value != amount {
                     return Err(InternalCreateRequestError::PayeeValueNotEqual);
                 }
             }
@@ -897,9 +898,9 @@ fn check_fee_output_amount(
     fee: bitcoin::Amount,
     clamp_fee_contribution: bool,
 ) -> Result<bitcoin::Amount, InternalCreateRequestError> {
-    if output.value < fee.to_sat() {
+    if output.value < fee {
         if clamp_fee_contribution {
-            Ok(bitcoin::Amount::from_sat(output.value))
+            Ok(output.value)
         } else {
             Err(InternalCreateRequestError::FeeOutputValueLowerThanFeeContribution)
         }

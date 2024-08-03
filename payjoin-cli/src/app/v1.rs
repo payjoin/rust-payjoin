@@ -72,8 +72,8 @@ impl AppTrait for App {
             .with_context(|| "HTTP request failed")?;
         let fallback_tx = Psbt::from_str(&body)
             .map_err(|e| anyhow!("Failed to load PSBT from base64: {}", e))?
-            .extract_tx();
-        println!("Sent fallback transaction txid: {}", fallback_tx.txid());
+            .extract_tx()?;
+        println!("Sent fallback transaction txid: {}", fallback_tx.compute_txid());
         println!(
             "Sent fallback transaction hex: {:#}",
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
@@ -243,7 +243,10 @@ impl App {
         let payjoin_proposal = self.process_v1_proposal(proposal)?;
         let psbt = payjoin_proposal.psbt();
         let body = psbt.to_string();
-        println!("Responded with Payjoin proposal {}", psbt.clone().extract_tx().txid());
+        println!(
+            "Responded with Payjoin proposal {}",
+            psbt.clone().extract_tx_unchecked_fee_rate().compute_txid()
+        );
         Ok(Response::new(Body::from(body)))
     }
 
@@ -254,12 +257,7 @@ impl App {
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // The network is used for checks later
-        let network = bitcoind
-            .get_blockchain_info()
-            .map_err(|e| Error::Server(e.into()))
-            .and_then(|info| {
-                bitcoin::Network::from_core_arg(&info.chain).map_err(|e| Error::Server(e.into()))
-            })?;
+        let network = bitcoind.get_blockchain_info().map_err(|e| Error::Server(e.into()))?.chain;
 
         // Receive Check 1: Can Broadcast
         let proposal = proposal.check_broadcast_suitability(None, |tx| {
@@ -334,7 +332,7 @@ impl App {
         let payjoin_proposal_psbt = payjoin_proposal.psbt();
         println!(
             "Responded with Payjoin proposal {}",
-            payjoin_proposal_psbt.clone().extract_tx().txid()
+            payjoin_proposal_psbt.clone().extract_tx_unchecked_fee_rate().compute_txid()
         );
         Ok(payjoin_proposal)
     }

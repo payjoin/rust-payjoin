@@ -3,7 +3,7 @@ mod e2e {
     use std::env;
     use std::process::Stdio;
 
-    use bitcoind::bitcoincore_rpc::core_rpc_json::AddressType;
+    use bitcoincore_rpc::json::AddressType;
     use bitcoind::bitcoincore_rpc::RpcApi;
     use log::{log_enabled, Level};
     use payjoin::bitcoin::Amount;

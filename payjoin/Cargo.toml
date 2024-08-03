@@ -24,8 +24,8 @@ io = ["reqwest/rustls-tls"]
 danger-local-https = ["io", "reqwest/rustls-tls", "rustls"]
 
 [dependencies]
-bitcoin = { version = "0.30.0", features = ["base64"] }
-bip21 = "0.3.1"
+bitcoin = { version = "0.32.2", features = ["base64"] }
+bip21 = "0.5.0"
 chacha20poly1305 = { version = "0.10.1", optional = true }
 log = { version = "0.4.14"}
 http = { version = "1", optional = true }
@@ -38,7 +38,7 @@ url = "2.2.2"
 serde_json = "1.0.108"
 
 [dev-dependencies]
-bitcoind = { version = "0.31.1", features = ["0_21_2"] }
+bitcoind = { version = "0.36.0", features = ["0_21_2"] }
 http = "1"
 payjoin-directory = { path = "../payjoin-directory", features = ["danger-local-https"] }
 ohttp-relay = "0.0.8"

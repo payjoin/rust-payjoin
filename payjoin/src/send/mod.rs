@@ -321,7 +321,7 @@ impl RequestContext {
                 return Err(InternalCreateRequestError::Expired(expiry).into());
             }
         }
-        let rs = Self::rs_pubkey_from_dir_endpoint(&self.endpoint)?;
+        let rs = self.extract_rs_pubkey()?;
         let url = self.endpoint.clone();
         let body = serialize_v2_body(
             &self.psbt,
@@ -357,25 +357,23 @@ impl RequestContext {
     }
 
     #[cfg(feature = "v2")]
-    fn rs_pubkey_from_dir_endpoint(endpoint: &Url) -> Result<PublicKey, CreateRequestError> {
+    fn extract_rs_pubkey(&self) -> Result<PublicKey, error::ParseSubdirectoryError> {
         use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
         use bitcoin::base64::Engine;
+        use error::ParseSubdirectoryError;
 
-        use crate::send::error::ParseSubdirectoryError;
-
-        let subdirectory = endpoint
+        let subdirectory = self
+            .endpoint
             .path_segments()
-            .ok_or(ParseSubdirectoryError::MissingSubdirectory)?
-            .next()
-            .ok_or(ParseSubdirectoryError::MissingSubdirectory)?
-            .to_string();
+            .and_then(|mut segments| segments.next())
+            .ok_or(ParseSubdirectoryError::MissingSubdirectory)?;
 
         let pubkey_bytes = BASE64_URL_SAFE_NO_PAD
             .decode(subdirectory)
             .map_err(ParseSubdirectoryError::SubdirectoryNotBase64)?;
+
         bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
             .map_err(ParseSubdirectoryError::SubdirectoryInvalidPubkey)
-            .map_err(CreateRequestError::from)
     }
 
     pub fn endpoint(&self) -> &Url { &self.endpoint }

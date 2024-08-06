@@ -329,11 +329,6 @@ impl App {
             },
             Some(bitcoin::FeeRate::MIN),
         )?;
-        let payjoin_proposal_psbt = payjoin_proposal.psbt();
-        println!(
-            "Responded with Payjoin proposal {}",
-            payjoin_proposal_psbt.clone().extract_tx_unchecked_fee_rate().compute_txid()
-        );
         Ok(payjoin_proposal)
     }
 }

@@ -52,7 +52,7 @@ mod integration {
             let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt, uri)?
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1()?;
-            let headers = HeaderMock::from_vec(&req.body);
+            let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************
             // Inside the Receiver:
@@ -77,9 +77,9 @@ mod integration {
         }
 
         impl HeaderMock {
-            fn from_vec(body: &[u8]) -> HeaderMock {
+            fn new(body: &[u8], content_type: &str) -> HeaderMock {
                 let mut h = HashMap::new();
-                h.insert("content-type".to_string(), payjoin::V1_REQ_CONTENT_TYPE.to_string());
+                h.insert("content-type".to_string(), content_type.to_string());
                 h.insert("content-length".to_string(), body.len().to_string());
                 HeaderMock(h)
             }
@@ -476,11 +476,11 @@ mod integration {
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
                 let mut req_ctx = RequestBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
                     .build_recommended(payjoin::bitcoin::FeeRate::BROADCAST_MIN)?;
-                let (Request { url, body, .. }, send_ctx) =
+                let (Request { url, body, content_type, .. }, send_ctx) =
                     req_ctx.extract_v2(directory.to_owned())?;
                 let response = agent
                     .post(url.clone())
-                    .header("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
+                    .header("Content-Type", content_type)
                     .body(body.clone())
                     .send()
                     .await
@@ -576,7 +576,7 @@ mod integration {
                     .check_pj_supported()
                     .unwrap();
                 let psbt = build_original_psbt(&sender, &pj_uri)?;
-                let (Request { url, body, .. }, send_ctx) =
+                let (Request { url, body, content_type, .. }, send_ctx) =
                     RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
                         .build_with_additional_fee(
                             Amount::from_sat(10000),
@@ -588,7 +588,7 @@ mod integration {
                 log::info!("send fallback v1 to offline receiver fail");
                 let res = agent
                     .post(url.clone())
-                    .header("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
+                    .header("Content-Type", content_type)
                     .body(body.clone())
                     .send()
                     .await;
@@ -631,12 +631,8 @@ mod integration {
                 // **********************
                 // send fallback v1 to online receiver
                 log::info!("send fallback v1 to online receiver should succeed");
-                let response = agent
-                    .post(url)
-                    .header("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
-                    .body(body)
-                    .send()
-                    .await?;
+                let response =
+                    agent.post(url).header("Content-Type", content_type).body(body).send().await?;
                 log::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success());
 

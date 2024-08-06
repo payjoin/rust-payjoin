@@ -92,7 +92,7 @@ impl AppTrait for App {
         let http = http_agent()?;
         let ohttp_response = http
             .post(req.url)
-            .header("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
+            .header("Content-Type", req.content_type)
             .body(req.body)
             .send()
             .await
@@ -156,7 +156,7 @@ impl App {
         let http = http_agent()?;
         let res = http
             .post(req.url)
-            .header("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
+            .header("Content-Type", req.content_type)
             .body(req.body)
             .send()
             .await
@@ -219,7 +219,7 @@ impl App {
             let http = http_agent()?;
             let response = http
                 .post(req.url)
-                .header("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
+                .header("Content-Type", req.content_type)
                 .body(req.body)
                 .send()
                 .await
@@ -251,7 +251,7 @@ impl App {
             let http = http_agent()?;
             let ohttp_response = http
                 .post(req.url)
-                .header("Content-Type", payjoin::V2_REQ_CONTENT_TYPE)
+                .header("Content-Type", req.content_type)
                 .body(req.body)
                 .send()
                 .await

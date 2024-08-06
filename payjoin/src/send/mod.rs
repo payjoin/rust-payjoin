@@ -290,7 +290,7 @@ impl RequestContext {
         .map_err(InternalCreateRequestError::Url)?;
         let body = self.psbt.to_string().as_bytes().to_vec();
         Ok((
-            Request { url, body },
+            Request::new_v1(url, body),
             ContextV1 {
                 original_psbt: self.psbt,
                 disable_output_substitution: self.disable_output_substitution,
@@ -338,7 +338,7 @@ impl RequestContext {
                 .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
         log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
         Ok((
-            Request { url: ohttp_relay, body },
+            Request { url: ohttp_relay, body, content_type: crate::request::V2_REQ_CONTENT_TYPE },
             // this method may be called more than once to re-construct the ohttp, therefore we must clone (or TODO memoize)
             ContextV2 {
                 context_v1: ContextV1 {

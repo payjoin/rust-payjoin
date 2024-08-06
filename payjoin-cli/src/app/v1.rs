@@ -65,7 +65,7 @@ impl AppTrait for App {
         println!("Sending fallback request to {}", &req.url);
         let response = http
             .post(req.url)
-            .header("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
+            .header("Content-Type", req.content_type)
             .body(body.clone())
             .send()
             .await

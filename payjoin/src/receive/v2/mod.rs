@@ -91,7 +91,7 @@ impl SessionInitializer {
             self.context.directory.as_str(),
             Some(subdirectory.as_bytes()),
         )?;
-        let req = Request { url, body };
+        let req = Request::new_v2(url, body);
         Ok((req, ctx))
     }
 
@@ -130,7 +130,7 @@ impl ActiveSession {
         let (body, ohttp_ctx) =
             self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulationError)?;
         let url = self.context.ohttp_relay.clone();
-        let req = Request { url, body };
+        let req = Request::new_v2(url, body);
         Ok((req, ohttp_ctx))
     }
 
@@ -479,7 +479,7 @@ impl PayjoinProposal {
             Some(&body),
         )?;
         let url = self.context.ohttp_relay.clone();
-        let req = Request { url, body };
+        let req = Request::new_v2(url, body);
         Ok((req, ctx))
     }
 

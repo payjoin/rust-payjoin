@@ -279,9 +279,9 @@ impl Eq for RequestContext {}
 
 impl RequestContext {
     /// Extract serialized V1 Request and Context froma Payjoin Proposal
-    pub fn extract_v1(self) -> Result<(Request, ContextV1), CreateRequestError> {
+    pub fn extract_v1(&self) -> Result<(Request, ContextV1), CreateRequestError> {
         let url = serialize_url(
-            self.endpoint,
+            self.endpoint.clone(),
             self.disable_output_substitution,
             self.fee_contribution,
             self.min_fee_rate,
@@ -290,12 +290,12 @@ impl RequestContext {
         .map_err(InternalCreateRequestError::Url)?;
         let body = self.psbt.to_string().as_bytes().to_vec();
         Ok((
-            Request { url, body },
+            Request::new_v1(url, body),
             ContextV1 {
-                original_psbt: self.psbt,
+                original_psbt: self.psbt.clone(),
                 disable_output_substitution: self.disable_output_substitution,
                 fee_contribution: self.fee_contribution,
-                payee: self.payee,
+                payee: self.payee.clone(),
                 input_type: self.input_type,
                 sequence: self.sequence,
                 min_fee_rate: self.min_fee_rate,
@@ -303,7 +303,7 @@ impl RequestContext {
         ))
     }
 
-    /// Extract serialized Request and Context from a Payjoin Proposal.
+    /// Extract serialized Request and Context from a Payjoin Proposal. Automatically selects the correct version.
     ///
     /// In order to support polling, this may need to be called many times to be encrypted with
     /// new unique nonces to make independent OHTTP requests.
@@ -321,7 +321,28 @@ impl RequestContext {
                 return Err(InternalCreateRequestError::Expired(expiry).into());
             }
         }
-        let rs = Self::rs_pubkey_from_dir_endpoint(&self.endpoint)?;
+
+        match self.extract_rs_pubkey() {
+            Ok(rs) => self.extract_v2_strict(ohttp_relay, rs),
+            Err(e) => {
+                log::warn!("Failed to extract `rs` pubkey, falling back to v1: {}", e);
+                let (req, context_v1) = self.extract_v1()?;
+                Ok((req, ContextV2 { context_v1, e: None, ohttp_res: None }))
+            }
+        }
+    }
+
+    /// Extract serialized Request and Context from a Payjoin Proposal.
+    ///
+    /// This method requires the `rs` pubkey to be extracted from the endpoint
+    /// and has no fallback to v1.
+    #[cfg(feature = "v2")]
+    fn extract_v2_strict(
+        &mut self,
+        ohttp_relay: Url,
+        rs: PublicKey,
+    ) -> Result<(Request, ContextV2), CreateRequestError> {
+        use crate::uri::UrlExt;
         let url = self.endpoint.clone();
         let body = serialize_v2_body(
             &self.psbt,
@@ -338,8 +359,7 @@ impl RequestContext {
                 .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
         log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
         Ok((
-            Request { url: ohttp_relay, body },
-            // this method may be called more than once to re-construct the ohttp, therefore we must clone (or TODO memoize)
+            Request::new_v2(ohttp_relay, body),
             ContextV2 {
                 context_v1: ContextV1 {
                     original_psbt: self.psbt.clone(),
@@ -350,32 +370,30 @@ impl RequestContext {
                     sequence: self.sequence,
                     min_fee_rate: self.min_fee_rate,
                 },
-                e: self.e,
-                ohttp_res,
+                e: Some(self.e),
+                ohttp_res: Some(ohttp_res),
             },
         ))
     }
 
     #[cfg(feature = "v2")]
-    fn rs_pubkey_from_dir_endpoint(endpoint: &Url) -> Result<PublicKey, CreateRequestError> {
+    fn extract_rs_pubkey(&self) -> Result<PublicKey, error::ParseSubdirectoryError> {
         use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
         use bitcoin::base64::Engine;
+        use error::ParseSubdirectoryError;
 
-        use crate::send::error::ParseSubdirectoryError;
-
-        let subdirectory = endpoint
+        let subdirectory = self
+            .endpoint
             .path_segments()
-            .ok_or(ParseSubdirectoryError::MissingSubdirectory)?
-            .next()
-            .ok_or(ParseSubdirectoryError::MissingSubdirectory)?
-            .to_string();
+            .and_then(|mut segments| segments.next())
+            .ok_or(ParseSubdirectoryError::MissingSubdirectory)?;
 
         let pubkey_bytes = BASE64_URL_SAFE_NO_PAD
             .decode(subdirectory)
             .map_err(ParseSubdirectoryError::SubdirectoryNotBase64)?;
+
         bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
             .map_err(ParseSubdirectoryError::SubdirectoryInvalidPubkey)
-            .map_err(CreateRequestError::from)
     }
 
     pub fn endpoint(&self) -> &Url { &self.endpoint }
@@ -517,8 +535,8 @@ pub struct ContextV1 {
 #[cfg(feature = "v2")]
 pub struct ContextV2 {
     context_v1: ContextV1,
-    e: bitcoin::secp256k1::SecretKey,
-    ohttp_res: ohttp::ClientResponse,
+    e: Option<bitcoin::secp256k1::SecretKey>,
+    ohttp_res: Option<ohttp::ClientResponse>,
 }
 
 macro_rules! check_eq {
@@ -552,21 +570,26 @@ impl ContextV2 {
         self,
         response: &mut impl std::io::Read,
     ) -> Result<Option<Psbt>, ResponseError> {
-        let mut res_buf = Vec::new();
-        response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
-        let response = crate::v2::ohttp_decapsulate(self.ohttp_res, &res_buf)
-            .map_err(InternalValidationError::OhttpEncapsulation)?;
-        let mut body = match response.status() {
-            http::StatusCode::OK => response.body().to_vec(),
-            http::StatusCode::ACCEPTED => return Ok(None),
-            _ => return Err(InternalValidationError::UnexpectedStatusCode)?,
-        };
-        let psbt = crate::v2::decrypt_message_b(&mut body, self.e)
-            .map_err(InternalValidationError::HpkeError)?;
+        match (self.ohttp_res, self.e) {
+            (Some(ohttp_res), Some(e)) => {
+                let mut res_buf = Vec::new();
+                response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
+                let response = crate::v2::ohttp_decapsulate(ohttp_res, &res_buf)
+                    .map_err(InternalValidationError::OhttpEncapsulation)?;
+                let mut body = match response.status() {
+                    http::StatusCode::OK => response.body().to_vec(),
+                    http::StatusCode::ACCEPTED => return Ok(None),
+                    _ => return Err(InternalValidationError::UnexpectedStatusCode)?,
+                };
+                let psbt = crate::v2::decrypt_message_b(&mut body, e)
+                    .map_err(InternalValidationError::HpkeError)?;
 
-        let proposal = Psbt::deserialize(&psbt).map_err(InternalValidationError::Psbt)?;
-        let processed_proposal = self.context_v1.process_proposal(proposal)?;
-        Ok(Some(processed_proposal))
+                let proposal = Psbt::deserialize(&psbt).map_err(InternalValidationError::Psbt)?;
+                let processed_proposal = self.context_v1.process_proposal(proposal)?;
+                Ok(Some(processed_proposal))
+            }
+            _ => self.context_v1.process_response(response).map(Some),
+        }
     }
 }
 

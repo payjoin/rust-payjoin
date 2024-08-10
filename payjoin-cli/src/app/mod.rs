@@ -11,7 +11,7 @@ use payjoin::{bitcoin, PjUri};
 pub mod config;
 use crate::app::config::AppConfig;
 
-#[cfg(not(feature = "v2"))]
+#[cfg(all(not(feature = "v2"), feature = "v1"))]
 pub(crate) mod v1;
 #[cfg(feature = "v2")]
 pub(crate) mod v2;
@@ -124,13 +124,6 @@ fn try_contributing_inputs(
         bitcoin::OutPoint { txid: selected_utxo.txid, vout: selected_utxo.vout };
     payjoin.contribute_witness_input(txo_to_contribute, outpoint_to_contribute);
     Ok(())
-}
-
-struct Headers<'a>(&'a hyper::HeaderMap);
-impl payjoin::receive::Headers for Headers<'_> {
-    fn get_header(&self, key: &str) -> Option<&str> {
-        self.0.get(key).map(|v| v.to_str()).transpose().ok().flatten()
-    }
 }
 
 #[cfg(feature = "danger-local-https")]

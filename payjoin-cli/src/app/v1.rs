@@ -21,10 +21,17 @@ use tokio::net::TcpListener;
 
 use super::config::AppConfig;
 use super::App as AppTrait;
-use crate::app::{http_agent, try_contributing_inputs, Headers};
+use crate::app::{http_agent, try_contributing_inputs};
 use crate::db::Database;
 #[cfg(feature = "danger-local-https")]
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
+
+struct Headers<'a>(&'a hyper::HeaderMap);
+impl payjoin::receive::Headers for Headers<'_> {
+    fn get_header(&self, key: &str) -> Option<&str> {
+        self.0.get(key).map(|v| v.to_str()).transpose().ok().flatten()
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct App {

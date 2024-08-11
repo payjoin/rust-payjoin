@@ -96,7 +96,7 @@ fn init_ohttp() -> Result<ohttp::Server> {
     use ohttp::{KeyId, SymmetricSuite};
 
     const KEY_ID: KeyId = 1;
-    const KEM: Kem = Kem::X25519Sha256;
+    const KEM: Kem = Kem::K256Sha256;
     const SYMMETRIC: &[SymmetricSuite] =
         &[SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
 
@@ -166,7 +166,10 @@ async fn handle_ohttp(
     let response = handle_v2(pool, request).await?;
 
     let (parts, body) = response.into_parts();
-    let mut bhttp_res = bhttp::Message::response(parts.status.as_u16());
+    let mut bhttp_res = bhttp::Message::response(
+        bhttp::StatusCode::try_from(parts.status.as_u16())
+            .map_err(|e| HandlerError::InternalServerError(e.into()))?,
+    );
     let full_body = hyper::body::to_bytes(body)
         .await
         .map_err(|e| HandlerError::InternalServerError(e.into()))?;

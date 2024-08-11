@@ -54,4 +54,4 @@ ohttp_relay="https://pj.bobspacebkk.com"
 
 # (v2 only, optional) The HPKE keys which need to be fetched ahead of time from the pj_endpoint for the payjoin packets to be encrypted.
 # These can now be fetched and no longer need to be configured.
-ohttp_keys="AQAg3c9qovMZvPzLh8XHgD8q86WG7SmPQvPamCTvEoueKBsABAABAAM"
+ohttp_keys="AQAWBG3fkg7fQCN-bafc-BEJOSnDfq8k1M9Cy1kgQZX42GVOvI0bWVAciTaJCy2A_wy7R7VxtU88xej692bv0uXgt98ABAABAAM"

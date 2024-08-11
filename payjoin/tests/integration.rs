@@ -175,7 +175,7 @@ mod integration {
         #[tokio::test]
         async fn test_bad_ohttp_keys() {
             let bad_ohttp_keys =
-                OhttpKeys::from_str("AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM")
+                OhttpKeys::from_str("AQAWBG3fkg7fQCN-bafc-BEJOSnDfq8k1M9Cy1kgQZX42GVOvI0bWVAciTaJCy2A_wy7R7VxtU88xej692bv0uXgt98ABAABAAM")
                     .expect("Invalid OhttpKeys");
 
             let (cert, key) = local_cert_key();

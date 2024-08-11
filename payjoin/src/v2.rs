@@ -184,8 +184,11 @@ pub fn ohttp_decapsulate(
     let bhttp_body = res_ctx.decapsulate(ohttp_body)?;
     let mut r = std::io::Cursor::new(bhttp_body);
     let m: bhttp::Message = bhttp::Message::read_bhttp(&mut r)?;
+    let status_code = m.control().status().map_or(500, Into::into);
+    let status = http::StatusCode::try_from(status_code)
+        .map_err(|_| OhttpEncapsulationError::Bhttp(bhttp::Error::InvalidStatus))?;
     http::Response::builder()
-        .status(m.control().status().unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR.into()))
+        .status(status)
         .body(m.content().to_vec())
         .map_err(OhttpEncapsulationError::Http)
 }
@@ -345,7 +348,7 @@ mod test {
         use ohttp::hpke::{Aead, Kdf, Kem};
         use ohttp::{KeyId, SymmetricSuite};
         const KEY_ID: KeyId = 1;
-        const KEM: Kem = Kem::X25519Sha256;
+        const KEM: Kem = Kem::K256Sha256;
         const SYMMETRIC: &[SymmetricSuite] =
             &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
         let keys = OhttpKeys(ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap());

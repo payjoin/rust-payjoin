@@ -20,12 +20,17 @@ interface PayjoinError {
     NetworkValidation(string message);
     OhttpError(string message);
     UrlError(string message);
+    IoError(string message);
 };
 
 
 callback interface CanBroadcast {
         [Throws=PayjoinError]
         boolean callback(sequence<u8> tx);
+};
+callback interface GenerateScript {
+        [Throws=PayjoinError]
+        sequence<u8> callback();
 };
 callback interface IsScriptOwned {
         [Throws=PayjoinError]
@@ -75,9 +80,24 @@ interface Uri {
       constructor(string uri);
       string address();
       f64? amount();
+      [Throws=PayjoinError]
+      PjUri check_pj_supported();
+      string as_string();
 };
-interface PjUri{};
-
+interface PjUri{
+      string address();
+      f64? amount();
+      string as_string();
+};
+interface PjUriBuilder{
+      [Throws=PayjoinError]
+      constructor( string address, Url pj, OhttpKeys? ohttp_keys, u64? expiry );
+       PjUriBuilder amount( u64 amount );
+       PjUriBuilder message( string message );
+       PjUriBuilder label( string label );
+       PjUriBuilder pjos( boolean pjos );
+       PjUri build();
+};
 
 interface ClientResponse{};
 
@@ -115,7 +135,7 @@ interface ProvisionalProposal{
       [Throws=PayjoinError]
       void  contribute_non_witness_input(sequence<u8> tx, OutPoint outpoint);
       [Throws=PayjoinError]
-      void substitute_output_address(string substitute_address);
+      void try_substitute_receiver_output(GenerateScript generate_script);
       [Throws=PayjoinError]
       OutPoint try_preserving_privacy(record<u64, OutPoint> candidate_inputs);
       [Throws=PayjoinError]
@@ -129,14 +149,14 @@ interface PayjoinProposal{
 };
 interface RequestBuilder{
       [Throws=PayjoinError, Name=from_psbt_and_uri]
-      constructor(string psbt, Uri uri);
+      constructor(string psbt, PjUri uri);
       RequestBuilder always_disable_output_substitution( boolean disable );
       [Throws=PayjoinError]
       RequestContext build_recommended( u64 min_fee_rate);
       [Throws=PayjoinError]
       RequestContext build_with_additional_fee( u64 max_fee_contribution, u8? change_index, u64 min_fee_rate, boolean clamp_fee_contribution );
       [Throws=PayjoinError]
-      RequestContext build_non_incentivizing();
+      RequestContext build_non_incentivizing( u64 min_fee_rate );
 };
 
 interface RequestContext{
@@ -163,7 +183,7 @@ interface ContextV1{
 
 interface ContextV2{
     [Throws=PayjoinError]
-    string?  process_response( sequence<u8> response );
+    string? process_response( sequence<u8> response );
 };
 
 interface OhttpKeys{
@@ -171,19 +191,21 @@ interface OhttpKeys{
     constructor( sequence<u8> bytes );
 };
 
-interface Enroller{
-   [Name=from_directory_config]
-   constructor(Url directory, OhttpKeys ohttp_keys, Url ohttp_relay);
+interface SessionInitializer{
+   [Throws=PayjoinError]
+   constructor( string address, u64? expire_after, Network network, Url directory, OhttpKeys ohttp_keys, Url ohttp_relay);
    [Throws=PayjoinError]
    RequestResponse extract_req();
    [Throws=PayjoinError]
-   Enrolled process_res(sequence<u8> body, ClientResponse ctx);
+   ActiveSession process_res(sequence<u8> body, ClientResponse ctx);
 };
 
-interface Enrolled {
-     string fallback_target();
+interface ActiveSession {
      [Throws=PayjoinError]
      RequestResponse extract_req();
+     Url pj_url();
+     string public_key();
+     PjUriBuilder pj_uri_builder();
      [Throws=PayjoinError]
      V2UncheckedProposal? process_res(sequence<u8> body, ClientResponse ctx);
 };
@@ -217,7 +239,7 @@ interface V2ProvisionalProposal{
    [Throws=PayjoinError]
    void contribute_non_witness_input(sequence<u8> tx, OutPoint outpoint);
    [Throws=PayjoinError]
-   void substitute_output_address(string substitute_address);
+   void try_substitute_receiver_output(GenerateScript generate_script);
    [Throws=PayjoinError]
    OutPoint try_preserving_privacy(record<u64, OutPoint> candidate_inputs);
    [Throws=PayjoinError]
@@ -229,6 +251,9 @@ interface V2PayjoinProposal{
         boolean is_output_substitution_disabled();
         sequence<u64> owned_vouts();
         string psbt();
+        string extract_v1_req();
         [Throws=PayjoinError]
-        sequence<u8> deserialize_res(sequence<u8> res, ClientResponse ohttp_context);
+        RequestResponse extract_v2_req();
+        [Throws=PayjoinError]
+        void process_res(sequence<u8> res, ClientResponse ohttp_context);
 };

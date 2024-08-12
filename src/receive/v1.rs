@@ -12,7 +12,9 @@ use crate::types::{OutPoint, TxOut};
 pub trait CanBroadcast {
     fn callback(&self, tx: Vec<u8>) -> Result<bool, PayjoinError>;
 }
-
+pub trait GenerateScript {
+    fn callback(&self) -> Result<Vec<u8>, PayjoinError>;
+}
 #[derive(Clone)]
 pub struct Headers(pub HashMap<String, String>);
 
@@ -324,8 +326,16 @@ impl ProvisionalProposal {
     #[cfg(feature = "uniffi")]
     pub fn try_substitute_receiver_output(
         &self,
-        generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>,
+        generate_script: Box<dyn GenerateScript>,
     ) -> Result<(), PayjoinError> {
+        self.mutex_guard()
+            .try_substitute_receiver_output(|| {
+                generate_script
+                    .callback()
+                    .map(|e| payjoin::bitcoin::ScriptBuf::from_bytes(e))
+                    .map_err(|e| payjoin::Error::Server(Box::new(e)))
+            })
+            .map_err(|e| e.into())
     }
     pub fn contribute_witness_input(
         &self,

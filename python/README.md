@@ -37,23 +37,6 @@ python -m unittest --verbose test/payjoin_unit_test.py
 
 Before diving into the integration test, you'll need to set up Bitcoin Core on the regtest network. If you don't have Bitcoin Core installed locally, check out [this installation guide](https://learn.saylor.org/mod/page/view.php?id=36347). Alternatively, you can use `Nigiri Bitcoin`, a tool designed to streamline the process of running local instances of Bitcoin and Liquid networks for development and testing. Follow the instructions [here](https://github.com/vulpemventures/nigiri) to install it on your machine.
 
-Once Nigiri Bitcoin is up and running, replace the following snippet in `payjoin_integration_test.py` with your `Nigiri Bitcoin` Core credentials:
-
-```
-rpc_user = "bitcoin"
-rpc_password = "bitcoin"
-
-```
-
-By default, these credentials are:
-
-```
-rpc_user = "admin1"
-rpc_password = "123"
-rpc_host = "localhost"
-rpc_port = "18443"
-
-```
 Now, proceed with the integration test:
 
 ```shell

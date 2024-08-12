@@ -15,7 +15,6 @@ import hashlib
 import unittest
 from pprint import *
 from bitcoin import SelectParams
-from bitcoin.core import Hash160, CMutableTransaction, CTransaction
 from bitcoin.core.script import (
     CScript,
     OP_0,
@@ -88,12 +87,10 @@ class TestPayjoin(unittest.TestCase):
         pj_uri_string = "{}?amount={}&pj=https://example.com".format(
             f"bitcoin:{str(pj_uri_address)}", 1
         )
-        print(f"\npj_uri_string: {pj_uri_string}")
-        prj_uri = Uri.from_str(pj_uri_string)
-        print(f"\nprj_uri: {prj_uri}")
+        prj_uri = Uri.from_str(pj_uri_string).check_pj_supported()
+        print(f"\nprj_uri: {prj_uri.as_string()}")
         outputs = {}
         outputs[prj_uri.address()] = prj_uri.amount()
-        pprint(outputs)
         pre_processed_psbt = self.sender._call(
             "walletcreatefundedpsbt",
             [],
@@ -177,8 +174,6 @@ class TestPayjoin(unittest.TestCase):
             txid=selected_utxo["txid"], vout=int(selected_utxo["vout"])
         )
         payjoin.contribute_witness_input(txo_to_contribute, outpoint_to_contribute)
-        receiver_substitute_address = connection.getnewaddress()
-        payjoin.substitute_output_address(str(receiver_substitute_address))
         payjoin_proposal = payjoin.finalize_proposal(
             ProcessPartiallySignedTransactionCallBack(connection=connection),
             1,
@@ -229,7 +224,6 @@ class ScriptOwnershipCallback(IsScriptOwned):
         try:
             script = CScript(bytes(script))      
             witness_program = script[2:]   
-            print(witness_program)
             address = P2WPKHBitcoinAddress.from_bytes(0, witness_program)
             return self.connection._call("getaddressinfo", str(address))["ismine"]
         except Exception as e:

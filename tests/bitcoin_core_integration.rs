@@ -61,9 +61,12 @@ fn v1_to_v1_full_cycle() -> Result<(), BoxError> {
         .psbt;
     let psbt_base64 = sender.wallet_process_psbt(&psbt, None, None, None)?.psbt;
     eprintln!("Original psbt: {:#?}", psbt_base64);
-    let req_ctx = RequestBuilder::from_psbt_and_uri(psbt_base64, Arc::new(pj_uri.check_pj_supported().unwrap()))?
-        .build_with_additional_fee(10000, None, 0, false)?
-        .extract_v1()?;
+    let req_ctx = RequestBuilder::from_psbt_and_uri(
+        psbt_base64,
+        Arc::new(pj_uri.check_pj_supported().unwrap()),
+    )?
+    .build_with_additional_fee(10000, None, 0, false)?
+    .extract_v1()?;
     let req = req_ctx.request;
     let ctx = req_ctx.context_v1;
     let headers = Headers::from_vec(req.body.clone());

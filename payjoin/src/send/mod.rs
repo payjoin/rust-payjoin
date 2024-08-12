@@ -800,7 +800,8 @@ impl ContextV1 {
     }
 
     fn check_outputs(&self, proposal: &Psbt) -> InternalResult<OutputStats> {
-        let mut original_outputs = proposal.unsigned_tx.output.iter().enumerate().peekable();
+        let mut original_outputs =
+            self.original_psbt.unsigned_tx.output.iter().enumerate().peekable();
         let mut total_value = bitcoin::Amount::ZERO;
         let mut contributed_fee = bitcoin::Amount::ZERO;
         let mut total_weight = Weight::ZERO;
@@ -821,7 +822,7 @@ impl ContextV1 {
                 {
                     if proposed_txout.value < original_output.value {
                         contributed_fee = original_output.value - proposed_txout.value;
-                        ensure!(contributed_fee < max_fee_contrib, FeeContributionExceedsMaximum);
+                        ensure!(contributed_fee <= max_fee_contrib, FeeContributionExceedsMaximum);
                         //The remaining fee checks are done in the caller
                     }
                     original_outputs.next();
@@ -1058,7 +1059,7 @@ mod test {
         let ctx = super::ContextV1 {
             original_psbt,
             disable_output_substitution: false,
-            fee_contribution: None,
+            fee_contribution: Some((bitcoin::Amount::from_sat(182), 0)),
             min_fee_rate: FeeRate::ZERO,
             payee,
             input_type: InputType::SegWitV0 { ty: SegWitV0Type::Pubkey, nested: true },
@@ -1081,6 +1082,27 @@ mod test {
             input.bip32_derivation.clear();
         }
         proposal.inputs_mut()[0].witness_utxo = None;
+        ctx.process_proposal(proposal).unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_receiver_steals_sender_change() {
+        let original_psbt = Psbt::from_str(ORIGINAL_PSBT).unwrap();
+        eprintln!("original: {:#?}", original_psbt);
+        let ctx = create_v1_context();
+        let mut proposal = Psbt::from_str(PAYJOIN_PROPOSAL).unwrap();
+        eprintln!("proposal: {:#?}", proposal);
+        for output in proposal.outputs_mut() {
+            output.bip32_derivation.clear();
+        }
+        for input in proposal.inputs_mut() {
+            input.bip32_derivation.clear();
+        }
+        proposal.inputs_mut()[0].witness_utxo = None;
+        // Steal 0.5 BTC from the sender output and add it to the receiver output
+        proposal.unsigned_tx.output[0].value -= bitcoin::Amount::from_btc(0.5).unwrap();
+        proposal.unsigned_tx.output[1].value += bitcoin::Amount::from_btc(0.5).unwrap();
         ctx.process_proposal(proposal).unwrap();
     }
 

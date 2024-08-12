@@ -408,10 +408,6 @@ impl ProvisionalProposal {
         self.inner.contribute_witness_input(txo, outpoint)
     }
 
-    pub fn contribute_non_witness_input(&mut self, tx: bitcoin::Transaction, outpoint: OutPoint) {
-        self.inner.contribute_non_witness_input(tx, outpoint)
-    }
-
     pub fn is_output_substitution_disabled(&self) -> bool {
         self.inner.is_output_substitution_disabled()
     }

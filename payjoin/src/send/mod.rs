@@ -722,15 +722,37 @@ pub(crate) fn from_psbt_and_uri(
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use bitcoin::psbt::Psbt;
+    use bitcoin::FeeRate;
+
+    use crate::psbt::PsbtExt;
+
+    const ORIGINAL_PSBT: &str = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+    const PAYJOIN_PROPOSAL: &str = "cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAQEgqBvXBQAAAAAXqRTeTh6QYcpZE1sDWtXm1HmQRUNU0IcBBBYAFMeKRXJTVYKNVlgHTdUmDV/LaYUwIgYDFZrAGqDVh1TEtNi300ntHt/PCzYrT2tVEGcjooWPhRYYSFzWUDEAAIABAACAAAAAgAEAAAAAAAAAAAEBIICEHgAAAAAAF6kUyPLL+cphRyyI5GTUazV0hF2R2NWHAQcXFgAUX4BmVeWSTJIEwtUb5TlPS/ntohABCGsCRzBEAiBnu3tA3yWlT0WBClsXXS9j69Bt+waCs9JcjWtNjtv7VgIge2VYAaBeLPDB6HGFlpqOENXMldsJezF9Gs5amvDQRDQBIQJl1jz1tBt8hNx2owTm+4Du4isx0pmdKNMNIjjaMHFfrQABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUIgICygvBWB5prpfx61y1HDAwo37kYP3YRJBvAjtunBAur3wYSFzWUDEAAIABAACAAAAAgAEAAAABAAAAAAA=";
+
+    fn create_v1_context() -> super::Context {
+        use crate::input_type::{InputType, SegWitV0Type};
+        let original_psbt = Psbt::from_str(ORIGINAL_PSBT).unwrap();
+        eprintln!("original: {:#?}", original_psbt);
+        let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
+        let sequence = original_psbt.unsigned_tx.input[0].sequence;
+        let ctx = super::Context {
+            original_psbt,
+            disable_output_substitution: false,
+            fee_contribution: Some((bitcoin::Amount::from_sat(182), 0)),
+            min_fee_rate: FeeRate::ZERO,
+            payee,
+            input_type: InputType::SegWitV0 { ty: SegWitV0Type::Pubkey, nested: true },
+            sequence,
+        };
+        ctx
+    }
+
     #[test]
     fn official_vectors() {
-        use std::str::FromStr;
-
-        use bitcoin::psbt::Psbt;
-        use bitcoin::FeeRate;
-
         use crate::input_type::{InputType, SegWitV0Type};
-        use crate::psbt::PsbtExt;
 
         let original_psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
 
@@ -758,6 +780,27 @@ mod tests {
             input.bip32_derivation.clear();
         }
         proposal.inputs_mut()[0].witness_utxo = None;
+        ctx.process_proposal(proposal).unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_receiver_steals_sender_change() {
+        let original_psbt = Psbt::from_str(ORIGINAL_PSBT).unwrap();
+        eprintln!("original: {:#?}", original_psbt);
+        let ctx = create_v1_context();
+        let mut proposal = Psbt::from_str(PAYJOIN_PROPOSAL).unwrap();
+        eprintln!("proposal: {:#?}", proposal);
+        for output in proposal.outputs_mut() {
+            output.bip32_derivation.clear();
+        }
+        for input in proposal.inputs_mut() {
+            input.bip32_derivation.clear();
+        }
+        proposal.inputs_mut()[0].witness_utxo = None;
+        // Steal 0.5 BTC from the sender output and add it to the receiver output
+        proposal.unsigned_tx.output[0].value -= 50000000;
+        proposal.unsigned_tx.output[1].value += 50000000;
         ctx.process_proposal(proposal).unwrap();
     }
 }

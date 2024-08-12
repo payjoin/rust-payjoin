@@ -459,41 +459,6 @@ impl ProvisionalProposal {
         );
     }
 
-    pub fn contribute_non_witness_input(&mut self, tx: bitcoin::Transaction, outpoint: OutPoint) {
-        // The payjoin proposal must not introduce mixed input sequence numbers
-        let original_sequence = self
-            .payjoin_psbt
-            .unsigned_tx
-            .input
-            .first()
-            .map(|input| input.sequence)
-            .unwrap_or_default();
-
-        // Add the value of new receiver input to receiver output
-        let txo_value = tx.output[outpoint.vout as usize].value;
-        let vout_to_augment =
-            self.owned_vouts.choose(&mut rand::thread_rng()).expect("owned_vouts is empty");
-        self.payjoin_psbt.unsigned_tx.output[*vout_to_augment].value += txo_value;
-
-        // Insert contribution at random index for privacy
-        let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
-
-        // Add the new input to the PSBT
-        self.payjoin_psbt.inputs.insert(
-            index,
-            bitcoin::psbt::Input { non_witness_utxo: Some(tx), ..Default::default() },
-        );
-        self.payjoin_psbt.unsigned_tx.input.insert(
-            index,
-            bitcoin::TxIn {
-                previous_output: outpoint,
-                sequence: original_sequence,
-                ..Default::default()
-            },
-        );
-    }
-
     pub fn is_output_substitution_disabled(&self) -> bool {
         self.params.disable_output_substitution
     }

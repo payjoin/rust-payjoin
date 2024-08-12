@@ -760,4 +760,25 @@ mod tests {
         proposal.inputs_mut()[0].witness_utxo = None;
         ctx.process_proposal(proposal).unwrap();
     }
+
+    #[test]
+    #[should_panic]
+    fn test_receiver_steals_sender_change() {
+        let original_psbt = Psbt::from_str(ORIGINAL_PSBT).unwrap();
+        eprintln!("original: {:#?}", original_psbt);
+        let ctx = create_v1_context();
+        let mut proposal = Psbt::from_str(PAYJOIN_PROPOSAL).unwrap();
+        eprintln!("proposal: {:#?}", proposal);
+        for output in proposal.outputs_mut() {
+            output.bip32_derivation.clear();
+        }
+        for input in proposal.inputs_mut() {
+            input.bip32_derivation.clear();
+        }
+        proposal.inputs_mut()[0].witness_utxo = None;
+        // Steal 0.5 BTC from the sender output and add it to the receiver output
+        proposal.unsigned_tx.output[0].value -= bitcoin::Amount::from_btc(0.5).unwrap();
+        proposal.unsigned_tx.output[1].value += bitcoin::Amount::from_btc(0.5).unwrap();
+        ctx.process_proposal(proposal).unwrap();
+    }
 }

@@ -1,5 +1,12 @@
 # Payjoin Changelog
 
+## 0.20.0
+
+- remove `contribute_non_witness_input` because it was unused
+- Fix output checks
+- Make backwards-compatible v2 to v1 sends possible
+- Bump bitcoin to v0.32.2
+
 ## 0.19.0
 
 This release attempts to stabilize the Payjoin V2 Bitcoin URI format. That includes placing v2-specific parameters in the URI's pj parameter's fragment and including the `exp` expiration parameter.

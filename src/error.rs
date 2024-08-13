@@ -80,7 +80,7 @@ impl_from_error! {
     ohttp::Error => OhttpError,
     PsbtParseError => PsbtParseError,
     payjoin::bitcoin::consensus::encode::Error => TransactionError,
-    payjoin::bitcoin::address::Error => InvalidAddress,
+    payjoin::bitcoin::address::ParseError => InvalidAddress,
     RequestError => RequestError,
     PdkResponseError => ResponseError,
     ValidationError => ValidationError,

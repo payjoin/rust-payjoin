@@ -462,16 +462,14 @@ impl PayjoinProposal {
             }
             None => Ok(self.extract_v1_req().as_bytes().to_vec()),
         }?;
-        let post_payjoin_target = format!(
-            "{}{}/payjoin",
-            self.context.directory.as_str(),
-            subdir_path_from_pubkey(&self.context.s.public_key())
-        );
+        let subdir_path = subdir_path_from_pubkey(&self.context.s.public_key());
+        let post_payjoin_target =
+            self.context.directory.join(&subdir_path).map_err(|e| Error::Server(e.into()))?;
         log::debug!("Payjoin post target: {}", post_payjoin_target.as_str());
         let (body, ctx) = crate::v2::ohttp_encapsulate(
             &mut self.context.ohttp_keys,
-            "POST",
-            &post_payjoin_target,
+            "PUT",
+            post_payjoin_target.as_str(),
             Some(&body),
         )?;
         let url = self.context.ohttp_relay.clone();

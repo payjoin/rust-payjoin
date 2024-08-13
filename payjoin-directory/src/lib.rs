@@ -224,7 +224,7 @@ async fn handle_v2(
         (Method::POST, &["", ""]) => post_session(body).await,
         (Method::POST, &["", id]) => post_fallback_v2(id, body, pool).await,
         (Method::GET, &["", id]) => get_fallback(id, pool).await,
-        (Method::POST, &["", id, "payjoin"]) => post_payjoin(id, body, pool).await,
+        (Method::PUT, &["", id]) => post_payjoin(id, body, pool).await,
         _ => Ok(not_found()),
     }
 }

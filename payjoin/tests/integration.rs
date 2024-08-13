@@ -5,7 +5,7 @@ mod integration {
     use std::str::FromStr;
 
     use bitcoin::psbt::Psbt;
-    use bitcoin::{Amount, FeeRate, OutPoint};
+    use bitcoin::{Amount, FeeRate, OutPoint, Weight};
     use bitcoind::bitcoincore_rpc::json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use log::{log_enabled, Level};
@@ -20,6 +20,14 @@ mod integration {
     static INIT_TRACING: OnceCell<()> = OnceCell::new();
     static EXAMPLE_URL: Lazy<Url> =
         Lazy::new(|| Url::parse("https://example.com").expect("Invalid Url"));
+
+    // See https://jlopp.github.io/bitcoin-transaction-size-calculator/
+    // Base weight of an empty transaction (no inputs, no outputs)
+    static BASE_WEIGHT: Weight = Weight::from_vb_unchecked(11);
+    // Per-input weight for P2WPKH inputs
+    static INPUT_WEIGHT: Weight = Weight::from_vb_unchecked(68);
+    // Per-output weight for P2WPKH inputs
+    static OUTPUT_WEIGHT: Weight = Weight::from_vb_unchecked(31);
 
     #[cfg(not(feature = "v2"))]
     mod v1 {
@@ -39,6 +47,8 @@ mod integration {
                 .amount(Amount::ONE_BTC)
                 .build();
 
+            // **********************
+            // Inside the Sender:
             // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let uri = Uri::from_str(&pj_uri.to_string())
                 .unwrap()
@@ -55,16 +65,28 @@ mod integration {
             // **********************
             // Inside the Receiver:
             // this data would transit from one party to another over the network in production
-            let response = handle_v1_pj_request(req, headers, receiver);
+            let response = handle_v1_pj_request(req, headers, &receiver);
             // this response would be returned as http response to the sender
 
             // **********************
             // Inside the Sender:
-
             // Sender checks, signs, finalizes, extracts, and broadcasts
             let checked_payjoin_proposal_psbt = ctx.process_response(&mut response.as_bytes())?;
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
+
+            // Check resulting transaction and balances
+            let input_count = payjoin_tx.input.len() as u64;
+            let output_count = payjoin_tx.output.len() as u64;
+            let tx_weight = BASE_WEIGHT + input_count * INPUT_WEIGHT + output_count * OUTPUT_WEIGHT;
+            let network_fees = tx_weight * FeeRate::BROADCAST_MIN;
+            assert_eq!(input_count, 2);
+            assert_eq!(output_count, 2);
+            assert_eq!(receiver.get_balances()?.mine.untrusted_pending, Amount::from_btc(51.0)?);
+            assert_eq!(
+                sender.get_balances()?.mine.untrusted_pending,
+                Amount::from_btc(49.0)? - network_fees
+            );
             Ok(())
         }
     }
@@ -264,7 +286,7 @@ mod integration {
                     .unwrap();
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
                 let mut req_ctx = RequestBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
-                    .build_recommended(payjoin::bitcoin::FeeRate::BROADCAST_MIN)?;
+                    .build_recommended(FeeRate::BROADCAST_MIN)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
                     req_ctx.extract_v2(directory.to_owned())?;
                 let response = agent
@@ -290,7 +312,7 @@ mod integration {
                 // POST payjoin
                 let proposal =
                     session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?.unwrap();
-                let mut payjoin_proposal = handle_directory_proposal(receiver, proposal);
+                let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal);
                 assert!(!payjoin_proposal.is_output_substitution_disabled());
                 let (req, ctx) = payjoin_proposal.extract_v2_req()?;
                 let response = agent.post(req.url).body(req.body).send().await?;
@@ -300,7 +322,6 @@ mod integration {
                 // **********************
                 // Inside the Sender:
                 // Sender checks, signs, finalizes, extracts, and broadcasts
-
                 // Replay post fallback to get the response
                 let (Request { url, body, .. }, send_ctx) =
                     req_ctx.extract_v2(directory.to_owned())?;
@@ -311,6 +332,24 @@ mod integration {
                 let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
                 log::info!("sent");
+
+                // Check resulting transaction and balances
+                let input_count = payjoin_tx.input.len() as u64;
+                let output_count = payjoin_tx.output.len() as u64;
+                let tx_weight =
+                    BASE_WEIGHT + input_count * INPUT_WEIGHT + output_count * OUTPUT_WEIGHT;
+                // NOTE: No one is contributing fees for the receiver input because the sender has
+                // no change output and the receiver doesn't contribute fees
+                let network_fees =
+                    (tx_weight - 1 * INPUT_WEIGHT) * FeeRate::from_sat_per_vb_unchecked(2);
+                // Sender sent the entire value of their utxo to receiver (minus fees)
+                assert_eq!(input_count, 2);
+                assert_eq!(output_count, 1);
+                assert_eq!(
+                    receiver.get_balances()?.mine.untrusted_pending,
+                    Amount::from_btc(100.0)? - network_fees
+                );
+                assert_eq!(sender.get_balances()?.mine.untrusted_pending, Amount::from_btc(0.0)?);
                 Ok(())
             }
         }
@@ -335,24 +374,36 @@ mod integration {
                 .unwrap();
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             let mut req_ctx = RequestBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
-                .build_recommended(payjoin::bitcoin::FeeRate::BROADCAST_MIN)?;
+                .build_recommended(FeeRate::BROADCAST_MIN)?;
             let (req, ctx) = req_ctx.extract_v2(EXAMPLE_URL.to_owned())?;
             let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************
             // Inside the Receiver:
             // this data would transit from one party to another over the network in production
-            let response = handle_v1_pj_request(req, headers, receiver);
+            let response = handle_v1_pj_request(req, headers, &receiver);
             // this response would be returned as http response to the sender
 
             // **********************
             // Inside the Sender:
-
             // Sender checks, signs, finalizes, extracts, and broadcasts
             let checked_payjoin_proposal_psbt =
                 ctx.process_response(&mut response.as_bytes())?.unwrap();
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
+
+            // Check resulting transaction and balances
+            let input_count = payjoin_tx.input.len() as u64;
+            let output_count = payjoin_tx.output.len() as u64;
+            let tx_weight = BASE_WEIGHT + input_count * INPUT_WEIGHT + output_count * OUTPUT_WEIGHT;
+            let network_fees = tx_weight * FeeRate::BROADCAST_MIN;
+            assert_eq!(input_count, 2);
+            assert_eq!(output_count, 2);
+            assert_eq!(receiver.get_balances()?.mine.untrusted_pending, Amount::from_btc(51.0)?);
+            assert_eq!(
+                sender.get_balances()?.mine.untrusted_pending,
+                Amount::from_btc(49.0)? - network_fees
+            );
             Ok(())
         }
 
@@ -427,6 +478,8 @@ mod integration {
                 // **********************
                 // Inside the Receiver:
                 let agent_clone: Arc<Client> = agent.clone();
+                let receiver: Arc<bitcoincore_rpc::Client> = Arc::new(receiver);
+                let receiver_clone = receiver.clone();
                 let receiver_loop = tokio::task::spawn(async move {
                     let agent_clone = agent_clone.clone();
                     let (response, ctx) = loop {
@@ -446,7 +499,7 @@ mod integration {
                         }
                     };
                     let proposal = session.process_res(response.as_slice(), ctx).unwrap().unwrap();
-                    let mut payjoin_proposal = handle_directory_proposal(receiver, proposal);
+                    let mut payjoin_proposal = handle_directory_proposal(&receiver_clone, proposal);
                     assert!(payjoin_proposal.is_output_substitution_disabled());
                     // Respond with payjoin psbt within the time window the sender is willing to wait
                     // this response would be returned as http response to the sender
@@ -475,6 +528,23 @@ mod integration {
                 assert!(
                     receiver_loop.await.is_ok(),
                     "The spawned task panicked or returned an error"
+                );
+
+                // Check resulting transaction and balances
+                let input_count = payjoin_tx.input.len() as u64;
+                let output_count = payjoin_tx.output.len() as u64;
+                let tx_weight =
+                    BASE_WEIGHT + input_count * INPUT_WEIGHT + output_count * OUTPUT_WEIGHT;
+                let network_fees = tx_weight * FeeRate::BROADCAST_MIN;
+                assert_eq!(input_count, 2);
+                assert_eq!(output_count, 2);
+                assert_eq!(
+                    receiver.get_balances()?.mine.untrusted_pending,
+                    Amount::from_btc(51.0)?
+                );
+                assert_eq!(
+                    sender.get_balances()?.mine.untrusted_pending,
+                    Amount::from_btc(49.0)? - network_fees
                 );
                 Ok(())
             }
@@ -535,7 +605,7 @@ mod integration {
         }
 
         fn handle_directory_proposal(
-            receiver: bitcoincore_rpc::Client,
+            receiver: &bitcoincore_rpc::Client,
             proposal: UncheckedProposal,
         ) -> PayjoinProposal {
             // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
@@ -618,7 +688,7 @@ mod integration {
                             })
                             .unwrap())
                     },
-                    Some(bitcoin::FeeRate::MIN),
+                    Some(FeeRate::BROADCAST_MIN),
                 )
                 .unwrap();
             payjoin_proposal
@@ -740,7 +810,7 @@ mod integration {
         outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap_or(Amount::ONE_BTC));
         let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
             lock_unspent: Some(true),
-            fee_rate: Some(Amount::from_sat(2000)),
+            fee_rate: Some(Amount::from_sat(1000)),
             ..Default::default()
         };
         let psbt = sender
@@ -761,7 +831,7 @@ mod integration {
     fn handle_v1_pj_request(
         req: Request,
         headers: impl payjoin::receive::Headers,
-        receiver: bitcoincore_rpc::Client,
+        receiver: &bitcoincore_rpc::Client,
     ) -> String {
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
         let proposal = payjoin::receive::UncheckedProposal::from_request(
@@ -779,7 +849,7 @@ mod integration {
 
     fn handle_proposal(
         proposal: payjoin::receive::UncheckedProposal,
-        receiver: bitcoincore_rpc::Client,
+        receiver: &bitcoincore_rpc::Client,
     ) -> payjoin::receive::PayjoinProposal {
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
@@ -861,7 +931,7 @@ mod integration {
                         })
                         .unwrap())
                 },
-                Some(bitcoin::FeeRate::MIN),
+                Some(FeeRate::BROADCAST_MIN),
             )
             .unwrap();
         payjoin_proposal

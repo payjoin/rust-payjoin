@@ -1,5 +1,10 @@
 # payjoin-cli Changelog
 
+## 0.0.9-alpha
+
+- Make backwards-compatible v2 to v1 sends possible
+- Bump payjoin to v0.20.0
+
 ## 0.0.8-alpha
 
 This release attempts to stabilize the Payjoin V2 Bitcoin URI format. That includes placing v2-specific parameters in the URI's pj parameter's fragment and including the exp expiration parameter.

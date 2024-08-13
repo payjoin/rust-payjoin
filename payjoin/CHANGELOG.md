@@ -1,5 +1,9 @@
 # Payjoin Changelog
 
+## 0.13.1
+
+- Fix output checks
+
 ## 0.13.0
 
 ### API

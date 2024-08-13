@@ -1,5 +1,9 @@
 # Payjoin Changelog
 
+## 0.8.3
+
+- Fix output checks
+
 ## 0.8.1
 
 - Bump `bitcoin-0.30.0`

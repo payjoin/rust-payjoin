@@ -360,8 +360,22 @@ impl WantsOutputs {
         match outputs {
             Some(o) => {
                 if self.params.disable_output_substitution {
-                    // TODO: only fail if the original output's amount decreased or its script pubkey is not in `outputs`
-                    return Err(Error::Server("Output substitution is disabled.".into()));
+                    // Receiver may not change the script pubkey or decrease the value of the
+                    // their output, but can still increase the amount or add new outputs.
+                    // https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#payment-output-substitution
+                    let original_output = &self.psbt.unsigned_tx.output[self.owned_vouts[0]];
+                    match o.iter().find(|txo| txo.script_pubkey == original_output.script_pubkey) {
+                        Some(txo) if txo.value < original_output.value => {
+                            return Err(Error::Server(
+                                "Decreasing the receiver output value is not allowed".into(),
+                            ));
+                        }
+                        None =>
+                            return Err(Error::Server(
+                                "Changing the receiver output script pubkey is not allowed".into(),
+                            )),
+                        _ => log::info!("Receiver is augmenting outputs"),
+                    }
                 }
                 let mut replacement_outputs = o.into_iter();
                 let mut outputs = vec![];

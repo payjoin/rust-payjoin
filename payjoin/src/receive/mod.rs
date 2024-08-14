@@ -37,7 +37,6 @@ mod optional_parameters;
 #[cfg(feature = "v2")]
 pub mod v2;
 
-use bitcoin::secp256k1::rand::seq::SliceRandom;
 use bitcoin::secp256k1::rand::{self, Rng};
 pub use error::{Error, RequestError, SelectionError};
 use error::{InternalRequestError, InternalSelectionError};
@@ -325,15 +324,32 @@ impl OutputsUnknown {
             return Err(Error::BadRequest(InternalRequestError::MissingPayment.into()));
         }
 
-        Ok(WantsOutputs { psbt: self.psbt, params: self.params, owned_vouts })
+        let mut params = self.params.clone();
+        if let Some((_, additional_fee_output_index)) = params.additional_fee_contribution {
+            // If the additional fee output index specified by the sender is pointing to a receiver output,
+            // the receiver should ignore the parameter.
+            if owned_vouts.contains(&additional_fee_output_index) {
+                params.additional_fee_contribution = None;
+            }
+        }
+
+        Ok(WantsOutputs {
+            original_psbt: self.psbt.clone(),
+            payjoin_psbt: self.psbt,
+            params,
+            change_vout: owned_vouts[0],
+            owned_vouts,
+        })
     }
 }
 
 /// A checked proposal that the receiver may substitute or add outputs to
 #[derive(Debug, Clone)]
 pub struct WantsOutputs {
-    psbt: Psbt,
+    original_psbt: Psbt,
+    payjoin_psbt: Psbt,
     params: Params,
+    change_vout: usize,
     owned_vouts: Vec<usize>,
 }
 
@@ -342,70 +358,97 @@ impl WantsOutputs {
         self.params.disable_output_substitution
     }
 
-    /// If output substitution is enabled, replace the receiver's output script with a new one.
-    pub fn try_substitute_receiver_output(
-        self,
-        generate_script: impl Fn() -> Result<bitcoin::ScriptBuf, Error>,
-    ) -> Result<WantsInputs, Error> {
-        let output_value = self.psbt.unsigned_tx.output[self.owned_vouts[0]].value;
-        let outputs = vec![TxOut { value: output_value, script_pubkey: generate_script()? }];
-        self.try_substitute_receiver_outputs(Some(outputs))
+    /// Substitute the receiver output script with the provided script.
+    pub fn substitute_receiver_script(self, output_script: &Script) -> Result<WantsOutputs, Error> {
+        let output_value = self.original_psbt.unsigned_tx.output[self.change_vout].value;
+        let outputs = vec![TxOut { value: output_value, script_pubkey: output_script.into() }];
+        self.replace_receiver_outputs(outputs, output_script)
     }
 
-    pub fn try_substitute_receiver_outputs(
+    /// Replace **all** receiver outputs with one or more provided outputs.
+    /// The drain script specifies which address to *drain* coins to. An output corresponding to
+    /// that address must be included in `replacement_outputs`. The value of that output may be
+    /// increased or decreased depending on the receiver's input contributions and whether the
+    /// receiver needs to pay for additional miner fees (e.g. in the case of adding many outputs).
+    pub fn replace_receiver_outputs(
         self,
-        outputs: Option<Vec<TxOut>>,
-    ) -> Result<WantsInputs, Error> {
-        let mut payjoin_psbt = self.psbt.clone();
-        match outputs {
-            Some(o) => {
-                if self.params.disable_output_substitution {
-                    // Receiver may not change the script pubkey or decrease the value of the
-                    // their output, but can still increase the amount or add new outputs.
-                    // https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#payment-output-substitution
-                    let original_output = &self.psbt.unsigned_tx.output[self.owned_vouts[0]];
-                    match o.iter().find(|txo| txo.script_pubkey == original_output.script_pubkey) {
-                        Some(txo) if txo.value < original_output.value => {
-                            return Err(Error::Server(
-                                "Decreasing the receiver output value is not allowed".into(),
-                            ));
-                        }
-                        None =>
-                            return Err(Error::Server(
-                                "Changing the receiver output script pubkey is not allowed".into(),
-                            )),
-                        _ => log::info!("Receiver is augmenting outputs"),
-                    }
+        replacement_outputs: Vec<TxOut>,
+        drain_script: &Script,
+    ) -> Result<WantsOutputs, Error> {
+        let mut payjoin_psbt = self.original_psbt.clone();
+        let mut change_vout: Option<usize> = None;
+        if self.params.disable_output_substitution {
+            // Receiver may not change the script pubkey or decrease the value of the
+            // their output, but can still increase the amount or add new outputs.
+            // https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#payment-output-substitution
+            let original_output = &self.original_psbt.unsigned_tx.output[self.owned_vouts[0]];
+            match replacement_outputs
+                .iter()
+                .find(|txo| txo.script_pubkey == original_output.script_pubkey)
+            {
+                Some(txo) if txo.value < original_output.value => {
+                    return Err(Error::Server(
+                        "Decreasing the receiver output value is not allowed".into(),
+                    ));
                 }
-                let mut replacement_outputs = o.into_iter();
-                let mut outputs = vec![];
-                for (i, output) in self.psbt.unsigned_tx.output.iter().enumerate() {
-                    if self.owned_vouts.contains(&i) {
-                        // Receiver output: substitute with a provided output
-                        // TODO: pick from outputs in random order?
-                        outputs.push(
-                            replacement_outputs
-                                .next()
-                                .ok_or(Error::Server("Not enough outputs".into()))?,
-                        );
-                    } else {
-                        // Sender output: leave it as is
-                        outputs.push(output.clone());
-                    }
-                }
-                // Append all remaining outputs
-                outputs.extend(replacement_outputs);
-                payjoin_psbt.unsigned_tx.output = outputs;
-                // TODO: update self.owned_vouts?
+                None =>
+                    return Err(Error::Server(
+                        "Changing the receiver output script pubkey is not allowed".into(),
+                    )),
+                _ => log::info!("Receiver is augmenting outputs"),
             }
-            None => log::info!("No outputs provided: skipping output substitution."),
         }
-        Ok(WantsInputs {
-            original_psbt: self.psbt,
+        let mut outputs = vec![];
+        let mut replacement_outputs = replacement_outputs.clone();
+        let mut rng = rand::thread_rng();
+        // Replace the existing receiver outputs
+        for (i, output) in self.original_psbt.unsigned_tx.output.iter().enumerate() {
+            if self.owned_vouts.contains(&i) {
+                // Receiver output: substitute with a provided output picked randomly
+                if replacement_outputs.is_empty() {
+                    return Err(Error::Server("Not enough outputs".into()));
+                }
+                let index = rng.gen_range(0..replacement_outputs.len());
+                let txo = replacement_outputs.swap_remove(index);
+                if *drain_script == txo.script_pubkey {
+                    change_vout = Some(i);
+                }
+                outputs.push(txo);
+            } else {
+                // Sender output: leave it as is
+                outputs.push(output.clone());
+            }
+        }
+        // Append all remaining outputs
+        while !replacement_outputs.is_empty() {
+            let index = rng.gen_range(0..replacement_outputs.len());
+            let txo = replacement_outputs.swap_remove(index);
+            if *drain_script == txo.script_pubkey {
+                change_vout = Some(outputs.len());
+            }
+            outputs.push(txo);
+            // Additional outputs must also be added to the PSBT outputs data structure
+            payjoin_psbt.outputs.push(Default::default());
+        }
+        payjoin_psbt.unsigned_tx.output = outputs;
+        Ok(WantsOutputs {
+            original_psbt: self.original_psbt,
             payjoin_psbt,
             params: self.params,
+            change_vout: change_vout.ok_or(Error::Server("Invalid drain script".into()))?,
             owned_vouts: self.owned_vouts,
         })
+    }
+
+    /// Proceed to the input contribution step.
+    /// Outputs cannot be modified after this function is called.
+    pub fn commit_outputs(self) -> WantsInputs {
+        WantsInputs {
+            original_psbt: self.original_psbt,
+            payjoin_psbt: self.payjoin_psbt,
+            params: self.params,
+            change_vout: self.change_vout,
+        }
     }
 }
 
@@ -415,7 +458,7 @@ pub struct WantsInputs {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,
     params: Params,
-    owned_vouts: Vec<usize>,
+    change_vout: usize,
 }
 
 impl WantsInputs {
@@ -451,8 +494,8 @@ impl WantsInputs {
     /// UIH "Unnecessary input heuristic" is one class of heuristics to avoid. We define
     /// UIH1 and UIH2 according to the BlockSci practice
     /// BlockSci UIH1 and UIH2:
-    // if min(in) > min(out) then UIH1 else UIH2
-    // https://eprint.iacr.org/2022/589.pdf
+    /// if min(in) > min(out) then UIH1 else UIH2
+    /// https://eprint.iacr.org/2022/589.pdf
     fn avoid_uih(
         &self,
         candidate_inputs: HashMap<Amount, OutPoint>,
@@ -464,16 +507,16 @@ impl WantsInputs {
             .iter()
             .map(|output| output.value)
             .min()
-            .unwrap_or_else(|| Amount::MAX_MONEY);
+            .unwrap_or(Amount::MAX_MONEY);
 
         let min_original_in_sats = self
             .payjoin_psbt
             .input_pairs()
             .filter_map(|input| input.previous_txout().ok().map(|txo| txo.value))
             .min()
-            .unwrap_or_else(|| Amount::MAX_MONEY);
+            .unwrap_or(Amount::MAX_MONEY);
 
-        let prior_payment_sats = self.payjoin_psbt.unsigned_tx.output[self.owned_vouts[0]].value;
+        let prior_payment_sats = self.payjoin_psbt.unsigned_tx.output[self.change_vout].value;
 
         for candidate in candidate_inputs {
             let candidate_sats = candidate.0;
@@ -502,10 +545,12 @@ impl WantsInputs {
             .ok_or(SelectionError::from(InternalSelectionError::NotFound))
     }
 
+    /// Add the provided list of inputs to the transaction.
+    /// Any excess input amount is added to the change_vout output indicated previously.
     pub fn contribute_witness_inputs(
         self,
         inputs: impl IntoIterator<Item = (OutPoint, TxOut)>,
-    ) -> ProvisionalProposal {
+    ) -> WantsInputs {
         let mut payjoin_psbt = self.payjoin_psbt.clone();
         // The payjoin proposal must not introduce mixed input sequence numbers
         let original_sequence = self
@@ -540,20 +585,16 @@ impl WantsInputs {
         let receiver_min_input_amount = self.receiver_min_input_amount();
         if receiver_input_amount >= receiver_min_input_amount {
             let change_amount = receiver_input_amount - receiver_min_input_amount;
-            // TODO: ensure that owned_vouts only refers to outpoints actually owned by the
-            // receiver (e.g. not a forwarded payment)
-            let vout_to_augment =
-                self.owned_vouts.choose(&mut rand::thread_rng()).expect("owned_vouts is empty");
-            payjoin_psbt.unsigned_tx.output[*vout_to_augment].value += change_amount;
+            payjoin_psbt.unsigned_tx.output[self.change_vout].value += change_amount;
         } else {
             todo!("Return an error?");
         }
 
-        ProvisionalProposal {
+        WantsInputs {
             original_psbt: self.original_psbt,
             payjoin_psbt,
             params: self.params,
-            owned_vouts: self.owned_vouts,
+            change_vout: self.change_vout,
         }
     }
 
@@ -573,6 +614,17 @@ impl WantsInputs {
             .fold(Amount::ZERO, |acc, output| acc + output.value);
         max(Amount::ZERO, output_amount - original_output_amount)
     }
+
+    /// Proceed to the proposal finalization step.
+    /// Inputs cannot be modified after this function is called.
+    pub fn commit_inputs(self) -> ProvisionalProposal {
+        ProvisionalProposal {
+            original_psbt: self.original_psbt,
+            payjoin_psbt: self.payjoin_psbt,
+            params: self.params,
+            change_vout: self.change_vout,
+        }
+    }
 }
 
 /// A checked proposal that the receiver may sign and finalize to make a proposal PSBT that the
@@ -582,7 +634,7 @@ pub struct ProvisionalProposal {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,
     params: Params,
-    owned_vouts: Vec<usize>,
+    change_vout: usize,
 }
 
 impl ProvisionalProposal {
@@ -621,11 +673,21 @@ impl ProvisionalProposal {
             );
             if let Some((_, additional_fee_output_index)) = self.params.additional_fee_contribution
             {
-                if !self.owned_vouts.contains(&additional_fee_output_index) {
-                    // remove additional miner fee from the sender's specified output
-                    self.payjoin_psbt.unsigned_tx.output[additional_fee_output_index].value -=
-                        additional_fee;
-                }
+                // Find the sender's specified output in the original psbt.
+                // This step is necessary because the sender output may have shifted if new
+                // receiver outputs were added to the payjoin psbt.
+                let sender_fee_output =
+                    &self.original_psbt.unsigned_tx.output[additional_fee_output_index];
+                // Find the index of that output in the payjoin psbt
+                let sender_fee_vout = self
+                    .payjoin_psbt
+                    .unsigned_tx
+                    .output
+                    .iter()
+                    .position(|txo| txo.script_pubkey == sender_fee_output.script_pubkey)
+                    .expect("Sender output is missing from payjoin PSBT");
+                // Remove additional miner fee from the sender's specified output
+                self.payjoin_psbt.unsigned_tx.output[sender_fee_vout].value -= additional_fee;
             }
         }
         Ok(&self.payjoin_psbt)
@@ -660,11 +722,7 @@ impl ProvisionalProposal {
             self.payjoin_psbt.inputs[i].tap_key_sig = None;
         }
 
-        Ok(PayjoinProposal {
-            payjoin_psbt: self.payjoin_psbt,
-            owned_vouts: self.owned_vouts,
-            params: self.params,
-        })
+        Ok(PayjoinProposal { payjoin_psbt: self.payjoin_psbt, params: self.params })
     }
 
     fn sender_input_indexes(&self) -> Vec<usize> {
@@ -710,7 +768,6 @@ impl ProvisionalProposal {
 pub struct PayjoinProposal {
     payjoin_psbt: Psbt,
     params: Params,
-    owned_vouts: Vec<usize>,
 }
 
 impl PayjoinProposal {
@@ -721,8 +778,6 @@ impl PayjoinProposal {
     pub fn is_output_substitution_disabled(&self) -> bool {
         self.params.disable_output_substitution
     }
-
-    pub fn owned_vouts(&self) -> &Vec<usize> { &self.owned_vouts }
 
     pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
 }
@@ -797,9 +852,8 @@ mod test {
                         .unwrap())
             })
             .expect("Receiver output should be identified")
-            .try_substitute_receiver_outputs(None)
-            .expect("Substitute outputs should do nothing")
-            .contribute_witness_inputs(vec![]);
+            .commit_outputs()
+            .commit_inputs();
 
         let payjoin = payjoin.apply_fee(None);
 

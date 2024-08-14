@@ -316,21 +316,24 @@ impl App {
         })?;
         log::trace!("check4");
 
-        let provisional_payjoin = payjoin.identify_receiver_outputs(|output_script| {
-            if let Ok(address) = bitcoin::Address::from_script(output_script, network) {
-                bitcoind
-                    .get_address_info(&address)
-                    .map(|info| info.is_mine.unwrap_or(false))
-                    .map_err(|e| Error::Server(e.into()))
-            } else {
-                Ok(false)
-            }
-        })?;
+        let payjoin = payjoin
+            .identify_receiver_outputs(|output_script| {
+                if let Ok(address) = bitcoin::Address::from_script(output_script, network) {
+                    bitcoind
+                        .get_address_info(&address)
+                        .map(|info| info.is_mine.unwrap_or(false))
+                        .map_err(|e| Error::Server(e.into()))
+                } else {
+                    Ok(false)
+                }
+            })?
+            .commit_outputs();
 
-        let provisional_payjoin = provisional_payjoin.try_substitute_receiver_outputs(None)?;
-
-        let provisional_payjoin = try_contributing_inputs(provisional_payjoin, &bitcoind)
-            .map_err(|e| Error::Server(e.into()))?;
+        let provisional_payjoin = try_contributing_inputs(payjoin.clone(), &bitcoind)
+            .unwrap_or_else(|e| {
+                log::warn!("Failed to contribute inputs: {}", e);
+                payjoin.commit_inputs()
+            });
 
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &Psbt| {
@@ -372,7 +375,9 @@ fn try_contributing_inputs(
         script_pubkey: selected_utxo.script_pub_key.clone(),
     };
 
-    Ok(payjoin.contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)]))
+    Ok(payjoin
+        .contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)])
+        .commit_inputs())
 }
 
 async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::OhttpKeys> {

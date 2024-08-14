@@ -329,7 +329,7 @@ impl App {
         })?;
         log::trace!("check4");
 
-        let provisional_payjoin = payjoin.identify_receiver_outputs(|output_script| {
+        let payjoin = payjoin.identify_receiver_outputs(|output_script| {
             if let Ok(address) = bitcoin::Address::from_script(output_script, network) {
                 bitcoind
                     .get_address_info(&address)
@@ -340,17 +340,22 @@ impl App {
             }
         })?;
 
-        let provisional_payjoin = provisional_payjoin.try_substitute_receiver_output(|| {
-            Ok(bitcoind
-                .get_new_address(None, None)
-                .map_err(|e| Error::Server(e.into()))?
-                .require_network(network)
-                .map_err(|e| Error::Server(e.into()))?
-                .script_pubkey())
-        })?;
+        let payjoin = payjoin
+            .substitute_receiver_script(
+                &bitcoind
+                    .get_new_address(None, None)
+                    .map_err(|e| Error::Server(e.into()))?
+                    .require_network(network)
+                    .map_err(|e| Error::Server(e.into()))?
+                    .script_pubkey(),
+            )?
+            .commit_outputs();
 
-        let provisional_payjoin = try_contributing_inputs(provisional_payjoin, &bitcoind)
-            .map_err(|e| Error::Server(e.into()))?;
+        let provisional_payjoin = try_contributing_inputs(payjoin.clone(), &bitcoind)
+            .unwrap_or_else(|e| {
+                log::warn!("Failed to contribute inputs: {}", e);
+                payjoin.commit_inputs()
+            });
 
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &Psbt| {
@@ -390,7 +395,9 @@ fn try_contributing_inputs(
         script_pubkey: selected_utxo.script_pub_key.clone(),
     };
 
-    Ok(payjoin.contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)]))
+    Ok(payjoin
+        .contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)])
+        .commit_inputs())
 }
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {

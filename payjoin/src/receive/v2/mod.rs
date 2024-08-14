@@ -401,21 +401,31 @@ impl WantsOutputs {
         self.inner.is_output_substitution_disabled()
     }
 
-    /// If output substitution is enabled, replace the receiver's output script with a new one.
-    pub fn try_substitute_receiver_output(
-        self,
-        generate_script: impl Fn() -> Result<bitcoin::ScriptBuf, Error>,
-    ) -> Result<WantsInputs, Error> {
-        let inner = self.inner.try_substitute_receiver_output(generate_script)?;
-        Ok(WantsInputs { inner, context: self.context })
+    /// Substitute the receiver output script with the provided script.
+    pub fn substitute_receiver_script(self, output_script: &Script) -> Result<WantsOutputs, Error> {
+        let inner = self.inner.substitute_receiver_script(output_script)?;
+        Ok(WantsOutputs { inner, context: self.context })
     }
 
-    pub fn try_substitute_receiver_outputs(
+    /// Replace **all** receiver outputs with one or more provided outputs.
+    /// The drain script specifies which address to *drain* coins to. An output corresponding to
+    /// that address must be included in `replacement_outputs`. The value of that output may be
+    /// increased or decreased depending on the receiver's input contributions and whether the
+    /// receiver needs to pay for additional miner fees (e.g. in the case of adding many outputs).
+    pub fn replace_receiver_outputs(
         self,
-        generate_outputs: Option<Vec<TxOut>>,
-    ) -> Result<WantsInputs, Error> {
-        let inner = self.inner.try_substitute_receiver_outputs(generate_outputs)?;
-        Ok(WantsInputs { inner, context: self.context })
+        replacement_outputs: Vec<TxOut>,
+        drain_script: &Script,
+    ) -> Result<WantsOutputs, Error> {
+        let inner = self.inner.replace_receiver_outputs(replacement_outputs, drain_script)?;
+        Ok(WantsOutputs { inner, context: self.context })
+    }
+
+    /// Proceed to the input contribution step.
+    /// Outputs cannot be modified after this function is called.
+    pub fn commit_outputs(self) -> WantsInputs {
+        let inner = self.inner.commit_outputs();
+        WantsInputs { inner, context: self.context }
     }
 }
 
@@ -436,8 +446,8 @@ impl WantsInputs {
     /// UIH "Unnecessary input heuristic" is one class of them to avoid. We define
     /// UIH1 and UIH2 according to the BlockSci practice
     /// BlockSci UIH1 and UIH2:
-    // if min(in) > min(out) then UIH1 else UIH2
-    // https://eprint.iacr.org/2022/589.pdf
+    /// if min(in) > min(out) then UIH1 else UIH2
+    /// https://eprint.iacr.org/2022/589.pdf
     pub fn try_preserving_privacy(
         &self,
         candidate_inputs: HashMap<Amount, OutPoint>,
@@ -445,11 +455,20 @@ impl WantsInputs {
         self.inner.try_preserving_privacy(candidate_inputs)
     }
 
+    /// Add the provided list of inputs to the transaction.
+    /// Any excess input amount is added to the change_vout output indicated previously.
     pub fn contribute_witness_inputs(
         self,
         inputs: impl IntoIterator<Item = (OutPoint, TxOut)>,
-    ) -> ProvisionalProposal {
+    ) -> WantsInputs {
         let inner = self.inner.contribute_witness_inputs(inputs);
+        WantsInputs { inner, context: self.context }
+    }
+
+    /// Proceed to the proposal finalization step.
+    /// Inputs cannot be modified after this function is called.
+    pub fn commit_inputs(self) -> ProvisionalProposal {
+        let inner = self.inner.commit_inputs();
         ProvisionalProposal { inner, context: self.context }
     }
 }
@@ -488,8 +507,6 @@ impl PayjoinProposal {
     pub fn is_output_substitution_disabled(&self) -> bool {
         self.inner.is_output_substitution_disabled()
     }
-
-    pub fn owned_vouts(&self) -> &Vec<usize> { self.inner.owned_vouts() }
 
     pub fn psbt(&self) -> &Psbt { self.inner.psbt() }
 

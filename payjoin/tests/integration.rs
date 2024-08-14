@@ -626,9 +626,7 @@ mod integration {
                 })
                 .expect("Receiver should have at least one output");
 
-            let payjoin = payjoin
-                .try_substitute_receiver_outputs(None)
-                .expect("Could not substitute outputs");
+            let payjoin = payjoin.commit_outputs();
 
             // Select receiver payjoin inputs. TODO Lock them.
             let available_inputs = receiver.list_unspent(None, None, None, None, None).unwrap();
@@ -647,8 +645,9 @@ mod integration {
                 script_pubkey: selected_utxo.script_pub_key.clone(),
             };
 
-            let payjoin =
-                payjoin.contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)]);
+            let payjoin = payjoin
+                .contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)])
+                .commit_inputs();
 
             // Sign and finalize the proposal PSBT
             let payjoin_proposal = payjoin
@@ -874,10 +873,11 @@ mod integration {
             .expect("Receiver should have at least one output");
 
         let payjoin = payjoin
-            .try_substitute_receiver_output(|| {
-                Ok(receiver.get_new_address(None, None).unwrap().assume_checked().script_pubkey())
-            })
-            .expect("Could not substitute outputs");
+            .substitute_receiver_script(
+                &receiver.get_new_address(None, None).unwrap().assume_checked().script_pubkey(),
+            )
+            .expect("Could not substitute outputs")
+            .commit_outputs();
 
         // Select receiver payjoin inputs. TODO Lock them.
         let available_inputs = receiver.list_unspent(None, None, None, None, None).unwrap();
@@ -896,8 +896,9 @@ mod integration {
             script_pubkey: selected_utxo.script_pub_key.clone(),
         };
 
-        let payjoin =
-            payjoin.contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)]);
+        let payjoin = payjoin
+            .contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)])
+            .commit_inputs();
 
         let payjoin_proposal = payjoin
             .finalize_proposal(

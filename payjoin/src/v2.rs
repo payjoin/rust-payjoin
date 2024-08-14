@@ -167,6 +167,7 @@ pub fn ohttp_encapsulate(
         authority_bytes,
         url.path().as_bytes().to_vec(),
     );
+    // None of our messages include headers, so we don't add them
     if let Some(body) = body {
         bhttp_message.write_content(body);
     }
@@ -184,7 +185,12 @@ pub fn ohttp_decapsulate(
     let bhttp_body = res_ctx.decapsulate(ohttp_body)?;
     let mut r = std::io::Cursor::new(bhttp_body);
     let m: bhttp::Message = bhttp::Message::read_bhttp(&mut r)?;
-    http::Response::builder()
+    let mut builder = http::Response::builder();
+    for field in m.header().iter() {
+        println!("Adding header: {:?}, {:?}", field.name(), field.value());
+        builder = builder.header(field.name(), field.value());
+    }
+    builder
         .status(m.control().status().unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR.into()))
         .body(m.content().to_vec())
         .map_err(OhttpEncapsulationError::Http)

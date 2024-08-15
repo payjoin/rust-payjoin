@@ -17,7 +17,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let db_host = env::var("PJ_DB_HOST").unwrap_or_else(|_| DEFAULT_DB_HOST.to_string());
 
-    payjoin_directory::listen_tcp(dir_port, db_host, timeout).await
+    let base_url = env::var("PJ_DIR_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string());
+
+    payjoin_directory::listen_tcp(base_url, dir_port, db_host, timeout).await
 }
 
 fn init_logging() {

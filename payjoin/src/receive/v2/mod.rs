@@ -29,6 +29,7 @@ static TWENTY_FOUR_HOURS_DEFAULT_EXPIRY: Duration = Duration::from_secs(60 * 60 
 struct SessionContext {
     address: Address,
     directory: url::Url,
+    subdirectory: Option<url::Url>,
     ohttp_keys: OhttpKeys,
     expiry: SystemTime,
     ohttp_relay: url::Url,
@@ -72,6 +73,7 @@ impl SessionInitializer {
             context: SessionContext {
                 address,
                 directory,
+                subdirectory: None,
                 ohttp_keys,
                 ohttp_relay,
                 expiry: SystemTime::now()
@@ -96,7 +98,7 @@ impl SessionInitializer {
     }
 
     pub fn process_res(
-        self,
+        mut self,
         mut res: impl std::io::Read,
         ctx: ohttp::ClientResponse,
     ) -> Result<ActiveSession, Error> {
@@ -106,6 +108,15 @@ impl SessionInitializer {
         if !response.status().is_success() {
             return Err(Error::Server("Enrollment failed, expected success status".into()));
         }
+        log::debug!("Received response headers: {:?}", response.headers());
+        let location = response
+            .headers()
+            .get("location")
+            .ok_or(Error::Server("Missing location header".into()))?
+            .to_str()
+            .map_err(|e| Error::Server(format!("Invalid location header: {}", e).into()))?;
+        self.context.subdirectory =
+            Some(url::Url::parse(location).map_err(|e| Error::Server(e.into()))?);
 
         Ok(ActiveSession { context: self.context.clone() })
     }
@@ -462,16 +473,14 @@ impl PayjoinProposal {
             }
             None => Ok(self.extract_v1_req().as_bytes().to_vec()),
         }?;
-        let post_payjoin_target = format!(
-            "{}{}/payjoin",
-            self.context.directory.as_str(),
-            subdir_path_from_pubkey(&self.context.s.public_key())
-        );
+        let subdir_path = subdir_path_from_pubkey(&self.context.s.public_key());
+        let post_payjoin_target =
+            self.context.directory.join(&subdir_path).map_err(|e| Error::Server(e.into()))?;
         log::debug!("Payjoin post target: {}", post_payjoin_target.as_str());
         let (body, ctx) = crate::v2::ohttp_encapsulate(
             &mut self.context.ohttp_keys,
-            "POST",
-            &post_payjoin_target,
+            "PUT",
+            post_payjoin_target.as_str(),
             Some(&body),
         )?;
         let url = self.context.ohttp_relay.clone();
@@ -511,6 +520,7 @@ impl Serialize for SessionContext {
         let mut state = serializer.serialize_struct("SessionContext", 4)?;
         state.serialize_field("address", &self.address)?;
         state.serialize_field("directory", &self.directory)?;
+        state.serialize_field("subdirectory", &self.subdirectory)?;
         state.serialize_field("ohttp_keys", &self.ohttp_keys)?;
         state.serialize_field("ohttp_relay", &self.ohttp_relay)?;
         state.serialize_field("expiry", &self.expiry)?;
@@ -531,6 +541,7 @@ impl<'de> Deserialize<'de> for SessionContext {
         enum Field {
             Address,
             Directory,
+            Subdirectory,
             OhttpKeys,
             OhttpRelay,
             Expiry,
@@ -553,6 +564,7 @@ impl<'de> Deserialize<'de> for SessionContext {
             {
                 let mut address: Option<Address<NetworkUnchecked>> = None;
                 let mut directory = None;
+                let mut subdirectory = None;
                 let mut ohttp_keys = None;
                 let mut ohttp_relay = None;
                 let mut expiry = None;
@@ -571,6 +583,12 @@ impl<'de> Deserialize<'de> for SessionContext {
                                 return Err(de::Error::duplicate_field("directory"));
                             }
                             directory = Some(map.next_value()?);
+                        }
+                        Field::Subdirectory => {
+                            if subdirectory.is_some() {
+                                return Err(de::Error::duplicate_field("subdirectory"));
+                            }
+                            subdirectory = Some(map.next_value()?);
                         }
                         Field::OhttpKeys => {
                             if ohttp_keys.is_some() {
@@ -608,6 +626,8 @@ impl<'de> Deserialize<'de> for SessionContext {
                     .ok_or_else(|| de::Error::missing_field("address"))
                     .map(|a| a.assume_checked())?;
                 let directory = directory.ok_or_else(|| de::Error::missing_field("directory"))?;
+                let subdirectory =
+                    subdirectory.ok_or_else(|| de::Error::missing_field("subdirectory"))?;
                 let ohttp_keys =
                     ohttp_keys.ok_or_else(|| de::Error::missing_field("ohttp_keys"))?;
                 let ohttp_relay =
@@ -615,7 +635,16 @@ impl<'de> Deserialize<'de> for SessionContext {
                 let expiry = expiry.ok_or_else(|| de::Error::missing_field("expiry"))?;
                 let s = s.ok_or_else(|| de::Error::missing_field("s"))?;
                 let e = e.ok_or_else(|| de::Error::missing_field("e"))?;
-                Ok(SessionContext { address, directory, ohttp_keys, ohttp_relay, expiry, s, e })
+                Ok(SessionContext {
+                    address,
+                    directory,
+                    subdirectory,
+                    ohttp_keys,
+                    ohttp_relay,
+                    expiry,
+                    s,
+                    e,
+                })
             }
         }
 
@@ -644,6 +673,7 @@ mod test {
                     .unwrap()
                     .assume_checked(),
                 directory: url::Url::parse("https://directory.com").unwrap(),
+                subdirectory: None,
                 ohttp_keys: OhttpKeys(
                     ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap(),
                 ),

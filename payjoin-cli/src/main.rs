@@ -7,7 +7,7 @@ use url::Url;
 mod app;
 mod db;
 
-#[cfg(not(feature = "v2"))]
+#[cfg(all(not(feature = "v2"), feature = "v1"))]
 use app::v1::App;
 #[cfg(feature = "v2")]
 use app::v2::App;

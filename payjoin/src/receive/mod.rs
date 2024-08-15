@@ -587,7 +587,7 @@ impl WantsInputs {
             let change_amount = receiver_input_amount - receiver_min_input_amount;
             payjoin_psbt.unsigned_tx.output[self.change_vout].value += change_amount;
         } else {
-            todo!("Return an error?");
+            todo!("Input amount is not enough to cover additional output value");
         }
 
         WantsInputs {
@@ -612,7 +612,7 @@ impl WantsInputs {
             .output
             .iter()
             .fold(Amount::ZERO, |acc, output| acc + output.value);
-        max(Amount::ZERO, output_amount - original_output_amount)
+        output_amount.checked_sub(original_output_amount).unwrap_or(Amount::ZERO)
     }
 
     /// Proceed to the proposal finalization step.

@@ -6,7 +6,7 @@ mod integration {
 
     use bitcoin::policy::DEFAULT_MIN_RELAY_TX_FEE;
     use bitcoin::psbt::Psbt;
-    use bitcoin::{Amount, FeeRate, OutPoint, Weight};
+    use bitcoin::{Amount, FeeRate, OutPoint, TxOut, Weight};
     use bitcoind::bitcoincore_rpc::json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use log::{log_enabled, Level};
@@ -58,7 +58,7 @@ mod integration {
             // **********************
             // Inside the Receiver:
             // this data would transit from one party to another over the network in production
-            let response = handle_v1_pj_request(req, headers, &receiver);
+            let response = handle_v1_pj_request(req, headers, &receiver, None, None, None);
             // this response would be returned as http response to the sender
 
             // **********************
@@ -364,7 +364,7 @@ mod integration {
             // **********************
             // Inside the Receiver:
             // this data would transit from one party to another over the network in production
-            let response = handle_v1_pj_request(req, headers, &receiver);
+            let response = handle_v1_pj_request(req, headers, &receiver, None, None, None);
             // this response would be returned as http response to the sender
 
             // **********************
@@ -736,6 +736,197 @@ mod integration {
         }
     }
 
+    #[cfg(not(feature = "v2"))]
+    mod batching {
+        use payjoin::UriExt;
+
+        use super::*;
+
+        // In this test the receiver consolidates a bunch of UTXOs into the destination output
+        #[test]
+        fn receiver_consolidates_utxos() -> Result<(), BoxError> {
+            init_tracing();
+            let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
+            // Generate more UTXOs for the receiver
+            let receiver_address =
+                receiver.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
+            bitcoind.client.generate_to_address(199, &receiver_address)?;
+            let receiver_utxos = receiver.list_unspent(None, None, None, None, None).unwrap();
+            assert_eq!(100, receiver_utxos.len(), "receiver doesn't have enough UTXOs");
+            assert_eq!(
+                Amount::from_btc(3700.0)?, // 48*50.0 + 52*25.0 (halving occurs every 150 blocks)
+                receiver.get_balances()?.mine.trusted,
+                "receiver doesn't have enough bitcoin"
+            );
+
+            // Receiver creates the payjoin URI
+            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
+            let pj_uri = PjUriBuilder::new(pj_receiver_address, EXAMPLE_URL.to_owned())
+                .amount(Amount::ONE_BTC)
+                .build();
+
+            // **********************
+            // Inside the Sender:
+            // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
+            let uri = Uri::from_str(&pj_uri.to_string())
+                .unwrap()
+                .assume_checked()
+                .check_pj_supported()
+                .unwrap();
+            let psbt = build_original_psbt(&sender, &uri)?;
+            log::debug!("Original psbt: {:#?}", psbt);
+            let max_additional_fee = Amount::from_sat(1000);
+            let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt.clone(), uri)?
+                .build_with_additional_fee(max_additional_fee, None, FeeRate::ZERO, false)?
+                .extract_v1()?;
+            let headers = HeaderMock::new(&req.body, req.content_type);
+
+            // **********************
+            // Inside the Receiver:
+            // this data would transit from one party to another over the network in production
+            let outputs = vec![TxOut {
+                value: Amount::from_btc(3700.0)?,
+                script_pubkey: receiver
+                    .get_new_address(None, None)?
+                    .assume_checked()
+                    .script_pubkey(),
+            }];
+            let drain_script = outputs[0].script_pubkey.clone();
+            let inputs = receiver_utxos
+                .iter()
+                .map(|utxo| {
+                    let outpoint = OutPoint { txid: utxo.txid, vout: utxo.vout };
+                    let txo = bitcoin::TxOut {
+                        value: utxo.amount,
+                        script_pubkey: utxo.script_pub_key.clone(),
+                    };
+                    (outpoint, txo)
+                })
+                .collect();
+            let response = handle_v1_pj_request(
+                req,
+                headers,
+                &receiver,
+                Some(outputs),
+                Some(&drain_script),
+                Some(inputs),
+            );
+            // this response would be returned as http response to the sender
+
+            // **********************
+            // Inside the Sender:
+            // Sender checks, signs, finalizes, extracts, and broadcasts
+            let checked_payjoin_proposal_psbt = ctx.process_response(&mut response.as_bytes())?;
+            let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
+            sender.send_raw_transaction(&payjoin_tx)?;
+
+            // Check resulting transaction and balances
+            let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
+            // The sender pays (original tx fee + max additional fee)
+            let original_tx_fee = psbt.fee()?;
+            let sender_fee = original_tx_fee + max_additional_fee;
+            // The receiver pays the difference
+            let receiver_fee = network_fees - sender_fee;
+            assert_eq!(payjoin_tx.input.len(), 101);
+            assert_eq!(payjoin_tx.output.len(), 2);
+            assert_eq!(
+                receiver.get_balances()?.mine.untrusted_pending,
+                Amount::from_btc(3701.0)? - receiver_fee
+            );
+            assert_eq!(
+                sender.get_balances()?.mine.untrusted_pending,
+                Amount::from_btc(49.0)? - sender_fee
+            );
+            Ok(())
+        }
+
+        // In this test the receiver forwards part of the sender payment to another payee
+        #[test]
+        fn receiver_forwards_payment() -> Result<(), BoxError> {
+            init_tracing();
+            let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
+            let third_party = bitcoind.create_wallet("third-party")?;
+
+            // Receiver creates the payjoin URI
+            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
+            let pj_uri = PjUriBuilder::new(pj_receiver_address, EXAMPLE_URL.to_owned())
+                .amount(Amount::ONE_BTC)
+                .build();
+
+            // **********************
+            // Inside the Sender:
+            // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
+            let uri = Uri::from_str(&pj_uri.to_string())
+                .unwrap()
+                .assume_checked()
+                .check_pj_supported()
+                .unwrap();
+            let psbt = build_original_psbt(&sender, &uri)?;
+            log::debug!("Original psbt: {:#?}", psbt);
+            let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt.clone(), uri)?
+                .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
+                .extract_v1()?;
+            let headers = HeaderMock::new(&req.body, req.content_type);
+
+            // **********************
+            // Inside the Receiver:
+            // this data would transit from one party to another over the network in production
+            let outputs = vec![
+                TxOut {
+                    value: Amount::from_sat(10000000),
+                    script_pubkey: third_party
+                        .get_new_address(None, None)?
+                        .assume_checked()
+                        .script_pubkey(),
+                },
+                TxOut {
+                    value: Amount::from_sat(90000000),
+                    script_pubkey: receiver
+                        .get_new_address(None, None)?
+                        .assume_checked()
+                        .script_pubkey(),
+                },
+            ];
+            let drain_script = outputs[1].script_pubkey.clone();
+            let inputs = vec![];
+            let response = handle_v1_pj_request(
+                req,
+                headers,
+                &receiver,
+                Some(outputs),
+                Some(&drain_script),
+                Some(inputs),
+            );
+            // this response would be returned as http response to the sender
+
+            // **********************
+            // Inside the Sender:
+            // Sender checks, signs, finalizes, extracts, and broadcasts
+            let checked_payjoin_proposal_psbt = ctx.process_response(&mut response.as_bytes())?;
+            let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
+            sender.send_raw_transaction(&payjoin_tx)?;
+
+            // Check resulting transaction and balances
+            let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
+            // The sender pays original tx fee
+            let original_tx_fee = psbt.fee()?;
+            let sender_fee = original_tx_fee;
+            // The receiver pays the difference
+            let receiver_fee = network_fees - sender_fee;
+            assert_eq!(payjoin_tx.input.len(), 1);
+            assert_eq!(payjoin_tx.output.len(), 3);
+            assert_eq!(
+                receiver.get_balances()?.mine.untrusted_pending,
+                Amount::from_btc(0.9)? - receiver_fee
+            );
+            assert_eq!(third_party.get_balances()?.mine.untrusted_pending, Amount::from_btc(0.1)?);
+            // sender balance is considered "trusted" because all inputs in the transaction were
+            // created by their wallet
+            assert_eq!(sender.get_balances()?.mine.trusted, Amount::from_btc(49.0)? - sender_fee);
+            Ok(())
+        }
+    }
+
     fn init_tracing() {
         INIT_TRACING.get_or_init(|| {
             let subscriber = FmtSubscriber::builder()
@@ -811,6 +1002,9 @@ mod integration {
         req: Request,
         headers: impl payjoin::receive::Headers,
         receiver: &bitcoincore_rpc::Client,
+        custom_outputs: Option<Vec<TxOut>>,
+        drain_script: Option<&bitcoin::Script>,
+        custom_inputs: Option<Vec<(OutPoint, TxOut)>>,
     ) -> String {
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
         let proposal = payjoin::receive::UncheckedProposal::from_request(
@@ -819,7 +1013,8 @@ mod integration {
             headers,
         )
         .unwrap();
-        let proposal = handle_proposal(proposal, receiver);
+        let proposal =
+            handle_proposal(proposal, receiver, custom_outputs, drain_script, custom_inputs);
         assert!(!proposal.is_output_substitution_disabled());
         let psbt = proposal.psbt();
         tracing::debug!("Receiver's Payjoin proposal PSBT: {:#?}", &psbt);
@@ -829,6 +1024,9 @@ mod integration {
     fn handle_proposal(
         proposal: payjoin::receive::UncheckedProposal,
         receiver: &bitcoincore_rpc::Client,
+        custom_outputs: Option<Vec<TxOut>>,
+        drain_script: Option<&bitcoin::Script>,
+        custom_inputs: Option<Vec<(OutPoint, TxOut)>>,
     ) -> payjoin::receive::PayjoinProposal {
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
@@ -869,33 +1067,43 @@ mod integration {
             })
             .expect("Receiver should have at least one output");
 
-        let payjoin = payjoin
-            .substitute_receiver_script(
-                &receiver.get_new_address(None, None).unwrap().assume_checked().script_pubkey(),
-            )
-            .expect("Could not substitute outputs")
-            .commit_outputs();
+        let payjoin = match custom_outputs {
+            Some(txos) => payjoin
+                .replace_receiver_outputs(txos, &drain_script.unwrap())
+                .expect("Could not substitute outputs"),
+            None => payjoin
+                .substitute_receiver_script(
+                    &receiver.get_new_address(None, None).unwrap().assume_checked().script_pubkey(),
+                )
+                .expect("Could not substitute outputs"),
+        }
+        .commit_outputs();
 
-        // Select receiver payjoin inputs. TODO Lock them.
-        let available_inputs = receiver.list_unspent(None, None, None, None, None).unwrap();
-        let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
-            .iter()
-            .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
-            .collect();
+        let inputs = match custom_inputs {
+            Some(inputs) => inputs,
+            None => {
+                // Select receiver payjoin inputs. TODO Lock them.
+                let available_inputs = receiver.list_unspent(None, None, None, None, None).unwrap();
+                let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
+                    .iter()
+                    .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
+                    .collect();
 
-        let selected_outpoint = payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
-        let selected_utxo = available_inputs
-            .iter()
-            .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
-            .unwrap();
-        let txo_to_contribute = bitcoin::TxOut {
-            value: selected_utxo.amount,
-            script_pubkey: selected_utxo.script_pub_key.clone(),
+                let selected_outpoint =
+                    payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
+                let selected_utxo = available_inputs
+                    .iter()
+                    .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
+                    .unwrap();
+                let txo_to_contribute = bitcoin::TxOut {
+                    value: selected_utxo.amount,
+                    script_pubkey: selected_utxo.script_pub_key.clone(),
+                };
+                vec![(selected_outpoint, txo_to_contribute)]
+            }
         };
 
-        let payjoin = payjoin
-            .contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)])
-            .commit_inputs();
+        let payjoin = payjoin.contribute_witness_inputs(inputs).commit_inputs();
 
         let payjoin_proposal = payjoin
             .finalize_proposal(

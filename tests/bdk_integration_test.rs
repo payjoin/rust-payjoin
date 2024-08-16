@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use bdk::bitcoin::psbt::PartiallySignedTransaction;
-use bdk::bitcoin::{Address, Script, Transaction};
+use bdk::bitcoin::{Address, Network, Script, Transaction};
 use bdk::blockchain::EsploraBlockchain;
 use bdk::database::MemoryDatabase;
 use bdk::wallet::AddressIndex;
@@ -11,7 +11,7 @@ use bdk::{FeeRate, LocalUtxo, SignOptions, Wallet as BdkWallet};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use payjoin_ffi::error::PayjoinError;
 use payjoin_ffi::receive::v1::{Headers, PayjoinProposal, UncheckedProposal};
-use payjoin_ffi::types::{Network, OutPoint, Request, TxOut};
+use payjoin_ffi::types::{OutPoint, Request, TxOut};
 use payjoin_ffi::uri::{PjUri, Uri};
 use uniffi::deps::log::debug;
 
@@ -135,6 +135,7 @@ fn build_pj_uri<'a>(
 pub struct Wallet {
     inner_mutex: Mutex<BdkWallet<MemoryDatabase>>,
 }
+
 impl Wallet {
     pub fn new_no_persist(descriptor: String, network: Network) -> Result<Self, BoxError> {
         let wallet =
@@ -352,7 +353,7 @@ mod v1 {
         let psbt = build_original_psbt(&sender, &pj_uri)?;
         println!("\nOriginal sender psbt: {:#?}", psbt.to_string());
 
-        let req_ctx = RequestBuilder::from_psbt_and_uri(psbt.to_string(), Arc::new(pj_uri))?
+        let req_ctx = RequestBuilder::from_psbt_and_uri(psbt.to_string(), pj_uri)?
             .build_with_additional_fee(10000, None, 0, false)?
             .extract_v1()?;
         let headers = Headers::from_vec(req_ctx.request.body.clone());
@@ -394,8 +395,8 @@ mod v2 {
         broadcast_tx, build_original_psbt, extract_pj_tx, init_sender_receiver_wallet,
         restore_esplora_client, BoxError, Wallet,
     };
-
     #[tokio::test]
+
     async fn v2_to_v2_full_cycle() {
         let (cert, key) = local_cert_key();
         let ohttp_relay_port = find_free_port();
@@ -444,7 +445,7 @@ mod v2 {
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             println!("\nOriginal sender psbt: {:#?}", psbt.to_string());
 
-            let req_ctx = RequestBuilder::from_psbt_and_uri(psbt.to_string(), Arc::new(pj_uri))?
+            let req_ctx = RequestBuilder::from_psbt_and_uri(psbt.to_string(), pj_uri)?
                 .build_recommended(payjoin::bitcoin::FeeRate::BROADCAST_MIN.to_sat_per_kwu())?;
             let req_ctx_v2 = req_ctx.extract_v2(Arc::new(directory.to_owned()))?;
             let response = agent

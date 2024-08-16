@@ -482,12 +482,12 @@ mod test {
             .check_no_inputs_seen_before(|_| Ok(false))
             .expect("No inputs should be seen before")
             .identify_receiver_outputs(|script| {
-                let network = payjoin::bitcoin::Network::Bitcoin;
-                let script = payjoin::bitcoin::ScriptBuf::from_bytes(script.to_vec());
-                Ok(payjoin::bitcoin::Address::from_script(&script, network)
-                    == payjoin::bitcoin::Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
-                        .map(|x| x.require_network(network).expect("Invalid address")))
-            })
-            .expect("Receiver output should be identified");
-    }
+                 let network = payjoin::bitcoin::Network::Bitcoin;
+                 let script = payjoin::bitcoin::ScriptBuf::from_bytes(script.to_vec());
+                 Ok(payjoin::bitcoin::Address::from_script(&script, network).unwrap()
+                     == payjoin::bitcoin::Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+                         .map(|x| x.require_network(network).unwrap()).unwrap())
+             })
+             .expect("Receiver output should be identified");
+     }
 }

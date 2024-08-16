@@ -133,8 +133,6 @@ interface ProvisionalProposal{
       [Throws=PayjoinError]
       void contribute_witness_input(TxOut txout, OutPoint outpoint);
       [Throws=PayjoinError]
-      void  contribute_non_witness_input(sequence<u8> tx, OutPoint outpoint);
-      [Throws=PayjoinError]
       void try_substitute_receiver_output(GenerateScript generate_script);
       [Throws=PayjoinError]
       OutPoint try_preserving_privacy(record<u64, OutPoint> candidate_inputs);
@@ -236,8 +234,6 @@ interface V2OutputsUnknown{
 interface V2ProvisionalProposal{
    [Throws=PayjoinError]
    void contribute_witness_input(TxOut txout, OutPoint outpoint);
-   [Throws=PayjoinError]
-   void contribute_non_witness_input(sequence<u8> tx, OutPoint outpoint);
    [Throws=PayjoinError]
    void try_substitute_receiver_output(GenerateScript generate_script);
    [Throws=PayjoinError]

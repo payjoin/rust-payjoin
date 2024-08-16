@@ -492,15 +492,6 @@ impl V2ProvisionalProposal {
         let txo: payjoin::bitcoin::blockdata::transaction::TxOut = txo.into();
         Ok(self.mutex_guard().contribute_witness_input(txo, outpoint.into()))
     }
-    pub fn contribute_non_witness_input(
-        &self,
-        tx: Vec<u8>,
-        outpoint: OutPoint,
-    ) -> Result<(), PayjoinError> {
-        let tx: payjoin::bitcoin::Transaction =
-            payjoin::bitcoin::consensus::encode::deserialize(&*tx)?;
-        Ok(self.mutex_guard().contribute_non_witness_input(tx, outpoint.into()))
-    }
     /// Select receiver input such that the payjoin avoids surveillance.
     /// Return the input chosen that has been applied to the Proposal.
     ///

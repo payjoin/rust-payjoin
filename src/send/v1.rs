@@ -27,9 +27,15 @@ impl RequestBuilder {
     /// An HTTP client will own the Request data while Context sticks around so
     /// a `(Request, Context)` tuple is returned from `RequestBuilder::build()`
     /// to keep them separated.
-    pub fn from_psbt_and_uri(psbt: String, uri: Arc<PjUri>) -> Result<Self, PayjoinError> {
-        let psbt = payjoin::bitcoin::psbt::PartiallySignedTransaction::from_str(psbt.as_str())?;
-        pdk::RequestBuilder::from_psbt_and_uri(psbt, (*uri).clone().into())
+    pub fn from_psbt_and_uri(
+        psbt: String,
+        #[cfg(not(feature = "uniffi"))] uri: PjUri,
+        #[cfg(feature = "uniffi")] uri: Arc<PjUri>,
+    ) -> Result<Self, PayjoinError> {
+        let psbt = payjoin::bitcoin::psbt::Psbt::from_str(psbt.as_str())?;
+        #[cfg(feature = "uniffi")]
+        let uri = (*uri).clone().into();
+        pdk::RequestBuilder::from_psbt_and_uri(psbt, uri.into())
             .map(|e| e.into())
             .map_err(|e| e.into())
     }

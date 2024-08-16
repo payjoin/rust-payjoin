@@ -7,6 +7,7 @@ mod e2e {
     use bitcoind::bitcoincore_rpc::RpcApi;
     use log::{log_enabled, Level};
     use payjoin::bitcoin::Amount;
+    use tokio::fs;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::process::Command;
 
@@ -43,103 +44,119 @@ mod e2e {
             "sender doesn't own bitcoin"
         );
 
-        let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
-        let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
         let temp_dir = env::temp_dir();
         let receiver_db_path = temp_dir.join("receiver_db");
         let sender_db_path = temp_dir.join("sender_db");
-        let cookie_file = &bitcoind.params.cookie_file;
-        let port = find_free_port();
-        let pj_endpoint = format!("https://localhost:{}", port);
-        let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
+        let receiver_db_path_clone = receiver_db_path.clone();
+        let sender_db_path_clone = sender_db_path.clone();
 
-        let mut cli_receiver = Command::new(payjoin_cli)
-            .arg("--rpchost")
-            .arg(&receiver_rpchost)
-            .arg("--cookie-file")
-            .arg(&cookie_file)
-            .arg("--db-path")
-            .arg(&receiver_db_path)
-            .arg("receive")
-            .arg(RECEIVE_SATS)
-            .arg("--port")
-            .arg(&port.to_string())
-            .arg("--pj-endpoint")
-            .arg(&pj_endpoint)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .expect("Failed to execute payjoin-cli");
+        let payjoin_sent = tokio::spawn(async move {
+            let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
+            let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
+            let cookie_file = &bitcoind.params.cookie_file;
+            let port = find_free_port();
+            let pj_endpoint = format!("https://localhost:{}", port);
+            let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
 
-        let stdout = cli_receiver.stdout.take().expect("Failed to take stdout of child process");
-        let reader = BufReader::new(stdout);
-        let mut stdout = tokio::io::stdout();
-        let mut bip21 = String::new();
+            let mut cli_receiver = Command::new(payjoin_cli)
+                .arg("--rpchost")
+                .arg(&receiver_rpchost)
+                .arg("--cookie-file")
+                .arg(&cookie_file)
+                .arg("--db-path")
+                .arg(&receiver_db_path_clone)
+                .arg("receive")
+                .arg(RECEIVE_SATS)
+                .arg("--port")
+                .arg(&port.to_string())
+                .arg("--pj-endpoint")
+                .arg(&pj_endpoint)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli");
 
-        let mut lines = reader.lines();
-
-        while let Some(line) = lines.next_line().await.expect("Failed to read line from stdout") {
-            // Write to stdout regardless
-            stdout
-                .write_all(format!("{}\n", line).as_bytes())
-                .await
-                .expect("Failed to write to stdout");
-
-            if line.to_ascii_uppercase().starts_with("BITCOIN") {
-                bip21 = line;
-                break;
-            }
-        }
-        log::debug!("Got bip21 {}", &bip21);
-
-        let mut cli_sender = Command::new(payjoin_cli)
-            .arg("--rpchost")
-            .arg(&sender_rpchost)
-            .arg("--cookie-file")
-            .arg(&cookie_file)
-            .arg("--db-path")
-            .arg(&sender_db_path)
-            .arg("send")
-            .arg(&bip21)
-            .arg("--fee-rate")
-            .arg("1")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .expect("Failed to execute payjoin-cli");
-
-        let stdout = cli_sender.stdout.take().expect("Failed to take stdout of child process");
-        let reader = BufReader::new(stdout);
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-
-        let mut lines = reader.lines();
-        tokio::spawn(async move {
+            let stdout =
+                cli_receiver.stdout.take().expect("Failed to take stdout of child process");
+            let reader = BufReader::new(stdout);
             let mut stdout = tokio::io::stdout();
+            let mut bip21 = String::new();
+
+            let mut lines = reader.lines();
+
             while let Some(line) = lines.next_line().await.expect("Failed to read line from stdout")
             {
+                // Write to stdout regardless
                 stdout
                     .write_all(format!("{}\n", line).as_bytes())
                     .await
                     .expect("Failed to write to stdout");
-                if line.contains("Payjoin sent") {
-                    let _ = tx.send(true).await;
+
+                if line.to_ascii_uppercase().starts_with("BITCOIN") {
+                    bip21 = line;
                     break;
                 }
             }
-        });
+            log::debug!("Got bip21 {}", &bip21);
 
-        let timeout = tokio::time::Duration::from_secs(10);
-        let payjoin_sent = tokio::time::timeout(timeout, rx.recv()).await;
+            let mut cli_sender = Command::new(payjoin_cli)
+                .arg("--rpchost")
+                .arg(&sender_rpchost)
+                .arg("--cookie-file")
+                .arg(&cookie_file)
+                .arg("--db-path")
+                .arg(&sender_db_path_clone)
+                .arg("send")
+                .arg(&bip21)
+                .arg("--fee-rate")
+                .arg("1")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli");
 
-        cli_receiver.kill().await.expect("Failed to kill payjoin-cli");
-        cli_sender.kill().await.expect("Failed to kill payjoin-cli");
+            let stdout = cli_sender.stdout.take().expect("Failed to take stdout of child process");
+            let reader = BufReader::new(stdout);
+            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
-        assert!(payjoin_sent.unwrap_or(Some(false)).unwrap(), "Payjoin send was not detected");
+            let mut lines = reader.lines();
+            tokio::spawn(async move {
+                let mut stdout = tokio::io::stdout();
+                while let Some(line) =
+                    lines.next_line().await.expect("Failed to read line from stdout")
+                {
+                    stdout
+                        .write_all(format!("{}\n", line).as_bytes())
+                        .await
+                        .expect("Failed to write to stdout");
+                    if line.contains("Payjoin sent") {
+                        let _ = tx.send(true).await;
+                        break;
+                    }
+                }
+            });
+
+            let timeout = tokio::time::Duration::from_secs(10);
+            let payjoin_sent = tokio::time::timeout(timeout, rx.recv()).await;
+
+            cli_receiver.kill().await.expect("Failed to kill payjoin-cli");
+            cli_sender.kill().await.expect("Failed to kill payjoin-cli");
+            payjoin_sent
+        })
+        .await;
+
+        cleanup_temp_file(&receiver_db_path).await;
+        cleanup_temp_file(&sender_db_path).await;
+        assert!(
+            payjoin_sent.unwrap().unwrap_or(Some(false)).unwrap(),
+            "Payjoin send was not detected"
+        );
     }
 
     #[cfg(feature = "v2")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn send_receive_payjoin() {
+        use std::path::PathBuf;
         use std::str::FromStr;
         use std::sync::Arc;
         use std::time::Duration;
@@ -166,16 +183,26 @@ mod e2e {
         let directory_port = find_free_port();
         let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
         let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
-        tokio::select!(
-        _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => assert!(false, "Ohttp relay is long running"),
-        _ = init_directory(directory_port, (cert.clone(), key)) => assert!(false, "Directory server is long running"),
-        res = send_receive_cli_async(ohttp_relay, directory, cert) => assert!(res.is_ok(), "send_receive failed: {:?}", res),
-        );
+
+        let temp_dir = env::temp_dir();
+        let receiver_db_path = temp_dir.join("receiver_db");
+        let sender_db_path = temp_dir.join("sender_db");
+        let result: Result<()> = tokio::select! {
+            res = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => Err(format!("Ohttp relay is long running: {:?}", res).into()),
+            res = init_directory(directory_port, (cert.clone(), key)) => Err(format!("Directory server is long running: {:?}", res).into()),
+            res = send_receive_cli_async(ohttp_relay, directory, cert, receiver_db_path.clone(), sender_db_path.clone()) => res.map_err(|e| format!("send_receive failed: {:?}", e).into()),
+        };
+
+        cleanup_temp_file(&receiver_db_path).await;
+        cleanup_temp_file(&sender_db_path).await;
+        assert!(result.is_ok(), "{}", result.unwrap_err());
 
         async fn send_receive_cli_async(
             ohttp_relay: Url,
             directory: Url,
             cert: Vec<u8>,
+            receiver_db_path: PathBuf,
+            sender_db_path: PathBuf,
         ) -> Result<()> {
             let bitcoind_exe = env::var("BITCOIND_EXE")
                 .ok()
@@ -219,9 +246,6 @@ mod e2e {
 
             let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
             let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
-            let temp_dir = env::temp_dir();
-            let receiver_db_path = temp_dir.join("receiver_db");
-            let sender_db_path = temp_dir.join("sender_db");
             let cookie_file = &bitcoind.params.cookie_file;
 
             let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
@@ -506,5 +530,11 @@ mod e2e {
     fn find_free_port() -> u16 {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.local_addr().unwrap().port()
+    }
+
+    async fn cleanup_temp_file(path: &std::path::Path) {
+        if let Err(e) = fs::remove_dir_all(path).await {
+            eprintln!("Failed to remove {:?}: {}", path, e);
+        }
     }
 }

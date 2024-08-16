@@ -69,12 +69,15 @@ cargo test  --package payjoin_ffi --test bdk_integration_test v2_to_v2_full_cycl
 
 
 ```
-
-
-## 🚨 Warning 🚨
-
-The main branch of this repository is still under development and is incomplete.
+## References
 
 [Payjoin Dev Kit]: https://payjoindevkit.org/
 
 [mozilla/uniffi-rs]: https://github.com/mozilla/uniffi-rs
+
+
+## Release status and readiness warning
+
+Caution, this package is an Alpha at this stage Please consider reviewing, experimenting and contributing
+
+Please review and carry out testing to ensure security and safety of funds before using in production.

@@ -61,9 +61,10 @@ fn v1_to_v1_full_cycle() -> Result<(), BoxError> {
         .psbt;
     let psbt_base64 = sender.wallet_process_psbt(&psbt, None, None, None)?.psbt;
     eprintln!("Original psbt: {:#?}", psbt_base64);
-    let req_ctx = RequestBuilder::from_psbt_and_uri(psbt_base64, Arc::new(pj_uri.check_pj_supported().unwrap()))?
-        .build_with_additional_fee(10000, None, 0, false)?
-        .extract_v1()?;
+    let req_ctx =
+        RequestBuilder::from_psbt_and_uri(psbt_base64, pj_uri.check_pj_supported().unwrap())?
+            .build_with_additional_fee(10000, None, 0, false)?
+            .extract_v1()?;
     let req = req_ctx.request;
     let ctx = req_ctx.context_v1;
     let headers = Headers::from_vec(req.body.clone());
@@ -215,11 +216,9 @@ fn extract_pj_tx(sender: &Client, psbt: String) -> payjoin::bitcoin::Transaction
     let payjoin_psbt =
         sender.finalize_psbt(&payjoin_psbt, Some(false)).expect("finalize error").psbt.unwrap();
 
-    let payjoin_psbt =
-        payjoin::bitcoin::psbt::PartiallySignedTransaction::from_str(payjoin_psbt.as_str())
-            .unwrap();
+    let payjoin_psbt = payjoin::bitcoin::psbt::Psbt::from_str(payjoin_psbt.as_str()).unwrap();
     eprintln!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
-    payjoin_psbt.extract_tx()
+    payjoin_psbt.extract_tx().unwrap()
 }
 fn get_client(wallet_name: &str) -> Client {
     let url = format!("http://{}:{}/wallet/{}", RPC_HOST, RPC_PORT, wallet_name);

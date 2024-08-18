@@ -30,7 +30,7 @@ import typing
 import platform
 
 # Used for default argument values
-_DEFAULT = object()
+_DEFAULT = object() # type: typing.Any
 
 
 class _UniffiRustBuffer(ctypes.Structure):
@@ -46,14 +46,14 @@ class _UniffiRustBuffer(ctypes.Structure):
 
     @staticmethod
     def alloc(size):
-        return _rust_call(_UniffiLib.ffi_payjoin_ffi_rustbuffer_alloc, size)
+        return _uniffi_rust_call(_UniffiLib.ffi_payjoin_ffi_rustbuffer_alloc, size)
 
     @staticmethod
     def reserve(rbuf, additional):
-        return _rust_call(_UniffiLib.ffi_payjoin_ffi_rustbuffer_reserve, rbuf, additional)
+        return _uniffi_rust_call(_UniffiLib.ffi_payjoin_ffi_rustbuffer_reserve, rbuf, additional)
 
     def free(self):
-        return _rust_call(_UniffiLib.ffi_payjoin_ffi_rustbuffer_free, self)
+        return _uniffi_rust_call(_UniffiLib.ffi_payjoin_ffi_rustbuffer_free, self)
 
     def __str__(self):
         return "_UniffiRustBuffer(capacity={}, len={}, data={})".format(
@@ -278,11 +278,11 @@ class _UniffiRustCallStatus(ctypes.Structure):
         else:
             return "_UniffiRustCallStatus(<invalid code>)"
 
-def _rust_call(fn, *args):
+def _uniffi_rust_call(fn, *args):
     # Call a rust function
-    return _rust_call_with_error(None, fn, *args)
+    return _uniffi_rust_call_with_error(None, fn, *args)
 
-def _rust_call_with_error(error_ffi_converter, fn, *args):
+def _uniffi_rust_call_with_error(error_ffi_converter, fn, *args):
     # Call a rust function and handle any errors
     #
     # This function is used for rust calls that return Result<> and therefore can set the CALL_ERROR status code.
@@ -300,7 +300,7 @@ def _uniffi_check_call_status(error_ffi_converter, call_status):
     elif call_status.code == _UniffiRustCallStatus.CALL_ERROR:
         if error_ffi_converter is None:
             call_status.error_buf.free()
-            raise InternalError("_rust_call_with_error: CALL_ERROR, but error_ffi_converter is None")
+            raise InternalError("_uniffi_rust_call_with_error: CALL_ERROR, but error_ffi_converter is None")
         else:
             raise error_ffi_converter.lift(call_status.error_buf)
     elif call_status.code == _UniffiRustCallStatus.CALL_UNEXPECTED_ERROR:
@@ -355,14 +355,14 @@ class _UniffiHandleMap:
             with self._lock:
                 return self._map[handle]
         except KeyError:
-            raise InternalError("UniffiHandleMap.get: Invalid handle")
+            raise InternalError("_UniffiHandleMap.get: Invalid handle")
 
     def remove(self, handle):
         try:
             with self._lock:
                 return self._map.pop(handle)
         except KeyError:
-            raise InternalError("UniffiHandleMap.remove: Invalid handle")
+            raise InternalError("_UniffiHandleMap.remove: Invalid handle")
 
     def __len__(self):
         return len(self._map)
@@ -460,19 +460,19 @@ def _uniffi_check_contract_api_version(lib):
         raise InternalError("UniFFI contract version mismatch: try cleaning and rebuilding your project")
 
 def _uniffi_check_api_checksums(lib):
+    if lib.uniffi_payjoin_ffi_checksum_method_activesession_extract_req() != 42189:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_activesession_pj_uri_builder() != 6882:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_activesession_pj_url() != 41021:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_activesession_process_res() != 52549:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_activesession_public_key() != 56528:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_contextv1_process_response() != 62276:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_contextv2_process_response() != 16327:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_method_enrolled_extract_req() != 58529:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_method_enrolled_fallback_target() != 1788:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_method_enrolled_process_res() != 61918:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_method_enroller_extract_req() != 17758:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_method_enroller_process_res() != 22088:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_headers_get_map() != 7889:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -492,19 +492,35 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_utxos_to_be_locked() != 62799:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_pjuri_address() != 42104:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_pjuri_amount() != 7807:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_pjuri_as_string() != 55733:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_amount() != 47662:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_build() != 16591:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_label() != 52425:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_message() != 7896:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_pjos() != 46879:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_contribute_non_witness_input() != 9161:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_contribute_witness_input() != 57615:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_finalize_proposal() != 32297:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_substitute_output_address() != 56103:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_try_preserving_privacy() != 3109:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_try_substitute_receiver_output() != 34999:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_requestbuilder_always_disable_output_substitution() != 46341:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_method_requestbuilder_build_non_incentivizing() != 38078:
+    if lib.uniffi_payjoin_ffi_checksum_method_requestbuilder_build_non_incentivizing() != 23473:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_requestbuilder_build_recommended() != 37649:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -513,6 +529,10 @@ def _uniffi_check_api_checksums(lib):
     if lib.uniffi_payjoin_ffi_checksum_method_requestcontext_extract_v1() != 44537:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_requestcontext_extract_v2() != 35928:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_sessioninitializer_extract_req() != 41164:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_sessioninitializer_process_res() != 28070:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_uncheckedproposal_assume_interactive_receiver() != 30907:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -523,6 +543,10 @@ def _uniffi_check_api_checksums(lib):
     if lib.uniffi_payjoin_ffi_checksum_method_uri_address() != 5138:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_uri_amount() != 26669:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_uri_as_string() != 45476:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_uri_check_pj_supported() != 58582:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_url_as_string() != 36665:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -536,11 +560,15 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_v2outputsunknown_identify_receiver_outputs() != 31941:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_deserialize_res() != 21303:
+    if lib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_extract_v1_req() != 7185:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_extract_v2_req() != 3688:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_is_output_substitution_disabled() != 13037:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_owned_vouts() != 58943:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_process_res() != 12177:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_psbt() != 17219:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -552,9 +580,9 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_finalize_proposal() != 16888:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_substitute_output_address() != 20437:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_try_preserving_privacy() != 3228:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_try_substitute_receiver_output() != 37622:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_v2uncheckedproposal_assume_interactive_receiver() != 23782:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -562,13 +590,15 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_v2uncheckedproposal_extract_tx_to_schedule_broadcast() != 12585:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_constructor_enroller_from_directory_config() != 24309:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_constructor_headers_from_vec() != 55332:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_constructor_ohttpkeys_decode() != 43383:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_constructor_requestbuilder_from_psbt_and_uri() != 10227:
+    if lib.uniffi_payjoin_ffi_checksum_constructor_pjuribuilder_new() != 33990:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_constructor_requestbuilder_from_psbt_and_uri() != 21795:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_constructor_sessioninitializer_new() != 63778:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_constructor_uncheckedproposal_from_request() != 49662:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -577,6 +607,8 @@ def _uniffi_check_api_checksums(lib):
     if lib.uniffi_payjoin_ffi_checksum_constructor_url_from_str() != 58365:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_canbroadcast_callback() != 27867:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_payjoin_ffi_checksum_method_generatescript_callback() != 38507:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_isoutputknown_callback() != 1120:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -589,139 +621,184 @@ def _uniffi_check_api_checksums(lib):
 # This is an implementation detail which will be called internally by the public API.
 
 _UniffiLib = _uniffi_load_indirect()
-UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK = ctypes.CFUNCTYPE(None,ctypes.c_uint64,ctypes.c_int8,
+_UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK = ctypes.CFUNCTYPE(None,ctypes.c_uint64,ctypes.c_int8,
 )
-UNIFFI_FOREIGN_FUTURE_FREE = ctypes.CFUNCTYPE(None,ctypes.c_uint64,
+_UNIFFI_FOREIGN_FUTURE_FREE = ctypes.CFUNCTYPE(None,ctypes.c_uint64,
 )
-UNIFFI_CALLBACK_INTERFACE_FREE = ctypes.CFUNCTYPE(None,ctypes.c_uint64,
+_UNIFFI_CALLBACK_INTERFACE_FREE = ctypes.CFUNCTYPE(None,ctypes.c_uint64,
 )
-class UniffiForeignFuture(ctypes.Structure):
+class _UniffiForeignFuture(ctypes.Structure):
     _fields_ = [
         ("handle", ctypes.c_uint64),
-        ("free", UNIFFI_FOREIGN_FUTURE_FREE),
+        ("free", _UNIFFI_FOREIGN_FUTURE_FREE),
     ]
-class UniffiForeignFutureStructU8(ctypes.Structure):
+class _UniffiForeignFutureStructU8(ctypes.Structure):
     _fields_ = [
         ("return_value", ctypes.c_uint8),
         ("call_status", _UniffiRustCallStatus),
     ]
-UNIFFI_FOREIGN_FUTURE_COMPLETE_U8 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,UniffiForeignFutureStructU8,
+_UNIFFI_FOREIGN_FUTURE_COMPLETE_U8 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiForeignFutureStructU8,
 )
-class UniffiForeignFutureStructI8(ctypes.Structure):
+class _UniffiForeignFutureStructI8(ctypes.Structure):
     _fields_ = [
         ("return_value", ctypes.c_int8),
         ("call_status", _UniffiRustCallStatus),
     ]
-UNIFFI_FOREIGN_FUTURE_COMPLETE_I8 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,UniffiForeignFutureStructI8,
+_UNIFFI_FOREIGN_FUTURE_COMPLETE_I8 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiForeignFutureStructI8,
 )
-class UniffiForeignFutureStructU16(ctypes.Structure):
+class _UniffiForeignFutureStructU16(ctypes.Structure):
     _fields_ = [
         ("return_value", ctypes.c_uint16),
         ("call_status", _UniffiRustCallStatus),
     ]
-UNIFFI_FOREIGN_FUTURE_COMPLETE_U16 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,UniffiForeignFutureStructU16,
+_UNIFFI_FOREIGN_FUTURE_COMPLETE_U16 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiForeignFutureStructU16,
 )
-class UniffiForeignFutureStructI16(ctypes.Structure):
+class _UniffiForeignFutureStructI16(ctypes.Structure):
     _fields_ = [
         ("return_value", ctypes.c_int16),
         ("call_status", _UniffiRustCallStatus),
     ]
-UNIFFI_FOREIGN_FUTURE_COMPLETE_I16 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,UniffiForeignFutureStructI16,
+_UNIFFI_FOREIGN_FUTURE_COMPLETE_I16 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiForeignFutureStructI16,
 )
-class UniffiForeignFutureStructU32(ctypes.Structure):
+class _UniffiForeignFutureStructU32(ctypes.Structure):
     _fields_ = [
         ("return_value", ctypes.c_uint32),
         ("call_status", _UniffiRustCallStatus),
     ]
-UNIFFI_FOREIGN_FUTURE_COMPLETE_U32 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,UniffiForeignFutureStructU32,
+_UNIFFI_FOREIGN_FUTURE_COMPLETE_U32 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiForeignFutureStructU32,
 )
-class UniffiForeignFutureStructI32(ctypes.Structure):
+class _UniffiForeignFutureStructI32(ctypes.Structure):
     _fields_ = [
         ("return_value", ctypes.c_int32),
         ("call_status", _UniffiRustCallStatus),
     ]
-UNIFFI_FOREIGN_FUTURE_COMPLETE_I32 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,UniffiForeignFutureStructI32,
+_UNIFFI_FOREIGN_FUTURE_COMPLETE_I32 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiForeignFutureStructI32,
 )
-class UniffiForeignFutureStructU64(ctypes.Structure):
+class _UniffiForeignFutureStructU64(ctypes.Structure):
     _fields_ = [
         ("return_value", ctypes.c_uint64),
         ("call_status", _UniffiRustCallStatus),
     ]
-UNIFFI_FOREIGN_FUTURE_COMPLETE_U64 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,UniffiForeignFutureStructU64,
+_UNIFFI_FOREIGN_FUTURE_COMPLETE_U64 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiForeignFutureStructU64,
 )
-class UniffiForeignFutureStructI64(ctypes.Structure):
+class _UniffiForeignFutureStructI64(ctypes.Structure):
     _fields_ = [
         ("return_value", ctypes.c_int64),
         ("call_status", _UniffiRustCallStatus),
     ]
-UNIFFI_FOREIGN_FUTURE_COMPLETE_I64 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,UniffiForeignFutureStructI64,
+_UNIFFI_FOREIGN_FUTURE_COMPLETE_I64 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiForeignFutureStructI64,
 )
-class UniffiForeignFutureStructF32(ctypes.Structure):
+class _UniffiForeignFutureStructF32(ctypes.Structure):
     _fields_ = [
         ("return_value", ctypes.c_float),
         ("call_status", _UniffiRustCallStatus),
     ]
-UNIFFI_FOREIGN_FUTURE_COMPLETE_F32 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,UniffiForeignFutureStructF32,
+_UNIFFI_FOREIGN_FUTURE_COMPLETE_F32 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiForeignFutureStructF32,
 )
-class UniffiForeignFutureStructF64(ctypes.Structure):
+class _UniffiForeignFutureStructF64(ctypes.Structure):
     _fields_ = [
         ("return_value", ctypes.c_double),
         ("call_status", _UniffiRustCallStatus),
     ]
-UNIFFI_FOREIGN_FUTURE_COMPLETE_F64 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,UniffiForeignFutureStructF64,
+_UNIFFI_FOREIGN_FUTURE_COMPLETE_F64 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiForeignFutureStructF64,
 )
-class UniffiForeignFutureStructPointer(ctypes.Structure):
+class _UniffiForeignFutureStructPointer(ctypes.Structure):
     _fields_ = [
         ("return_value", ctypes.c_void_p),
         ("call_status", _UniffiRustCallStatus),
     ]
-UNIFFI_FOREIGN_FUTURE_COMPLETE_POINTER = ctypes.CFUNCTYPE(None,ctypes.c_uint64,UniffiForeignFutureStructPointer,
+_UNIFFI_FOREIGN_FUTURE_COMPLETE_POINTER = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiForeignFutureStructPointer,
 )
-class UniffiForeignFutureStructRustBuffer(ctypes.Structure):
+class _UniffiForeignFutureStructRustBuffer(ctypes.Structure):
     _fields_ = [
         ("return_value", _UniffiRustBuffer),
         ("call_status", _UniffiRustCallStatus),
     ]
-UNIFFI_FOREIGN_FUTURE_COMPLETE_RUST_BUFFER = ctypes.CFUNCTYPE(None,ctypes.c_uint64,UniffiForeignFutureStructRustBuffer,
+_UNIFFI_FOREIGN_FUTURE_COMPLETE_RUST_BUFFER = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiForeignFutureStructRustBuffer,
 )
-class UniffiForeignFutureStructVoid(ctypes.Structure):
+class _UniffiForeignFutureStructVoid(ctypes.Structure):
     _fields_ = [
         ("call_status", _UniffiRustCallStatus),
     ]
-UNIFFI_FOREIGN_FUTURE_COMPLETE_VOID = ctypes.CFUNCTYPE(None,ctypes.c_uint64,UniffiForeignFutureStructVoid,
+_UNIFFI_FOREIGN_FUTURE_COMPLETE_VOID = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiForeignFutureStructVoid,
 )
-UNIFFI_CALLBACK_INTERFACE_CAN_BROADCAST_METHOD0 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiRustBuffer,ctypes.POINTER(ctypes.c_int8),
+_UNIFFI_CALLBACK_INTERFACE_CAN_BROADCAST_METHOD0 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiRustBuffer,ctypes.POINTER(ctypes.c_int8),
     ctypes.POINTER(_UniffiRustCallStatus),
 )
-UNIFFI_CALLBACK_INTERFACE_IS_OUTPUT_KNOWN_METHOD0 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiRustBuffer,ctypes.POINTER(ctypes.c_int8),
+_UNIFFI_CALLBACK_INTERFACE_GENERATE_SCRIPT_METHOD0 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,ctypes.POINTER(_UniffiRustBuffer),
     ctypes.POINTER(_UniffiRustCallStatus),
 )
-UNIFFI_CALLBACK_INTERFACE_IS_SCRIPT_OWNED_METHOD0 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiRustBuffer,ctypes.POINTER(ctypes.c_int8),
+_UNIFFI_CALLBACK_INTERFACE_IS_OUTPUT_KNOWN_METHOD0 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiRustBuffer,ctypes.POINTER(ctypes.c_int8),
     ctypes.POINTER(_UniffiRustCallStatus),
 )
-UNIFFI_CALLBACK_INTERFACE_PROCESS_PARTIALLY_SIGNED_TRANSACTION_METHOD0 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiRustBuffer,ctypes.POINTER(_UniffiRustBuffer),
+_UNIFFI_CALLBACK_INTERFACE_IS_SCRIPT_OWNED_METHOD0 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiRustBuffer,ctypes.POINTER(ctypes.c_int8),
     ctypes.POINTER(_UniffiRustCallStatus),
 )
-class UniffiVTableCallbackInterfaceCanBroadcast(ctypes.Structure):
+_UNIFFI_CALLBACK_INTERFACE_PROCESS_PARTIALLY_SIGNED_TRANSACTION_METHOD0 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiRustBuffer,ctypes.POINTER(_UniffiRustBuffer),
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+class _UniffiVTableCallbackInterfaceCanBroadcast(ctypes.Structure):
     _fields_ = [
-        ("callback", UNIFFI_CALLBACK_INTERFACE_CAN_BROADCAST_METHOD0),
-        ("uniffi_free", UNIFFI_CALLBACK_INTERFACE_FREE),
+        ("callback", _UNIFFI_CALLBACK_INTERFACE_CAN_BROADCAST_METHOD0),
+        ("uniffi_free", _UNIFFI_CALLBACK_INTERFACE_FREE),
     ]
-class UniffiVTableCallbackInterfaceIsOutputKnown(ctypes.Structure):
+class _UniffiVTableCallbackInterfaceGenerateScript(ctypes.Structure):
     _fields_ = [
-        ("callback", UNIFFI_CALLBACK_INTERFACE_IS_OUTPUT_KNOWN_METHOD0),
-        ("uniffi_free", UNIFFI_CALLBACK_INTERFACE_FREE),
+        ("callback", _UNIFFI_CALLBACK_INTERFACE_GENERATE_SCRIPT_METHOD0),
+        ("uniffi_free", _UNIFFI_CALLBACK_INTERFACE_FREE),
     ]
-class UniffiVTableCallbackInterfaceIsScriptOwned(ctypes.Structure):
+class _UniffiVTableCallbackInterfaceIsOutputKnown(ctypes.Structure):
     _fields_ = [
-        ("callback", UNIFFI_CALLBACK_INTERFACE_IS_SCRIPT_OWNED_METHOD0),
-        ("uniffi_free", UNIFFI_CALLBACK_INTERFACE_FREE),
+        ("callback", _UNIFFI_CALLBACK_INTERFACE_IS_OUTPUT_KNOWN_METHOD0),
+        ("uniffi_free", _UNIFFI_CALLBACK_INTERFACE_FREE),
     ]
-class UniffiVTableCallbackInterfaceProcessPartiallySignedTransaction(ctypes.Structure):
+class _UniffiVTableCallbackInterfaceIsScriptOwned(ctypes.Structure):
     _fields_ = [
-        ("callback", UNIFFI_CALLBACK_INTERFACE_PROCESS_PARTIALLY_SIGNED_TRANSACTION_METHOD0),
-        ("uniffi_free", UNIFFI_CALLBACK_INTERFACE_FREE),
+        ("callback", _UNIFFI_CALLBACK_INTERFACE_IS_SCRIPT_OWNED_METHOD0),
+        ("uniffi_free", _UNIFFI_CALLBACK_INTERFACE_FREE),
     ]
+class _UniffiVTableCallbackInterfaceProcessPartiallySignedTransaction(ctypes.Structure):
+    _fields_ = [
+        ("callback", _UNIFFI_CALLBACK_INTERFACE_PROCESS_PARTIALLY_SIGNED_TRANSACTION_METHOD0),
+        ("uniffi_free", _UNIFFI_CALLBACK_INTERFACE_FREE),
+    ]
+_UniffiLib.uniffi_payjoin_ffi_fn_clone_activesession.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_clone_activesession.restype = ctypes.c_void_p
+_UniffiLib.uniffi_payjoin_ffi_fn_free_activesession.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_free_activesession.restype = None
+_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_extract_req.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_extract_req.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_pj_uri_builder.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_pj_uri_builder.restype = ctypes.c_void_p
+_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_pj_url.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_pj_url.restype = ctypes.c_void_p
+_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_process_res.argtypes = (
+    ctypes.c_void_p,
+    _UniffiRustBuffer,
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_process_res.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_public_key.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_public_key.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_payjoin_ffi_fn_clone_clientresponse.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -764,62 +841,6 @@ _UniffiLib.uniffi_payjoin_ffi_fn_method_contextv2_process_response.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_method_contextv2_process_response.restype = _UniffiRustBuffer
-_UniffiLib.uniffi_payjoin_ffi_fn_clone_enrolled.argtypes = (
-    ctypes.c_void_p,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_payjoin_ffi_fn_clone_enrolled.restype = ctypes.c_void_p
-_UniffiLib.uniffi_payjoin_ffi_fn_free_enrolled.argtypes = (
-    ctypes.c_void_p,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_payjoin_ffi_fn_free_enrolled.restype = None
-_UniffiLib.uniffi_payjoin_ffi_fn_method_enrolled_extract_req.argtypes = (
-    ctypes.c_void_p,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_payjoin_ffi_fn_method_enrolled_extract_req.restype = _UniffiRustBuffer
-_UniffiLib.uniffi_payjoin_ffi_fn_method_enrolled_fallback_target.argtypes = (
-    ctypes.c_void_p,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_payjoin_ffi_fn_method_enrolled_fallback_target.restype = _UniffiRustBuffer
-_UniffiLib.uniffi_payjoin_ffi_fn_method_enrolled_process_res.argtypes = (
-    ctypes.c_void_p,
-    _UniffiRustBuffer,
-    ctypes.c_void_p,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_payjoin_ffi_fn_method_enrolled_process_res.restype = _UniffiRustBuffer
-_UniffiLib.uniffi_payjoin_ffi_fn_clone_enroller.argtypes = (
-    ctypes.c_void_p,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_payjoin_ffi_fn_clone_enroller.restype = ctypes.c_void_p
-_UniffiLib.uniffi_payjoin_ffi_fn_free_enroller.argtypes = (
-    ctypes.c_void_p,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_payjoin_ffi_fn_free_enroller.restype = None
-_UniffiLib.uniffi_payjoin_ffi_fn_constructor_enroller_from_directory_config.argtypes = (
-    ctypes.c_void_p,
-    ctypes.c_void_p,
-    ctypes.c_void_p,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_payjoin_ffi_fn_constructor_enroller_from_directory_config.restype = ctypes.c_void_p
-_UniffiLib.uniffi_payjoin_ffi_fn_method_enroller_extract_req.argtypes = (
-    ctypes.c_void_p,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_payjoin_ffi_fn_method_enroller_extract_req.restype = _UniffiRustBuffer
-_UniffiLib.uniffi_payjoin_ffi_fn_method_enroller_process_res.argtypes = (
-    ctypes.c_void_p,
-    _UniffiRustBuffer,
-    ctypes.c_void_p,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_payjoin_ffi_fn_method_enroller_process_res.restype = ctypes.c_void_p
 _UniffiLib.uniffi_payjoin_ffi_fn_clone_headers.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -958,6 +979,68 @@ _UniffiLib.uniffi_payjoin_ffi_fn_free_pjuri.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_free_pjuri.restype = None
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuri_address.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuri_address.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuri_amount.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuri_amount.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuri_as_string.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuri_as_string.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_payjoin_ffi_fn_clone_pjuribuilder.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_clone_pjuribuilder.restype = ctypes.c_void_p
+_UniffiLib.uniffi_payjoin_ffi_fn_free_pjuribuilder.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_free_pjuribuilder.restype = None
+_UniffiLib.uniffi_payjoin_ffi_fn_constructor_pjuribuilder_new.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.c_void_p,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_constructor_pjuribuilder_new.restype = ctypes.c_void_p
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_amount.argtypes = (
+    ctypes.c_void_p,
+    ctypes.c_uint64,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_amount.restype = ctypes.c_void_p
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_build.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_build.restype = ctypes.c_void_p
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_label.argtypes = (
+    ctypes.c_void_p,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_label.restype = ctypes.c_void_p
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_message.argtypes = (
+    ctypes.c_void_p,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_message.restype = ctypes.c_void_p
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_pjos.argtypes = (
+    ctypes.c_void_p,
+    ctypes.c_int8,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_pjos.restype = ctypes.c_void_p
 _UniffiLib.uniffi_payjoin_ffi_fn_clone_provisionalproposal.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -989,18 +1072,18 @@ _UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_finalize_proposal.ar
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_finalize_proposal.restype = ctypes.c_void_p
-_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_substitute_output_address.argtypes = (
-    ctypes.c_void_p,
-    _UniffiRustBuffer,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_substitute_output_address.restype = None
 _UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_try_preserving_privacy.argtypes = (
     ctypes.c_void_p,
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_try_preserving_privacy.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_try_substitute_receiver_output.argtypes = (
+    ctypes.c_void_p,
+    ctypes.c_uint64,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_try_substitute_receiver_output.restype = None
 _UniffiLib.uniffi_payjoin_ffi_fn_clone_requestbuilder.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1025,6 +1108,7 @@ _UniffiLib.uniffi_payjoin_ffi_fn_method_requestbuilder_always_disable_output_sub
 _UniffiLib.uniffi_payjoin_ffi_fn_method_requestbuilder_always_disable_output_substitution.restype = ctypes.c_void_p
 _UniffiLib.uniffi_payjoin_ffi_fn_method_requestbuilder_build_non_incentivizing.argtypes = (
     ctypes.c_void_p,
+    ctypes.c_uint64,
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_method_requestbuilder_build_non_incentivizing.restype = ctypes.c_void_p
@@ -1064,6 +1148,38 @@ _UniffiLib.uniffi_payjoin_ffi_fn_method_requestcontext_extract_v2.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_method_requestcontext_extract_v2.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_payjoin_ffi_fn_clone_sessioninitializer.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_clone_sessioninitializer.restype = ctypes.c_void_p
+_UniffiLib.uniffi_payjoin_ffi_fn_free_sessioninitializer.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_free_sessioninitializer.restype = None
+_UniffiLib.uniffi_payjoin_ffi_fn_constructor_sessioninitializer_new.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_constructor_sessioninitializer_new.restype = ctypes.c_void_p
+_UniffiLib.uniffi_payjoin_ffi_fn_method_sessioninitializer_extract_req.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_sessioninitializer_extract_req.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_payjoin_ffi_fn_method_sessioninitializer_process_res.argtypes = (
+    ctypes.c_void_p,
+    _UniffiRustBuffer,
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_sessioninitializer_process_res.restype = ctypes.c_void_p
 _UniffiLib.uniffi_payjoin_ffi_fn_clone_uncheckedproposal.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1123,6 +1239,16 @@ _UniffiLib.uniffi_payjoin_ffi_fn_method_uri_amount.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_method_uri_amount.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_payjoin_ffi_fn_method_uri_as_string.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_uri_as_string.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_payjoin_ffi_fn_method_uri_check_pj_supported.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_uri_check_pj_supported.restype = ctypes.c_void_p
 _UniffiLib.uniffi_payjoin_ffi_fn_clone_url.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1221,13 +1347,16 @@ _UniffiLib.uniffi_payjoin_ffi_fn_free_v2payjoinproposal.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_free_v2payjoinproposal.restype = None
-_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_deserialize_res.argtypes = (
-    ctypes.c_void_p,
-    _UniffiRustBuffer,
+_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_extract_v1_req.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
 )
-_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_deserialize_res.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_extract_v1_req.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_extract_v2_req.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_extract_v2_req.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_is_output_substitution_disabled.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1238,6 +1367,13 @@ _UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_owned_vouts.argtypes =
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_owned_vouts.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_process_res.argtypes = (
+    ctypes.c_void_p,
+    _UniffiRustBuffer,
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_process_res.restype = None
 _UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_psbt.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1279,18 +1415,18 @@ _UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_finalize_proposal.
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_finalize_proposal.restype = ctypes.c_void_p
-_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_substitute_output_address.argtypes = (
-    ctypes.c_void_p,
-    _UniffiRustBuffer,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_substitute_output_address.restype = None
 _UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_try_preserving_privacy.argtypes = (
     ctypes.c_void_p,
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_try_preserving_privacy.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_try_substitute_receiver_output.argtypes = (
+    ctypes.c_void_p,
+    ctypes.c_uint64,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_try_substitute_receiver_output.restype = None
 _UniffiLib.uniffi_payjoin_ffi_fn_clone_v2uncheckedproposal.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1319,19 +1455,23 @@ _UniffiLib.uniffi_payjoin_ffi_fn_method_v2uncheckedproposal_extract_tx_to_schedu
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_method_v2uncheckedproposal_extract_tx_to_schedule_broadcast.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_canbroadcast.argtypes = (
-    ctypes.POINTER(UniffiVTableCallbackInterfaceCanBroadcast),
+    ctypes.POINTER(_UniffiVTableCallbackInterfaceCanBroadcast),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_canbroadcast.restype = None
+_UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_generatescript.argtypes = (
+    ctypes.POINTER(_UniffiVTableCallbackInterfaceGenerateScript),
+)
+_UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_generatescript.restype = None
 _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_isoutputknown.argtypes = (
-    ctypes.POINTER(UniffiVTableCallbackInterfaceIsOutputKnown),
+    ctypes.POINTER(_UniffiVTableCallbackInterfaceIsOutputKnown),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_isoutputknown.restype = None
 _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_isscriptowned.argtypes = (
-    ctypes.POINTER(UniffiVTableCallbackInterfaceIsScriptOwned),
+    ctypes.POINTER(_UniffiVTableCallbackInterfaceIsScriptOwned),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_isscriptowned.restype = None
 _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_processpartiallysignedtransaction.argtypes = (
-    ctypes.POINTER(UniffiVTableCallbackInterfaceProcessPartiallySignedTransaction),
+    ctypes.POINTER(_UniffiVTableCallbackInterfaceProcessPartiallySignedTransaction),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_processpartiallysignedtransaction.restype = None
 _UniffiLib.ffi_payjoin_ffi_rustbuffer_alloc.argtypes = (
@@ -1357,7 +1497,7 @@ _UniffiLib.ffi_payjoin_ffi_rustbuffer_reserve.argtypes = (
 _UniffiLib.ffi_payjoin_ffi_rustbuffer_reserve.restype = _UniffiRustBuffer
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_u8.argtypes = (
     ctypes.c_uint64,
-    UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
+    _UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
     ctypes.c_uint64,
 )
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_u8.restype = None
@@ -1376,7 +1516,7 @@ _UniffiLib.ffi_payjoin_ffi_rust_future_complete_u8.argtypes = (
 _UniffiLib.ffi_payjoin_ffi_rust_future_complete_u8.restype = ctypes.c_uint8
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_i8.argtypes = (
     ctypes.c_uint64,
-    UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
+    _UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
     ctypes.c_uint64,
 )
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_i8.restype = None
@@ -1395,7 +1535,7 @@ _UniffiLib.ffi_payjoin_ffi_rust_future_complete_i8.argtypes = (
 _UniffiLib.ffi_payjoin_ffi_rust_future_complete_i8.restype = ctypes.c_int8
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_u16.argtypes = (
     ctypes.c_uint64,
-    UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
+    _UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
     ctypes.c_uint64,
 )
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_u16.restype = None
@@ -1414,7 +1554,7 @@ _UniffiLib.ffi_payjoin_ffi_rust_future_complete_u16.argtypes = (
 _UniffiLib.ffi_payjoin_ffi_rust_future_complete_u16.restype = ctypes.c_uint16
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_i16.argtypes = (
     ctypes.c_uint64,
-    UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
+    _UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
     ctypes.c_uint64,
 )
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_i16.restype = None
@@ -1433,7 +1573,7 @@ _UniffiLib.ffi_payjoin_ffi_rust_future_complete_i16.argtypes = (
 _UniffiLib.ffi_payjoin_ffi_rust_future_complete_i16.restype = ctypes.c_int16
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_u32.argtypes = (
     ctypes.c_uint64,
-    UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
+    _UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
     ctypes.c_uint64,
 )
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_u32.restype = None
@@ -1452,7 +1592,7 @@ _UniffiLib.ffi_payjoin_ffi_rust_future_complete_u32.argtypes = (
 _UniffiLib.ffi_payjoin_ffi_rust_future_complete_u32.restype = ctypes.c_uint32
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_i32.argtypes = (
     ctypes.c_uint64,
-    UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
+    _UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
     ctypes.c_uint64,
 )
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_i32.restype = None
@@ -1471,7 +1611,7 @@ _UniffiLib.ffi_payjoin_ffi_rust_future_complete_i32.argtypes = (
 _UniffiLib.ffi_payjoin_ffi_rust_future_complete_i32.restype = ctypes.c_int32
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_u64.argtypes = (
     ctypes.c_uint64,
-    UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
+    _UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
     ctypes.c_uint64,
 )
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_u64.restype = None
@@ -1490,7 +1630,7 @@ _UniffiLib.ffi_payjoin_ffi_rust_future_complete_u64.argtypes = (
 _UniffiLib.ffi_payjoin_ffi_rust_future_complete_u64.restype = ctypes.c_uint64
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_i64.argtypes = (
     ctypes.c_uint64,
-    UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
+    _UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
     ctypes.c_uint64,
 )
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_i64.restype = None
@@ -1509,7 +1649,7 @@ _UniffiLib.ffi_payjoin_ffi_rust_future_complete_i64.argtypes = (
 _UniffiLib.ffi_payjoin_ffi_rust_future_complete_i64.restype = ctypes.c_int64
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_f32.argtypes = (
     ctypes.c_uint64,
-    UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
+    _UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
     ctypes.c_uint64,
 )
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_f32.restype = None
@@ -1528,7 +1668,7 @@ _UniffiLib.ffi_payjoin_ffi_rust_future_complete_f32.argtypes = (
 _UniffiLib.ffi_payjoin_ffi_rust_future_complete_f32.restype = ctypes.c_float
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_f64.argtypes = (
     ctypes.c_uint64,
-    UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
+    _UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
     ctypes.c_uint64,
 )
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_f64.restype = None
@@ -1547,7 +1687,7 @@ _UniffiLib.ffi_payjoin_ffi_rust_future_complete_f64.argtypes = (
 _UniffiLib.ffi_payjoin_ffi_rust_future_complete_f64.restype = ctypes.c_double
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_pointer.argtypes = (
     ctypes.c_uint64,
-    UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
+    _UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
     ctypes.c_uint64,
 )
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_pointer.restype = None
@@ -1566,7 +1706,7 @@ _UniffiLib.ffi_payjoin_ffi_rust_future_complete_pointer.argtypes = (
 _UniffiLib.ffi_payjoin_ffi_rust_future_complete_pointer.restype = ctypes.c_void_p
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_rust_buffer.argtypes = (
     ctypes.c_uint64,
-    UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
+    _UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
     ctypes.c_uint64,
 )
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_rust_buffer.restype = None
@@ -1585,7 +1725,7 @@ _UniffiLib.ffi_payjoin_ffi_rust_future_complete_rust_buffer.argtypes = (
 _UniffiLib.ffi_payjoin_ffi_rust_future_complete_rust_buffer.restype = _UniffiRustBuffer
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_void.argtypes = (
     ctypes.c_uint64,
-    UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
+    _UNIFFI_RUST_FUTURE_CONTINUATION_CALLBACK,
     ctypes.c_uint64,
 )
 _UniffiLib.ffi_payjoin_ffi_rust_future_poll_void.restype = None
@@ -1602,27 +1742,27 @@ _UniffiLib.ffi_payjoin_ffi_rust_future_complete_void.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.ffi_payjoin_ffi_rust_future_complete_void.restype = None
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_activesession_extract_req.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_activesession_extract_req.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_activesession_pj_uri_builder.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_activesession_pj_uri_builder.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_activesession_pj_url.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_activesession_pj_url.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_activesession_process_res.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_activesession_process_res.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_activesession_public_key.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_activesession_public_key.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_contextv1_process_response.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_contextv1_process_response.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_contextv2_process_response.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_contextv2_process_response.restype = ctypes.c_uint16
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_enrolled_extract_req.argtypes = (
-)
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_enrolled_extract_req.restype = ctypes.c_uint16
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_enrolled_fallback_target.argtypes = (
-)
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_enrolled_fallback_target.restype = ctypes.c_uint16
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_enrolled_process_res.argtypes = (
-)
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_enrolled_process_res.restype = ctypes.c_uint16
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_enroller_extract_req.argtypes = (
-)
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_enroller_extract_req.restype = ctypes.c_uint16
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_enroller_process_res.argtypes = (
-)
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_enroller_process_res.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_headers_get_map.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_headers_get_map.restype = ctypes.c_uint16
@@ -1650,6 +1790,30 @@ _UniffiLib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_psbt.restype = cty
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_utxos_to_be_locked.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_payjoinproposal_utxos_to_be_locked.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuri_address.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuri_address.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuri_amount.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuri_amount.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuri_as_string.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuri_as_string.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_amount.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_amount.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_build.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_build.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_label.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_label.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_message.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_message.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_pjos.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_pjos.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_contribute_non_witness_input.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_contribute_non_witness_input.restype = ctypes.c_uint16
@@ -1659,12 +1823,12 @@ _UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_contribute_wit
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_finalize_proposal.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_finalize_proposal.restype = ctypes.c_uint16
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_substitute_output_address.argtypes = (
-)
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_substitute_output_address.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_try_preserving_privacy.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_try_preserving_privacy.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_try_substitute_receiver_output.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_try_substitute_receiver_output.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_requestbuilder_always_disable_output_substitution.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_requestbuilder_always_disable_output_substitution.restype = ctypes.c_uint16
@@ -1683,6 +1847,12 @@ _UniffiLib.uniffi_payjoin_ffi_checksum_method_requestcontext_extract_v1.restype 
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_requestcontext_extract_v2.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_requestcontext_extract_v2.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_sessioninitializer_extract_req.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_sessioninitializer_extract_req.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_sessioninitializer_process_res.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_sessioninitializer_process_res.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_uncheckedproposal_assume_interactive_receiver.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_uncheckedproposal_assume_interactive_receiver.restype = ctypes.c_uint16
@@ -1698,6 +1868,12 @@ _UniffiLib.uniffi_payjoin_ffi_checksum_method_uri_address.restype = ctypes.c_uin
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_uri_amount.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_uri_amount.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_uri_as_string.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_uri_as_string.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_uri_check_pj_supported.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_uri_check_pj_supported.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_url_as_string.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_url_as_string.restype = ctypes.c_uint16
@@ -1716,15 +1892,21 @@ _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2maybemixedinputscripts_check_no_
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2outputsunknown_identify_receiver_outputs.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2outputsunknown_identify_receiver_outputs.restype = ctypes.c_uint16
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_deserialize_res.argtypes = (
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_extract_v1_req.argtypes = (
 )
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_deserialize_res.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_extract_v1_req.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_extract_v2_req.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_extract_v2_req.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_is_output_substitution_disabled.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_is_output_substitution_disabled.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_owned_vouts.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_owned_vouts.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_process_res.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_process_res.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_psbt.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_psbt.restype = ctypes.c_uint16
@@ -1740,12 +1922,12 @@ _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_contribute_w
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_finalize_proposal.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_finalize_proposal.restype = ctypes.c_uint16
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_substitute_output_address.argtypes = (
-)
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_substitute_output_address.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_try_preserving_privacy.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_try_preserving_privacy.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_try_substitute_receiver_output.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_try_substitute_receiver_output.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2uncheckedproposal_assume_interactive_receiver.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2uncheckedproposal_assume_interactive_receiver.restype = ctypes.c_uint16
@@ -1755,18 +1937,21 @@ _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2uncheckedproposal_check_broadcas
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2uncheckedproposal_extract_tx_to_schedule_broadcast.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2uncheckedproposal_extract_tx_to_schedule_broadcast.restype = ctypes.c_uint16
-_UniffiLib.uniffi_payjoin_ffi_checksum_constructor_enroller_from_directory_config.argtypes = (
-)
-_UniffiLib.uniffi_payjoin_ffi_checksum_constructor_enroller_from_directory_config.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_constructor_headers_from_vec.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_constructor_headers_from_vec.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_constructor_ohttpkeys_decode.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_constructor_ohttpkeys_decode.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_constructor_pjuribuilder_new.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_constructor_pjuribuilder_new.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_constructor_requestbuilder_from_psbt_and_uri.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_constructor_requestbuilder_from_psbt_and_uri.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_constructor_sessioninitializer_new.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_constructor_sessioninitializer_new.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_constructor_uncheckedproposal_from_request.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_constructor_uncheckedproposal_from_request.restype = ctypes.c_uint16
@@ -1779,6 +1964,9 @@ _UniffiLib.uniffi_payjoin_ffi_checksum_constructor_url_from_str.restype = ctypes
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_canbroadcast_callback.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_canbroadcast_callback.restype = ctypes.c_uint16
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_generatescript_callback.argtypes = (
+)
+_UniffiLib.uniffi_payjoin_ffi_checksum_method_generatescript_callback.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_isoutputknown_callback.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_isoutputknown_callback.restype = ctypes.c_uint16
@@ -1901,6 +2089,126 @@ class _UniffiConverterString:
 
 
 
+class ActiveSessionProtocol(typing.Protocol):
+    def extract_req(self, ):
+        raise NotImplementedError
+    def pj_uri_builder(self, ):
+        raise NotImplementedError
+    def pj_url(self, ):
+        raise NotImplementedError
+    def process_res(self, body: "typing.List[int]",ctx: "ClientResponse"):
+        raise NotImplementedError
+    def public_key(self, ):
+        raise NotImplementedError
+
+
+class ActiveSession:
+    _pointer: ctypes.c_void_p
+    
+    def __init__(self, *args, **kwargs):
+        raise ValueError("This class has no default constructor")
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_activesession, pointer)
+
+    def _uniffi_clone_pointer(self):
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_activesession, self._pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+    def extract_req(self, ) -> "RequestResponse":
+        return _UniffiConverterTypeRequestResponse.lift(
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_extract_req,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def pj_uri_builder(self, ) -> "PjUriBuilder":
+        return _UniffiConverterTypePjUriBuilder.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_pj_uri_builder,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def pj_url(self, ) -> "Url":
+        return _UniffiConverterTypeUrl.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_pj_url,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def process_res(self, body: "typing.List[int]",ctx: "ClientResponse") -> "typing.Optional[V2UncheckedProposal]":
+        _UniffiConverterSequenceUInt8.check_lower(body)
+        
+        _UniffiConverterTypeClientResponse.check_lower(ctx)
+        
+        return _UniffiConverterOptionalTypeV2UncheckedProposal.lift(
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_process_res,self._uniffi_clone_pointer(),
+        _UniffiConverterSequenceUInt8.lower(body),
+        _UniffiConverterTypeClientResponse.lower(ctx))
+        )
+
+
+
+
+
+    def public_key(self, ) -> "str":
+        return _UniffiConverterString.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_activesession_public_key,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+
+class _UniffiConverterTypeActiveSession:
+
+    @staticmethod
+    def lift(value: int):
+        return ActiveSession._make_instance_(value)
+
+    @staticmethod
+    def check_lower(value: ActiveSession):
+        if not isinstance(value, ActiveSession):
+            raise TypeError("Expected ActiveSession instance, {} found".format(type(value).__name__))
+
+    @staticmethod
+    def lower(value: ActiveSessionProtocol):
+        if not isinstance(value, ActiveSession):
+            raise TypeError("Expected ActiveSession instance, {} found".format(type(value).__name__))
+        return value._uniffi_clone_pointer()
+
+    @classmethod
+    def read(cls, buf: _UniffiRustBuffer):
+        ptr = buf.read_u64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value: ActiveSessionProtocol, buf: _UniffiRustBuffer):
+        buf.write_u64(cls.lower(value))
+
+
+
 class ClientResponseProtocol(typing.Protocol):
     pass
 
@@ -1915,10 +2223,10 @@ class ClientResponse:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_clientresponse, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_clientresponse, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_clientresponse, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_clientresponse, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -1976,10 +2284,10 @@ class ContextV1:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_contextv1, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_contextv1, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_contextv1, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_contextv1, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -1995,7 +2303,7 @@ class ContextV1:
         _UniffiConverterSequenceUInt8.check_lower(response)
         
         return _UniffiConverterString.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_contextv1_process_response,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_contextv1_process_response,self._uniffi_clone_pointer(),
         _UniffiConverterSequenceUInt8.lower(response))
         )
 
@@ -2049,10 +2357,10 @@ class ContextV2:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_contextv2, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_contextv2, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_contextv2, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_contextv2, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -2068,7 +2376,7 @@ class ContextV2:
         _UniffiConverterSequenceUInt8.check_lower(response)
         
         return _UniffiConverterOptionalString.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_contextv2_process_response,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_contextv2_process_response,self._uniffi_clone_pointer(),
         _UniffiConverterSequenceUInt8.lower(response))
         )
 
@@ -2107,207 +2415,6 @@ class _UniffiConverterTypeContextV2:
 
 
 
-class EnrolledProtocol(typing.Protocol):
-    def extract_req(self, ):
-        raise NotImplementedError
-    def fallback_target(self, ):
-        raise NotImplementedError
-    def process_res(self, body: "typing.List[int]",ctx: "ClientResponse"):
-        raise NotImplementedError
-
-
-class Enrolled:
-    _pointer: ctypes.c_void_p
-    
-    def __init__(self, *args, **kwargs):
-        raise ValueError("This class has no default constructor")
-
-    def __del__(self):
-        # In case of partial initialization of instances.
-        pointer = getattr(self, "_pointer", None)
-        if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_enrolled, pointer)
-
-    def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_enrolled, self._pointer)
-
-    # Used by alternative constructors or any methods which return this type.
-    @classmethod
-    def _make_instance_(cls, pointer):
-        # Lightly yucky way to bypass the usual __init__ logic
-        # and just create a new instance with the required pointer.
-        inst = cls.__new__(cls)
-        inst._pointer = pointer
-        return inst
-
-
-    def extract_req(self, ) -> "RequestResponse":
-        return _UniffiConverterTypeRequestResponse.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_enrolled_extract_req,self._uniffi_clone_pointer(),)
-        )
-
-
-
-
-
-    def fallback_target(self, ) -> "str":
-        return _UniffiConverterString.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_enrolled_fallback_target,self._uniffi_clone_pointer(),)
-        )
-
-
-
-
-
-    def process_res(self, body: "typing.List[int]",ctx: "ClientResponse") -> "typing.Optional[V2UncheckedProposal]":
-        _UniffiConverterSequenceUInt8.check_lower(body)
-        
-        _UniffiConverterTypeClientResponse.check_lower(ctx)
-        
-        return _UniffiConverterOptionalTypeV2UncheckedProposal.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_enrolled_process_res,self._uniffi_clone_pointer(),
-        _UniffiConverterSequenceUInt8.lower(body),
-        _UniffiConverterTypeClientResponse.lower(ctx))
-        )
-
-
-
-
-
-
-class _UniffiConverterTypeEnrolled:
-
-    @staticmethod
-    def lift(value: int):
-        return Enrolled._make_instance_(value)
-
-    @staticmethod
-    def check_lower(value: Enrolled):
-        if not isinstance(value, Enrolled):
-            raise TypeError("Expected Enrolled instance, {} found".format(type(value).__name__))
-
-    @staticmethod
-    def lower(value: EnrolledProtocol):
-        if not isinstance(value, Enrolled):
-            raise TypeError("Expected Enrolled instance, {} found".format(type(value).__name__))
-        return value._uniffi_clone_pointer()
-
-    @classmethod
-    def read(cls, buf: _UniffiRustBuffer):
-        ptr = buf.read_u64()
-        if ptr == 0:
-            raise InternalError("Raw pointer value was null")
-        return cls.lift(ptr)
-
-    @classmethod
-    def write(cls, value: EnrolledProtocol, buf: _UniffiRustBuffer):
-        buf.write_u64(cls.lower(value))
-
-
-
-class EnrollerProtocol(typing.Protocol):
-    def extract_req(self, ):
-        raise NotImplementedError
-    def process_res(self, body: "typing.List[int]",ctx: "ClientResponse"):
-        raise NotImplementedError
-
-
-class Enroller:
-    _pointer: ctypes.c_void_p
-    
-    def __init__(self, *args, **kwargs):
-        raise ValueError("This class has no default constructor")
-
-    def __del__(self):
-        # In case of partial initialization of instances.
-        pointer = getattr(self, "_pointer", None)
-        if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_enroller, pointer)
-
-    def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_enroller, self._pointer)
-
-    # Used by alternative constructors or any methods which return this type.
-    @classmethod
-    def _make_instance_(cls, pointer):
-        # Lightly yucky way to bypass the usual __init__ logic
-        # and just create a new instance with the required pointer.
-        inst = cls.__new__(cls)
-        inst._pointer = pointer
-        return inst
-
-    @classmethod
-    def from_directory_config(cls, directory: "Url",ohttp_keys: "OhttpKeys",ohttp_relay: "Url"):
-        _UniffiConverterTypeUrl.check_lower(directory)
-        
-        _UniffiConverterTypeOhttpKeys.check_lower(ohttp_keys)
-        
-        _UniffiConverterTypeUrl.check_lower(ohttp_relay)
-        
-        # Call the (fallible) function before creating any half-baked object instances.
-        pointer = _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_constructor_enroller_from_directory_config,
-        _UniffiConverterTypeUrl.lower(directory),
-        _UniffiConverterTypeOhttpKeys.lower(ohttp_keys),
-        _UniffiConverterTypeUrl.lower(ohttp_relay))
-        return cls._make_instance_(pointer)
-
-
-
-    def extract_req(self, ) -> "RequestResponse":
-        return _UniffiConverterTypeRequestResponse.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_enroller_extract_req,self._uniffi_clone_pointer(),)
-        )
-
-
-
-
-
-    def process_res(self, body: "typing.List[int]",ctx: "ClientResponse") -> "Enrolled":
-        _UniffiConverterSequenceUInt8.check_lower(body)
-        
-        _UniffiConverterTypeClientResponse.check_lower(ctx)
-        
-        return _UniffiConverterTypeEnrolled.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_enroller_process_res,self._uniffi_clone_pointer(),
-        _UniffiConverterSequenceUInt8.lower(body),
-        _UniffiConverterTypeClientResponse.lower(ctx))
-        )
-
-
-
-
-
-
-class _UniffiConverterTypeEnroller:
-
-    @staticmethod
-    def lift(value: int):
-        return Enroller._make_instance_(value)
-
-    @staticmethod
-    def check_lower(value: Enroller):
-        if not isinstance(value, Enroller):
-            raise TypeError("Expected Enroller instance, {} found".format(type(value).__name__))
-
-    @staticmethod
-    def lower(value: EnrollerProtocol):
-        if not isinstance(value, Enroller):
-            raise TypeError("Expected Enroller instance, {} found".format(type(value).__name__))
-        return value._uniffi_clone_pointer()
-
-    @classmethod
-    def read(cls, buf: _UniffiRustBuffer):
-        ptr = buf.read_u64()
-        if ptr == 0:
-            raise InternalError("Raw pointer value was null")
-        return cls.lift(ptr)
-
-    @classmethod
-    def write(cls, value: EnrollerProtocol, buf: _UniffiRustBuffer):
-        buf.write_u64(cls.lower(value))
-
-
-
 class HeadersProtocol(typing.Protocol):
     def get_map(self, ):
         raise NotImplementedError
@@ -2323,10 +2430,10 @@ class Headers:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_headers, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_headers, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_headers, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_headers, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -2342,7 +2449,7 @@ class Headers:
         _UniffiConverterSequenceUInt8.check_lower(body)
         
         # Call the (fallible) function before creating any half-baked object instances.
-        pointer = _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_constructor_headers_from_vec,
+        pointer = _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_constructor_headers_from_vec,
         _UniffiConverterSequenceUInt8.lower(body))
         return cls._make_instance_(pointer)
 
@@ -2350,7 +2457,7 @@ class Headers:
 
     def get_map(self, ) -> "dict[str, str]":
         return _UniffiConverterMapStringString.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_headers_get_map,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_headers_get_map,self._uniffi_clone_pointer(),)
         )
 
 
@@ -2403,10 +2510,10 @@ class MaybeInputsOwned:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_maybeinputsowned, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_maybeinputsowned, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_maybeinputsowned, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_maybeinputsowned, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -2422,7 +2529,7 @@ class MaybeInputsOwned:
         _UniffiConverterCallbackInterfaceIsScriptOwned.check_lower(is_owned)
         
         return _UniffiConverterTypeMaybeMixedInputScripts.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_maybeinputsowned_check_inputs_not_owned,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_maybeinputsowned_check_inputs_not_owned,self._uniffi_clone_pointer(),
         _UniffiConverterCallbackInterfaceIsScriptOwned.lower(is_owned))
         )
 
@@ -2476,10 +2583,10 @@ class MaybeInputsSeen:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_maybeinputsseen, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_maybeinputsseen, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_maybeinputsseen, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_maybeinputsseen, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -2495,7 +2602,7 @@ class MaybeInputsSeen:
         _UniffiConverterCallbackInterfaceIsOutputKnown.check_lower(is_known)
         
         return _UniffiConverterTypeOutputsUnknown.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_maybeinputsseen_check_no_inputs_seen_before,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_maybeinputsseen_check_no_inputs_seen_before,self._uniffi_clone_pointer(),
         _UniffiConverterCallbackInterfaceIsOutputKnown.lower(is_known))
         )
 
@@ -2549,10 +2656,10 @@ class MaybeMixedInputScripts:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_maybemixedinputscripts, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_maybemixedinputscripts, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_maybemixedinputscripts, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_maybemixedinputscripts, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -2566,7 +2673,7 @@ class MaybeMixedInputScripts:
 
     def check_no_mixed_input_scripts(self, ) -> "MaybeInputsSeen":
         return _UniffiConverterTypeMaybeInputsSeen.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_maybemixedinputscripts_check_no_mixed_input_scripts,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_maybemixedinputscripts_check_no_mixed_input_scripts,self._uniffi_clone_pointer(),)
         )
 
 
@@ -2618,10 +2725,10 @@ class OhttpKeys:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_ohttpkeys, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_ohttpkeys, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_ohttpkeys, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_ohttpkeys, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -2637,7 +2744,7 @@ class OhttpKeys:
         _UniffiConverterSequenceUInt8.check_lower(bytes)
         
         # Call the (fallible) function before creating any half-baked object instances.
-        pointer = _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_constructor_ohttpkeys_decode,
+        pointer = _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_constructor_ohttpkeys_decode,
         _UniffiConverterSequenceUInt8.lower(bytes))
         return cls._make_instance_(pointer)
 
@@ -2689,10 +2796,10 @@ class OutputsUnknown:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_outputsunknown, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_outputsunknown, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_outputsunknown, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_outputsunknown, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -2708,7 +2815,7 @@ class OutputsUnknown:
         _UniffiConverterCallbackInterfaceIsScriptOwned.check_lower(is_receiver_output)
         
         return _UniffiConverterTypeProvisionalProposal.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_outputsunknown_identify_receiver_outputs,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_outputsunknown_identify_receiver_outputs,self._uniffi_clone_pointer(),
         _UniffiConverterCallbackInterfaceIsScriptOwned.lower(is_receiver_output))
         )
 
@@ -2768,10 +2875,10 @@ class PayjoinProposal:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_payjoinproposal, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_payjoinproposal, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_payjoinproposal, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_payjoinproposal, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -2785,7 +2892,7 @@ class PayjoinProposal:
 
     def is_output_substitution_disabled(self, ) -> "bool":
         return _UniffiConverterBool.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_payjoinproposal_is_output_substitution_disabled,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_payjoinproposal_is_output_substitution_disabled,self._uniffi_clone_pointer(),)
         )
 
 
@@ -2794,7 +2901,7 @@ class PayjoinProposal:
 
     def owned_vouts(self, ) -> "typing.List[int]":
         return _UniffiConverterSequenceUInt64.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_payjoinproposal_owned_vouts,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_payjoinproposal_owned_vouts,self._uniffi_clone_pointer(),)
         )
 
 
@@ -2803,7 +2910,7 @@ class PayjoinProposal:
 
     def psbt(self, ) -> "str":
         return _UniffiConverterString.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_payjoinproposal_psbt,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_payjoinproposal_psbt,self._uniffi_clone_pointer(),)
         )
 
 
@@ -2812,7 +2919,7 @@ class PayjoinProposal:
 
     def utxos_to_be_locked(self, ) -> "typing.List[OutPoint]":
         return _UniffiConverterSequenceTypeOutPoint.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_payjoinproposal_utxos_to_be_locked,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_payjoinproposal_utxos_to_be_locked,self._uniffi_clone_pointer(),)
         )
 
 
@@ -2851,7 +2958,12 @@ class _UniffiConverterTypePayjoinProposal:
 
 
 class PjUriProtocol(typing.Protocol):
-    pass
+    def address(self, ):
+        raise NotImplementedError
+    def amount(self, ):
+        raise NotImplementedError
+    def as_string(self, ):
+        raise NotImplementedError
 
 
 class PjUri:
@@ -2864,10 +2976,10 @@ class PjUri:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_pjuri, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_pjuri, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_pjuri, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_pjuri, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -2877,6 +2989,33 @@ class PjUri:
         inst = cls.__new__(cls)
         inst._pointer = pointer
         return inst
+
+
+    def address(self, ) -> "str":
+        return _UniffiConverterString.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuri_address,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def amount(self, ) -> "typing.Optional[float]":
+        return _UniffiConverterOptionalDouble.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuri_amount,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def as_string(self, ) -> "str":
+        return _UniffiConverterString.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuri_as_string,self._uniffi_clone_pointer(),)
+        )
+
+
+
 
 
 
@@ -2910,6 +3049,143 @@ class _UniffiConverterTypePjUri:
 
 
 
+class PjUriBuilderProtocol(typing.Protocol):
+    def amount(self, amount: "int"):
+        raise NotImplementedError
+    def build(self, ):
+        raise NotImplementedError
+    def label(self, label: "str"):
+        raise NotImplementedError
+    def message(self, message: "str"):
+        raise NotImplementedError
+    def pjos(self, pjos: "bool"):
+        raise NotImplementedError
+
+
+class PjUriBuilder:
+    _pointer: ctypes.c_void_p
+    def __init__(self, address: "str",pj: "Url",ohttp_keys: "typing.Optional[OhttpKeys]",expiry: "typing.Optional[int]"):
+        _UniffiConverterString.check_lower(address)
+        
+        _UniffiConverterTypeUrl.check_lower(pj)
+        
+        _UniffiConverterOptionalTypeOhttpKeys.check_lower(ohttp_keys)
+        
+        _UniffiConverterOptionalUInt64.check_lower(expiry)
+        
+        self._pointer = _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_constructor_pjuribuilder_new,
+        _UniffiConverterString.lower(address),
+        _UniffiConverterTypeUrl.lower(pj),
+        _UniffiConverterOptionalTypeOhttpKeys.lower(ohttp_keys),
+        _UniffiConverterOptionalUInt64.lower(expiry))
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_pjuribuilder, pointer)
+
+    def _uniffi_clone_pointer(self):
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_pjuribuilder, self._pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+    def amount(self, amount: "int") -> "PjUriBuilder":
+        _UniffiConverterUInt64.check_lower(amount)
+        
+        return _UniffiConverterTypePjUriBuilder.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_amount,self._uniffi_clone_pointer(),
+        _UniffiConverterUInt64.lower(amount))
+        )
+
+
+
+
+
+    def build(self, ) -> "PjUri":
+        return _UniffiConverterTypePjUri.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_build,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def label(self, label: "str") -> "PjUriBuilder":
+        _UniffiConverterString.check_lower(label)
+        
+        return _UniffiConverterTypePjUriBuilder.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_label,self._uniffi_clone_pointer(),
+        _UniffiConverterString.lower(label))
+        )
+
+
+
+
+
+    def message(self, message: "str") -> "PjUriBuilder":
+        _UniffiConverterString.check_lower(message)
+        
+        return _UniffiConverterTypePjUriBuilder.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_message,self._uniffi_clone_pointer(),
+        _UniffiConverterString.lower(message))
+        )
+
+
+
+
+
+    def pjos(self, pjos: "bool") -> "PjUriBuilder":
+        _UniffiConverterBool.check_lower(pjos)
+        
+        return _UniffiConverterTypePjUriBuilder.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_pjuribuilder_pjos,self._uniffi_clone_pointer(),
+        _UniffiConverterBool.lower(pjos))
+        )
+
+
+
+
+
+
+class _UniffiConverterTypePjUriBuilder:
+
+    @staticmethod
+    def lift(value: int):
+        return PjUriBuilder._make_instance_(value)
+
+    @staticmethod
+    def check_lower(value: PjUriBuilder):
+        if not isinstance(value, PjUriBuilder):
+            raise TypeError("Expected PjUriBuilder instance, {} found".format(type(value).__name__))
+
+    @staticmethod
+    def lower(value: PjUriBuilderProtocol):
+        if not isinstance(value, PjUriBuilder):
+            raise TypeError("Expected PjUriBuilder instance, {} found".format(type(value).__name__))
+        return value._uniffi_clone_pointer()
+
+    @classmethod
+    def read(cls, buf: _UniffiRustBuffer):
+        ptr = buf.read_u64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value: PjUriBuilderProtocol, buf: _UniffiRustBuffer):
+        buf.write_u64(cls.lower(value))
+
+
+
 class ProvisionalProposalProtocol(typing.Protocol):
     def contribute_non_witness_input(self, tx: "typing.List[int]",outpoint: "OutPoint"):
         raise NotImplementedError
@@ -2917,9 +3193,9 @@ class ProvisionalProposalProtocol(typing.Protocol):
         raise NotImplementedError
     def finalize_proposal(self, process_psbt: "ProcessPartiallySignedTransaction",min_feerate_sat_per_vb: "typing.Optional[int]"):
         raise NotImplementedError
-    def substitute_output_address(self, substitute_address: "str"):
-        raise NotImplementedError
     def try_preserving_privacy(self, candidate_inputs: "dict[int, OutPoint]"):
+        raise NotImplementedError
+    def try_substitute_receiver_output(self, generate_script: "GenerateScript"):
         raise NotImplementedError
 
 
@@ -2933,10 +3209,10 @@ class ProvisionalProposal:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_provisionalproposal, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_provisionalproposal, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_provisionalproposal, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_provisionalproposal, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -2953,7 +3229,7 @@ class ProvisionalProposal:
         
         _UniffiConverterTypeOutPoint.check_lower(outpoint)
         
-        _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_contribute_non_witness_input,self._uniffi_clone_pointer(),
+        _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_contribute_non_witness_input,self._uniffi_clone_pointer(),
         _UniffiConverterSequenceUInt8.lower(tx),
         _UniffiConverterTypeOutPoint.lower(outpoint))
 
@@ -2967,7 +3243,7 @@ class ProvisionalProposal:
         
         _UniffiConverterTypeOutPoint.check_lower(outpoint)
         
-        _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_contribute_witness_input,self._uniffi_clone_pointer(),
+        _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_contribute_witness_input,self._uniffi_clone_pointer(),
         _UniffiConverterTypeTxOut.lower(txout),
         _UniffiConverterTypeOutPoint.lower(outpoint))
 
@@ -2982,21 +3258,10 @@ class ProvisionalProposal:
         _UniffiConverterOptionalUInt64.check_lower(min_feerate_sat_per_vb)
         
         return _UniffiConverterTypePayjoinProposal.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_finalize_proposal,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_finalize_proposal,self._uniffi_clone_pointer(),
         _UniffiConverterCallbackInterfaceProcessPartiallySignedTransaction.lower(process_psbt),
         _UniffiConverterOptionalUInt64.lower(min_feerate_sat_per_vb))
         )
-
-
-
-
-
-    def substitute_output_address(self, substitute_address: "str") -> None:
-        _UniffiConverterString.check_lower(substitute_address)
-        
-        _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_substitute_output_address,self._uniffi_clone_pointer(),
-        _UniffiConverterString.lower(substitute_address))
-
 
 
 
@@ -3006,9 +3271,20 @@ class ProvisionalProposal:
         _UniffiConverterMapUInt64TypeOutPoint.check_lower(candidate_inputs)
         
         return _UniffiConverterTypeOutPoint.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_try_preserving_privacy,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_try_preserving_privacy,self._uniffi_clone_pointer(),
         _UniffiConverterMapUInt64TypeOutPoint.lower(candidate_inputs))
         )
+
+
+
+
+
+    def try_substitute_receiver_output(self, generate_script: "GenerateScript") -> None:
+        _UniffiConverterCallbackInterfaceGenerateScript.check_lower(generate_script)
+        
+        _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_try_substitute_receiver_output,self._uniffi_clone_pointer(),
+        _UniffiConverterCallbackInterfaceGenerateScript.lower(generate_script))
+
 
 
 
@@ -3048,7 +3324,7 @@ class _UniffiConverterTypeProvisionalProposal:
 class RequestBuilderProtocol(typing.Protocol):
     def always_disable_output_substitution(self, disable: "bool"):
         raise NotImplementedError
-    def build_non_incentivizing(self, ):
+    def build_non_incentivizing(self, min_fee_rate: "int"):
         raise NotImplementedError
     def build_recommended(self, min_fee_rate: "int"):
         raise NotImplementedError
@@ -3066,10 +3342,10 @@ class RequestBuilder:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_requestbuilder, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_requestbuilder, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_requestbuilder, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_requestbuilder, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -3081,15 +3357,15 @@ class RequestBuilder:
         return inst
 
     @classmethod
-    def from_psbt_and_uri(cls, psbt: "str",uri: "Uri"):
+    def from_psbt_and_uri(cls, psbt: "str",uri: "PjUri"):
         _UniffiConverterString.check_lower(psbt)
         
-        _UniffiConverterTypeUri.check_lower(uri)
+        _UniffiConverterTypePjUri.check_lower(uri)
         
         # Call the (fallible) function before creating any half-baked object instances.
-        pointer = _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_constructor_requestbuilder_from_psbt_and_uri,
+        pointer = _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_constructor_requestbuilder_from_psbt_and_uri,
         _UniffiConverterString.lower(psbt),
-        _UniffiConverterTypeUri.lower(uri))
+        _UniffiConverterTypePjUri.lower(uri))
         return cls._make_instance_(pointer)
 
 
@@ -3098,7 +3374,7 @@ class RequestBuilder:
         _UniffiConverterBool.check_lower(disable)
         
         return _UniffiConverterTypeRequestBuilder.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_requestbuilder_always_disable_output_substitution,self._uniffi_clone_pointer(),
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_requestbuilder_always_disable_output_substitution,self._uniffi_clone_pointer(),
         _UniffiConverterBool.lower(disable))
         )
 
@@ -3106,9 +3382,12 @@ class RequestBuilder:
 
 
 
-    def build_non_incentivizing(self, ) -> "RequestContext":
+    def build_non_incentivizing(self, min_fee_rate: "int") -> "RequestContext":
+        _UniffiConverterUInt64.check_lower(min_fee_rate)
+        
         return _UniffiConverterTypeRequestContext.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_requestbuilder_build_non_incentivizing,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_requestbuilder_build_non_incentivizing,self._uniffi_clone_pointer(),
+        _UniffiConverterUInt64.lower(min_fee_rate))
         )
 
 
@@ -3119,7 +3398,7 @@ class RequestBuilder:
         _UniffiConverterUInt64.check_lower(min_fee_rate)
         
         return _UniffiConverterTypeRequestContext.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_requestbuilder_build_recommended,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_requestbuilder_build_recommended,self._uniffi_clone_pointer(),
         _UniffiConverterUInt64.lower(min_fee_rate))
         )
 
@@ -3137,7 +3416,7 @@ class RequestBuilder:
         _UniffiConverterBool.check_lower(clamp_fee_contribution)
         
         return _UniffiConverterTypeRequestContext.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_requestbuilder_build_with_additional_fee,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_requestbuilder_build_with_additional_fee,self._uniffi_clone_pointer(),
         _UniffiConverterUInt64.lower(max_fee_contribution),
         _UniffiConverterOptionalUInt8.lower(change_index),
         _UniffiConverterUInt64.lower(min_fee_rate),
@@ -3196,10 +3475,10 @@ class RequestContext:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_requestcontext, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_requestcontext, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_requestcontext, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_requestcontext, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -3213,7 +3492,7 @@ class RequestContext:
 
     def extract_v1(self, ) -> "RequestContextV1":
         return _UniffiConverterTypeRequestContextV1.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_requestcontext_extract_v1,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_requestcontext_extract_v1,self._uniffi_clone_pointer(),)
         )
 
 
@@ -3224,7 +3503,7 @@ class RequestContext:
         _UniffiConverterTypeUrl.check_lower(ohttp_proxy_url)
         
         return _UniffiConverterTypeRequestContextV2.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_requestcontext_extract_v2,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_requestcontext_extract_v2,self._uniffi_clone_pointer(),
         _UniffiConverterTypeUrl.lower(ohttp_proxy_url))
         )
 
@@ -3263,6 +3542,110 @@ class _UniffiConverterTypeRequestContext:
 
 
 
+class SessionInitializerProtocol(typing.Protocol):
+    def extract_req(self, ):
+        raise NotImplementedError
+    def process_res(self, body: "typing.List[int]",ctx: "ClientResponse"):
+        raise NotImplementedError
+
+
+class SessionInitializer:
+    _pointer: ctypes.c_void_p
+    def __init__(self, address: "str",expire_after: "typing.Optional[int]",network: "Network",directory: "Url",ohttp_keys: "OhttpKeys",ohttp_relay: "Url"):
+        _UniffiConverterString.check_lower(address)
+        
+        _UniffiConverterOptionalUInt64.check_lower(expire_after)
+        
+        _UniffiConverterTypeNetwork.check_lower(network)
+        
+        _UniffiConverterTypeUrl.check_lower(directory)
+        
+        _UniffiConverterTypeOhttpKeys.check_lower(ohttp_keys)
+        
+        _UniffiConverterTypeUrl.check_lower(ohttp_relay)
+        
+        self._pointer = _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_constructor_sessioninitializer_new,
+        _UniffiConverterString.lower(address),
+        _UniffiConverterOptionalUInt64.lower(expire_after),
+        _UniffiConverterTypeNetwork.lower(network),
+        _UniffiConverterTypeUrl.lower(directory),
+        _UniffiConverterTypeOhttpKeys.lower(ohttp_keys),
+        _UniffiConverterTypeUrl.lower(ohttp_relay))
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_sessioninitializer, pointer)
+
+    def _uniffi_clone_pointer(self):
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_sessioninitializer, self._pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+    def extract_req(self, ) -> "RequestResponse":
+        return _UniffiConverterTypeRequestResponse.lift(
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_sessioninitializer_extract_req,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def process_res(self, body: "typing.List[int]",ctx: "ClientResponse") -> "ActiveSession":
+        _UniffiConverterSequenceUInt8.check_lower(body)
+        
+        _UniffiConverterTypeClientResponse.check_lower(ctx)
+        
+        return _UniffiConverterTypeActiveSession.lift(
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_sessioninitializer_process_res,self._uniffi_clone_pointer(),
+        _UniffiConverterSequenceUInt8.lower(body),
+        _UniffiConverterTypeClientResponse.lower(ctx))
+        )
+
+
+
+
+
+
+class _UniffiConverterTypeSessionInitializer:
+
+    @staticmethod
+    def lift(value: int):
+        return SessionInitializer._make_instance_(value)
+
+    @staticmethod
+    def check_lower(value: SessionInitializer):
+        if not isinstance(value, SessionInitializer):
+            raise TypeError("Expected SessionInitializer instance, {} found".format(type(value).__name__))
+
+    @staticmethod
+    def lower(value: SessionInitializerProtocol):
+        if not isinstance(value, SessionInitializer):
+            raise TypeError("Expected SessionInitializer instance, {} found".format(type(value).__name__))
+        return value._uniffi_clone_pointer()
+
+    @classmethod
+    def read(cls, buf: _UniffiRustBuffer):
+        ptr = buf.read_u64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value: SessionInitializerProtocol, buf: _UniffiRustBuffer):
+        buf.write_u64(cls.lower(value))
+
+
+
 class UncheckedProposalProtocol(typing.Protocol):
     def assume_interactive_receiver(self, ):
         raise NotImplementedError
@@ -3282,10 +3665,10 @@ class UncheckedProposal:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_uncheckedproposal, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_uncheckedproposal, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_uncheckedproposal, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_uncheckedproposal, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -3305,7 +3688,7 @@ class UncheckedProposal:
         _UniffiConverterTypeHeaders.check_lower(headers)
         
         # Call the (fallible) function before creating any half-baked object instances.
-        pointer = _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_constructor_uncheckedproposal_from_request,
+        pointer = _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_constructor_uncheckedproposal_from_request,
         _UniffiConverterSequenceUInt8.lower(body),
         _UniffiConverterString.lower(query),
         _UniffiConverterTypeHeaders.lower(headers))
@@ -3315,7 +3698,7 @@ class UncheckedProposal:
 
     def assume_interactive_receiver(self, ) -> "MaybeInputsOwned":
         return _UniffiConverterTypeMaybeInputsOwned.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_uncheckedproposal_assume_interactive_receiver,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_uncheckedproposal_assume_interactive_receiver,self._uniffi_clone_pointer(),)
         )
 
 
@@ -3328,7 +3711,7 @@ class UncheckedProposal:
         _UniffiConverterCallbackInterfaceCanBroadcast.check_lower(can_broadcast)
         
         return _UniffiConverterTypeMaybeInputsOwned.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_uncheckedproposal_check_broadcast_suitability,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_uncheckedproposal_check_broadcast_suitability,self._uniffi_clone_pointer(),
         _UniffiConverterOptionalUInt64.lower(min_fee_rate),
         _UniffiConverterCallbackInterfaceCanBroadcast.lower(can_broadcast))
         )
@@ -3339,7 +3722,7 @@ class UncheckedProposal:
 
     def extract_tx_to_schedule_broadcast(self, ) -> "typing.List[int]":
         return _UniffiConverterSequenceUInt8.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_uncheckedproposal_extract_tx_to_schedule_broadcast,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_uncheckedproposal_extract_tx_to_schedule_broadcast,self._uniffi_clone_pointer(),)
         )
 
 
@@ -3382,6 +3765,10 @@ class UriProtocol(typing.Protocol):
         raise NotImplementedError
     def amount(self, ):
         raise NotImplementedError
+    def as_string(self, ):
+        raise NotImplementedError
+    def check_pj_supported(self, ):
+        raise NotImplementedError
 
 
 class Uri:
@@ -3394,10 +3781,10 @@ class Uri:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_uri, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_uri, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_uri, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_uri, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -3413,7 +3800,7 @@ class Uri:
         _UniffiConverterString.check_lower(uri)
         
         # Call the (fallible) function before creating any half-baked object instances.
-        pointer = _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_constructor_uri_from_str,
+        pointer = _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_constructor_uri_from_str,
         _UniffiConverterString.lower(uri))
         return cls._make_instance_(pointer)
 
@@ -3421,7 +3808,7 @@ class Uri:
 
     def address(self, ) -> "str":
         return _UniffiConverterString.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_uri_address,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_uri_address,self._uniffi_clone_pointer(),)
         )
 
 
@@ -3430,7 +3817,25 @@ class Uri:
 
     def amount(self, ) -> "typing.Optional[float]":
         return _UniffiConverterOptionalDouble.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_uri_amount,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_uri_amount,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def as_string(self, ) -> "str":
+        return _UniffiConverterString.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_uri_as_string,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def check_pj_supported(self, ) -> "PjUri":
+        return _UniffiConverterTypePjUri.lift(
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_uri_check_pj_supported,self._uniffi_clone_pointer(),)
         )
 
 
@@ -3485,10 +3890,10 @@ class Url:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_url, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_url, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_url, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_url, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -3504,7 +3909,7 @@ class Url:
         _UniffiConverterString.check_lower(input)
         
         # Call the (fallible) function before creating any half-baked object instances.
-        pointer = _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_constructor_url_from_str,
+        pointer = _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_constructor_url_from_str,
         _UniffiConverterString.lower(input))
         return cls._make_instance_(pointer)
 
@@ -3512,7 +3917,7 @@ class Url:
 
     def as_string(self, ) -> "str":
         return _UniffiConverterString.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_url_as_string,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_url_as_string,self._uniffi_clone_pointer(),)
         )
 
 
@@ -3521,7 +3926,7 @@ class Url:
 
     def query(self, ) -> "typing.Optional[str]":
         return _UniffiConverterOptionalString.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_url_query,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_url_query,self._uniffi_clone_pointer(),)
         )
 
 
@@ -3574,10 +3979,10 @@ class V2MaybeInputsOwned:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_v2maybeinputsowned, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_v2maybeinputsowned, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_v2maybeinputsowned, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_v2maybeinputsowned, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -3593,7 +3998,7 @@ class V2MaybeInputsOwned:
         _UniffiConverterCallbackInterfaceIsScriptOwned.check_lower(is_owned)
         
         return _UniffiConverterTypeV2MaybeMixedInputScripts.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2maybeinputsowned_check_inputs_not_owned,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2maybeinputsowned_check_inputs_not_owned,self._uniffi_clone_pointer(),
         _UniffiConverterCallbackInterfaceIsScriptOwned.lower(is_owned))
         )
 
@@ -3647,10 +4052,10 @@ class V2MaybeInputsSeen:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_v2maybeinputsseen, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_v2maybeinputsseen, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_v2maybeinputsseen, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_v2maybeinputsseen, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -3666,7 +4071,7 @@ class V2MaybeInputsSeen:
         _UniffiConverterCallbackInterfaceIsOutputKnown.check_lower(is_known)
         
         return _UniffiConverterTypeV2OutputsUnknown.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2maybeinputsseen_check_no_inputs_seen_before,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2maybeinputsseen_check_no_inputs_seen_before,self._uniffi_clone_pointer(),
         _UniffiConverterCallbackInterfaceIsOutputKnown.lower(is_known))
         )
 
@@ -3720,10 +4125,10 @@ class V2MaybeMixedInputScripts:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_v2maybemixedinputscripts, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_v2maybemixedinputscripts, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_v2maybemixedinputscripts, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_v2maybemixedinputscripts, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -3737,7 +4142,7 @@ class V2MaybeMixedInputScripts:
 
     def check_no_mixed_input_scripts(self, ) -> "V2MaybeInputsSeen":
         return _UniffiConverterTypeV2MaybeInputsSeen.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2maybemixedinputscripts_check_no_mixed_input_scripts,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2maybemixedinputscripts_check_no_mixed_input_scripts,self._uniffi_clone_pointer(),)
         )
 
 
@@ -3790,10 +4195,10 @@ class V2OutputsUnknown:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_v2outputsunknown, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_v2outputsunknown, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_v2outputsunknown, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_v2outputsunknown, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -3809,7 +4214,7 @@ class V2OutputsUnknown:
         _UniffiConverterCallbackInterfaceIsScriptOwned.check_lower(is_receiver_output)
         
         return _UniffiConverterTypeV2ProvisionalProposal.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2outputsunknown_identify_receiver_outputs,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2outputsunknown_identify_receiver_outputs,self._uniffi_clone_pointer(),
         _UniffiConverterCallbackInterfaceIsScriptOwned.lower(is_receiver_output))
         )
 
@@ -3849,11 +4254,15 @@ class _UniffiConverterTypeV2OutputsUnknown:
 
 
 class V2PayjoinProposalProtocol(typing.Protocol):
-    def deserialize_res(self, res: "typing.List[int]",ohttp_context: "ClientResponse"):
+    def extract_v1_req(self, ):
+        raise NotImplementedError
+    def extract_v2_req(self, ):
         raise NotImplementedError
     def is_output_substitution_disabled(self, ):
         raise NotImplementedError
     def owned_vouts(self, ):
+        raise NotImplementedError
+    def process_res(self, res: "typing.List[int]",ohttp_context: "ClientResponse"):
         raise NotImplementedError
     def psbt(self, ):
         raise NotImplementedError
@@ -3871,10 +4280,10 @@ class V2PayjoinProposal:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_v2payjoinproposal, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_v2payjoinproposal, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_v2payjoinproposal, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_v2payjoinproposal, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -3886,15 +4295,18 @@ class V2PayjoinProposal:
         return inst
 
 
-    def deserialize_res(self, res: "typing.List[int]",ohttp_context: "ClientResponse") -> "typing.List[int]":
-        _UniffiConverterSequenceUInt8.check_lower(res)
-        
-        _UniffiConverterTypeClientResponse.check_lower(ohttp_context)
-        
-        return _UniffiConverterSequenceUInt8.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_deserialize_res,self._uniffi_clone_pointer(),
-        _UniffiConverterSequenceUInt8.lower(res),
-        _UniffiConverterTypeClientResponse.lower(ohttp_context))
+    def extract_v1_req(self, ) -> "str":
+        return _UniffiConverterString.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_extract_v1_req,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def extract_v2_req(self, ) -> "RequestResponse":
+        return _UniffiConverterTypeRequestResponse.lift(
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_extract_v2_req,self._uniffi_clone_pointer(),)
         )
 
 
@@ -3903,7 +4315,7 @@ class V2PayjoinProposal:
 
     def is_output_substitution_disabled(self, ) -> "bool":
         return _UniffiConverterBool.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_is_output_substitution_disabled,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_is_output_substitution_disabled,self._uniffi_clone_pointer(),)
         )
 
 
@@ -3912,8 +4324,22 @@ class V2PayjoinProposal:
 
     def owned_vouts(self, ) -> "typing.List[int]":
         return _UniffiConverterSequenceUInt64.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_owned_vouts,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_owned_vouts,self._uniffi_clone_pointer(),)
         )
+
+
+
+
+
+    def process_res(self, res: "typing.List[int]",ohttp_context: "ClientResponse") -> None:
+        _UniffiConverterSequenceUInt8.check_lower(res)
+        
+        _UniffiConverterTypeClientResponse.check_lower(ohttp_context)
+        
+        _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_process_res,self._uniffi_clone_pointer(),
+        _UniffiConverterSequenceUInt8.lower(res),
+        _UniffiConverterTypeClientResponse.lower(ohttp_context))
+
 
 
 
@@ -3921,7 +4347,7 @@ class V2PayjoinProposal:
 
     def psbt(self, ) -> "str":
         return _UniffiConverterString.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_psbt,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_psbt,self._uniffi_clone_pointer(),)
         )
 
 
@@ -3930,7 +4356,7 @@ class V2PayjoinProposal:
 
     def utxos_to_be_locked(self, ) -> "typing.List[OutPoint]":
         return _UniffiConverterSequenceTypeOutPoint.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_utxos_to_be_locked,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_v2payjoinproposal_utxos_to_be_locked,self._uniffi_clone_pointer(),)
         )
 
 
@@ -3975,9 +4401,9 @@ class V2ProvisionalProposalProtocol(typing.Protocol):
         raise NotImplementedError
     def finalize_proposal(self, process_psbt: "ProcessPartiallySignedTransaction",min_feerate_sat_per_vb: "typing.Optional[int]"):
         raise NotImplementedError
-    def substitute_output_address(self, substitute_address: "str"):
-        raise NotImplementedError
     def try_preserving_privacy(self, candidate_inputs: "dict[int, OutPoint]"):
+        raise NotImplementedError
+    def try_substitute_receiver_output(self, generate_script: "GenerateScript"):
         raise NotImplementedError
 
 
@@ -3991,10 +4417,10 @@ class V2ProvisionalProposal:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_v2provisionalproposal, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_v2provisionalproposal, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_v2provisionalproposal, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_v2provisionalproposal, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -4011,7 +4437,7 @@ class V2ProvisionalProposal:
         
         _UniffiConverterTypeOutPoint.check_lower(outpoint)
         
-        _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_contribute_non_witness_input,self._uniffi_clone_pointer(),
+        _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_contribute_non_witness_input,self._uniffi_clone_pointer(),
         _UniffiConverterSequenceUInt8.lower(tx),
         _UniffiConverterTypeOutPoint.lower(outpoint))
 
@@ -4025,7 +4451,7 @@ class V2ProvisionalProposal:
         
         _UniffiConverterTypeOutPoint.check_lower(outpoint)
         
-        _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_contribute_witness_input,self._uniffi_clone_pointer(),
+        _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_contribute_witness_input,self._uniffi_clone_pointer(),
         _UniffiConverterTypeTxOut.lower(txout),
         _UniffiConverterTypeOutPoint.lower(outpoint))
 
@@ -4040,21 +4466,10 @@ class V2ProvisionalProposal:
         _UniffiConverterOptionalUInt64.check_lower(min_feerate_sat_per_vb)
         
         return _UniffiConverterTypeV2PayjoinProposal.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_finalize_proposal,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_finalize_proposal,self._uniffi_clone_pointer(),
         _UniffiConverterCallbackInterfaceProcessPartiallySignedTransaction.lower(process_psbt),
         _UniffiConverterOptionalUInt64.lower(min_feerate_sat_per_vb))
         )
-
-
-
-
-
-    def substitute_output_address(self, substitute_address: "str") -> None:
-        _UniffiConverterString.check_lower(substitute_address)
-        
-        _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_substitute_output_address,self._uniffi_clone_pointer(),
-        _UniffiConverterString.lower(substitute_address))
-
 
 
 
@@ -4064,9 +4479,20 @@ class V2ProvisionalProposal:
         _UniffiConverterMapUInt64TypeOutPoint.check_lower(candidate_inputs)
         
         return _UniffiConverterTypeOutPoint.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_try_preserving_privacy,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_try_preserving_privacy,self._uniffi_clone_pointer(),
         _UniffiConverterMapUInt64TypeOutPoint.lower(candidate_inputs))
         )
+
+
+
+
+
+    def try_substitute_receiver_output(self, generate_script: "GenerateScript") -> None:
+        _UniffiConverterCallbackInterfaceGenerateScript.check_lower(generate_script)
+        
+        _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_try_substitute_receiver_output,self._uniffi_clone_pointer(),
+        _UniffiConverterCallbackInterfaceGenerateScript.lower(generate_script))
+
 
 
 
@@ -4122,10 +4548,10 @@ class V2UncheckedProposal:
         # In case of partial initialization of instances.
         pointer = getattr(self, "_pointer", None)
         if pointer is not None:
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_v2uncheckedproposal, pointer)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_free_v2uncheckedproposal, pointer)
 
     def _uniffi_clone_pointer(self):
-        return _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_v2uncheckedproposal, self._pointer)
+        return _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_clone_v2uncheckedproposal, self._pointer)
 
     # Used by alternative constructors or any methods which return this type.
     @classmethod
@@ -4139,7 +4565,7 @@ class V2UncheckedProposal:
 
     def assume_interactive_receiver(self, ) -> "V2MaybeInputsOwned":
         return _UniffiConverterTypeV2MaybeInputsOwned.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_v2uncheckedproposal_assume_interactive_receiver,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_v2uncheckedproposal_assume_interactive_receiver,self._uniffi_clone_pointer(),)
         )
 
 
@@ -4152,7 +4578,7 @@ class V2UncheckedProposal:
         _UniffiConverterCallbackInterfaceCanBroadcast.check_lower(can_broadcast)
         
         return _UniffiConverterTypeV2MaybeInputsOwned.lift(
-            _rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2uncheckedproposal_check_broadcast_suitability,self._uniffi_clone_pointer(),
+            _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2uncheckedproposal_check_broadcast_suitability,self._uniffi_clone_pointer(),
         _UniffiConverterOptionalUInt64.lower(min_fee_rate),
         _UniffiConverterCallbackInterfaceCanBroadcast.lower(can_broadcast))
         )
@@ -4163,7 +4589,7 @@ class V2UncheckedProposal:
 
     def extract_tx_to_schedule_broadcast(self, ) -> "typing.List[int]":
         return _UniffiConverterSequenceUInt8.lift(
-            _rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_v2uncheckedproposal_extract_tx_to_schedule_broadcast,self._uniffi_clone_pointer(),)
+            _uniffi_rust_call(_UniffiLib.uniffi_payjoin_ffi_fn_method_v2uncheckedproposal_extract_tx_to_schedule_broadcast,self._uniffi_clone_pointer(),)
         )
 
 
@@ -4203,7 +4629,6 @@ class _UniffiConverterTypeV2UncheckedProposal:
 class OutPoint:
     txid: "str"
     vout: "int"
-    @typing.no_type_check
     def __init__(self, *, txid: "str", vout: "int"):
         self.txid = txid
         self.vout = vout
@@ -4240,7 +4665,6 @@ class _UniffiConverterTypeOutPoint(_UniffiConverterRustBuffer):
 class Request:
     url: "Url"
     body: "typing.List[int]"
-    @typing.no_type_check
     def __init__(self, *, url: "Url", body: "typing.List[int]"):
         self.url = url
         self.body = body
@@ -4277,7 +4701,6 @@ class _UniffiConverterTypeRequest(_UniffiConverterRustBuffer):
 class RequestContextV1:
     request: "Request"
     context_v1: "ContextV1"
-    @typing.no_type_check
     def __init__(self, *, request: "Request", context_v1: "ContextV1"):
         self.request = request
         self.context_v1 = context_v1
@@ -4314,7 +4737,6 @@ class _UniffiConverterTypeRequestContextV1(_UniffiConverterRustBuffer):
 class RequestContextV2:
     request: "Request"
     context_v2: "ContextV2"
-    @typing.no_type_check
     def __init__(self, *, request: "Request", context_v2: "ContextV2"):
         self.request = request
         self.context_v2 = context_v2
@@ -4351,7 +4773,6 @@ class _UniffiConverterTypeRequestContextV2(_UniffiConverterRustBuffer):
 class RequestResponse:
     request: "Request"
     client_response: "ClientResponse"
-    @typing.no_type_check
     def __init__(self, *, request: "Request", client_response: "ClientResponse"):
         self.request = request
         self.client_response = client_response
@@ -4388,7 +4809,6 @@ class _UniffiConverterTypeRequestResponse(_UniffiConverterRustBuffer):
 class TxOut:
     value: "int"
     script_pubkey: "typing.List[int]"
-    @typing.no_type_check
     def __init__(self, *, value: "int", script_pubkey: "typing.List[int]"):
         self.value = value
         self.script_pubkey = script_pubkey
@@ -4488,175 +4908,185 @@ _UniffiTempPayjoinError = PayjoinError
 
 class PayjoinError:  # type: ignore
     class InvalidAddress(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.InvalidAddress({})".format(str(self))
     _UniffiTempPayjoinError.InvalidAddress = InvalidAddress # type: ignore
     class InvalidScript(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.InvalidScript({})".format(str(self))
     _UniffiTempPayjoinError.InvalidScript = InvalidScript # type: ignore
     class PsbtParseError(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.PsbtParseError({})".format(str(self))
     _UniffiTempPayjoinError.PsbtParseError = PsbtParseError # type: ignore
     class ResponseError(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.ResponseError({})".format(str(self))
     _UniffiTempPayjoinError.ResponseError = ResponseError # type: ignore
     class RequestError(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.RequestError({})".format(str(self))
     _UniffiTempPayjoinError.RequestError = RequestError # type: ignore
     class SelectionError(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.SelectionError({})".format(str(self))
     _UniffiTempPayjoinError.SelectionError = SelectionError # type: ignore
     class CreateRequestError(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.CreateRequestError({})".format(str(self))
     _UniffiTempPayjoinError.CreateRequestError = CreateRequestError # type: ignore
     class PjParseError(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.PjParseError({})".format(str(self))
     _UniffiTempPayjoinError.PjParseError = PjParseError # type: ignore
     class PjNotSupported(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.PjNotSupported({})".format(str(self))
     _UniffiTempPayjoinError.PjNotSupported = PjNotSupported # type: ignore
     class V2Error(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.V2Error({})".format(str(self))
     _UniffiTempPayjoinError.V2Error = V2Error # type: ignore
     class ValidationError(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.ValidationError({})".format(str(self))
     _UniffiTempPayjoinError.ValidationError = ValidationError # type: ignore
     class TransactionError(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.TransactionError({})".format(str(self))
     _UniffiTempPayjoinError.TransactionError = TransactionError # type: ignore
     class UnexpectedError(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.UnexpectedError({})".format(str(self))
     _UniffiTempPayjoinError.UnexpectedError = UnexpectedError # type: ignore
     class ServerError(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.ServerError({})".format(str(self))
     _UniffiTempPayjoinError.ServerError = ServerError # type: ignore
     class NetworkValidation(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.NetworkValidation({})".format(str(self))
     _UniffiTempPayjoinError.NetworkValidation = NetworkValidation # type: ignore
     class OhttpError(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.OhttpError({})".format(str(self))
     _UniffiTempPayjoinError.OhttpError = OhttpError # type: ignore
     class UrlError(_UniffiTempPayjoinError):
-
         def __init__(self, message):
             super().__init__(", ".join([
                 "message={!r}".format(message),
             ]))
             self.message = message
+
         def __repr__(self):
             return "PayjoinError.UrlError({})".format(str(self))
     _UniffiTempPayjoinError.UrlError = UrlError # type: ignore
+    class IoError(_UniffiTempPayjoinError):
+        def __init__(self, message):
+            super().__init__(", ".join([
+                "message={!r}".format(message),
+            ]))
+            self.message = message
+
+        def __repr__(self):
+            return "PayjoinError.IoError({})".format(str(self))
+    _UniffiTempPayjoinError.IoError = IoError # type: ignore
 
 PayjoinError = _UniffiTempPayjoinError # type: ignore
 del _UniffiTempPayjoinError
@@ -4668,71 +5098,75 @@ class _UniffiConverterTypePayjoinError(_UniffiConverterRustBuffer):
         variant = buf.read_i32()
         if variant == 1:
             return PayjoinError.InvalidAddress(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 2:
             return PayjoinError.InvalidScript(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 3:
             return PayjoinError.PsbtParseError(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 4:
             return PayjoinError.ResponseError(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 5:
             return PayjoinError.RequestError(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 6:
             return PayjoinError.SelectionError(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 7:
             return PayjoinError.CreateRequestError(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 8:
             return PayjoinError.PjParseError(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 9:
             return PayjoinError.PjNotSupported(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 10:
             return PayjoinError.V2Error(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 11:
             return PayjoinError.ValidationError(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 12:
             return PayjoinError.TransactionError(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 13:
             return PayjoinError.UnexpectedError(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 14:
             return PayjoinError.ServerError(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 15:
             return PayjoinError.NetworkValidation(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 16:
             return PayjoinError.OhttpError(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
             )
         if variant == 17:
             return PayjoinError.UrlError(
-                message=_UniffiConverterString.read(buf),
+                _UniffiConverterString.read(buf),
+            )
+        if variant == 18:
+            return PayjoinError.IoError(
+                _UniffiConverterString.read(buf),
             )
         raise InternalError("Raw enum value doesn't match any cases")
 
@@ -4789,6 +5223,9 @@ class _UniffiConverterTypePayjoinError(_UniffiConverterRustBuffer):
         if isinstance(value, PayjoinError.UrlError):
             _UniffiConverterString.check_lower(value.message)
             return
+        if isinstance(value, PayjoinError.IoError):
+            _UniffiConverterString.check_lower(value.message)
+            return
 
     @staticmethod
     def write(value, buf):
@@ -4843,6 +5280,9 @@ class _UniffiConverterTypePayjoinError(_UniffiConverterRustBuffer):
         if isinstance(value, PayjoinError.UrlError):
             buf.write_i32(17)
             _UniffiConverterString.write(value.message, buf)
+        if isinstance(value, PayjoinError.IoError):
+            buf.write_i32(18)
+            _UniffiConverterString.write(value.message, buf)
 
 
 
@@ -4851,13 +5291,13 @@ class CanBroadcast(typing.Protocol):
         raise NotImplementedError
 # Magic number for the Rust proxy to call using the same mechanism as every other method,
 # to free the callback once it's dropped by Rust.
-IDX_CALLBACK_FREE = 0
+_UNIFFI_IDX_CALLBACK_FREE = 0
 # Return codes for callback calls
 _UNIFFI_CALLBACK_SUCCESS = 0
 _UNIFFI_CALLBACK_ERROR = 1
 _UNIFFI_CALLBACK_UNEXPECTED_ERROR = 2
 
-class UniffiCallbackInterfaceFfiConverter:
+class _UniffiCallbackInterfaceFfiConverter:
     _handle_map = _UniffiHandleMap()
 
     @classmethod
@@ -4883,10 +5323,10 @@ class UniffiCallbackInterfaceFfiConverter:
         buf.write_u64(cls.lower(cb))
 
 # Put all the bits inside a class to keep the top-level namespace clean
-class UniffiTraitImplCanBroadcast:
+class _UniffiTraitImplCanBroadcast:
     # For each method, generate a callback function to pass to Rust
 
-    @UNIFFI_CALLBACK_INTERFACE_CAN_BROADCAST_METHOD0
+    @_UNIFFI_CALLBACK_INTERFACE_CAN_BROADCAST_METHOD0
     def callback(
             uniffi_handle,
             tx,
@@ -4910,21 +5350,71 @@ class UniffiTraitImplCanBroadcast:
                 _UniffiConverterTypePayjoinError.lower,
         )
 
-    @UNIFFI_CALLBACK_INTERFACE_FREE
-    def uniffi_free(uniffi_handle):
+    @_UNIFFI_CALLBACK_INTERFACE_FREE
+    def _uniffi_free(uniffi_handle):
         _UniffiConverterCallbackInterfaceCanBroadcast._handle_map.remove(uniffi_handle)
 
     # Generate the FFI VTable.  This has a field for each callback interface method.
-    uniffi_vtable = UniffiVTableCallbackInterfaceCanBroadcast(
+    _uniffi_vtable = _UniffiVTableCallbackInterfaceCanBroadcast(
         callback,
-        uniffi_free
+        _uniffi_free
     )
     # Send Rust a pointer to the VTable.  Note: this means we need to keep the struct alive forever,
     # or else bad things will happen when Rust tries to access it.
-    _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_canbroadcast(ctypes.byref(uniffi_vtable))
+    _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_canbroadcast(ctypes.byref(_uniffi_vtable))
 
 # The _UniffiConverter which transforms the Callbacks in to Handles to pass to Rust.
-_UniffiConverterCallbackInterfaceCanBroadcast = UniffiCallbackInterfaceFfiConverter()
+_UniffiConverterCallbackInterfaceCanBroadcast = _UniffiCallbackInterfaceFfiConverter()
+
+
+
+class GenerateScript(typing.Protocol):
+    def callback(self, ):
+        raise NotImplementedError
+
+
+# Put all the bits inside a class to keep the top-level namespace clean
+class _UniffiTraitImplGenerateScript:
+    # For each method, generate a callback function to pass to Rust
+
+    @_UNIFFI_CALLBACK_INTERFACE_GENERATE_SCRIPT_METHOD0
+    def callback(
+            uniffi_handle,
+            uniffi_out_return,
+            uniffi_call_status_ptr,
+        ):
+        uniffi_obj = _UniffiConverterCallbackInterfaceGenerateScript._handle_map.get(uniffi_handle)
+        def make_call():
+            args = ()
+            method = uniffi_obj.callback
+            return method(*args)
+
+        
+        def write_return_value(v):
+            uniffi_out_return[0] = _UniffiConverterSequenceUInt8.lower(v)
+        _uniffi_trait_interface_call_with_error(
+                uniffi_call_status_ptr.contents,
+                make_call,
+                write_return_value,
+                PayjoinError,
+                _UniffiConverterTypePayjoinError.lower,
+        )
+
+    @_UNIFFI_CALLBACK_INTERFACE_FREE
+    def _uniffi_free(uniffi_handle):
+        _UniffiConverterCallbackInterfaceGenerateScript._handle_map.remove(uniffi_handle)
+
+    # Generate the FFI VTable.  This has a field for each callback interface method.
+    _uniffi_vtable = _UniffiVTableCallbackInterfaceGenerateScript(
+        callback,
+        _uniffi_free
+    )
+    # Send Rust a pointer to the VTable.  Note: this means we need to keep the struct alive forever,
+    # or else bad things will happen when Rust tries to access it.
+    _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_generatescript(ctypes.byref(_uniffi_vtable))
+
+# The _UniffiConverter which transforms the Callbacks in to Handles to pass to Rust.
+_UniffiConverterCallbackInterfaceGenerateScript = _UniffiCallbackInterfaceFfiConverter()
 
 
 
@@ -4934,10 +5424,10 @@ class IsOutputKnown(typing.Protocol):
 
 
 # Put all the bits inside a class to keep the top-level namespace clean
-class UniffiTraitImplIsOutputKnown:
+class _UniffiTraitImplIsOutputKnown:
     # For each method, generate a callback function to pass to Rust
 
-    @UNIFFI_CALLBACK_INTERFACE_IS_OUTPUT_KNOWN_METHOD0
+    @_UNIFFI_CALLBACK_INTERFACE_IS_OUTPUT_KNOWN_METHOD0
     def callback(
             uniffi_handle,
             outpoint,
@@ -4961,21 +5451,21 @@ class UniffiTraitImplIsOutputKnown:
                 _UniffiConverterTypePayjoinError.lower,
         )
 
-    @UNIFFI_CALLBACK_INTERFACE_FREE
-    def uniffi_free(uniffi_handle):
+    @_UNIFFI_CALLBACK_INTERFACE_FREE
+    def _uniffi_free(uniffi_handle):
         _UniffiConverterCallbackInterfaceIsOutputKnown._handle_map.remove(uniffi_handle)
 
     # Generate the FFI VTable.  This has a field for each callback interface method.
-    uniffi_vtable = UniffiVTableCallbackInterfaceIsOutputKnown(
+    _uniffi_vtable = _UniffiVTableCallbackInterfaceIsOutputKnown(
         callback,
-        uniffi_free
+        _uniffi_free
     )
     # Send Rust a pointer to the VTable.  Note: this means we need to keep the struct alive forever,
     # or else bad things will happen when Rust tries to access it.
-    _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_isoutputknown(ctypes.byref(uniffi_vtable))
+    _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_isoutputknown(ctypes.byref(_uniffi_vtable))
 
 # The _UniffiConverter which transforms the Callbacks in to Handles to pass to Rust.
-_UniffiConverterCallbackInterfaceIsOutputKnown = UniffiCallbackInterfaceFfiConverter()
+_UniffiConverterCallbackInterfaceIsOutputKnown = _UniffiCallbackInterfaceFfiConverter()
 
 
 
@@ -4985,10 +5475,10 @@ class IsScriptOwned(typing.Protocol):
 
 
 # Put all the bits inside a class to keep the top-level namespace clean
-class UniffiTraitImplIsScriptOwned:
+class _UniffiTraitImplIsScriptOwned:
     # For each method, generate a callback function to pass to Rust
 
-    @UNIFFI_CALLBACK_INTERFACE_IS_SCRIPT_OWNED_METHOD0
+    @_UNIFFI_CALLBACK_INTERFACE_IS_SCRIPT_OWNED_METHOD0
     def callback(
             uniffi_handle,
             script,
@@ -5012,21 +5502,21 @@ class UniffiTraitImplIsScriptOwned:
                 _UniffiConverterTypePayjoinError.lower,
         )
 
-    @UNIFFI_CALLBACK_INTERFACE_FREE
-    def uniffi_free(uniffi_handle):
+    @_UNIFFI_CALLBACK_INTERFACE_FREE
+    def _uniffi_free(uniffi_handle):
         _UniffiConverterCallbackInterfaceIsScriptOwned._handle_map.remove(uniffi_handle)
 
     # Generate the FFI VTable.  This has a field for each callback interface method.
-    uniffi_vtable = UniffiVTableCallbackInterfaceIsScriptOwned(
+    _uniffi_vtable = _UniffiVTableCallbackInterfaceIsScriptOwned(
         callback,
-        uniffi_free
+        _uniffi_free
     )
     # Send Rust a pointer to the VTable.  Note: this means we need to keep the struct alive forever,
     # or else bad things will happen when Rust tries to access it.
-    _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_isscriptowned(ctypes.byref(uniffi_vtable))
+    _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_isscriptowned(ctypes.byref(_uniffi_vtable))
 
 # The _UniffiConverter which transforms the Callbacks in to Handles to pass to Rust.
-_UniffiConverterCallbackInterfaceIsScriptOwned = UniffiCallbackInterfaceFfiConverter()
+_UniffiConverterCallbackInterfaceIsScriptOwned = _UniffiCallbackInterfaceFfiConverter()
 
 
 
@@ -5036,10 +5526,10 @@ class ProcessPartiallySignedTransaction(typing.Protocol):
 
 
 # Put all the bits inside a class to keep the top-level namespace clean
-class UniffiTraitImplProcessPartiallySignedTransaction:
+class _UniffiTraitImplProcessPartiallySignedTransaction:
     # For each method, generate a callback function to pass to Rust
 
-    @UNIFFI_CALLBACK_INTERFACE_PROCESS_PARTIALLY_SIGNED_TRANSACTION_METHOD0
+    @_UNIFFI_CALLBACK_INTERFACE_PROCESS_PARTIALLY_SIGNED_TRANSACTION_METHOD0
     def callback(
             uniffi_handle,
             psbt,
@@ -5063,21 +5553,21 @@ class UniffiTraitImplProcessPartiallySignedTransaction:
                 _UniffiConverterTypePayjoinError.lower,
         )
 
-    @UNIFFI_CALLBACK_INTERFACE_FREE
-    def uniffi_free(uniffi_handle):
+    @_UNIFFI_CALLBACK_INTERFACE_FREE
+    def _uniffi_free(uniffi_handle):
         _UniffiConverterCallbackInterfaceProcessPartiallySignedTransaction._handle_map.remove(uniffi_handle)
 
     # Generate the FFI VTable.  This has a field for each callback interface method.
-    uniffi_vtable = UniffiVTableCallbackInterfaceProcessPartiallySignedTransaction(
+    _uniffi_vtable = _UniffiVTableCallbackInterfaceProcessPartiallySignedTransaction(
         callback,
-        uniffi_free
+        _uniffi_free
     )
     # Send Rust a pointer to the VTable.  Note: this means we need to keep the struct alive forever,
     # or else bad things will happen when Rust tries to access it.
-    _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_processpartiallysignedtransaction(ctypes.byref(uniffi_vtable))
+    _UniffiLib.uniffi_payjoin_ffi_fn_init_callback_vtable_processpartiallysignedtransaction(ctypes.byref(_uniffi_vtable))
 
 # The _UniffiConverter which transforms the Callbacks in to Handles to pass to Rust.
-_UniffiConverterCallbackInterfaceProcessPartiallySignedTransaction = UniffiCallbackInterfaceFfiConverter()
+_UniffiConverterCallbackInterfaceProcessPartiallySignedTransaction = _UniffiCallbackInterfaceFfiConverter()
 
 
 
@@ -5184,6 +5674,33 @@ class _UniffiConverterOptionalString(_UniffiConverterRustBuffer):
             return None
         elif flag == 1:
             return _UniffiConverterString.read(buf)
+        else:
+            raise InternalError("Unexpected flag byte for optional type")
+
+
+
+class _UniffiConverterOptionalTypeOhttpKeys(_UniffiConverterRustBuffer):
+    @classmethod
+    def check_lower(cls, value):
+        if value is not None:
+            _UniffiConverterTypeOhttpKeys.check_lower(value)
+
+    @classmethod
+    def write(cls, value, buf):
+        if value is None:
+            buf.write_u8(0)
+            return
+
+        buf.write_u8(1)
+        _UniffiConverterTypeOhttpKeys.write(value, buf)
+
+    @classmethod
+    def read(cls, buf):
+        flag = buf.read_u8()
+        if flag == 0:
+            return None
+        elif flag == 1:
+            return _UniffiConverterTypeOhttpKeys.read(buf)
         else:
             raise InternalError("Unexpected flag byte for optional type")
 
@@ -5367,11 +5884,10 @@ __all__ = [
     "RequestContextV2",
     "RequestResponse",
     "TxOut",
+    "ActiveSession",
     "ClientResponse",
     "ContextV1",
     "ContextV2",
-    "Enrolled",
-    "Enroller",
     "Headers",
     "MaybeInputsOwned",
     "MaybeInputsSeen",
@@ -5380,9 +5896,11 @@ __all__ = [
     "OutputsUnknown",
     "PayjoinProposal",
     "PjUri",
+    "PjUriBuilder",
     "ProvisionalProposal",
     "RequestBuilder",
     "RequestContext",
+    "SessionInitializer",
     "UncheckedProposal",
     "Uri",
     "Url",
@@ -5394,6 +5912,7 @@ __all__ = [
     "V2ProvisionalProposal",
     "V2UncheckedProposal",
     "CanBroadcast",
+    "GenerateScript",
     "IsOutputKnown",
     "IsScriptOwned",
     "ProcessPartiallySignedTransaction",

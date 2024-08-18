@@ -25,7 +25,7 @@ setup(
     zip_safe=False,
     packages=["payjoin"],
     package_dir={"payjoin": "./src/payjoin"},
-    version='0.13.dev.0',
+    version='0.18.0',
     license="MIT or Apache 2.0",
     has_ext_modules=lambda: True,
 )

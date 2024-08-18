@@ -12,7 +12,9 @@ use crate::types::{OutPoint, TxOut};
 pub trait CanBroadcast {
     fn callback(&self, tx: Vec<u8>) -> Result<bool, PayjoinError>;
 }
-
+pub trait GenerateScript {
+    fn callback(&self) -> Result<Vec<u8>, PayjoinError>;
+}
 #[derive(Clone)]
 pub struct Headers(pub HashMap<String, String>);
 
@@ -324,8 +326,16 @@ impl ProvisionalProposal {
     #[cfg(feature = "uniffi")]
     pub fn try_substitute_receiver_output(
         &self,
-        generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>,
+        generate_script: Box<dyn GenerateScript>,
     ) -> Result<(), PayjoinError> {
+        self.mutex_guard()
+            .try_substitute_receiver_output(|| {
+                generate_script
+                    .callback()
+                    .map(|e| payjoin::bitcoin::ScriptBuf::from_bytes(e))
+                    .map_err(|e| payjoin::Error::Server(Box::new(e)))
+            })
+            .map_err(|e| e.into())
     }
     pub fn contribute_witness_input(
         &self,
@@ -334,16 +344,6 @@ impl ProvisionalProposal {
     ) -> Result<(), PayjoinError> {
         let txo: payjoin::bitcoin::blockdata::transaction::TxOut = txo.into();
         Ok(self.mutex_guard().contribute_witness_input(txo, outpoint.into()))
-    }
-
-    pub fn contribute_non_witness_input(
-        &self,
-        tx: Vec<u8>,
-        outpoint: OutPoint,
-    ) -> Result<(), PayjoinError> {
-        let tx: payjoin::bitcoin::Transaction =
-            payjoin::bitcoin::consensus::encode::deserialize(&*tx)?;
-        Ok(self.mutex_guard().contribute_non_witness_input(tx, outpoint.into()))
     }
 
     /// Select receiver input such that the payjoin avoids surveillance. Return the input chosen that has been applied to the Proposal.
@@ -484,9 +484,9 @@ mod test {
             .identify_receiver_outputs(|script| {
                 let network = payjoin::bitcoin::Network::Bitcoin;
                 let script = payjoin::bitcoin::ScriptBuf::from_bytes(script.to_vec());
-                Ok(payjoin::bitcoin::Address::from_script(&script, network)
+                Ok(payjoin::bitcoin::Address::from_script(&script, network).unwrap()
                     == payjoin::bitcoin::Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
-                        .map(|x| x.require_network(network).expect("Invalid address")))
+                        .map(|x| x.require_network(network).unwrap()).unwrap())
             })
             .expect("Receiver output should be identified");
     }

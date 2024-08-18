@@ -10,7 +10,7 @@ pub mod uri;
 use crate::error::PayjoinError;
 #[cfg(feature = "uniffi")]
 use crate::receive::v1::{
-    CanBroadcast, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction,
+    CanBroadcast, GenerateScript, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction,
 };
 #[allow(unused_imports)]
 use crate::receive::v1::{
@@ -32,7 +32,7 @@ use crate::send::v2::ContextV2;
 #[allow(unused_imports)]
 use crate::types::{Network, OhttpKeys, OutPoint, Request, TxOut};
 #[allow(unused_imports)]
-use crate::uri::{PjUri, Uri, Url};
+use crate::uri::{PjUri, PjUriBuilder, Uri, Url};
 
 #[cfg(feature = "uniffi")]
 uniffi::include_scaffolding!("payjoin_ffi");

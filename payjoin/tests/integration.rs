@@ -11,7 +11,7 @@ mod integration {
     use log::{log_enabled, Level};
     use once_cell::sync::{Lazy, OnceCell};
     use payjoin::send::RequestBuilder;
-    use payjoin::{PjUriBuilder, Request, Uri};
+    use payjoin::{PjUri, PjUriBuilder, Request, Uri};
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
     use url::Url;
 
@@ -20,10 +20,11 @@ mod integration {
     static INIT_TRACING: OnceCell<()> = OnceCell::new();
     static EXAMPLE_URL: Lazy<Url> =
         Lazy::new(|| Url::parse("https://example.com").expect("Invalid Url"));
+
     #[cfg(not(feature = "v2"))]
     mod v1 {
         use log::debug;
-        use payjoin::{PjUri, UriExt};
+        use payjoin::UriExt;
 
         use super::*;
 
@@ -65,89 +66,6 @@ mod integration {
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
             Ok(())
-        }
-
-        fn init_tracing() {
-            INIT_TRACING.get_or_init(|| {
-                let subscriber = FmtSubscriber::builder()
-                    .with_env_filter(EnvFilter::from_default_env())
-                    .with_test_writer()
-                    .finish();
-
-                tracing::subscriber::set_global_default(subscriber)
-                    .expect("failed to set global default subscriber");
-            });
-        }
-
-        fn init_bitcoind_sender_receiver(
-        ) -> Result<(bitcoind::BitcoinD, bitcoincore_rpc::Client, bitcoincore_rpc::Client), BoxError>
-        {
-            let bitcoind_exe = env::var("BITCOIND_EXE")
-                .ok()
-                .or_else(|| bitcoind::downloaded_exe_path().ok())
-                .unwrap();
-            let mut conf = bitcoind::Conf::default();
-            conf.view_stdout = log_enabled!(Level::Debug);
-            let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &conf)?;
-            let receiver = bitcoind.create_wallet("receiver")?;
-            let receiver_address =
-                receiver.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
-            let sender = bitcoind.create_wallet("sender")?;
-            let sender_address =
-                sender.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
-            bitcoind.client.generate_to_address(1, &receiver_address)?;
-            bitcoind.client.generate_to_address(101, &sender_address)?;
-
-            assert_eq!(
-                Amount::from_btc(50.0)?,
-                receiver.get_balances()?.mine.trusted,
-                "receiver doesn't own bitcoin"
-            );
-
-            assert_eq!(
-                Amount::from_btc(50.0)?,
-                sender.get_balances()?.mine.trusted,
-                "sender doesn't own bitcoin"
-            );
-            Ok((bitcoind, sender, receiver))
-        }
-
-        fn build_original_psbt(
-            sender: &bitcoincore_rpc::Client,
-            pj_uri: &PjUri,
-        ) -> Result<Psbt, BoxError> {
-            let mut outputs = HashMap::with_capacity(1);
-            outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap());
-            debug!("outputs: {:?}", outputs);
-            let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
-                lock_unspent: Some(true),
-                fee_rate: Some(Amount::from_sat(2000)),
-                ..Default::default()
-            };
-            let psbt = sender
-                .wallet_create_funded_psbt(
-                    &[], // inputs
-                    &outputs,
-                    None, // locktime
-                    Some(options),
-                    None,
-                )?
-                .psbt;
-            let psbt = sender.wallet_process_psbt(&psbt, None, None, None)?.psbt;
-            Ok(Psbt::from_str(&psbt)?)
-        }
-
-        fn extract_pj_tx(
-            sender: &bitcoincore_rpc::Client,
-            psbt: Psbt,
-        ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
-            let payjoin_psbt =
-                sender.wallet_process_psbt(&psbt.to_string(), None, None, None)?.psbt;
-            let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.unwrap();
-            let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
-            debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
-
-            Ok(payjoin_psbt.extract_tx()?)
         }
     }
 
@@ -745,75 +663,6 @@ mod integration {
             Err("Timeout waiting for service to be ready")
         }
 
-        fn init_tracing() {
-            INIT_TRACING.get_or_init(|| {
-                let subscriber = FmtSubscriber::builder()
-                    .with_env_filter(EnvFilter::from_default_env())
-                    .with_test_writer()
-                    .finish();
-
-                tracing::subscriber::set_global_default(subscriber)
-                    .expect("failed to set global default subscriber");
-            });
-        }
-
-        fn init_bitcoind_sender_receiver(
-        ) -> Result<(bitcoind::BitcoinD, bitcoincore_rpc::Client, bitcoincore_rpc::Client), BoxError>
-        {
-            let bitcoind_exe = env::var("BITCOIND_EXE")
-                .ok()
-                .or_else(|| bitcoind::downloaded_exe_path().ok())
-                .unwrap();
-            let mut conf = bitcoind::Conf::default();
-            conf.view_stdout = log_enabled!(Level::Debug);
-            let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &conf)?;
-            let receiver = bitcoind.create_wallet("receiver")?;
-            let receiver_address =
-                receiver.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
-            let sender = bitcoind.create_wallet("sender")?;
-            let sender_address =
-                sender.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
-            bitcoind.client.generate_to_address(1, &receiver_address)?;
-            bitcoind.client.generate_to_address(101, &sender_address)?;
-
-            assert_eq!(
-                Amount::from_btc(50.0)?,
-                receiver.get_balances()?.mine.trusted,
-                "receiver doesn't own bitcoin"
-            );
-
-            assert_eq!(
-                Amount::from_btc(50.0)?,
-                sender.get_balances()?.mine.trusted,
-                "sender doesn't own bitcoin"
-            );
-            Ok((bitcoind, sender, receiver))
-        }
-
-        fn build_original_psbt(
-            sender: &bitcoincore_rpc::Client,
-            pj_uri: &PjUri,
-        ) -> Result<Psbt, BoxError> {
-            let mut outputs = HashMap::with_capacity(1);
-            outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap_or(Amount::ONE_BTC));
-            let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
-                lock_unspent: Some(true),
-                fee_rate: Some(Amount::from_sat(2000)),
-                ..Default::default()
-            };
-            let psbt = sender
-                .wallet_create_funded_psbt(
-                    &[], // inputs
-                    &outputs,
-                    None, // locktime
-                    Some(options),
-                    Some(true), // check that the sender properly clears keypaths
-                )?
-                .psbt;
-            let psbt = sender.wallet_process_psbt(&psbt, None, None, None)?.psbt;
-            Ok(Psbt::from_str(&psbt)?)
-        }
-
         fn build_sweep_psbt(
             sender: &bitcoincore_rpc::Client,
             pj_uri: &PjUri,
@@ -838,17 +687,73 @@ mod integration {
             let psbt = sender.wallet_process_psbt(&psbt, None, None, None)?.psbt;
             Ok(Psbt::from_str(&psbt)?)
         }
+    }
 
-        fn extract_pj_tx(
-            sender: &bitcoincore_rpc::Client,
-            psbt: Psbt,
-        ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
-            let payjoin_psbt =
-                sender.wallet_process_psbt(&psbt.to_string(), None, None, None)?.psbt;
-            let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.unwrap();
-            let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
-            Ok(payjoin_psbt.extract_tx()?)
-        }
+    fn init_tracing() {
+        INIT_TRACING.get_or_init(|| {
+            let subscriber = FmtSubscriber::builder()
+                .with_env_filter(EnvFilter::from_default_env())
+                .with_test_writer()
+                .finish();
+
+            tracing::subscriber::set_global_default(subscriber)
+                .expect("failed to set global default subscriber");
+        });
+    }
+
+    fn init_bitcoind_sender_receiver(
+    ) -> Result<(bitcoind::BitcoinD, bitcoincore_rpc::Client, bitcoincore_rpc::Client), BoxError>
+    {
+        let bitcoind_exe =
+            env::var("BITCOIND_EXE").ok().or_else(|| bitcoind::downloaded_exe_path().ok()).unwrap();
+        let mut conf = bitcoind::Conf::default();
+        conf.view_stdout = log_enabled!(Level::Debug);
+        let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &conf)?;
+        let receiver = bitcoind.create_wallet("receiver")?;
+        let receiver_address =
+            receiver.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
+        let sender = bitcoind.create_wallet("sender")?;
+        let sender_address =
+            sender.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
+        bitcoind.client.generate_to_address(1, &receiver_address)?;
+        bitcoind.client.generate_to_address(101, &sender_address)?;
+
+        assert_eq!(
+            Amount::from_btc(50.0)?,
+            receiver.get_balances()?.mine.trusted,
+            "receiver doesn't own bitcoin"
+        );
+
+        assert_eq!(
+            Amount::from_btc(50.0)?,
+            sender.get_balances()?.mine.trusted,
+            "sender doesn't own bitcoin"
+        );
+        Ok((bitcoind, sender, receiver))
+    }
+
+    fn build_original_psbt(
+        sender: &bitcoincore_rpc::Client,
+        pj_uri: &PjUri,
+    ) -> Result<Psbt, BoxError> {
+        let mut outputs = HashMap::with_capacity(1);
+        outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap_or(Amount::ONE_BTC));
+        let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
+            lock_unspent: Some(true),
+            fee_rate: Some(Amount::from_sat(2000)),
+            ..Default::default()
+        };
+        let psbt = sender
+            .wallet_create_funded_psbt(
+                &[], // inputs
+                &outputs,
+                None, // locktime
+                Some(options),
+                Some(true), // check that the sender properly clears keypaths
+            )?
+            .psbt;
+        let psbt = sender.wallet_process_psbt(&psbt, None, None, None)?.psbt;
+        Ok(Psbt::from_str(&psbt)?)
     }
 
     // Receiver receive and process original_psbt from a sender
@@ -960,6 +865,18 @@ mod integration {
             )
             .unwrap();
         payjoin_proposal
+    }
+
+    fn extract_pj_tx(
+        sender: &bitcoincore_rpc::Client,
+        psbt: Psbt,
+    ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
+        let payjoin_psbt = sender.wallet_process_psbt(&psbt.to_string(), None, None, None)?.psbt;
+        let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.unwrap();
+        let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
+        tracing::debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
+
+        Ok(payjoin_psbt.extract_tx()?)
     }
 
     struct HeaderMock(HashMap<String, String>);

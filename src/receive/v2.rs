@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::str::FromStr;
-use std::sync::{ Arc, Mutex, MutexGuard };
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use payjoin::bitcoin::psbt::Psbt;
@@ -10,15 +10,11 @@ use payjoin::receive as pdk;
 
 #[cfg(feature = "uniffi")]
 use crate::receive::v1::{
-    CanBroadcast,
-    GenerateScript,
-    IsOutputKnown,
-    IsScriptOwned,
-    ProcessPartiallySignedTransaction,
+    CanBroadcast, GenerateScript, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction,
 };
 use crate::types::Network;
 use crate::uri::PjUriBuilder;
-use crate::{ OhttpKeys, OutPoint, PayjoinError, Request, TxOut, Url };
+use crate::{OhttpKeys, OutPoint, PayjoinError, Request, TxOut, Url};
 
 pub struct ClientResponse(Mutex<Option<ohttp::ClientResponse>>);
 
@@ -75,22 +71,18 @@ impl SessionInitializer {
         network: Network,
         directory: Arc<Url>,
         ohttp_keys: Arc<OhttpKeys>,
-        ohttp_relay: Arc<Url>
+        ohttp_relay: Arc<Url>,
     ) -> Result<Self, PayjoinError> {
-        let address = payjoin::bitcoin::Address
-            ::from_str(address.as_str())?
+        let address = payjoin::bitcoin::Address::from_str(address.as_str())?
             .require_network(network.into())?;
-        Ok(
-            payjoin::receive::v2::SessionInitializer
-                ::new(
-                    address,
-                    (*directory).clone().into(),
-                    (*ohttp_keys).clone().into(),
-                    (*ohttp_relay).clone().into(),
-                    expire_after.map(|e| Duration::from_secs(e))
-                )
-                .into()
+        Ok(payjoin::receive::v2::SessionInitializer::new(
+            address,
+            (*directory).clone().into(),
+            (*ohttp_keys).clone().into(),
+            (*ohttp_relay).clone().into(),
+            expire_after.map(|e| Duration::from_secs(e)),
         )
+        .into())
     }
     #[cfg(not(feature = "uniffi"))]
     pub fn new(
@@ -99,22 +91,18 @@ impl SessionInitializer {
         network: Network,
         directory: Url,
         ohttp_keys: OhttpKeys,
-        ohttp_relay: Url
+        ohttp_relay: Url,
     ) -> Result<Self, PayjoinError> {
-        let address = payjoin::bitcoin::Address
-            ::from_str(address.as_str())?
+        let address = payjoin::bitcoin::Address::from_str(address.as_str())?
             .require_network(network.into())?;
-        Ok(
-            payjoin::receive::v2::SessionInitializer
-                ::new(
-                    address,
-                    directory.into(),
-                    ohttp_keys.into(),
-                    ohttp_relay.into(),
-                    expire_after.map(|e| Duration::from_secs(e))
-                )
-                .into()
+        Ok(payjoin::receive::v2::SessionInitializer::new(
+            address,
+            directory.into(),
+            ohttp_keys.into(),
+            ohttp_relay.into(),
+            expire_after.map(|e| Duration::from_secs(e)),
         )
+        .into())
     }
 
     #[cfg(feature = "uniffi")]
@@ -137,10 +125,9 @@ impl SessionInitializer {
     pub fn process_res(
         &self,
         body: Vec<u8>,
-        ctx: ohttp::ClientResponse
+        ctx: ohttp::ClientResponse,
     ) -> Result<ActiveSession, PayjoinError> {
-        <SessionInitializer as Into<payjoin::receive::v2::SessionInitializer>>
-            ::into(self.clone())
+        <SessionInitializer as Into<payjoin::receive::v2::SessionInitializer>>::into(self.clone())
             .process_res(Cursor::new(body), ctx)
             .map(|e| e.into())
             .map_err(|e| e.into())
@@ -149,10 +136,9 @@ impl SessionInitializer {
     pub fn process_res(
         &self,
         body: Vec<u8>,
-        ctx: Arc<ClientResponse>
+        ctx: Arc<ClientResponse>,
     ) -> Result<Arc<ActiveSession>, PayjoinError> {
-        <SessionInitializer as Into<payjoin::receive::v2::SessionInitializer>>
-            ::into(self.clone())
+        <SessionInitializer as Into<payjoin::receive::v2::SessionInitializer>>::into(self.clone())
             .process_res(Cursor::new(body), ctx.as_ref().into())
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
@@ -195,10 +181,9 @@ impl ActiveSession {
     pub fn process_res(
         &self,
         body: Vec<u8>,
-        context: Arc<ClientResponse>
+        context: Arc<ClientResponse>,
     ) -> Result<Option<Arc<V2UncheckedProposal>>, PayjoinError> {
-        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>
-            ::into(self.clone())
+        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
             .process_res(Cursor::new(body), context.as_ref().into())
             .map(|e| e.map(|x| Arc::new(x.into())))
             .map_err(|e| e.into())
@@ -208,28 +193,25 @@ impl ActiveSession {
     pub fn process_res(
         &self,
         body: Vec<u8>,
-        ctx: ohttp::ClientResponse
+        ctx: ohttp::ClientResponse,
     ) -> Result<Option<V2UncheckedProposal>, PayjoinError> {
-        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>
-            ::into(self.clone())
+        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
             .process_res(Cursor::new(body), ctx)
             .map(|e| e.map(|o| o.into()))
             .map_err(|e| e.into())
     }
     #[cfg(not(feature = "uniffi"))]
     pub fn pj_uri_builder(&self) -> PjUriBuilder {
-        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>
-            ::into(self.clone())
+        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
             .pj_uri_builder()
             .into()
     }
     #[cfg(feature = "uniffi")]
     pub fn pj_uri_builder(&self) -> Arc<PjUriBuilder> {
         Arc::new(
-            <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>
-                ::into(self.clone())
+            <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
                 .pj_uri_builder()
-                .into()
+                .into(),
         )
     }
     /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
@@ -237,23 +219,20 @@ impl ActiveSession {
     #[cfg(feature = "uniffi")]
     pub fn pj_url(&self) -> Arc<Url> {
         Arc::new(
-            <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>
-                ::into(self.clone())
+            <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
                 .pj_url()
-                .into()
+                .into(),
         )
     }
     #[cfg(not(feature = "uniffi"))]
     pub fn pj_url(&self) -> Url {
-        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>
-            ::into(self.clone())
+        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
             .pj_url()
             .into()
     }
     ///The per-session public key to use as an identifier
     pub fn public_key(&self) -> String {
-        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>
-            ::into(self.clone())
+        <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
             .public_key()
             .to_string()
     }
@@ -276,7 +255,7 @@ impl V2UncheckedProposal {
     ///The Sender’s Original PSBT
     pub fn extract_tx_to_schedule_broadcast(&self) -> Vec<u8> {
         payjoin::bitcoin::consensus::encode::serialize(
-            &self.0.clone().extract_tx_to_schedule_broadcast()
+            &self.0.clone().extract_tx_to_schedule_broadcast(),
         )
     }
 
@@ -296,7 +275,7 @@ impl V2UncheckedProposal {
     pub fn check_broadcast_suitability(
         &self,
         min_fee_rate: Option<u64>,
-        can_broadcast: Box<dyn CanBroadcast>
+        can_broadcast: Box<dyn CanBroadcast>,
     ) -> Result<Arc<V2MaybeInputsOwned>, PayjoinError> {
         self.0
             .clone()
@@ -306,7 +285,7 @@ impl V2UncheckedProposal {
                     can_broadcast
                         .callback(payjoin::bitcoin::consensus::encode::serialize(tx))
                         .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
-                }
+                },
             )
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
@@ -316,17 +295,16 @@ impl V2UncheckedProposal {
     pub fn check_broadcast_suitability(
         &self,
         min_fee_rate: Option<u64>,
-        can_broadcast: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>
+        can_broadcast: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
     ) -> Result<Arc<V2MaybeInputsOwned>, PayjoinError> {
         self.0
             .clone()
             .check_broadcast_suitability(
                 min_fee_rate.map(|x| FeeRate::from_sat_per_kwu(x)),
                 |transaction| {
-                    can_broadcast(
-                        &payjoin::bitcoin::consensus::encode::serialize(transaction)
-                    ).map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
-                }
+                    can_broadcast(&payjoin::bitcoin::consensus::encode::serialize(transaction))
+                        .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
+                },
             )
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
@@ -354,7 +332,7 @@ impl V2MaybeInputsOwned {
     /// An attacker could try to spend receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         &self,
-        is_owned: Box<dyn IsScriptOwned>
+        is_owned: Box<dyn IsScriptOwned>,
     ) -> Result<Arc<V2MaybeMixedInputScripts>, PayjoinError> {
         self.0
             .clone()
@@ -369,14 +347,13 @@ impl V2MaybeInputsOwned {
     #[cfg(not(feature = "uniffi"))]
     pub fn check_inputs_not_owned(
         &self,
-        is_owned: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>
+        is_owned: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
     ) -> Result<Arc<V2MaybeMixedInputScripts>, PayjoinError> {
         self.0
             .clone()
             .check_inputs_not_owned(|input| {
-                is_owned(&input.to_bytes()).map_err(|e|
-                    payjoin::receive::Error::Server(Box::new(e))
-                )
+                is_owned(&input.to_bytes())
+                    .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
             })
             .map_err(|e| e.into())
             .map(|e| Arc::new(e.into()))
@@ -420,7 +397,7 @@ impl V2MaybeInputsSeen {
     /// proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
     pub fn check_no_inputs_seen_before(
         &self,
-        is_known: Box<dyn IsOutputKnown>
+        is_known: Box<dyn IsOutputKnown>,
     ) -> Result<Arc<V2OutputsUnknown>, PayjoinError> {
         self.0
             .clone()
@@ -435,7 +412,7 @@ impl V2MaybeInputsSeen {
     #[cfg(not(feature = "uniffi"))]
     pub fn check_no_inputs_seen_before(
         &self,
-        is_known: impl Fn(&OutPoint) -> Result<bool, PayjoinError>
+        is_known: impl Fn(&OutPoint) -> Result<bool, PayjoinError>,
     ) -> Result<Arc<V2OutputsUnknown>, PayjoinError> {
         self.0
             .clone()
@@ -465,7 +442,7 @@ impl V2OutputsUnknown {
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
         &self,
-        is_receiver_output: Box<dyn IsScriptOwned>
+        is_receiver_output: Box<dyn IsScriptOwned>,
     ) -> Result<Arc<V2ProvisionalProposal>, PayjoinError> {
         self.0
             .clone()
@@ -480,14 +457,13 @@ impl V2OutputsUnknown {
     #[cfg(not(feature = "uniffi"))]
     pub fn identify_receiver_outputs(
         &self,
-        is_receiver_output: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>
+        is_receiver_output: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
     ) -> Result<V2ProvisionalProposal, PayjoinError> {
         self.0
             .clone()
             .identify_receiver_outputs(|input| {
-                is_receiver_output(&input.to_bytes()).map_err(|e|
-                    payjoin::receive::Error::Server(Box::new(e))
-                )
+                is_receiver_output(&input.to_bytes())
+                    .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
             })
             .map_err(|e| e.into())
             .map(|e| e.into())
@@ -511,7 +487,7 @@ impl V2ProvisionalProposal {
     pub fn contribute_witness_input(
         &self,
         txo: TxOut,
-        outpoint: OutPoint
+        outpoint: OutPoint,
     ) -> Result<(), PayjoinError> {
         let txo: payjoin::bitcoin::blockdata::transaction::TxOut = txo.into();
         Ok(self.mutex_guard().contribute_witness_input(txo, outpoint.into()))
@@ -529,15 +505,13 @@ impl V2ProvisionalProposal {
     // https://eprint.iacr.org/2022/589.pdf
     pub fn try_preserving_privacy(
         &self,
-        candidate_inputs: HashMap<u64, OutPoint>
+        candidate_inputs: HashMap<u64, OutPoint>,
     ) -> Result<OutPoint, PayjoinError> {
-        let candidate_inputs: HashMap<
-            payjoin::bitcoin::Amount,
-            payjoin::bitcoin::OutPoint
-        > = candidate_inputs
-            .into_iter()
-            .map(|(key, value)| (payjoin::bitcoin::Amount::from_sat(key), value.into()))
-            .collect();
+        let candidate_inputs: HashMap<payjoin::bitcoin::Amount, payjoin::bitcoin::OutPoint> =
+            candidate_inputs
+                .into_iter()
+                .map(|(key, value)| (payjoin::bitcoin::Amount::from_sat(key), value.into()))
+                .collect();
 
         match self.mutex_guard().try_preserving_privacy(candidate_inputs) {
             Ok(e) => Ok(OutPoint { txid: e.txid.to_string(), vout: e.vout }),
@@ -552,7 +526,7 @@ impl V2ProvisionalProposal {
     ///If output substitution is enabled, replace the receiver’s output script with a new one.
     pub fn try_substitute_receiver_output(
         &self,
-        generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>
+        generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>,
     ) -> Result<(), PayjoinError> {
         self.mutex_guard()
             .try_substitute_receiver_output(|| {
@@ -565,7 +539,7 @@ impl V2ProvisionalProposal {
     #[cfg(feature = "uniffi")]
     pub fn try_substitute_receiver_output(
         &self,
-        generate_script: Box<dyn GenerateScript>
+        generate_script: Box<dyn GenerateScript>,
     ) -> Result<(), PayjoinError> {
         self.mutex_guard()
             .try_substitute_receiver_output(|| {
@@ -581,7 +555,7 @@ impl V2ProvisionalProposal {
     pub fn finalize_proposal(
         &self,
         process_psbt: Box<dyn ProcessPartiallySignedTransaction>,
-        min_feerate_sat_per_vb: Option<u64>
+        min_feerate_sat_per_vb: Option<u64>,
     ) -> Result<Arc<V2PayjoinProposal>, PayjoinError> {
         self.mutex_guard()
             .clone()
@@ -596,7 +570,7 @@ impl V2ProvisionalProposal {
                         Err(e) => Err(pdk::Error::Server(Box::new(e))),
                     }
                 },
-                min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x))
+                min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x)),
             )
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
@@ -605,7 +579,7 @@ impl V2ProvisionalProposal {
     pub fn finalize_proposal(
         &self,
         process_psbt: impl Fn(String) -> Result<String, PayjoinError>,
-        min_feerate_sat_per_vb: Option<u64>
+        min_feerate_sat_per_vb: Option<u64>,
     ) -> Result<Arc<V2PayjoinProposal>, PayjoinError> {
         self.mutex_guard()
             .clone()
@@ -619,7 +593,7 @@ impl V2ProvisionalProposal {
                         Err(e) => Err(pdk::Error::Server(Box::new(e))),
                     }
                 },
-                min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x))
+                min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x)),
             )
             .map(|e| Arc::new(e.into()))
             .map_err(|e| e.into())
@@ -644,37 +618,34 @@ impl From<payjoin::receive::v2::PayjoinProposal> for V2PayjoinProposal {
 impl V2PayjoinProposal {
     pub fn utxos_to_be_locked(&self) -> Vec<OutPoint> {
         let mut outpoints: Vec<OutPoint> = Vec::new();
-        for e in <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>
-            ::into(self.clone())
-            .utxos_to_be_locked() {
+        for e in
+            <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
+                .utxos_to_be_locked()
+        {
             outpoints.push(e.to_owned().into());
         }
         outpoints
     }
     pub fn is_output_substitution_disabled(&self) -> bool {
-        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>
-            ::into(self.clone())
+        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
             .is_output_substitution_disabled()
     }
     pub fn owned_vouts(&self) -> Vec<u64> {
-        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>
-            ::into(self.clone())
+        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
             .owned_vouts()
             .iter()
             .map(|x| *x as u64)
             .collect()
     }
     pub fn psbt(&self) -> String {
-        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>
-            ::into(self.clone())
+        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
             .psbt()
             .clone()
             .to_string()
     }
 
     pub fn extract_v1_req(&self) -> String {
-        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>
-            ::into(self.clone())
+        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
             .extract_v1_req()
     }
     #[cfg(feature = "uniffi")]
@@ -698,10 +669,9 @@ impl V2PayjoinProposal {
     pub fn process_res(
         &self,
         body: Vec<u8>,
-        ctx: ohttp::ClientResponse
+        ctx: ohttp::ClientResponse,
     ) -> Result<(), PayjoinError> {
-        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>
-            ::into(self.clone())
+        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
             .process_res(body, ctx)
             .map_err(|e| e.into())
     }
@@ -714,10 +684,9 @@ impl V2PayjoinProposal {
     pub fn process_res(
         &self,
         res: Vec<u8>,
-        ohttp_context: Arc<ClientResponse>
+        ohttp_context: Arc<ClientResponse>,
     ) -> Result<(), PayjoinError> {
-        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>
-            ::into(self.clone())
+        <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
             .process_res(res, ohttp_context.as_ref().into())
             .map_err(|e| e.into())
     }

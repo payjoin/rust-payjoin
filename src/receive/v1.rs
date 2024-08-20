@@ -486,7 +486,8 @@ mod test {
                 let script = payjoin::bitcoin::ScriptBuf::from_bytes(script.to_vec());
                 Ok(payjoin::bitcoin::Address::from_script(&script, network).unwrap()
                     == payjoin::bitcoin::Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
-                        .map(|x| x.require_network(network).unwrap()).unwrap())
+                        .map(|x| x.require_network(network).unwrap())
+                        .unwrap())
             })
             .expect("Receiver output should be identified");
     }

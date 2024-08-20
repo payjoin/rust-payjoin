@@ -324,10 +324,7 @@ mod integration {
                 log::info!("sent");
 
                 // Check resulting transaction and balances
-                // NOTE: No one is contributing fees for the receiver input because the sender has
-                // no change output and the receiver doesn't contribute fees. Temporary workaround
-                // is to ensure the sender overpays in the original psbt for the receiver's input.
-                let network_fees = psbt.fee()?;
+                let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
                 // Sender sent the entire value of their utxo to receiver (minus fees)
                 assert_eq!(payjoin_tx.input.len(), 2);
                 assert_eq!(payjoin_tx.output.len(), 1);
@@ -719,9 +716,9 @@ mod integration {
             outputs.insert(pj_uri.address.to_string(), Amount::from_btc(50.0)?);
             let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
                 lock_unspent: Some(true),
-                // The current API doesn't let the receiver pay for additional fees,
-                // so we double the minimum relay fee to ensure that the sender pays for the receiver's inputs
-                fee_rate: Some(Amount::from_sat((DEFAULT_MIN_RELAY_TX_FEE * 2).into())),
+                // The minimum relay feerate ensures that tests fail if the receiver would add inputs/outputs
+                // that cannot be covered by the sender's additional fee contributions.
+                fee_rate: Some(Amount::from_sat(DEFAULT_MIN_RELAY_TX_FEE.into())),
                 subtract_fee_from_outputs: vec![0],
                 ..Default::default()
             };

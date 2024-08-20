@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use bitcoin::base64::prelude::BASE64_STANDARD;
 use bitcoin::base64::Engine;
 use bitcoin::psbt::Psbt;
-use bitcoin::{Amount, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::{Amount, FeeRate, OutPoint, Script, TxOut, Weight};
 
 mod error;
 mod optional_parameters;
@@ -647,31 +647,18 @@ impl ProvisionalProposal {
         let min_feerate = max(min_feerate, self.params.min_feerate);
         log::debug!("min_feerate: {:?}", min_feerate);
 
-        // this error should never happen. We check for at least one input in the constructor
-        let input_pair = self
-            .payjoin_psbt
-            .input_pairs()
-            .next()
-            .ok_or(InternalRequestError::OriginalPsbtNotBroadcastable)?;
-        let txo = input_pair.previous_txout().map_err(InternalRequestError::PrevTxOut)?;
-        let input_type = InputType::from_spent_input(txo, &self.payjoin_psbt.inputs[0])
-            .map_err(InternalRequestError::InputType)?;
-        let contribution_weight = input_type.expected_input_weight();
-        log::trace!("contribution_weight: {}", contribution_weight);
-        let mut additional_fee = contribution_weight * min_feerate;
-        let max_additional_fee_contribution =
-            self.params.additional_fee_contribution.unwrap_or_default().0;
-        if additional_fee >= max_additional_fee_contribution {
-            // Cap fee at the sender's contribution to simplify this method
-            additional_fee = max_additional_fee_contribution;
-        }
-        log::trace!("additional_fee: {}", additional_fee);
+        // If the sender specified a fee contribution, the receiver is allowed to decrease the
+        // sender's fee output to pay for additional input fees. Any fees in excess of
+        // `max_additional_fee_contribution` must be covered by the receiver.
+        let additional_fee = self.additional_input_fee(min_feerate)?;
         if additional_fee > Amount::ZERO {
             log::trace!(
                 "self.params.additional_fee_contribution: {:?}",
                 self.params.additional_fee_contribution
             );
-            if let Some((_, additional_fee_output_index)) = self.params.additional_fee_contribution
+            let mut receiver_additional_fee = additional_fee;
+            if let Some((max_additional_fee_contribution, additional_fee_output_index)) =
+                self.params.additional_fee_contribution
             {
                 // Find the sender's specified output in the original psbt.
                 // This step is necessary because the sender output may have shifted if new
@@ -686,11 +673,76 @@ impl ProvisionalProposal {
                     .iter()
                     .position(|txo| txo.script_pubkey == sender_fee_output.script_pubkey)
                     .expect("Sender output is missing from payjoin PSBT");
+                // Determine the additional amount that the sender will pay in fees
+                let sender_additional_fee = min(max_additional_fee_contribution, additional_fee);
+                log::trace!("sender_additional_fee: {}", sender_additional_fee);
                 // Remove additional miner fee from the sender's specified output
-                self.payjoin_psbt.unsigned_tx.output[sender_fee_vout].value -= additional_fee;
+                self.payjoin_psbt.unsigned_tx.output[sender_fee_vout].value -=
+                    sender_additional_fee;
+                receiver_additional_fee -= sender_additional_fee;
+            }
+
+            // The receiver covers any additional fees if applicable
+            if receiver_additional_fee > Amount::ZERO {
+                log::trace!("receiver_additional_fee: {}", receiver_additional_fee);
+                // Remove additional miner fee from the receiver's specified output
+                self.payjoin_psbt.unsigned_tx.output[self.change_vout].value -=
+                    receiver_additional_fee;
             }
         }
+
+        // The sender's fee contribution can only be used to pay for additional input weight, so
+        // any additional outputs must be paid for by the receiver.
+        let additional_receiver_fee = self.additional_output_fee(min_feerate);
+        if additional_receiver_fee > Amount::ZERO {
+            // Remove additional miner fee from the receiver's specified output
+            self.payjoin_psbt.unsigned_tx.output[self.change_vout].value -= additional_receiver_fee;
+        }
         Ok(&self.payjoin_psbt)
+    }
+
+    /// Calculate the additional fee required to pay for any additional inputs in the payjoin tx
+    fn additional_input_fee(&self, min_feerate: FeeRate) -> Result<Amount, RequestError> {
+        // This error should never happen. We check for at least one input in the constructor
+        let input_pair = self
+            .payjoin_psbt
+            .input_pairs()
+            .next()
+            .ok_or(InternalRequestError::OriginalPsbtNotBroadcastable)?;
+        // Calculate the additional fee contribution
+        let txo = input_pair.previous_txout().map_err(InternalRequestError::PrevTxOut)?;
+        let input_type = InputType::from_spent_input(txo, &self.payjoin_psbt.inputs[0])
+            .map_err(InternalRequestError::InputType)?;
+        let input_count = self.payjoin_psbt.inputs.len() - self.original_psbt.inputs.len();
+        log::trace!("input_count : {}", input_count);
+        let weight_per_input = input_type.expected_input_weight();
+        log::trace!("weight_per_input : {}", weight_per_input);
+        let contribution_weight = weight_per_input * input_count as u64;
+        log::trace!("contribution_weight: {}", contribution_weight);
+        let additional_fee = contribution_weight * min_feerate;
+        log::trace!("additional_fee: {}", additional_fee);
+        Ok(additional_fee)
+    }
+
+    /// Calculate the additional fee required to pay for any additional outputs in the payjoin tx
+    fn additional_output_fee(&self, min_feerate: FeeRate) -> Amount {
+        let payjoin_outputs_weight = self
+            .payjoin_psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .fold(Weight::ZERO, |acc, txo| acc + txo.weight());
+        let original_outputs_weight = self
+            .original_psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .fold(Weight::ZERO, |acc, txo| acc + txo.weight());
+        let output_contribution_weight = payjoin_outputs_weight - original_outputs_weight;
+        log::trace!("output_contribution_weight : {}", output_contribution_weight);
+        let additional_fee = output_contribution_weight * min_feerate;
+        log::trace!("additional_fee: {}", additional_fee);
+        additional_fee
     }
 
     /// Return a Payjoin Proposal PSBT that the sender will find acceptable.

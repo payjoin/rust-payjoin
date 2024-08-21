@@ -63,16 +63,19 @@ The integration tests illustrates and verify integration using bitcoin core and 
 ```shell
 
 # Run the integration test
-cargo test --package payjoin_ffi --test bitcoin_core_integration v1_to_v1_full_cycle
-cargo test --package payjoin_ffi --test bdk_integration v1_to_v1_full_cycle
+cargo test --package payjoin_ffi --test bitcoin_core_integration_test v1_to_v1_full_cycle
+cargo test --package payjoin_ffi --test bdk_integration_test v1_to_v1_full_cycle
+cargo test  --package payjoin_ffi --test bdk_integration_test v2_to_v2_full_cycle --features enable-danger-local-https
+
 
 ```
+## References
 
+[Payjoin Dev Kit](https://payjoindevkit.org/)
 
-## 🚨 Warning 🚨
+[mozilla/uniffi-rs](https://github.com/mozilla/uniffi-rs)
 
-The main branch of this repository is still under development and is incomplete.
+## Release Status and Disclaimer
 
-[Payjoin Dev Kit]: https://payjoindevkit.org/
-
-[mozilla/uniffi-rs]: https://github.com/mozilla/uniffi-rs
+This project is in active development and currently in its Alpha stage. **Please proceed with caution**, particularly when using real funds.
+We encourage thorough review, testing, and contributions to help improve its stability and security before considering production use.

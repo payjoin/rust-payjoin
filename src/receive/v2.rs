@@ -10,7 +10,7 @@ use payjoin::receive as pdk;
 
 #[cfg(feature = "uniffi")]
 use crate::receive::v1::{
-    CanBroadcast, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction,
+    CanBroadcast, GenerateScript, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction,
 };
 use crate::types::Network;
 use crate::uri::PjUriBuilder;
@@ -84,21 +84,22 @@ impl SessionInitializer {
         )
         .into())
     }
+    #[cfg(not(feature = "uniffi"))]
     pub fn new(
         address: String,
         expire_after: Option<u64>,
         network: Network,
-        directory: Arc<Url>,
-        ohttp_keys: Arc<OhttpKeys>,
-        ohttp_relay: Arc<Url>,
+        directory: Url,
+        ohttp_keys: OhttpKeys,
+        ohttp_relay: Url,
     ) -> Result<Self, PayjoinError> {
         let address = payjoin::bitcoin::Address::from_str(address.as_str())?
             .require_network(network.into())?;
         Ok(payjoin::receive::v2::SessionInitializer::new(
             address,
-            (*directory).clone().into(),
-            (*ohttp_keys).clone().into(),
-            (*ohttp_relay).clone().into(),
+            directory.into(),
+            ohttp_keys.into(),
+            ohttp_relay.into(),
             expire_after.map(|e| Duration::from_secs(e)),
         )
         .into())
@@ -199,13 +200,31 @@ impl ActiveSession {
             .map(|e| e.map(|o| o.into()))
             .map_err(|e| e.into())
     }
+    #[cfg(not(feature = "uniffi"))]
     pub fn pj_uri_builder(&self) -> PjUriBuilder {
         <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
             .pj_uri_builder()
             .into()
     }
+    #[cfg(feature = "uniffi")]
+    pub fn pj_uri_builder(&self) -> Arc<PjUriBuilder> {
+        Arc::new(
+            <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
+                .pj_uri_builder()
+                .into(),
+        )
+    }
     /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
     /// This identifies a session at the payjoin directory server.
+    #[cfg(feature = "uniffi")]
+    pub fn pj_url(&self) -> Arc<Url> {
+        Arc::new(
+            <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
+                .pj_url()
+                .into(),
+        )
+    }
+    #[cfg(not(feature = "uniffi"))]
     pub fn pj_url(&self) -> Url {
         <ActiveSession as Into<payjoin::receive::v2::ActiveSession>>::into(self.clone())
             .pj_url()
@@ -473,15 +492,6 @@ impl V2ProvisionalProposal {
         let txo: payjoin::bitcoin::blockdata::transaction::TxOut = txo.into();
         Ok(self.mutex_guard().contribute_witness_input(txo, outpoint.into()))
     }
-    pub fn contribute_non_witness_input(
-        &self,
-        tx: Vec<u8>,
-        outpoint: OutPoint,
-    ) -> Result<(), PayjoinError> {
-        let tx: payjoin::bitcoin::Transaction =
-            payjoin::bitcoin::consensus::encode::deserialize(&*tx)?;
-        Ok(self.mutex_guard().contribute_non_witness_input(tx, outpoint.into()))
-    }
     /// Select receiver input such that the payjoin avoids surveillance.
     /// Return the input chosen that has been applied to the Proposal.
     ///
@@ -526,12 +536,19 @@ impl V2ProvisionalProposal {
             })
             .map_err(|e| e.into())
     }
-    //TODO; create try_substitute_receiver_output for uniffi build
     #[cfg(feature = "uniffi")]
     pub fn try_substitute_receiver_output(
         &self,
-        generate_script: impl Fn() -> Result<Vec<u8>, PayjoinError>,
+        generate_script: Box<dyn GenerateScript>,
     ) -> Result<(), PayjoinError> {
+        self.mutex_guard()
+            .try_substitute_receiver_output(|| {
+                generate_script
+                    .callback()
+                    .map(|e| payjoin::bitcoin::ScriptBuf::from_bytes(e))
+                    .map_err(|e| payjoin::Error::Server(Box::new(e)))
+            })
+            .map_err(|e| e.into())
     }
 
     #[cfg(feature = "uniffi")]
@@ -605,7 +622,7 @@ impl V2PayjoinProposal {
             <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
                 .utxos_to_be_locked()
         {
-            outpoints.push((e.to_owned()).into())
+            outpoints.push(e.to_owned().into());
         }
         outpoints
     }

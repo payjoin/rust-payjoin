@@ -1,11 +1,12 @@
 use std::str::FromStr;
+#[cfg(feature = "uniffi")]
+use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use payjoin::bitcoin::address::NetworkChecked;
 use payjoin::UriExt;
 
 use crate::error::PayjoinError;
-#[cfg(not(feature = "uniffi"))]
 use crate::types::OhttpKeys;
 #[derive(Clone)]
 pub struct Uri(payjoin::Uri<'static, NetworkChecked>);
@@ -33,12 +34,23 @@ impl Uri {
     }
     ///Gets the amount in satoshis.
     pub fn amount(&self) -> Option<f64> {
-
         self.0.amount.map(|x| x.to_btc())
     }
+    #[cfg(not(feature = "uniffi"))]
     pub fn check_pj_supported(&self) -> Result<PjUri, PayjoinError> {
         match self.0.clone().check_pj_supported() {
             Ok(e) => Ok(e.into()),
+            Err(_) => {
+                Err(PayjoinError::PjNotSupported {
+                    message: "Uri doesn't support payjoin".to_string(),
+                })
+            }
+        }
+    }
+    #[cfg(feature = "uniffi")]
+    pub fn check_pj_supported(&self) -> Result<Arc<PjUri>, PayjoinError> {
+        match self.0.clone().check_pj_supported() {
+            Ok(e) => Ok(Arc::new(e.into())),
             Err(_) => {
                 Err(PayjoinError::PjNotSupported {
                     message: "Uri doesn't support payjoin".to_string(),
@@ -111,12 +123,55 @@ impl Url {
 
 ///Build a valid PjUri.
 // Payjoin receiver can use this builder to create a payjoin uri to send to the sender.
-#[cfg(not(feature = "uniffi"))]
 pub struct PjUriBuilder(pub payjoin::PjUriBuilder);
 
 impl From<payjoin::PjUriBuilder> for PjUriBuilder {
     fn from(value: payjoin::PjUriBuilder) -> Self {
         Self(value)
+    }
+}
+#[cfg(feature = "uniffi")]
+impl PjUriBuilder {
+    ///Create a new PjUriBuilder with required parameters.
+    /// Parameters
+    /// address: Represents a bitcoin address.
+    /// ohttp_keys: Optional OHTTP keys for v2.
+    /// expiry: Optional non-default duration_since epoch expiry for the payjoin session.
+    pub fn new(
+        address: String,
+        pj: Arc<Url>,
+        ohttp_keys: Option<Arc<OhttpKeys>>,
+        expiry: Option<u64>,
+    ) -> Result<Self, PayjoinError> {
+        let address = payjoin::bitcoin::Address::from_str(&address)?.assume_checked();
+        Ok(payjoin::PjUriBuilder::new(
+            address,
+            (*pj).clone().into(),
+            ohttp_keys.map(|e| e.0.clone()),
+            expiry.map(|e| UNIX_EPOCH + Duration::from_secs(e)),
+        )
+        .into())
+    }
+    ///Accepts the amount you want to receive in sats and sets it in btc .
+    pub fn amount(&self, amount: u64) -> Arc<Self> {
+        let amount = payjoin::bitcoin::Amount::from_sat(amount);
+        Arc::new(self.0.clone().amount(amount).into())
+    }
+    /// Set the message.
+    pub fn message(&self, message: String) -> Arc<Self> {
+        Arc::new(self.0.clone().message(message).into())
+    }
+    ///Set the label.
+    pub fn label(&self, label: String) -> Arc<Self> {
+        Arc::new(self.0.clone().label(label).into())
+    }
+    ///Set whether payjoin output substitution is allowed.
+    pub fn pjos(&self, pjos: bool) -> Arc<Self> {
+        Arc::new(self.0.clone().pjos(pjos).into())
+    }
+    ///Constructs a Uri with PayjoinParams from the parameters set in the builder.
+    pub fn build(&self) -> Arc<PjUri> {
+        Arc::new(self.0.clone().build().into())
     }
 }
 #[cfg(not(feature = "uniffi"))]

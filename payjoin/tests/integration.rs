@@ -5,6 +5,7 @@ mod integration {
     use std::str::FromStr;
 
     use bitcoin::psbt::Psbt;
+    use bitcoin::policy::DEFAULT_MIN_RELAY_TX_FEE;
     use bitcoin::{Amount, FeeRate, OutPoint, Weight};
     use bitcoind::bitcoincore_rpc::json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
@@ -741,7 +742,9 @@ mod integration {
             outputs.insert(pj_uri.address.to_string(), Amount::from_btc(50.0)?);
             let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
                 lock_unspent: Some(true),
-                fee_rate: Some(Amount::from_sat(2000)),
+                // The current API doesn't let the receiver pay for additional fees,
+                // so we double the minimum relay fee to ensure that the sender pays for the receiver's inputs
+                fee_rate: Some(Amount::from_sat((DEFAULT_MIN_RELAY_TX_FEE * 2).into())),
                 subtract_fee_from_outputs: vec![0],
                 ..Default::default()
             };
@@ -810,7 +813,9 @@ mod integration {
         outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap_or(Amount::ONE_BTC));
         let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
             lock_unspent: Some(true),
-            fee_rate: Some(Amount::from_sat(1000)),
+            // The minimum relay feerate ensures that tests fail if the receiver would add inputs/outputs
+            // that cannot be covered by the sender's additional fee contributions.
+            fee_rate: Some(Amount::from_sat(DEFAULT_MIN_RELAY_TX_FEE.into())),
             ..Default::default()
         };
         let psbt = sender

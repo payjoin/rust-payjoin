@@ -536,8 +536,6 @@ impl V2ProvisionalProposal {
             })
             .map_err(|e| e.into())
     }
-    //TODO; create try_substitute_receiver_output for uniffi build
-    #[cfg(feature = "uniffi")]
     #[cfg(feature = "uniffi")]
     pub fn try_substitute_receiver_output(
         &self,
@@ -624,7 +622,7 @@ impl V2PayjoinProposal {
             <V2PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
                 .utxos_to_be_locked()
         {
-            outpoints.push((e.to_owned()).into())
+            outpoints.push(e.to_owned().into());
         }
         outpoints
     }

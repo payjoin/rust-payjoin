@@ -1,3 +1,11 @@
+## [0.20.0]
+#### APIs added
+- Make backwards-compatible `v2` to `v1` sends possible.
+#### APIs changed
+- Removed `contribute_non_nitness_input`  from `v1` & `v2`.
+- Allow receivers to make `payjoins` out of sweep transactions ([#259](https://github.com/payjoin/rust-payjoin/pull/259)).
+- Encode &ohttp= and &exp= parameters in the &pj= URL as a fragment instead of as URI params ([#298](https://github.com/payjoin/rust-payjoin/pull/298))
+
 ## [0.18.0]
 This release updates the bindings libraries to `payjoin` version `0.18.0`.
 #### APIs changed

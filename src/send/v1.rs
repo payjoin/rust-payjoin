@@ -22,6 +22,7 @@ impl From<pdk::RequestBuilder<'static>> for RequestBuilder {
 }
 
 impl RequestBuilder {
+    //TODO: Replicate all functions like this & remove duplicate code
     /// Prepare an HTTP request and request context to process the response
     ///
     /// An HTTP client will own the Request data while Context sticks around so
@@ -34,7 +35,7 @@ impl RequestBuilder {
     ) -> Result<Self, PayjoinError> {
         let psbt = payjoin::bitcoin::psbt::Psbt::from_str(psbt.as_str())?;
         #[cfg(feature = "uniffi")]
-        let uri = (*uri).clone().into();
+        let uri: PjUri = (*uri).clone();
         pdk::RequestBuilder::from_psbt_and_uri(psbt, uri.into())
             .map(|e| e.into())
             .map_err(|e| e.into())

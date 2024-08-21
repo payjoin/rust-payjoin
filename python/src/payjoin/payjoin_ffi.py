@@ -508,8 +508,6 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_pjos() != 46879:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_contribute_non_witness_input() != 9161:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_contribute_witness_input() != 57615:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_finalize_proposal() != 32297:
@@ -573,8 +571,6 @@ def _uniffi_check_api_checksums(lib):
     if lib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_psbt() != 17219:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_utxos_to_be_locked() != 8312:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_contribute_non_witness_input() != 8344:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_contribute_witness_input() != 9262:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -1051,13 +1047,6 @@ _UniffiLib.uniffi_payjoin_ffi_fn_free_provisionalproposal.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_free_provisionalproposal.restype = None
-_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_contribute_non_witness_input.argtypes = (
-    ctypes.c_void_p,
-    _UniffiRustBuffer,
-    _UniffiRustBuffer,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_contribute_non_witness_input.restype = None
 _UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_contribute_witness_input.argtypes = (
     ctypes.c_void_p,
     _UniffiRustBuffer,
@@ -1394,13 +1383,6 @@ _UniffiLib.uniffi_payjoin_ffi_fn_free_v2provisionalproposal.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_payjoin_ffi_fn_free_v2provisionalproposal.restype = None
-_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_contribute_non_witness_input.argtypes = (
-    ctypes.c_void_p,
-    _UniffiRustBuffer,
-    _UniffiRustBuffer,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_contribute_non_witness_input.restype = None
 _UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_contribute_witness_input.argtypes = (
     ctypes.c_void_p,
     _UniffiRustBuffer,
@@ -1814,9 +1796,6 @@ _UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_message.restype = cty
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_pjos.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_pjuribuilder_pjos.restype = ctypes.c_uint16
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_contribute_non_witness_input.argtypes = (
-)
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_contribute_non_witness_input.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_contribute_witness_input.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_provisionalproposal_contribute_witness_input.restype = ctypes.c_uint16
@@ -1913,9 +1892,6 @@ _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_psbt.restype = c
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_utxos_to_be_locked.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2payjoinproposal_utxos_to_be_locked.restype = ctypes.c_uint16
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_contribute_non_witness_input.argtypes = (
-)
-_UniffiLib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_contribute_non_witness_input.restype = ctypes.c_uint16
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_contribute_witness_input.argtypes = (
 )
 _UniffiLib.uniffi_payjoin_ffi_checksum_method_v2provisionalproposal_contribute_witness_input.restype = ctypes.c_uint16
@@ -3187,8 +3163,6 @@ class _UniffiConverterTypePjUriBuilder:
 
 
 class ProvisionalProposalProtocol(typing.Protocol):
-    def contribute_non_witness_input(self, tx: "typing.List[int]",outpoint: "OutPoint"):
-        raise NotImplementedError
     def contribute_witness_input(self, txout: "TxOut",outpoint: "OutPoint"):
         raise NotImplementedError
     def finalize_proposal(self, process_psbt: "ProcessPartiallySignedTransaction",min_feerate_sat_per_vb: "typing.Optional[int]"):
@@ -3222,20 +3196,6 @@ class ProvisionalProposal:
         inst = cls.__new__(cls)
         inst._pointer = pointer
         return inst
-
-
-    def contribute_non_witness_input(self, tx: "typing.List[int]",outpoint: "OutPoint") -> None:
-        _UniffiConverterSequenceUInt8.check_lower(tx)
-        
-        _UniffiConverterTypeOutPoint.check_lower(outpoint)
-        
-        _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_provisionalproposal_contribute_non_witness_input,self._uniffi_clone_pointer(),
-        _UniffiConverterSequenceUInt8.lower(tx),
-        _UniffiConverterTypeOutPoint.lower(outpoint))
-
-
-
-
 
 
     def contribute_witness_input(self, txout: "TxOut",outpoint: "OutPoint") -> None:
@@ -4395,8 +4355,6 @@ class _UniffiConverterTypeV2PayjoinProposal:
 
 
 class V2ProvisionalProposalProtocol(typing.Protocol):
-    def contribute_non_witness_input(self, tx: "typing.List[int]",outpoint: "OutPoint"):
-        raise NotImplementedError
     def contribute_witness_input(self, txout: "TxOut",outpoint: "OutPoint"):
         raise NotImplementedError
     def finalize_proposal(self, process_psbt: "ProcessPartiallySignedTransaction",min_feerate_sat_per_vb: "typing.Optional[int]"):
@@ -4430,20 +4388,6 @@ class V2ProvisionalProposal:
         inst = cls.__new__(cls)
         inst._pointer = pointer
         return inst
-
-
-    def contribute_non_witness_input(self, tx: "typing.List[int]",outpoint: "OutPoint") -> None:
-        _UniffiConverterSequenceUInt8.check_lower(tx)
-        
-        _UniffiConverterTypeOutPoint.check_lower(outpoint)
-        
-        _uniffi_rust_call_with_error(_UniffiConverterTypePayjoinError,_UniffiLib.uniffi_payjoin_ffi_fn_method_v2provisionalproposal_contribute_non_witness_input,self._uniffi_clone_pointer(),
-        _UniffiConverterSequenceUInt8.lower(tx),
-        _UniffiConverterTypeOutPoint.lower(outpoint))
-
-
-
-
 
 
     def contribute_witness_input(self, txout: "TxOut",outpoint: "OutPoint") -> None:

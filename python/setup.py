@@ -17,7 +17,7 @@ import payjoin as payjoin
 """
 
 setup(
-    name='payjoin',
+    name="payjoin",
     description="The Python language bindings for the Payjoin Dev Kit",
     long_description=LONG_DESCRIPTION,
     long_description_content_type="text/markdown",
@@ -25,7 +25,7 @@ setup(
     zip_safe=False,
     packages=["payjoin"],
     package_dir={"payjoin": "./src/payjoin"},
-    version='0.18.0',
+    version="0.20.0",
     license="MIT or Apache 2.0",
     has_ext_modules=lambda: True,
 )

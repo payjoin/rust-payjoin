@@ -4,8 +4,8 @@ mod integration {
     use std::env;
     use std::str::FromStr;
 
-    use bitcoin::psbt::Psbt;
     use bitcoin::policy::DEFAULT_MIN_RELAY_TX_FEE;
+    use bitcoin::psbt::Psbt;
     use bitcoin::{Amount, FeeRate, OutPoint, Weight};
     use bitcoind::bitcoincore_rpc::json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
@@ -21,14 +21,6 @@ mod integration {
     static INIT_TRACING: OnceCell<()> = OnceCell::new();
     static EXAMPLE_URL: Lazy<Url> =
         Lazy::new(|| Url::parse("https://example.com").expect("Invalid Url"));
-
-    // See https://jlopp.github.io/bitcoin-transaction-size-calculator/
-    // Base weight of an empty transaction (no inputs, no outputs)
-    static BASE_WEIGHT: Weight = Weight::from_vb_unchecked(11);
-    // Per-input weight for P2WPKH inputs
-    static INPUT_WEIGHT: Weight = Weight::from_vb_unchecked(68);
-    // Per-output weight for P2WPKH inputs
-    static OUTPUT_WEIGHT: Weight = Weight::from_vb_unchecked(31);
 
     #[cfg(not(feature = "v2"))]
     mod v1 {
@@ -77,12 +69,9 @@ mod integration {
             sender.send_raw_transaction(&payjoin_tx)?;
 
             // Check resulting transaction and balances
-            let input_count = payjoin_tx.input.len() as u64;
-            let output_count = payjoin_tx.output.len() as u64;
-            let tx_weight = BASE_WEIGHT + input_count * INPUT_WEIGHT + output_count * OUTPUT_WEIGHT;
-            let network_fees = tx_weight * FeeRate::BROADCAST_MIN;
-            assert_eq!(input_count, 2);
-            assert_eq!(output_count, 2);
+            let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
+            assert_eq!(payjoin_tx.input.len(), 2);
+            assert_eq!(payjoin_tx.output.len(), 2);
             assert_eq!(receiver.get_balances()?.mine.untrusted_pending, Amount::from_btc(51.0)?);
             assert_eq!(
                 sender.get_balances()?.mine.untrusted_pending,
@@ -335,17 +324,13 @@ mod integration {
                 log::info!("sent");
 
                 // Check resulting transaction and balances
-                let input_count = payjoin_tx.input.len() as u64;
-                let output_count = payjoin_tx.output.len() as u64;
-                let tx_weight =
-                    BASE_WEIGHT + input_count * INPUT_WEIGHT + output_count * OUTPUT_WEIGHT;
                 // NOTE: No one is contributing fees for the receiver input because the sender has
-                // no change output and the receiver doesn't contribute fees
-                let network_fees =
-                    (tx_weight - 1 * INPUT_WEIGHT) * FeeRate::from_sat_per_vb_unchecked(2);
+                // no change output and the receiver doesn't contribute fees. Temporary workaround
+                // is to ensure the sender overpays in the original psbt for the receiver's input.
+                let network_fees = psbt.fee()?;
                 // Sender sent the entire value of their utxo to receiver (minus fees)
-                assert_eq!(input_count, 2);
-                assert_eq!(output_count, 1);
+                assert_eq!(payjoin_tx.input.len(), 2);
+                assert_eq!(payjoin_tx.output.len(), 1);
                 assert_eq!(
                     receiver.get_balances()?.mine.untrusted_pending,
                     Amount::from_btc(100.0)? - network_fees
@@ -394,12 +379,9 @@ mod integration {
             sender.send_raw_transaction(&payjoin_tx)?;
 
             // Check resulting transaction and balances
-            let input_count = payjoin_tx.input.len() as u64;
-            let output_count = payjoin_tx.output.len() as u64;
-            let tx_weight = BASE_WEIGHT + input_count * INPUT_WEIGHT + output_count * OUTPUT_WEIGHT;
-            let network_fees = tx_weight * FeeRate::BROADCAST_MIN;
-            assert_eq!(input_count, 2);
-            assert_eq!(output_count, 2);
+            let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
+            assert_eq!(payjoin_tx.input.len(), 2);
+            assert_eq!(payjoin_tx.output.len(), 2);
             assert_eq!(receiver.get_balances()?.mine.untrusted_pending, Amount::from_btc(51.0)?);
             assert_eq!(
                 sender.get_balances()?.mine.untrusted_pending,
@@ -532,13 +514,9 @@ mod integration {
                 );
 
                 // Check resulting transaction and balances
-                let input_count = payjoin_tx.input.len() as u64;
-                let output_count = payjoin_tx.output.len() as u64;
-                let tx_weight =
-                    BASE_WEIGHT + input_count * INPUT_WEIGHT + output_count * OUTPUT_WEIGHT;
-                let network_fees = tx_weight * FeeRate::BROADCAST_MIN;
-                assert_eq!(input_count, 2);
-                assert_eq!(output_count, 2);
+                let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
+                assert_eq!(payjoin_tx.input.len(), 2);
+                assert_eq!(payjoin_tx.output.len(), 2);
                 assert_eq!(
                     receiver.get_balances()?.mine.untrusted_pending,
                     Amount::from_btc(51.0)?
@@ -952,6 +930,13 @@ mod integration {
         tracing::debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
 
         Ok(payjoin_psbt.extract_tx()?)
+    }
+
+    fn predicted_tx_weight(tx: &bitcoin::Transaction) -> Weight {
+        bitcoin::transaction::predict_weight(
+            vec![bitcoin::transaction::InputWeightPrediction::P2WPKH_MAX; tx.input.len()],
+            tx.script_pubkey_lens(),
+        )
     }
 
     struct HeaderMock(HashMap<String, String>);

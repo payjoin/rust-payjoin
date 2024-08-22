@@ -196,6 +196,51 @@ impl std::error::Error for RequestError {
     }
 }
 
+/// Error that may occur when output substitution fails.
+///
+/// This is currently opaque type because we aren't sure which variants will stay.
+/// You can only display it.
+#[derive(Debug)]
+pub struct OutputSubstitutionError(InternalOutputSubstitutionError);
+
+#[derive(Debug)]
+pub(crate) enum InternalOutputSubstitutionError {
+    /// Output substitution is disabled
+    OutputSubstitutionDisabled(&'static str),
+    /// Current output substitution implementation doesn't support reducing the number of outputs
+    NotEnoughOutputs,
+    /// The provided drain script could not be identified in the provided replacement outputs
+    InvalidDrainScript,
+}
+
+impl fmt::Display for OutputSubstitutionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self.0 {
+            InternalOutputSubstitutionError::OutputSubstitutionDisabled(reason) => write!(f, "{}", &format!("Output substitution is disabled: {}", reason)),
+            InternalOutputSubstitutionError::NotEnoughOutputs => write!(
+                f,
+                "Current output substitution implementation doesn't support reducing the number of outputs"
+            ),
+            InternalOutputSubstitutionError::InvalidDrainScript =>
+                write!(f, "The provided drain script could not be identified in the provided replacement outputs"),
+        }
+    }
+}
+
+impl From<InternalOutputSubstitutionError> for OutputSubstitutionError {
+    fn from(value: InternalOutputSubstitutionError) -> Self { OutputSubstitutionError(value) }
+}
+
+impl std::error::Error for OutputSubstitutionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self.0 {
+            InternalOutputSubstitutionError::OutputSubstitutionDisabled(_) => None,
+            InternalOutputSubstitutionError::NotEnoughOutputs => None,
+            InternalOutputSubstitutionError::InvalidDrainScript => None,
+        }
+    }
+}
+
 /// Error that may occur when coin selection fails.
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
@@ -229,4 +274,30 @@ impl fmt::Display for SelectionError {
 
 impl From<InternalSelectionError> for SelectionError {
     fn from(value: InternalSelectionError) -> Self { SelectionError(value) }
+}
+
+/// Error that may occur when input contribution fails.
+///
+/// This is currently opaque type because we aren't sure which variants will stay.
+/// You can only display it.
+#[derive(Debug)]
+pub struct InputContributionError(InternalInputContributionError);
+
+#[derive(Debug)]
+pub(crate) enum InternalInputContributionError {
+    /// Total input value is not enough to cover additional output value
+    ValueTooLow,
+}
+
+impl fmt::Display for InputContributionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self.0 {
+            InternalInputContributionError::ValueTooLow =>
+                write!(f, "Total input value is not enough to cover additional output value"),
+        }
+    }
+}
+
+impl From<InternalInputContributionError> for InputContributionError {
+    fn from(value: InternalInputContributionError) -> Self { InputContributionError(value) }
 }

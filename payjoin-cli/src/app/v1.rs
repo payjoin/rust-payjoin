@@ -348,7 +348,8 @@ impl App {
                     .require_network(network)
                     .map_err(|e| Error::Server(e.into()))?
                     .script_pubkey(),
-            )?
+            )
+            .map_err(|e| Error::Server(e.into()))?
             .commit_outputs();
 
         let provisional_payjoin = try_contributing_inputs(payjoin.clone(), &bitcoind)
@@ -397,6 +398,7 @@ fn try_contributing_inputs(
 
     Ok(payjoin
         .contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)])
+        .expect("This shouldn't happen. Failed to contribute inputs.")
         .commit_inputs())
 }
 

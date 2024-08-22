@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize, Serializer};
 use url::Url;
 
 use super::v2::error::{InternalSessionError, SessionError};
-use super::{Error, InternalRequestError, RequestError, SelectionError};
+use super::{
+    Error, InputContributionError, InternalRequestError, OutputSubstitutionError, RequestError,
+    SelectionError,
+};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
 use crate::v2::OhttpEncapsulationError;
@@ -402,7 +405,10 @@ impl WantsOutputs {
     }
 
     /// Substitute the receiver output script with the provided script.
-    pub fn substitute_receiver_script(self, output_script: &Script) -> Result<WantsOutputs, Error> {
+    pub fn substitute_receiver_script(
+        self,
+        output_script: &Script,
+    ) -> Result<WantsOutputs, OutputSubstitutionError> {
         let inner = self.inner.substitute_receiver_script(output_script)?;
         Ok(WantsOutputs { inner, context: self.context })
     }
@@ -416,7 +422,7 @@ impl WantsOutputs {
         self,
         replacement_outputs: Vec<TxOut>,
         drain_script: &Script,
-    ) -> Result<WantsOutputs, Error> {
+    ) -> Result<WantsOutputs, OutputSubstitutionError> {
         let inner = self.inner.replace_receiver_outputs(replacement_outputs, drain_script)?;
         Ok(WantsOutputs { inner, context: self.context })
     }
@@ -460,9 +466,9 @@ impl WantsInputs {
     pub fn contribute_witness_inputs(
         self,
         inputs: impl IntoIterator<Item = (OutPoint, TxOut)>,
-    ) -> WantsInputs {
-        let inner = self.inner.contribute_witness_inputs(inputs);
-        WantsInputs { inner, context: self.context }
+    ) -> Result<WantsInputs, InputContributionError> {
+        let inner = self.inner.contribute_witness_inputs(inputs)?;
+        Ok(WantsInputs { inner, context: self.context })
     }
 
     /// Proceed to the proposal finalization step.

@@ -38,8 +38,11 @@ mod optional_parameters;
 pub mod v2;
 
 use bitcoin::secp256k1::rand::{self, Rng};
-pub use error::{Error, RequestError, SelectionError};
-use error::{InternalRequestError, InternalSelectionError};
+pub use error::{Error, OutputSubstitutionError, RequestError, SelectionError};
+use error::{
+    InputContributionError, InternalInputContributionError, InternalOutputSubstitutionError,
+    InternalRequestError, InternalSelectionError,
+};
 use optional_parameters::Params;
 
 use crate::input_type::InputType;
@@ -359,7 +362,10 @@ impl WantsOutputs {
     }
 
     /// Substitute the receiver output script with the provided script.
-    pub fn substitute_receiver_script(self, output_script: &Script) -> Result<WantsOutputs, Error> {
+    pub fn substitute_receiver_script(
+        self,
+        output_script: &Script,
+    ) -> Result<WantsOutputs, OutputSubstitutionError> {
         let output_value = self.original_psbt.unsigned_tx.output[self.change_vout].value;
         let outputs = vec![TxOut { value: output_value, script_pubkey: output_script.into() }];
         self.replace_receiver_outputs(outputs, output_script)
@@ -374,7 +380,7 @@ impl WantsOutputs {
         self,
         replacement_outputs: Vec<TxOut>,
         drain_script: &Script,
-    ) -> Result<WantsOutputs, Error> {
+    ) -> Result<WantsOutputs, OutputSubstitutionError> {
         let mut payjoin_psbt = self.original_psbt.clone();
         let mut change_vout: Option<usize> = None;
         if self.params.disable_output_substitution {
@@ -387,14 +393,16 @@ impl WantsOutputs {
                 .find(|txo| txo.script_pubkey == original_output.script_pubkey)
             {
                 Some(txo) if txo.value < original_output.value => {
-                    return Err(Error::Server(
-                        "Decreasing the receiver output value is not allowed".into(),
-                    ));
+                    return Err(InternalOutputSubstitutionError::OutputSubstitutionDisabled(
+                        "Decreasing the receiver output value is not allowed",
+                    )
+                    .into());
                 }
                 None =>
-                    return Err(Error::Server(
-                        "Changing the receiver output script pubkey is not allowed".into(),
-                    )),
+                    return Err(InternalOutputSubstitutionError::OutputSubstitutionDisabled(
+                        "Changing the receiver output script pubkey is not allowed",
+                    )
+                    .into()),
                 _ => log::info!("Receiver is augmenting outputs"),
             }
         }
@@ -406,7 +414,7 @@ impl WantsOutputs {
             if self.owned_vouts.contains(&i) {
                 // Receiver output: substitute with a provided output picked randomly
                 if replacement_outputs.is_empty() {
-                    return Err(Error::Server("Not enough outputs".into()));
+                    return Err(InternalOutputSubstitutionError::NotEnoughOutputs.into());
                 }
                 let index = rng.gen_range(0..replacement_outputs.len());
                 let txo = replacement_outputs.swap_remove(index);
@@ -435,7 +443,7 @@ impl WantsOutputs {
             original_psbt: self.original_psbt,
             payjoin_psbt,
             params: self.params,
-            change_vout: change_vout.ok_or(Error::Server("Invalid drain script".into()))?,
+            change_vout: change_vout.ok_or(InternalOutputSubstitutionError::InvalidDrainScript)?,
             owned_vouts: self.owned_vouts,
         })
     }
@@ -475,13 +483,13 @@ impl WantsInputs {
         candidate_inputs: HashMap<Amount, OutPoint>,
     ) -> Result<OutPoint, SelectionError> {
         if candidate_inputs.is_empty() {
-            return Err(SelectionError::from(InternalSelectionError::Empty));
+            return Err(InternalSelectionError::Empty.into());
         }
 
         if self.payjoin_psbt.outputs.len() > 2 {
             // This UIH avoidance function supports only
             // many-input, n-output transactions such that n <= 2 for now
-            return Err(SelectionError::from(InternalSelectionError::TooManyOutputs));
+            return Err(InternalSelectionError::TooManyOutputs.into());
         }
 
         if self.payjoin_psbt.outputs.len() == 2 {
@@ -531,18 +539,14 @@ impl WantsInputs {
         }
 
         // No suitable privacy preserving selection found
-        Err(SelectionError::from(InternalSelectionError::NotFound))
+        Err(InternalSelectionError::NotFound.into())
     }
 
     fn select_first_candidate(
         &self,
         candidate_inputs: HashMap<Amount, OutPoint>,
     ) -> Result<OutPoint, SelectionError> {
-        candidate_inputs
-            .values()
-            .next()
-            .cloned()
-            .ok_or(SelectionError::from(InternalSelectionError::NotFound))
+        candidate_inputs.values().next().cloned().ok_or(InternalSelectionError::NotFound.into())
     }
 
     /// Add the provided list of inputs to the transaction.
@@ -550,7 +554,7 @@ impl WantsInputs {
     pub fn contribute_witness_inputs(
         self,
         inputs: impl IntoIterator<Item = (OutPoint, TxOut)>,
-    ) -> WantsInputs {
+    ) -> Result<WantsInputs, InputContributionError> {
         let mut payjoin_psbt = self.payjoin_psbt.clone();
         // The payjoin proposal must not introduce mixed input sequence numbers
         let original_sequence = self
@@ -587,15 +591,15 @@ impl WantsInputs {
             let change_amount = receiver_input_amount - receiver_min_input_amount;
             payjoin_psbt.unsigned_tx.output[self.change_vout].value += change_amount;
         } else {
-            todo!("Input amount is not enough to cover additional output value");
+            return Err(InternalInputContributionError::ValueTooLow.into());
         }
 
-        WantsInputs {
+        Ok(WantsInputs {
             original_psbt: self.original_psbt,
             payjoin_psbt,
             params: self.params,
             change_vout: self.change_vout,
-        }
+        })
     }
 
     // Compute the minimum amount that the receiver must contribute to the transaction as input

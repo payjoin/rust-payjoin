@@ -644,6 +644,7 @@ mod integration {
 
             let payjoin = payjoin
                 .contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)])
+                .unwrap()
                 .commit_inputs();
 
             // Sign and finalize the proposal PSBT
@@ -1103,7 +1104,7 @@ mod integration {
             }
         };
 
-        let payjoin = payjoin.contribute_witness_inputs(inputs).commit_inputs();
+        let payjoin = payjoin.contribute_witness_inputs(inputs).unwrap().commit_inputs();
 
         let payjoin_proposal = payjoin
             .finalize_proposal(

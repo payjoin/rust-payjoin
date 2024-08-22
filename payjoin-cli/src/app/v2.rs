@@ -377,6 +377,7 @@ fn try_contributing_inputs(
 
     Ok(payjoin
         .contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)])
+        .expect("This shouldn't happen. Failed to contribute inputs.")
         .commit_inputs())
 }
 

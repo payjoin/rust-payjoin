@@ -187,7 +187,6 @@ pub fn ohttp_decapsulate(
     let m: bhttp::Message = bhttp::Message::read_bhttp(&mut r)?;
     let mut builder = http::Response::builder();
     for field in m.header().iter() {
-        println!("Adding header: {:?}, {:?}", field.name(), field.value());
         builder = builder.header(field.name(), field.value());
     }
     builder

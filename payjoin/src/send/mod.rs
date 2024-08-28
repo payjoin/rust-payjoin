@@ -846,7 +846,7 @@ impl ContextV1 {
                     ensure!(proposed_txout.value >= original_output.value, OutputValueDecreased);
                     original_outputs.next();
                 }
-                // all original outputs processed, only additional outputs remain
+                // additional output
                 _ => (),
             }
         }

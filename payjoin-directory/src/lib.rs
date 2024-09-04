@@ -132,7 +132,7 @@ fn init_ohttp() -> Result<ohttp::Server> {
     use ohttp::{KeyId, SymmetricSuite};
 
     const KEY_ID: KeyId = 1;
-    const KEM: Kem = Kem::X25519Sha256;
+    const KEM: Kem = Kem::K256Sha256;
     const SYMMETRIC: &[SymmetricSuite] =
         &[SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
 

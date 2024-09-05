@@ -350,7 +350,7 @@ mod test {
         use ohttp::hpke::{Aead, Kdf, Kem};
         use ohttp::{KeyId, SymmetricSuite};
         const KEY_ID: KeyId = 1;
-        const KEM: Kem = Kem::X25519Sha256;
+        const KEM: Kem = Kem::K256Sha256;
         const SYMMETRIC: &[SymmetricSuite] =
             &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
         let keys = OhttpKeys(ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap());

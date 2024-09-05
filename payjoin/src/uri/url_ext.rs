@@ -91,11 +91,11 @@ mod tests {
         let mut url = Url::parse("https://example.com").unwrap();
 
         let ohttp_keys =
-            OhttpKeys::from_str("AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM").unwrap();
+            OhttpKeys::from_str("AQAWBG3fkg7fQCN-bafc-BEJOSnDfq8k1M9Cy1kgQZX42GVOvI0bWVAciTaJCy2A_wy7R7VxtU88xej692bv0uXgt98ABAABAAM").unwrap();
         let _ = url.set_ohttp(Some(ohttp_keys.clone()));
         assert_eq!(
             url.fragment(),
-            Some("ohttp=AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM")
+            Some("ohttp=AQAWBG3fkg7fQCN-bafc-BEJOSnDfq8k1M9Cy1kgQZX42GVOvI0bWVAciTaJCy2A_wy7R7VxtU88xej692bv0uXgt98ABAABAAM")
         );
 
         assert_eq!(url.ohttp(), Some(ohttp_keys));
@@ -124,7 +124,7 @@ mod tests {
         // fragment is not percent encoded so `&ohttp=` is parsed as a query parameter, not a fragment parameter
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
                    &pj=https://example.com\
-                   #exp=1720547781&ohttp=AQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM";
+                   #exp=1720547781&ohttp=AQAWBG3fkg7fQCN-bafc-BEJOSnDfq8k1M9Cy1kgQZX42GVOvI0bWVAciTaJCy2A_wy7R7VxtU88xej692bv0uXgt98ABAABAAM";
         let uri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
         assert!(uri.extras.endpoint().ohttp().is_none());
     }
@@ -133,7 +133,7 @@ mod tests {
     fn test_valid_v2_url_fragment_on_bip21() {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
                    &pj=https://example.com\
-                   #ohttp%3DAQAg3WpRjS0aqAxQUoLvpas2VYjT2oIg6-3XSiB-QiYI1BAABAABAAM%26exp%3D1720547781";
+                   #ohttp%3DAQAWBG3fkg7fQCN-bafc-BEJOSnDfq8k1M9Cy1kgQZX42GVOvI0bWVAciTaJCy2A_wy7R7VxtU88xej692bv0uXgt98ABAABAAM";
         let uri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
         assert!(uri.extras.endpoint().ohttp().is_some());
     }

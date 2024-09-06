@@ -3,13 +3,16 @@ use std::{error, fmt};
 
 use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
+use bitcoin::key::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE;
 use hpke::aead::ChaCha20Poly1305;
 use hpke::kdf::HkdfSha256;
 use hpke::kem::SecpK256HkdfSha256;
 use hpke::rand_core::OsRng;
 use hpke::{Deserializable, OpModeR, OpModeS, Serializable};
 
-pub const PADDED_MESSAGE_BYTES: usize = 7168; // 7KB
+pub const PADDED_MESSAGE_BYTES: usize = 7168;
+pub const PADDED_PLAINTEXT_LENGTH: usize = PADDED_MESSAGE_BYTES - UNCOMPRESSED_PUBLIC_KEY_SIZE * 2;
+
 pub const INFO_A: &[u8] = b"PjV2MsgA";
 pub const INFO_B: &[u8] = b"PjV2MsgB";
 
@@ -107,7 +110,7 @@ impl<'de> serde::Deserialize<'de> for HpkePublicKey {
 /// Message A is sent from the sender to the receiver containing an Original PSBT payload
 #[cfg(feature = "send")]
 pub fn encrypt_message_a(
-    plaintext: Vec<u8>,
+    mut plaintext: Vec<u8>,
     sender_sk: &HpkeSecretKey,
     receiver_pk: &HpkePublicKey,
 ) -> Result<Vec<u8>, HpkeError> {
@@ -120,11 +123,11 @@ pub fn encrypt_message_a(
             &mut OsRng,
         )?;
     let aad = pk.to_bytes().to_vec();
-    let ciphertext: Vec<u8> = encryption_context.seal(&plaintext, &aad)?;
+    let plaintext = pad_plaintext(&mut plaintext)?;
+    let ciphertext = encryption_context.seal(plaintext, &aad)?;
     let mut message_a = encapsulated_key.to_bytes().to_vec();
     message_a.extend(&aad);
     message_a.extend(&ciphertext);
-    //TODO let message_a = pad(&mut message_a).expect("TODO: handle error");
     Ok(message_a.to_vec())
 }
 
@@ -150,7 +153,7 @@ pub fn decrypt_message_a(
 /// Message B is sent from the receiver to the sender containing a Payjoin PSBT payload or an error
 #[cfg(feature = "receive")]
 pub fn encrypt_message_b(
-    plaintext: Vec<u8>,
+    mut plaintext: Vec<u8>,
     receiver_keypair: (HpkeSecretKey, HpkePublicKey),
     sender_pk: &HpkePublicKey,
 ) -> Result<Vec<u8>, HpkeError> {
@@ -163,11 +166,11 @@ pub fn encrypt_message_b(
             &mut OsRng,
         )?;
     let aad = pk.to_bytes().to_vec();
-    let ciphertext = encryption_context.seal(&plaintext, &aad)?;
+    let plaintext = pad_plaintext(&mut plaintext)?;
+    let ciphertext = encryption_context.seal(plaintext, &aad)?;
     let mut message_b = encapsulated_key.to_bytes().to_vec();
     message_b.extend(&aad);
     message_b.extend(&ciphertext);
-    //let message_b = pad(&mut message_b).expect("TODO: handle error");
     Ok(message_b.to_vec())
 }
 
@@ -187,13 +190,11 @@ pub fn decrypt_message_b(message_b: &[u8], sender_sk: HpkeSecretKey) -> Result<V
     Ok(plaintext)
 }
 
-fn pad(msg: &mut Vec<u8>) -> Result<&[u8], HpkeError> {
-    if msg.len() > PADDED_MESSAGE_BYTES {
+fn pad_plaintext(msg: &mut Vec<u8>) -> Result<&[u8], HpkeError> {
+    if msg.len() > PADDED_PLAINTEXT_LENGTH {
         return Err(HpkeError::PayloadTooLarge);
     }
-    while msg.len() < PADDED_MESSAGE_BYTES {
-        msg.push(0);
-    }
+    msg.resize(PADDED_PLAINTEXT_LENGTH, 0);
     Ok(msg)
 }
 
@@ -218,7 +219,7 @@ impl fmt::Display for HpkeError {
             Hpke(e) => e.fmt(f),
             InvalidKeyLength => write!(f, "Invalid Length"),
             PayloadTooLarge =>
-                write!(f, "Payload too large, max size is {} bytes", PADDED_MESSAGE_BYTES),
+                write!(f, "Plaintext too large, max size is {} bytes", PADDED_PLAINTEXT_LENGTH),
             PayloadTooShort => write!(f, "Payload too small"),
         }
     }

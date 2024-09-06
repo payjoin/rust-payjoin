@@ -27,10 +27,6 @@
 use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
-#[cfg(feature = "v2")]
-use bitcoin::secp256k1::rand;
-#[cfg(feature = "v2")]
-use bitcoin::secp256k1::PublicKey;
 use bitcoin::{FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
 pub use error::{CreateRequestError, ResponseError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
@@ -45,6 +41,8 @@ use url::Url;
 use crate::input_type::InputType;
 use crate::psbt::PsbtExt;
 use crate::request::Request;
+#[cfg(feature = "v2")]
+use crate::v2::{HpkePublicKey, HpkeSecretKey};
 use crate::weight::{varint_size, ComputeWeight};
 use crate::PjUri;
 
@@ -238,13 +236,6 @@ impl<'a> RequestBuilder<'a> {
         let input_type = InputType::from_spent_input(txout, zeroth_input.psbtin)
             .map_err(InternalCreateRequestError::InputType)?;
 
-        #[cfg(feature = "v2")]
-        let e = {
-            let secp = bitcoin::secp256k1::Secp256k1::new();
-            let (e_sec, _) = secp.generate_keypair(&mut rand::rngs::OsRng);
-            e_sec
-        };
-
         Ok(RequestContext {
             psbt,
             endpoint,
@@ -255,7 +246,7 @@ impl<'a> RequestBuilder<'a> {
             sequence,
             min_fee_rate: self.min_fee_rate,
             #[cfg(feature = "v2")]
-            e,
+            e: crate::v2::gen_keypair().0,
         })
     }
 }
@@ -271,7 +262,7 @@ pub struct RequestContext {
     sequence: Sequence,
     payee: ScriptBuf,
     #[cfg(feature = "v2")]
-    e: bitcoin::secp256k1::SecretKey,
+    e: crate::v2::HpkeSecretKey,
 }
 
 #[cfg(feature = "v2")]
@@ -340,7 +331,7 @@ impl RequestContext {
     fn extract_v2_strict(
         &mut self,
         ohttp_relay: Url,
-        rs: PublicKey,
+        rs: HpkePublicKey,
     ) -> Result<(Request, ContextV2), CreateRequestError> {
         use crate::uri::UrlExt;
         let url = self.endpoint.clone();
@@ -350,7 +341,7 @@ impl RequestContext {
             self.fee_contribution,
             self.min_fee_rate,
         )?;
-        let body = crate::v2::encrypt_message_a(body, self.e, rs)
+        let body = crate::v2::encrypt_message_a(body, &self.e.clone(), &rs)
             .map_err(InternalCreateRequestError::Hpke)?;
         let mut ohttp =
             self.endpoint.ohttp().ok_or(InternalCreateRequestError::MissingOhttpConfig)?;
@@ -370,14 +361,14 @@ impl RequestContext {
                     sequence: self.sequence,
                     min_fee_rate: self.min_fee_rate,
                 },
-                e: Some(self.e),
+                e: Some(self.e.clone()),
                 ohttp_res: Some(ohttp_res),
             },
         ))
     }
 
     #[cfg(feature = "v2")]
-    fn extract_rs_pubkey(&self) -> Result<PublicKey, error::ParseSubdirectoryError> {
+    fn extract_rs_pubkey(&self) -> Result<HpkePublicKey, error::ParseSubdirectoryError> {
         use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
         use bitcoin::base64::Engine;
         use error::ParseSubdirectoryError;
@@ -392,7 +383,7 @@ impl RequestContext {
             .decode(subdirectory)
             .map_err(ParseSubdirectoryError::SubdirectoryNotBase64)?;
 
-        bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
+        HpkePublicKey::from_bytes(&pubkey_bytes)
             .map_err(ParseSubdirectoryError::SubdirectoryInvalidPubkey)
     }
 
@@ -417,7 +408,7 @@ impl Serialize for RequestContext {
         state.serialize_field("input_type", &self.input_type)?;
         state.serialize_field("sequence", &self.sequence)?;
         state.serialize_field("payee", &self.payee)?;
-        state.serialize_field("e", &self.e.secret_bytes())?;
+        state.serialize_field("e", &self.e)?;
         state.end()
     }
 }
@@ -486,13 +477,7 @@ impl<'de> Deserialize<'de> for RequestContext {
                         "input_type" => input_type = Some(map.next_value()?),
                         "sequence" => sequence = Some(map.next_value()?),
                         "payee" => payee = Some(map.next_value()?),
-                        "e" => {
-                            let secret_bytes: Vec<u8> = map.next_value()?;
-                            e = Some(
-                                bitcoin::secp256k1::SecretKey::from_slice(&secret_bytes)
-                                    .map_err(de::Error::custom)?,
-                            );
-                        }
+                        "e" => e = Some(map.next_value()?),
                         _ => return Err(de::Error::unknown_field(key.as_str(), FIELDS)),
                     }
                 }
@@ -535,7 +520,7 @@ pub struct ContextV1 {
 #[cfg(feature = "v2")]
 pub struct ContextV2 {
     context_v1: ContextV1,
-    e: Option<bitcoin::secp256k1::SecretKey>,
+    e: Option<HpkeSecretKey>,
     ohttp_res: Option<ohttp::ClientResponse>,
 }
 
@@ -576,13 +561,13 @@ impl ContextV2 {
                 response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
                 let response = crate::v2::ohttp_decapsulate(ohttp_res, &res_buf)
                     .map_err(InternalValidationError::OhttpEncapsulation)?;
-                let mut body = match response.status() {
+                let body = match response.status() {
                     http::StatusCode::OK => response.body().to_vec(),
                     http::StatusCode::ACCEPTED => return Ok(None),
                     _ => return Err(InternalValidationError::UnexpectedStatusCode)?,
                 };
-                let psbt = crate::v2::decrypt_message_b(&mut body, e)
-                    .map_err(InternalValidationError::HpkeError)?;
+                let psbt = crate::v2::decrypt_message_b(&body, e)
+                    .map_err(InternalValidationError::Hpke)?;
 
                 let proposal = Psbt::deserialize(&psbt).map_err(InternalValidationError::Psbt)?;
                 let processed_proposal = self.context_v1.process_proposal(proposal)?;
@@ -1109,8 +1094,9 @@ mod test {
     #[test]
     #[cfg(feature = "v2")]
     fn req_ctx_ser_de_roundtrip() {
-        use super::*;
+        use hpke::Deserializable;
 
+        use super::*;
         let req_ctx = RequestContext {
             psbt: Psbt::from_str(ORIGINAL_PSBT).unwrap(),
             endpoint: Url::parse("http://localhost:1234").unwrap(),
@@ -1123,7 +1109,10 @@ mod test {
             },
             sequence: Sequence::MAX,
             payee: ScriptBuf::from(vec![0x00]),
-            e: bitcoin::secp256k1::SecretKey::from_slice(&[0x01; 32]).unwrap(),
+            e: HpkeSecretKey(
+                <hpke::kem::SecpK256HkdfSha256 as hpke::Kem>::PrivateKey::from_bytes(&[0x01; 32])
+                    .unwrap(),
+            ),
         };
         let serialized = serde_json::to_string(&req_ctx).unwrap();
         let deserialized = serde_json::from_str(&serialized).unwrap();

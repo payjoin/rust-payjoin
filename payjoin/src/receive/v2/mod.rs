@@ -7,8 +7,8 @@ use bitcoin::address::NetworkUnchecked;
 use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
 use bitcoin::psbt::Psbt;
-use bitcoin::secp256k1::{rand, PublicKey};
 use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut};
+use hpke::Serializable;
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -21,7 +21,7 @@ use super::{
 };
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
-use crate::v2::OhttpEncapsulationError;
+use crate::v2::{HpkePublicKey, HpkeSecretKey, OhttpEncapsulationError};
 use crate::{OhttpKeys, PjUriBuilder, Request};
 
 pub(crate) mod error;
@@ -36,8 +36,8 @@ struct SessionContext {
     ohttp_keys: OhttpKeys,
     expiry: SystemTime,
     ohttp_relay: url::Url,
-    s: bitcoin::secp256k1::Keypair,
-    e: Option<bitcoin::secp256k1::PublicKey>,
+    s: (HpkeSecretKey, HpkePublicKey),
+    e: Option<HpkePublicKey>,
 }
 
 /// Initializes a new payjoin session, including necessary context
@@ -70,8 +70,6 @@ impl SessionInitializer {
         ohttp_relay: Url,
         expire_after: Option<Duration>,
     ) -> Self {
-        let secp = bitcoin::secp256k1::Secp256k1::new();
-        let (sk, _) = secp.generate_keypair(&mut rand::rngs::OsRng);
         Self {
             context: SessionContext {
                 address,
@@ -81,7 +79,7 @@ impl SessionInitializer {
                 ohttp_relay,
                 expiry: SystemTime::now()
                     + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
-                s: bitcoin::secp256k1::Keypair::from_secret_key(&secp, &sk),
+                s: crate::v2::gen_keypair(),
                 e: None,
             },
         }
@@ -89,7 +87,7 @@ impl SessionInitializer {
 
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
         let url = self.context.ohttp_relay.clone();
-        let subdirectory = subdir_path_from_pubkey(&self.context.s.public_key());
+        let subdirectory = subdir_path_from_pubkey(&self.context.s.1); // TODO ensure it's the compressed key
         let (body, ctx) = crate::v2::ohttp_encapsulate(
             &mut self.context.ohttp_keys,
             "POST",
@@ -125,8 +123,10 @@ impl SessionInitializer {
     }
 }
 
-fn subdir_path_from_pubkey(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
-    BASE64_URL_SAFE_NO_PAD.encode(pubkey.serialize())
+fn subdir_path_from_pubkey(
+    pubkey: &<hpke::kem::SecpK256HkdfSha256 as hpke::Kem>::PublicKey,
+) -> String {
+    BASE64_URL_SAFE_NO_PAD.encode(pubkey.to_bytes())
 }
 
 /// An active payjoin V2 session, allowing for polled requests to the
@@ -188,8 +188,7 @@ impl ActiveSession {
     }
 
     fn extract_proposal_from_v2(&mut self, response: Vec<u8>) -> Result<UncheckedProposal, Error> {
-        let (payload_bytes, e) =
-            crate::v2::decrypt_message_a(&response, self.context.s.secret_key())?;
+        let (payload_bytes, e) = crate::v2::decrypt_message_a(&response, self.context.s.0.clone())?;
         self.context.e = Some(e);
         let payload = String::from_utf8(payload_bytes).map_err(InternalRequestError::Utf8)?;
         Ok(self.unchecked_from_payload(payload)?)
@@ -237,7 +236,7 @@ impl ActiveSession {
     // The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
     // This identifies a session at the payjoin directory server.
     pub fn pj_url(&self) -> Url {
-        let pubkey = &self.context.s.public_key().serialize();
+        let pubkey = &self.context.s.1.to_bytes();
         let pubkey_base64 = BASE64_URL_SAFE_NO_PAD.encode(pubkey);
         let mut url = self.context.directory.clone();
         {
@@ -249,7 +248,7 @@ impl ActiveSession {
     }
 
     /// The per-session public key to use as an identifier
-    pub fn public_key(&self) -> PublicKey { self.context.s.public_key() }
+    pub fn id(&self) -> Vec<u8> { self.context.s.1.to_bytes().to_vec() }
 }
 
 /// The sender's original PSBT and optional parameters
@@ -525,15 +524,15 @@ impl PayjoinProposal {
 
     #[cfg(feature = "v2")]
     pub fn extract_v2_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
-        let body = match self.context.e {
+        let body = match &self.context.e {
             Some(e) => {
-                let mut payjoin_bytes = self.inner.payjoin_psbt.serialize();
-                log::debug!("THERE IS AN e: {}", e);
-                crate::v2::encrypt_message_b(&mut payjoin_bytes, e)
+                let payjoin_bytes = self.inner.payjoin_psbt.serialize();
+                log::debug!("THERE IS AN e: {:?}", e);
+                crate::v2::encrypt_message_b(payjoin_bytes, self.context.s.clone(), e)
             }
             None => Ok(self.extract_v1_req().as_bytes().to_vec()),
         }?;
-        let subdir_path = subdir_path_from_pubkey(&self.context.s.public_key());
+        let subdir_path = subdir_path_from_pubkey(&self.context.s.1);
         let post_payjoin_target =
             self.context.directory.join(&subdir_path).map_err(|e| Error::Server(e.into()))?;
         log::debug!("Payjoin post target: {}", post_payjoin_target.as_str());
@@ -739,10 +738,7 @@ mod test {
                 ),
                 ohttp_relay: url::Url::parse("https://relay.com").unwrap(),
                 expiry: SystemTime::now() + Duration::from_secs(60),
-                s: bitcoin::secp256k1::Keypair::from_secret_key(
-                    &bitcoin::secp256k1::Secp256k1::new(),
-                    &bitcoin::secp256k1::SecretKey::from_slice(&[1; 32]).unwrap(),
-                ),
+                s: crate::v2::gen_keypair(),
                 e: None,
             },
         };

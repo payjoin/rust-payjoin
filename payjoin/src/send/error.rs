@@ -58,7 +58,7 @@ pub(crate) enum InternalValidationError {
     FeeContributionPaysOutputSizeIncrease,
     FeeRateBelowMinimum,
     #[cfg(feature = "v2")]
-    HpkeError(crate::v2::HpkeError),
+    Hpke(crate::v2::HpkeError),
     #[cfg(feature = "v2")]
     OhttpEncapsulation(crate::v2::OhttpEncapsulationError),
     #[cfg(feature = "v2")]
@@ -108,7 +108,7 @@ impl fmt::Display for ValidationError {
             FeeContributionPaysOutputSizeIncrease => write!(f, "fee contribution pays for additional outputs"),
             FeeRateBelowMinimum =>  write!(f, "the fee rate of proposed transaction is below minimum"),
             #[cfg(feature = "v2")]
-            HpkeError(e) => write!(f, "v2 error: {}", e),
+            Hpke(e) => write!(f, "v2 error: {}", e),
             #[cfg(feature = "v2")]
             OhttpEncapsulation(e) => write!(f, "Ohttp encapsulation error: {}", e),
             #[cfg(feature = "v2")]
@@ -153,7 +153,7 @@ impl std::error::Error for ValidationError {
             FeeContributionPaysOutputSizeIncrease => None,
             FeeRateBelowMinimum => None,
             #[cfg(feature = "v2")]
-            HpkeError(error) => Some(error),
+            Hpke(error) => Some(error),
             #[cfg(feature = "v2")]
             OhttpEncapsulation(error) => Some(error),
             #[cfg(feature = "v2")]
@@ -282,7 +282,7 @@ impl From<ParseSubdirectoryError> for CreateRequestError {
 pub(crate) enum ParseSubdirectoryError {
     MissingSubdirectory,
     SubdirectoryNotBase64(bitcoin::base64::DecodeError),
-    SubdirectoryInvalidPubkey(bitcoin::secp256k1::Error),
+    SubdirectoryInvalidPubkey(hpke::HpkeError),
 }
 
 #[cfg(feature = "v2")]

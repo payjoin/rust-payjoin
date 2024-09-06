@@ -9,7 +9,7 @@ use super::*;
 impl Database {
     pub(crate) fn insert_recv_session(&self, session: ActiveSession) -> Result<()> {
         let recv_tree = self.0.open_tree("recv_sessions")?;
-        let key = &session.public_key().serialize();
+        let key = &session.id();
         let value = serde_json::to_string(&session).map_err(Error::Serialize)?;
         recv_tree.insert(key.as_slice(), IVec::from(value.as_str()))?;
         recv_tree.flush()?;

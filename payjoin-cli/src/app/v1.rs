@@ -14,7 +14,7 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::bitcoin::{self};
+use payjoin::bitcoin::{self, FeeRate};
 use payjoin::receive::{PayjoinProposal, UncheckedProposal};
 use payjoin::{Error, PjUriBuilder, Uri, UriExt};
 use tokio::net::TcpListener;
@@ -366,6 +366,9 @@ impl App {
                     .map_err(|e| Error::Server(e.into()))?
             },
             Some(bitcoin::FeeRate::MIN),
+            self.config.max_fee_rate.map_or(Ok(FeeRate::ZERO), |fee_rate| {
+                FeeRate::from_sat_per_vb(fee_rate).ok_or(Error::Server("Invalid fee rate".into()))
+            })?,
         )?;
         Ok(payjoin_proposal)
     }

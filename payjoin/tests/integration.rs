@@ -665,6 +665,7 @@ mod integration {
                             .unwrap())
                     },
                     Some(FeeRate::BROADCAST_MIN),
+                    FeeRate::from_sat_per_vb_unchecked(2),
                 )
                 .unwrap();
             payjoin_proposal
@@ -1123,6 +1124,7 @@ mod integration {
                         .unwrap())
                 },
                 Some(FeeRate::BROADCAST_MIN),
+                FeeRate::from_sat_per_vb_unchecked(2),
             )
             .unwrap();
         payjoin_proposal

@@ -672,7 +672,15 @@ pub struct ProvisionalProposal {
 impl ProvisionalProposal {
     /// Apply additional fee contribution now that the receiver has contributed input
     /// this is kind of a "build_proposal" step before we sign and finalize and extract
-    fn apply_fee(&mut self, min_feerate: Option<FeeRate>) -> Result<&Psbt, RequestError> {
+    ///
+    /// max_feerate is the maximum effective feerate that the receiver is willing to pay for their
+    /// own input/output contributions. A max_feerate of zero indicates that the receiver is not
+    /// willing to pay any additional fees.
+    fn apply_fee(
+        &mut self,
+        min_feerate: Option<FeeRate>,
+        max_feerate: FeeRate,
+    ) -> Result<&Psbt, RequestError> {
         let min_feerate = min_feerate.unwrap_or(FeeRate::MIN);
         log::trace!("min_feerate: {:?}", min_feerate);
         log::trace!("params.min_feerate: {:?}", self.params.min_feerate);
@@ -682,13 +690,15 @@ impl ProvisionalProposal {
         // If the sender specified a fee contribution, the receiver is allowed to decrease the
         // sender's fee output to pay for additional input fees. Any fees in excess of
         // `max_additional_fee_contribution` must be covered by the receiver.
-        let additional_fee = self.additional_input_fee(min_feerate)?;
+        let input_contribution_weight = self.additional_input_weight()?;
+        let additional_fee = input_contribution_weight * min_feerate;
+        log::trace!("additional_fee: {}", additional_fee);
+        let mut receiver_additional_fee = additional_fee;
         if additional_fee > Amount::ZERO {
             log::trace!(
                 "self.params.additional_fee_contribution: {:?}",
                 self.params.additional_fee_contribution
             );
-            let mut receiver_additional_fee = additional_fee;
             if let Some((max_additional_fee_contribution, additional_fee_output_index)) =
                 self.params.additional_fee_contribution
             {
@@ -713,28 +723,31 @@ impl ProvisionalProposal {
                     sender_additional_fee;
                 receiver_additional_fee -= sender_additional_fee;
             }
-
-            // The receiver covers any additional fees if applicable
-            if receiver_additional_fee > Amount::ZERO {
-                log::trace!("receiver_additional_fee: {}", receiver_additional_fee);
-                // Remove additional miner fee from the receiver's specified output
-                self.payjoin_psbt.unsigned_tx.output[self.change_vout].value -=
-                    receiver_additional_fee;
-            }
         }
 
         // The sender's fee contribution can only be used to pay for additional input weight, so
         // any additional outputs must be paid for by the receiver.
-        let additional_receiver_fee = self.additional_output_fee(min_feerate);
-        if additional_receiver_fee > Amount::ZERO {
+        let output_contribution_weight = self.additional_output_weight();
+        receiver_additional_fee += output_contribution_weight * min_feerate;
+        log::trace!("receiver_additional_fee: {}", receiver_additional_fee);
+        // Ensure that the receiver does not pay more in fees
+        // than they would by building a separate transaction at max_feerate instead.
+        let max_fee = (input_contribution_weight + output_contribution_weight) * max_feerate;
+        log::trace!("max_fee: {}", max_fee);
+        if receiver_additional_fee > max_fee {
+            let proposed_feerate =
+                receiver_additional_fee / (input_contribution_weight + output_contribution_weight);
+            return Err(InternalRequestError::FeeTooHigh(proposed_feerate, max_feerate).into());
+        }
+        if receiver_additional_fee > Amount::ZERO {
             // Remove additional miner fee from the receiver's specified output
-            self.payjoin_psbt.unsigned_tx.output[self.change_vout].value -= additional_receiver_fee;
+            self.payjoin_psbt.unsigned_tx.output[self.change_vout].value -= receiver_additional_fee;
         }
         Ok(&self.payjoin_psbt)
     }
 
-    /// Calculate the additional fee required to pay for any additional inputs in the payjoin tx
-    fn additional_input_fee(&self, min_feerate: FeeRate) -> Result<Amount, RequestError> {
+    /// Calculate the additional input weight contributed by the receiver
+    fn additional_input_weight(&self) -> Result<Weight, RequestError> {
         // This error should never happen. We check for at least one input in the constructor
         let input_pair = self
             .payjoin_psbt
@@ -751,13 +764,11 @@ impl ProvisionalProposal {
         log::trace!("weight_per_input : {}", weight_per_input);
         let contribution_weight = weight_per_input * input_count as u64;
         log::trace!("contribution_weight: {}", contribution_weight);
-        let additional_fee = contribution_weight * min_feerate;
-        log::trace!("additional_fee: {}", additional_fee);
-        Ok(additional_fee)
+        Ok(contribution_weight)
     }
 
-    /// Calculate the additional fee required to pay for any additional outputs in the payjoin tx
-    fn additional_output_fee(&self, min_feerate: FeeRate) -> Amount {
+    /// Calculate the additional output weight contributed by the receiver
+    fn additional_output_weight(&self) -> Weight {
         let payjoin_outputs_weight = self
             .payjoin_psbt
             .unsigned_tx
@@ -772,9 +783,7 @@ impl ProvisionalProposal {
             .fold(Weight::ZERO, |acc, txo| acc + txo.weight());
         let output_contribution_weight = payjoin_outputs_weight - original_outputs_weight;
         log::trace!("output_contribution_weight : {}", output_contribution_weight);
-        let additional_fee = output_contribution_weight * min_feerate;
-        log::trace!("additional_fee: {}", additional_fee);
-        additional_fee
+        output_contribution_weight
     }
 
     /// Return a Payjoin Proposal PSBT that the sender will find acceptable.
@@ -833,6 +842,7 @@ impl ProvisionalProposal {
         mut self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, Error>,
         min_feerate_sat_per_vb: Option<FeeRate>,
+        max_feerate_sat_per_vb: FeeRate,
     ) -> Result<PayjoinProposal, Error> {
         for i in self.sender_input_indexes() {
             log::trace!("Clearing sender script signatures for input {}", i);
@@ -840,7 +850,7 @@ impl ProvisionalProposal {
             self.payjoin_psbt.inputs[i].final_script_witness = None;
             self.payjoin_psbt.inputs[i].tap_key_sig = None;
         }
-        let psbt = self.apply_fee(min_feerate_sat_per_vb)?;
+        let psbt = self.apply_fee(min_feerate_sat_per_vb, max_feerate_sat_per_vb)?;
         let psbt = wallet_process_psbt(psbt)?;
         let payjoin_proposal = self.prepare_psbt(psbt)?;
         Ok(payjoin_proposal)
@@ -868,6 +878,10 @@ impl PayjoinProposal {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
+    use bitcoin::hashes::Hash;
+    use bitcoin::{Address, Network, ScriptBuf};
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -916,10 +930,6 @@ mod test {
 
     #[test]
     fn unchecked_proposal_unlocks_after_checks() {
-        use std::str::FromStr;
-
-        use bitcoin::{Address, Network};
-
         let proposal = proposal_from_test_vector().unwrap();
         assert_eq!(proposal.psbt_fee_rate().unwrap().to_sat_per_vb_floor(), 2);
         let mut payjoin = proposal
@@ -942,9 +952,61 @@ mod test {
             .commit_outputs()
             .commit_inputs();
 
-        let payjoin = payjoin.apply_fee(None);
+        let payjoin = payjoin.apply_fee(None, FeeRate::ZERO);
 
         assert!(payjoin.is_ok(), "Payjoin should be a valid PSBT");
+    }
+
+    #[test]
+    fn sender_specifies_excessive_feerate() {
+        let mut proposal = proposal_from_test_vector().unwrap();
+        assert_eq!(proposal.psbt_fee_rate().unwrap().to_sat_per_vb_floor(), 2);
+        // Specify excessive fee rate in sender params
+        proposal.params.min_feerate = FeeRate::from_sat_per_vb_unchecked(1000);
+        // Input contribution for the receiver, from the BIP78 test vector
+        let input: (OutPoint, TxOut) = (
+            OutPoint {
+                txid: "833b085de288cda6ff614c6e8655f61e7ae4f84604a2751998dc25a0d1ba278f"
+                    .parse()
+                    .unwrap(),
+                vout: 1,
+            },
+            TxOut {
+                value: Amount::from_sat(2000000),
+                // HACK: The script pubkey in the original test vector is a nested p2sh witness
+                // script, which is not correctly supported in our current weight calculations.
+                // To get around this limitation, this test uses a native segwit script instead.
+                script_pubkey: ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::hash(
+                    "00145f806655e5924c9204c2d51be5394f4bf9eda210".as_bytes(),
+                )),
+            },
+        );
+        let mut payjoin = proposal
+            .assume_interactive_receiver()
+            .check_inputs_not_owned(|_| Ok(false))
+            .expect("No inputs should be owned")
+            .check_no_mixed_input_scripts()
+            .expect("No mixed input scripts")
+            .check_no_inputs_seen_before(|_| Ok(false))
+            .expect("No inputs should be seen before")
+            .identify_receiver_outputs(|script| {
+                let network = Network::Bitcoin;
+                Ok(Address::from_script(script, network).unwrap()
+                    == Address::from_str(&"3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+                        .unwrap()
+                        .require_network(network)
+                        .unwrap())
+            })
+            .expect("Receiver output should be identified")
+            .commit_outputs()
+            .contribute_witness_inputs(vec![input])
+            .expect("Failed to contribute inputs")
+            .commit_inputs();
+        let mut payjoin_clone = payjoin.clone();
+        let psbt = payjoin.apply_fee(None, FeeRate::from_sat_per_vb_unchecked(1000));
+        assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
+        let psbt = payjoin_clone.apply_fee(None, FeeRate::from_sat_per_vb_unchecked(995));
+        assert!(psbt.is_err(), "Payjoin exceeds receiver fee preference and should error");
     }
 
     #[test]

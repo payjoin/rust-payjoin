@@ -6,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::bitcoin::Amount;
+use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v2::ActiveSession;
 use payjoin::send::RequestContext;
 use payjoin::{bitcoin, Error, Uri};
@@ -343,6 +343,9 @@ impl App {
                     .map_err(|e| Error::Server(e.into()))?
             },
             Some(bitcoin::FeeRate::MIN),
+            self.config.max_fee_rate.map_or(Ok(FeeRate::ZERO), |fee_rate| {
+                FeeRate::from_sat_per_vb(fee_rate).ok_or(Error::Server("Invalid fee rate".into()))
+            })?,
         )?;
         let payjoin_proposal_psbt = payjoin_proposal.psbt();
         log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);

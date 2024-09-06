@@ -492,8 +492,13 @@ impl ProvisionalProposal {
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, Error>,
         min_feerate_sat_per_vb: Option<FeeRate>,
+        max_feerate_sat_per_vb: FeeRate,
     ) -> Result<PayjoinProposal, Error> {
-        let inner = self.inner.finalize_proposal(wallet_process_psbt, min_feerate_sat_per_vb)?;
+        let inner = self.inner.finalize_proposal(
+            wallet_process_psbt,
+            min_feerate_sat_per_vb,
+            max_feerate_sat_per_vb,
+        )?;
         Ok(PayjoinProposal { inner, context: self.context })
     }
 }

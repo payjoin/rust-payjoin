@@ -111,6 +111,12 @@ fn cli() -> ArgMatches {
     let mut cmd = cmd.subcommand(Command::new("resume"));
 
     // Conditional arguments based on features for the receive subcommand
+    receive_cmd = receive_cmd.arg(
+        Arg::new("max_fee_rate")
+            .long("max-fee-rate")
+            .num_args(1)
+            .help("The maximum effective fee rate the receiver is willing to pay (in sat/vB)"),
+    );
     #[cfg(not(feature = "v2"))]
     {
         receive_cmd = receive_cmd.arg(

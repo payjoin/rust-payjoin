@@ -90,6 +90,8 @@ pub(crate) enum InternalRequestError {
     ///
     /// Second argument is the minimum fee rate optionaly set by the receiver.
     PsbtBelowFeeRate(bitcoin::FeeRate, bitcoin::FeeRate),
+    /// Effective receiver feerate exceeds maximum allowed feerate
+    FeeTooHigh(bitcoin::FeeRate, bitcoin::FeeRate),
 }
 
 impl From<InternalRequestError> for RequestError {
@@ -170,6 +172,14 @@ impl fmt::Display for RequestError {
                 &format!(
                     "Original PSBT fee rate too low: {} < {}.",
                     original_psbt_fee_rate, receiver_min_fee_rate
+                ),
+            ),
+            InternalRequestError::FeeTooHigh(proposed_feerate, max_feerate) => write_error(
+                f,
+                "original-psbt-rejected",
+                &format!(
+                    "Effective receiver feerate exceeds maximum allowed feerate: {} > {}",
+                    proposed_feerate, max_feerate
                 ),
             ),
         }

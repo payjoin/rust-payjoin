@@ -282,7 +282,7 @@ impl From<ParseSubdirectoryError> for CreateRequestError {
 pub(crate) enum ParseSubdirectoryError {
     MissingSubdirectory,
     SubdirectoryNotBase64(bitcoin::base64::DecodeError),
-    SubdirectoryInvalidPubkey(hpke::HpkeError),
+    SubdirectoryInvalidPubkey(crate::v2::HpkeError),
 }
 
 #[cfg(feature = "v2")]

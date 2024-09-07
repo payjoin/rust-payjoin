@@ -6,7 +6,6 @@ use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut};
-use hpke::Serializable;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -94,7 +93,7 @@ impl SessionInitializer {
 
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
         let url = self.context.ohttp_relay.clone();
-        let subdirectory = subdir_path_from_pubkey(&self.context.s.1); // TODO ensure it's the compressed key
+        let subdirectory = subdir_path_from_pubkey(&self.context.s.1);
         let (body, ctx) = crate::v2::ohttp_encapsulate(
             &mut self.context.ohttp_keys,
             "POST",
@@ -130,10 +129,8 @@ impl SessionInitializer {
     }
 }
 
-fn subdir_path_from_pubkey(
-    pubkey: &<hpke::kem::SecpK256HkdfSha256 as hpke::Kem>::PublicKey,
-) -> String {
-    BASE64_URL_SAFE_NO_PAD.encode(pubkey.to_bytes())
+fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> String {
+    BASE64_URL_SAFE_NO_PAD.encode(pubkey.to_compressed_bytes())
 }
 
 /// An active payjoin V2 session, allowing for polled requests to the
@@ -243,7 +240,7 @@ impl ActiveSession {
     // The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
     // This identifies a session at the payjoin directory server.
     pub fn pj_url(&self) -> Url {
-        let pubkey = &self.context.s.1.to_bytes();
+        let pubkey = &self.id();
         let pubkey_base64 = BASE64_URL_SAFE_NO_PAD.encode(pubkey);
         let mut url = self.context.directory.clone();
         {
@@ -255,7 +252,7 @@ impl ActiveSession {
     }
 
     /// The per-session public key to use as an identifier
-    pub fn id(&self) -> Vec<u8> { self.context.s.1.to_bytes().to_vec() }
+    pub fn id(&self) -> [u8; 33] { self.context.s.1.to_compressed_bytes() }
 }
 
 /// The sender's original PSBT and optional parameters

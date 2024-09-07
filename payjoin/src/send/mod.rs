@@ -377,7 +377,7 @@ impl RequestContext {
             .decode(subdirectory)
             .map_err(ParseSubdirectoryError::SubdirectoryNotBase64)?;
 
-        HpkePublicKey::from_bytes(&pubkey_bytes)
+        HpkePublicKey::from_compressed_bytes(&pubkey_bytes)
             .map_err(ParseSubdirectoryError::SubdirectoryInvalidPubkey)
     }
 

@@ -68,8 +68,17 @@ impl<'de> serde::Deserialize<'de> for HpkeSecretKey {
 pub struct HpkePublicKey(pub PublicKey);
 
 impl HpkePublicKey {
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, hpke::HpkeError> {
-        Ok(HpkePublicKey(PublicKey::from_bytes(bytes)?))
+    pub fn to_compressed_bytes(&self) -> [u8; 33] {
+        let compressed_key = bitcoin::secp256k1::PublicKey::from_slice(&self.0.to_bytes())
+            .expect("Invalid public key from known valid bytes");
+        compressed_key.serialize()
+    }
+
+    pub fn from_compressed_bytes(bytes: &[u8]) -> Result<Self, HpkeError> {
+        let compressed_key = bitcoin::secp256k1::PublicKey::from_slice(bytes)?;
+        Ok(HpkePublicKey(PublicKey::from_bytes(
+            compressed_key.serialize_uncompressed().as_slice(),
+        )?))
     }
 }
 
@@ -201,6 +210,7 @@ fn pad_plaintext(msg: &mut Vec<u8>) -> Result<&[u8], HpkeError> {
 /// Error from de/encrypting a v2 Hybrid Public Key Encryption payload.
 #[derive(Debug)]
 pub enum HpkeError {
+    Secp256k1(bitcoin::secp256k1::Error),
     Hpke(hpke::HpkeError),
     InvalidKeyLength,
     PayloadTooLarge,
@@ -209,6 +219,10 @@ pub enum HpkeError {
 
 impl From<hpke::HpkeError> for HpkeError {
     fn from(value: hpke::HpkeError) -> Self { Self::Hpke(value) }
+}
+
+impl From<bitcoin::secp256k1::Error> for HpkeError {
+    fn from(value: bitcoin::secp256k1::Error) -> Self { Self::Secp256k1(value) }
 }
 
 impl fmt::Display for HpkeError {
@@ -221,6 +235,7 @@ impl fmt::Display for HpkeError {
             PayloadTooLarge =>
                 write!(f, "Plaintext too large, max size is {} bytes", PADDED_PLAINTEXT_LENGTH),
             PayloadTooShort => write!(f, "Payload too small"),
+            Secp256k1(e) => e.fmt(f),
         }
     }
 }
@@ -232,6 +247,7 @@ impl error::Error for HpkeError {
         match &self {
             Hpke(e) => Some(e),
             InvalidKeyLength | PayloadTooLarge | PayloadTooShort => None,
+            Secp256k1(e) => Some(e),
         }
     }
 }

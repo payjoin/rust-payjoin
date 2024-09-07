@@ -1,17 +1,14 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
-use bitcoin::address::NetworkUnchecked;
 use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut};
 use hpke::Serializable;
-use serde::de::{self, Deserializer, MapAccess, Visitor};
-use serde::ser::SerializeStruct;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::de::Deserializer;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::v2::error::{InternalSessionError, SessionError};
@@ -28,8 +25,9 @@ pub(crate) mod error;
 
 static TWENTY_FOUR_HOURS_DEFAULT_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct SessionContext {
+    #[serde(deserialize_with = "deserialize_address_assume_checked")]
     address: Address,
     directory: url::Url,
     subdirectory: Option<url::Url>,
@@ -38,6 +36,15 @@ struct SessionContext {
     ohttp_relay: url::Url,
     s: (HpkeSecretKey, HpkePublicKey),
     e: Option<HpkePublicKey>,
+}
+
+fn deserialize_address_assume_checked<'de, D>(deserializer: D) -> Result<Address, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    let address = Address::from_str(&s).map_err(serde::de::Error::custom)?;
+    Ok(address.assume_checked())
 }
 
 /// Initializes a new payjoin session, including necessary context
@@ -569,146 +576,6 @@ impl PayjoinProposal {
                     .into(),
             ))
         }
-    }
-}
-impl Serialize for SessionContext {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_struct("SessionContext", 4)?;
-        state.serialize_field("address", &self.address)?;
-        state.serialize_field("directory", &self.directory)?;
-        state.serialize_field("subdirectory", &self.subdirectory)?;
-        state.serialize_field("ohttp_keys", &self.ohttp_keys)?;
-        state.serialize_field("ohttp_relay", &self.ohttp_relay)?;
-        state.serialize_field("expiry", &self.expiry)?;
-        state.serialize_field("s", &self.s)?;
-        state.serialize_field("e", &self.e)?;
-
-        state.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for SessionContext {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(field_identifier, rename_all = "snake_case")]
-        enum Field {
-            Address,
-            Directory,
-            Subdirectory,
-            OhttpKeys,
-            OhttpRelay,
-            Expiry,
-            S,
-            E,
-        }
-
-        struct SessionContextVisitor;
-
-        impl<'de> Visitor<'de> for SessionContextVisitor {
-            type Value = SessionContext;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("struct ActiveSession")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> Result<SessionContext, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut address: Option<Address<NetworkUnchecked>> = None;
-                let mut directory = None;
-                let mut subdirectory = None;
-                let mut ohttp_keys = None;
-                let mut ohttp_relay = None;
-                let mut expiry = None;
-                let mut s = None;
-                let mut e = None;
-                while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::Address => {
-                            if address.is_some() {
-                                return Err(de::Error::duplicate_field("address"));
-                            }
-                            address = Some(map.next_value()?);
-                        }
-                        Field::Directory => {
-                            if directory.is_some() {
-                                return Err(de::Error::duplicate_field("directory"));
-                            }
-                            directory = Some(map.next_value()?);
-                        }
-                        Field::Subdirectory => {
-                            if subdirectory.is_some() {
-                                return Err(de::Error::duplicate_field("subdirectory"));
-                            }
-                            subdirectory = Some(map.next_value()?);
-                        }
-                        Field::OhttpKeys => {
-                            if ohttp_keys.is_some() {
-                                return Err(de::Error::duplicate_field("ohttp_keys"));
-                            }
-                            ohttp_keys = Some(map.next_value()?);
-                        }
-                        Field::OhttpRelay => {
-                            if ohttp_relay.is_some() {
-                                return Err(de::Error::duplicate_field("ohttp_relay"));
-                            }
-                            ohttp_relay = Some(map.next_value()?);
-                        }
-                        Field::Expiry => {
-                            if expiry.is_some() {
-                                return Err(de::Error::duplicate_field("expiry"));
-                            }
-                            expiry = Some(map.next_value()?);
-                        }
-                        Field::S => {
-                            if s.is_some() {
-                                return Err(de::Error::duplicate_field("s"));
-                            }
-                            s = Some(map.next_value()?);
-                        }
-                        Field::E => {
-                            if e.is_some() {
-                                return Err(de::Error::duplicate_field("e"));
-                            }
-                            e = Some(map.next_value()?);
-                        }
-                    }
-                }
-                let address = address
-                    .ok_or_else(|| de::Error::missing_field("address"))
-                    .map(|a| a.assume_checked())?;
-                let directory = directory.ok_or_else(|| de::Error::missing_field("directory"))?;
-                let subdirectory =
-                    subdirectory.ok_or_else(|| de::Error::missing_field("subdirectory"))?;
-                let ohttp_keys =
-                    ohttp_keys.ok_or_else(|| de::Error::missing_field("ohttp_keys"))?;
-                let ohttp_relay =
-                    ohttp_relay.ok_or_else(|| de::Error::missing_field("ohttp_relay"))?;
-                let expiry = expiry.ok_or_else(|| de::Error::missing_field("expiry"))?;
-                let s = s.ok_or_else(|| de::Error::missing_field("s"))?;
-                let e = e.ok_or_else(|| de::Error::missing_field("e"))?;
-                Ok(SessionContext {
-                    address,
-                    directory,
-                    subdirectory,
-                    ohttp_keys,
-                    ohttp_relay,
-                    expiry,
-                    s,
-                    e,
-                })
-            }
-        }
-
-        const FIELDS: &[&str] = &["directory", "ohttp_keys", "ohttp_relay", "expiry", "s", "e"];
-        deserializer.deserialize_struct("SessionContext", FIELDS, SessionContextVisitor)
     }
 }
 

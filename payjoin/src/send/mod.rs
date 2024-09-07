@@ -31,11 +31,7 @@ use bitcoin::{FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
 pub use error::{CreateRequestError, ResponseError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 #[cfg(feature = "v2")]
-use serde::{
-    de::{self, MapAccess, Visitor},
-    ser::SerializeStruct,
-    Deserialize, Deserializer, Serialize, Serializer,
-};
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::input_type::InputType;
@@ -251,7 +247,8 @@ impl<'a> RequestBuilder<'a> {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "v2", derive(Serialize, Deserialize))]
 pub struct RequestContext {
     psbt: Psbt,
     endpoint: Url,
@@ -264,9 +261,6 @@ pub struct RequestContext {
     #[cfg(feature = "v2")]
     e: crate::v2::HpkeSecretKey,
 }
-
-#[cfg(feature = "v2")]
-impl Eq for RequestContext {}
 
 impl RequestContext {
     /// Extract serialized V1 Request and Context froma Payjoin Proposal
@@ -388,118 +382,6 @@ impl RequestContext {
     }
 
     pub fn endpoint(&self) -> &Url { &self.endpoint }
-}
-
-#[cfg(feature = "v2")]
-impl Serialize for RequestContext {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_struct("RequestContext", 8)?;
-        state.serialize_field("psbt", &self.psbt.to_string())?;
-        state.serialize_field("endpoint", &self.endpoint.as_str())?;
-        state.serialize_field("disable_output_substitution", &self.disable_output_substitution)?;
-        state.serialize_field(
-            "fee_contribution",
-            &self.fee_contribution.as_ref().map(|(amount, index)| (amount.to_sat(), *index)),
-        )?;
-        state.serialize_field("min_fee_rate", &self.min_fee_rate)?;
-        state.serialize_field("input_type", &self.input_type)?;
-        state.serialize_field("sequence", &self.sequence)?;
-        state.serialize_field("payee", &self.payee)?;
-        state.serialize_field("e", &self.e)?;
-        state.end()
-    }
-}
-
-#[cfg(feature = "v2")]
-impl<'de> Deserialize<'de> for RequestContext {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct RequestContextVisitor;
-
-        const FIELDS: &[&str] = &[
-            "psbt",
-            "endpoint",
-            "ohttp_keys",
-            "disable_output_substitution",
-            "fee_contribution",
-            "min_fee_rate",
-            "input_type",
-            "sequence",
-            "payee",
-            "e",
-        ];
-
-        impl<'de> Visitor<'de> for RequestContextVisitor {
-            type Value = RequestContext;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("struct RequestContext")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> Result<RequestContext, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut psbt = None;
-                let mut endpoint = None;
-                let mut disable_output_substitution = None;
-                let mut fee_contribution = None;
-                let mut min_fee_rate = None;
-                let mut input_type = None;
-                let mut sequence = None;
-                let mut payee = None;
-                let mut e = None;
-
-                while let Some(key) = map.next_key::<String>()? {
-                    match key.as_str() {
-                        "psbt" => {
-                            let buf: String = map.next_value::<String>()?;
-                            psbt = Some(Psbt::from_str(&buf).map_err(de::Error::custom)?);
-                        }
-                        "endpoint" =>
-                            endpoint = Some(
-                                url::Url::from_str(&map.next_value::<String>()?)
-                                    .map_err(de::Error::custom)?,
-                            ),
-                        "disable_output_substitution" =>
-                            disable_output_substitution = Some(map.next_value()?),
-                        "fee_contribution" => {
-                            let fc: Option<(u64, usize)> = map.next_value()?;
-                            fee_contribution = fc
-                                .map(|(amount, index)| (bitcoin::Amount::from_sat(amount), index));
-                        }
-                        "min_fee_rate" => min_fee_rate = Some(map.next_value()?),
-                        "input_type" => input_type = Some(map.next_value()?),
-                        "sequence" => sequence = Some(map.next_value()?),
-                        "payee" => payee = Some(map.next_value()?),
-                        "e" => e = Some(map.next_value()?),
-                        _ => return Err(de::Error::unknown_field(key.as_str(), FIELDS)),
-                    }
-                }
-
-                Ok(RequestContext {
-                    psbt: psbt.ok_or_else(|| de::Error::missing_field("psbt"))?,
-                    endpoint: endpoint.ok_or_else(|| de::Error::missing_field("endpoint"))?,
-                    disable_output_substitution: disable_output_substitution
-                        .ok_or_else(|| de::Error::missing_field("disable_output_substitution"))?,
-                    fee_contribution,
-                    min_fee_rate: min_fee_rate
-                        .ok_or_else(|| de::Error::missing_field("min_fee_rate"))?,
-                    input_type: input_type.ok_or_else(|| de::Error::missing_field("input_type"))?,
-                    sequence: sequence.ok_or_else(|| de::Error::missing_field("sequence"))?,
-                    payee: payee.ok_or_else(|| de::Error::missing_field("payee"))?,
-                    e: e.ok_or_else(|| de::Error::missing_field("e"))?,
-                })
-            }
-        }
-
-        deserializer.deserialize_struct("RequestContext", FIELDS, RequestContextVisitor)
-    }
 }
 
 /// Data required for validation of response.

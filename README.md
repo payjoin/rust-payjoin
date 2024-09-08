@@ -108,6 +108,20 @@ cargo update -p which --precise 4.4.0
 cargo update -p zstd-sys --precise 2.0.8+zstd.1.5.5
 ```
 
+## Contributing
+
+### Upgrading dependencies
+
+If your change requires a dependency to be upgraded you must do the following:
+
+1. Modify `Cargo.toml`
+2. Copy `Cargo-minimal.lock` to `Cargo.lock`
+3. Trigger cargo to update the required entries in the lock file - use `--precise` using the minimum version number that works
+4. Test your change
+5. Copy `Cargo.lock` to `Cargo-minimal.lock`
+6. Update `Cargo-recent.lock` if it is also behind
+7. Commit both lock files together with `Cargo.toml` and your code changes
+
 ## Code Formatting
 
 We use the nightly Rust formatter for this project. Please run `rustfmt` using the nightly toolchain before submitting any changes.

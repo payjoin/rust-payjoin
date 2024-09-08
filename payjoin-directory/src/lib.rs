@@ -15,7 +15,7 @@ use hyper::{Method, Request, Response, StatusCode, Uri};
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 
 pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
@@ -138,9 +138,6 @@ fn init_ohttp() -> Result<ohttp::Server> {
 
     // create or read from file
     let server_config = ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC))?;
-    let encoded_config = server_config.encode()?;
-    let b64_config = BASE64_URL_SAFE_NO_PAD.encode(encoded_config);
-    info!("ohttp-keys server config base64 UrlSafe: {:?}", b64_config);
     Ok(ohttp::Server::new(server_config)?)
 }
 

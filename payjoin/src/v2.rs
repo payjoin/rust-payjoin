@@ -364,9 +364,23 @@ impl OhttpKeys {
     }
 }
 
+const KEM_ID: &[u8] = b"\x00\x16"; // DHKEM(secp256k1, HKDF-SHA256)
+const SYMMETRIC_LEN: &[u8] = b"\x00\x04"; // 4 bytes
+const SYMMETRIC_KDF_AEAD: &[u8] = b"\x00\x01\x00\x03"; // KDF(HKDF-SHA256), AEAD(ChaCha20Poly1305)
+
 impl fmt::Display for OhttpKeys {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let encoded = BASE64_URL_SAFE_NO_PAD.encode(self.encode().map_err(|_| fmt::Error)?);
+        let bytes = self.encode().map_err(|_| fmt::Error)?;
+        let key_id = bytes[0];
+        let pubkey = &bytes[3..68];
+
+        let compressed_pubkey =
+            bitcoin::secp256k1::PublicKey::from_slice(pubkey).map_err(|_| fmt::Error)?.serialize();
+
+        let mut buf = vec![key_id];
+        buf.extend_from_slice(&compressed_pubkey);
+
+        let encoded = BASE64_URL_SAFE_NO_PAD.encode(buf);
         write!(f, "{}", encoded)
     }
 }
@@ -374,9 +388,24 @@ impl fmt::Display for OhttpKeys {
 impl std::str::FromStr for OhttpKeys {
     type Err = ParseOhttpKeysError;
 
+    /// Parses a base64URL-encoded string into OhttpKeys.
+    /// The string format is: key_id || compressed_public_key
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let bytes = BASE64_URL_SAFE_NO_PAD.decode(s).map_err(ParseOhttpKeysError::DecodeBase64)?;
-        OhttpKeys::decode(&bytes).map_err(ParseOhttpKeysError::DecodeKeyConfig)
+
+        let key_id = *bytes.first().ok_or(ParseOhttpKeysError::InvalidFormat)?;
+        let compressed_pk = bytes.get(1..34).ok_or(ParseOhttpKeysError::InvalidFormat)?;
+
+        let pubkey = bitcoin::secp256k1::PublicKey::from_slice(compressed_pk)
+            .map_err(|_| ParseOhttpKeysError::InvalidPublicKey)?;
+
+        let mut buf = vec![key_id];
+        buf.extend_from_slice(KEM_ID);
+        buf.extend_from_slice(&pubkey.serialize_uncompressed());
+        buf.extend_from_slice(SYMMETRIC_LEN);
+        buf.extend_from_slice(SYMMETRIC_KDF_AEAD);
+
+        ohttp::KeyConfig::decode(&buf).map(Self).map_err(ParseOhttpKeysError::DecodeKeyConfig)
     }
 }
 
@@ -424,6 +453,8 @@ impl serde::Serialize for OhttpKeys {
 
 #[derive(Debug)]
 pub enum ParseOhttpKeysError {
+    InvalidFormat,
+    InvalidPublicKey,
     DecodeBase64(bitcoin::base64::DecodeError),
     DecodeKeyConfig(ohttp::Error),
 }
@@ -431,6 +462,8 @@ pub enum ParseOhttpKeysError {
 impl std::fmt::Display for ParseOhttpKeysError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            ParseOhttpKeysError::InvalidFormat => write!(f, "Invalid format"),
+            ParseOhttpKeysError::InvalidPublicKey => write!(f, "Invalid public key"),
             ParseOhttpKeysError::DecodeBase64(e) => write!(f, "Failed to decode base64: {}", e),
             ParseOhttpKeysError::DecodeKeyConfig(e) =>
                 write!(f, "Failed to decode KeyConfig: {}", e),
@@ -443,6 +476,7 @@ impl std::error::Error for ParseOhttpKeysError {
         match self {
             ParseOhttpKeysError::DecodeBase64(e) => Some(e),
             ParseOhttpKeysError::DecodeKeyConfig(e) => Some(e),
+            ParseOhttpKeysError::InvalidFormat | ParseOhttpKeysError::InvalidPublicKey => None,
         }
     }
 }

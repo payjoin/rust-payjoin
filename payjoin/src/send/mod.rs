@@ -312,7 +312,7 @@ impl RequestContext {
             Err(e) => {
                 log::warn!("Failed to extract `rs` pubkey, falling back to v1: {}", e);
                 let (req, context_v1) = self.extract_v1()?;
-                Ok((req, ContextV2 { context_v1, e: None, ohttp_res: None }))
+                Ok((req, ContextV2 { context_v1, rs: None, e: None, ohttp_res: None }))
             }
         }
     }
@@ -355,6 +355,7 @@ impl RequestContext {
                     sequence: self.sequence,
                     min_fee_rate: self.min_fee_rate,
                 },
+                rs: Some(self.extract_rs_pubkey()?),
                 e: Some(self.e.clone()),
                 ohttp_res: Some(ohttp_res),
             },
@@ -402,6 +403,7 @@ pub struct ContextV1 {
 #[cfg(feature = "v2")]
 pub struct ContextV2 {
     context_v1: ContextV1,
+    rs: Option<HpkePublicKey>,
     e: Option<HpkeSecretKey>,
     ohttp_res: Option<ohttp::ClientResponse>,
 }
@@ -437,8 +439,8 @@ impl ContextV2 {
         self,
         response: &mut impl std::io::Read,
     ) -> Result<Option<Psbt>, ResponseError> {
-        match (self.ohttp_res, self.e) {
-            (Some(ohttp_res), Some(e)) => {
+        match (self.ohttp_res, self.rs, self.e) {
+            (Some(ohttp_res), Some(rs), Some(e)) => {
                 let mut res_buf = Vec::new();
                 response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
                 let response = crate::v2::ohttp_decapsulate(ohttp_res, &res_buf)
@@ -448,7 +450,7 @@ impl ContextV2 {
                     http::StatusCode::ACCEPTED => return Ok(None),
                     _ => return Err(InternalValidationError::UnexpectedStatusCode)?,
                 };
-                let psbt = crate::v2::decrypt_message_b(&body, e)
+                let psbt = crate::v2::decrypt_message_b(&body, rs, e)
                     .map_err(InternalValidationError::Hpke)?;
 
                 let proposal = Psbt::deserialize(&psbt).map_err(InternalValidationError::Psbt)?;

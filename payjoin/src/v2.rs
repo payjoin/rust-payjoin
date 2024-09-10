@@ -11,8 +11,9 @@ use hpke::rand_core::OsRng;
 use hpke::{Deserializable, OpModeR, OpModeS, Serializable};
 
 pub const PADDED_MESSAGE_BYTES: usize = 7168;
-pub const PADDED_PLAINTEXT_LENGTH: usize = PADDED_MESSAGE_BYTES - UNCOMPRESSED_PUBLIC_KEY_SIZE * 2;
-
+pub const PADDED_PLAINTEXT_A_LENGTH: usize =
+    PADDED_MESSAGE_BYTES - UNCOMPRESSED_PUBLIC_KEY_SIZE * 2;
+pub const PADDED_PLAINTEXT_B_LENGTH: usize = PADDED_MESSAGE_BYTES - UNCOMPRESSED_PUBLIC_KEY_SIZE;
 pub const INFO_A: &[u8] = b"PjV2MsgA";
 pub const INFO_B: &[u8] = b"PjV2MsgB";
 
@@ -132,7 +133,7 @@ pub fn encrypt_message_a(
             &mut OsRng,
         )?;
     let aad = pk.to_bytes().to_vec();
-    let plaintext = pad_plaintext(&mut plaintext)?;
+    let plaintext = pad_plaintext(&mut plaintext, PADDED_PLAINTEXT_A_LENGTH)?;
     let ciphertext = encryption_context.seal(plaintext, &aad)?;
     let mut message_a = encapsulated_key.to_bytes().to_vec();
     message_a.extend(&aad);
@@ -174,36 +175,36 @@ pub fn encrypt_message_b(
             INFO_B,
             &mut OsRng,
         )?;
-    let aad = pk.to_bytes().to_vec();
-    let plaintext = pad_plaintext(&mut plaintext)?;
-    let ciphertext = encryption_context.seal(plaintext, &aad)?;
+    let plaintext = pad_plaintext(&mut plaintext, PADDED_PLAINTEXT_B_LENGTH)?;
+    let ciphertext = encryption_context.seal(plaintext, &[])?;
     let mut message_b = encapsulated_key.to_bytes().to_vec();
-    message_b.extend(&aad);
     message_b.extend(&ciphertext);
     Ok(message_b.to_vec())
 }
 
 #[cfg(feature = "send")]
-pub fn decrypt_message_b(message_b: &[u8], sender_sk: HpkeSecretKey) -> Result<Vec<u8>, HpkeError> {
+pub fn decrypt_message_b(
+    message_b: &[u8],
+    receiver_pk: HpkePublicKey,
+    sender_sk: HpkeSecretKey,
+) -> Result<Vec<u8>, HpkeError> {
     let enc = message_b.get(..65).ok_or(HpkeError::PayloadTooShort)?;
-    let enc = EncappedKey::from_bytes(enc).unwrap();
-    let aad = message_b.get(65..130).ok_or(HpkeError::PayloadTooShort)?;
-    let pk_s = PublicKey::from_bytes(aad)?;
+    let enc = EncappedKey::from_bytes(enc)?;
     let mut decryption_ctx = hpke::setup_receiver::<
         ChaCha20Poly1305,
         HkdfSha256,
         SecpK256HkdfSha256,
-    >(&OpModeR::Auth(pk_s), &sender_sk.0, &enc, INFO_B)?;
+    >(&OpModeR::Auth(receiver_pk.0), &sender_sk.0, &enc, INFO_B)?;
     let plaintext =
-        decryption_ctx.open(message_b.get(130..).ok_or(HpkeError::PayloadTooShort)?, aad)?;
+        decryption_ctx.open(message_b.get(65..).ok_or(HpkeError::PayloadTooShort)?, &[])?;
     Ok(plaintext)
 }
 
-fn pad_plaintext(msg: &mut Vec<u8>) -> Result<&[u8], HpkeError> {
-    if msg.len() > PADDED_PLAINTEXT_LENGTH {
-        return Err(HpkeError::PayloadTooLarge);
+fn pad_plaintext(msg: &mut Vec<u8>, padded_length: usize) -> Result<&[u8], HpkeError> {
+    if msg.len() > padded_length {
+        return Err(HpkeError::PayloadTooLarge { actual: msg.len(), max: padded_length });
     }
-    msg.resize(PADDED_PLAINTEXT_LENGTH, 0);
+    msg.resize(padded_length, 0);
     Ok(msg)
 }
 
@@ -213,7 +214,7 @@ pub enum HpkeError {
     Secp256k1(bitcoin::secp256k1::Error),
     Hpke(hpke::HpkeError),
     InvalidKeyLength,
-    PayloadTooLarge,
+    PayloadTooLarge { actual: usize, max: usize },
     PayloadTooShort,
 }
 
@@ -232,8 +233,13 @@ impl fmt::Display for HpkeError {
         match &self {
             Hpke(e) => e.fmt(f),
             InvalidKeyLength => write!(f, "Invalid Length"),
-            PayloadTooLarge =>
-                write!(f, "Plaintext too large, max size is {} bytes", PADDED_PLAINTEXT_LENGTH),
+            PayloadTooLarge { actual, max } => {
+                write!(
+                    f,
+                    "Plaintext too large, max size is {} bytes, actual size is {} bytes",
+                    max, actual
+                )
+            }
             PayloadTooShort => write!(f, "Payload too small"),
             Secp256k1(e) => e.fmt(f),
         }
@@ -246,7 +252,8 @@ impl error::Error for HpkeError {
 
         match &self {
             Hpke(e) => Some(e),
-            InvalidKeyLength | PayloadTooLarge | PayloadTooShort => None,
+            PayloadTooLarge { .. } => None,
+            InvalidKeyLength | PayloadTooShort => None,
             Secp256k1(e) => Some(e),
         }
     }

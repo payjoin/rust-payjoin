@@ -15,7 +15,7 @@ use hyper::{Method, Request, Response, StatusCode, Uri};
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
 pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
@@ -138,6 +138,7 @@ fn init_ohttp() -> Result<ohttp::Server> {
 
     // create or read from file
     let server_config = ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC))?;
+    info!("Initialized a new OHTTP Key Configuration. GET /ohttp-keys to fetch it.");
     Ok(ohttp::Server::new(server_config)?)
 }
 

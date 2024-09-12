@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -5,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::bitcoin::Amount;
+use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v2::ActiveSession;
 use payjoin::send::RequestContext;
 use payjoin::{bitcoin, Error, Uri};
@@ -272,8 +273,6 @@ impl App {
         &self,
         proposal: payjoin::receive::v2::UncheckedProposal,
     ) -> Result<payjoin::receive::v2::PayjoinProposal, Error> {
-        use crate::app::try_contributing_inputs;
-
         let bitcoind = self.bitcoind().map_err(|e| Error::Server(e.into()))?;
 
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
@@ -317,19 +316,24 @@ impl App {
         })?;
         log::trace!("check4");
 
-        let mut provisional_payjoin = payjoin.identify_receiver_outputs(|output_script| {
-            if let Ok(address) = bitcoin::Address::from_script(output_script, network) {
-                bitcoind
-                    .get_address_info(&address)
-                    .map(|info| info.is_mine.unwrap_or(false))
-                    .map_err(|e| Error::Server(e.into()))
-            } else {
-                Ok(false)
-            }
-        })?;
+        let payjoin = payjoin
+            .identify_receiver_outputs(|output_script| {
+                if let Ok(address) = bitcoin::Address::from_script(output_script, network) {
+                    bitcoind
+                        .get_address_info(&address)
+                        .map(|info| info.is_mine.unwrap_or(false))
+                        .map_err(|e| Error::Server(e.into()))
+                } else {
+                    Ok(false)
+                }
+            })?
+            .commit_outputs();
 
-        _ = try_contributing_inputs(&mut provisional_payjoin.inner, &bitcoind)
-            .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
+        let provisional_payjoin = try_contributing_inputs(payjoin.clone(), &bitcoind)
+            .unwrap_or_else(|e| {
+                log::warn!("Failed to contribute inputs: {}", e);
+                payjoin.commit_inputs()
+            });
 
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &Psbt| {
@@ -339,11 +343,45 @@ impl App {
                     .map_err(|e| Error::Server(e.into()))?
             },
             Some(bitcoin::FeeRate::MIN),
+            self.config.max_fee_rate.map_or(Ok(FeeRate::ZERO), |fee_rate| {
+                FeeRate::from_sat_per_vb(fee_rate).ok_or(Error::Server("Invalid fee rate".into()))
+            })?,
         )?;
         let payjoin_proposal_psbt = payjoin_proposal.psbt();
         log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
         Ok(payjoin_proposal)
     }
+}
+
+fn try_contributing_inputs(
+    payjoin: payjoin::receive::v2::WantsInputs,
+    bitcoind: &bitcoincore_rpc::Client,
+) -> Result<payjoin::receive::v2::ProvisionalProposal> {
+    use bitcoin::OutPoint;
+
+    let available_inputs = bitcoind
+        .list_unspent(None, None, None, None, None)
+        .context("Failed to list unspent from bitcoind")?;
+    let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
+        .iter()
+        .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
+        .collect();
+
+    let selected_outpoint = payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
+    let selected_utxo = available_inputs
+        .iter()
+        .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
+        .context("This shouldn't happen. Failed to retrieve the privacy preserving utxo from those we provided to the seclector.")?;
+    log::debug!("selected utxo: {:#?}", selected_utxo);
+    let txo_to_contribute = bitcoin::TxOut {
+        value: selected_utxo.amount,
+        script_pubkey: selected_utxo.script_pub_key.clone(),
+    };
+
+    Ok(payjoin
+        .contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)])
+        .expect("This shouldn't happen. Failed to contribute inputs.")
+        .commit_inputs())
 }
 
 async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::OhttpKeys> {

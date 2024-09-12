@@ -94,38 +94,6 @@ pub trait App {
     }
 }
 
-fn try_contributing_inputs(
-    payjoin: &mut payjoin::receive::ProvisionalProposal,
-    bitcoind: &bitcoincore_rpc::Client,
-) -> Result<()> {
-    use bitcoin::OutPoint;
-
-    let available_inputs = bitcoind
-        .list_unspent(None, None, None, None, None)
-        .context("Failed to list unspent from bitcoind")?;
-    let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
-        .iter()
-        .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
-        .collect();
-
-    let selected_outpoint = payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
-    let selected_utxo = available_inputs
-        .iter()
-        .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
-        .context("This shouldn't happen. Failed to retrieve the privacy preserving utxo from those we provided to the seclector.")?;
-    log::debug!("selected utxo: {:#?}", selected_utxo);
-
-    //  calculate receiver payjoin outputs given receiver payjoin inputs and original_psbt,
-    let txo_to_contribute = bitcoin::TxOut {
-        value: selected_utxo.amount,
-        script_pubkey: selected_utxo.script_pub_key.clone(),
-    };
-    let outpoint_to_contribute =
-        bitcoin::OutPoint { txid: selected_utxo.txid, vout: selected_utxo.vout };
-    payjoin.contribute_witness_input(txo_to_contribute, outpoint_to_contribute);
-    Ok(())
-}
-
 #[cfg(feature = "danger-local-https")]
 fn http_agent() -> Result<reqwest::Client> { Ok(http_agent_builder()?.build()?) }
 

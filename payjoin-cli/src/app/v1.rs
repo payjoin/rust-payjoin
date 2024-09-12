@@ -14,14 +14,14 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::bitcoin::{self};
+use payjoin::bitcoin::{self, FeeRate};
 use payjoin::receive::{PayjoinProposal, UncheckedProposal};
 use payjoin::{Error, PjUriBuilder, Uri, UriExt};
 use tokio::net::TcpListener;
 
 use super::config::AppConfig;
 use super::App as AppTrait;
-use crate::app::{http_agent, try_contributing_inputs};
+use crate::app::http_agent;
 use crate::db::Database;
 #[cfg(feature = "danger-local-https")]
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
@@ -329,7 +329,7 @@ impl App {
         })?;
         log::trace!("check4");
 
-        let mut provisional_payjoin = payjoin.identify_receiver_outputs(|output_script| {
+        let payjoin = payjoin.identify_receiver_outputs(|output_script| {
             if let Ok(address) = bitcoin::Address::from_script(output_script, network) {
                 bitcoind
                     .get_address_info(&address)
@@ -340,19 +340,23 @@ impl App {
             }
         })?;
 
-        _ = try_contributing_inputs(&mut provisional_payjoin, &bitcoind)
-            .map_err(|e| log::warn!("Failed to contribute inputs: {}", e));
-
-        _ = provisional_payjoin
-            .try_substitute_receiver_output(|| {
-                Ok(bitcoind
+        let payjoin = payjoin
+            .substitute_receiver_script(
+                &bitcoind
                     .get_new_address(None, None)
                     .map_err(|e| Error::Server(e.into()))?
                     .require_network(network)
                     .map_err(|e| Error::Server(e.into()))?
-                    .script_pubkey())
-            })
-            .map_err(|e| log::warn!("Failed to substitute output: {}", e));
+                    .script_pubkey(),
+            )
+            .map_err(|e| Error::Server(e.into()))?
+            .commit_outputs();
+
+        let provisional_payjoin = try_contributing_inputs(payjoin.clone(), &bitcoind)
+            .unwrap_or_else(|e| {
+                log::warn!("Failed to contribute inputs: {}", e);
+                payjoin.commit_inputs()
+            });
 
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &Psbt| {
@@ -362,9 +366,43 @@ impl App {
                     .map_err(|e| Error::Server(e.into()))?
             },
             Some(bitcoin::FeeRate::MIN),
+            self.config.max_fee_rate.map_or(Ok(FeeRate::ZERO), |fee_rate| {
+                FeeRate::from_sat_per_vb(fee_rate).ok_or(Error::Server("Invalid fee rate".into()))
+            })?,
         )?;
         Ok(payjoin_proposal)
     }
+}
+
+fn try_contributing_inputs(
+    payjoin: payjoin::receive::WantsInputs,
+    bitcoind: &bitcoincore_rpc::Client,
+) -> Result<payjoin::receive::ProvisionalProposal> {
+    use bitcoin::OutPoint;
+
+    let available_inputs = bitcoind
+        .list_unspent(None, None, None, None, None)
+        .context("Failed to list unspent from bitcoind")?;
+    let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
+        .iter()
+        .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
+        .collect();
+
+    let selected_outpoint = payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
+    let selected_utxo = available_inputs
+        .iter()
+        .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
+        .context("This shouldn't happen. Failed to retrieve the privacy preserving utxo from those we provided to the seclector.")?;
+    log::debug!("selected utxo: {:#?}", selected_utxo);
+    let txo_to_contribute = bitcoin::TxOut {
+        value: selected_utxo.amount,
+        script_pubkey: selected_utxo.script_pub_key.clone(),
+    };
+
+    Ok(payjoin
+        .contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)])
+        .expect("This shouldn't happen. Failed to contribute inputs.")
+        .commit_inputs())
 }
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {

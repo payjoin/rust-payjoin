@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use bitcoin::base64::prelude::BASE64_STANDARD;
 use bitcoin::base64::Engine;
 use bitcoin::psbt::Psbt;
-use bitcoin::{Amount, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::{Amount, FeeRate, OutPoint, Script, TxOut, Weight};
 
 mod error;
 mod optional_parameters;
@@ -39,8 +39,11 @@ pub mod v2;
 
 use bitcoin::secp256k1::rand::seq::SliceRandom;
 use bitcoin::secp256k1::rand::{self, Rng};
-pub use error::{Error, RequestError, SelectionError};
-use error::{InternalRequestError, InternalSelectionError};
+pub use error::{Error, OutputSubstitutionError, RequestError, SelectionError};
+use error::{
+    InputContributionError, InternalInputContributionError, InternalOutputSubstitutionError,
+    InternalRequestError, InternalSelectionError,
+};
 use optional_parameters::Params;
 
 use crate::input_type::InputType;
@@ -307,7 +310,7 @@ impl OutputsUnknown {
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: impl Fn(&Script) -> Result<bool, Error>,
-    ) -> Result<ProvisionalProposal, Error> {
+    ) -> Result<WantsOutputs, Error> {
         let owned_vouts: Vec<usize> = self
             .psbt
             .unsigned_tx
@@ -325,25 +328,176 @@ impl OutputsUnknown {
             return Err(Error::BadRequest(InternalRequestError::MissingPayment.into()));
         }
 
-        Ok(ProvisionalProposal {
+        let mut params = self.params.clone();
+        if let Some((_, additional_fee_output_index)) = params.additional_fee_contribution {
+            // If the additional fee output index specified by the sender is pointing to a receiver output,
+            // the receiver should ignore the parameter.
+            if owned_vouts.contains(&additional_fee_output_index) {
+                params.additional_fee_contribution = None;
+            }
+        }
+
+        Ok(WantsOutputs {
             original_psbt: self.psbt.clone(),
             payjoin_psbt: self.psbt,
-            params: self.params,
+            params,
+            change_vout: owned_vouts[0],
             owned_vouts,
         })
     }
 }
 
-/// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+/// A checked proposal that the receiver may substitute or add outputs to
 #[derive(Debug, Clone)]
-pub struct ProvisionalProposal {
+pub struct WantsOutputs {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,
     params: Params,
+    change_vout: usize,
     owned_vouts: Vec<usize>,
 }
 
-impl ProvisionalProposal {
+impl WantsOutputs {
+    pub fn is_output_substitution_disabled(&self) -> bool {
+        self.params.disable_output_substitution
+    }
+
+    /// Substitute the receiver output script with the provided script.
+    pub fn substitute_receiver_script(
+        self,
+        output_script: &Script,
+    ) -> Result<WantsOutputs, OutputSubstitutionError> {
+        let output_value = self.original_psbt.unsigned_tx.output[self.change_vout].value;
+        let outputs = vec![TxOut { value: output_value, script_pubkey: output_script.into() }];
+        self.replace_receiver_outputs(outputs, output_script)
+    }
+
+    /// Replace **all** receiver outputs with one or more provided outputs.
+    /// The drain script specifies which address to *drain* coins to. An output corresponding to
+    /// that address must be included in `replacement_outputs`. The value of that output may be
+    /// increased or decreased depending on the receiver's input contributions and whether the
+    /// receiver needs to pay for additional miner fees (e.g. in the case of adding many outputs).
+    pub fn replace_receiver_outputs(
+        self,
+        replacement_outputs: Vec<TxOut>,
+        drain_script: &Script,
+    ) -> Result<WantsOutputs, OutputSubstitutionError> {
+        let mut payjoin_psbt = self.original_psbt.clone();
+        let mut outputs = vec![];
+        let mut replacement_outputs = replacement_outputs.clone();
+        let mut rng = rand::thread_rng();
+        // Substitute the existing receiver outputs, keeping the sender/receiver output ordering
+        for (i, original_output) in self.original_psbt.unsigned_tx.output.iter().enumerate() {
+            if self.owned_vouts.contains(&i) {
+                // Receiver output: substitute in-place a provided replacement output
+                if replacement_outputs.is_empty() {
+                    return Err(InternalOutputSubstitutionError::NotEnoughOutputs.into());
+                }
+                match replacement_outputs
+                    .iter()
+                    .position(|txo| txo.script_pubkey == original_output.script_pubkey)
+                {
+                    // Select an output with the same address if one was provided
+                    Some(pos) => {
+                        let txo = replacement_outputs.swap_remove(pos);
+                        if self.params.disable_output_substitution
+                            && txo.value < original_output.value
+                        {
+                            return Err(
+                                InternalOutputSubstitutionError::OutputSubstitutionDisabled(
+                                    "Decreasing the receiver output value is not allowed",
+                                )
+                                .into(),
+                            );
+                        }
+                        outputs.push(txo);
+                    }
+                    // Otherwise randomly select one of the replacement outputs
+                    None => {
+                        if self.params.disable_output_substitution {
+                            return Err(
+                                InternalOutputSubstitutionError::OutputSubstitutionDisabled(
+                                    "Changing the receiver output script pubkey is not allowed",
+                                )
+                                .into(),
+                            );
+                        }
+                        let index = rng.gen_range(0..replacement_outputs.len());
+                        let txo = replacement_outputs.swap_remove(index);
+                        outputs.push(txo);
+                    }
+                }
+            } else {
+                // Sender output: leave it as is
+                outputs.push(original_output.clone());
+            }
+        }
+        // Insert all remaining outputs at random indices for privacy
+        interleave_shuffle(&mut outputs, &mut replacement_outputs, &mut rng);
+        // Identify the receiver output that will be used for change and fees
+        let change_vout = outputs.iter().position(|txo| txo.script_pubkey == *drain_script);
+        // Update the payjoin PSBT outputs
+        payjoin_psbt.outputs = vec![Default::default(); outputs.len()];
+        payjoin_psbt.unsigned_tx.output = outputs;
+        Ok(WantsOutputs {
+            original_psbt: self.original_psbt,
+            payjoin_psbt,
+            params: self.params,
+            change_vout: change_vout.ok_or(InternalOutputSubstitutionError::InvalidDrainScript)?,
+            owned_vouts: self.owned_vouts,
+        })
+    }
+
+    /// Proceed to the input contribution step.
+    /// Outputs cannot be modified after this function is called.
+    pub fn commit_outputs(self) -> WantsInputs {
+        WantsInputs {
+            original_psbt: self.original_psbt,
+            payjoin_psbt: self.payjoin_psbt,
+            params: self.params,
+            change_vout: self.change_vout,
+        }
+    }
+}
+
+/// Shuffles `new` vector, then interleaves its elements with those from `original`,
+/// maintaining the relative order in `original` but randomly inserting elements from `new`.
+/// The combined result replaces the contents of `original`.
+fn interleave_shuffle<T: Clone, R: rand::Rng>(
+    original: &mut Vec<T>,
+    new: &mut Vec<T>,
+    rng: &mut R,
+) {
+    // Shuffle the substitute_outputs
+    new.shuffle(rng);
+    // Create a new vector to store the combined result
+    let mut combined = Vec::with_capacity(original.len() + new.len());
+    // Initialize indices
+    let mut original_index = 0;
+    let mut new_index = 0;
+    // Interleave elements
+    while original_index < original.len() || new_index < new.len() {
+        if original_index < original.len() && (new_index >= new.len() || rng.gen_bool(0.5)) {
+            combined.push(original[original_index].clone());
+            original_index += 1;
+        } else {
+            combined.push(new[new_index].clone());
+            new_index += 1;
+        }
+    }
+    *original = combined;
+}
+
+/// A checked proposal that the receiver may contribute inputs to to make a payjoin
+#[derive(Debug, Clone)]
+pub struct WantsInputs {
+    original_psbt: Psbt,
+    payjoin_psbt: Psbt,
+    params: Params,
+    change_vout: usize,
+}
+
+impl WantsInputs {
     /// Select receiver input such that the payjoin avoids surveillance.
     /// Return the input chosen that has been applied to the Proposal.
     ///
@@ -357,13 +511,13 @@ impl ProvisionalProposal {
         candidate_inputs: HashMap<Amount, OutPoint>,
     ) -> Result<OutPoint, SelectionError> {
         if candidate_inputs.is_empty() {
-            return Err(SelectionError::from(InternalSelectionError::Empty));
+            return Err(InternalSelectionError::Empty.into());
         }
 
         if self.payjoin_psbt.outputs.len() > 2 {
             // This UIH avoidance function supports only
             // many-input, n-output transactions such that n <= 2 for now
-            return Err(SelectionError::from(InternalSelectionError::TooManyOutputs));
+            return Err(InternalSelectionError::TooManyOutputs.into());
         }
 
         if self.payjoin_psbt.outputs.len() == 2 {
@@ -376,8 +530,8 @@ impl ProvisionalProposal {
     /// UIH "Unnecessary input heuristic" is one class of heuristics to avoid. We define
     /// UIH1 and UIH2 according to the BlockSci practice
     /// BlockSci UIH1 and UIH2:
-    // if min(in) > min(out) then UIH1 else UIH2
-    // https://eprint.iacr.org/2022/589.pdf
+    /// if min(in) > min(out) then UIH1 else UIH2
+    /// https://eprint.iacr.org/2022/589.pdf
     fn avoid_uih(
         &self,
         candidate_inputs: HashMap<Amount, OutPoint>,
@@ -389,16 +543,16 @@ impl ProvisionalProposal {
             .iter()
             .map(|output| output.value)
             .min()
-            .unwrap_or_else(|| Amount::MAX_MONEY);
+            .unwrap_or(Amount::MAX_MONEY);
 
         let min_original_in_sats = self
             .payjoin_psbt
             .input_pairs()
             .filter_map(|input| input.previous_txout().ok().map(|txo| txo.value))
             .min()
-            .unwrap_or_else(|| Amount::MAX_MONEY);
+            .unwrap_or(Amount::MAX_MONEY);
 
-        let prior_payment_sats = self.payjoin_psbt.unsigned_tx.output[self.owned_vouts[0]].value;
+        let prior_payment_sats = self.payjoin_psbt.unsigned_tx.output[self.change_vout].value;
 
         for candidate in candidate_inputs {
             let candidate_sats = candidate.0;
@@ -413,21 +567,23 @@ impl ProvisionalProposal {
         }
 
         // No suitable privacy preserving selection found
-        Err(SelectionError::from(InternalSelectionError::NotFound))
+        Err(InternalSelectionError::NotFound.into())
     }
 
     fn select_first_candidate(
         &self,
         candidate_inputs: HashMap<Amount, OutPoint>,
     ) -> Result<OutPoint, SelectionError> {
-        candidate_inputs
-            .values()
-            .next()
-            .cloned()
-            .ok_or_else(|| SelectionError::from(InternalSelectionError::NotFound))
+        candidate_inputs.values().next().cloned().ok_or(InternalSelectionError::NotFound.into())
     }
 
-    pub fn contribute_witness_input(&mut self, txo: TxOut, outpoint: OutPoint) {
+    /// Add the provided list of inputs to the transaction.
+    /// Any excess input amount is added to the change_vout output indicated previously.
+    pub fn contribute_witness_inputs(
+        self,
+        inputs: impl IntoIterator<Item = (OutPoint, TxOut)>,
+    ) -> Result<WantsInputs, InputContributionError> {
+        let mut payjoin_psbt = self.payjoin_psbt.clone();
         // The payjoin proposal must not introduce mixed input sequence numbers
         let original_sequence = self
             .payjoin_psbt
@@ -437,90 +593,197 @@ impl ProvisionalProposal {
             .map(|input| input.sequence)
             .unwrap_or_default();
 
-        // Add the value of new receiver input to receiver output
-        let txo_value = txo.value;
-        let vout_to_augment =
-            self.owned_vouts.choose(&mut rand::thread_rng()).expect("owned_vouts is empty");
-        self.payjoin_psbt.unsigned_tx.output[*vout_to_augment].value += txo_value;
-
-        // Insert contribution at random index for privacy
+        // Insert contributions at random indices for privacy
         let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
-        self.payjoin_psbt
-            .inputs
-            .insert(index, bitcoin::psbt::Input { witness_utxo: Some(txo), ..Default::default() });
-        self.payjoin_psbt.unsigned_tx.input.insert(
-            index,
-            bitcoin::TxIn {
-                previous_output: outpoint,
-                sequence: original_sequence,
-                ..Default::default()
-            },
-        );
-    }
-
-    pub fn is_output_substitution_disabled(&self) -> bool {
-        self.params.disable_output_substitution
-    }
-
-    /// If output substitution is enabled, replace the receiver's output script with a new one.
-    pub fn try_substitute_receiver_output(
-        &mut self,
-        generate_script: impl Fn() -> Result<bitcoin::ScriptBuf, Error>,
-    ) -> Result<(), Error> {
-        if self.params.disable_output_substitution {
-            return Err(Error::Server("Output substitution is disabled.".into()));
+        let mut receiver_input_amount = Amount::ZERO;
+        for (outpoint, txo) in inputs.into_iter() {
+            receiver_input_amount += txo.value;
+            let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
+            payjoin_psbt.inputs.insert(
+                index,
+                bitcoin::psbt::Input { witness_utxo: Some(txo), ..Default::default() },
+            );
+            payjoin_psbt.unsigned_tx.input.insert(
+                index,
+                bitcoin::TxIn {
+                    previous_output: outpoint,
+                    sequence: original_sequence,
+                    ..Default::default()
+                },
+            );
         }
-        let substitute_script = generate_script()?;
-        self.payjoin_psbt.unsigned_tx.output[self.owned_vouts[0]].script_pubkey = substitute_script;
-        Ok(())
+
+        // Add the receiver change amount to the receiver change output, if applicable
+        let receiver_min_input_amount = self.receiver_min_input_amount();
+        if receiver_input_amount >= receiver_min_input_amount {
+            let change_amount = receiver_input_amount - receiver_min_input_amount;
+            payjoin_psbt.unsigned_tx.output[self.change_vout].value += change_amount;
+        } else {
+            return Err(InternalInputContributionError::ValueTooLow.into());
+        }
+
+        Ok(WantsInputs {
+            original_psbt: self.original_psbt,
+            payjoin_psbt,
+            params: self.params,
+            change_vout: self.change_vout,
+        })
     }
 
+    // Compute the minimum amount that the receiver must contribute to the transaction as input
+    fn receiver_min_input_amount(&self) -> Amount {
+        let output_amount = self
+            .payjoin_psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .fold(Amount::ZERO, |acc, output| acc + output.value);
+        let original_output_amount = self
+            .original_psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .fold(Amount::ZERO, |acc, output| acc + output.value);
+        output_amount.checked_sub(original_output_amount).unwrap_or(Amount::ZERO)
+    }
+
+    /// Proceed to the proposal finalization step.
+    /// Inputs cannot be modified after this function is called.
+    pub fn commit_inputs(self) -> ProvisionalProposal {
+        ProvisionalProposal {
+            original_psbt: self.original_psbt,
+            payjoin_psbt: self.payjoin_psbt,
+            params: self.params,
+            change_vout: self.change_vout,
+        }
+    }
+}
+
+/// A checked proposal that the receiver may sign and finalize to make a proposal PSBT that the
+/// sender will accept.
+#[derive(Debug, Clone)]
+pub struct ProvisionalProposal {
+    original_psbt: Psbt,
+    payjoin_psbt: Psbt,
+    params: Params,
+    change_vout: usize,
+}
+
+impl ProvisionalProposal {
     /// Apply additional fee contribution now that the receiver has contributed input
     /// this is kind of a "build_proposal" step before we sign and finalize and extract
     ///
-    /// WARNING: DO NOT ALTER INPUTS OR OUTPUTS AFTER THIS STEP
-    fn apply_fee(&mut self, min_feerate: Option<FeeRate>) -> Result<&Psbt, RequestError> {
+    /// max_feerate is the maximum effective feerate that the receiver is willing to pay for their
+    /// own input/output contributions. A max_feerate of zero indicates that the receiver is not
+    /// willing to pay any additional fees.
+    fn apply_fee(
+        &mut self,
+        min_feerate: Option<FeeRate>,
+        max_feerate: FeeRate,
+    ) -> Result<&Psbt, RequestError> {
         let min_feerate = min_feerate.unwrap_or(FeeRate::MIN);
         log::trace!("min_feerate: {:?}", min_feerate);
         log::trace!("params.min_feerate: {:?}", self.params.min_feerate);
         let min_feerate = max(min_feerate, self.params.min_feerate);
         log::debug!("min_feerate: {:?}", min_feerate);
 
-        // this error should never happen. We check for at least one input in the constructor
+        // If the sender specified a fee contribution, the receiver is allowed to decrease the
+        // sender's fee output to pay for additional input fees. Any fees in excess of
+        // `max_additional_fee_contribution` must be covered by the receiver.
+        let input_contribution_weight = self.additional_input_weight()?;
+        let additional_fee = input_contribution_weight * min_feerate;
+        log::trace!("additional_fee: {}", additional_fee);
+        let mut receiver_additional_fee = additional_fee;
+        if additional_fee > Amount::ZERO {
+            log::trace!(
+                "self.params.additional_fee_contribution: {:?}",
+                self.params.additional_fee_contribution
+            );
+            if let Some((max_additional_fee_contribution, additional_fee_output_index)) =
+                self.params.additional_fee_contribution
+            {
+                // Find the sender's specified output in the original psbt.
+                // This step is necessary because the sender output may have shifted if new
+                // receiver outputs were added to the payjoin psbt.
+                let sender_fee_output =
+                    &self.original_psbt.unsigned_tx.output[additional_fee_output_index];
+                // Find the index of that output in the payjoin psbt
+                let sender_fee_vout = self
+                    .payjoin_psbt
+                    .unsigned_tx
+                    .output
+                    .iter()
+                    .position(|txo| txo.script_pubkey == sender_fee_output.script_pubkey)
+                    .expect("Sender output is missing from payjoin PSBT");
+                // Determine the additional amount that the sender will pay in fees
+                let sender_additional_fee = min(max_additional_fee_contribution, additional_fee);
+                log::trace!("sender_additional_fee: {}", sender_additional_fee);
+                // Remove additional miner fee from the sender's specified output
+                self.payjoin_psbt.unsigned_tx.output[sender_fee_vout].value -=
+                    sender_additional_fee;
+                receiver_additional_fee -= sender_additional_fee;
+            }
+        }
+
+        // The sender's fee contribution can only be used to pay for additional input weight, so
+        // any additional outputs must be paid for by the receiver.
+        let output_contribution_weight = self.additional_output_weight();
+        receiver_additional_fee += output_contribution_weight * min_feerate;
+        log::trace!("receiver_additional_fee: {}", receiver_additional_fee);
+        // Ensure that the receiver does not pay more in fees
+        // than they would by building a separate transaction at max_feerate instead.
+        let max_fee = (input_contribution_weight + output_contribution_weight) * max_feerate;
+        log::trace!("max_fee: {}", max_fee);
+        if receiver_additional_fee > max_fee {
+            let proposed_feerate =
+                receiver_additional_fee / (input_contribution_weight + output_contribution_weight);
+            return Err(InternalRequestError::FeeTooHigh(proposed_feerate, max_feerate).into());
+        }
+        if receiver_additional_fee > Amount::ZERO {
+            // Remove additional miner fee from the receiver's specified output
+            self.payjoin_psbt.unsigned_tx.output[self.change_vout].value -= receiver_additional_fee;
+        }
+        Ok(&self.payjoin_psbt)
+    }
+
+    /// Calculate the additional input weight contributed by the receiver
+    fn additional_input_weight(&self) -> Result<Weight, RequestError> {
+        // This error should never happen. We check for at least one input in the constructor
         let input_pair = self
             .payjoin_psbt
             .input_pairs()
             .next()
             .ok_or(InternalRequestError::OriginalPsbtNotBroadcastable)?;
+        // Calculate the additional fee contribution
         let txo = input_pair.previous_txout().map_err(InternalRequestError::PrevTxOut)?;
         let input_type = InputType::from_spent_input(txo, &self.payjoin_psbt.inputs[0])
             .map_err(InternalRequestError::InputType)?;
-        let contribution_weight = input_type.expected_input_weight();
+        let input_count = self.payjoin_psbt.inputs.len() - self.original_psbt.inputs.len();
+        log::trace!("input_count : {}", input_count);
+        let weight_per_input = input_type.expected_input_weight();
+        log::trace!("weight_per_input : {}", weight_per_input);
+        let contribution_weight = weight_per_input * input_count as u64;
         log::trace!("contribution_weight: {}", contribution_weight);
-        let mut additional_fee = contribution_weight * min_feerate;
-        let max_additional_fee_contribution =
-            self.params.additional_fee_contribution.unwrap_or_default().0;
-        if additional_fee >= max_additional_fee_contribution {
-            // Cap fee at the sender's contribution to simplify this method
-            additional_fee = max_additional_fee_contribution;
-        }
-        log::trace!("additional_fee: {}", additional_fee);
-        if additional_fee > bitcoin::Amount::ZERO {
-            log::trace!(
-                "self.params.additional_fee_contribution: {:?}",
-                self.params.additional_fee_contribution
-            );
-            if let Some((_, additional_fee_output_index)) = self.params.additional_fee_contribution
-            {
-                if !self.owned_vouts.contains(&additional_fee_output_index) {
-                    // remove additional miner fee from the sender's specified output
-                    self.payjoin_psbt.unsigned_tx.output[additional_fee_output_index].value -=
-                        additional_fee;
-                }
-            }
-        }
-        Ok(&self.payjoin_psbt)
+        Ok(contribution_weight)
+    }
+
+    /// Calculate the additional output weight contributed by the receiver
+    fn additional_output_weight(&self) -> Weight {
+        let payjoin_outputs_weight = self
+            .payjoin_psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .fold(Weight::ZERO, |acc, txo| acc + txo.weight());
+        let original_outputs_weight = self
+            .original_psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .fold(Weight::ZERO, |acc, txo| acc + txo.weight());
+        let output_contribution_weight = payjoin_outputs_weight - original_outputs_weight;
+        log::trace!("output_contribution_weight : {}", output_contribution_weight);
+        output_contribution_weight
     }
 
     /// Return a Payjoin Proposal PSBT that the sender will find acceptable.
@@ -552,11 +815,7 @@ impl ProvisionalProposal {
             self.payjoin_psbt.inputs[i].tap_key_sig = None;
         }
 
-        Ok(PayjoinProposal {
-            payjoin_psbt: self.payjoin_psbt,
-            owned_vouts: self.owned_vouts,
-            params: self.params,
-        })
+        Ok(PayjoinProposal { payjoin_psbt: self.payjoin_psbt, params: self.params })
     }
 
     fn sender_input_indexes(&self) -> Vec<usize> {
@@ -583,6 +842,7 @@ impl ProvisionalProposal {
         mut self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, Error>,
         min_feerate_sat_per_vb: Option<FeeRate>,
+        max_feerate_sat_per_vb: FeeRate,
     ) -> Result<PayjoinProposal, Error> {
         for i in self.sender_input_indexes() {
             log::trace!("Clearing sender script signatures for input {}", i);
@@ -590,7 +850,7 @@ impl ProvisionalProposal {
             self.payjoin_psbt.inputs[i].final_script_witness = None;
             self.payjoin_psbt.inputs[i].tap_key_sig = None;
         }
-        let psbt = self.apply_fee(min_feerate_sat_per_vb)?;
+        let psbt = self.apply_fee(min_feerate_sat_per_vb, max_feerate_sat_per_vb)?;
         let psbt = wallet_process_psbt(psbt)?;
         let payjoin_proposal = self.prepare_psbt(psbt)?;
         Ok(payjoin_proposal)
@@ -602,7 +862,6 @@ impl ProvisionalProposal {
 pub struct PayjoinProposal {
     payjoin_psbt: Psbt,
     params: Params,
-    owned_vouts: Vec<usize>,
 }
 
 impl PayjoinProposal {
@@ -614,13 +873,18 @@ impl PayjoinProposal {
         self.params.disable_output_substitution
     }
 
-    pub fn owned_vouts(&self) -> &Vec<usize> { &self.owned_vouts }
-
     pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
 }
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
+    use bitcoin::hashes::Hash;
+    use bitcoin::{Address, Network, ScriptBuf};
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
     use super::*;
 
     struct MockHeaders {
@@ -666,10 +930,6 @@ mod test {
 
     #[test]
     fn unchecked_proposal_unlocks_after_checks() {
-        use std::str::FromStr;
-
-        use bitcoin::{Address, Network};
-
         let proposal = proposal_from_test_vector().unwrap();
         assert_eq!(proposal.psbt_fee_rate().unwrap().to_sat_per_vb_floor(), 2);
         let mut payjoin = proposal
@@ -688,9 +948,86 @@ mod test {
                         .require_network(network)
                         .unwrap())
             })
-            .expect("Receiver output should be identified");
-        let payjoin = payjoin.apply_fee(None);
+            .expect("Receiver output should be identified")
+            .commit_outputs()
+            .commit_inputs();
+
+        let payjoin = payjoin.apply_fee(None, FeeRate::ZERO);
 
         assert!(payjoin.is_ok(), "Payjoin should be a valid PSBT");
+    }
+
+    #[test]
+    fn sender_specifies_excessive_feerate() {
+        let mut proposal = proposal_from_test_vector().unwrap();
+        assert_eq!(proposal.psbt_fee_rate().unwrap().to_sat_per_vb_floor(), 2);
+        // Specify excessive fee rate in sender params
+        proposal.params.min_feerate = FeeRate::from_sat_per_vb_unchecked(1000);
+        // Input contribution for the receiver, from the BIP78 test vector
+        let input: (OutPoint, TxOut) = (
+            OutPoint {
+                txid: "833b085de288cda6ff614c6e8655f61e7ae4f84604a2751998dc25a0d1ba278f"
+                    .parse()
+                    .unwrap(),
+                vout: 1,
+            },
+            TxOut {
+                value: Amount::from_sat(2000000),
+                // HACK: The script pubkey in the original test vector is a nested p2sh witness
+                // script, which is not correctly supported in our current weight calculations.
+                // To get around this limitation, this test uses a native segwit script instead.
+                script_pubkey: ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::hash(
+                    "00145f806655e5924c9204c2d51be5394f4bf9eda210".as_bytes(),
+                )),
+            },
+        );
+        let mut payjoin = proposal
+            .assume_interactive_receiver()
+            .check_inputs_not_owned(|_| Ok(false))
+            .expect("No inputs should be owned")
+            .check_no_mixed_input_scripts()
+            .expect("No mixed input scripts")
+            .check_no_inputs_seen_before(|_| Ok(false))
+            .expect("No inputs should be seen before")
+            .identify_receiver_outputs(|script| {
+                let network = Network::Bitcoin;
+                Ok(Address::from_script(script, network).unwrap()
+                    == Address::from_str(&"3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+                        .unwrap()
+                        .require_network(network)
+                        .unwrap())
+            })
+            .expect("Receiver output should be identified")
+            .commit_outputs()
+            .contribute_witness_inputs(vec![input])
+            .expect("Failed to contribute inputs")
+            .commit_inputs();
+        let mut payjoin_clone = payjoin.clone();
+        let psbt = payjoin.apply_fee(None, FeeRate::from_sat_per_vb_unchecked(1000));
+        assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
+        let psbt = payjoin_clone.apply_fee(None, FeeRate::from_sat_per_vb_unchecked(995));
+        assert!(psbt.is_err(), "Payjoin exceeds receiver fee preference and should error");
+    }
+
+    #[test]
+    fn test_interleave_shuffle() {
+        let mut original1 = vec![1, 2, 3];
+        let mut original2 = original1.clone();
+        let mut original3 = original1.clone();
+        let mut new1 = vec![4, 5, 6];
+        let mut new2 = new1.clone();
+        let mut new3 = new1.clone();
+        let mut rng1 = StdRng::seed_from_u64(123);
+        let mut rng2 = StdRng::seed_from_u64(234);
+        let mut rng3 = StdRng::seed_from_u64(345);
+        // Operate on the same data multiple times with different RNG seeds.
+        interleave_shuffle(&mut original1, &mut new1, &mut rng1);
+        interleave_shuffle(&mut original2, &mut new2, &mut rng2);
+        interleave_shuffle(&mut original3, &mut new3, &mut rng3);
+        // The result should be different for each seed
+        // and the relative ordering from `original` always preserved/
+        assert_eq!(original1, vec![1, 6, 2, 5, 4, 3]);
+        assert_eq!(original2, vec![1, 5, 4, 2, 6, 3]);
+        assert_eq!(original3, vec![4, 5, 1, 2, 6, 3]);
     }
 }

@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize, Serializer};
 use url::Url;
 
 use super::v2::error::{InternalSessionError, SessionError};
-use super::{Error, InternalRequestError, RequestError, SelectionError};
+use super::{
+    Error, InputContributionError, InternalRequestError, OutputSubstitutionError, RequestError,
+    SelectionError,
+};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
 use crate::v2::OhttpEncapsulationError;
@@ -383,20 +386,63 @@ impl OutputsUnknown {
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: impl Fn(&Script) -> Result<bool, Error>,
-    ) -> Result<ProvisionalProposal, Error> {
+    ) -> Result<WantsOutputs, Error> {
         let inner = self.inner.identify_receiver_outputs(is_receiver_output)?;
-        Ok(ProvisionalProposal { inner, context: self.context })
+        Ok(WantsOutputs { inner, context: self.context })
     }
 }
 
-/// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+/// A checked proposal that the receiver may substitute or add outputs to
 #[derive(Debug, Clone)]
-pub struct ProvisionalProposal {
-    pub inner: super::ProvisionalProposal,
+pub struct WantsOutputs {
+    inner: super::WantsOutputs,
     context: SessionContext,
 }
 
-impl ProvisionalProposal {
+impl WantsOutputs {
+    pub fn is_output_substitution_disabled(&self) -> bool {
+        self.inner.is_output_substitution_disabled()
+    }
+
+    /// Substitute the receiver output script with the provided script.
+    pub fn substitute_receiver_script(
+        self,
+        output_script: &Script,
+    ) -> Result<WantsOutputs, OutputSubstitutionError> {
+        let inner = self.inner.substitute_receiver_script(output_script)?;
+        Ok(WantsOutputs { inner, context: self.context })
+    }
+
+    /// Replace **all** receiver outputs with one or more provided outputs.
+    /// The drain script specifies which address to *drain* coins to. An output corresponding to
+    /// that address must be included in `replacement_outputs`. The value of that output may be
+    /// increased or decreased depending on the receiver's input contributions and whether the
+    /// receiver needs to pay for additional miner fees (e.g. in the case of adding many outputs).
+    pub fn replace_receiver_outputs(
+        self,
+        replacement_outputs: Vec<TxOut>,
+        drain_script: &Script,
+    ) -> Result<WantsOutputs, OutputSubstitutionError> {
+        let inner = self.inner.replace_receiver_outputs(replacement_outputs, drain_script)?;
+        Ok(WantsOutputs { inner, context: self.context })
+    }
+
+    /// Proceed to the input contribution step.
+    /// Outputs cannot be modified after this function is called.
+    pub fn commit_outputs(self) -> WantsInputs {
+        let inner = self.inner.commit_outputs();
+        WantsInputs { inner, context: self.context }
+    }
+}
+
+/// A checked proposal that the receiver may contribute inputs to to make a payjoin
+#[derive(Debug, Clone)]
+pub struct WantsInputs {
+    inner: super::WantsInputs,
+    context: SessionContext,
+}
+
+impl WantsInputs {
     /// Select receiver input such that the payjoin avoids surveillance.
     /// Return the input chosen that has been applied to the Proposal.
     ///
@@ -406,8 +452,8 @@ impl ProvisionalProposal {
     /// UIH "Unnecessary input heuristic" is one class of them to avoid. We define
     /// UIH1 and UIH2 according to the BlockSci practice
     /// BlockSci UIH1 and UIH2:
-    // if min(in) > min(out) then UIH1 else UIH2
-    // https://eprint.iacr.org/2022/589.pdf
+    /// if min(in) > min(out) then UIH1 else UIH2
+    /// https://eprint.iacr.org/2022/589.pdf
     pub fn try_preserving_privacy(
         &self,
         candidate_inputs: HashMap<Amount, OutPoint>,
@@ -415,28 +461,44 @@ impl ProvisionalProposal {
         self.inner.try_preserving_privacy(candidate_inputs)
     }
 
-    pub fn contribute_witness_input(&mut self, txo: TxOut, outpoint: OutPoint) {
-        self.inner.contribute_witness_input(txo, outpoint)
+    /// Add the provided list of inputs to the transaction.
+    /// Any excess input amount is added to the change_vout output indicated previously.
+    pub fn contribute_witness_inputs(
+        self,
+        inputs: impl IntoIterator<Item = (OutPoint, TxOut)>,
+    ) -> Result<WantsInputs, InputContributionError> {
+        let inner = self.inner.contribute_witness_inputs(inputs)?;
+        Ok(WantsInputs { inner, context: self.context })
     }
 
-    pub fn is_output_substitution_disabled(&self) -> bool {
-        self.inner.is_output_substitution_disabled()
+    /// Proceed to the proposal finalization step.
+    /// Inputs cannot be modified after this function is called.
+    pub fn commit_inputs(self) -> ProvisionalProposal {
+        let inner = self.inner.commit_inputs();
+        ProvisionalProposal { inner, context: self.context }
     }
+}
 
-    /// If output substitution is enabled, replace the receiver's output script with a new one.
-    pub fn try_substitute_receiver_output(
-        &mut self,
-        generate_script: impl Fn() -> Result<bitcoin::ScriptBuf, Error>,
-    ) -> Result<(), Error> {
-        self.inner.try_substitute_receiver_output(generate_script)
-    }
+/// A checked proposal that the receiver may sign and finalize to make a proposal PSBT that the
+/// sender will accept.
+#[derive(Debug, Clone)]
+pub struct ProvisionalProposal {
+    inner: super::ProvisionalProposal,
+    context: SessionContext,
+}
 
+impl ProvisionalProposal {
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, Error>,
         min_feerate_sat_per_vb: Option<FeeRate>,
+        max_feerate_sat_per_vb: FeeRate,
     ) -> Result<PayjoinProposal, Error> {
-        let inner = self.inner.finalize_proposal(wallet_process_psbt, min_feerate_sat_per_vb)?;
+        let inner = self.inner.finalize_proposal(
+            wallet_process_psbt,
+            min_feerate_sat_per_vb,
+            max_feerate_sat_per_vb,
+        )?;
         Ok(PayjoinProposal { inner, context: self.context })
     }
 }
@@ -456,8 +518,6 @@ impl PayjoinProposal {
     pub fn is_output_substitution_disabled(&self) -> bool {
         self.inner.is_output_substitution_disabled()
     }
-
-    pub fn owned_vouts(&self) -> &Vec<usize> { self.inner.owned_vouts() }
 
     pub fn psbt(&self) -> &Psbt { self.inner.psbt() }
 

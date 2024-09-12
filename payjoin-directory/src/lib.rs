@@ -441,7 +441,7 @@ mod tests {
     #[tokio::test]
     async fn test_post_session() -> Result<(), Box<dyn std::error::Error>> {
         let base_url = "https://localhost".to_string();
-        let body = full("some_base64_encoded_pubkey");
+        let body = full("A6z245ZfDfnlk7_HiAp6sPmNaVYwADih-vCGE3eysWp7");
 
         let request = Request::builder().method(Method::POST).uri("/").body(body)?;
 

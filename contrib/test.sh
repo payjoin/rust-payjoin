@@ -2,7 +2,7 @@
 set -e
 
 DEPS="recent minimal"
-CRATES="payjoin payjoin-cli"
+CRATES="payjoin payjoin-cli payjoin-directory"
 
 for dep in $DEPS
 do

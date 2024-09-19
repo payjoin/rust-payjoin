@@ -9,6 +9,7 @@ use hpke::kdf::HkdfSha256;
 use hpke::kem::SecpK256HkdfSha256;
 use hpke::rand_core::OsRng;
 use hpke::{Deserializable, OpModeR, OpModeS, Serializable};
+use serde::{Deserialize, Serialize};
 
 pub const PADDED_MESSAGE_BYTES: usize = 7168;
 pub const PADDED_PLAINTEXT_A_LENGTH: usize =
@@ -23,9 +24,20 @@ pub type EncappedKey = <SecpK256HkdfSha256 as hpke::Kem>::EncappedKey;
 
 fn sk_to_pk(sk: &SecretKey) -> PublicKey { <SecpK256HkdfSha256 as hpke::Kem>::sk_to_pk(sk) }
 
-pub(crate) fn gen_keypair() -> (HpkeSecretKey, HpkePublicKey) {
-    let (sk, pk) = <SecpK256HkdfSha256 as hpke::Kem>::gen_keypair(&mut OsRng);
-    (HpkeSecretKey(sk), HpkePublicKey(pk))
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HpkeKeyPair(pub HpkeSecretKey, pub HpkePublicKey);
+
+impl From<HpkeKeyPair> for (HpkeSecretKey, HpkePublicKey) {
+    fn from(value: HpkeKeyPair) -> Self { (value.0, value.1) }
+}
+
+impl HpkeKeyPair {
+    pub fn gen_keypair() -> Self {
+        let (sk, pk) = <SecpK256HkdfSha256 as hpke::Kem>::gen_keypair(&mut OsRng);
+        Self(HpkeSecretKey(sk), HpkePublicKey(pk))
+    }
+    pub fn secret_key(&self) -> &HpkeSecretKey { &self.0 }
+    pub fn public_key(&self) -> &HpkePublicKey { &self.1 }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -164,13 +176,15 @@ pub fn decrypt_message_a(
 #[cfg(feature = "receive")]
 pub fn encrypt_message_b(
     mut plaintext: Vec<u8>,
-    receiver_keypair: (HpkeSecretKey, HpkePublicKey),
+    receiver_keypair: &HpkeKeyPair,
     sender_pk: &HpkePublicKey,
 ) -> Result<Vec<u8>, HpkeError> {
-    let pk = sk_to_pk(&receiver_keypair.0 .0);
     let (encapsulated_key, mut encryption_context) =
         hpke::setup_sender::<ChaCha20Poly1305, HkdfSha256, SecpK256HkdfSha256, _>(
-            &OpModeS::Auth((receiver_keypair.0 .0, pk.clone())),
+            &OpModeS::Auth((
+                receiver_keypair.secret_key().0.clone(),
+                receiver_keypair.public_key().0.clone(),
+            )),
             &sender_pk.0,
             INFO_B,
             &mut OsRng,

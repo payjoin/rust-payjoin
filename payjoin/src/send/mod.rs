@@ -242,7 +242,7 @@ impl<'a> RequestBuilder<'a> {
             sequence,
             min_fee_rate: self.min_fee_rate,
             #[cfg(feature = "v2")]
-            e: crate::v2::gen_keypair().0,
+            e: crate::v2::HpkeKeyPair::gen_keypair().secret_key().clone(),
         })
     }
 }

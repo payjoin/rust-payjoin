@@ -17,7 +17,7 @@ use super::{
 };
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
-use crate::v2::{HpkePublicKey, HpkeSecretKey, OhttpEncapsulationError};
+use crate::v2::{HpkeKeyPair, HpkePublicKey, OhttpEncapsulationError};
 use crate::{OhttpKeys, PjUriBuilder, Request};
 
 pub(crate) mod error;
@@ -33,7 +33,7 @@ struct SessionContext {
     ohttp_keys: OhttpKeys,
     expiry: SystemTime,
     ohttp_relay: url::Url,
-    s: (HpkeSecretKey, HpkePublicKey),
+    s: HpkeKeyPair,
     e: Option<HpkePublicKey>,
 }
 
@@ -85,7 +85,7 @@ impl SessionInitializer {
                 ohttp_relay,
                 expiry: SystemTime::now()
                     + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
-                s: crate::v2::gen_keypair(),
+                s: HpkeKeyPair::gen_keypair(),
                 e: None,
             },
         }
@@ -93,7 +93,7 @@ impl SessionInitializer {
 
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
         let url = self.context.ohttp_relay.clone();
-        let subdirectory = subdir_path_from_pubkey(&self.context.s.1);
+        let subdirectory = subdir_path_from_pubkey(self.context.s.public_key());
         let (body, ctx) = crate::v2::ohttp_encapsulate(
             &mut self.context.ohttp_keys,
             "POST",
@@ -192,7 +192,8 @@ impl ActiveSession {
     }
 
     fn extract_proposal_from_v2(&mut self, response: Vec<u8>) -> Result<UncheckedProposal, Error> {
-        let (payload_bytes, e) = crate::v2::decrypt_message_a(&response, self.context.s.0.clone())?;
+        let (payload_bytes, e) =
+            crate::v2::decrypt_message_a(&response, self.context.s.secret_key().clone())?;
         self.context.e = Some(e);
         let payload = String::from_utf8(payload_bytes).map_err(InternalRequestError::Utf8)?;
         Ok(self.unchecked_from_payload(payload)?)
@@ -252,7 +253,7 @@ impl ActiveSession {
     }
 
     /// The per-session public key to use as an identifier
-    pub fn id(&self) -> [u8; 33] { self.context.s.1.to_compressed_bytes() }
+    pub fn id(&self) -> [u8; 33] { self.context.s.public_key().to_compressed_bytes() }
 }
 
 /// The sender's original PSBT and optional parameters
@@ -532,11 +533,11 @@ impl PayjoinProposal {
             Some(e) => {
                 let payjoin_bytes = self.inner.payjoin_psbt.serialize();
                 log::debug!("THERE IS AN e: {:?}", e);
-                crate::v2::encrypt_message_b(payjoin_bytes, self.context.s.clone(), e)
+                crate::v2::encrypt_message_b(payjoin_bytes, &self.context.s, e)
             }
             None => Ok(self.extract_v1_req().as_bytes().to_vec()),
         }?;
-        let subdir_path = subdir_path_from_pubkey(&self.context.s.1);
+        let subdir_path = subdir_path_from_pubkey(self.context.s.public_key());
         let post_payjoin_target =
             self.context.directory.join(&subdir_path).map_err(|e| Error::Server(e.into()))?;
         log::debug!("Payjoin post target: {}", post_payjoin_target.as_str());
@@ -602,7 +603,7 @@ mod test {
                 ),
                 ohttp_relay: url::Url::parse("https://relay.com").unwrap(),
                 expiry: SystemTime::now() + Duration::from_secs(60),
-                s: crate::v2::gen_keypair(),
+                s: HpkeKeyPair::gen_keypair(),
                 e: None,
             },
         };

@@ -754,7 +754,7 @@ impl ProvisionalProposal {
             .input_pairs()
             .next()
             .ok_or(InternalRequestError::OriginalPsbtNotBroadcastable)?;
-        // Calculate the additional fee contribution
+        // Calculate the additional weight contribution
         let txo = input_pair.previous_txout().map_err(InternalRequestError::PrevTxOut)?;
         let input_type = InputType::from_spent_input(txo, &self.payjoin_psbt.inputs[0])
             .map_err(InternalRequestError::InputType)?;

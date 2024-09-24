@@ -3,6 +3,8 @@ use std::fmt;
 use bitcoin::blockdata::script::{Instruction, Instructions, Script};
 use bitcoin::blockdata::transaction::TxOut;
 use bitcoin::psbt::Input as PsbtInput;
+use bitcoin::transaction::InputWeightPrediction;
+use bitcoin::Weight;
 
 /// Takes the script out of script_sig assuming script_sig signs p2sh script
 fn unpack_p2sh(script_sig: &Script) -> Option<&Script> {
@@ -92,6 +94,8 @@ impl InputType {
                 .as_ref()
                 .and_then(|script_buf| unpack_p2sh(script_buf.as_ref()))
             {
+                // Currently this always results in a `NotFinalized` error because final_script_sig
+                // is unset for receiver inputs and explicitly cleared for sender inputs before this step.
                 Some(script) if script.is_witness_program() =>
                     Self::segwit_from_script(script, true),
                 Some(_) => Ok(InputType::P2Sh),
@@ -128,18 +132,30 @@ impl InputType {
         }
     }
 
-    pub(crate) fn expected_input_weight(&self) -> bitcoin::Weight {
+    pub(crate) fn expected_input_weight(&self) -> Weight {
+        let iwp = self.input_weight_prediction();
+        // Lengths of txid, index and sequence: (32, 4, 4).
+        let input_weight = iwp.weight() + Weight::from_non_witness_data_size(32 + 4 + 4);
+        input_weight
+    }
+
+    fn input_weight_prediction(&self) -> InputWeightPrediction {
         use InputType::*;
 
-        bitcoin::Weight::from_non_witness_data_size(match self {
+        match self {
             P2Pk => unimplemented!(),
-            P2Pkh => 148,
+            P2Pkh => InputWeightPrediction::P2PKH_COMPRESSED_MAX,
             P2Sh => unimplemented!(),
-            SegWitV0 { ty: SegWitV0Type::Pubkey, nested: false } => 68,
-            SegWitV0 { ty: SegWitV0Type::Pubkey, nested: true } => 91,
+            SegWitV0 { ty: SegWitV0Type::Pubkey, nested: false } =>
+                InputWeightPrediction::P2WPKH_MAX,
+            SegWitV0 { ty: SegWitV0Type::Pubkey, nested: true } =>
+            // input script: 0x160014{20-byte-key-hash} = 23 bytes
+            // witness: <signature> <pubkey> = 72, 33 bytes
+            // https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki#p2wpkh-nested-in-bip16-p2sh
+                InputWeightPrediction::new(23, &[72, 33]),
             SegWitV0 { ty: SegWitV0Type::Script, nested: _ } => unimplemented!(),
-            Taproot => 58,
-        })
+            Taproot => InputWeightPrediction::P2TR_KEY_NON_DEFAULT_SIGHASH,
+        }
     }
 }
 

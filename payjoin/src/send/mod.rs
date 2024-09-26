@@ -27,7 +27,7 @@
 use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
-use bitcoin::{FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
+use bitcoin::{Amount, FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
 pub use error::{CreateRequestError, ResponseError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 #[cfg(feature = "v2")]
@@ -480,29 +480,24 @@ impl ContextV1 {
 
     fn process_proposal(self, mut proposal: Psbt) -> InternalResult<Psbt> {
         self.basic_checks(&proposal)?;
-        let in_stats = self.check_inputs(&proposal)?;
-        let out_stats = self.check_outputs(&proposal)?;
+        self.check_inputs(&proposal)?;
+        let contributed_fee = self.check_outputs(&proposal)?;
         self.restore_original_utxos(&mut proposal)?;
-        self.check_fees(&proposal, in_stats, out_stats)?;
+        self.check_fees(&proposal, contributed_fee)?;
         Ok(proposal)
     }
 
-    fn check_fees(
-        &self,
-        proposal: &Psbt,
-        in_stats: InputStats,
-        out_stats: OutputStats,
-    ) -> InternalResult<()> {
+    fn check_fees(&self, proposal: &Psbt, contributed_fee: Amount) -> InternalResult<()> {
         let proposed_fee = proposal.fee().map_err(InternalValidationError::Psbt)?;
         let original_fee = self.original_psbt.fee().map_err(InternalValidationError::Psbt)?;
         ensure!(original_fee <= proposed_fee, AbsoluteFeeDecreased);
-        ensure!(out_stats.contributed_fee <= proposed_fee - original_fee, PayeeTookContributedFee);
+        ensure!(contributed_fee <= proposed_fee - original_fee, PayeeTookContributedFee);
         let original_weight = self.original_psbt.clone().extract_tx_unchecked_fee_rate().weight();
         let original_fee_rate = original_fee / original_weight;
         // TODO: Refactor this to be support mixed input types, preferably share method with
         // `ProvisionalProposal::additional_input_weight()`
         ensure!(
-            out_stats.contributed_fee
+            contributed_fee
                 <= original_fee_rate
                     * self.input_type.expected_input_weight()
                     * (proposal.inputs.len() - self.original_psbt.inputs.len()) as u64,
@@ -530,13 +525,8 @@ impl ContextV1 {
         Ok(())
     }
 
-    fn check_inputs(&self, proposal: &Psbt) -> InternalResult<InputStats> {
-        use crate::weight::ComputeSize;
-
+    fn check_inputs(&self, proposal: &Psbt) -> InternalResult<()> {
         let mut original_inputs = self.original_psbt.input_pairs().peekable();
-        let mut total_value = bitcoin::Amount::ZERO;
-        let mut total_weight = Weight::ZERO;
-        let mut inputs_with_witnesses = 0;
 
         for proposed in proposal.input_pairs() {
             ensure!(proposed.psbtin.bip32_derivation.is_empty(), TxInContainsKeyPaths);
@@ -564,16 +554,6 @@ impl ContextV1 {
                         proposed.psbtin.final_script_witness.is_none(),
                         SenderTxinContainsFinalScriptWitness
                     );
-                    let prevout = original.previous_txout().expect("We've validated this before");
-                    total_value += prevout.value;
-                    // We assume the signture will be the same size
-                    // I know sigs can be slightly different size but there isn't much to do about
-                    // it other than prefer Taproot.
-                    total_weight += original.txin.weight();
-                    if !original.txin.witness.is_empty() {
-                        inputs_with_witnesses += 1;
-                    }
-
                     original_inputs.next();
                 }
                 // theirs (receiver)
@@ -584,20 +564,6 @@ impl ContextV1 {
                             || proposed.psbtin.final_script_witness.is_some(),
                         ReceiverTxinNotFinalized
                     );
-                    if let Some(script_sig) = &proposed.psbtin.final_script_sig {
-                        // The weight of the TxIn when it's included in a legacy transaction
-                        // (i.e., a transaction having only legacy inputs).
-                        total_weight += Weight::from_non_witness_data_size(
-                            32 /* txid */ + 4 /* vout */ + 4 /* sequence */ + script_sig.encoded_size(),
-                        );
-                    }
-                    if let Some(script_witness) = &proposed.psbtin.final_script_witness {
-                        if !script_witness.is_empty() {
-                            inputs_with_witnesses += 1;
-                            total_weight += crate::weight::witness_weight(script_witness);
-                        };
-                    }
-
                     // Verify that non_witness_utxo or witness_utxo are filled in.
                     ensure!(
                         proposed.psbtin.witness_utxo.is_some()
@@ -608,7 +574,6 @@ impl ContextV1 {
                     let txout = proposed
                         .previous_txout()
                         .map_err(InternalValidationError::InvalidProposedInput)?;
-                    total_value += txout.value;
                     check_eq!(
                         InputType::from_spent_input(txout, proposed.psbtin)?,
                         self.input_type,
@@ -618,7 +583,7 @@ impl ContextV1 {
             }
         }
         ensure!(original_inputs.peek().is_none(), MissingOrShuffledInputs);
-        Ok(InputStats { total_value, total_weight, inputs_with_witnesses })
+        Ok(())
     }
 
     // Restore Original PSBT utxos that the receiver stripped.
@@ -644,19 +609,15 @@ impl ContextV1 {
         Ok(())
     }
 
-    fn check_outputs(&self, proposal: &Psbt) -> InternalResult<OutputStats> {
+    fn check_outputs(&self, proposal: &Psbt) -> InternalResult<Amount> {
         let mut original_outputs =
             self.original_psbt.unsigned_tx.output.iter().enumerate().peekable();
-        let mut total_value = bitcoin::Amount::ZERO;
-        let mut contributed_fee = bitcoin::Amount::ZERO;
-        let mut total_weight = Weight::ZERO;
+        let mut contributed_fee = Amount::ZERO;
 
         for (proposed_txout, proposed_psbtout) in
             proposal.unsigned_tx.output.iter().zip(&proposal.outputs)
         {
             ensure!(proposed_psbtout.bip32_derivation.is_empty(), TxOutContainsKeyPaths);
-            total_value += proposed_txout.value;
-            total_weight += proposed_txout.weight();
             match (original_outputs.peek(), self.fee_contribution) {
                 // fee output
                 (
@@ -668,7 +629,7 @@ impl ContextV1 {
                     if proposed_txout.value < original_output.value {
                         contributed_fee = original_output.value - proposed_txout.value;
                         ensure!(contributed_fee <= max_fee_contrib, FeeContributionExceedsMaximum);
-                        //The remaining fee checks are done in the caller
+                        // The remaining fee checks are done in later in `check_fees`
                     }
                     original_outputs.next();
                 }
@@ -697,20 +658,8 @@ impl ContextV1 {
         }
 
         ensure!(original_outputs.peek().is_none(), MissingOrShuffledOutputs);
-        Ok(OutputStats { total_value, contributed_fee, total_weight })
+        Ok(contributed_fee)
     }
-}
-
-struct OutputStats {
-    total_value: bitcoin::Amount,
-    contributed_fee: bitcoin::Amount,
-    total_weight: Weight,
-}
-
-struct InputStats {
-    total_value: bitcoin::Amount,
-    total_weight: Weight,
-    inputs_with_witnesses: usize,
 }
 
 fn check_single_payee(

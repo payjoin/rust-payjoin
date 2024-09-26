@@ -482,8 +482,8 @@ impl ContextV1 {
         self.basic_checks(&proposal)?;
         let in_stats = self.check_inputs(&proposal)?;
         let out_stats = self.check_outputs(&proposal)?;
-        self.check_fees(&proposal, in_stats, out_stats)?;
         self.restore_original_utxos(&mut proposal)?;
+        self.check_fees(&proposal, in_stats, out_stats)?;
         Ok(proposal)
     }
 
@@ -493,18 +493,14 @@ impl ContextV1 {
         in_stats: InputStats,
         out_stats: OutputStats,
     ) -> InternalResult<()> {
-        if out_stats.total_value > in_stats.total_value {
-            return Err(InternalValidationError::Inflation);
-        }
-        let proposed_psbt_fee = in_stats.total_value - out_stats.total_value;
-        let original_fee = self.original_psbt.calculate_fee();
-        ensure!(original_fee <= proposed_psbt_fee, AbsoluteFeeDecreased);
-        ensure!(
-            out_stats.contributed_fee <= proposed_psbt_fee - original_fee,
-            PayeeTookContributedFee
-        );
-        let original_weight = Weight::from_wu(u64::from(self.original_psbt.unsigned_tx.weight()));
+        let proposed_fee = proposal.fee().map_err(InternalValidationError::Psbt)?;
+        let original_fee = self.original_psbt.fee().map_err(InternalValidationError::Psbt)?;
+        ensure!(original_fee <= proposed_fee, AbsoluteFeeDecreased);
+        ensure!(out_stats.contributed_fee <= proposed_fee - original_fee, PayeeTookContributedFee);
+        let original_weight = self.original_psbt.clone().extract_tx_unchecked_fee_rate().weight();
         let original_fee_rate = original_fee / original_weight;
+        // TODO: Refactor this to be support mixed input types, preferably share method with
+        // `ProvisionalProposal::additional_input_weight()`
         ensure!(
             out_stats.contributed_fee
                 <= original_fee_rate
@@ -513,28 +509,8 @@ impl ContextV1 {
             FeeContributionPaysOutputSizeIncrease
         );
         if self.min_fee_rate > FeeRate::ZERO {
-            let non_input_output_size =
-                // version
-                4 +
-                // count variants
-                varint_size(proposal.unsigned_tx.input.len() as u64) +
-                varint_size(proposal.unsigned_tx.output.len() as u64) +
-                // lock time
-                4;
-            let weight_without_witnesses =
-                Weight::from_non_witness_data_size(non_input_output_size)
-                    + in_stats.total_weight
-                    + out_stats.total_weight;
-            let total_weight = if in_stats.inputs_with_witnesses == 0 {
-                weight_without_witnesses
-            } else {
-                weight_without_witnesses
-                    + Weight::from_wu(
-                        (proposal.unsigned_tx.input.len() - in_stats.inputs_with_witnesses + 2)
-                            as u64,
-                    )
-            };
-            ensure!(proposed_psbt_fee / total_weight >= self.min_fee_rate, FeeRateBelowMinimum);
+            let proposed_weight = proposal.clone().extract_tx_unchecked_fee_rate().weight();
+            ensure!(proposed_fee / proposed_weight >= self.min_fee_rate, FeeRateBelowMinimum);
         }
         Ok(())
     }

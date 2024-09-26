@@ -52,17 +52,15 @@ pub(crate) enum InternalValidationError {
     DisallowedOutputSubstitution,
     OutputValueDecreased,
     MissingOrShuffledOutputs,
-    Inflation,
     AbsoluteFeeDecreased,
     PayeeTookContributedFee,
     FeeContributionPaysOutputSizeIncrease,
     FeeRateBelowMinimum,
+    Psbt(bitcoin::psbt::Error),
     #[cfg(feature = "v2")]
     Hpke(crate::v2::HpkeError),
     #[cfg(feature = "v2")]
     OhttpEncapsulation(crate::v2::OhttpEncapsulationError),
-    #[cfg(feature = "v2")]
-    Psbt(bitcoin::psbt::Error),
     #[cfg(feature = "v2")]
     UnexpectedStatusCode,
 }
@@ -102,17 +100,15 @@ impl fmt::Display for ValidationError {
             DisallowedOutputSubstitution => write!(f, "the receiver change output despite it being disallowed"),
             OutputValueDecreased => write!(f, "the amount in our non-fee output was decreased"),
             MissingOrShuffledOutputs => write!(f, "proposed transaction is missing outputs of the sender or they are shuffled"),
-            Inflation => write!(f, "proposed transaction is attempting inflation"),
             AbsoluteFeeDecreased => write!(f, "abslute fee of proposed transaction is lower than original"),
             PayeeTookContributedFee => write!(f, "payee tried to take fee contribution for himself"),
             FeeContributionPaysOutputSizeIncrease => write!(f, "fee contribution pays for additional outputs"),
             FeeRateBelowMinimum =>  write!(f, "the fee rate of proposed transaction is below minimum"),
+            Psbt(e) => write!(f, "psbt error: {}", e),
             #[cfg(feature = "v2")]
             Hpke(e) => write!(f, "v2 error: {}", e),
             #[cfg(feature = "v2")]
             OhttpEncapsulation(e) => write!(f, "Ohttp encapsulation error: {}", e),
-            #[cfg(feature = "v2")]
-            Psbt(e) => write!(f, "psbt error: {}", e),
             #[cfg(feature = "v2")]
             UnexpectedStatusCode => write!(f, "unexpected status code"),
         }
@@ -147,17 +143,15 @@ impl std::error::Error for ValidationError {
             DisallowedOutputSubstitution => None,
             OutputValueDecreased => None,
             MissingOrShuffledOutputs => None,
-            Inflation => None,
             AbsoluteFeeDecreased => None,
             PayeeTookContributedFee => None,
             FeeContributionPaysOutputSizeIncrease => None,
             FeeRateBelowMinimum => None,
+            Psbt(error) => Some(error),
             #[cfg(feature = "v2")]
             Hpke(error) => Some(error),
             #[cfg(feature = "v2")]
             OhttpEncapsulation(error) => Some(error),
-            #[cfg(feature = "v2")]
-            Psbt(error) => Some(error),
             #[cfg(feature = "v2")]
             UnexpectedStatusCode => None,
         }

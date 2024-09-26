@@ -39,7 +39,6 @@ pub(crate) trait PsbtExt: Sized {
     /// thing for outputs.
     fn validate(self) -> Result<Self, InconsistentPsbt>;
     fn validate_input_utxos(&self, treat_missing_as_error: bool) -> Result<(), PsbtInputsError>;
-    fn calculate_fee(&self) -> bitcoin::Amount;
 }
 
 impl PsbtExt for Psbt {
@@ -90,22 +89,6 @@ impl PsbtExt for Psbt {
                 .validate_utxo(treat_missing_as_error)
                 .map_err(|error| PsbtInputsError { index, error })
         })
-    }
-
-    fn calculate_fee(&self) -> bitcoin::Amount {
-        let mut total_outputs = bitcoin::Amount::ZERO;
-        let mut total_inputs = bitcoin::Amount::ZERO;
-
-        for output in &self.unsigned_tx.output {
-            total_outputs += output.value;
-        }
-
-        for input in self.input_pairs() {
-            total_inputs += input.previous_txout().unwrap().value;
-        }
-        log::debug!("  total_inputs:  {}", total_inputs);
-        log::debug!("- total_outputs: {}", total_outputs);
-        total_inputs - total_outputs
     }
 }
 

@@ -4,8 +4,6 @@ use bitcoin::locktime::absolute::LockTime;
 use bitcoin::transaction::Version;
 use bitcoin::{AddressType, Sequence};
 
-use crate::input_type::{InputType, InputTypeError};
-
 /// Error that may occur when the response from receiver is malformed.
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
@@ -19,7 +17,6 @@ pub struct ValidationError {
 pub(crate) enum InternalValidationError {
     Parse,
     Io(std::io::Error),
-    InvalidInputType(InputTypeError),
     InvalidProposedInput(crate::psbt::PrevTxOutError),
     VersionsDontMatch {
         proposed: Version,
@@ -68,9 +65,6 @@ pub(crate) enum InternalValidationError {
 impl From<InternalValidationError> for ValidationError {
     fn from(value: InternalValidationError) -> Self { ValidationError { internal: value } }
 }
-impl From<InputTypeError> for InternalValidationError {
-    fn from(value: InputTypeError) -> Self { InternalValidationError::InvalidInputType(value) }
-}
 
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -79,7 +73,6 @@ impl fmt::Display for ValidationError {
         match &self.internal {
             Parse => write!(f, "couldn't decode as PSBT or JSON",),
             Io(e) => write!(f, "couldn't read PSBT: {}", e),
-            InvalidInputType(e) => write!(f, "invalid transaction input type: {}", e),
             InvalidProposedInput(e) => write!(f, "invalid proposed transaction input: {}", e),
             VersionsDontMatch { proposed, original, } => write!(f, "proposed transaction version {} doesn't match the original {}", proposed, original),
             LockTimesDontMatch { proposed, original, } => write!(f, "proposed transaction lock time {} doesn't match the original {}", proposed, original),
@@ -122,7 +115,6 @@ impl std::error::Error for ValidationError {
         match &self.internal {
             Parse => None,
             Io(error) => Some(error),
-            InvalidInputType(error) => Some(error),
             InvalidProposedInput(error) => Some(error),
             VersionsDontMatch { proposed: _, original: _ } => None,
             LockTimesDontMatch { proposed: _, original: _ } => None,
@@ -181,7 +173,6 @@ pub(crate) enum InternalCreateRequestError {
     ChangeIndexPointsAtPayee,
     Url(url::ParseError),
     PrevTxOut(crate::psbt::PrevTxOutError),
-    InputType(crate::input_type::InputTypeError),
     #[cfg(feature = "v2")]
     Hpke(crate::v2::HpkeError),
     #[cfg(feature = "v2")]
@@ -212,7 +203,6 @@ impl fmt::Display for CreateRequestError {
             ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
             Url(e) => write!(f, "cannot parse url: {:#?}", e),
             PrevTxOut(e) => write!(f, "invalid previous transaction output: {}", e),
-            InputType(e) => write!(f, "invalid input type: {}", e),
             #[cfg(feature = "v2")]
             Hpke(e) => write!(f, "v2 error: {}", e),
             #[cfg(feature = "v2")]
@@ -245,7 +235,6 @@ impl std::error::Error for CreateRequestError {
             ChangeIndexPointsAtPayee => None,
             Url(error) => Some(error),
             PrevTxOut(error) => Some(error),
-            InputType(error) => Some(error),
             #[cfg(feature = "v2")]
             Hpke(error) => Some(error),
             #[cfg(feature = "v2")]

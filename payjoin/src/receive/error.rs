@@ -74,8 +74,6 @@ pub(crate) enum InternalRequestError {
     InputOwned(bitcoin::ScriptBuf),
     /// The original psbt has mixed input address types that could harm privacy
     MixedInputScripts(bitcoin::AddressType, bitcoin::AddressType),
-    /// Unrecognized input type
-    InputType(crate::input_type::InputTypeError),
     /// Original PSBT input has been seen before. Only automatic receivers, aka "interactive" in the spec
     /// look out for these to prevent probing attacks.
     InputSeen(bitcoin::OutPoint),
@@ -155,8 +153,6 @@ impl fmt::Display for RequestError {
                 "original-psbt-rejected",
                 &format!("Mixed input scripts: {}; {}.", type_a, type_b),
             ),
-            InternalRequestError::InputType(e) =>
-                write_error(f, "original-psbt-rejected", &format!("Input Type Error: {}.", e)),
             InternalRequestError::InputSeen(_) =>
                 write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
             #[cfg(feature = "v2")]

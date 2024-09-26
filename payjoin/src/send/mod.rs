@@ -34,12 +34,10 @@ pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::input_type::InputType;
 use crate::psbt::{InputPair, PsbtExt};
 use crate::request::Request;
 #[cfg(feature = "v2")]
 use crate::v2::{HpkePublicKey, HpkeSecretKey};
-use crate::weight::{varint_size, ComputeWeight};
 use crate::PjUri;
 
 // See usize casts
@@ -130,16 +128,19 @@ impl<'a> RequestBuilder<'a> {
             let first_input_pair =
                 input_pairs.first().ok_or(InternalCreateRequestError::NoInputs)?;
             // use cheapest default if mixed input types
-            let mut input_vsize = InputType::Taproot.expected_input_weight();
+            let mut input_weight =
+                bitcoin::transaction::InputWeightPrediction::P2TR_KEY_NON_DEFAULT_SIGHASH.weight()
+                    // Lengths of txid, index and sequence: (32, 4, 4).
+                    + Weight::from_non_witness_data_size(32 + 4 + 4);
             // Check if all inputs are the same type
             if input_pairs
                 .iter()
                 .all(|input_pair| input_pair.address_type() == first_input_pair.address_type())
             {
-                input_vsize = first_input_pair.expected_input_weight();
+                input_weight = first_input_pair.expected_input_weight();
             }
 
-            let recommended_additional_fee = min_fee_rate * input_vsize;
+            let recommended_additional_fee = min_fee_rate * input_weight;
             if fee_available < recommended_additional_fee {
                 log::warn!("Insufficient funds to maintain specified minimum feerate.");
                 return self.build_with_additional_fee(
@@ -832,7 +833,6 @@ mod test {
     const PAYJOIN_PROPOSAL: &str = "cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAQEgqBvXBQAAAAAXqRTeTh6QYcpZE1sDWtXm1HmQRUNU0IcBBBYAFMeKRXJTVYKNVlgHTdUmDV/LaYUwIgYDFZrAGqDVh1TEtNi300ntHt/PCzYrT2tVEGcjooWPhRYYSFzWUDEAAIABAACAAAAAgAEAAAAAAAAAAAEBIICEHgAAAAAAF6kUyPLL+cphRyyI5GTUazV0hF2R2NWHAQcXFgAUX4BmVeWSTJIEwtUb5TlPS/ntohABCGsCRzBEAiBnu3tA3yWlT0WBClsXXS9j69Bt+waCs9JcjWtNjtv7VgIge2VYAaBeLPDB6HGFlpqOENXMldsJezF9Gs5amvDQRDQBIQJl1jz1tBt8hNx2owTm+4Du4isx0pmdKNMNIjjaMHFfrQABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUIgICygvBWB5prpfx61y1HDAwo37kYP3YRJBvAjtunBAur3wYSFzWUDEAAIABAACAAAAAgAEAAAABAAAAAAA=";
 
     fn create_v1_context() -> super::ContextV1 {
-        use crate::input_type::{InputType, SegWitV0Type};
         let original_psbt = Psbt::from_str(ORIGINAL_PSBT).unwrap();
         eprintln!("original: {:#?}", original_psbt);
         let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();

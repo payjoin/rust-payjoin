@@ -243,6 +243,8 @@ mod e2e {
             let ohttp_keys =
                 payjoin::io::fetch_ohttp_keys(ohttp_relay.clone(), directory.clone(), cert.clone())
                     .await?;
+            let ohttp_keys_path = temp_dir.join("ohttp_keys");
+            tokio::fs::write(&ohttp_keys_path, ohttp_keys.encode()?).await?;
 
             let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
             let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
@@ -268,13 +270,12 @@ mod e2e {
                 .arg("--pj-directory")
                 .arg(&directory)
                 .arg("--ohttp-keys")
-                .arg(&ohttp_keys.to_string())
+                .arg(&ohttp_keys_path)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
                 .spawn()
                 .expect("Failed to execute payjoin-cli");
             let bip21 = get_bip21_from_receiver(cli_receive_initiator).await;
-
             let cli_send_initiator = Command::new(payjoin_cli)
                 .arg("--rpchost")
                 .arg(&sender_rpchost)

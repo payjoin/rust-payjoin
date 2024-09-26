@@ -1,17 +1,13 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
-use bitcoin::address::NetworkUnchecked;
 use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
 use bitcoin::psbt::Psbt;
-use bitcoin::secp256k1::{rand, PublicKey};
 use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut};
-use serde::de::{self, Deserializer, MapAccess, Visitor};
-use serde::ser::SerializeStruct;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::de::Deserializer;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::v2::error::{InternalSessionError, SessionError};
@@ -21,23 +17,33 @@ use super::{
 };
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
-use crate::v2::OhttpEncapsulationError;
+use crate::v2::{HpkeKeyPair, HpkePublicKey, OhttpEncapsulationError};
 use crate::{OhttpKeys, PjUriBuilder, Request};
 
 pub(crate) mod error;
 
 static TWENTY_FOUR_HOURS_DEFAULT_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct SessionContext {
+    #[serde(deserialize_with = "deserialize_address_assume_checked")]
     address: Address,
     directory: url::Url,
     subdirectory: Option<url::Url>,
     ohttp_keys: OhttpKeys,
     expiry: SystemTime,
     ohttp_relay: url::Url,
-    s: bitcoin::secp256k1::Keypair,
-    e: Option<bitcoin::secp256k1::PublicKey>,
+    s: HpkeKeyPair,
+    e: Option<HpkePublicKey>,
+}
+
+fn deserialize_address_assume_checked<'de, D>(deserializer: D) -> Result<Address, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    let address = Address::from_str(&s).map_err(serde::de::Error::custom)?;
+    Ok(address.assume_checked())
 }
 
 /// Initializes a new payjoin session, including necessary context
@@ -70,8 +76,6 @@ impl SessionInitializer {
         ohttp_relay: Url,
         expire_after: Option<Duration>,
     ) -> Self {
-        let secp = bitcoin::secp256k1::Secp256k1::new();
-        let (sk, _) = secp.generate_keypair(&mut rand::rngs::OsRng);
         Self {
             context: SessionContext {
                 address,
@@ -81,7 +85,7 @@ impl SessionInitializer {
                 ohttp_relay,
                 expiry: SystemTime::now()
                     + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
-                s: bitcoin::secp256k1::Keypair::from_secret_key(&secp, &sk),
+                s: HpkeKeyPair::gen_keypair(),
                 e: None,
             },
         }
@@ -89,7 +93,7 @@ impl SessionInitializer {
 
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
         let url = self.context.ohttp_relay.clone();
-        let subdirectory = subdir_path_from_pubkey(&self.context.s.public_key());
+        let subdirectory = subdir_path_from_pubkey(self.context.s.public_key());
         let (body, ctx) = crate::v2::ohttp_encapsulate(
             &mut self.context.ohttp_keys,
             "POST",
@@ -125,8 +129,8 @@ impl SessionInitializer {
     }
 }
 
-fn subdir_path_from_pubkey(pubkey: &bitcoin::secp256k1::PublicKey) -> String {
-    BASE64_URL_SAFE_NO_PAD.encode(pubkey.serialize())
+fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> String {
+    BASE64_URL_SAFE_NO_PAD.encode(pubkey.to_compressed_bytes())
 }
 
 /// An active payjoin V2 session, allowing for polled requests to the
@@ -189,7 +193,7 @@ impl ActiveSession {
 
     fn extract_proposal_from_v2(&mut self, response: Vec<u8>) -> Result<UncheckedProposal, Error> {
         let (payload_bytes, e) =
-            crate::v2::decrypt_message_a(&response, self.context.s.secret_key())?;
+            crate::v2::decrypt_message_a(&response, self.context.s.secret_key().clone())?;
         self.context.e = Some(e);
         let payload = String::from_utf8(payload_bytes).map_err(InternalRequestError::Utf8)?;
         Ok(self.unchecked_from_payload(payload)?)
@@ -237,7 +241,7 @@ impl ActiveSession {
     // The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
     // This identifies a session at the payjoin directory server.
     pub fn pj_url(&self) -> Url {
-        let pubkey = &self.context.s.public_key().serialize();
+        let pubkey = &self.id();
         let pubkey_base64 = BASE64_URL_SAFE_NO_PAD.encode(pubkey);
         let mut url = self.context.directory.clone();
         {
@@ -249,7 +253,7 @@ impl ActiveSession {
     }
 
     /// The per-session public key to use as an identifier
-    pub fn public_key(&self) -> PublicKey { self.context.s.public_key() }
+    pub fn id(&self) -> [u8; 33] { self.context.s.public_key().to_compressed_bytes() }
 }
 
 /// The sender's original PSBT and optional parameters
@@ -525,15 +529,15 @@ impl PayjoinProposal {
 
     #[cfg(feature = "v2")]
     pub fn extract_v2_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
-        let body = match self.context.e {
+        let body = match &self.context.e {
             Some(e) => {
-                let mut payjoin_bytes = self.inner.payjoin_psbt.serialize();
-                log::debug!("THERE IS AN e: {}", e);
-                crate::v2::encrypt_message_b(&mut payjoin_bytes, e)
+                let payjoin_bytes = self.inner.payjoin_psbt.serialize();
+                log::debug!("THERE IS AN e: {:?}", e);
+                crate::v2::encrypt_message_b(payjoin_bytes, &self.context.s, e)
             }
             None => Ok(self.extract_v1_req().as_bytes().to_vec()),
         }?;
-        let subdir_path = subdir_path_from_pubkey(&self.context.s.public_key());
+        let subdir_path = subdir_path_from_pubkey(self.context.s.public_key());
         let post_payjoin_target =
             self.context.directory.join(&subdir_path).map_err(|e| Error::Server(e.into()))?;
         log::debug!("Payjoin post target: {}", post_payjoin_target.as_str());
@@ -572,146 +576,6 @@ impl PayjoinProposal {
         }
     }
 }
-impl Serialize for SessionContext {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_struct("SessionContext", 4)?;
-        state.serialize_field("address", &self.address)?;
-        state.serialize_field("directory", &self.directory)?;
-        state.serialize_field("subdirectory", &self.subdirectory)?;
-        state.serialize_field("ohttp_keys", &self.ohttp_keys)?;
-        state.serialize_field("ohttp_relay", &self.ohttp_relay)?;
-        state.serialize_field("expiry", &self.expiry)?;
-        state.serialize_field("s", &self.s)?;
-        state.serialize_field("e", &self.e)?;
-
-        state.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for SessionContext {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(field_identifier, rename_all = "snake_case")]
-        enum Field {
-            Address,
-            Directory,
-            Subdirectory,
-            OhttpKeys,
-            OhttpRelay,
-            Expiry,
-            S,
-            E,
-        }
-
-        struct SessionContextVisitor;
-
-        impl<'de> Visitor<'de> for SessionContextVisitor {
-            type Value = SessionContext;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("struct ActiveSession")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> Result<SessionContext, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut address: Option<Address<NetworkUnchecked>> = None;
-                let mut directory = None;
-                let mut subdirectory = None;
-                let mut ohttp_keys = None;
-                let mut ohttp_relay = None;
-                let mut expiry = None;
-                let mut s = None;
-                let mut e = None;
-                while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::Address => {
-                            if address.is_some() {
-                                return Err(de::Error::duplicate_field("address"));
-                            }
-                            address = Some(map.next_value()?);
-                        }
-                        Field::Directory => {
-                            if directory.is_some() {
-                                return Err(de::Error::duplicate_field("directory"));
-                            }
-                            directory = Some(map.next_value()?);
-                        }
-                        Field::Subdirectory => {
-                            if subdirectory.is_some() {
-                                return Err(de::Error::duplicate_field("subdirectory"));
-                            }
-                            subdirectory = Some(map.next_value()?);
-                        }
-                        Field::OhttpKeys => {
-                            if ohttp_keys.is_some() {
-                                return Err(de::Error::duplicate_field("ohttp_keys"));
-                            }
-                            ohttp_keys = Some(map.next_value()?);
-                        }
-                        Field::OhttpRelay => {
-                            if ohttp_relay.is_some() {
-                                return Err(de::Error::duplicate_field("ohttp_relay"));
-                            }
-                            ohttp_relay = Some(map.next_value()?);
-                        }
-                        Field::Expiry => {
-                            if expiry.is_some() {
-                                return Err(de::Error::duplicate_field("expiry"));
-                            }
-                            expiry = Some(map.next_value()?);
-                        }
-                        Field::S => {
-                            if s.is_some() {
-                                return Err(de::Error::duplicate_field("s"));
-                            }
-                            s = Some(map.next_value()?);
-                        }
-                        Field::E => {
-                            if e.is_some() {
-                                return Err(de::Error::duplicate_field("e"));
-                            }
-                            e = Some(map.next_value()?);
-                        }
-                    }
-                }
-                let address = address
-                    .ok_or_else(|| de::Error::missing_field("address"))
-                    .map(|a| a.assume_checked())?;
-                let directory = directory.ok_or_else(|| de::Error::missing_field("directory"))?;
-                let subdirectory =
-                    subdirectory.ok_or_else(|| de::Error::missing_field("subdirectory"))?;
-                let ohttp_keys =
-                    ohttp_keys.ok_or_else(|| de::Error::missing_field("ohttp_keys"))?;
-                let ohttp_relay =
-                    ohttp_relay.ok_or_else(|| de::Error::missing_field("ohttp_relay"))?;
-                let expiry = expiry.ok_or_else(|| de::Error::missing_field("expiry"))?;
-                let s = s.ok_or_else(|| de::Error::missing_field("s"))?;
-                let e = e.ok_or_else(|| de::Error::missing_field("e"))?;
-                Ok(SessionContext {
-                    address,
-                    directory,
-                    subdirectory,
-                    ohttp_keys,
-                    ohttp_relay,
-                    expiry,
-                    s,
-                    e,
-                })
-            }
-        }
-
-        const FIELDS: &[&str] = &["directory", "ohttp_keys", "ohttp_relay", "expiry", "s", "e"];
-        deserializer.deserialize_struct("SessionContext", FIELDS, SessionContextVisitor)
-    }
-}
 
 #[cfg(test)]
 mod test {
@@ -739,10 +603,7 @@ mod test {
                 ),
                 ohttp_relay: url::Url::parse("https://relay.com").unwrap(),
                 expiry: SystemTime::now() + Duration::from_secs(60),
-                s: bitcoin::secp256k1::Keypair::from_secret_key(
-                    &bitcoin::secp256k1::Secp256k1::new(),
-                    &bitcoin::secp256k1::SecretKey::from_slice(&[1; 32]).unwrap(),
-                ),
+                s: HpkeKeyPair::gen_keypair(),
                 e: None,
             },
         };

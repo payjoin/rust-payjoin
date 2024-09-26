@@ -3,100 +3,222 @@ use std::{error, fmt};
 
 use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
-use bitcoin::secp256k1::ecdh::SharedSecret;
-use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
-use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
-use chacha20poly1305::{AeadCore, ChaCha20Poly1305, Nonce};
+use bitcoin::key::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE;
+use hpke::aead::ChaCha20Poly1305;
+use hpke::kdf::HkdfSha256;
+use hpke::kem::SecpK256HkdfSha256;
+use hpke::rand_core::OsRng;
+use hpke::{Deserializable, OpModeR, OpModeS, Serializable};
+use serde::{Deserialize, Serialize};
 
-pub const PADDED_MESSAGE_BYTES: usize = 7168; // 7KB
+pub const PADDED_MESSAGE_BYTES: usize = 7168;
+pub const PADDED_PLAINTEXT_A_LENGTH: usize =
+    PADDED_MESSAGE_BYTES - UNCOMPRESSED_PUBLIC_KEY_SIZE * 2;
+pub const PADDED_PLAINTEXT_B_LENGTH: usize = PADDED_MESSAGE_BYTES - UNCOMPRESSED_PUBLIC_KEY_SIZE;
+pub const INFO_A: &[u8] = b"PjV2MsgA";
+pub const INFO_B: &[u8] = b"PjV2MsgB";
 
-/// crypto context
-///
-/// <- Receiver S
-/// -> Sender E, ES(payload), payload protected by knowledge of receiver key
-/// <- Receiver E, EE(payload), payload protected by knowledge of sender & receiver key
+pub type SecretKey = <SecpK256HkdfSha256 as hpke::Kem>::PrivateKey;
+pub type PublicKey = <SecpK256HkdfSha256 as hpke::Kem>::PublicKey;
+pub type EncappedKey = <SecpK256HkdfSha256 as hpke::Kem>::EncappedKey;
+
+fn sk_to_pk(sk: &SecretKey) -> PublicKey { <SecpK256HkdfSha256 as hpke::Kem>::sk_to_pk(sk) }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HpkeKeyPair(pub HpkeSecretKey, pub HpkePublicKey);
+
+impl From<HpkeKeyPair> for (HpkeSecretKey, HpkePublicKey) {
+    fn from(value: HpkeKeyPair) -> Self { (value.0, value.1) }
+}
+
+impl HpkeKeyPair {
+    pub fn gen_keypair() -> Self {
+        let (sk, pk) = <SecpK256HkdfSha256 as hpke::Kem>::gen_keypair(&mut OsRng);
+        Self(HpkeSecretKey(sk), HpkePublicKey(pk))
+    }
+    pub fn secret_key(&self) -> &HpkeSecretKey { &self.0 }
+    pub fn public_key(&self) -> &HpkePublicKey { &self.1 }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct HpkeSecretKey(pub SecretKey);
+
+impl Deref for HpkeSecretKey {
+    type Target = SecretKey;
+
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+
+impl core::fmt::Debug for HpkeSecretKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SecpHpkeSecretKey({:?})", self.0.to_bytes())
+    }
+}
+
+impl serde::Serialize for HpkeSecretKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_bytes(&self.0.to_bytes())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for HpkeSecretKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = Vec::<u8>::deserialize(deserializer)?;
+        Ok(HpkeSecretKey(
+            SecretKey::from_bytes(&bytes)
+                .map_err(|_| serde::de::Error::custom("Invalid secret key"))?,
+        ))
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct HpkePublicKey(pub PublicKey);
+
+impl HpkePublicKey {
+    pub fn to_compressed_bytes(&self) -> [u8; 33] {
+        let compressed_key = bitcoin::secp256k1::PublicKey::from_slice(&self.0.to_bytes())
+            .expect("Invalid public key from known valid bytes");
+        compressed_key.serialize()
+    }
+
+    pub fn from_compressed_bytes(bytes: &[u8]) -> Result<Self, HpkeError> {
+        let compressed_key = bitcoin::secp256k1::PublicKey::from_slice(bytes)?;
+        Ok(HpkePublicKey(PublicKey::from_bytes(
+            compressed_key.serialize_uncompressed().as_slice(),
+        )?))
+    }
+}
+
+impl Deref for HpkePublicKey {
+    type Target = PublicKey;
+
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+
+impl core::fmt::Debug for HpkePublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SecpHpkePublicKey({:?})", self.0)
+    }
+}
+
+impl serde::Serialize for HpkePublicKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_bytes(&self.0.to_bytes())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for HpkePublicKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = Vec::<u8>::deserialize(deserializer)?;
+        Ok(HpkePublicKey(
+            PublicKey::from_bytes(&bytes)
+                .map_err(|_| serde::de::Error::custom("Invalid public key"))?,
+        ))
+    }
+}
+
+/// Message A is sent from the sender to the receiver containing an Original PSBT payload
 #[cfg(feature = "send")]
 pub fn encrypt_message_a(
-    mut raw_msg: Vec<u8>,
-    e_sec: SecretKey,
-    s: PublicKey,
+    mut plaintext: Vec<u8>,
+    sender_sk: &HpkeSecretKey,
+    receiver_pk: &HpkePublicKey,
 ) -> Result<Vec<u8>, HpkeError> {
-    let secp = Secp256k1::new();
-    let e_pub = e_sec.public_key(&secp);
-    let es = SharedSecret::new(&s, &e_sec);
-    let cipher = ChaCha20Poly1305::new_from_slice(&es.secret_bytes())
-        .map_err(|_| HpkeError::InvalidKeyLength)?;
-    let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng); // key es encrypts only 1 message so 0 is unique
-    let aad = &e_pub.serialize();
-    let msg = pad(&mut raw_msg)?;
-    let payload = Payload { msg, aad };
-    let c_t: Vec<u8> = cipher.encrypt(&nonce, payload)?;
-    let mut message_a = e_pub.serialize().to_vec();
-    message_a.extend(&nonce[..]);
-    message_a.extend(&c_t[..]);
-    Ok(message_a)
+    let pk = sk_to_pk(&sender_sk.0);
+    let (encapsulated_key, mut encryption_context) =
+        hpke::setup_sender::<ChaCha20Poly1305, HkdfSha256, SecpK256HkdfSha256, _>(
+            &OpModeS::Auth((sender_sk.0.clone(), pk.clone())),
+            &receiver_pk.0,
+            INFO_A,
+            &mut OsRng,
+        )?;
+    let aad = pk.to_bytes().to_vec();
+    let plaintext = pad_plaintext(&mut plaintext, PADDED_PLAINTEXT_A_LENGTH)?;
+    let ciphertext = encryption_context.seal(plaintext, &aad)?;
+    let mut message_a = encapsulated_key.to_bytes().to_vec();
+    message_a.extend(&aad);
+    message_a.extend(&ciphertext);
+    Ok(message_a.to_vec())
 }
 
 #[cfg(feature = "receive")]
 pub fn decrypt_message_a(
     message_a: &[u8],
-    s: SecretKey,
-) -> Result<(Vec<u8>, PublicKey), HpkeError> {
-    // let message a = [pubkey/AD][nonce][authentication tag][ciphertext]
-    let e = PublicKey::from_slice(message_a.get(..33).ok_or(HpkeError::PayloadTooShort)?)?;
-    let nonce = Nonce::from_slice(message_a.get(33..45).ok_or(HpkeError::PayloadTooShort)?);
-    let es = SharedSecret::new(&e, &s);
-    let cipher = ChaCha20Poly1305::new_from_slice(&es.secret_bytes())
-        .map_err(|_| HpkeError::InvalidKeyLength)?;
-    let c_t = message_a.get(45..).ok_or(HpkeError::PayloadTooShort)?;
-    let aad = &e.serialize();
-    let payload = Payload { msg: c_t, aad };
-    let buffer = cipher.decrypt(nonce, payload)?;
-    Ok((buffer, e))
+    receiver_sk: HpkeSecretKey,
+) -> Result<(Vec<u8>, HpkePublicKey), HpkeError> {
+    let enc = message_a.get(..65).ok_or(HpkeError::PayloadTooShort)?;
+    let enc = EncappedKey::from_bytes(enc)?;
+    let aad = message_a.get(65..130).ok_or(HpkeError::PayloadTooShort)?;
+    let pk_s = PublicKey::from_bytes(aad)?;
+    let mut decryption_ctx = hpke::setup_receiver::<
+        ChaCha20Poly1305,
+        HkdfSha256,
+        SecpK256HkdfSha256,
+    >(&OpModeR::Auth(pk_s.clone()), &receiver_sk.0, &enc, INFO_A)?;
+    let ciphertext = message_a.get(130..).ok_or(HpkeError::PayloadTooShort)?;
+    let plaintext = decryption_ctx.open(ciphertext, aad)?;
+    Ok((plaintext, HpkePublicKey(pk_s)))
 }
 
+/// Message B is sent from the receiver to the sender containing a Payjoin PSBT payload or an error
 #[cfg(feature = "receive")]
-pub fn encrypt_message_b(raw_msg: &mut Vec<u8>, re_pub: PublicKey) -> Result<Vec<u8>, HpkeError> {
-    // let message b = [pubkey/AD][nonce][authentication tag][ciphertext]
-    let secp = Secp256k1::new();
-    let (e_sec, e_pub) = secp.generate_keypair(&mut OsRng);
-    let ee = SharedSecret::new(&re_pub, &e_sec);
-    let cipher = ChaCha20Poly1305::new_from_slice(&ee.secret_bytes())
-        .map_err(|_| HpkeError::InvalidKeyLength)?;
-    let nonce = Nonce::from_slice(&[0u8; 12]); // key es encrypts only 1 message so 0 is unique
-    let aad = &e_pub.serialize();
-    let msg = pad(raw_msg)?;
-    let payload = Payload { msg, aad };
-    let c_t = cipher.encrypt(nonce, payload)?;
-    let mut message_b = e_pub.serialize().to_vec();
-    message_b.extend(&nonce[..]);
-    message_b.extend(&c_t[..]);
-    Ok(message_b)
+pub fn encrypt_message_b(
+    mut plaintext: Vec<u8>,
+    receiver_keypair: &HpkeKeyPair,
+    sender_pk: &HpkePublicKey,
+) -> Result<Vec<u8>, HpkeError> {
+    let (encapsulated_key, mut encryption_context) =
+        hpke::setup_sender::<ChaCha20Poly1305, HkdfSha256, SecpK256HkdfSha256, _>(
+            &OpModeS::Auth((
+                receiver_keypair.secret_key().0.clone(),
+                receiver_keypair.public_key().0.clone(),
+            )),
+            &sender_pk.0,
+            INFO_B,
+            &mut OsRng,
+        )?;
+    let plaintext = pad_plaintext(&mut plaintext, PADDED_PLAINTEXT_B_LENGTH)?;
+    let ciphertext = encryption_context.seal(plaintext, &[])?;
+    let mut message_b = encapsulated_key.to_bytes().to_vec();
+    message_b.extend(&ciphertext);
+    Ok(message_b.to_vec())
 }
 
 #[cfg(feature = "send")]
-pub fn decrypt_message_b(message_b: &mut [u8], e: SecretKey) -> Result<Vec<u8>, HpkeError> {
-    // let message b = [pubkey/AD][nonce][authentication tag][ciphertext]
-    let re = PublicKey::from_slice(message_b.get(..33).ok_or(HpkeError::PayloadTooShort)?)?;
-    let nonce = Nonce::from_slice(message_b.get(33..45).ok_or(HpkeError::PayloadTooShort)?);
-    let ee = SharedSecret::new(&re, &e);
-    let cipher = ChaCha20Poly1305::new_from_slice(&ee.secret_bytes())
-        .map_err(|_| HpkeError::InvalidKeyLength)?;
-    let payload = Payload {
-        msg: message_b.get(45..).ok_or(HpkeError::PayloadTooShort)?,
-        aad: &re.serialize(),
-    };
-    let buffer = cipher.decrypt(nonce, payload)?;
-    Ok(buffer)
+pub fn decrypt_message_b(
+    message_b: &[u8],
+    receiver_pk: HpkePublicKey,
+    sender_sk: HpkeSecretKey,
+) -> Result<Vec<u8>, HpkeError> {
+    let enc = message_b.get(..65).ok_or(HpkeError::PayloadTooShort)?;
+    let enc = EncappedKey::from_bytes(enc)?;
+    let mut decryption_ctx = hpke::setup_receiver::<
+        ChaCha20Poly1305,
+        HkdfSha256,
+        SecpK256HkdfSha256,
+    >(&OpModeR::Auth(receiver_pk.0), &sender_sk.0, &enc, INFO_B)?;
+    let plaintext =
+        decryption_ctx.open(message_b.get(65..).ok_or(HpkeError::PayloadTooShort)?, &[])?;
+    Ok(plaintext)
 }
 
-fn pad(msg: &mut Vec<u8>) -> Result<&[u8], HpkeError> {
-    if msg.len() > PADDED_MESSAGE_BYTES {
-        return Err(HpkeError::PayloadTooLarge);
+fn pad_plaintext(msg: &mut Vec<u8>, padded_length: usize) -> Result<&[u8], HpkeError> {
+    if msg.len() > padded_length {
+        return Err(HpkeError::PayloadTooLarge { actual: msg.len(), max: padded_length });
     }
-    while msg.len() < PADDED_MESSAGE_BYTES {
-        msg.push(0);
-    }
+    msg.resize(padded_length, 0);
     Ok(msg)
 }
 
@@ -104,18 +226,18 @@ fn pad(msg: &mut Vec<u8>) -> Result<&[u8], HpkeError> {
 #[derive(Debug)]
 pub enum HpkeError {
     Secp256k1(bitcoin::secp256k1::Error),
-    ChaCha20Poly1305(chacha20poly1305::aead::Error),
+    Hpke(hpke::HpkeError),
     InvalidKeyLength,
-    PayloadTooLarge,
+    PayloadTooLarge { actual: usize, max: usize },
     PayloadTooShort,
+}
+
+impl From<hpke::HpkeError> for HpkeError {
+    fn from(value: hpke::HpkeError) -> Self { Self::Hpke(value) }
 }
 
 impl From<bitcoin::secp256k1::Error> for HpkeError {
     fn from(value: bitcoin::secp256k1::Error) -> Self { Self::Secp256k1(value) }
-}
-
-impl From<chacha20poly1305::aead::Error> for HpkeError {
-    fn from(value: chacha20poly1305::aead::Error) -> Self { Self::ChaCha20Poly1305(value) }
 }
 
 impl fmt::Display for HpkeError {
@@ -123,12 +245,17 @@ impl fmt::Display for HpkeError {
         use HpkeError::*;
 
         match &self {
-            Secp256k1(e) => e.fmt(f),
-            ChaCha20Poly1305(e) => e.fmt(f),
+            Hpke(e) => e.fmt(f),
             InvalidKeyLength => write!(f, "Invalid Length"),
-            PayloadTooLarge =>
-                write!(f, "Payload too large, max size is {} bytes", PADDED_MESSAGE_BYTES),
+            PayloadTooLarge { actual, max } => {
+                write!(
+                    f,
+                    "Plaintext too large, max size is {} bytes, actual size is {} bytes",
+                    max, actual
+                )
+            }
             PayloadTooShort => write!(f, "Payload too small"),
+            Secp256k1(e) => e.fmt(f),
         }
     }
 }
@@ -138,8 +265,10 @@ impl error::Error for HpkeError {
         use HpkeError::*;
 
         match &self {
+            Hpke(e) => Some(e),
+            PayloadTooLarge { .. } => None,
+            InvalidKeyLength | PayloadTooShort => None,
             Secp256k1(e) => Some(e),
-            ChaCha20Poly1305(_) | InvalidKeyLength | PayloadTooLarge | PayloadTooShort => None,
         }
     }
 }
@@ -256,9 +385,23 @@ impl OhttpKeys {
     }
 }
 
+const KEM_ID: &[u8] = b"\x00\x16"; // DHKEM(secp256k1, HKDF-SHA256)
+const SYMMETRIC_LEN: &[u8] = b"\x00\x04"; // 4 bytes
+const SYMMETRIC_KDF_AEAD: &[u8] = b"\x00\x01\x00\x03"; // KDF(HKDF-SHA256), AEAD(ChaCha20Poly1305)
+
 impl fmt::Display for OhttpKeys {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let encoded = BASE64_URL_SAFE_NO_PAD.encode(self.encode().map_err(|_| fmt::Error)?);
+        let bytes = self.encode().map_err(|_| fmt::Error)?;
+        let key_id = bytes[0];
+        let pubkey = &bytes[3..68];
+
+        let compressed_pubkey =
+            bitcoin::secp256k1::PublicKey::from_slice(pubkey).map_err(|_| fmt::Error)?.serialize();
+
+        let mut buf = vec![key_id];
+        buf.extend_from_slice(&compressed_pubkey);
+
+        let encoded = BASE64_URL_SAFE_NO_PAD.encode(buf);
         write!(f, "{}", encoded)
     }
 }
@@ -266,9 +409,24 @@ impl fmt::Display for OhttpKeys {
 impl std::str::FromStr for OhttpKeys {
     type Err = ParseOhttpKeysError;
 
+    /// Parses a base64URL-encoded string into OhttpKeys.
+    /// The string format is: key_id || compressed_public_key
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let bytes = BASE64_URL_SAFE_NO_PAD.decode(s).map_err(ParseOhttpKeysError::DecodeBase64)?;
-        OhttpKeys::decode(&bytes).map_err(ParseOhttpKeysError::DecodeKeyConfig)
+
+        let key_id = *bytes.first().ok_or(ParseOhttpKeysError::InvalidFormat)?;
+        let compressed_pk = bytes.get(1..34).ok_or(ParseOhttpKeysError::InvalidFormat)?;
+
+        let pubkey = bitcoin::secp256k1::PublicKey::from_slice(compressed_pk)
+            .map_err(|_| ParseOhttpKeysError::InvalidPublicKey)?;
+
+        let mut buf = vec![key_id];
+        buf.extend_from_slice(KEM_ID);
+        buf.extend_from_slice(&pubkey.serialize_uncompressed());
+        buf.extend_from_slice(SYMMETRIC_LEN);
+        buf.extend_from_slice(SYMMETRIC_KDF_AEAD);
+
+        ohttp::KeyConfig::decode(&buf).map(Self).map_err(ParseOhttpKeysError::DecodeKeyConfig)
     }
 }
 
@@ -316,6 +474,8 @@ impl serde::Serialize for OhttpKeys {
 
 #[derive(Debug)]
 pub enum ParseOhttpKeysError {
+    InvalidFormat,
+    InvalidPublicKey,
     DecodeBase64(bitcoin::base64::DecodeError),
     DecodeKeyConfig(ohttp::Error),
 }
@@ -323,6 +483,8 @@ pub enum ParseOhttpKeysError {
 impl std::fmt::Display for ParseOhttpKeysError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            ParseOhttpKeysError::InvalidFormat => write!(f, "Invalid format"),
+            ParseOhttpKeysError::InvalidPublicKey => write!(f, "Invalid public key"),
             ParseOhttpKeysError::DecodeBase64(e) => write!(f, "Failed to decode base64: {}", e),
             ParseOhttpKeysError::DecodeKeyConfig(e) =>
                 write!(f, "Failed to decode KeyConfig: {}", e),
@@ -335,6 +497,7 @@ impl std::error::Error for ParseOhttpKeysError {
         match self {
             ParseOhttpKeysError::DecodeBase64(e) => Some(e),
             ParseOhttpKeysError::DecodeKeyConfig(e) => Some(e),
+            ParseOhttpKeysError::InvalidFormat | ParseOhttpKeysError::InvalidPublicKey => None,
         }
     }
 }

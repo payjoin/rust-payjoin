@@ -138,9 +138,7 @@ fn init_ohttp() -> Result<ohttp::Server> {
 
     // create or read from file
     let server_config = ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC))?;
-    let encoded_config = server_config.encode()?;
-    let b64_config = BASE64_URL_SAFE_NO_PAD.encode(encoded_config);
-    info!("ohttp-keys server config base64 UrlSafe: {:?}", b64_config);
+    info!("Initialized a new OHTTP Key Configuration. GET /ohttp-keys to fetch it.");
     Ok(ohttp::Server::new(server_config)?)
 }
 

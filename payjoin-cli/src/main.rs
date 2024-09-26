@@ -145,11 +145,8 @@ fn cli() -> ArgMatches {
                 .help("The directory to store payjoin requests")
                 .value_parser(value_parser!(Url)),
         );
-        receive_cmd = receive_cmd.arg(
-            Arg::new("ohttp_keys")
-                .long("ohttp-keys")
-                .help("The ohttp key config as a base64 encoded string"),
-        );
+        receive_cmd = receive_cmd
+            .arg(Arg::new("ohttp_keys").long("ohttp-keys").help("The ohttp key config file path"));
     }
 
     cmd = cmd.subcommand(receive_cmd);

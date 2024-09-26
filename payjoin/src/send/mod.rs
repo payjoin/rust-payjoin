@@ -27,24 +27,18 @@
 use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
-#[cfg(feature = "v2")]
-use bitcoin::secp256k1::rand;
-#[cfg(feature = "v2")]
-use bitcoin::secp256k1::PublicKey;
 use bitcoin::{FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
 pub use error::{CreateRequestError, ResponseError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 #[cfg(feature = "v2")]
-use serde::{
-    de::{self, MapAccess, Visitor},
-    ser::SerializeStruct,
-    Deserialize, Deserializer, Serialize, Serializer,
-};
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::input_type::InputType;
 use crate::psbt::PsbtExt;
 use crate::request::Request;
+#[cfg(feature = "v2")]
+use crate::v2::{HpkePublicKey, HpkeSecretKey};
 use crate::weight::{varint_size, ComputeWeight};
 use crate::PjUri;
 
@@ -238,13 +232,6 @@ impl<'a> RequestBuilder<'a> {
         let input_type = InputType::from_spent_input(txout, zeroth_input.psbtin)
             .map_err(InternalCreateRequestError::InputType)?;
 
-        #[cfg(feature = "v2")]
-        let e = {
-            let secp = bitcoin::secp256k1::Secp256k1::new();
-            let (e_sec, _) = secp.generate_keypair(&mut rand::rngs::OsRng);
-            e_sec
-        };
-
         Ok(RequestContext {
             psbt,
             endpoint,
@@ -255,12 +242,13 @@ impl<'a> RequestBuilder<'a> {
             sequence,
             min_fee_rate: self.min_fee_rate,
             #[cfg(feature = "v2")]
-            e,
+            e: crate::v2::HpkeKeyPair::gen_keypair().secret_key().clone(),
         })
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "v2", derive(Serialize, Deserialize))]
 pub struct RequestContext {
     psbt: Psbt,
     endpoint: Url,
@@ -271,11 +259,8 @@ pub struct RequestContext {
     sequence: Sequence,
     payee: ScriptBuf,
     #[cfg(feature = "v2")]
-    e: bitcoin::secp256k1::SecretKey,
+    e: crate::v2::HpkeSecretKey,
 }
-
-#[cfg(feature = "v2")]
-impl Eq for RequestContext {}
 
 impl RequestContext {
     /// Extract serialized V1 Request and Context froma Payjoin Proposal
@@ -327,7 +312,7 @@ impl RequestContext {
             Err(e) => {
                 log::warn!("Failed to extract `rs` pubkey, falling back to v1: {}", e);
                 let (req, context_v1) = self.extract_v1()?;
-                Ok((req, ContextV2 { context_v1, e: None, ohttp_res: None }))
+                Ok((req, ContextV2 { context_v1, rs: None, e: None, ohttp_res: None }))
             }
         }
     }
@@ -340,7 +325,7 @@ impl RequestContext {
     fn extract_v2_strict(
         &mut self,
         ohttp_relay: Url,
-        rs: PublicKey,
+        rs: HpkePublicKey,
     ) -> Result<(Request, ContextV2), CreateRequestError> {
         use crate::uri::UrlExt;
         let url = self.endpoint.clone();
@@ -350,7 +335,7 @@ impl RequestContext {
             self.fee_contribution,
             self.min_fee_rate,
         )?;
-        let body = crate::v2::encrypt_message_a(body, self.e, rs)
+        let body = crate::v2::encrypt_message_a(body, &self.e.clone(), &rs)
             .map_err(InternalCreateRequestError::Hpke)?;
         let mut ohttp =
             self.endpoint.ohttp().ok_or(InternalCreateRequestError::MissingOhttpConfig)?;
@@ -370,14 +355,15 @@ impl RequestContext {
                     sequence: self.sequence,
                     min_fee_rate: self.min_fee_rate,
                 },
-                e: Some(self.e),
+                rs: Some(self.extract_rs_pubkey()?),
+                e: Some(self.e.clone()),
                 ohttp_res: Some(ohttp_res),
             },
         ))
     }
 
     #[cfg(feature = "v2")]
-    fn extract_rs_pubkey(&self) -> Result<PublicKey, error::ParseSubdirectoryError> {
+    fn extract_rs_pubkey(&self) -> Result<HpkePublicKey, error::ParseSubdirectoryError> {
         use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
         use bitcoin::base64::Engine;
         use error::ParseSubdirectoryError;
@@ -392,129 +378,11 @@ impl RequestContext {
             .decode(subdirectory)
             .map_err(ParseSubdirectoryError::SubdirectoryNotBase64)?;
 
-        bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
+        HpkePublicKey::from_compressed_bytes(&pubkey_bytes)
             .map_err(ParseSubdirectoryError::SubdirectoryInvalidPubkey)
     }
 
     pub fn endpoint(&self) -> &Url { &self.endpoint }
-}
-
-#[cfg(feature = "v2")]
-impl Serialize for RequestContext {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_struct("RequestContext", 8)?;
-        state.serialize_field("psbt", &self.psbt.to_string())?;
-        state.serialize_field("endpoint", &self.endpoint.as_str())?;
-        state.serialize_field("disable_output_substitution", &self.disable_output_substitution)?;
-        state.serialize_field(
-            "fee_contribution",
-            &self.fee_contribution.as_ref().map(|(amount, index)| (amount.to_sat(), *index)),
-        )?;
-        state.serialize_field("min_fee_rate", &self.min_fee_rate)?;
-        state.serialize_field("input_type", &self.input_type)?;
-        state.serialize_field("sequence", &self.sequence)?;
-        state.serialize_field("payee", &self.payee)?;
-        state.serialize_field("e", &self.e.secret_bytes())?;
-        state.end()
-    }
-}
-
-#[cfg(feature = "v2")]
-impl<'de> Deserialize<'de> for RequestContext {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct RequestContextVisitor;
-
-        const FIELDS: &[&str] = &[
-            "psbt",
-            "endpoint",
-            "ohttp_keys",
-            "disable_output_substitution",
-            "fee_contribution",
-            "min_fee_rate",
-            "input_type",
-            "sequence",
-            "payee",
-            "e",
-        ];
-
-        impl<'de> Visitor<'de> for RequestContextVisitor {
-            type Value = RequestContext;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("struct RequestContext")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> Result<RequestContext, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut psbt = None;
-                let mut endpoint = None;
-                let mut disable_output_substitution = None;
-                let mut fee_contribution = None;
-                let mut min_fee_rate = None;
-                let mut input_type = None;
-                let mut sequence = None;
-                let mut payee = None;
-                let mut e = None;
-
-                while let Some(key) = map.next_key::<String>()? {
-                    match key.as_str() {
-                        "psbt" => {
-                            let buf: String = map.next_value::<String>()?;
-                            psbt = Some(Psbt::from_str(&buf).map_err(de::Error::custom)?);
-                        }
-                        "endpoint" =>
-                            endpoint = Some(
-                                url::Url::from_str(&map.next_value::<String>()?)
-                                    .map_err(de::Error::custom)?,
-                            ),
-                        "disable_output_substitution" =>
-                            disable_output_substitution = Some(map.next_value()?),
-                        "fee_contribution" => {
-                            let fc: Option<(u64, usize)> = map.next_value()?;
-                            fee_contribution = fc
-                                .map(|(amount, index)| (bitcoin::Amount::from_sat(amount), index));
-                        }
-                        "min_fee_rate" => min_fee_rate = Some(map.next_value()?),
-                        "input_type" => input_type = Some(map.next_value()?),
-                        "sequence" => sequence = Some(map.next_value()?),
-                        "payee" => payee = Some(map.next_value()?),
-                        "e" => {
-                            let secret_bytes: Vec<u8> = map.next_value()?;
-                            e = Some(
-                                bitcoin::secp256k1::SecretKey::from_slice(&secret_bytes)
-                                    .map_err(de::Error::custom)?,
-                            );
-                        }
-                        _ => return Err(de::Error::unknown_field(key.as_str(), FIELDS)),
-                    }
-                }
-
-                Ok(RequestContext {
-                    psbt: psbt.ok_or_else(|| de::Error::missing_field("psbt"))?,
-                    endpoint: endpoint.ok_or_else(|| de::Error::missing_field("endpoint"))?,
-                    disable_output_substitution: disable_output_substitution
-                        .ok_or_else(|| de::Error::missing_field("disable_output_substitution"))?,
-                    fee_contribution,
-                    min_fee_rate: min_fee_rate
-                        .ok_or_else(|| de::Error::missing_field("min_fee_rate"))?,
-                    input_type: input_type.ok_or_else(|| de::Error::missing_field("input_type"))?,
-                    sequence: sequence.ok_or_else(|| de::Error::missing_field("sequence"))?,
-                    payee: payee.ok_or_else(|| de::Error::missing_field("payee"))?,
-                    e: e.ok_or_else(|| de::Error::missing_field("e"))?,
-                })
-            }
-        }
-
-        deserializer.deserialize_struct("RequestContext", FIELDS, RequestContextVisitor)
-    }
 }
 
 /// Data required for validation of response.
@@ -535,7 +403,8 @@ pub struct ContextV1 {
 #[cfg(feature = "v2")]
 pub struct ContextV2 {
     context_v1: ContextV1,
-    e: Option<bitcoin::secp256k1::SecretKey>,
+    rs: Option<HpkePublicKey>,
+    e: Option<HpkeSecretKey>,
     ohttp_res: Option<ohttp::ClientResponse>,
 }
 
@@ -570,19 +439,19 @@ impl ContextV2 {
         self,
         response: &mut impl std::io::Read,
     ) -> Result<Option<Psbt>, ResponseError> {
-        match (self.ohttp_res, self.e) {
-            (Some(ohttp_res), Some(e)) => {
+        match (self.ohttp_res, self.rs, self.e) {
+            (Some(ohttp_res), Some(rs), Some(e)) => {
                 let mut res_buf = Vec::new();
                 response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
                 let response = crate::v2::ohttp_decapsulate(ohttp_res, &res_buf)
                     .map_err(InternalValidationError::OhttpEncapsulation)?;
-                let mut body = match response.status() {
+                let body = match response.status() {
                     http::StatusCode::OK => response.body().to_vec(),
                     http::StatusCode::ACCEPTED => return Ok(None),
                     _ => return Err(InternalValidationError::UnexpectedStatusCode)?,
                 };
-                let psbt = crate::v2::decrypt_message_b(&mut body, e)
-                    .map_err(InternalValidationError::HpkeError)?;
+                let psbt = crate::v2::decrypt_message_b(&body, rs, e)
+                    .map_err(InternalValidationError::Hpke)?;
 
                 let proposal = Psbt::deserialize(&psbt).map_err(InternalValidationError::Psbt)?;
                 let processed_proposal = self.context_v1.process_proposal(proposal)?;
@@ -1109,8 +978,9 @@ mod test {
     #[test]
     #[cfg(feature = "v2")]
     fn req_ctx_ser_de_roundtrip() {
-        use super::*;
+        use hpke::Deserializable;
 
+        use super::*;
         let req_ctx = RequestContext {
             psbt: Psbt::from_str(ORIGINAL_PSBT).unwrap(),
             endpoint: Url::parse("http://localhost:1234").unwrap(),
@@ -1123,7 +993,10 @@ mod test {
             },
             sequence: Sequence::MAX,
             payee: ScriptBuf::from(vec![0x00]),
-            e: bitcoin::secp256k1::SecretKey::from_slice(&[0x01; 32]).unwrap(),
+            e: HpkeSecretKey(
+                <hpke::kem::SecpK256HkdfSha256 as hpke::Kem>::PrivateKey::from_bytes(&[0x01; 32])
+                    .unwrap(),
+            ),
         };
         let serialized = serde_json::to_string(&req_ctx).unwrap();
         let deserialized = serde_json::from_str(&serialized).unwrap();

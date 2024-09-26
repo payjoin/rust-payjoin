@@ -19,14 +19,14 @@ exclude = ["tests"]
 send = []
 receive = ["bitcoin/rand"]
 base64 = ["bitcoin/base64"]
-v2 = ["bitcoin/rand", "bitcoin/serde", "chacha20poly1305", "dep:http", "bhttp", "ohttp", "serde", "url/serde"]
+v2 = ["bitcoin/rand", "bitcoin/serde", "hpke", "dep:http", "bhttp", "ohttp", "serde", "url/serde"]
 io = ["reqwest/rustls-tls"]
 danger-local-https = ["io", "reqwest/rustls-tls", "rustls"]
 
 [dependencies]
 bitcoin = { version = "0.32.2", features = ["base64"] }
 bip21 = "0.5.0"
-chacha20poly1305 = { version = "0.10.1", optional = true }
+hpke = { package = "bitcoin-hpke", version = "0.13.0", optional = true }
 log = { version = "0.4.14"}
 http = { version = "1", optional = true }
 bhttp = { version = "=0.5.1", optional = true }

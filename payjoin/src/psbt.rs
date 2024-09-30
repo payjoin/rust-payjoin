@@ -3,8 +3,10 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use bitcoin::blockdata::script::Instruction;
 use bitcoin::psbt::Psbt;
-use bitcoin::{bip32, psbt, TxIn, TxOut};
+use bitcoin::transaction::InputWeightPrediction;
+use bitcoin::{bip32, psbt, Address, AddressType, Network, Script, TxIn, TxOut, Weight};
 
 #[derive(Debug)]
 pub(crate) enum InconsistentPsbt {
@@ -107,6 +109,19 @@ impl PsbtExt for Psbt {
     }
 }
 
+/// Gets redeemScript from the script_sig following BIP16 rules regarding P2SH spending.
+fn redeem_script(script_sig: &Script) -> Option<&Script> {
+    match script_sig.instructions().last()?.ok()? {
+        Instruction::PushBytes(bytes) => Some(Script::from_bytes(bytes.as_bytes())),
+        Instruction::Op(_) => None,
+    }
+}
+
+// input script: 0x160014{20-byte-key-hash} = 23 bytes
+// witness: <signature> <pubkey> = 72, 33 bytes
+// https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki#p2wpkh-nested-in-bip16-p2sh
+const NESTED_P2WPKH_MAX: InputWeightPrediction = InputWeightPrediction::from_slice(23, &[72, 33]);
+
 pub(crate) struct InputPair<'a> {
     pub txin: &'a TxIn,
     pub psbtin: &'a psbt::Input,
@@ -179,6 +194,41 @@ impl<'a> InputPair<'a> {
             }
             (Some(_), Some(_)) => Err(PsbtInputError::UnequalTxid),
         }
+    }
+
+    pub fn address_type(&self) -> AddressType {
+        let txo = self.previous_txout().expect("PrevTxoutError");
+        // HACK: Network doesn't matter for our use case of only getting the address type
+        // but is required in the `from_script` interface. Hardcoded to mainnet.
+        Address::from_script(&txo.script_pubkey, Network::Bitcoin)
+            .expect("Unrecognized script")
+            .address_type()
+            .expect("UnknownAddressType")
+    }
+
+    pub fn expected_input_weight(&self) -> Weight {
+        use bitcoin::AddressType::*;
+
+        // Get the input weight prediction corresponding to spending an output of this address type
+        let iwp = match self.address_type() {
+            P2pkh => InputWeightPrediction::P2PKH_COMPRESSED_MAX,
+            P2sh =>
+                match self.psbtin.final_script_sig.as_ref().and_then(|s| redeem_script(s.as_ref()))
+                {
+                    Some(script) if script.is_witness_program() && script.is_p2wpkh() =>
+                        NESTED_P2WPKH_MAX,
+                    Some(_) => unimplemented!(),
+                    None => panic!("Input not finalized!"),
+                },
+            P2wpkh => InputWeightPrediction::P2WPKH_MAX,
+            P2wsh => unimplemented!(),
+            P2tr => InputWeightPrediction::P2TR_KEY_NON_DEFAULT_SIGHASH,
+            _ => panic!("Unknown address type!"),
+        };
+
+        // Lengths of txid, index and sequence: (32, 4, 4).
+        let input_weight = iwp.weight() + Weight::from_non_witness_data_size(32 + 4 + 4);
+        input_weight
     }
 }
 

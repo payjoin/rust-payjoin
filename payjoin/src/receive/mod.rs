@@ -46,7 +46,6 @@ use error::{
 };
 use optional_parameters::Params;
 
-use crate::input_type::InputType;
 use crate::psbt::PsbtExt;
 
 pub trait Headers {
@@ -229,14 +228,8 @@ impl MaybeMixedInputScripts {
         let input_scripts = self
             .psbt
             .input_pairs()
-            .scan(&mut err, |err, input| match input.previous_txout() {
-                Ok(txout) => match InputType::from_spent_input(txout, input.psbtin) {
-                    Ok(input_script) => Some(input_script),
-                    Err(e) => {
-                        **err = Err(RequestError::from(InternalRequestError::InputType(e)));
-                        None
-                    }
-                },
+            .scan(&mut err, |err, input| match Ok(input.address_type()) {
+                Ok(address_type) => Some(address_type),
                 Err(e) => {
                     **err = Err(RequestError::from(InternalRequestError::PrevTxOut(e)));
                     None
@@ -755,12 +748,9 @@ impl ProvisionalProposal {
             .next()
             .ok_or(InternalRequestError::OriginalPsbtNotBroadcastable)?;
         // Calculate the additional weight contribution
-        let txo = input_pair.previous_txout().map_err(InternalRequestError::PrevTxOut)?;
-        let input_type = InputType::from_spent_input(txo, &self.payjoin_psbt.inputs[0])
-            .map_err(InternalRequestError::InputType)?;
         let input_count = self.payjoin_psbt.inputs.len() - self.original_psbt.inputs.len();
         log::trace!("input_count : {}", input_count);
-        let weight_per_input = input_type.expected_input_weight();
+        let weight_per_input = input_pair.expected_input_weight();
         log::trace!("weight_per_input : {}", weight_per_input);
         let contribution_weight = weight_per_input * input_count as u64;
         log::trace!("contribution_weight: {}", contribution_weight);

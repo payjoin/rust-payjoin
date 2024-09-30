@@ -27,7 +27,7 @@
 use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
-use bitcoin::{Amount, FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
+use bitcoin::{AddressType, Amount, FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
 pub use error::{CreateRequestError, ResponseError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 #[cfg(feature = "v2")]
@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::input_type::InputType;
-use crate::psbt::PsbtExt;
+use crate::psbt::{InputPair, PsbtExt};
 use crate::request::Request;
 #[cfg(feature = "v2")]
 use crate::v2::{HpkePublicKey, HpkeSecretKey};
@@ -125,23 +125,18 @@ impl<'a> RequestBuilder<'a> {
             .find(|(_, txo)| payout_scripts.all(|script| script != txo.script_pubkey))
             .map(|(i, txo)| (i, txo.value))
         {
-            let input_types = self
-                .psbt
-                .input_pairs()
-                .map(|input| {
-                    let txo =
-                        input.previous_txout().map_err(InternalCreateRequestError::PrevTxOut)?;
-                    InputType::from_spent_input(txo, input.psbtin)
-                        .map_err(InternalCreateRequestError::InputType)
-                })
-                .collect::<Result<Vec<InputType>, InternalCreateRequestError>>()?;
+            let input_pairs = self.psbt.input_pairs().collect::<Vec<InputPair>>();
 
-            let first_type = input_types.first().ok_or(InternalCreateRequestError::NoInputs)?;
+            let first_input_pair =
+                input_pairs.first().ok_or(InternalCreateRequestError::NoInputs)?;
             // use cheapest default if mixed input types
             let mut input_vsize = InputType::Taproot.expected_input_weight();
             // Check if all inputs are the same type
-            if input_types.iter().all(|input_type| input_type == first_type) {
-                input_vsize = first_type.expected_input_weight();
+            if input_pairs
+                .iter()
+                .all(|input_pair| input_pair.address_type() == first_input_pair.address_type())
+            {
+                input_vsize = first_input_pair.expected_input_weight();
             }
 
             let recommended_additional_fee = min_fee_rate * input_vsize;
@@ -228,9 +223,7 @@ impl<'a> RequestBuilder<'a> {
         let zeroth_input = psbt.input_pairs().next().ok_or(InternalCreateRequestError::NoInputs)?;
 
         let sequence = zeroth_input.txin.sequence;
-        let txout = zeroth_input.previous_txout().map_err(InternalCreateRequestError::PrevTxOut)?;
-        let input_type = InputType::from_spent_input(txout, zeroth_input.psbtin)
-            .map_err(InternalCreateRequestError::InputType)?;
+        let input_type = zeroth_input.address_type().to_string();
 
         Ok(RequestContext {
             psbt,
@@ -255,7 +248,7 @@ pub struct RequestContext {
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
-    input_type: InputType,
+    input_type: String,
     sequence: Sequence,
     payee: ScriptBuf,
     #[cfg(feature = "v2")]
@@ -281,7 +274,7 @@ impl RequestContext {
                 disable_output_substitution: self.disable_output_substitution,
                 fee_contribution: self.fee_contribution,
                 payee: self.payee.clone(),
-                input_type: self.input_type,
+                input_type: AddressType::from_str(&self.input_type).expect("Unknown address type"),
                 sequence: self.sequence,
                 min_fee_rate: self.min_fee_rate,
             },
@@ -351,7 +344,8 @@ impl RequestContext {
                     disable_output_substitution: self.disable_output_substitution,
                     fee_contribution: self.fee_contribution,
                     payee: self.payee.clone(),
-                    input_type: self.input_type,
+                    input_type: AddressType::from_str(&self.input_type)
+                        .expect("Unknown address type"),
                     sequence: self.sequence,
                     min_fee_rate: self.min_fee_rate,
                 },
@@ -395,7 +389,7 @@ pub struct ContextV1 {
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
-    input_type: InputType,
+    input_type: AddressType,
     sequence: Sequence,
     payee: ScriptBuf,
 }
@@ -499,7 +493,7 @@ impl ContextV1 {
         ensure!(
             contributed_fee
                 <= original_fee_rate
-                    * self.input_type.expected_input_weight()
+                    * self.original_psbt.input_pairs().next().unwrap().expected_input_weight()
                     * (proposal.inputs.len() - self.original_psbt.inputs.len()) as u64,
             FeeContributionPaysOutputSizeIncrease
         );
@@ -571,14 +565,7 @@ impl ContextV1 {
                         ReceiverTxinMissingUtxoInfo
                     );
                     ensure!(proposed.txin.sequence == self.sequence, MixedSequence);
-                    let txout = proposed
-                        .previous_txout()
-                        .map_err(InternalValidationError::InvalidProposedInput)?;
-                    check_eq!(
-                        InputType::from_spent_input(txout, proposed.psbtin)?,
-                        self.input_type,
-                        MixedInputTypes
-                    );
+                    check_eq!(proposed.address_type(), self.input_type, MixedInputTypes);
                 }
             }
         }
@@ -856,7 +843,7 @@ mod test {
             fee_contribution: Some((bitcoin::Amount::from_sat(182), 0)),
             min_fee_rate: FeeRate::ZERO,
             payee,
-            input_type: InputType::SegWitV0 { ty: SegWitV0Type::Pubkey, nested: true },
+            input_type: bitcoin::AddressType::P2sh,
             sequence,
         };
         ctx
@@ -912,10 +899,7 @@ mod test {
             disable_output_substitution: false,
             fee_contribution: None,
             min_fee_rate: FeeRate::ZERO,
-            input_type: InputType::SegWitV0 {
-                ty: crate::input_type::SegWitV0Type::Pubkey,
-                nested: true,
-            },
+            input_type: bitcoin::AddressType::P2sh.to_string(),
             sequence: Sequence::MAX,
             payee: ScriptBuf::from(vec![0x00]),
             e: HpkeSecretKey(

@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use bitcoin::locktime::absolute::LockTime;
 use bitcoin::transaction::Version;
-use bitcoin::Sequence;
+use bitcoin::{AddressType, Sequence};
 
 use crate::input_type::{InputType, InputTypeError};
 
@@ -43,8 +43,8 @@ pub(crate) enum InternalValidationError {
     ReceiverTxinMissingUtxoInfo,
     MixedSequence,
     MixedInputTypes {
-        proposed: InputType,
-        original: InputType,
+        proposed: AddressType,
+        original: AddressType,
     },
     MissingOrShuffledInputs,
     TxOutContainsKeyPaths,

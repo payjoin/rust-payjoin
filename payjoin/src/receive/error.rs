@@ -73,7 +73,7 @@ pub(crate) enum InternalRequestError {
     /// The sender is trying to spend the receiver input
     InputOwned(bitcoin::ScriptBuf),
     /// The original psbt has mixed input address types that could harm privacy
-    MixedInputScripts(crate::input_type::InputType, crate::input_type::InputType),
+    MixedInputScripts(bitcoin::AddressType, bitcoin::AddressType),
     /// Unrecognized input type
     InputType(crate::input_type::InputTypeError),
     /// Original PSBT input has been seen before. Only automatic receivers, aka "interactive" in the spec

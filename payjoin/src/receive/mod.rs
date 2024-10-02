@@ -228,10 +228,10 @@ impl MaybeMixedInputScripts {
         let input_scripts = self
             .psbt
             .input_pairs()
-            .scan(&mut err, |err, input| match Ok(input.address_type()) {
+            .scan(&mut err, |err, input| match input.address_type() {
                 Ok(address_type) => Some(address_type),
                 Err(e) => {
-                    **err = Err(RequestError::from(InternalRequestError::PrevTxOut(e)));
+                    **err = Err(RequestError::from(InternalRequestError::AddressType(e)));
                     None
                 }
             })
@@ -750,7 +750,8 @@ impl ProvisionalProposal {
         // Calculate the additional weight contribution
         let input_count = self.payjoin_psbt.inputs.len() - self.original_psbt.inputs.len();
         log::trace!("input_count : {}", input_count);
-        let weight_per_input = input_pair.expected_input_weight();
+        let weight_per_input =
+            input_pair.expected_input_weight().map_err(InternalRequestError::InputWeight)?;
         log::trace!("weight_per_input : {}", weight_per_input);
         let contribution_weight = weight_per_input * input_count as u64;
         log::trace!("contribution_weight: {}", contribution_weight);

@@ -123,21 +123,21 @@ impl<'a> RequestBuilder<'a> {
             .find(|(_, txo)| payout_scripts.all(|script| script != txo.script_pubkey))
             .map(|(i, txo)| (i, txo.value))
         {
-            let input_pairs = self.psbt.input_pairs().collect::<Vec<InputPair>>();
-
+            let mut input_pairs = self.psbt.input_pairs().collect::<Vec<InputPair>>().into_iter();
             let first_input_pair =
-                input_pairs.first().ok_or(InternalCreateRequestError::NoInputs)?;
-            // use cheapest default if mixed input types
-            let mut input_weight =
-                bitcoin::transaction::InputWeightPrediction::P2TR_KEY_NON_DEFAULT_SIGHASH.weight()
+                input_pairs.next().ok_or(InternalCreateRequestError::NoInputs)?;
+            let mut input_weight = first_input_pair
+                .expected_input_weight()
+                .map_err(InternalCreateRequestError::InputWeight)?;
+            for input_pair in input_pairs {
+                // use cheapest default if mixed input types
+                if input_pair.address_type()? != first_input_pair.address_type()? {
+                    input_weight =
+                        bitcoin::transaction::InputWeightPrediction::P2TR_KEY_NON_DEFAULT_SIGHASH.weight()
                     // Lengths of txid, index and sequence: (32, 4, 4).
                     + Weight::from_non_witness_data_size(32 + 4 + 4);
-            // Check if all inputs are the same type
-            if input_pairs
-                .iter()
-                .all(|input_pair| input_pair.address_type() == first_input_pair.address_type())
-            {
-                input_weight = first_input_pair.expected_input_weight();
+                    break;
+                }
             }
 
             let recommended_additional_fee = min_fee_rate * input_weight;
@@ -224,7 +224,10 @@ impl<'a> RequestBuilder<'a> {
         let zeroth_input = psbt.input_pairs().next().ok_or(InternalCreateRequestError::NoInputs)?;
 
         let sequence = zeroth_input.txin.sequence;
-        let input_type = zeroth_input.address_type().to_string();
+        let input_type = zeroth_input
+            .address_type()
+            .map_err(InternalCreateRequestError::AddressType)?
+            .to_string();
 
         Ok(RequestContext {
             psbt,
@@ -489,12 +492,17 @@ impl ContextV1 {
         ensure!(contributed_fee <= proposed_fee - original_fee, PayeeTookContributedFee);
         let original_weight = self.original_psbt.clone().extract_tx_unchecked_fee_rate().weight();
         let original_fee_rate = original_fee / original_weight;
-        // TODO: Refactor this to be support mixed input types, preferably share method with
-        // `ProvisionalProposal::additional_input_weight()`
+        // TODO: This should support mixed input types
         ensure!(
             contributed_fee
                 <= original_fee_rate
-                    * self.original_psbt.input_pairs().next().unwrap().expected_input_weight()
+                    * self
+                        .original_psbt
+                        .input_pairs()
+                        .next()
+                        .expect("This shouldn't happen. Failed to get an original input.")
+                        .expected_input_weight()
+                        .expect("This shouldn't happen. Weight should have been calculated successfully before.")
                     * (proposal.inputs.len() - self.original_psbt.inputs.len()) as u64,
             FeeContributionPaysOutputSizeIncrease
         );
@@ -566,7 +574,7 @@ impl ContextV1 {
                         ReceiverTxinMissingUtxoInfo
                     );
                     ensure!(proposed.txin.sequence == self.sequence, MixedSequence);
-                    check_eq!(proposed.address_type(), self.input_type, MixedInputTypes);
+                    check_eq!(proposed.address_type()?, self.input_type, MixedInputTypes);
                 }
             }
         }

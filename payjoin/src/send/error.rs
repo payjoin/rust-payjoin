@@ -17,7 +17,7 @@ pub struct ValidationError {
 pub(crate) enum InternalValidationError {
     Parse,
     Io(std::io::Error),
-    InvalidProposedInput(crate::psbt::PrevTxOutError),
+    InvalidAddressType(crate::psbt::AddressTypeError),
     VersionsDontMatch {
         proposed: Version,
         original: Version,
@@ -66,6 +66,12 @@ impl From<InternalValidationError> for ValidationError {
     fn from(value: InternalValidationError) -> Self { ValidationError { internal: value } }
 }
 
+impl From<crate::psbt::AddressTypeError> for InternalValidationError {
+    fn from(value: crate::psbt::AddressTypeError) -> Self {
+        InternalValidationError::InvalidAddressType(value)
+    }
+}
+
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use InternalValidationError::*;
@@ -73,7 +79,7 @@ impl fmt::Display for ValidationError {
         match &self.internal {
             Parse => write!(f, "couldn't decode as PSBT or JSON",),
             Io(e) => write!(f, "couldn't read PSBT: {}", e),
-            InvalidProposedInput(e) => write!(f, "invalid proposed transaction input: {}", e),
+            InvalidAddressType(e) => write!(f, "invalid input address type: {}", e),
             VersionsDontMatch { proposed, original, } => write!(f, "proposed transaction version {} doesn't match the original {}", proposed, original),
             LockTimesDontMatch { proposed, original, } => write!(f, "proposed transaction lock time {} doesn't match the original {}", proposed, original),
             SenderTxinSequenceChanged { proposed, original, } => write!(f, "proposed transaction sequence number {} doesn't match the original {}", proposed, original),
@@ -115,7 +121,7 @@ impl std::error::Error for ValidationError {
         match &self.internal {
             Parse => None,
             Io(error) => Some(error),
-            InvalidProposedInput(error) => Some(error),
+            InvalidAddressType(error) => Some(error),
             VersionsDontMatch { proposed: _, original: _ } => None,
             LockTimesDontMatch { proposed: _, original: _ } => None,
             SenderTxinSequenceChanged { proposed: _, original: _ } => None,
@@ -172,7 +178,8 @@ pub(crate) enum InternalCreateRequestError {
     ChangeIndexOutOfBounds,
     ChangeIndexPointsAtPayee,
     Url(url::ParseError),
-    PrevTxOut(crate::psbt::PrevTxOutError),
+    AddressType(crate::psbt::AddressTypeError),
+    InputWeight(crate::psbt::InputWeightError),
     #[cfg(feature = "v2")]
     Hpke(crate::v2::HpkeError),
     #[cfg(feature = "v2")]
@@ -202,7 +209,8 @@ impl fmt::Display for CreateRequestError {
             ChangeIndexOutOfBounds => write!(f, "fee output index is points out of bounds"),
             ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
             Url(e) => write!(f, "cannot parse url: {:#?}", e),
-            PrevTxOut(e) => write!(f, "invalid previous transaction output: {}", e),
+            AddressType(e) => write!(f, "can not determine input address type: {}", e),
+            InputWeight(e) => write!(f, "can not determine expected input weight: {}", e),
             #[cfg(feature = "v2")]
             Hpke(e) => write!(f, "v2 error: {}", e),
             #[cfg(feature = "v2")]
@@ -234,7 +242,8 @@ impl std::error::Error for CreateRequestError {
             ChangeIndexOutOfBounds => None,
             ChangeIndexPointsAtPayee => None,
             Url(error) => Some(error),
-            PrevTxOut(error) => Some(error),
+            AddressType(error) => Some(error),
+            InputWeight(error) => Some(error),
             #[cfg(feature = "v2")]
             Hpke(error) => Some(error),
             #[cfg(feature = "v2")]
@@ -251,6 +260,12 @@ impl std::error::Error for CreateRequestError {
 
 impl From<InternalCreateRequestError> for CreateRequestError {
     fn from(value: InternalCreateRequestError) -> Self { CreateRequestError(value) }
+}
+
+impl From<crate::psbt::AddressTypeError> for CreateRequestError {
+    fn from(value: crate::psbt::AddressTypeError) -> Self {
+        CreateRequestError(InternalCreateRequestError::AddressType(value))
+    }
 }
 
 #[cfg(feature = "v2")]

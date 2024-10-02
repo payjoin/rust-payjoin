@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use bitcoin::address::FromScriptError;
 use bitcoin::blockdata::script::Instruction;
 use bitcoin::psbt::Psbt;
 use bitcoin::transaction::InputWeightPrediction;
@@ -179,39 +180,41 @@ impl<'a> InputPair<'a> {
         }
     }
 
-    pub fn address_type(&self) -> AddressType {
-        let txo = self.previous_txout().expect("PrevTxoutError");
+    pub fn address_type(&self) -> Result<AddressType, AddressTypeError> {
+        let txo = self.previous_txout()?;
         // HACK: Network doesn't matter for our use case of only getting the address type
         // but is required in the `from_script` interface. Hardcoded to mainnet.
-        Address::from_script(&txo.script_pubkey, Network::Bitcoin)
-            .expect("Unrecognized script")
+        Address::from_script(&txo.script_pubkey, Network::Bitcoin)?
             .address_type()
-            .expect("UnknownAddressType")
+            .ok_or(AddressTypeError::UnknownAddressType)
     }
 
-    pub fn expected_input_weight(&self) -> Weight {
+    pub fn expected_input_weight(&self) -> Result<Weight, InputWeightError> {
         use bitcoin::AddressType::*;
 
         // Get the input weight prediction corresponding to spending an output of this address type
-        let iwp = match self.address_type() {
-            P2pkh => InputWeightPrediction::P2PKH_COMPRESSED_MAX,
+        let iwp = match self.address_type()? {
+            P2pkh => Ok(InputWeightPrediction::P2PKH_COMPRESSED_MAX),
             P2sh =>
                 match self.psbtin.final_script_sig.as_ref().and_then(|s| redeem_script(s.as_ref()))
                 {
+                    // Nested segwit p2wpkh.
                     Some(script) if script.is_witness_program() && script.is_p2wpkh() =>
-                        NESTED_P2WPKH_MAX,
-                    Some(_) => unimplemented!(),
-                    None => panic!("Input not finalized!"),
+                        Ok(NESTED_P2WPKH_MAX),
+                    // Other script or witness program.
+                    Some(_) => Err(InputWeightError::NotSupported),
+                    // No redeem script provided. Cannot determine the script type.
+                    None => Err(InputWeightError::NotFinalized),
                 },
-            P2wpkh => InputWeightPrediction::P2WPKH_MAX,
-            P2wsh => unimplemented!(),
-            P2tr => InputWeightPrediction::P2TR_KEY_NON_DEFAULT_SIGHASH,
-            _ => panic!("Unknown address type!"),
-        };
+            P2wpkh => Ok(InputWeightPrediction::P2WPKH_MAX),
+            P2wsh => Err(InputWeightError::NotSupported),
+            P2tr => Ok(InputWeightPrediction::P2TR_KEY_NON_DEFAULT_SIGHASH),
+            _ => Err(AddressTypeError::UnknownAddressType.into()),
+        }?;
 
         // Lengths of txid, index and sequence: (32, 4, 4).
         let input_weight = iwp.weight() + Weight::from_non_witness_data_size(32 + 4 + 4);
-        input_weight
+        Ok(input_weight)
     }
 }
 
@@ -280,4 +283,69 @@ impl fmt::Display for PsbtInputsError {
 
 impl std::error::Error for PsbtInputsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { Some(&self.error) }
+}
+
+#[derive(Debug)]
+pub(crate) enum AddressTypeError {
+    PrevTxOut(PrevTxOutError),
+    InvalidScript(FromScriptError),
+    UnknownAddressType,
+}
+
+impl fmt::Display for AddressTypeError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::PrevTxOut(_) => write!(f, "invalid previous transaction output"),
+            Self::InvalidScript(_) => write!(f, "invalid script"),
+            Self::UnknownAddressType => write!(f, "unknown address type"),
+        }
+    }
+}
+
+impl std::error::Error for AddressTypeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::PrevTxOut(error) => Some(error),
+            Self::InvalidScript(error) => Some(error),
+            Self::UnknownAddressType => None,
+        }
+    }
+}
+
+impl From<PrevTxOutError> for AddressTypeError {
+    fn from(value: PrevTxOutError) -> Self { Self::PrevTxOut(value) }
+}
+
+impl From<FromScriptError> for AddressTypeError {
+    fn from(value: FromScriptError) -> Self { Self::InvalidScript(value) }
+}
+
+#[derive(Debug)]
+pub(crate) enum InputWeightError {
+    AddressType(AddressTypeError),
+    NotFinalized,
+    NotSupported,
+}
+
+impl fmt::Display for InputWeightError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::AddressType(_) => write!(f, "invalid address type"),
+            Self::NotFinalized => write!(f, "input not finalized"),
+            Self::NotSupported => write!(f, "weight prediction not supported"),
+        }
+    }
+}
+
+impl std::error::Error for InputWeightError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::AddressType(error) => Some(error),
+            Self::NotFinalized => None,
+            Self::NotSupported => None,
+        }
+    }
+}
+impl From<AddressTypeError> for InputWeightError {
+    fn from(value: AddressTypeError) -> Self { Self::AddressType(value) }
 }

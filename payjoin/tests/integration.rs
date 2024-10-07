@@ -632,7 +632,9 @@ mod integration {
                 .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
                 .collect();
 
-            let selected_outpoint = payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
+            let selected_outpoint = payjoin
+                .try_preserving_privacy(candidate_inputs)
+                .expect("Failed to make privacy preserving selection");
             let selected_utxo = available_inputs
                 .iter()
                 .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
@@ -1091,8 +1093,9 @@ mod integration {
                     .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
                     .collect();
 
-                let selected_outpoint =
-                    payjoin.try_preserving_privacy(candidate_inputs).expect("gg");
+                let selected_outpoint = payjoin
+                    .try_preserving_privacy(candidate_inputs)
+                    .expect("Failed to make privacy preserving selection");
                 let selected_utxo = available_inputs
                     .iter()
                     .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)

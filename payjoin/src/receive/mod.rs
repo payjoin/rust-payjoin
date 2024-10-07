@@ -25,7 +25,6 @@
 //! [reference implementation](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli)
 
 use std::cmp::{max, min};
-use std::collections::HashMap;
 
 use bitcoin::base64::prelude::BASE64_STANDARD;
 use bitcoin::base64::Engine;
@@ -508,9 +507,10 @@ impl WantsInputs {
     /// A simple consolidation is otherwise chosen if available.
     pub fn try_preserving_privacy(
         &self,
-        candidate_inputs: HashMap<Amount, OutPoint>,
+        candidate_inputs: impl IntoIterator<Item = (Amount, OutPoint)>,
     ) -> Result<OutPoint, SelectionError> {
-        if candidate_inputs.is_empty() {
+        let mut candidate_inputs = candidate_inputs.into_iter().peekable();
+        if candidate_inputs.peek().is_none() {
             return Err(InternalSelectionError::Empty.into());
         }
 
@@ -534,7 +534,7 @@ impl WantsInputs {
     /// https://eprint.iacr.org/2022/589.pdf
     fn avoid_uih(
         &self,
-        candidate_inputs: HashMap<Amount, OutPoint>,
+        candidate_inputs: impl IntoIterator<Item = (Amount, OutPoint)>,
     ) -> Result<OutPoint, SelectionError> {
         let min_original_out_sats = self
             .payjoin_psbt
@@ -572,9 +572,12 @@ impl WantsInputs {
 
     fn select_first_candidate(
         &self,
-        candidate_inputs: HashMap<Amount, OutPoint>,
+        candidate_inputs: impl IntoIterator<Item = (Amount, OutPoint)>,
     ) -> Result<OutPoint, SelectionError> {
-        candidate_inputs.values().next().cloned().ok_or(InternalSelectionError::NotFound.into())
+        candidate_inputs
+            .into_iter()
+            .next()
+            .map_or(Err(InternalSelectionError::NotFound.into()), |(_, outpoint)| Ok(outpoint))
     }
 
     /// Add the provided list of inputs to the transaction.

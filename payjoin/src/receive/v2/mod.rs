@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
@@ -460,7 +459,7 @@ impl WantsInputs {
     /// https://eprint.iacr.org/2022/589.pdf
     pub fn try_preserving_privacy(
         &self,
-        candidate_inputs: HashMap<Amount, OutPoint>,
+        candidate_inputs: impl IntoIterator<Item = (Amount, OutPoint)>,
     ) -> Result<OutPoint, SelectionError> {
         self.inner.try_preserving_privacy(candidate_inputs)
     }

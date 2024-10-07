@@ -18,6 +18,7 @@ pub(crate) enum InternalValidationError {
     Parse,
     Io(std::io::Error),
     InvalidAddressType(crate::psbt::AddressTypeError),
+    NoInputs,
     VersionsDontMatch {
         proposed: Version,
         original: Version,
@@ -80,6 +81,7 @@ impl fmt::Display for ValidationError {
             Parse => write!(f, "couldn't decode as PSBT or JSON",),
             Io(e) => write!(f, "couldn't read PSBT: {}", e),
             InvalidAddressType(e) => write!(f, "invalid input address type: {}", e),
+            NoInputs => write!(f, "PSBT doesn't have any inputs"),
             VersionsDontMatch { proposed, original, } => write!(f, "proposed transaction version {} doesn't match the original {}", proposed, original),
             LockTimesDontMatch { proposed, original, } => write!(f, "proposed transaction lock time {} doesn't match the original {}", proposed, original),
             SenderTxinSequenceChanged { proposed, original, } => write!(f, "proposed transaction sequence number {} doesn't match the original {}", proposed, original),
@@ -122,6 +124,7 @@ impl std::error::Error for ValidationError {
             Parse => None,
             Io(error) => Some(error),
             InvalidAddressType(error) => Some(error),
+            NoInputs => None,
             VersionsDontMatch { proposed: _, original: _ } => None,
             LockTimesDontMatch { proposed: _, original: _ } => None,
             SenderTxinSequenceChanged { proposed: _, original: _ } => None,

@@ -27,7 +27,7 @@
 use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
-use bitcoin::{AddressType, Amount, FeeRate, Script, ScriptBuf, Sequence, TxOut, Weight};
+use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
 pub use error::{CreateRequestError, ResponseError, ValidationError};
 pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 #[cfg(feature = "v2")]
@@ -221,22 +221,12 @@ impl<'a> RequestBuilder<'a> {
         )?;
         clear_unneeded_fields(&mut psbt);
 
-        let zeroth_input = psbt.input_pairs().next().ok_or(InternalCreateRequestError::NoInputs)?;
-
-        let sequence = zeroth_input.txin.sequence;
-        let input_type = zeroth_input
-            .address_type()
-            .map_err(InternalCreateRequestError::AddressType)?
-            .to_string();
-
         Ok(RequestContext {
             psbt,
             endpoint,
             disable_output_substitution,
             fee_contribution,
             payee,
-            input_type,
-            sequence,
             min_fee_rate: self.min_fee_rate,
             #[cfg(feature = "v2")]
             e: crate::v2::HpkeKeyPair::gen_keypair().secret_key().clone(),
@@ -252,8 +242,6 @@ pub struct RequestContext {
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
-    input_type: String,
-    sequence: Sequence,
     payee: ScriptBuf,
     #[cfg(feature = "v2")]
     e: crate::v2::HpkeSecretKey,
@@ -278,8 +266,6 @@ impl RequestContext {
                 disable_output_substitution: self.disable_output_substitution,
                 fee_contribution: self.fee_contribution,
                 payee: self.payee.clone(),
-                input_type: AddressType::from_str(&self.input_type).expect("Unknown address type"),
-                sequence: self.sequence,
                 min_fee_rate: self.min_fee_rate,
             },
         ))
@@ -348,9 +334,6 @@ impl RequestContext {
                     disable_output_substitution: self.disable_output_substitution,
                     fee_contribution: self.fee_contribution,
                     payee: self.payee.clone(),
-                    input_type: AddressType::from_str(&self.input_type)
-                        .expect("Unknown address type"),
-                    sequence: self.sequence,
                     min_fee_rate: self.min_fee_rate,
                 },
                 rs: Some(self.extract_rs_pubkey()?),
@@ -393,8 +376,6 @@ pub struct ContextV1 {
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
-    input_type: AddressType,
-    sequence: Sequence,
     payee: ScriptBuf,
 }
 
@@ -561,6 +542,11 @@ impl ContextV1 {
                 }
                 // theirs (receiver)
                 None | Some(_) => {
+                    let original = self
+                        .original_psbt
+                        .input_pairs()
+                        .next()
+                        .ok_or(InternalValidationError::NoInputs)?;
                     // Verify the PSBT input is finalized
                     ensure!(
                         proposed.psbtin.final_script_sig.is_some()
@@ -573,8 +559,8 @@ impl ContextV1 {
                             || proposed.psbtin.non_witness_utxo.is_some(),
                         ReceiverTxinMissingUtxoInfo
                     );
-                    ensure!(proposed.txin.sequence == self.sequence, MixedSequence);
-                    check_eq!(proposed.address_type()?, self.input_type, MixedInputTypes);
+                    ensure!(proposed.txin.sequence == original.txin.sequence, MixedSequence);
+                    check_eq!(proposed.address_type()?, original.address_type()?, MixedInputTypes);
                 }
             }
         }
@@ -844,15 +830,12 @@ mod test {
         let original_psbt = Psbt::from_str(ORIGINAL_PSBT).unwrap();
         eprintln!("original: {:#?}", original_psbt);
         let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
-        let sequence = original_psbt.unsigned_tx.input[0].sequence;
         let ctx = super::ContextV1 {
             original_psbt,
             disable_output_substitution: false,
             fee_contribution: Some((bitcoin::Amount::from_sat(182), 0)),
             min_fee_rate: FeeRate::ZERO,
             payee,
-            input_type: bitcoin::AddressType::P2sh,
-            sequence,
         };
         ctx
     }
@@ -907,8 +890,6 @@ mod test {
             disable_output_substitution: false,
             fee_contribution: None,
             min_fee_rate: FeeRate::ZERO,
-            input_type: bitcoin::AddressType::P2sh.to_string(),
-            sequence: Sequence::MAX,
             payee: ScriptBuf::from(vec![0x00]),
             e: HpkeSecretKey(
                 <hpke::kem::SecpK256HkdfSha256 as hpke::Kem>::PrivateKey::from_bytes(&[0x01; 32])

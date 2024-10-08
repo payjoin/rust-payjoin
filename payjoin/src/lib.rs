@@ -36,8 +36,6 @@ pub use v2::OhttpKeys;
 pub mod io;
 
 #[cfg(any(feature = "send", feature = "receive"))]
-pub(crate) mod input_type;
-#[cfg(any(feature = "send", feature = "receive"))]
 pub(crate) mod psbt;
 #[cfg(any(feature = "send", all(feature = "receive", feature = "v2")))]
 mod request;
@@ -45,8 +43,6 @@ mod request;
 pub use request::*;
 
 mod uri;
-#[cfg(any(feature = "send", feature = "receive"))]
-pub(crate) mod weight;
 
 #[cfg(feature = "base64")]
 pub use bitcoin::base64;

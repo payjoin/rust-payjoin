@@ -73,9 +73,11 @@ pub(crate) enum InternalRequestError {
     /// The sender is trying to spend the receiver input
     InputOwned(bitcoin::ScriptBuf),
     /// The original psbt has mixed input address types that could harm privacy
-    MixedInputScripts(crate::input_type::InputType, crate::input_type::InputType),
-    /// Unrecognized input type
-    InputType(crate::input_type::InputTypeError),
+    MixedInputScripts(bitcoin::AddressType, bitcoin::AddressType),
+    /// The address type could not be determined
+    AddressType(crate::psbt::AddressTypeError),
+    /// The expected input weight cannot be determined
+    InputWeight(crate::psbt::InputWeightError),
     /// Original PSBT input has been seen before. Only automatic receivers, aka "interactive" in the spec
     /// look out for these to prevent probing attacks.
     InputSeen(bitcoin::OutPoint),
@@ -155,8 +157,10 @@ impl fmt::Display for RequestError {
                 "original-psbt-rejected",
                 &format!("Mixed input scripts: {}; {}.", type_a, type_b),
             ),
-            InternalRequestError::InputType(e) =>
-                write_error(f, "original-psbt-rejected", &format!("Input Type Error: {}.", e)),
+            InternalRequestError::AddressType(e) =>
+                write_error(f, "original-psbt-rejected", &format!("AddressType Error: {}", e)),
+            InternalRequestError::InputWeight(e) =>
+                write_error(f, "original-psbt-rejected", &format!("InputWeight Error: {}", e)),
             InternalRequestError::InputSeen(_) =>
                 write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
             #[cfg(feature = "v2")]
@@ -196,6 +200,8 @@ impl std::error::Error for RequestError {
             InternalRequestError::SenderParams(e) => Some(e),
             InternalRequestError::InconsistentPsbt(e) => Some(e),
             InternalRequestError::PrevTxOut(e) => Some(e),
+            InternalRequestError::AddressType(e) => Some(e),
+            InternalRequestError::InputWeight(e) => Some(e),
             #[cfg(feature = "v2")]
             InternalRequestError::ParsePsbt(e) => Some(e),
             #[cfg(feature = "v2")]

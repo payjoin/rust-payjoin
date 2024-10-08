@@ -2,9 +2,7 @@ use std::fmt::{self, Display};
 
 use bitcoin::locktime::absolute::LockTime;
 use bitcoin::transaction::Version;
-use bitcoin::Sequence;
-
-use crate::input_type::{InputType, InputTypeError};
+use bitcoin::{AddressType, Sequence};
 
 /// Error that may occur when the response from receiver is malformed.
 ///
@@ -19,8 +17,8 @@ pub struct ValidationError {
 pub(crate) enum InternalValidationError {
     Parse,
     Io(std::io::Error),
-    InvalidInputType(InputTypeError),
-    InvalidProposedInput(crate::psbt::PrevTxOutError),
+    InvalidAddressType(crate::psbt::AddressTypeError),
+    NoInputs,
     VersionsDontMatch {
         proposed: Version,
         original: Version,
@@ -43,8 +41,8 @@ pub(crate) enum InternalValidationError {
     ReceiverTxinMissingUtxoInfo,
     MixedSequence,
     MixedInputTypes {
-        proposed: InputType,
-        original: InputType,
+        proposed: AddressType,
+        original: AddressType,
     },
     MissingOrShuffledInputs,
     TxOutContainsKeyPaths,
@@ -52,17 +50,15 @@ pub(crate) enum InternalValidationError {
     DisallowedOutputSubstitution,
     OutputValueDecreased,
     MissingOrShuffledOutputs,
-    Inflation,
     AbsoluteFeeDecreased,
     PayeeTookContributedFee,
     FeeContributionPaysOutputSizeIncrease,
     FeeRateBelowMinimum,
+    Psbt(bitcoin::psbt::Error),
     #[cfg(feature = "v2")]
     Hpke(crate::v2::HpkeError),
     #[cfg(feature = "v2")]
     OhttpEncapsulation(crate::v2::OhttpEncapsulationError),
-    #[cfg(feature = "v2")]
-    Psbt(bitcoin::psbt::Error),
     #[cfg(feature = "v2")]
     UnexpectedStatusCode,
 }
@@ -70,8 +66,11 @@ pub(crate) enum InternalValidationError {
 impl From<InternalValidationError> for ValidationError {
     fn from(value: InternalValidationError) -> Self { ValidationError { internal: value } }
 }
-impl From<InputTypeError> for InternalValidationError {
-    fn from(value: InputTypeError) -> Self { InternalValidationError::InvalidInputType(value) }
+
+impl From<crate::psbt::AddressTypeError> for InternalValidationError {
+    fn from(value: crate::psbt::AddressTypeError) -> Self {
+        InternalValidationError::InvalidAddressType(value)
+    }
 }
 
 impl fmt::Display for ValidationError {
@@ -81,8 +80,8 @@ impl fmt::Display for ValidationError {
         match &self.internal {
             Parse => write!(f, "couldn't decode as PSBT or JSON",),
             Io(e) => write!(f, "couldn't read PSBT: {}", e),
-            InvalidInputType(e) => write!(f, "invalid transaction input type: {}", e),
-            InvalidProposedInput(e) => write!(f, "invalid proposed transaction input: {}", e),
+            InvalidAddressType(e) => write!(f, "invalid input address type: {}", e),
+            NoInputs => write!(f, "PSBT doesn't have any inputs"),
             VersionsDontMatch { proposed, original, } => write!(f, "proposed transaction version {} doesn't match the original {}", proposed, original),
             LockTimesDontMatch { proposed, original, } => write!(f, "proposed transaction lock time {} doesn't match the original {}", proposed, original),
             SenderTxinSequenceChanged { proposed, original, } => write!(f, "proposed transaction sequence number {} doesn't match the original {}", proposed, original),
@@ -102,17 +101,15 @@ impl fmt::Display for ValidationError {
             DisallowedOutputSubstitution => write!(f, "the receiver change output despite it being disallowed"),
             OutputValueDecreased => write!(f, "the amount in our non-fee output was decreased"),
             MissingOrShuffledOutputs => write!(f, "proposed transaction is missing outputs of the sender or they are shuffled"),
-            Inflation => write!(f, "proposed transaction is attempting inflation"),
             AbsoluteFeeDecreased => write!(f, "abslute fee of proposed transaction is lower than original"),
             PayeeTookContributedFee => write!(f, "payee tried to take fee contribution for himself"),
             FeeContributionPaysOutputSizeIncrease => write!(f, "fee contribution pays for additional outputs"),
             FeeRateBelowMinimum =>  write!(f, "the fee rate of proposed transaction is below minimum"),
+            Psbt(e) => write!(f, "psbt error: {}", e),
             #[cfg(feature = "v2")]
             Hpke(e) => write!(f, "v2 error: {}", e),
             #[cfg(feature = "v2")]
             OhttpEncapsulation(e) => write!(f, "Ohttp encapsulation error: {}", e),
-            #[cfg(feature = "v2")]
-            Psbt(e) => write!(f, "psbt error: {}", e),
             #[cfg(feature = "v2")]
             UnexpectedStatusCode => write!(f, "unexpected status code"),
         }
@@ -126,8 +123,8 @@ impl std::error::Error for ValidationError {
         match &self.internal {
             Parse => None,
             Io(error) => Some(error),
-            InvalidInputType(error) => Some(error),
-            InvalidProposedInput(error) => Some(error),
+            InvalidAddressType(error) => Some(error),
+            NoInputs => None,
             VersionsDontMatch { proposed: _, original: _ } => None,
             LockTimesDontMatch { proposed: _, original: _ } => None,
             SenderTxinSequenceChanged { proposed: _, original: _ } => None,
@@ -147,17 +144,15 @@ impl std::error::Error for ValidationError {
             DisallowedOutputSubstitution => None,
             OutputValueDecreased => None,
             MissingOrShuffledOutputs => None,
-            Inflation => None,
             AbsoluteFeeDecreased => None,
             PayeeTookContributedFee => None,
             FeeContributionPaysOutputSizeIncrease => None,
             FeeRateBelowMinimum => None,
+            Psbt(error) => Some(error),
             #[cfg(feature = "v2")]
             Hpke(error) => Some(error),
             #[cfg(feature = "v2")]
             OhttpEncapsulation(error) => Some(error),
-            #[cfg(feature = "v2")]
-            Psbt(error) => Some(error),
             #[cfg(feature = "v2")]
             UnexpectedStatusCode => None,
         }
@@ -186,8 +181,8 @@ pub(crate) enum InternalCreateRequestError {
     ChangeIndexOutOfBounds,
     ChangeIndexPointsAtPayee,
     Url(url::ParseError),
-    PrevTxOut(crate::psbt::PrevTxOutError),
-    InputType(crate::input_type::InputTypeError),
+    AddressType(crate::psbt::AddressTypeError),
+    InputWeight(crate::psbt::InputWeightError),
     #[cfg(feature = "v2")]
     Hpke(crate::v2::HpkeError),
     #[cfg(feature = "v2")]
@@ -217,8 +212,8 @@ impl fmt::Display for CreateRequestError {
             ChangeIndexOutOfBounds => write!(f, "fee output index is points out of bounds"),
             ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
             Url(e) => write!(f, "cannot parse url: {:#?}", e),
-            PrevTxOut(e) => write!(f, "invalid previous transaction output: {}", e),
-            InputType(e) => write!(f, "invalid input type: {}", e),
+            AddressType(e) => write!(f, "can not determine input address type: {}", e),
+            InputWeight(e) => write!(f, "can not determine expected input weight: {}", e),
             #[cfg(feature = "v2")]
             Hpke(e) => write!(f, "v2 error: {}", e),
             #[cfg(feature = "v2")]
@@ -250,8 +245,8 @@ impl std::error::Error for CreateRequestError {
             ChangeIndexOutOfBounds => None,
             ChangeIndexPointsAtPayee => None,
             Url(error) => Some(error),
-            PrevTxOut(error) => Some(error),
-            InputType(error) => Some(error),
+            AddressType(error) => Some(error),
+            InputWeight(error) => Some(error),
             #[cfg(feature = "v2")]
             Hpke(error) => Some(error),
             #[cfg(feature = "v2")]
@@ -268,6 +263,12 @@ impl std::error::Error for CreateRequestError {
 
 impl From<InternalCreateRequestError> for CreateRequestError {
     fn from(value: InternalCreateRequestError) -> Self { CreateRequestError(value) }
+}
+
+impl From<crate::psbt::AddressTypeError> for CreateRequestError {
+    fn from(value: crate::psbt::AddressTypeError) -> Self {
+        CreateRequestError(InternalCreateRequestError::AddressType(value))
+    }
 }
 
 #[cfg(feature = "v2")]

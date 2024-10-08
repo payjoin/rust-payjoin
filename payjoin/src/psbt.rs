@@ -208,7 +208,7 @@ impl<'a> InputPair<'a> {
                 },
             P2wpkh => Ok(InputWeightPrediction::P2WPKH_MAX),
             P2wsh => Err(InputWeightError::NotSupported),
-            P2tr => Ok(InputWeightPrediction::P2TR_KEY_NON_DEFAULT_SIGHASH),
+            P2tr => Ok(InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH),
             _ => Err(AddressTypeError::UnknownAddressType.into()),
         }?;
 

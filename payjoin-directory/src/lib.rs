@@ -3,12 +3,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
-use bitcoin::base64::Engine;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::body::{Body, Bytes, Incoming};
-use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE, LOCATION};
+use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode, Uri};
@@ -20,7 +18,6 @@ use tracing::{debug, error, info, trace};
 pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
 pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
-pub const DEFAULT_BASE_URL: &str = "https://localhost";
 
 const MAX_BUFFER_SIZE: usize = 65536;
 
@@ -32,7 +29,6 @@ mod db;
 use crate::db::DbPool;
 
 pub async fn listen_tcp(
-    base_url: String,
     port: u16,
     db_host: String,
     timeout: Duration,
@@ -44,14 +40,13 @@ pub async fn listen_tcp(
     while let Ok((stream, _)) = listener.accept().await {
         let pool = pool.clone();
         let ohttp = ohttp.clone();
-        let base_url = base_url.clone();
         let io = TokioIo::new(stream);
         tokio::spawn(async move {
             if let Err(err) = http1::Builder::new()
                 .serve_connection(
                     io,
                     service_fn(move |req| {
-                        serve_payjoin_directory(req, pool.clone(), ohttp.clone(), base_url.clone())
+                        serve_payjoin_directory(req, pool.clone(), ohttp.clone())
                     }),
                 )
                 .with_upgrades()
@@ -67,7 +62,6 @@ pub async fn listen_tcp(
 
 #[cfg(feature = "danger-local-https")]
 pub async fn listen_tcp_with_tls(
-    base_url: String,
     port: u16,
     db_host: String,
     timeout: Duration,
@@ -81,7 +75,6 @@ pub async fn listen_tcp_with_tls(
     while let Ok((stream, _)) = listener.accept().await {
         let pool = pool.clone();
         let ohttp = ohttp.clone();
-        let base_url = base_url.clone();
         let tls_acceptor = tls_acceptor.clone();
         tokio::spawn(async move {
             let tls_stream = match tls_acceptor.accept(stream).await {
@@ -95,7 +88,7 @@ pub async fn listen_tcp_with_tls(
                 .serve_connection(
                     TokioIo::new(tls_stream),
                     service_fn(move |req| {
-                        serve_payjoin_directory(req, pool.clone(), ohttp.clone(), base_url.clone())
+                        serve_payjoin_directory(req, pool.clone(), ohttp.clone())
                     }),
                 )
                 .with_upgrades()
@@ -146,7 +139,6 @@ async fn serve_payjoin_directory(
     req: Request<Incoming>,
     pool: DbPool,
     ohttp: Arc<Mutex<ohttp::Server>>,
-    base_url: String,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
     let path = req.uri().path().to_string();
     let query = req.uri().query().unwrap_or_default().to_string();
@@ -155,7 +147,7 @@ async fn serve_payjoin_directory(
     let path_segments: Vec<&str> = path.split('/').collect();
     debug!("serve_payjoin_directory: {:?}", &path_segments);
     let mut response = match (parts.method, path_segments.as_slice()) {
-        (Method::POST, ["", ""]) => handle_ohttp_gateway(body, pool, ohttp, base_url).await,
+        (Method::POST, ["", ""]) => handle_ohttp_gateway(body, pool, ohttp).await,
         (Method::GET, ["", "ohttp-keys"]) => get_ohttp_keys(&ohttp).await,
         (Method::POST, ["", id]) => post_fallback_v1(id, query, body, pool).await,
         (Method::GET, ["", "health"]) => health_check().await,
@@ -173,7 +165,6 @@ async fn handle_ohttp_gateway(
     body: Incoming,
     pool: DbPool,
     ohttp: Arc<Mutex<ohttp::Server>>,
-    base_url: String,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
     // decapsulate
     let ohttp_body =
@@ -199,7 +190,7 @@ async fn handle_ohttp_gateway(
     }
     let request = http_req.body(full(body))?;
 
-    let response = handle_v2(pool, base_url, request).await?;
+    let response = handle_v2(pool, request).await?;
 
     let (parts, body) = response.into_parts();
     let mut bhttp_res = bhttp::Message::response(parts.status.as_u16());
@@ -221,7 +212,6 @@ async fn handle_ohttp_gateway(
 
 async fn handle_v2(
     pool: DbPool,
-    base_url: String,
     req: Request<BoxBody<Bytes, hyper::Error>>,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
     let path = req.uri().path().to_string();
@@ -230,7 +220,6 @@ async fn handle_v2(
     let path_segments: Vec<&str> = path.split('/').collect();
     debug!("handle_v2: {:?}", &path_segments);
     match (parts.method, path_segments.as_slice()) {
-        (Method::POST, &["", ""]) => post_session(base_url, body).await,
         (Method::POST, &["", id]) => post_fallback_v2(id, body, pool).await,
         (Method::GET, &["", id]) => get_fallback(id, pool).await,
         (Method::PUT, &["", id]) => post_payjoin(id, body, pool).await,
@@ -280,24 +269,6 @@ impl HandlerError {
 
 impl From<hyper::http::Error> for HandlerError {
     fn from(e: hyper::http::Error) -> Self { HandlerError::InternalServerError(e.into()) }
-}
-
-async fn post_session(
-    base_url: String,
-    body: BoxBody<Bytes, hyper::Error>,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-    let bytes = body.collect().await.map_err(|e| HandlerError::BadRequest(e.into()))?.to_bytes();
-    let base64_id =
-        String::from_utf8(bytes.to_vec()).map_err(|e| HandlerError::BadRequest(e.into()))?;
-    let pubkey_bytes: Vec<u8> =
-        BASE64_URL_SAFE_NO_PAD.decode(base64_id).map_err(|e| HandlerError::BadRequest(e.into()))?;
-    let pubkey = bitcoin::secp256k1::PublicKey::from_slice(&pubkey_bytes)
-        .map_err(|e| HandlerError::BadRequest(e.into()))?;
-    tracing::info!("Initialized session with pubkey: {:?}", pubkey);
-    Ok(Response::builder()
-        .header(LOCATION, format!("{}/{}", base_url, pubkey))
-        .status(StatusCode::CREATED)
-        .body(empty())?)
 }
 
 async fn post_fallback_v1(
@@ -424,33 +395,4 @@ fn empty() -> BoxBody<Bytes, hyper::Error> {
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into()).map_err(|never| match never {}).boxed()
-}
-
-#[cfg(test)]
-mod tests {
-    use hyper::Request;
-
-    use super::*;
-
-    /// Ensure that the POST / endpoint returns a 201 Created with a Location header
-    /// as is semantically correct when creating a resource.
-    ///
-    /// https://datatracker.ietf.org/doc/html/rfc9110#name-post
-    #[tokio::test]
-    async fn test_post_session() -> Result<(), Box<dyn std::error::Error>> {
-        let base_url = "https://localhost".to_string();
-        let body = full("A6z245ZfDfnlk7_HiAp6sPmNaVYwADih-vCGE3eysWp7");
-
-        let request = Request::builder().method(Method::POST).uri("/").body(body)?;
-
-        let response = post_session(base_url.clone(), request.into_body())
-            .await
-            .map_err(|e| format!("{:?}", e))?;
-
-        assert_eq!(response.status(), StatusCode::CREATED);
-        assert!(response.headers().contains_key(LOCATION));
-        let location_header = response.headers().get(LOCATION).ok_or("Missing LOCATION header")?;
-        assert!(location_header.to_str()?.starts_with(&base_url));
-        Ok(())
-    }
 }

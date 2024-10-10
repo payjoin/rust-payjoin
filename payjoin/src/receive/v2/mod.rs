@@ -45,16 +45,19 @@ where
     Ok(address.assume_checked())
 }
 
-/// Initializes a new payjoin session, including necessary context
-/// information for communication and cryptographic operations.
-#[derive(Debug, Clone)]
-pub struct SessionInitializer {
+fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> String {
+    BASE64_URL_SAFE_NO_PAD.encode(pubkey.to_compressed_bytes())
+}
+
+/// A payjoin V2 receiver, allowing for polled requests to the
+/// payjoin directory and response processing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Receiver {
     context: SessionContext,
 }
 
-#[cfg(feature = "v2")]
-impl SessionInitializer {
-    /// Creates a new `SessionInitializer` with the provided parameters.
+impl Receiver {
+    /// Creates a new `Receiver` with the provided parameters.
     ///
     /// # Parameters
     /// - `address`: The Bitcoin address for the payjoin session.
@@ -64,7 +67,7 @@ impl SessionInitializer {
     /// - `expire_after`: The duration after which the session expires.
     ///
     /// # Returns
-    /// A new instance of `SessionInitializer`.
+    /// A new instance of `Receiver`.
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
@@ -90,56 +93,7 @@ impl SessionInitializer {
         }
     }
 
-    pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
-        let url = self.context.ohttp_relay.clone();
-        let subdirectory = subdir_path_from_pubkey(self.context.s.public_key());
-        let (body, ctx) = crate::v2::ohttp_encapsulate(
-            &mut self.context.ohttp_keys,
-            "POST",
-            self.context.directory.as_str(),
-            Some(subdirectory.as_bytes()),
-        )?;
-        let req = Request::new_v2(url, body);
-        Ok((req, ctx))
-    }
-
-    pub fn process_res(
-        mut self,
-        mut res: impl std::io::Read,
-        ctx: ohttp::ClientResponse,
-    ) -> Result<ActiveSession, Error> {
-        let mut buf = Vec::new();
-        let _ = res.read_to_end(&mut buf);
-        let response = crate::v2::ohttp_decapsulate(ctx, &buf)?;
-        if !response.status().is_success() {
-            return Err(Error::Server("Enrollment failed, expected success status".into()));
-        }
-        log::debug!("Received response headers: {:?}", response.headers());
-        let location = response
-            .headers()
-            .get("location")
-            .ok_or(Error::Server("Missing location header".into()))?
-            .to_str()
-            .map_err(|e| Error::Server(format!("Invalid location header: {}", e).into()))?;
-        self.context.subdirectory =
-            Some(url::Url::parse(location).map_err(|e| Error::Server(e.into()))?);
-
-        Ok(ActiveSession { context: self.context.clone() })
-    }
-}
-
-fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> String {
-    BASE64_URL_SAFE_NO_PAD.encode(pubkey.to_compressed_bytes())
-}
-
-/// An active payjoin V2 session, allowing for polled requests to the
-/// payjoin directory and response processing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActiveSession {
-    context: SessionContext,
-}
-
-impl ActiveSession {
+    // OHTTP Encapsulated HTTP GET request for the Original PSBT
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), SessionError> {
         if SystemTime::now() > self.context.expiry {
             return Err(InternalSessionError::Expired(self.context.expiry).into());
@@ -561,7 +515,7 @@ mod test {
 
     #[test]
     #[cfg(feature = "v2")]
-    fn active_session_ser_de_roundtrip() {
+    fn receiver_ser_de_roundtrip() {
         use ohttp::hpke::{Aead, Kdf, Kem};
         use ohttp::{KeyId, SymmetricSuite};
         const KEY_ID: KeyId = 1;
@@ -569,7 +523,7 @@ mod test {
         const SYMMETRIC: &[SymmetricSuite] =
             &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
 
-        let session = ActiveSession {
+        let session = Receiver {
             context: SessionContext {
                 address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
                     .unwrap()
@@ -586,7 +540,7 @@ mod test {
             },
         };
         let serialized = serde_json::to_string(&session).unwrap();
-        let deserialized: ActiveSession = serde_json::from_str(&serialized).unwrap();
+        let deserialized: Receiver = serde_json::from_str(&serialized).unwrap();
         assert_eq!(session, deserialized);
     }
 }

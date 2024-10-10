@@ -7,7 +7,7 @@ use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::receive::v2::ActiveSession;
+use payjoin::receive::v2::Receiver;
 use payjoin::send::RequestContext;
 use payjoin::{bitcoin, Error, Uri};
 use tokio::signal;
@@ -75,32 +75,16 @@ impl AppTrait for App {
     }
 
     async fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
-        use payjoin::receive::v2::SessionInitializer;
-
         let address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
         let amount = Amount::from_sat(amount_arg.parse()?);
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
-        let mut initializer = SessionInitializer::new(
+        let session = Receiver::new(
             address,
             self.config.pj_directory.clone(),
             ohttp_keys.clone(),
             self.config.ohttp_relay.clone(),
             None,
         );
-        let (req, ctx) =
-            initializer.extract_req().map_err(|e| anyhow!("Failed to extract request {}", e))?;
-        println!("Starting new Payjoin session with {}", self.config.pj_directory);
-        let http = http_agent()?;
-        let ohttp_response = http
-            .post(req.url)
-            .header("Content-Type", req.content_type)
-            .body(req.body)
-            .send()
-            .await
-            .map_err(map_reqwest_err)?;
-        let session = initializer
-            .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), ctx)
-            .map_err(|e| anyhow!("Enrollment failed {}", e))?;
         self.db.insert_recv_session(session.clone())?;
         self.spawn_payjoin_receiver(session, Some(amount)).await
     }
@@ -123,7 +107,7 @@ impl App {
 
     async fn spawn_payjoin_receiver(
         &self,
-        mut session: ActiveSession,
+        mut session: Receiver,
         amount: Option<Amount>,
     ) -> Result<()> {
         println!("Receive session established");
@@ -244,7 +228,7 @@ impl App {
 
     async fn long_poll_fallback(
         &self,
-        session: &mut payjoin::receive::v2::ActiveSession,
+        session: &mut payjoin::receive::v2::Receiver,
     ) -> Result<payjoin::receive::v2::UncheckedProposal> {
         loop {
             let (req, context) = session.extract_req()?;

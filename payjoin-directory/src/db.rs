@@ -4,8 +4,8 @@ use futures::StreamExt;
 use redis::{AsyncCommands, Client, ErrorKind, RedisError, RedisResult};
 use tracing::debug;
 
-const RES_COLUMN: &str = "res";
-const REQ_COLUMN: &str = "req";
+const DEFAULT_COLUMN: &str = "";
+const PJ_V1_COLUMN: &str = "pjv1";
 
 #[derive(Debug, Clone)]
 pub(crate) struct DbPool {
@@ -19,20 +19,20 @@ impl DbPool {
         Ok(Self { client, timeout })
     }
 
-    pub async fn peek_req(&self, pubkey_id: &str) -> Option<RedisResult<Vec<u8>>> {
-        self.peek_with_timeout(pubkey_id, REQ_COLUMN).await
+    pub async fn push_default(&self, pubkey_id: &str, data: Vec<u8>) -> RedisResult<()> {
+        self.push(pubkey_id, DEFAULT_COLUMN, data).await
     }
 
-    pub async fn peek_res(&self, pubkey_id: &str) -> Option<RedisResult<Vec<u8>>> {
-        self.peek_with_timeout(pubkey_id, RES_COLUMN).await
+    pub async fn peek_default(&self, pubkey_id: &str) -> Option<RedisResult<Vec<u8>>> {
+        self.peek_with_timeout(pubkey_id, DEFAULT_COLUMN).await
     }
 
-    pub async fn push_req(&self, pubkey_id: &str, data: Vec<u8>) -> RedisResult<()> {
-        self.push(pubkey_id, REQ_COLUMN, data).await
+    pub async fn push_v1(&self, pubkey_id: &str, data: Vec<u8>) -> RedisResult<()> {
+        self.push(pubkey_id, PJ_V1_COLUMN, data).await
     }
 
-    pub async fn push_res(&self, pubkey_id: &str, data: Vec<u8>) -> RedisResult<()> {
-        self.push(pubkey_id, RES_COLUMN, data).await
+    pub async fn peek_v1(&self, pubkey_id: &str) -> Option<RedisResult<Vec<u8>>> {
+        self.peek_with_timeout(pubkey_id, PJ_V1_COLUMN).await
     }
 
     async fn push(&self, pubkey_id: &str, channel_type: &str, data: Vec<u8>) -> RedisResult<()> {

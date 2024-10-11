@@ -12,7 +12,7 @@ mod integration {
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use log::{log_enabled, Level};
     use once_cell::sync::{Lazy, OnceCell};
-    use payjoin::send::RequestBuilder;
+    use payjoin::send::SenderBuilder;
     use payjoin::{PjUri, PjUriBuilder, Request, Uri};
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
     use url::Url;
@@ -92,7 +92,7 @@ mod integration {
                 .unwrap();
             let psbt = build_original_psbt(&sender, &uri)?;
             debug!("Original psbt: {:#?}", psbt);
-            let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt, uri)?
+            let (req, ctx) = SenderBuilder::from_psbt_and_uri(psbt, uri)?
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);
@@ -157,7 +157,7 @@ mod integration {
                 .unwrap();
             let psbt = build_original_psbt(&sender, &uri)?;
             debug!("Original psbt: {:#?}", psbt);
-            let (req, _ctx) = RequestBuilder::from_psbt_and_uri(psbt, uri)?
+            let (req, _ctx) = SenderBuilder::from_psbt_and_uri(psbt, uri)?
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);
@@ -179,6 +179,7 @@ mod integration {
         use bitcoin::Address;
         use http::StatusCode;
         use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
+        use payjoin::send::Context;
         use payjoin::{OhttpKeys, PjUri, UriExt};
         use reqwest::{Client, ClientBuilder, Error, Response};
         use testcontainers_modules::redis::Redis;
@@ -283,9 +284,9 @@ mod integration {
                     Some(std::time::SystemTime::now()),
                 )
                 .build();
-                let mut expired_req_ctx = RequestBuilder::from_psbt_and_uri(psbt, expired_pj_uri)?
+                let mut expired_req_ctx = SenderBuilder::from_psbt_and_uri(psbt, expired_pj_uri)?
                     .build_non_incentivizing(FeeRate::BROADCAST_MIN)?;
-                match expired_req_ctx.extract_v2(directory.to_owned()) {
+                match expired_req_ctx.extract_highest_version(directory.to_owned()) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
                     _ => assert!(false, "Expired send session should error"),
@@ -353,10 +354,14 @@ mod integration {
                     .check_pj_supported()
                     .unwrap();
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
-                let mut req_ctx = RequestBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
+                let mut req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
-                    req_ctx.extract_v2(directory.to_owned())?;
+                    req_ctx.extract_highest_version(directory.to_owned())?;
+                let send_ctx = match send_ctx {
+                    Context::V2(ctx) => ctx,
+                    _ => panic!("V2 context expected"),
+                };
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -366,10 +371,9 @@ mod integration {
                     .unwrap();
                 log::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success());
-                let response_body =
+                let send_ctx =
                     send_ctx.process_response(&mut response.bytes().await?.to_vec().as_slice())?;
-                // No response body yet since we are async and pushed fallback_psbt to the buffer
-                assert!(response_body.is_none());
+                // POST Original PSBT
 
                 // **********************
                 // Inside the Receiver:
@@ -383,7 +387,12 @@ mod integration {
                 let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None);
                 assert!(!payjoin_proposal.is_output_substitution_disabled());
                 let (req, ctx) = payjoin_proposal.extract_v2_req()?;
-                let response = agent.post(req.url).body(req.body).send().await?;
+                let response = agent
+                    .post(req.url)
+                    .header("Content-Type", req.content_type)
+                    .body(req.body)
+                    .send()
+                    .await?;
                 let res = response.bytes().await?.to_vec();
                 payjoin_proposal.process_res(res, ctx)?;
 
@@ -391,11 +400,18 @@ mod integration {
                 // Inside the Sender:
                 // Sender checks, signs, finalizes, extracts, and broadcasts
                 // Replay post fallback to get the response
-                let (Request { url, body, .. }, send_ctx) =
-                    req_ctx.extract_v2(directory.to_owned())?;
-                let response = agent.post(url).body(body).send().await?;
+                let (Request { url, body, content_type, .. }, ohttp_ctx) =
+                    send_ctx.extract_req(directory.to_owned())?;
+                let response = agent
+                    .post(url.clone())
+                    .header("Content-Type", content_type)
+                    .body(body.clone())
+                    .send()
+                    .await
+                    .unwrap();
+                log::info!("Response: {:#?}", &response);
                 let checked_payjoin_proposal_psbt = send_ctx
-                    .process_response(&mut response.bytes().await?.to_vec().as_slice())?
+                    .process_response(&mut response.bytes().await?.to_vec().as_slice(), ohttp_ctx)?
                     .unwrap();
                 let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
@@ -482,10 +498,8 @@ mod integration {
                     address.clone(),
                     directory.clone(),
                     ohttp_keys.clone(),
-                    cert_der.clone(),
                     None,
-                )
-                .await?;
+                );
                 println!("session: {:#?}", &session);
                 let pj_uri_string = session.pj_uri_builder().build().to_string();
                 // Poll receive request
@@ -506,10 +520,10 @@ mod integration {
                     .check_pj_supported()
                     .unwrap();
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
-                let mut req_ctx = RequestBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
+                let mut req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
-                let (Request { url, body, content_type, .. }, send_ctx) =
-                    req_ctx.extract_v2(directory.to_owned())?;
+                let (Request { url, body, content_type, .. }, post_ctx) =
+                    req_ctx.extract_highest_version(directory.to_owned())?;
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -519,10 +533,23 @@ mod integration {
                     .unwrap();
                 log::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success());
-                let response_body =
-                    send_ctx.process_response(&mut response.bytes().await?.to_vec().as_slice())?;
+                let get_ctx = match post_ctx {
+                    Context::V2(ctx) =>
+                        ctx.process_response(&mut response.bytes().await?.to_vec().as_slice())?,
+                    _ => panic!("V2 context expected"),
+                };
+                let (Request { url, body, content_type, .. }, ohttp_ctx) =
+                    get_ctx.extract_req(directory.to_owned())?;
+                let response = agent
+                    .post(url.clone())
+                    .header("Content-Type", content_type)
+                    .body(body.clone())
+                    .send()
+                    .await?;
                 // No response body yet since we are async and pushed fallback_psbt to the buffer
-                assert!(response_body.is_none());
+                assert!(get_ctx
+                    .process_response(&mut response.bytes().await?.to_vec().as_slice(), ohttp_ctx)?
+                    .is_none());
 
                 // **********************
                 // Inside the Receiver:
@@ -546,11 +573,16 @@ mod integration {
                 // Inside the Sender:
                 // Sender checks, signs, finalizes, extracts, and broadcasts
                 // Replay post fallback to get the response
-                let (Request { url, body, .. }, send_ctx) =
-                    req_ctx.extract_v2(directory.to_owned())?;
-                let response = agent.post(url).body(body).send().await?;
-                let checked_payjoin_proposal_psbt = send_ctx
-                    .process_response(&mut response.bytes().await?.to_vec().as_slice())?
+                let (Request { url, body, content_type, .. }, ohttp_ctx) =
+                    get_ctx.extract_req(directory.to_owned())?;
+                let response = agent
+                    .post(url.clone())
+                    .header("Content-Type", content_type)
+                    .body(body.clone())
+                    .send()
+                    .await?;
+                let checked_payjoin_proposal_psbt = get_ctx
+                    .process_response(&mut response.bytes().await?.to_vec().as_slice(), ohttp_ctx)?
                     .unwrap();
                 let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
@@ -589,9 +621,9 @@ mod integration {
                 .check_pj_supported()
                 .unwrap();
             let psbt = build_original_psbt(&sender, &pj_uri)?;
-            let mut req_ctx = RequestBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
+            let mut req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
                 .build_recommended(FeeRate::BROADCAST_MIN)?;
-            let (req, ctx) = req_ctx.extract_v2(EXAMPLE_URL.to_owned())?;
+            let (req, ctx) = req_ctx.extract_highest_version(EXAMPLE_URL.to_owned())?;
             let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************
@@ -603,8 +635,11 @@ mod integration {
             // **********************
             // Inside the Sender:
             // Sender checks, signs, finalizes, extracts, and broadcasts
-            let checked_payjoin_proposal_psbt =
-                ctx.process_response(&mut response.as_bytes())?.unwrap();
+            let ctx = match ctx {
+                Context::V1(ctx) => ctx,
+                _ => panic!("V1 context expected"),
+            };
+            let checked_payjoin_proposal_psbt = ctx.process_response(&mut response.as_bytes())?;
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
 
@@ -664,7 +699,7 @@ mod integration {
                     .unwrap();
                 let psbt = build_original_psbt(&sender, &pj_uri)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
-                    RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
+                    SenderBuilder::from_psbt_and_uri(psbt, pj_uri)?
                         .build_with_additional_fee(
                             Amount::from_sat(10000),
                             None,
@@ -992,7 +1027,7 @@ mod integration {
             let psbt = build_original_psbt(&sender, &uri)?;
             log::debug!("Original psbt: {:#?}", psbt);
             let max_additional_fee = Amount::from_sat(1000);
-            let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt.clone(), uri)?
+            let (req, ctx) = SenderBuilder::from_psbt_and_uri(psbt.clone(), uri)?
                 .build_with_additional_fee(max_additional_fee, None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);
@@ -1069,7 +1104,7 @@ mod integration {
                 .unwrap();
             let psbt = build_original_psbt(&sender, &uri)?;
             log::debug!("Original psbt: {:#?}", psbt);
-            let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt.clone(), uri)?
+            let (req, ctx) = SenderBuilder::from_psbt_and_uri(psbt.clone(), uri)?
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);

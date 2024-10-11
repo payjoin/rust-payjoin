@@ -8,7 +8,7 @@ use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v2::Receiver;
-use payjoin::send::RequestContext;
+use payjoin::send::Sender;
 use payjoin::{bitcoin, Error, Uri};
 use tokio::signal;
 use tokio::sync::watch;
@@ -91,7 +91,7 @@ impl AppTrait for App {
 }
 
 impl App {
-    async fn spawn_payjoin_sender(&self, mut req_ctx: RequestContext) -> Result<()> {
+    async fn spawn_payjoin_sender(&self, mut req_ctx: Sender) -> Result<()> {
         let mut interrupt = self.interrupt.clone();
         tokio::select! {
             res = self.long_poll_post(&mut req_ctx) => {
@@ -197,30 +197,57 @@ impl App {
         Ok(())
     }
 
-    async fn long_poll_post(&self, req_ctx: &mut payjoin::send::RequestContext) -> Result<Psbt> {
-        loop {
-            let (req, ctx) = req_ctx.extract_v2(self.config.ohttp_relay.clone())?;
-            println!("Polling send request...");
-            let http = http_agent()?;
-            let response = http
-                .post(req.url)
-                .header("Content-Type", req.content_type)
-                .body(req.body)
-                .send()
-                .await
-                .map_err(map_reqwest_err)?;
-
-            println!("Sent fallback transaction");
-            match ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()) {
-                Ok(Some(psbt)) => return Ok(psbt),
-                Ok(None) => {
-                    println!("No response yet.");
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    async fn long_poll_post(&self, req_ctx: &mut payjoin::send::Sender) -> Result<Psbt> {
+        let (req, ctx) = req_ctx.extract_highest_version(self.config.ohttp_relay.clone())?;
+        println!("Posting Original PSBT Payload request...");
+        let http = http_agent()?;
+        let response = http
+            .post(req.url)
+            .header("Content-Type", req.content_type)
+            .body(req.body)
+            .send()
+            .await
+            .map_err(map_reqwest_err)?;
+        println!("Sent fallback transaction");
+        match ctx {
+            payjoin::send::Context::V2(ctx) => {
+                let v2_ctx = Arc::new(
+                    ctx.process_response(&mut response.bytes().await?.to_vec().as_slice())?,
+                );
+                loop {
+                    let (req, ohttp_ctx) = v2_ctx.extract_req(self.config.ohttp_relay.clone())?;
+                    let response = http
+                        .post(req.url)
+                        .header("Content-Type", req.content_type)
+                        .body(req.body)
+                        .send()
+                        .await
+                        .map_err(map_reqwest_err)?;
+                    match v2_ctx.process_response(
+                        &mut response.bytes().await?.to_vec().as_slice(),
+                        ohttp_ctx,
+                    ) {
+                        Ok(Some(psbt)) => return Ok(psbt),
+                        Ok(None) => {
+                            println!("No response yet.");
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        }
+                        Err(re) => {
+                            println!("{}", re);
+                            log::debug!("{:?}", re);
+                            return Err(anyhow!("Response error").context(re));
+                        }
+                    }
                 }
-                Err(re) => {
-                    println!("{}", re);
-                    log::debug!("{:?}", re);
-                    return Err(anyhow!("Response error").context(re));
+            }
+            payjoin::send::Context::V1(ctx) => {
+                match ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()) {
+                    Ok(psbt) => Ok(psbt),
+                    Err(re) => {
+                        println!("{}", re);
+                        log::debug!("{:?}", re);
+                        Err(anyhow!("Response error").context(re))
+                    }
                 }
             }
         }

@@ -220,9 +220,9 @@ async fn handle_v2(
     let path_segments: Vec<&str> = path.split('/').collect();
     debug!("handle_v2: {:?}", &path_segments);
     match (parts.method, path_segments.as_slice()) {
-        (Method::POST, &["", id]) => post_fallback_v2(id, body, pool).await,
-        (Method::GET, &["", id]) => get_fallback(id, pool).await,
-        (Method::PUT, &["", id]) => post_payjoin(id, body, pool).await,
+        (Method::POST, &["", id]) => post_subdir(id, body, pool).await,
+        (Method::GET, &["", id]) => get_subdir(id, pool).await,
+        (Method::PUT, &["", id]) => put_payjoin_v1(id, body, pool).await,
         _ => Ok(not_found()),
     }
 }
@@ -294,27 +294,28 @@ async fn post_fallback_v1(
         Err(_) => return Ok(bad_request_body_res),
     };
 
-    let v2_compat_body = full(format!("{}\n{}", body_str, query));
-    post_fallback(id, v2_compat_body, pool, none_response).await
+    let v2_compat_body = format!("{}\n{}", body_str, query);
+    let id = shorten_string(id);
+    pool.push_default(&id, v2_compat_body.into())
+        .await
+        .map_err(|e| HandlerError::BadRequest(e.into()))?;
+    match pool.peek_v1(&id).await {
+        Some(result) => match result {
+            Ok(buffered_req) => Ok(Response::new(full(buffered_req))),
+            Err(e) => Err(HandlerError::BadRequest(e.into())),
+        },
+        None => Ok(none_response),
+    }
 }
 
-async fn post_fallback_v2(
+async fn put_payjoin_v1(
     id: &str,
     body: BoxBody<Bytes, hyper::Error>,
     pool: DbPool,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-    trace!("Post fallback v2");
-    let none_response = Response::builder().status(StatusCode::ACCEPTED).body(empty())?;
-    post_fallback(id, body, pool, none_response).await
-}
+    trace!("Put_payjoin_v1");
+    let ok_response = Response::builder().status(StatusCode::OK).body(empty())?;
 
-async fn post_fallback(
-    id: &str,
-    body: BoxBody<Bytes, hyper::Error>,
-    pool: DbPool,
-    none_response: Response<BoxBody<Bytes, hyper::Error>>,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-    tracing::trace!("Post fallback");
     let id = shorten_string(id);
     let req =
         body.collect().await.map_err(|e| HandlerError::InternalServerError(e.into()))?.to_bytes();
@@ -322,48 +323,45 @@ async fn post_fallback(
         return Err(HandlerError::PayloadTooLarge);
     }
 
-    match pool.push_req(&id, req.into()).await {
-        Ok(_) => (),
-        Err(e) => return Err(HandlerError::BadRequest(e.into())),
-    };
-
-    match pool.peek_res(&id).await {
-        Some(result) => match result {
-            Ok(buffered_res) => Ok(Response::new(full(buffered_res))),
-            Err(e) => Err(HandlerError::BadRequest(e.into())),
-        },
-        None => Ok(none_response),
+    match pool.push_v1(&id, req.into()).await {
+        Ok(_) => Ok(ok_response),
+        Err(e) => Err(HandlerError::BadRequest(e.into())),
     }
 }
 
-async fn get_fallback(
+async fn post_subdir(
+    id: &str,
+    body: BoxBody<Bytes, hyper::Error>,
+    pool: DbPool,
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
+    let none_response = Response::builder().status(StatusCode::OK).body(empty())?;
+    trace!("post_subdir");
+
+    let id = shorten_string(id);
+    let req =
+        body.collect().await.map_err(|e| HandlerError::InternalServerError(e.into()))?.to_bytes();
+    if req.len() > MAX_BUFFER_SIZE {
+        return Err(HandlerError::PayloadTooLarge);
+    }
+
+    match pool.push_default(&id, req.into()).await {
+        Ok(_) => Ok(none_response),
+        Err(e) => Err(HandlerError::BadRequest(e.into())),
+    }
+}
+
+async fn get_subdir(
     id: &str,
     pool: DbPool,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-    trace!("GET fallback");
+    trace!("get_subdir");
     let id = shorten_string(id);
-    match pool.peek_req(&id).await {
+    match pool.peek_default(&id).await {
         Some(result) => match result {
             Ok(buffered_req) => Ok(Response::new(full(buffered_req))),
             Err(e) => Err(HandlerError::BadRequest(e.into())),
         },
         None => Ok(Response::builder().status(StatusCode::ACCEPTED).body(empty())?),
-    }
-}
-
-async fn post_payjoin(
-    id: &str,
-    body: BoxBody<Bytes, hyper::Error>,
-    pool: DbPool,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-    trace!("POST payjoin");
-    let id = shorten_string(id);
-    let res =
-        body.collect().await.map_err(|e| HandlerError::InternalServerError(e.into()))?.to_bytes();
-
-    match pool.push_res(&id, res.into()).await {
-        Ok(_) => Ok(Response::builder().status(StatusCode::NO_CONTENT).body(empty())?),
-        Err(e) => Err(HandlerError::BadRequest(e.into())),
     }
 }
 

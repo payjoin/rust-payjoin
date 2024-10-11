@@ -93,7 +93,7 @@ impl Receiver {
         }
     }
 
-    // OHTTP Encapsulated HTTP GET request for the Original PSBT
+    /// Extratct an OHTTP Encapsulated HTTP GET request for the Original PSBT
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), SessionError> {
         if SystemTime::now() > self.context.expiry {
             return Err(InternalSessionError::Expired(self.context.expiry).into());
@@ -461,22 +461,34 @@ impl PayjoinProposal {
 
     #[cfg(feature = "v2")]
     pub fn extract_v2_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
-        let body = match &self.context.e {
-            Some(e) => {
-                let payjoin_bytes = self.inner.payjoin_psbt.serialize();
-                log::debug!("THERE IS AN e: {:?}", e);
-                crate::v2::encrypt_message_b(payjoin_bytes, &self.context.s, e)
-            }
-            None => Ok(self.extract_v1_req().as_bytes().to_vec()),
-        }?;
-        let subdir_path = subdir_path_from_pubkey(self.context.s.public_key());
-        let post_payjoin_target =
-            self.context.directory.join(&subdir_path).map_err(|e| Error::Server(e.into()))?;
-        log::debug!("Payjoin post target: {}", post_payjoin_target.as_str());
+        let target_resource: Url;
+        let body: Vec<u8>;
+        let method: &str;
+
+        if let Some(e) = &self.context.e {
+            // Prepare v2 payload
+            let payjoin_bytes = self.inner.payjoin_psbt.serialize();
+            let sender_subdir = subdir_path_from_pubkey(e);
+            target_resource =
+                self.context.directory.join(&sender_subdir).map_err(|e| Error::Server(e.into()))?;
+            body = crate::v2::encrypt_message_b(payjoin_bytes, &self.context.s, e)?;
+            method = "POST";
+        } else {
+            // Prepare v2 wrapped and backwards-compatible v1 payload
+            body = self.extract_v1_req().as_bytes().to_vec();
+            let receiver_subdir = subdir_path_from_pubkey(self.context.s.public_key());
+            target_resource = self
+                .context
+                .directory
+                .join(&receiver_subdir)
+                .map_err(|e| Error::Server(e.into()))?;
+            method = "PUT";
+        }
+        log::debug!("Payjoin PSBT target: {}", target_resource.as_str());
         let (body, ctx) = crate::v2::ohttp_encapsulate(
             &mut self.context.ohttp_keys,
-            "PUT",
-            post_payjoin_target.as_str(),
+            method,
+            target_resource.as_str(),
             Some(&body),
         )?;
         let url = self.context.ohttp_relay.clone();

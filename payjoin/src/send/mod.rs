@@ -248,7 +248,7 @@ pub struct RequestContext {
 }
 
 impl RequestContext {
-    /// Extract serialized V1 Request and Context froma Payjoin Proposal
+    /// Extract serialized V1 Request and Context from a Payjoin Proposal
     pub fn extract_v1(&self) -> Result<(Request, ContextV1), CreateRequestError> {
         let url = serialize_url(
             self.endpoint.clone(),
@@ -267,6 +267,7 @@ impl RequestContext {
                 fee_contribution: self.fee_contribution,
                 payee: self.payee.clone(),
                 min_fee_rate: self.min_fee_rate,
+                allow_mixed_input_scripts: false,
             },
         ))
     }
@@ -335,6 +336,7 @@ impl RequestContext {
                     fee_contribution: self.fee_contribution,
                     payee: self.payee.clone(),
                     min_fee_rate: self.min_fee_rate,
+                    allow_mixed_input_scripts: true,
                 },
                 rs: Some(self.extract_rs_pubkey()?),
                 e: Some(self.e.clone()),
@@ -377,6 +379,7 @@ pub struct ContextV1 {
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
     payee: ScriptBuf,
+    allow_mixed_input_scripts: bool,
 }
 
 #[cfg(feature = "v2")]
@@ -473,18 +476,35 @@ impl ContextV1 {
         ensure!(contributed_fee <= proposed_fee - original_fee, PayeeTookContributedFee);
         let original_weight = self.original_psbt.clone().extract_tx_unchecked_fee_rate().weight();
         let original_fee_rate = original_fee / original_weight;
-        // TODO: This should support mixed input types
-        ensure!(
-            contributed_fee
-                <= original_fee_rate
-                    * self
-                        .original_psbt
-                        .input_pairs()
-                        .next()
-                        .expect("This shouldn't happen. Failed to get an original input.")
+        let original_spks = self
+            .original_psbt
+            .input_pairs()
+            .map(|input_pair| {
+                input_pair
+                    .previous_txout()
+                    .map_err(InternalValidationError::PrevTxOut)
+                    .map(|txout| txout.script_pubkey.clone())
+            })
+            .collect::<InternalResult<Vec<ScriptBuf>>>()?;
+        let additional_input_weight = proposal.input_pairs().try_fold(
+            Weight::ZERO,
+            |acc, input_pair| -> InternalResult<Weight> {
+                let spk = &input_pair
+                    .previous_txout()
+                    .map_err(InternalValidationError::PrevTxOut)?
+                    .script_pubkey;
+                if original_spks.contains(spk) {
+                    Ok(acc)
+                } else {
+                    let weight = input_pair
                         .expected_input_weight()
-                        .expect("This shouldn't happen. Weight should have been calculated successfully before.")
-                    * (proposal.inputs.len() - self.original_psbt.inputs.len()) as u64,
+                        .map_err(InternalValidationError::InputWeight)?;
+                    Ok(acc + weight)
+                }
+            },
+        )?;
+        ensure!(
+            contributed_fee <= original_fee_rate * additional_input_weight,
             FeeContributionPaysOutputSizeIncrease
         );
         if self.min_fee_rate > FeeRate::ZERO {
@@ -560,7 +580,13 @@ impl ContextV1 {
                         ReceiverTxinMissingUtxoInfo
                     );
                     ensure!(proposed.txin.sequence == original.txin.sequence, MixedSequence);
-                    check_eq!(proposed.address_type()?, original.address_type()?, MixedInputTypes);
+                    if !self.allow_mixed_input_scripts {
+                        check_eq!(
+                            proposed.address_type()?,
+                            original.address_type()?,
+                            MixedInputTypes
+                        );
+                    }
                 }
             }
         }
@@ -836,6 +862,7 @@ mod test {
             fee_contribution: Some((bitcoin::Amount::from_sat(182), 0)),
             min_fee_rate: FeeRate::ZERO,
             payee,
+            allow_mixed_input_scripts: false,
         };
         ctx
     }

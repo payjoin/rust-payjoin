@@ -223,6 +223,11 @@ impl MaybeMixedInputScripts {
     /// Note: mixed spends do not necessarily indicate distinct wallet fingerprints.
     /// This check is intended to prevent some types of wallet fingerprinting.
     pub fn check_no_mixed_input_scripts(self) -> Result<MaybeInputsSeen, RequestError> {
+        // Allow mixed input scripts in payjoin v2
+        if self.params.v == 2 {
+            return Ok(MaybeInputsSeen { psbt: self.psbt, params: self.params });
+        }
+
         let mut err = Ok(());
         let input_scripts = self
             .psbt
@@ -740,21 +745,22 @@ impl ProvisionalProposal {
 
     /// Calculate the additional input weight contributed by the receiver
     fn additional_input_weight(&self) -> Result<Weight, RequestError> {
-        // This error should never happen. We check for at least one input in the constructor
-        let input_pair = self
-            .payjoin_psbt
-            .input_pairs()
-            .next()
-            .ok_or(InternalRequestError::OriginalPsbtNotBroadcastable)?;
-        // Calculate the additional weight contribution
-        let input_count = self.payjoin_psbt.inputs.len() - self.original_psbt.inputs.len();
-        log::trace!("input_count : {}", input_count);
-        let weight_per_input =
-            input_pair.expected_input_weight().map_err(InternalRequestError::InputWeight)?;
-        log::trace!("weight_per_input : {}", weight_per_input);
-        let contribution_weight = weight_per_input * input_count as u64;
-        log::trace!("contribution_weight: {}", contribution_weight);
-        Ok(contribution_weight)
+        fn inputs_weight(psbt: &Psbt) -> Result<Weight, RequestError> {
+            psbt.input_pairs().try_fold(
+                Weight::ZERO,
+                |acc, input_pair| -> Result<Weight, RequestError> {
+                    let input_weight = input_pair
+                        .expected_input_weight()
+                        .map_err(InternalRequestError::InputWeight)?;
+                    Ok(acc + input_weight)
+                },
+            )
+        }
+        let payjoin_inputs_weight = inputs_weight(&self.payjoin_psbt)?;
+        let original_inputs_weight = inputs_weight(&self.original_psbt)?;
+        let input_contribution_weight = payjoin_inputs_weight - original_inputs_weight;
+        log::trace!("input_contribution_weight : {}", input_contribution_weight);
+        Ok(input_contribution_weight)
     }
 
     /// Calculate the additional output weight contributed by the receiver

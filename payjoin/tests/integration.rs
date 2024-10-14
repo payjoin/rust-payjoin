@@ -31,10 +31,51 @@ mod integration {
         use super::*;
 
         #[test]
-        fn v1_to_v1() -> Result<(), BoxError> {
+        fn v1_to_v1_p2pkh() -> Result<(), BoxError> {
             init_tracing();
-            let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
+            let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(
+                Some(AddressType::Legacy),
+                Some(AddressType::Legacy),
+            )?;
+            do_v1_to_v1(sender, receiver, true)
+        }
 
+        #[test]
+        fn v1_to_v1_nested_p2wpkh() -> Result<(), BoxError> {
+            init_tracing();
+            let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(
+                Some(AddressType::P2shSegwit),
+                Some(AddressType::P2shSegwit),
+            )?;
+            do_v1_to_v1(sender, receiver, false)
+        }
+
+        #[test]
+        fn v1_to_v1_p2wpkh() -> Result<(), BoxError> {
+            init_tracing();
+            let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(
+                Some(AddressType::Bech32),
+                Some(AddressType::Bech32),
+            )?;
+            do_v1_to_v1(sender, receiver, false)
+        }
+
+        // TODO: Not supported by bitcoind 0_21_2. Later versions fail for unknown reasons
+        //#[test]
+        //fn v1_to_v1_taproot() -> Result<(), BoxError> {
+        //    init_tracing();
+        //    let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(
+        //        Some(AddressType::Bech32m),
+        //        Some(AddressType::Bech32m),
+        //    )?;
+        //    do_v1_to_v1(sender, receiver, false)
+        //}
+
+        fn do_v1_to_v1(
+            sender: bitcoincore_rpc::Client,
+            receiver: bitcoincore_rpc::Client,
+            is_p2pkh: bool,
+        ) -> Result<(), BoxError> {
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
             let pj_uri = PjUriBuilder::new(pj_receiver_address, EXAMPLE_URL.to_owned())
@@ -70,7 +111,18 @@ mod integration {
             sender.send_raw_transaction(&payjoin_tx)?;
 
             // Check resulting transaction and balances
-            let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
+            let mut predicted_tx_weight = predicted_tx_weight(&payjoin_tx);
+            if is_p2pkh {
+                // HACK:
+                // bitcoin-cli always grinds signatures to save 1 byte (4WU) and simplify fee
+                // estimates. This results in the original PSBT having a fee of 219 sats
+                // instead of the "worst case" 220 sats assuming a maximum-size signature.
+                // Note that this also affects weight predictions for segwit inputs, but the
+                // resulting signatures are only 1WU smaller (.25 bytes) and therefore don't
+                // affect our weight predictions for the original sender inputs.
+                predicted_tx_weight -= Weight::from_non_witness_data_size(1);
+            }
+            let network_fees = predicted_tx_weight * FeeRate::BROADCAST_MIN;
             assert_eq!(payjoin_tx.input.len(), 2);
             assert_eq!(payjoin_tx.output.len(), 2);
             assert_eq!(receiver.get_balances()?.mine.untrusted_pending, Amount::from_btc(51.0)?);
@@ -166,7 +218,7 @@ mod integration {
                 directory: Url,
                 cert_der: Vec<u8>,
             ) -> Result<(), BoxError> {
-                let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
+                let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
                 let agent = Arc::new(http_agent(cert_der.clone())?);
                 wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await.unwrap();
                 wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
@@ -236,7 +288,7 @@ mod integration {
                 directory: Url,
                 cert_der: Vec<u8>,
             ) -> Result<(), BoxError> {
-                let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
+                let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
                 let agent = Arc::new(http_agent(cert_der.clone())?);
                 wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await.unwrap();
                 wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
@@ -341,7 +393,7 @@ mod integration {
         #[test]
         fn v2_to_v1() -> Result<(), BoxError> {
             init_tracing();
-            let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
+            let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
             let pj_uri = PjUriBuilder::new(pj_receiver_address, EXAMPLE_URL.to_owned(), None, None)
@@ -409,7 +461,7 @@ mod integration {
                 directory: Url,
                 cert_der: Vec<u8>,
             ) -> Result<(), BoxError> {
-                let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
+                let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
                 let agent: Arc<Client> = Arc::new(http_agent(cert_der.clone())?);
                 wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await?;
                 wait_for_service_ready(directory.clone(), agent.clone()).await?;
@@ -744,7 +796,7 @@ mod integration {
         #[test]
         fn receiver_consolidates_utxos() -> Result<(), BoxError> {
             init_tracing();
-            let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
+            let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
             // Generate more UTXOs for the receiver
             let receiver_address =
                 receiver.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
@@ -832,7 +884,7 @@ mod integration {
         #[test]
         fn receiver_forwards_payment() -> Result<(), BoxError> {
             init_tracing();
-            let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver()?;
+            let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
             let third_party = bitcoind.create_wallet("third-party")?;
 
             // Receiver creates the payjoin URI
@@ -928,6 +980,8 @@ mod integration {
     }
 
     fn init_bitcoind_sender_receiver(
+        sender_address_type: Option<AddressType>,
+        receiver_address_type: Option<AddressType>,
     ) -> Result<(bitcoind::BitcoinD, bitcoincore_rpc::Client, bitcoincore_rpc::Client), BoxError>
     {
         let bitcoind_exe =
@@ -937,10 +991,9 @@ mod integration {
         let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &conf)?;
         let receiver = bitcoind.create_wallet("receiver")?;
         let receiver_address =
-            receiver.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
+            receiver.get_new_address(None, receiver_address_type)?.assume_checked();
         let sender = bitcoind.create_wallet("sender")?;
-        let sender_address =
-            sender.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
+        let sender_address = sender.get_new_address(None, sender_address_type)?.assume_checked();
         bitcoind.client.generate_to_address(1, &receiver_address)?;
         bitcoind.client.generate_to_address(101, &sender_address)?;
 
@@ -1125,11 +1178,27 @@ mod integration {
         Ok(payjoin_psbt.extract_tx()?)
     }
 
+    /// Simplified input weight predictions for a fully-signed transaction
     fn predicted_tx_weight(tx: &bitcoin::Transaction) -> Weight {
-        bitcoin::transaction::predict_weight(
-            vec![bitcoin::transaction::InputWeightPrediction::P2WPKH_MAX; tx.input.len()],
-            tx.script_pubkey_lens(),
-        )
+        let input_weight_predictions = tx.input.iter().map(|txin| {
+            // See https://bitcoin.stackexchange.com/a/107873
+            match (txin.script_sig.is_empty(), txin.witness.is_empty()) {
+                // witness is empty: legacy input
+                (false, true) => InputWeightPrediction::P2PKH_COMPRESSED_MAX,
+                // script sig is empty: native segwit input
+                (true, false) => match txin.witness.len() {
+                    // <signature>
+                    1 => InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH,
+                    // <signature> <public_key>
+                    2 => InputWeightPrediction::P2WPKH_MAX,
+                    _ => panic!("unsupported witness"),
+                },
+                // neither are empty: nested segwit (p2wpkh-in-p2sh) input
+                (false, false) => InputWeightPrediction::from_slice(23, &[72, 33]),
+                _ => panic!("one of script_sig or witness should be non-empty"),
+            }
+        });
+        bitcoin::transaction::predict_weight(input_weight_predictions, tx.script_pubkey_lens())
     }
 
     fn input_pair_from_list_unspent(

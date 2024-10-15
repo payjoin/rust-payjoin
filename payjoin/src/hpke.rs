@@ -47,7 +47,7 @@ impl Deref for HpkeSecretKey {
 
 impl core::fmt::Debug for HpkeSecretKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SecpHpkeSecretKey({:?})", self.0.to_bytes())
+        write!(f, "SecpHpkeSecretKey([REDACTED])")
     }
 }
 

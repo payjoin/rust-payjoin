@@ -228,7 +228,7 @@ impl<'a> SenderBuilder<'a> {
             payee,
             min_fee_rate: self.min_fee_rate,
             #[cfg(feature = "v2")]
-            e: HpkeKeyPair::gen_keypair(),
+            reply_pair: HpkeKeyPair::gen_keypair(),
         })
     }
 }
@@ -243,7 +243,7 @@ pub struct Sender {
     min_fee_rate: FeeRate,
     payee: ScriptBuf,
     #[cfg(feature = "v2")]
-    e: HpkeKeyPair,
+    reply_pair: HpkeKeyPair,
 }
 
 impl Sender {
@@ -320,8 +320,14 @@ impl Sender {
             self.fee_contribution,
             self.min_fee_rate,
         )?;
-        let body = encrypt_message_a(body, &self.e.secret_key().clone(), &rs)
-            .map_err(InternalCreateRequestError::Hpke)?;
+        let hpke_ctx = HpkeContext::new(rs);
+        let body = encrypt_message_a(
+            body,
+            &hpke_ctx.encapsulation_pair.clone(),
+            &hpke_ctx.reply_pair.public_key().clone(),
+            &hpke_ctx.receiver.clone(),
+        )
+        .map_err(InternalCreateRequestError::Hpke)?;
         let mut ohttp =
             self.endpoint.ohttp().ok_or(InternalCreateRequestError::MissingOhttpConfig)?;
         let (body, ohttp_ctx) = ohttp_encapsulate(&mut ohttp, "POST", url.as_str(), Some(&body))
@@ -339,7 +345,7 @@ impl Sender {
                     min_fee_rate: self.min_fee_rate,
                     allow_mixed_input_scripts: true,
                 },
-                hpke_ctx: HpkeContext { rs, e: self.e.clone() },
+                hpke_ctx,
                 ohttp_ctx,
             }),
         ))
@@ -432,13 +438,14 @@ impl V2GetContext {
     ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
         use crate::uri::UrlExt;
         let mut url = self.endpoint.clone();
-        let subdir =
-            BASE64_URL_SAFE_NO_PAD.encode(self.hpke_ctx.e.public_key().to_compressed_bytes());
+        let subdir = BASE64_URL_SAFE_NO_PAD
+            .encode(self.hpke_ctx.reply_pair.public_key().to_compressed_bytes());
         url.set_path(&subdir);
         let body = encrypt_message_a(
             Vec::new(),
-            &self.hpke_ctx.e.secret_key().clone(),
-            &self.hpke_ctx.rs.clone(),
+            &self.hpke_ctx.encapsulation_pair.clone(),
+            &self.hpke_ctx.reply_pair.public_key().clone(),
+            &self.hpke_ctx.receiver.clone(),
         )
         .map_err(InternalCreateRequestError::Hpke)?;
         let mut ohttp =
@@ -465,8 +472,8 @@ impl V2GetContext {
         };
         let psbt = decrypt_message_b(
             &body,
-            self.hpke_ctx.rs.clone(),
-            self.hpke_ctx.e.secret_key().clone(),
+            self.hpke_ctx.receiver.clone(),
+            self.hpke_ctx.reply_pair.secret_key().clone(),
         )
         .map_err(InternalValidationError::Hpke)?;
 
@@ -489,10 +496,23 @@ pub struct PsbtContext {
     payee: ScriptBuf,
     allow_mixed_input_scripts: bool,
 }
+
 #[cfg(feature = "v2")]
 struct HpkeContext {
-    rs: HpkePublicKey,
-    e: HpkeKeyPair,
+    receiver: HpkePublicKey,
+    encapsulation_pair: HpkeKeyPair,
+    reply_pair: HpkeKeyPair,
+}
+
+#[cfg(feature = "v2")]
+impl HpkeContext {
+    pub fn new(receiver: HpkePublicKey) -> Self {
+        Self {
+            receiver,
+            encapsulation_pair: HpkeKeyPair::gen_keypair(),
+            reply_pair: HpkeKeyPair::gen_keypair(),
+        }
+    }
 }
 
 macro_rules! check_eq {
@@ -985,7 +1005,7 @@ mod test {
             fee_contribution: None,
             min_fee_rate: FeeRate::ZERO,
             payee: ScriptBuf::from(vec![0x00]),
-            e: HpkeKeyPair::gen_keypair(),
+            reply_pair: HpkeKeyPair::gen_keypair(),
         };
         let serialized = serde_json::to_string(&req_ctx).unwrap();
         let deserialized = serde_json::from_str(&serialized).unwrap();

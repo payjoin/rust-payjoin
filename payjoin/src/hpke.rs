@@ -20,8 +20,6 @@ pub type SecretKey = <SecpK256HkdfSha256 as hpke::Kem>::PrivateKey;
 pub type PublicKey = <SecpK256HkdfSha256 as hpke::Kem>::PublicKey;
 pub type EncappedKey = <SecpK256HkdfSha256 as hpke::Kem>::EncappedKey;
 
-fn sk_to_pk(sk: &SecretKey) -> PublicKey { <SecpK256HkdfSha256 as hpke::Kem>::sk_to_pk(sk) }
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HpkeKeyPair(pub HpkeSecretKey, pub HpkePublicKey);
 
@@ -130,19 +128,24 @@ impl<'de> serde::Deserialize<'de> for HpkePublicKey {
 /// Message A is sent from the sender to the receiver containing an Original PSBT payload
 #[cfg(feature = "send")]
 pub fn encrypt_message_a(
-    mut plaintext: Vec<u8>,
-    sender_sk: &HpkeSecretKey,
+    body: Vec<u8>,
+    encapsulation_pair: &HpkeKeyPair,
+    reply_pk: &HpkePublicKey,
     receiver_pk: &HpkePublicKey,
 ) -> Result<Vec<u8>, HpkeError> {
-    let pk = sk_to_pk(&sender_sk.0);
     let (encapsulated_key, mut encryption_context) =
         hpke::setup_sender::<ChaCha20Poly1305, HkdfSha256, SecpK256HkdfSha256, _>(
-            &OpModeS::Auth((sender_sk.0.clone(), pk.clone())),
+            &OpModeS::Auth((
+                encapsulation_pair.secret_key().0.clone(),
+                encapsulation_pair.public_key().0.clone(),
+            )),
             &receiver_pk.0,
             INFO_A,
             &mut OsRng,
         )?;
-    let aad = pk.to_bytes().to_vec();
+    let aad = encapsulation_pair.public_key().to_bytes().to_vec();
+    let mut plaintext = reply_pk.to_bytes().to_vec();
+    plaintext.extend(body);
     let plaintext = pad_plaintext(&mut plaintext, PADDED_PLAINTEXT_A_LENGTH)?;
     let ciphertext = encryption_context.seal(plaintext, &aad)?;
     let mut message_a = encapsulated_key.to_bytes().to_vec();
@@ -156,18 +159,26 @@ pub fn decrypt_message_a(
     message_a: &[u8],
     receiver_sk: HpkeSecretKey,
 ) -> Result<(Vec<u8>, HpkePublicKey), HpkeError> {
-    let enc = message_a.get(..65).ok_or(HpkeError::PayloadTooShort)?;
+    let enc = message_a.get(..UNCOMPRESSED_PUBLIC_KEY_SIZE).ok_or(HpkeError::PayloadTooShort)?;
     let enc = EncappedKey::from_bytes(enc)?;
-    let aad = message_a.get(65..130).ok_or(HpkeError::PayloadTooShort)?;
-    let pk_s = PublicKey::from_bytes(aad)?;
-    let mut decryption_ctx = hpke::setup_receiver::<
-        ChaCha20Poly1305,
-        HkdfSha256,
-        SecpK256HkdfSha256,
-    >(&OpModeR::Auth(pk_s.clone()), &receiver_sk.0, &enc, INFO_A)?;
+    let aad = message_a
+        .get(UNCOMPRESSED_PUBLIC_KEY_SIZE..(UNCOMPRESSED_PUBLIC_KEY_SIZE * 2))
+        .ok_or(HpkeError::PayloadTooShort)?;
+    let encapsulation_pk = PublicKey::from_bytes(aad)?;
+    let mut decryption_ctx =
+        hpke::setup_receiver::<ChaCha20Poly1305, HkdfSha256, SecpK256HkdfSha256>(
+            &OpModeR::Auth(encapsulation_pk.clone()),
+            &receiver_sk.0,
+            &enc,
+            INFO_A,
+        )?;
     let ciphertext = message_a.get(130..).ok_or(HpkeError::PayloadTooShort)?;
     let plaintext = decryption_ctx.open(ciphertext, aad)?;
-    Ok((plaintext, HpkePublicKey(pk_s)))
+    let reply_pk =
+        plaintext.get(..UNCOMPRESSED_PUBLIC_KEY_SIZE).ok_or(HpkeError::PayloadTooShort)?;
+    let reply_pk = HpkePublicKey(PublicKey::from_bytes(reply_pk)?);
+    let body = plaintext.get(UNCOMPRESSED_PUBLIC_KEY_SIZE..).ok_or(HpkeError::PayloadTooShort)?;
+    Ok((body.to_vec(), reply_pk))
 }
 
 /// Message B is sent from the receiver to the sender containing a Payjoin PSBT payload or an error

@@ -159,12 +159,18 @@ pub fn decrypt_message_a(
     message_a: &[u8],
     receiver_sk: HpkeSecretKey,
 ) -> Result<(Vec<u8>, HpkePublicKey), HpkeError> {
-    let enc = message_a.get(..UNCOMPRESSED_PUBLIC_KEY_SIZE).ok_or(HpkeError::PayloadTooShort)?;
-    let enc = EncappedKey::from_bytes(enc)?;
-    let aad = message_a
-        .get(UNCOMPRESSED_PUBLIC_KEY_SIZE..(UNCOMPRESSED_PUBLIC_KEY_SIZE * 2))
-        .ok_or(HpkeError::PayloadTooShort)?;
-    let encapsulation_pk = PublicKey::from_bytes(aad)?;
+    use std::io::{Cursor, Read};
+
+    let mut cursor = Cursor::new(message_a);
+
+    let mut enc = [0u8; UNCOMPRESSED_PUBLIC_KEY_SIZE];
+    cursor.read_exact(&mut enc).map_err(|_| HpkeError::PayloadTooShort)?;
+    let enc = EncappedKey::from_bytes(&enc)?;
+
+    let mut aad = [0u8; UNCOMPRESSED_PUBLIC_KEY_SIZE];
+    cursor.read_exact(&mut aad).map_err(|_| HpkeError::PayloadTooShort)?;
+    let encapsulation_pk = PublicKey::from_bytes(&aad)?;
+
     let mut decryption_ctx =
         hpke::setup_receiver::<ChaCha20Poly1305, HkdfSha256, SecpK256HkdfSha256>(
             &OpModeR::Auth(encapsulation_pk.clone()),
@@ -172,12 +178,16 @@ pub fn decrypt_message_a(
             &enc,
             INFO_A,
         )?;
-    let ciphertext = message_a.get(130..).ok_or(HpkeError::PayloadTooShort)?;
-    let plaintext = decryption_ctx.open(ciphertext, aad)?;
-    let reply_pk =
-        plaintext.get(..UNCOMPRESSED_PUBLIC_KEY_SIZE).ok_or(HpkeError::PayloadTooShort)?;
-    let reply_pk = HpkePublicKey(PublicKey::from_bytes(reply_pk)?);
-    let body = plaintext.get(UNCOMPRESSED_PUBLIC_KEY_SIZE..).ok_or(HpkeError::PayloadTooShort)?;
+
+    let mut ciphertext = Vec::new();
+    cursor.read_to_end(&mut ciphertext).map_err(|_| HpkeError::PayloadTooShort)?;
+    let plaintext = decryption_ctx.open(&ciphertext, &aad)?;
+
+    let reply_pk_bytes = &plaintext[..UNCOMPRESSED_PUBLIC_KEY_SIZE];
+    let reply_pk = HpkePublicKey(PublicKey::from_bytes(reply_pk_bytes)?);
+
+    let body = &plaintext[UNCOMPRESSED_PUBLIC_KEY_SIZE..];
+
     Ok((body.to_vec(), reply_pk))
 }
 
@@ -218,8 +228,10 @@ pub fn decrypt_message_b(
         HkdfSha256,
         SecpK256HkdfSha256,
     >(&OpModeR::Auth(receiver_pk.0), &sender_sk.0, &enc, INFO_B)?;
-    let plaintext =
-        decryption_ctx.open(message_b.get(65..).ok_or(HpkeError::PayloadTooShort)?, &[])?;
+    let plaintext = decryption_ctx.open(
+        message_b.get(UNCOMPRESSED_PUBLIC_KEY_SIZE..).ok_or(HpkeError::PayloadTooShort)?,
+        &[],
+    )?;
     Ok(plaintext)
 }
 

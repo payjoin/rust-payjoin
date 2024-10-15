@@ -14,10 +14,11 @@ use super::{
     Error, InputContributionError, InternalRequestError, OutputSubstitutionError, RequestError,
     SelectionError,
 };
+use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
+use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
-use crate::v2::{HpkeKeyPair, HpkePublicKey, OhttpEncapsulationError};
-use crate::{OhttpKeys, PjUriBuilder, Request};
+use crate::{PjUriBuilder, Request};
 
 pub(crate) mod error;
 
@@ -99,7 +100,7 @@ impl Receiver {
             return Err(InternalSessionError::Expired(self.context.expiry).into());
         }
         let (body, ohttp_ctx) =
-            self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulationError)?;
+            self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulation)?;
         let url = self.context.ohttp_relay.clone();
         let req = Request::new_v2(url, body);
         Ok((req, ohttp_ctx))
@@ -115,7 +116,7 @@ impl Receiver {
         let mut buf = Vec::new();
         let _ = body.read_to_end(&mut buf);
         log::trace!("decapsulating directory response");
-        let response = crate::v2::ohttp_decapsulate(context, &buf)?;
+        let response = ohttp_decapsulate(context, &buf)?;
         if response.body().is_empty() {
             log::debug!("response is empty");
             return Ok(None);
@@ -132,12 +133,7 @@ impl Receiver {
         &mut self,
     ) -> Result<(Vec<u8>, ohttp::ClientResponse), OhttpEncapsulationError> {
         let fallback_target = self.pj_url();
-        crate::v2::ohttp_encapsulate(
-            &mut self.context.ohttp_keys,
-            "GET",
-            fallback_target.as_str(),
-            None,
-        )
+        ohttp_encapsulate(&mut self.context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
 
     fn extract_proposal_from_v1(&mut self, response: String) -> Result<UncheckedProposal, Error> {
@@ -145,8 +141,7 @@ impl Receiver {
     }
 
     fn extract_proposal_from_v2(&mut self, response: Vec<u8>) -> Result<UncheckedProposal, Error> {
-        let (payload_bytes, e) =
-            crate::v2::decrypt_message_a(&response, self.context.s.secret_key().clone())?;
+        let (payload_bytes, e) = decrypt_message_a(&response, self.context.s.secret_key().clone())?;
         self.context.e = Some(e);
         let payload = String::from_utf8(payload_bytes).map_err(InternalRequestError::Utf8)?;
         Ok(self.unchecked_from_payload(payload)?)
@@ -471,7 +466,7 @@ impl PayjoinProposal {
             let sender_subdir = subdir_path_from_pubkey(e);
             target_resource =
                 self.context.directory.join(&sender_subdir).map_err(|e| Error::Server(e.into()))?;
-            body = crate::v2::encrypt_message_b(payjoin_bytes, &self.context.s, e)?;
+            body = encrypt_message_b(payjoin_bytes, &self.context.s, e)?;
             method = "POST";
         } else {
             // Prepare v2 wrapped and backwards-compatible v1 payload
@@ -485,7 +480,7 @@ impl PayjoinProposal {
             method = "PUT";
         }
         log::debug!("Payjoin PSBT target: {}", target_resource.as_str());
-        let (body, ctx) = crate::v2::ohttp_encapsulate(
+        let (body, ctx) = ohttp_encapsulate(
             &mut self.context.ohttp_keys,
             method,
             target_resource.as_str(),
@@ -509,7 +504,7 @@ impl PayjoinProposal {
         res: Vec<u8>,
         ohttp_context: ohttp::ClientResponse,
     ) -> Result<(), Error> {
-        let res = crate::v2::ohttp_decapsulate(ohttp_context, &res)?;
+        let res = ohttp_decapsulate(ohttp_context, &res)?;
         if res.status().is_success() {
             Ok(())
         } else {

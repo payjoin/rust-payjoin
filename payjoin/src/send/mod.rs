@@ -34,10 +34,12 @@ pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+#[cfg(feature = "v2")]
+use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeKeyPair, HpkePublicKey};
+#[cfg(feature = "v2")]
+use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
 use crate::psbt::PsbtExt;
 use crate::request::Request;
-#[cfg(feature = "v2")]
-use crate::v2::{HpkeKeyPair, HpkePublicKey};
 use crate::PjUri;
 
 // See usize casts
@@ -226,7 +228,7 @@ impl<'a> SenderBuilder<'a> {
             payee,
             min_fee_rate: self.min_fee_rate,
             #[cfg(feature = "v2")]
-            e: crate::v2::HpkeKeyPair::gen_keypair(),
+            e: HpkeKeyPair::gen_keypair(),
         })
     }
 }
@@ -241,7 +243,7 @@ pub struct Sender {
     min_fee_rate: FeeRate,
     payee: ScriptBuf,
     #[cfg(feature = "v2")]
-    e: crate::v2::HpkeKeyPair,
+    e: HpkeKeyPair,
 }
 
 impl Sender {
@@ -318,13 +320,12 @@ impl Sender {
             self.fee_contribution,
             self.min_fee_rate,
         )?;
-        let body = crate::v2::encrypt_message_a(body, &self.e.secret_key().clone(), &rs)
+        let body = encrypt_message_a(body, &self.e.secret_key().clone(), &rs)
             .map_err(InternalCreateRequestError::Hpke)?;
         let mut ohttp =
             self.endpoint.ohttp().ok_or(InternalCreateRequestError::MissingOhttpConfig)?;
-        let (body, ohttp_ctx) =
-            crate::v2::ohttp_encapsulate(&mut ohttp, "POST", url.as_str(), Some(&body))
-                .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
+        let (body, ohttp_ctx) = ohttp_encapsulate(&mut ohttp, "POST", url.as_str(), Some(&body))
+            .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
         log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
         Ok((
             Request::new_v2(ohttp_relay, body),
@@ -400,7 +401,7 @@ impl V2PostContext {
     ) -> Result<V2GetContext, ResponseError> {
         let mut res_buf = Vec::new();
         response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
-        let response = crate::v2::ohttp_decapsulate(self.ohttp_ctx, &res_buf)
+        let response = ohttp_decapsulate(self.ohttp_ctx, &res_buf)
             .map_err(InternalValidationError::OhttpEncapsulation)?;
         match response.status() {
             http::StatusCode::OK => {
@@ -434,7 +435,7 @@ impl V2GetContext {
         let subdir =
             BASE64_URL_SAFE_NO_PAD.encode(self.hpke_ctx.e.public_key().to_compressed_bytes());
         url.set_path(&subdir);
-        let body = crate::v2::encrypt_message_a(
+        let body = encrypt_message_a(
             Vec::new(),
             &self.hpke_ctx.e.secret_key().clone(),
             &self.hpke_ctx.rs.clone(),
@@ -442,9 +443,8 @@ impl V2GetContext {
         .map_err(InternalCreateRequestError::Hpke)?;
         let mut ohttp =
             self.endpoint.ohttp().ok_or(InternalCreateRequestError::MissingOhttpConfig)?;
-        let (body, ohttp_ctx) =
-            crate::v2::ohttp_encapsulate(&mut ohttp, "GET", url.as_str(), Some(&body))
-                .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
+        let (body, ohttp_ctx) = ohttp_encapsulate(&mut ohttp, "GET", url.as_str(), Some(&body))
+            .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
 
         Ok((Request::new_v2(ohttp_relay, body), ohttp_ctx))
     }
@@ -456,14 +456,14 @@ impl V2GetContext {
     ) -> Result<Option<Psbt>, ResponseError> {
         let mut res_buf = Vec::new();
         response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
-        let response = crate::v2::ohttp_decapsulate(ohttp_ctx, &res_buf)
+        let response = ohttp_decapsulate(ohttp_ctx, &res_buf)
             .map_err(InternalValidationError::OhttpEncapsulation)?;
         let body = match response.status() {
             http::StatusCode::OK => response.body().to_vec(),
             http::StatusCode::ACCEPTED => return Ok(None),
             _ => return Err(InternalValidationError::UnexpectedStatusCode)?,
         };
-        let psbt = crate::v2::decrypt_message_b(
+        let psbt = decrypt_message_b(
             &body,
             self.hpke_ctx.rs.clone(),
             self.hpke_ctx.e.secret_key().clone(),

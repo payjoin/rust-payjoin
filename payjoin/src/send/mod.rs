@@ -227,8 +227,6 @@ impl<'a> SenderBuilder<'a> {
             fee_contribution,
             payee,
             min_fee_rate: self.min_fee_rate,
-            #[cfg(feature = "v2")]
-            reply_pair: HpkeKeyPair::gen_keypair(),
         })
     }
 }
@@ -242,8 +240,6 @@ pub struct Sender {
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
     payee: ScriptBuf,
-    #[cfg(feature = "v2")]
-    reply_pair: HpkeKeyPair,
 }
 
 impl Sender {
@@ -1005,7 +1001,6 @@ mod test {
             fee_contribution: None,
             min_fee_rate: FeeRate::ZERO,
             payee: ScriptBuf::from(vec![0x00]),
-            reply_pair: HpkeKeyPair::gen_keypair(),
         };
         let serialized = serde_json::to_string(&req_ctx).unwrap();
         let deserialized = serde_json::from_str(&serialized).unwrap();

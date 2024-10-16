@@ -38,10 +38,12 @@ pub mod v2;
 
 use bitcoin::secp256k1::rand::seq::SliceRandom;
 use bitcoin::secp256k1::rand::{self, Rng};
-pub use error::{Error, OutputSubstitutionError, RequestError, SelectionError};
+pub use error::{
+    Error, InputContributionError, OutputSubstitutionError, RequestError, SelectionError,
+};
 use error::{
-    InputContributionError, InternalInputContributionError, InternalOutputSubstitutionError,
-    InternalRequestError, InternalSelectionError,
+    InternalInputContributionError, InternalOutputSubstitutionError, InternalRequestError,
+    InternalSelectionError,
 };
 use optional_parameters::Params;
 

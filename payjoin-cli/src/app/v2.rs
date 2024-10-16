@@ -15,7 +15,7 @@ use tokio::sync::watch;
 
 use super::config::AppConfig;
 use super::App as AppTrait;
-use crate::app::http_agent;
+use crate::app::{http_agent, input_pair_from_list_unspent};
 use crate::db::Database;
 
 #[derive(Clone)]
@@ -375,13 +375,10 @@ fn try_contributing_inputs(
         .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
         .context("This shouldn't happen. Failed to retrieve the privacy preserving utxo from those we provided to the seclector.")?;
     log::debug!("selected utxo: {:#?}", selected_utxo);
-    let txo_to_contribute = bitcoin::TxOut {
-        value: selected_utxo.amount,
-        script_pubkey: selected_utxo.script_pub_key.clone(),
-    };
+    let input_pair = input_pair_from_list_unspent(selected_utxo);
 
     Ok(payjoin
-        .contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)])
+        .contribute_inputs(vec![input_pair])
         .expect("This shouldn't happen. Failed to contribute inputs.")
         .commit_inputs())
 }

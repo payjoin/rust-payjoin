@@ -28,8 +28,8 @@ use std::cmp::{max, min};
 
 use bitcoin::base64::prelude::BASE64_STANDARD;
 use bitcoin::base64::Engine;
-use bitcoin::psbt::Psbt;
-use bitcoin::{Amount, FeeRate, OutPoint, Script, TxOut, Weight};
+use bitcoin::psbt::{Input as PsbtInput, Psbt};
+use bitcoin::{Amount, FeeRate, OutPoint, Script, TxIn, TxOut, Weight};
 
 mod error;
 mod optional_parameters;
@@ -45,7 +45,7 @@ use error::{
 };
 use optional_parameters::Params;
 
-use crate::psbt::PsbtExt;
+use crate::psbt::{InputPair, PsbtExt};
 
 pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
@@ -575,14 +575,14 @@ impl WantsInputs {
 
     /// Add the provided list of inputs to the transaction.
     /// Any excess input amount is added to the change_vout output indicated previously.
-    pub fn contribute_witness_inputs(
+    pub fn contribute_inputs(
         self,
-        inputs: impl IntoIterator<Item = (OutPoint, TxOut)>,
+        inputs: impl IntoIterator<Item = (PsbtInput, TxIn)>,
     ) -> Result<WantsInputs, InputContributionError> {
         let mut payjoin_psbt = self.payjoin_psbt.clone();
         // The payjoin proposal must not introduce mixed input sequence numbers
         let original_sequence = self
-            .payjoin_psbt
+            .original_psbt
             .unsigned_tx
             .input
             .first()
@@ -592,21 +592,17 @@ impl WantsInputs {
         // Insert contributions at random indices for privacy
         let mut rng = rand::thread_rng();
         let mut receiver_input_amount = Amount::ZERO;
-        for (outpoint, txo) in inputs.into_iter() {
-            receiver_input_amount += txo.value;
+        for (psbtin, txin) in inputs.into_iter() {
+            receiver_input_amount += InputPair { txin: &txin, psbtin: &psbtin }
+                .previous_txout()
+                .map_err(InternalInputContributionError::PrevTxOut)?
+                .value;
             let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
-            payjoin_psbt.inputs.insert(
-                index,
-                bitcoin::psbt::Input { witness_utxo: Some(txo), ..Default::default() },
-            );
-            payjoin_psbt.unsigned_tx.input.insert(
-                index,
-                bitcoin::TxIn {
-                    previous_output: outpoint,
-                    sequence: original_sequence,
-                    ..Default::default()
-                },
-            );
+            payjoin_psbt.inputs.insert(index, psbtin);
+            payjoin_psbt
+                .unsigned_tx
+                .input
+                .insert(index, TxIn { sequence: original_sequence, ..txin });
         }
 
         // Add the receiver change amount to the receiver change output, if applicable
@@ -874,8 +870,7 @@ impl PayjoinProposal {
 mod test {
     use std::str::FromStr;
 
-    use bitcoin::hashes::Hash;
-    use bitcoin::{Address, Network, ScriptBuf};
+    use bitcoin::{Address, Network};
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -958,23 +953,9 @@ mod test {
         // Specify excessive fee rate in sender params
         proposal.params.min_feerate = FeeRate::from_sat_per_vb_unchecked(1000);
         // Input contribution for the receiver, from the BIP78 test vector
-        let input: (OutPoint, TxOut) = (
-            OutPoint {
-                txid: "833b085de288cda6ff614c6e8655f61e7ae4f84604a2751998dc25a0d1ba278f"
-                    .parse()
-                    .unwrap(),
-                vout: 1,
-            },
-            TxOut {
-                value: Amount::from_sat(2000000),
-                // HACK: The script pubkey in the original test vector is a nested p2sh witness
-                // script, which is not correctly supported in our current weight calculations.
-                // To get around this limitation, this test uses a native segwit script instead.
-                script_pubkey: ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::hash(
-                    "00145f806655e5924c9204c2d51be5394f4bf9eda210".as_bytes(),
-                )),
-            },
-        );
+        let proposal_psbt = Psbt::from_str("cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAAEBIICEHgAAAAAAF6kUyPLL+cphRyyI5GTUazV0hF2R2NWHAQcXFgAUX4BmVeWSTJIEwtUb5TlPS/ntohABCGsCRzBEAiBnu3tA3yWlT0WBClsXXS9j69Bt+waCs9JcjWtNjtv7VgIge2VYAaBeLPDB6HGFlpqOENXMldsJezF9Gs5amvDQRDQBIQJl1jz1tBt8hNx2owTm+4Du4isx0pmdKNMNIjjaMHFfrQAAAA==").unwrap();
+        let input: (PsbtInput, TxIn) =
+            (proposal_psbt.inputs[1].clone(), proposal_psbt.unsigned_tx.input[1].clone());
         let mut payjoin = proposal
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| Ok(false))
@@ -993,7 +974,7 @@ mod test {
             })
             .expect("Receiver output should be identified")
             .commit_outputs()
-            .contribute_witness_inputs(vec![input])
+            .contribute_inputs(vec![input])
             .expect("Failed to contribute inputs")
             .commit_inputs();
         let mut payjoin_clone = payjoin.clone();

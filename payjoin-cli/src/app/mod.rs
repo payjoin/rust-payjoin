@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use anyhow::{anyhow, Context, Result};
+use bitcoin::psbt::Input as PsbtInput;
+use bitcoin::TxIn;
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::psbt::Psbt;
@@ -119,4 +121,25 @@ fn read_local_cert() -> Result<Vec<u8>> {
     let mut local_cert_path = std::env::temp_dir();
     local_cert_path.push(LOCAL_CERT_FILE);
     Ok(std::fs::read(local_cert_path)?)
+}
+
+pub fn input_pair_from_list_unspent(
+    utxo: &bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry,
+) -> (PsbtInput, TxIn) {
+    let psbtin = PsbtInput {
+        // NOTE: non_witness_utxo is not necessary because bitcoin-cli always supplies
+        // witness_utxo, even for non-witness inputs
+        witness_utxo: Some(bitcoin::TxOut {
+            value: utxo.amount,
+            script_pubkey: utxo.script_pub_key.clone(),
+        }),
+        redeem_script: utxo.redeem_script.clone(),
+        witness_script: utxo.witness_script.clone(),
+        ..Default::default()
+    };
+    let txin = TxIn {
+        previous_output: bitcoin::OutPoint { txid: utxo.txid, vout: utxo.vout },
+        ..Default::default()
+    };
+    (psbtin, txin)
 }

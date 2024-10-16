@@ -301,6 +301,8 @@ pub struct InputContributionError(InternalInputContributionError);
 
 #[derive(Debug)]
 pub(crate) enum InternalInputContributionError {
+    /// Missing previous txout information
+    PrevTxOut(crate::psbt::PrevTxOutError),
     /// Total input value is not enough to cover additional output value
     ValueTooLow,
 }
@@ -308,6 +310,8 @@ pub(crate) enum InternalInputContributionError {
 impl fmt::Display for InputContributionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
+            InternalInputContributionError::PrevTxOut(e) =>
+                write!(f, "Missing previous txout information: {}", e),
             InternalInputContributionError::ValueTooLow =>
                 write!(f, "Total input value is not enough to cover additional output value"),
         }

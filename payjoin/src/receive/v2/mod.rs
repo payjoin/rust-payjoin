@@ -3,8 +3,8 @@ use std::time::{Duration, SystemTime};
 
 use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
-use bitcoin::psbt::Psbt;
-use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::psbt::{Input as PsbtInput, Psbt};
+use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxIn, TxOut};
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -466,11 +466,11 @@ impl WantsInputs {
 
     /// Add the provided list of inputs to the transaction.
     /// Any excess input amount is added to the change_vout output indicated previously.
-    pub fn contribute_witness_inputs(
+    pub fn contribute_inputs(
         self,
-        inputs: impl IntoIterator<Item = (OutPoint, TxOut)>,
+        inputs: impl IntoIterator<Item = (PsbtInput, TxIn)>,
     ) -> Result<WantsInputs, InputContributionError> {
-        let inner = self.inner.contribute_witness_inputs(inputs)?;
+        let inner = self.inner.contribute_inputs(inputs)?;
         Ok(WantsInputs { inner, context: self.context })
     }
 

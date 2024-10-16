@@ -76,8 +76,10 @@ impl<'a> From<PjUri> for payjoin::PjUri<'a> {
 }
 
 #[derive(Clone)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct PjUri(pub payjoin::PjUri<'static>);
 
+#[cfg_attr(feature = "uniffi", uniffi::export)]
 impl PjUri {
     pub fn address(&self) -> String {
         self.0.clone().address.to_string()
@@ -104,9 +106,12 @@ impl From<Url> for payjoin::Url {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct Url(payjoin::Url);
 
+#[cfg_attr(feature = "uniffi", uniffi::export)]
 impl Url {
+    #[cfg_attr(feature = "uniffi", uniffi::constructor)]
     pub fn from_str(input: String) -> Result<Url, PayjoinError> {
         match payjoin::Url::from_str(input.as_str()) {
             Ok(e) => Ok(Self(e)),
@@ -123,6 +128,7 @@ impl Url {
 
 ///Build a valid PjUri.
 // Payjoin receiver can use this builder to create a payjoin uri to send to the sender.
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct PjUriBuilder(pub payjoin::PjUriBuilder);
 
 impl From<payjoin::PjUriBuilder> for PjUriBuilder {
@@ -131,7 +137,9 @@ impl From<payjoin::PjUriBuilder> for PjUriBuilder {
     }
 }
 #[cfg(feature = "uniffi")]
+#[cfg_attr(feature = "uniffi", uniffi::export)]
 impl PjUriBuilder {
+    #[cfg_attr(feature = "uniffi", uniffi::constructor)]
     ///Create a new PjUriBuilder with required parameters.
     /// Parameters
     /// address: Represents a bitcoin address.
@@ -222,6 +230,8 @@ impl PjUriBuilder {
 #[cfg(test)]
 #[cfg(not(feature = "uniffi"))]
 mod tests {
+    use std::sync::Arc;
+
     use bdk::bitcoin;
 
     use crate::uri::{PjUriBuilder, Url};
@@ -233,8 +243,8 @@ mod tests {
         let bech32_upper = "TB1Q6D3A2W975YNY0ASUVD9A67NER4NKS58FF0Q8G4";
         let bech32_lower = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
 
-        for address in vec![base58, bech32_upper, bech32_lower] {
-            for pj in vec![https, onion] {
+        for address in [base58, bech32_upper, bech32_lower] {
+            for pj in [https, onion] {
                 let amount = bitcoin::Amount::ONE_BTC;
                 let builder = PjUriBuilder::new(
                     address.to_string(),

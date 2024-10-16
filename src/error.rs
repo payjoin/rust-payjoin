@@ -1,10 +1,13 @@
 use std::fmt::Debug;
 
 use payjoin::bitcoin::psbt::PsbtParseError;
-use payjoin::receive::{RequestError, SelectionError};
+use payjoin::receive::{
+    InputContributionError, OutputSubstitutionError, PsbtInputError, RequestError, SelectionError,
+};
 use payjoin::send::{CreateRequestError, ResponseError as PdkResponseError, ValidationError};
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
 pub enum PayjoinError {
     #[error("Error while parsing the string: {message} ")]
     InvalidAddress { message: String },
@@ -15,7 +18,7 @@ pub enum PayjoinError {
     #[error("Error encountered while decoding PSBT: {message} ")]
     PsbtParseError { message: String },
 
-    #[error("Response error: {message}")]
+    #[error("Response error: {message:?}")]
     ResponseError { message: String },
 
     ///Error that may occur when the request from sender is malformed.
@@ -62,6 +65,15 @@ pub enum PayjoinError {
 
     #[error("{message}")]
     IoError { message: String },
+
+    #[error("{message}")]
+    OutputSubstitutionError { message: String },
+
+    #[error("{message}")]
+    InputContributionError { message: String },
+
+    #[error("{message}")]
+    InputPairError { message: String },
 }
 
 macro_rules! impl_from_error {
@@ -82,10 +94,24 @@ impl_from_error! {
     payjoin::bitcoin::consensus::encode::Error => TransactionError,
     payjoin::bitcoin::address::ParseError => InvalidAddress,
     RequestError => RequestError,
-    PdkResponseError => ResponseError,
     ValidationError => ValidationError,
     CreateRequestError => CreateRequestError,
-    uniffi::UnexpectedUniFFICallbackError => UnexpectedError,
+    OutputSubstitutionError => OutputSubstitutionError,
+    InputContributionError => InputContributionError,
+    PsbtInputError => InputPairError,
+}
+
+#[cfg(feature = "uniffi")]
+impl From<uniffi::UnexpectedUniFFICallbackError> for PayjoinError {
+    fn from(value: uniffi::UnexpectedUniFFICallbackError) -> Self {
+        PayjoinError::UnexpectedError { message: value.to_string() }
+    }
+}
+
+impl From<PdkResponseError> for PayjoinError {
+    fn from(value: PdkResponseError) -> Self {
+        PayjoinError::ResponseError { message: format!("{:?}", value) }
+    }
 }
 
 impl From<SelectionError> for PayjoinError {

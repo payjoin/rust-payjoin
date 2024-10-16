@@ -33,37 +33,12 @@ pip install payjoin
 ```
 ## Running the Integration Test
 
-First, we need to set up bitcoin core and esplora locally in the regtest network. If you don't have these, please refer to this [page](https://learn.saylor.org/mod/page/view.php?id=36347). Alternatively, you can install `Nigiri Bitcoin`, a tool designed to simplify the process of running local instances of Bitcoin and Liquid networks for development and testing purposes. Follow the instructions [here](https://github.com/vulpemventures/nigiri) to install it on your machine.
 
-Once Nigiri Bitcoin is up and running, you need to mine a few blocks. Refer to this [link](https://developer.bitcoin.org/reference/rpc/generatetoaddress.html?highlight=generate) on how to mine blocks.
-
-Before running the integration tests, replace the following snippet in `tests/bdk_integration_test.rs` and `tests/bitcoin_core_integration_test.rs` with your Nigiri Bitcoin Core credentials:
-
-```rust
-static RPC_USER: &str = "admin1";
-static RPC_PASSWORD: &str = "123";
-static RPC_HOST: &str = "localhost";
-static RPC_PORT: &str = "18443";
-
-```
-
-NB: The default nigiri credentials would be the following
-
-```
-rpc_user = "admin1"
-rpc_password = "123"
-rpc_host = "localhost"
-rpc_port = "18443"
-```
-
-Now, run the integration tests:
-
-The integration tests illustrates and verify integration using bitcoin core and with bitcoin dev kit(bdk).
+The integration tests illustrates and verify integration using bitcoin core and bdk.
 
 ```shell
 
 # Run the integration test
-cargo test --package payjoin_ffi --test bitcoin_core_integration_test v1_to_v1_full_cycle
 cargo test --package payjoin_ffi --test bdk_integration_test v1_to_v1_full_cycle
 cargo test  --package payjoin_ffi --test bdk_integration_test v2_to_v2_full_cycle --features danger-local-https
 

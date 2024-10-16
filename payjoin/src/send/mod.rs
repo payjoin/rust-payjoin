@@ -9,11 +9,9 @@
 //! 2. Construct URI request parameters, a finalized “Original PSBT” paying .amount to .address
 //! 3. (optional) Spawn a thread or async task that will broadcast the original PSBT fallback after
 //!    delay (e.g. 1 minute) unless canceled
-//! 4. Construct the request using [`RequestBuilder`](crate::send::RequestBuilder) with the PSBT
-//!    and payjoin uri
+//! 4. Construct the request using [`RequestBuilder`] with the PSBT and payjoin uri
 //! 5. Send the request and receive response
-//! 6. Process the response with
-//!    [`Context::process_response()`](crate::send::Context::process_response())
+//! 6. Process the response with [`ContextV1::process_response`]
 //! 7. Sign and finalize the Payjoin Proposal PSBT
 //! 8. Broadcast the Payjoin Transaction (and cancel the optional fallback broadcast)
 //!
@@ -34,7 +32,7 @@ pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::psbt::{InputPair, PsbtExt};
+use crate::psbt::PsbtExt;
 use crate::request::Request;
 #[cfg(feature = "v2")]
 use crate::v2::{HpkePublicKey, HpkeSecretKey};
@@ -123,7 +121,7 @@ impl<'a> RequestBuilder<'a> {
             .find(|(_, txo)| payout_scripts.all(|script| script != txo.script_pubkey))
             .map(|(i, txo)| (i, txo.value))
         {
-            let mut input_pairs = self.psbt.input_pairs().collect::<Vec<InputPair>>().into_iter();
+            let mut input_pairs = self.psbt.input_pairs();
             let first_input_pair =
                 input_pairs.next().ok_or(InternalCreateRequestError::NoInputs)?;
             let mut input_weight = first_input_pair
@@ -370,8 +368,8 @@ impl RequestContext {
 
 /// Data required for validation of response.
 ///
-/// This type is used to process the response. Get it from [`RequestBuilder`](crate::send::RequestBuilder)'s build methods.
-/// Then you only need to call [`.process_response()`](crate::send::Context::process_response()) on it to continue BIP78 flow.
+/// This type is used to process the response. Get it from [`RequestBuilder`]'s build methods.
+/// Then you only need to call [`Self::process_response`] on it to continue BIP78 flow.
 #[derive(Debug, Clone)]
 pub struct ContextV1 {
     original_psbt: Psbt,

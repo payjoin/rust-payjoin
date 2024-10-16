@@ -165,7 +165,7 @@ impl UncheckedProposal {
 
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
-/// Call [`check_no_receiver_owned_inputs()`](struct.UncheckedProposal.html#method.check_no_receiver_owned_inputs) to proceed.
+/// Call [`Self::check_inputs_not_owned`] to proceed.
 #[derive(Clone)]
 pub struct MaybeInputsOwned {
     psbt: Psbt,
@@ -208,8 +208,9 @@ impl MaybeInputsOwned {
 }
 
 /// Typestate to validate that the Original PSBT has no mixed input types.
+/// This check is skipped in payjoin v2.
 ///
-/// Call [`check_no_mixed_input_types`](struct.UncheckedProposal.html#method.check_no_mixed_input_scripts) to proceed.
+/// Call [`Self::check_no_mixed_input_scripts`] to proceed.
 #[derive(Clone)]
 pub struct MaybeMixedInputScripts {
     psbt: Psbt,
@@ -261,7 +262,7 @@ impl MaybeMixedInputScripts {
 
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
-/// Call [`check_no_inputs_seen`](struct.MaybeInputsSeen.html#method.check_no_inputs_seen_before) to proceed.
+/// Call [`Self::check_no_inputs_seen_before`] to proceed.
 #[derive(Clone)]
 pub struct MaybeInputsSeen {
     psbt: Psbt,
@@ -295,7 +296,7 @@ impl MaybeInputsSeen {
 /// The receiver has not yet identified which outputs belong to the receiver.
 ///
 /// Only accept PSBTs that send us money.
-/// Identify those outputs with `identify_receiver_outputs()` to proceed
+/// Identify those outputs with [`Self::identify_receiver_outputs`] to proceed.
 #[derive(Clone)]
 pub struct OutputsUnknown {
     psbt: Psbt,
@@ -345,6 +346,8 @@ impl OutputsUnknown {
 }
 
 /// A checked proposal that the receiver may substitute or add outputs to
+///
+/// Call [`Self::commit_outputs`] to proceed.
 #[derive(Debug, Clone)]
 pub struct WantsOutputs {
     original_psbt: Psbt,
@@ -486,6 +489,8 @@ fn interleave_shuffle<T: Clone, R: rand::Rng>(
 }
 
 /// A checked proposal that the receiver may contribute inputs to to make a payjoin
+///
+/// Call [`Self::commit_inputs`] to proceed.
 #[derive(Debug, Clone)]
 pub struct WantsInputs {
     original_psbt: Psbt,
@@ -658,6 +663,8 @@ impl WantsInputs {
 
 /// A checked proposal that the receiver may sign and finalize to make a proposal PSBT that the
 /// sender will accept.
+///
+/// Call [`Self::finalize_proposal`] to return a finalized [`PayjoinProposal`].
 #[derive(Debug, Clone)]
 pub struct ProvisionalProposal {
     original_psbt: Psbt,
@@ -856,7 +863,8 @@ impl ProvisionalProposal {
     }
 }
 
-/// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+/// A finalized payjoin proposal, complete with fees and receiver signatures, that the sender
+/// should find acceptable.
 #[derive(Clone)]
 pub struct PayjoinProposal {
     payjoin_psbt: Psbt,

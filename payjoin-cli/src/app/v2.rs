@@ -306,7 +306,7 @@ impl App {
             }
         })?;
         log::trace!("check2");
-        // Receive Check 3: receiver can't sign for proposal inputs
+        // Receive Check 3: no mixed input scripts
         let proposal = proposal.check_no_mixed_input_scripts()?;
         log::trace!("check3");
 

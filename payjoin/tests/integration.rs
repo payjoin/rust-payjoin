@@ -860,7 +860,7 @@ mod integration {
                 })
                 .expect("Receiver should not own any of the inputs");
 
-            // Receive Check 3: receiver can't sign for proposal inputs
+            // Receive Check 3: no mixed input scripts
             let proposal = proposal.check_no_mixed_input_scripts().unwrap();
 
             // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
@@ -880,7 +880,6 @@ mod integration {
             let inputs = match custom_inputs {
                 Some(inputs) => inputs,
                 None => {
-                    // Select receiver payjoin inputs. TODO Lock them.
                     let available_inputs =
                         receiver.list_unspent(None, None, None, None, None).unwrap();
                     let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
@@ -1301,7 +1300,7 @@ mod integration {
             })
             .expect("Receiver should not own any of the inputs");
 
-        // Receive Check 3: receiver can't sign for proposal inputs
+        // Receive Check 3: no mixed input scripts
         let proposal = proposal.check_no_mixed_input_scripts().unwrap();
 
         // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
@@ -1331,7 +1330,6 @@ mod integration {
         let inputs = match custom_inputs {
             Some(inputs) => inputs,
             None => {
-                // Select receiver payjoin inputs. TODO Lock them.
                 let available_inputs = receiver.list_unspent(None, None, None, None, None).unwrap();
                 let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
                     .iter()

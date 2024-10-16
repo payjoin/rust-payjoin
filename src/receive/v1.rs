@@ -441,6 +441,7 @@ impl PayjoinProposal {
 }
 
 #[cfg(test)]
+#[cfg(not(feature = "uniffi"))]
 mod test {
     use std::sync::Arc;
 

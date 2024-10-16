@@ -1,3 +1,5 @@
+#![cfg(all(feature = "enable-danger-local-https", not(feature = "uniffi")))]
+
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};

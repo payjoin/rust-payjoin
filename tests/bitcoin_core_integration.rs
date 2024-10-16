@@ -1,3 +1,5 @@
+#![cfg(all(feature = "enable-danger-local-https", not(feature = "uniffi")))]
+
 extern crate core;
 
 use std::collections::HashMap;

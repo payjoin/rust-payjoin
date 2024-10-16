@@ -220,6 +220,7 @@ impl PjUriBuilder {
 }
 
 #[cfg(test)]
+#[cfg(not(feature = "uniffi"))]
 mod tests {
     use bdk::bitcoin;
 

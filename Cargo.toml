@@ -51,4 +51,4 @@ strip = true
 [features]
 default = ["uniffi/cli"]
 uniffi = []
-enable-danger-local-https = ["payjoin/danger-local-https"]
+danger-local-https = ["payjoin/danger-local-https"]

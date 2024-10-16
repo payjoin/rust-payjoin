@@ -65,7 +65,7 @@ The integration tests illustrates and verify integration using bitcoin core and 
 # Run the integration test
 cargo test --package payjoin_ffi --test bitcoin_core_integration_test v1_to_v1_full_cycle
 cargo test --package payjoin_ffi --test bdk_integration_test v1_to_v1_full_cycle
-cargo test  --package payjoin_ffi --test bdk_integration_test v2_to_v2_full_cycle --features enable-danger-local-https
+cargo test  --package payjoin_ffi --test bdk_integration_test v2_to_v2_full_cycle --features danger-local-https
 
 
 ```

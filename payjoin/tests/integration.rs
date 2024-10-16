@@ -132,6 +132,48 @@ mod integration {
             );
             Ok(())
         }
+
+        #[test]
+        fn disallow_mixed_input_scripts() -> Result<(), BoxError> {
+            init_tracing();
+            let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(
+                Some(AddressType::Bech32),
+                Some(AddressType::P2shSegwit),
+            )?;
+
+            // Receiver creates the payjoin URI
+            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
+            let pj_uri = PjUriBuilder::new(pj_receiver_address, EXAMPLE_URL.to_owned())
+                .amount(Amount::ONE_BTC)
+                .build();
+
+            // **********************
+            // Inside the Sender:
+            // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
+            let uri = Uri::from_str(&pj_uri.to_string())
+                .unwrap()
+                .assume_checked()
+                .check_pj_supported()
+                .unwrap();
+            let psbt = build_original_psbt(&sender, &uri)?;
+            debug!("Original psbt: {:#?}", psbt);
+            let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt, uri)?
+                .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
+                .extract_v1()?;
+            let headers = HeaderMock::new(&req.body, req.content_type);
+
+            // **********************
+            // Inside the Receiver:
+            // this data would transit from one party to another over the network in production
+            let response = handle_v1_pj_request(req, headers, &receiver, None, None, None);
+            // this response would be returned as http response to the sender
+
+            // **********************
+            // Inside the Sender:
+            // Sender checks error due to mixed input scripts
+            assert!(ctx.process_response(&mut response.as_bytes()).is_err());
+            Ok(())
+        }
     }
 
     #[cfg(feature = "danger-local-https")]

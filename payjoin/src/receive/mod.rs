@@ -776,12 +776,7 @@ impl ProvisionalProposal {
         output_contribution_weight
     }
 
-    /// Return a Payjoin Proposal PSBT that the sender will find acceptable.
-    ///
-    /// This attempts to calculate any network fee owed by the receiver, subtract it from their output,
-    /// and return a PSBT that can produce a consensus-valid transaction that the sender will accept.
-    ///
-    /// wallet_process_psbt should sign and finalize receiver inputs
+    /// Prepare the PSBT by clearing the fields that the sender expects to be empty
     fn prepare_psbt(mut self, processed_psbt: Psbt) -> Result<PayjoinProposal, RequestError> {
         self.payjoin_psbt = processed_psbt;
         log::trace!("Preparing PSBT {:#?}", self.payjoin_psbt);
@@ -808,6 +803,7 @@ impl ProvisionalProposal {
         Ok(PayjoinProposal { payjoin_psbt: self.payjoin_psbt, params: self.params })
     }
 
+    /// Return the indexes of the sender inputs
     fn sender_input_indexes(&self) -> Vec<usize> {
         // iterate proposal as mutable WITH the outpoint (previous_output) available too
         let mut original_inputs = self.original_psbt.input_pairs().peekable();
@@ -828,20 +824,27 @@ impl ProvisionalProposal {
         sender_input_indexes
     }
 
+    /// Return a Payjoin Proposal PSBT that the sender will find acceptable.
+    ///
+    /// This attempts to calculate any network fee owed by the receiver, subtract it from their output,
+    /// and return a PSBT that can produce a consensus-valid transaction that the sender will accept.
+    ///
+    /// wallet_process_psbt should sign and finalize receiver inputs
     pub fn finalize_proposal(
         mut self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, Error>,
         min_feerate_sat_per_vb: Option<FeeRate>,
         max_feerate_sat_per_vb: FeeRate,
     ) -> Result<PayjoinProposal, Error> {
+        let mut psbt = self.apply_fee(min_feerate_sat_per_vb, max_feerate_sat_per_vb)?.clone();
+        // Remove now-invalid sender signatures before applying the receiver signatures
         for i in self.sender_input_indexes() {
-            log::trace!("Clearing sender script signatures for input {}", i);
-            self.payjoin_psbt.inputs[i].final_script_sig = None;
-            self.payjoin_psbt.inputs[i].final_script_witness = None;
-            self.payjoin_psbt.inputs[i].tap_key_sig = None;
+            log::trace!("Clearing sender input {}", i);
+            psbt.inputs[i].final_script_sig = None;
+            psbt.inputs[i].final_script_witness = None;
+            psbt.inputs[i].tap_key_sig = None;
         }
-        let psbt = self.apply_fee(min_feerate_sat_per_vb, max_feerate_sat_per_vb)?;
-        let psbt = wallet_process_psbt(psbt)?;
+        let psbt = wallet_process_psbt(&psbt)?;
         let payjoin_proposal = self.prepare_psbt(psbt)?;
         Ok(payjoin_proposal)
     }
@@ -1002,13 +1005,17 @@ mod test {
 
         // Input weight for a single nested P2WPKH (nested segwit) receiver input
         let nested_p2wpkh_proposal = ProvisionalProposal {
-            original_psbt: Psbt::from_str("cHNidP8BAHECAAAAAX57euL5j6xOst5JB/e/gp58RihmmpxXpsc2hEKKcVFkAAAAAAD9////AhAnAAAAAAAAFgAUtjrU62JOASAnPQ4e30wBM/Exk7ZM0QKVAAAAABYAFL6xh6gjSHmznJnPMbolG7wbGuwtAAAAAAABAIYCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wQCqgAA/////wIA+QKVAAAAABepFOyefe4gjXozL4pzi5vcPrjMeCJwhwAAAAAAAAAAJmokqiGp7eL2HD9x0d79P6mZ36NpU3VcaQaJeZlitIvr2DaXToz5AAAAAAEBIAD5ApUAAAAAF6kU7J597iCNejMvinOLm9w+uMx4InCHAQcXFgAUd6fhKfAd+JIJGpIGkMfMpjd/26sBCGsCRzBEAiBaCDgIrTw5bB1VZrB8RPycgKGNPw/YS6P+psUyxOUwgwIgbJkcbHlMoZxG7vBOVWnQQWayDTSvub6L20dDo1R5SS8BIQK2GCTydo2dJXC6C5wcSKzQ2pCsSygXa0+cMlJrRRnKtwAAIgIC0VgJvaoW2/lbq5atJhxfcgVzs6/gnpafsJHbz+ei484YDOqFk1QAAIABAACAAAAAgAEAAAACAAAAAA==").unwrap(),
-            payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAn57euL5j6xOst5JB/e/gp58RihmmpxXpsc2hEKKcVFkAAAAAAD9////VinByqmVDo3wPNB9LnNELJoJ0g+hOdWiTSXzWEUVtiAAAAAAAP3///8CEBkGKgEAAAAWABSZUDn7eqenP01ziWRBnTCrpwwD6vHQApUAAAAAFgAUvrGHqCNIebOcmc8xuiUbvBsa7C0AAAAAAAEAhgIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////BAKqAAD/////AgD5ApUAAAAAF6kU7J597iCNejMvinOLm9w+uMx4InCHAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEgAPkClQAAAAAXqRTsnn3uII16My+Kc4ub3D64zHgicIcAAQCEAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP////8CYAD/////AgDyBSoBAAAAF6kUx/+ZHBBBZ+6E/US1N2Oe7IDItXiHAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEgAPIFKgEAAAAXqRTH/5kcEEFn7oT9RLU3Y57sgMi1eIcBBxcWABRDVkPBhZHK7tVQqp2uWqQC/GGTCgEIawJHMEQCIEv8/8VpUz0dK4MCcVzS7zoyt+hPRvWwLskZBuaurnFiAiBIuyt1IRaHqFSspDbjDNM607nrDQz4lmDnekNqMNn07AEhAp1Ol7vKvG2Oi8RSrsb7uSPTET83/YXuknx63PhfCG/zAAAA").unwrap(),
+            original_psbt: Psbt::from_str("cHNidP8BAHECAAAAAeOsT9cRWRz3te+bgmtweG1vDLkdSH4057NuoodDNPFWAAAAAAD9////AhAnAAAAAAAAFgAUtp3bPFM/YWThyxD5Cc9OR4mb8tdMygUqAQAAABYAFODlplDoE6EGlZvmqoUngBgsu8qCAAAAAAABAIUCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBZwD/////AgDyBSoBAAAAF6kU2JnIn4Mmcb5kuF3EYeFei8IB43qHAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEgAPIFKgEAAAAXqRTYmcifgyZxvmS4XcRh4V6LwgHjeocBBxcWABSPGoPK1yl60X4Z9OfA7IQPUWCgVwEIawJHMEQCICZG3s2cbulPnLTvK4TwlKhsC+cem8tD2GjZZ3eMJD7FAiADh/xwv0ib8ksOrj1M27DYLiw7WFptxkMkE2YgiNMRVgEhAlDMm5DA8kU+QGiPxEWUyV1S8+XGzUOepUOck257ZOhkAAAiAgP+oMbeca66mt+UtXgHm6v/RIFEpxrwG7IvPDim5KWHpBgfVHrXVAAAgAEAAIAAAACAAQAAAAAAAAAA").unwrap(),
+            payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAuXYOTUaVRiB8cPPhEXzcJ72/SgZOPEpPx5pkG0fNeGCAAAAAAD9////46xP1xFZHPe175uCa3B4bW8MuR1IfjTns26ih0M08VYAAAAAAP3///8CEBkGKgEAAAAWABQHuuu4H4fbQWV51IunoJLUtmMTfEzKBSoBAAAAFgAU4OWmUOgToQaVm+aqhSeAGCy7yoIAAAAAAAEBIADyBSoBAAAAF6kUQ4BssmVBS3r0s95c6dl1DQCHCR+HAQQWABQbDc333XiiOeEXroP523OoYNb1aAABAIUCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBZwD/////AgDyBSoBAAAAF6kU2JnIn4Mmcb5kuF3EYeFei8IB43qHAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEgAPIFKgEAAAAXqRTYmcifgyZxvmS4XcRh4V6LwgHjeocBBxcWABSPGoPK1yl60X4Z9OfA7IQPUWCgVwEIawJHMEQCICZG3s2cbulPnLTvK4TwlKhsC+cem8tD2GjZZ3eMJD7FAiADh/xwv0ib8ksOrj1M27DYLiw7WFptxkMkE2YgiNMRVgEhAlDMm5DA8kU+QGiPxEWUyV1S8+XGzUOepUOck257ZOhkAAAA").unwrap(),
             params: Params::default(),
             change_vout: 0
         };
-        // Currently nested segwit is not supported, see https://github.com/payjoin/rust-payjoin/issues/358
-        assert!(nested_p2wpkh_proposal.additional_input_weight().is_err());
+        assert_eq!(
+            nested_p2wpkh_proposal
+                .additional_input_weight()
+                .expect("should calculate input weight"),
+            Weight::from_wu(364)
+        );
 
         // Input weight for a single P2WPKH (native segwit) receiver input
         let p2wpkh_proposal = ProvisionalProposal {

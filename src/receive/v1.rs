@@ -6,8 +6,8 @@ use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 use payjoin::receive as pdk;
 
+use crate::bitcoin::{OutPoint, TxOut};
 use crate::error::PayjoinError;
-use crate::types::{OutPoint, TxOut};
 
 pub trait CanBroadcast {
     fn callback(&self, tx: Vec<u8>) -> Result<bool, PayjoinError>;

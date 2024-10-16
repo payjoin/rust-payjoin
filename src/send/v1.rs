@@ -6,8 +6,8 @@ pub use payjoin::send as pdk;
 
 use crate::error::PayjoinError;
 use crate::send::v2::ContextV2;
-use crate::types::Request;
 use crate::uri::{PjUri, Url};
+use crate::Request;
 
 ///Builder for sender-side payjoin parameters
 ///

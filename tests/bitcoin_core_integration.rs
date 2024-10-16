@@ -8,10 +8,11 @@ use std::sync::Arc;
 
 use bitcoincore_rpc::bitcoincore_rpc_json::WalletProcessPsbtResult;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
+use payjoin_ffi::bitcoin::{OutPoint, Request, TxOut};
 use payjoin_ffi::receive::v1::{Headers, PayjoinProposal, UncheckedProposal};
 use payjoin_ffi::send::v1::RequestBuilder;
-use payjoin_ffi::types::{OutPoint, Request, TxOut};
 use payjoin_ffi::uri::{PjUriBuilder, Uri, Url};
+use payjoin_ffi::Request;
 
 type BoxError = Box<dyn std::error::Error>;
 

@@ -1,5 +1,5 @@
 use crate::error::PayjoinError;
-use crate::types::OhttpKeys;
+use crate::ohttp::OhttpKeys;
 use crate::uri::Url;
 
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.

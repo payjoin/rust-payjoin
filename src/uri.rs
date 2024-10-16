@@ -7,7 +7,7 @@ use payjoin::bitcoin::address::NetworkChecked;
 use payjoin::UriExt;
 
 use crate::error::PayjoinError;
-use crate::types::OhttpKeys;
+use crate::ohttp::OhttpKeys;
 #[derive(Clone)]
 pub struct Uri(payjoin::Uri<'static, NetworkChecked>);
 impl From<Uri> for payjoin::Uri<'static, NetworkChecked> {

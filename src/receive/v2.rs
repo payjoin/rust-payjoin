@@ -8,13 +8,14 @@ use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 use payjoin::receive as pdk;
 
+use crate::bitcoin::Network;
+use crate::ohttp::OhttpKeys;
 #[cfg(feature = "uniffi")]
 use crate::receive::v1::{
     CanBroadcast, GenerateScript, IsOutputKnown, IsScriptOwned, ProcessPartiallySignedTransaction,
 };
-use crate::types::Network;
 use crate::uri::PjUriBuilder;
-use crate::{OhttpKeys, OutPoint, PayjoinError, Request, TxOut, Url};
+use crate::{OutPoint, PayjoinError, Request, TxOut, Url};
 
 pub struct ClientResponse(Mutex<Option<ohttp::ClientResponse>>);
 

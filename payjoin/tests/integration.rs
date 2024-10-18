@@ -164,14 +164,11 @@ mod integration {
 
             // **********************
             // Inside the Receiver:
-            // this data would transit from one party to another over the network in production
-            let response = handle_v1_pj_request(req, headers, &receiver, None, None, None);
-            // this response would be returned as http response to the sender
-
-            // **********************
-            // Inside the Sender:
-            // Sender checks error due to mixed input scripts
-            assert!(ctx.process_response(&mut response.as_bytes()).is_err());
+            // This should error because the receiver is attempting to introduce mixed input script types
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                handle_v1_pj_request(req, headers, &receiver, None, None, None)
+            }));
+            assert!(result.is_err());
             Ok(())
         }
     }
@@ -860,10 +857,7 @@ mod integration {
                 })
                 .expect("Receiver should not own any of the inputs");
 
-            // Receive Check 3: no mixed input scripts
-            let proposal = proposal.check_no_mixed_input_scripts().unwrap();
-
-            // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
+            // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
             let payjoin = proposal
                 .check_no_inputs_seen_before(|_| Ok(false))
                 .unwrap()
@@ -1300,10 +1294,7 @@ mod integration {
             })
             .expect("Receiver should not own any of the inputs");
 
-        // Receive Check 3: no mixed input scripts
-        let proposal = proposal.check_no_mixed_input_scripts().unwrap();
-
-        // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
+        // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let payjoin = proposal
             .check_no_inputs_seen_before(|_| Ok(false))
             .unwrap()

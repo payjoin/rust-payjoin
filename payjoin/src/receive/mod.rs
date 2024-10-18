@@ -38,10 +38,12 @@ pub mod v2;
 
 use bitcoin::secp256k1::rand::seq::SliceRandom;
 use bitcoin::secp256k1::rand::{self, Rng};
-pub use error::{Error, OutputSubstitutionError, RequestError, SelectionError};
+pub use error::{
+    Error, InputContributionError, OutputSubstitutionError, RequestError, SelectionError,
+};
 use error::{
-    InputContributionError, InternalInputContributionError, InternalOutputSubstitutionError,
-    InternalRequestError, InternalSelectionError,
+    InternalInputContributionError, InternalOutputSubstitutionError, InternalRequestError,
+    InternalSelectionError,
 };
 use optional_parameters::Params;
 
@@ -180,7 +182,7 @@ impl MaybeInputsOwned {
     pub fn check_inputs_not_owned(
         self,
         is_owned: impl Fn(&Script) -> Result<bool, Error>,
-    ) -> Result<MaybeMixedInputScripts, Error> {
+    ) -> Result<MaybeInputsSeen, Error> {
         let mut err = Ok(());
         if let Some(e) = self
             .psbt
@@ -202,59 +204,6 @@ impl MaybeInputsOwned {
             return Err(e);
         }
         err?;
-
-        Ok(MaybeMixedInputScripts { psbt: self.psbt, params: self.params })
-    }
-}
-
-/// Typestate to validate that the Original PSBT has no mixed input types.
-/// This check is skipped in payjoin v2.
-///
-/// Call [`Self::check_no_mixed_input_scripts`] to proceed.
-#[derive(Clone)]
-pub struct MaybeMixedInputScripts {
-    psbt: Psbt,
-    params: Params,
-}
-
-impl MaybeMixedInputScripts {
-    /// Verify the original transaction did not have mixed input types
-    /// Call this after checking downstream.
-    ///
-    /// Note: mixed spends do not necessarily indicate distinct wallet fingerprints.
-    /// This check is intended to prevent some types of wallet fingerprinting.
-    pub fn check_no_mixed_input_scripts(self) -> Result<MaybeInputsSeen, RequestError> {
-        // Allow mixed input scripts in payjoin v2
-        if self.params.v == 2 {
-            return Ok(MaybeInputsSeen { psbt: self.psbt, params: self.params });
-        }
-
-        let mut err = Ok(());
-        let input_scripts = self
-            .psbt
-            .input_pairs()
-            .scan(&mut err, |err, input| match input.address_type() {
-                Ok(address_type) => Some(address_type),
-                Err(e) => {
-                    **err = Err(RequestError::from(InternalRequestError::AddressType(e)));
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-        err?;
-
-        if let Some(first) = input_scripts.first() {
-            input_scripts.iter().try_for_each(|input_type| {
-                if input_type != first {
-                    Err(RequestError::from(InternalRequestError::MixedInputScripts(
-                        *first,
-                        *input_type,
-                    )))
-                } else {
-                    Ok(())
-                }
-            })?;
-        }
 
         Ok(MaybeInputsSeen { psbt: self.psbt, params: self.params })
     }
@@ -598,12 +547,24 @@ impl WantsInputs {
             .first()
             .map(|input| input.sequence)
             .unwrap_or_default();
+        let (sender_has_mixed_inputs, sender_input_type) = self.sender_mixed_inputs()?;
 
         // Insert contributions at random indices for privacy
         let mut rng = rand::thread_rng();
         let mut receiver_input_amount = Amount::ZERO;
         for (psbtin, txin) in inputs.into_iter() {
-            receiver_input_amount += InputPair { txin: &txin, psbtin: &psbtin }
+            let input_pair = InputPair { txin: &txin, psbtin: &psbtin };
+            let input_type =
+                input_pair.address_type().map_err(InternalInputContributionError::AddressType)?;
+            // The payjoin proposal must not introduce mixed input script types (in v1 only)
+            if self.params.v == 1 && !sender_has_mixed_inputs && input_type != sender_input_type {
+                return Err(InternalInputContributionError::MixedInputScripts(
+                    input_type,
+                    sender_input_type,
+                )
+                .into());
+            }
+            receiver_input_amount += input_pair
                 .previous_txout()
                 .map_err(InternalInputContributionError::PrevTxOut)?
                 .value;
@@ -630,6 +591,24 @@ impl WantsInputs {
             params: self.params,
             change_vout: self.change_vout,
         })
+    }
+
+    fn sender_mixed_inputs(&self) -> Result<(bool, bitcoin::AddressType), InputContributionError> {
+        let mut sender_inputs = self.original_psbt.input_pairs();
+        let first_input_type = sender_inputs
+            .next()
+            .ok_or(InternalInputContributionError::NoSenderInputs)?
+            .address_type()
+            .map_err(InternalInputContributionError::AddressType)?;
+        let mut sender_has_mixed_inputs = false;
+        for input in sender_inputs {
+            if input.address_type().map_err(InternalInputContributionError::AddressType)?
+                != first_input_type
+            {
+                sender_has_mixed_inputs = true;
+            }
+        }
+        Ok((sender_has_mixed_inputs, first_input_type))
     }
 
     // Compute the minimum amount that the receiver must contribute to the transaction as input
@@ -942,8 +921,6 @@ mod test {
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| Ok(false))
             .expect("No inputs should be owned")
-            .check_no_mixed_input_scripts()
-            .expect("No mixed input scripts")
             .check_no_inputs_seen_before(|_| Ok(false))
             .expect("No inputs should be seen before")
             .identify_receiver_outputs(|script| {
@@ -977,8 +954,6 @@ mod test {
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| Ok(false))
             .expect("No inputs should be owned")
-            .check_no_mixed_input_scripts()
-            .expect("No mixed input scripts")
             .check_no_inputs_seen_before(|_| Ok(false))
             .expect("No inputs should be seen before")
             .identify_receiver_outputs(|script| {

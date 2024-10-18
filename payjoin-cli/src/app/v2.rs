@@ -306,15 +306,12 @@ impl App {
             }
         })?;
         log::trace!("check2");
-        // Receive Check 3: no mixed input scripts
-        let proposal = proposal.check_no_mixed_input_scripts()?;
-        log::trace!("check3");
 
-        // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
+        // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let payjoin = proposal.check_no_inputs_seen_before(|input| {
             self.db.insert_input_seen_before(*input).map_err(|e| Error::Server(e.into()))
         })?;
-        log::trace!("check4");
+        log::trace!("check3");
 
         let payjoin = payjoin
             .identify_receiver_outputs(|output_script| {

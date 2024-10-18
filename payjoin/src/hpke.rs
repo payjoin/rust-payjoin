@@ -129,27 +129,21 @@ impl<'de> serde::Deserialize<'de> for HpkePublicKey {
 #[cfg(feature = "send")]
 pub fn encrypt_message_a(
     body: Vec<u8>,
-    encapsulation_pair: &HpkeKeyPair,
     reply_pk: &HpkePublicKey,
     receiver_pk: &HpkePublicKey,
 ) -> Result<Vec<u8>, HpkeError> {
     let (encapsulated_key, mut encryption_context) =
         hpke::setup_sender::<ChaCha20Poly1305, HkdfSha256, SecpK256HkdfSha256, _>(
-            &OpModeS::Auth((
-                encapsulation_pair.secret_key().0.clone(),
-                encapsulation_pair.public_key().0.clone(),
-            )),
+            &OpModeS::Base,
             &receiver_pk.0,
             INFO_A,
             &mut OsRng,
         )?;
-    let aad = encapsulation_pair.public_key().to_bytes().to_vec();
     let mut plaintext = reply_pk.to_bytes().to_vec();
     plaintext.extend(body);
     let plaintext = pad_plaintext(&mut plaintext, PADDED_PLAINTEXT_A_LENGTH)?;
-    let ciphertext = encryption_context.seal(plaintext, &aad)?;
+    let ciphertext = encryption_context.seal(plaintext, &[])?;
     let mut message_a = encapsulated_key.to_bytes().to_vec();
-    message_a.extend(&aad);
     message_a.extend(&ciphertext);
     Ok(message_a.to_vec())
 }
@@ -167,21 +161,15 @@ pub fn decrypt_message_a(
     cursor.read_exact(&mut enc).map_err(|_| HpkeError::PayloadTooShort)?;
     let enc = EncappedKey::from_bytes(&enc)?;
 
-    let mut aad = [0u8; UNCOMPRESSED_PUBLIC_KEY_SIZE];
-    cursor.read_exact(&mut aad).map_err(|_| HpkeError::PayloadTooShort)?;
-    let encapsulation_pk = PublicKey::from_bytes(&aad)?;
-
-    let mut decryption_ctx =
-        hpke::setup_receiver::<ChaCha20Poly1305, HkdfSha256, SecpK256HkdfSha256>(
-            &OpModeR::Auth(encapsulation_pk.clone()),
-            &receiver_sk.0,
-            &enc,
-            INFO_A,
-        )?;
+    let mut decryption_ctx = hpke::setup_receiver::<
+        ChaCha20Poly1305,
+        HkdfSha256,
+        SecpK256HkdfSha256,
+    >(&OpModeR::Base, &receiver_sk.0, &enc, INFO_A)?;
 
     let mut ciphertext = Vec::new();
     cursor.read_to_end(&mut ciphertext).map_err(|_| HpkeError::PayloadTooShort)?;
-    let plaintext = decryption_ctx.open(&ciphertext, &aad)?;
+    let plaintext = decryption_ctx.open(&ciphertext, &[])?;
 
     let reply_pk_bytes = &plaintext[..UNCOMPRESSED_PUBLIC_KEY_SIZE];
     let reply_pk = HpkePublicKey(PublicKey::from_bytes(reply_pk_bytes)?);

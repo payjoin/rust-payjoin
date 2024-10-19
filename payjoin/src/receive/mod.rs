@@ -547,7 +547,7 @@ impl WantsInputs {
             .first()
             .map(|input| input.sequence)
             .unwrap_or_default();
-        let (sender_has_mixed_inputs, sender_input_type) = self.sender_mixed_inputs()?;
+        let uniform_sender_input_type = self.uniform_sender_input_type()?;
 
         // Insert contributions at random indices for privacy
         let mut rng = rand::thread_rng();
@@ -556,14 +556,12 @@ impl WantsInputs {
             let input_pair = InputPair { txin: &txin, psbtin: &psbtin };
             let input_type =
                 input_pair.address_type().map_err(InternalInputContributionError::AddressType)?;
-            // The payjoin proposal must not introduce mixed input script types (in v1 only)
-            if self.params.v == 1 && !sender_has_mixed_inputs && input_type != sender_input_type {
-                return Err(InternalInputContributionError::MixedInputScripts(
-                    input_type,
-                    sender_input_type,
-                )
-                .into());
+
+            if self.params.v == 1 {
+                // v1 payjoin proposals must not introduce mixed input script types
+                self.check_mixed_input_types(input_type, uniform_sender_input_type)?;
             }
+
             receiver_input_amount += input_pair
                 .previous_txout()
                 .map_err(InternalInputContributionError::PrevTxOut)?
@@ -593,22 +591,44 @@ impl WantsInputs {
         })
     }
 
-    fn sender_mixed_inputs(&self) -> Result<(bool, bitcoin::AddressType), InputContributionError> {
+    /// Check for mixed input types and throw an error if conditions are met
+    fn check_mixed_input_types(
+        &self,
+        receiver_input_type: bitcoin::AddressType,
+        uniform_sender_input_type: Option<bitcoin::AddressType>,
+    ) -> Result<(), InputContributionError> {
+        if let Some(uniform_sender_input_type) = uniform_sender_input_type {
+            if receiver_input_type != uniform_sender_input_type {
+                return Err(InternalInputContributionError::MixedInputScripts(
+                    receiver_input_type,
+                    uniform_sender_input_type,
+                )
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    /// Check if the sender's inputs are all of the same type
+    ///
+    /// Returns `None` if the sender inputs are not all of the same type
+    fn uniform_sender_input_type(
+        &self,
+    ) -> Result<Option<bitcoin::AddressType>, InputContributionError> {
         let mut sender_inputs = self.original_psbt.input_pairs();
         let first_input_type = sender_inputs
             .next()
             .ok_or(InternalInputContributionError::NoSenderInputs)?
             .address_type()
             .map_err(InternalInputContributionError::AddressType)?;
-        let mut sender_has_mixed_inputs = false;
         for input in sender_inputs {
             if input.address_type().map_err(InternalInputContributionError::AddressType)?
                 != first_input_type
             {
-                sender_has_mixed_inputs = true;
+                return Ok(None);
             }
         }
-        Ok((sender_has_mixed_inputs, first_input_type))
+        Ok(Some(first_input_type))
     }
 
     // Compute the minimum amount that the receiver must contribute to the transaction as input

@@ -100,7 +100,7 @@ mod integration {
             // **********************
             // Inside the Receiver:
             // this data would transit from one party to another over the network in production
-            let response = handle_v1_pj_request(req, headers, &receiver, None, None, None);
+            let response = handle_v1_pj_request(req, headers, &receiver, None, None, None)?;
             // this response would be returned as http response to the sender
 
             // **********************
@@ -157,7 +157,7 @@ mod integration {
                 .unwrap();
             let psbt = build_original_psbt(&sender, &uri)?;
             debug!("Original psbt: {:#?}", psbt);
-            let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt, uri)?
+            let (req, _ctx) = RequestBuilder::from_psbt_and_uri(psbt, uri)?
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);
@@ -165,10 +165,7 @@ mod integration {
             // **********************
             // Inside the Receiver:
             // This should error because the receiver is attempting to introduce mixed input script types
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                handle_v1_pj_request(req, headers, &receiver, None, None, None)
-            }));
-            assert!(result.is_err());
+            assert!(handle_v1_pj_request(req, headers, &receiver, None, None, None).is_err());
             Ok(())
         }
     }
@@ -611,7 +608,7 @@ mod integration {
             // **********************
             // Inside the Receiver:
             // this data would transit from one party to another over the network in production
-            let response = handle_v1_pj_request(req, headers, &receiver, None, None, None);
+            let response = handle_v1_pj_request(req, headers, &receiver, None, None, None)?;
             // this response would be returned as http response to the sender
 
             // **********************
@@ -1051,7 +1048,7 @@ mod integration {
                 Some(outputs),
                 Some(&drain_script),
                 Some(inputs),
-            );
+            )?;
             // this response would be returned as http response to the sender
 
             // **********************
@@ -1137,7 +1134,7 @@ mod integration {
                 Some(outputs),
                 Some(&drain_script),
                 Some(inputs),
-            );
+            )?;
             // this response would be returned as http response to the sender
 
             // **********************
@@ -1247,20 +1244,19 @@ mod integration {
         custom_outputs: Option<Vec<TxOut>>,
         drain_script: Option<&bitcoin::Script>,
         custom_inputs: Option<Vec<(PsbtInput, TxIn)>>,
-    ) -> String {
+    ) -> Result<String, BoxError> {
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
         let proposal = payjoin::receive::UncheckedProposal::from_request(
             req.body.as_slice(),
             req.url.query().unwrap_or(""),
             headers,
-        )
-        .unwrap();
+        )?;
         let proposal =
-            handle_proposal(proposal, receiver, custom_outputs, drain_script, custom_inputs);
+            handle_proposal(proposal, receiver, custom_outputs, drain_script, custom_inputs)?;
         assert!(!proposal.is_output_substitution_disabled());
         let psbt = proposal.psbt();
         tracing::debug!("Receiver's Payjoin proposal PSBT: {:#?}", &psbt);
-        psbt.to_string()
+        Ok(psbt.to_string())
     }
 
     fn handle_proposal(
@@ -1269,59 +1265,48 @@ mod integration {
         custom_outputs: Option<Vec<TxOut>>,
         drain_script: Option<&bitcoin::Script>,
         custom_inputs: Option<Vec<(PsbtInput, TxIn)>>,
-    ) -> payjoin::receive::PayjoinProposal {
+    ) -> Result<payjoin::receive::PayjoinProposal, BoxError> {
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // Receive Check 1: Can Broadcast
-        let proposal = proposal
-            .check_broadcast_suitability(None, |tx| {
-                Ok(receiver
-                    .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
-                    .unwrap()
-                    .first()
-                    .unwrap()
-                    .allowed)
-            })
-            .expect("Payjoin proposal should be broadcastable");
+        let proposal = proposal.check_broadcast_suitability(None, |tx| {
+            Ok(receiver
+                .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
+                .unwrap()
+                .first()
+                .unwrap()
+                .allowed)
+        })?;
 
         // Receive Check 2: receiver can't sign for proposal inputs
-        let proposal = proposal
-            .check_inputs_not_owned(|input| {
-                let address =
-                    bitcoin::Address::from_script(&input, bitcoin::Network::Regtest).unwrap();
-                Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
-            })
-            .expect("Receiver should not own any of the inputs");
+        let proposal = proposal.check_inputs_not_owned(|input| {
+            let address = bitcoin::Address::from_script(&input, bitcoin::Network::Regtest).unwrap();
+            Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
+        })?;
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let payjoin = proposal
-            .check_no_inputs_seen_before(|_| Ok(false))
-            .unwrap()
+            .check_no_inputs_seen_before(|_| Ok(false))?
             .identify_receiver_outputs(|output_script| {
                 let address =
                     bitcoin::Address::from_script(&output_script, bitcoin::Network::Regtest)
                         .unwrap();
                 Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
-            })
-            .expect("Receiver should have at least one output");
+            })?;
 
         let payjoin = match custom_outputs {
-            Some(txos) => payjoin
-                .replace_receiver_outputs(txos, &drain_script.unwrap())
-                .expect("Could not substitute outputs"),
-            None => payjoin
-                .substitute_receiver_script(
-                    &receiver.get_new_address(None, None).unwrap().assume_checked().script_pubkey(),
-                )
-                .expect("Could not substitute outputs"),
+            Some(txos) => payjoin.replace_receiver_outputs(txos, &drain_script.unwrap())?,
+            None => payjoin.substitute_receiver_script(
+                &receiver.get_new_address(None, None)?.assume_checked().script_pubkey(),
+            )?,
         }
         .commit_outputs();
 
         let inputs = match custom_inputs {
             Some(inputs) => inputs,
             None => {
-                let available_inputs = receiver.list_unspent(None, None, None, None, None).unwrap();
+                let available_inputs = receiver.list_unspent(None, None, None, None, None)?;
                 let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
                     .iter()
                     .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
@@ -1329,7 +1314,7 @@ mod integration {
 
                 let selected_outpoint = payjoin
                     .try_preserving_privacy(candidate_inputs)
-                    .expect("Failed to make privacy preserving selection");
+                    .map_err(|e| format!("Failed to make privacy preserving selection: {:?}", e))?;
                 let selected_utxo = available_inputs
                     .iter()
                     .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
@@ -1338,29 +1323,30 @@ mod integration {
                 vec![input_pair]
             }
         };
-        let payjoin = payjoin.contribute_inputs(inputs).unwrap().commit_inputs();
+        let payjoin = payjoin
+            .contribute_inputs(inputs)
+            .map_err(|e| format!("Failed to contribute inputs: {:?}", e))?
+            .commit_inputs();
 
-        let payjoin_proposal = payjoin
-            .finalize_proposal(
-                |psbt: &Psbt| {
-                    Ok(receiver
-                        .wallet_process_psbt(
-                            &psbt.to_string(),
-                            None,
-                            None,
-                            Some(true), // check that the receiver properly clears keypaths
-                        )
-                        .map(|res: WalletProcessPsbtResult| {
-                            let psbt = Psbt::from_str(&res.psbt).unwrap();
-                            return psbt;
-                        })
-                        .unwrap())
-                },
-                Some(FeeRate::BROADCAST_MIN),
-                FeeRate::from_sat_per_vb_unchecked(2),
-            )
-            .unwrap();
-        payjoin_proposal
+        let payjoin_proposal = payjoin.finalize_proposal(
+            |psbt: &Psbt| {
+                Ok(receiver
+                    .wallet_process_psbt(
+                        &psbt.to_string(),
+                        None,
+                        None,
+                        Some(true), // check that the receiver properly clears keypaths
+                    )
+                    .map(|res: WalletProcessPsbtResult| {
+                        let psbt = Psbt::from_str(&res.psbt).unwrap();
+                        return psbt;
+                    })
+                    .unwrap())
+            },
+            Some(FeeRate::BROADCAST_MIN),
+            FeeRate::from_sat_per_vb_unchecked(2),
+        )?;
+        Ok(payjoin_proposal)
     }
 
     fn extract_pj_tx(

@@ -13,8 +13,8 @@ pub const PADDED_MESSAGE_BYTES: usize = 7168;
 pub const PADDED_PLAINTEXT_A_LENGTH: usize =
     PADDED_MESSAGE_BYTES - UNCOMPRESSED_PUBLIC_KEY_SIZE * 2;
 pub const PADDED_PLAINTEXT_B_LENGTH: usize = PADDED_MESSAGE_BYTES - UNCOMPRESSED_PUBLIC_KEY_SIZE;
-pub const INFO_A: &[u8] = b"PjV2MsgA";
-pub const INFO_B: &[u8] = b"PjV2MsgB";
+pub const INFO_A: &[u8; 8] = b"PjV2MsgA";
+pub const INFO_B: &[u8; 8] = b"PjV2MsgB";
 
 pub type SecretKey = <SecpK256HkdfSha256 as hpke::Kem>::PrivateKey;
 pub type PublicKey = <SecpK256HkdfSha256 as hpke::Kem>::PublicKey;

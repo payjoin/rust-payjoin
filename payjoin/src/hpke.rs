@@ -1,7 +1,8 @@
 use std::ops::Deref;
 use std::{error, fmt};
 
-use bitcoin::key::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE;
+use bitcoin::key::constants::{ELLSWIFT_ENCODING_SIZE, UNCOMPRESSED_PUBLIC_KEY_SIZE};
+use bitcoin::secp256k1::ellswift::ElligatorSwift;
 use hpke::aead::ChaCha20Poly1305;
 use hpke::kdf::HkdfSha256;
 use hpke::kem::SecpK256HkdfSha256;
@@ -10,8 +11,7 @@ use hpke::{Deserializable, OpModeR, OpModeS, Serializable};
 use serde::{Deserialize, Serialize};
 
 pub const PADDED_MESSAGE_BYTES: usize = 7168;
-pub const PADDED_PLAINTEXT_A_LENGTH: usize =
-    PADDED_MESSAGE_BYTES - UNCOMPRESSED_PUBLIC_KEY_SIZE * 2;
+pub const PADDED_PLAINTEXT_A_LENGTH: usize = PADDED_MESSAGE_BYTES - ELLSWIFT_ENCODING_SIZE;
 pub const PADDED_PLAINTEXT_B_LENGTH: usize = PADDED_MESSAGE_BYTES - UNCOMPRESSED_PUBLIC_KEY_SIZE;
 pub const INFO_A: &[u8; 8] = b"PjV2MsgA";
 pub const INFO_B: &[u8; 8] = b"PjV2MsgB";
@@ -34,6 +34,23 @@ impl HpkeKeyPair {
     }
     pub fn secret_key(&self) -> &HpkeSecretKey { &self.0 }
     pub fn public_key(&self) -> &HpkePublicKey { &self.1 }
+}
+
+fn encapped_key_from_ellswift_bytes(encoded: &[u8]) -> Result<EncappedKey, HpkeError> {
+    let mut buf = [0u8; ELLSWIFT_ENCODING_SIZE];
+    buf.copy_from_slice(encoded);
+    let ellswift = ElligatorSwift::from_array(buf);
+    let pk = bitcoin::secp256k1::PublicKey::from_ellswift(ellswift);
+    Ok(EncappedKey::from_bytes(pk.serialize_uncompressed().as_slice())?)
+}
+
+fn ellswift_bytes_from_encapped_key(
+    enc: &EncappedKey,
+) -> Result<[u8; ELLSWIFT_ENCODING_SIZE], HpkeError> {
+    let uncompressed = enc.to_bytes();
+    let pk = bitcoin::secp256k1::PublicKey::from_slice(&uncompressed)?;
+    let ellswift = ElligatorSwift::from_pubkey(pk);
+    Ok(ellswift.to_array())
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -143,7 +160,7 @@ pub fn encrypt_message_a(
     plaintext.extend(body);
     let plaintext = pad_plaintext(&mut plaintext, PADDED_PLAINTEXT_A_LENGTH)?;
     let ciphertext = encryption_context.seal(plaintext, &[])?;
-    let mut message_a = encapsulated_key.to_bytes().to_vec();
+    let mut message_a = ellswift_bytes_from_encapped_key(&encapsulated_key)?.to_vec();
     message_a.extend(&ciphertext);
     Ok(message_a.to_vec())
 }
@@ -157,9 +174,9 @@ pub fn decrypt_message_a(
 
     let mut cursor = Cursor::new(message_a);
 
-    let mut enc = [0u8; UNCOMPRESSED_PUBLIC_KEY_SIZE];
-    cursor.read_exact(&mut enc).map_err(|_| HpkeError::PayloadTooShort)?;
-    let enc = EncappedKey::from_bytes(&enc)?;
+    let mut enc_bytes = [0u8; ELLSWIFT_ENCODING_SIZE];
+    cursor.read_exact(&mut enc_bytes).map_err(|_| HpkeError::PayloadTooShort)?;
+    let enc = encapped_key_from_ellswift_bytes(&enc_bytes)?;
 
     let mut decryption_ctx = hpke::setup_receiver::<
         ChaCha20Poly1305,
@@ -196,9 +213,9 @@ pub fn encrypt_message_b(
             INFO_B,
             &mut OsRng,
         )?;
-    let plaintext = pad_plaintext(&mut plaintext, PADDED_PLAINTEXT_B_LENGTH)?;
+    let plaintext: &[u8] = pad_plaintext(&mut plaintext, PADDED_PLAINTEXT_B_LENGTH)?;
     let ciphertext = encryption_context.seal(plaintext, &[])?;
-    let mut message_b = encapsulated_key.to_bytes().to_vec();
+    let mut message_b = ellswift_bytes_from_encapped_key(&encapsulated_key)?.to_vec();
     message_b.extend(&ciphertext);
     Ok(message_b.to_vec())
 }
@@ -209,17 +226,15 @@ pub fn decrypt_message_b(
     receiver_pk: HpkePublicKey,
     sender_sk: HpkeSecretKey,
 ) -> Result<Vec<u8>, HpkeError> {
-    let enc = message_b.get(..65).ok_or(HpkeError::PayloadTooShort)?;
-    let enc = EncappedKey::from_bytes(enc)?;
+    let enc = message_b.get(..ELLSWIFT_ENCODING_SIZE).ok_or(HpkeError::PayloadTooShort)?;
+    let enc = encapped_key_from_ellswift_bytes(enc)?;
     let mut decryption_ctx = hpke::setup_receiver::<
         ChaCha20Poly1305,
         HkdfSha256,
         SecpK256HkdfSha256,
     >(&OpModeR::Auth(receiver_pk.0), &sender_sk.0, &enc, INFO_B)?;
-    let plaintext = decryption_ctx.open(
-        message_b.get(UNCOMPRESSED_PUBLIC_KEY_SIZE..).ok_or(HpkeError::PayloadTooShort)?,
-        &[],
-    )?;
+    let plaintext = decryption_ctx
+        .open(message_b.get(ELLSWIFT_ENCODING_SIZE..).ok_or(HpkeError::PayloadTooShort)?, &[])?;
     Ok(plaintext)
 }
 

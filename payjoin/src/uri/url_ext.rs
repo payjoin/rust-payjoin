@@ -160,9 +160,19 @@ mod tests {
     #[test]
     fn test_valid_v2_url_fragment_on_bip21() {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
-                   &pj=https://example.com\
-                   #OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
-        let uri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
-        assert!(uri.extras.endpoint().ohttp().is_some());
+                   &pjos=0&pj=HTTPS://EXAMPLE.COM/\
+                   %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
+        let pjuri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
+        assert!(pjuri.extras.endpoint().ohttp().is_some());
+        assert_eq!(format!("{}", pjuri), uri);
+
+        let reordered = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
+                   &pj=HTTPS://EXAMPLE.COM/\
+                   %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC\
+                   &pjos=0";
+        let pjuri =
+            Uri::try_from(reordered).unwrap().assume_checked().check_pj_supported().unwrap();
+        assert!(pjuri.extras.endpoint().ohttp().is_some());
+        assert_eq!(format!("{}", pjuri), uri);
     }
 }

@@ -100,8 +100,8 @@ impl PayjoinExtras {
     pub fn endpoint(&self) -> &Url { &self.endpoint }
 }
 
-pub type Uri<'a, NetworkValidation> = bip21::Uri<'a, NetworkValidation, MaybePayjoinExtras>;
-pub type PjUri<'a> = bip21::Uri<'a, NetworkChecked, PayjoinExtras>;
+pub type Uri<'a, NetworkValidation> = bitcoin_uri::Uri<'a, NetworkValidation, MaybePayjoinExtras>;
+pub type PjUri<'a> = bitcoin_uri::Uri<'a, NetworkChecked, PayjoinExtras>;
 
 mod sealed {
     use bitcoin::address::NetworkChecked;
@@ -115,14 +115,14 @@ mod sealed {
 pub trait UriExt<'a>: sealed::UriExt {
     // Error type is boxed to reduce the size of the Result
     // (See https://rust-lang.github.io/rust-clippy/master/index.html#result_large_err)
-    fn check_pj_supported(self) -> Result<PjUri<'a>, Box<bip21::Uri<'a>>>;
+    fn check_pj_supported(self) -> Result<PjUri<'a>, Box<bitcoin_uri::Uri<'a>>>;
 }
 
 impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
-    fn check_pj_supported(self) -> Result<PjUri<'a>, Box<bip21::Uri<'a>>> {
+    fn check_pj_supported(self) -> Result<PjUri<'a>, Box<bitcoin_uri::Uri<'a>>> {
         match self.extras {
             MaybePayjoinExtras::Supported(payjoin) => {
-                let mut uri = bip21::Uri::with_extras(self.address, payjoin);
+                let mut uri = bitcoin_uri::Uri::with_extras(self.address, payjoin);
                 uri.amount = self.amount;
                 uri.label = self.label;
                 uri.message = self.message;
@@ -130,7 +130,7 @@ impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
                 Ok(uri)
             }
             MaybePayjoinExtras::Unsupported => {
-                let mut uri = bip21::Uri::new(self.address);
+                let mut uri = bitcoin_uri::Uri::new(self.address);
                 uri.amount = self.amount;
                 uri.label = self.label;
                 uri.message = self.message;
@@ -220,11 +220,11 @@ impl PjUriBuilder {
 
     /// Build payjoin URI.
     ///
-    /// Constructs a `bip21::Uri` with PayjoinParams from the
+    /// Constructs a `bitcoin_uri::Uri` with PayjoinParams from the
     /// parameters set in the builder.
     pub fn build<'a>(self) -> PjUri<'a> {
         let extras = PayjoinExtras { endpoint: self.pj, disable_output_substitution: self.pjos };
-        let mut pj_uri = bip21::Uri::with_extras(self.address, extras);
+        let mut pj_uri = bitcoin_uri::Uri::with_extras(self.address, extras);
         pj_uri.amount = self.amount;
         pj_uri.label = self.label.map(Into::into);
         pj_uri.message = self.message.map(Into::into);
@@ -236,11 +236,11 @@ impl PayjoinExtras {
     pub fn is_output_substitution_disabled(&self) -> bool { self.disable_output_substitution }
 }
 
-impl bip21::de::DeserializationError for MaybePayjoinExtras {
+impl bitcoin_uri::de::DeserializationError for MaybePayjoinExtras {
     type Error = PjParseError;
 }
 
-impl bip21::de::DeserializeParams<'_> for MaybePayjoinExtras {
+impl bitcoin_uri::de::DeserializeParams<'_> for MaybePayjoinExtras {
     type DeserializationState = DeserializationState;
 }
 
@@ -250,7 +250,7 @@ pub struct DeserializationState {
     pjos: Option<bool>,
 }
 
-impl bip21::SerializeParams for &MaybePayjoinExtras {
+impl bitcoin_uri::SerializeParams for &MaybePayjoinExtras {
     type Key = &'static str;
     type Value = String;
     type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
@@ -263,7 +263,7 @@ impl bip21::SerializeParams for &MaybePayjoinExtras {
     }
 }
 
-impl bip21::SerializeParams for &PayjoinExtras {
+impl bitcoin_uri::SerializeParams for &PayjoinExtras {
     type Key = &'static str;
     type Value = String;
     type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
@@ -287,7 +287,7 @@ impl bip21::SerializeParams for &PayjoinExtras {
     }
 }
 
-impl bip21::de::DeserializationState<'_> for DeserializationState {
+impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
     type Value = MaybePayjoinExtras;
 
     fn is_param_known(&self, param: &str) -> bool { matches!(param, "pj" | "pjos") }
@@ -295,10 +295,10 @@ impl bip21::de::DeserializationState<'_> for DeserializationState {
     fn deserialize_temp(
         &mut self,
         key: &str,
-        value: bip21::Param<'_>,
+        value: bitcoin_uri::Param<'_>,
     ) -> std::result::Result<
-        bip21::de::ParamKind,
-        <Self::Value as bip21::DeserializationError>::Error,
+        bitcoin_uri::de::ParamKind,
+        <Self::Value as bitcoin_uri::DeserializationError>::Error,
     > {
         match key {
             "pj" if self.pj.is_none() => {
@@ -306,7 +306,7 @@ impl bip21::de::DeserializationState<'_> for DeserializationState {
                 let url = Url::parse(&endpoint).map_err(|_| InternalPjParseError::BadEndpoint)?;
                 self.pj = Some(url);
 
-                Ok(bip21::de::ParamKind::Known)
+                Ok(bitcoin_uri::de::ParamKind::Known)
             }
             "pj" => Err(InternalPjParseError::DuplicateParams("pj").into()),
             "pjos" if self.pjos.is_none() => {
@@ -315,16 +315,17 @@ impl bip21::de::DeserializationState<'_> for DeserializationState {
                     "1" => self.pjos = Some(true),
                     _ => return Err(InternalPjParseError::BadPjOs.into()),
                 }
-                Ok(bip21::de::ParamKind::Known)
+                Ok(bitcoin_uri::de::ParamKind::Known)
             }
             "pjos" => Err(InternalPjParseError::DuplicateParams("pjos").into()),
-            _ => Ok(bip21::de::ParamKind::Unknown),
+            _ => Ok(bitcoin_uri::de::ParamKind::Unknown),
         }
     }
 
     fn finalize(
         self,
-    ) -> std::result::Result<Self::Value, <Self::Value as bip21::DeserializationError>::Error> {
+    ) -> std::result::Result<Self::Value, <Self::Value as bitcoin_uri::DeserializationError>::Error>
+    {
         match (self.pj, self.pjos) {
             (None, None) => Ok(MaybePayjoinExtras::Unsupported),
             (None, Some(_)) => Err(InternalPjParseError::MissingEndpoint.into()),

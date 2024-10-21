@@ -206,16 +206,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bip21"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebe7a7f5928d264879d5b65eb18a72ea1890c57f22d62ee2eba93f207a6a020b"
-dependencies = [
- "bitcoin",
- "percent-encoding-rfc3986",
-]
-
-[[package]]
 name = "bitcoin"
 version = "0.32.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -310,6 +300,16 @@ dependencies = [
  "bitcoin-io",
  "hex-conservative",
  "serde",
+]
+
+[[package]]
+name = "bitcoin_uri"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e0a228e083d1702f83389b0ac71eb70078dc8d7fcbb6cde864d1cbca145f5cc"
+dependencies = [
+ "bitcoin",
+ "percent-encoding-rfc3986",
 ]
 
 [[package]]
@@ -1580,10 +1580,10 @@ name = "payjoin"
 version = "0.20.0"
 dependencies = [
  "bhttp",
- "bip21",
  "bitcoin",
  "bitcoin-hpke",
  "bitcoin-ohttp",
+ "bitcoin_uri",
  "bitcoind",
  "http",
  "log",
@@ -1609,7 +1609,6 @@ version = "0.0.9-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
- "bip21",
  "bitcoincore-rpc",
  "bitcoind",
  "clap",

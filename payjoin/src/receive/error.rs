@@ -72,10 +72,6 @@ pub(crate) enum InternalRequestError {
     OriginalPsbtNotBroadcastable,
     /// The sender is trying to spend the receiver input
     InputOwned(bitcoin::ScriptBuf),
-    /// The original psbt has mixed input address types that could harm privacy
-    MixedInputScripts(bitcoin::AddressType, bitcoin::AddressType),
-    /// The address type could not be determined
-    AddressType(crate::psbt::AddressTypeError),
     /// The expected input weight cannot be determined
     InputWeight(crate::psbt::InputWeightError),
     /// Original PSBT input has been seen before. Only automatic receivers, aka "interactive" in the spec
@@ -152,13 +148,6 @@ impl fmt::Display for RequestError {
             ),
             InternalRequestError::InputOwned(_) =>
                 write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
-            InternalRequestError::MixedInputScripts(type_a, type_b) => write_error(
-                f,
-                "original-psbt-rejected",
-                &format!("Mixed input scripts: {}; {}.", type_a, type_b),
-            ),
-            InternalRequestError::AddressType(e) =>
-                write_error(f, "original-psbt-rejected", &format!("AddressType Error: {}", e)),
             InternalRequestError::InputWeight(e) =>
                 write_error(f, "original-psbt-rejected", &format!("InputWeight Error: {}", e)),
             InternalRequestError::InputSeen(_) =>
@@ -200,7 +189,6 @@ impl std::error::Error for RequestError {
             InternalRequestError::SenderParams(e) => Some(e),
             InternalRequestError::InconsistentPsbt(e) => Some(e),
             InternalRequestError::PrevTxOut(e) => Some(e),
-            InternalRequestError::AddressType(e) => Some(e),
             InternalRequestError::InputWeight(e) => Some(e),
             #[cfg(feature = "v2")]
             InternalRequestError::ParsePsbt(e) => Some(e),
@@ -301,6 +289,14 @@ pub struct InputContributionError(InternalInputContributionError);
 
 #[derive(Debug)]
 pub(crate) enum InternalInputContributionError {
+    /// Missing previous txout information
+    PrevTxOut(crate::psbt::PrevTxOutError),
+    /// The address type could not be determined
+    AddressType(crate::psbt::AddressTypeError),
+    /// The original PSBT has no inputs
+    NoSenderInputs,
+    /// The proposed receiver inputs would introduce mixed input script types
+    MixedInputScripts(bitcoin::AddressType, bitcoin::AddressType),
     /// Total input value is not enough to cover additional output value
     ValueTooLow,
 }
@@ -308,6 +304,17 @@ pub(crate) enum InternalInputContributionError {
 impl fmt::Display for InputContributionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
+            InternalInputContributionError::PrevTxOut(e) =>
+                write!(f, "Missing previous txout information: {}", e),
+            InternalInputContributionError::AddressType(e) =>
+                write!(f, "The address type could not be determined: {}", e),
+            InternalInputContributionError::NoSenderInputs =>
+                write!(f, "The original PSBT has no inputs"),
+            InternalInputContributionError::MixedInputScripts(type_a, type_b) => write!(
+                f,
+                "The proposed receiver inputs would introduce mixed input script types: {}; {}.",
+                type_a, type_b
+            ),
             InternalInputContributionError::ValueTooLow =>
                 write!(f, "Total input value is not enough to cover additional output value"),
         }

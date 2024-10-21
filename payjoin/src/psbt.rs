@@ -195,17 +195,24 @@ impl<'a> InputPair<'a> {
         // Get the input weight prediction corresponding to spending an output of this address type
         let iwp = match self.address_type()? {
             P2pkh => Ok(InputWeightPrediction::P2PKH_COMPRESSED_MAX),
-            P2sh =>
-                match self.psbtin.final_script_sig.as_ref().and_then(|s| redeem_script(s.as_ref()))
-                {
+            P2sh => {
+                // redeemScript can be extracted from scriptSig for signed P2SH inputs
+                let redeem_script = if let Some(ref script_sig) = self.psbtin.final_script_sig {
+                    redeem_script(script_sig)
+                // try the PSBT redeem_script field for unsigned inputs.
+                } else {
+                    self.psbtin.redeem_script.as_ref().map(|script| script.as_ref())
+                };
+                match redeem_script {
                     // Nested segwit p2wpkh.
                     Some(script) if script.is_witness_program() && script.is_p2wpkh() =>
                         Ok(NESTED_P2WPKH_MAX),
                     // Other script or witness program.
                     Some(_) => Err(InputWeightError::NotSupported),
                     // No redeem script provided. Cannot determine the script type.
-                    None => Err(InputWeightError::NotFinalized),
-                },
+                    None => Err(InputWeightError::NoRedeemScript),
+                }
+            }
             P2wpkh => Ok(InputWeightPrediction::P2WPKH_MAX),
             P2wsh => Err(InputWeightError::NotSupported),
             P2tr => Ok(InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH),
@@ -323,7 +330,7 @@ impl From<FromScriptError> for AddressTypeError {
 #[derive(Debug)]
 pub(crate) enum InputWeightError {
     AddressType(AddressTypeError),
-    NotFinalized,
+    NoRedeemScript,
     NotSupported,
 }
 
@@ -331,7 +338,7 @@ impl fmt::Display for InputWeightError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::AddressType(_) => write!(f, "invalid address type"),
-            Self::NotFinalized => write!(f, "input not finalized"),
+            Self::NoRedeemScript => write!(f, "p2sh input missing a redeem script"),
             Self::NotSupported => write!(f, "weight prediction not supported"),
         }
     }
@@ -341,7 +348,7 @@ impl std::error::Error for InputWeightError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::AddressType(error) => Some(error),
-            Self::NotFinalized => None,
+            Self::NoRedeemScript => None,
             Self::NotSupported => None,
         }
     }

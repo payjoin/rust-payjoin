@@ -21,7 +21,7 @@ use tokio::net::TcpListener;
 
 use super::config::AppConfig;
 use super::App as AppTrait;
-use crate::app::http_agent;
+use crate::app::{http_agent, input_pair_from_list_unspent};
 use crate::db::Database;
 #[cfg(feature = "danger-local-https")]
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
@@ -319,15 +319,12 @@ impl App {
             }
         })?;
         log::trace!("check2");
-        // Receive Check 3: receiver can't sign for proposal inputs
-        let proposal = proposal.check_no_mixed_input_scripts()?;
-        log::trace!("check3");
 
-        // Receive Check 4: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
+        // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let payjoin = proposal.check_no_inputs_seen_before(|input| {
             self.db.insert_input_seen_before(*input).map_err(|e| Error::Server(e.into()))
         })?;
-        log::trace!("check4");
+        log::trace!("check3");
 
         let payjoin = payjoin.identify_receiver_outputs(|output_script| {
             if let Ok(address) = bitcoin::Address::from_script(output_script, network) {
@@ -396,13 +393,10 @@ fn try_contributing_inputs(
         .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
         .context("This shouldn't happen. Failed to retrieve the privacy preserving utxo from those we provided to the seclector.")?;
     log::debug!("selected utxo: {:#?}", selected_utxo);
-    let txo_to_contribute = bitcoin::TxOut {
-        value: selected_utxo.amount,
-        script_pubkey: selected_utxo.script_pub_key.clone(),
-    };
+    let input_pair = input_pair_from_list_unspent(selected_utxo);
 
     Ok(payjoin
-        .contribute_witness_inputs(vec![(selected_outpoint, txo_to_contribute)])
+        .contribute_inputs(vec![input_pair])
         .expect("This shouldn't happen. Failed to contribute inputs.")
         .commit_inputs())
 }

@@ -28,8 +28,8 @@ use std::cmp::{max, min};
 
 use bitcoin::base64::prelude::BASE64_STANDARD;
 use bitcoin::base64::Engine;
-use bitcoin::psbt::Psbt;
-use bitcoin::{Amount, FeeRate, OutPoint, Script, TxOut, Weight};
+use bitcoin::psbt::{Input as PsbtInput, Psbt};
+use bitcoin::{Amount, FeeRate, OutPoint, Script, TxIn, TxOut, Weight};
 
 mod error;
 mod optional_parameters;
@@ -38,14 +38,16 @@ pub mod v2;
 
 use bitcoin::secp256k1::rand::seq::SliceRandom;
 use bitcoin::secp256k1::rand::{self, Rng};
-pub use error::{Error, OutputSubstitutionError, RequestError, SelectionError};
+pub use error::{
+    Error, InputContributionError, OutputSubstitutionError, RequestError, SelectionError,
+};
 use error::{
-    InputContributionError, InternalInputContributionError, InternalOutputSubstitutionError,
-    InternalRequestError, InternalSelectionError,
+    InternalInputContributionError, InternalOutputSubstitutionError, InternalRequestError,
+    InternalSelectionError,
 };
 use optional_parameters::Params;
 
-use crate::psbt::PsbtExt;
+use crate::psbt::{InputPair, PsbtExt};
 
 pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
@@ -165,7 +167,7 @@ impl UncheckedProposal {
 
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
-/// Call [`check_no_receiver_owned_inputs()`](struct.UncheckedProposal.html#method.check_no_receiver_owned_inputs) to proceed.
+/// Call [`Self::check_inputs_not_owned`] to proceed.
 #[derive(Clone)]
 pub struct MaybeInputsOwned {
     psbt: Psbt,
@@ -180,7 +182,7 @@ impl MaybeInputsOwned {
     pub fn check_inputs_not_owned(
         self,
         is_owned: impl Fn(&Script) -> Result<bool, Error>,
-    ) -> Result<MaybeMixedInputScripts, Error> {
+    ) -> Result<MaybeInputsSeen, Error> {
         let mut err = Ok(());
         if let Some(e) = self
             .psbt
@@ -203,60 +205,13 @@ impl MaybeInputsOwned {
         }
         err?;
 
-        Ok(MaybeMixedInputScripts { psbt: self.psbt, params: self.params })
-    }
-}
-
-/// Typestate to validate that the Original PSBT has no mixed input types.
-///
-/// Call [`check_no_mixed_input_types`](struct.UncheckedProposal.html#method.check_no_mixed_input_scripts) to proceed.
-#[derive(Clone)]
-pub struct MaybeMixedInputScripts {
-    psbt: Psbt,
-    params: Params,
-}
-
-impl MaybeMixedInputScripts {
-    /// Verify the original transaction did not have mixed input types
-    /// Call this after checking downstream.
-    ///
-    /// Note: mixed spends do not necessarily indicate distinct wallet fingerprints.
-    /// This check is intended to prevent some types of wallet fingerprinting.
-    pub fn check_no_mixed_input_scripts(self) -> Result<MaybeInputsSeen, RequestError> {
-        let mut err = Ok(());
-        let input_scripts = self
-            .psbt
-            .input_pairs()
-            .scan(&mut err, |err, input| match input.address_type() {
-                Ok(address_type) => Some(address_type),
-                Err(e) => {
-                    **err = Err(RequestError::from(InternalRequestError::AddressType(e)));
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-        err?;
-
-        if let Some(first) = input_scripts.first() {
-            input_scripts.iter().try_for_each(|input_type| {
-                if input_type != first {
-                    Err(RequestError::from(InternalRequestError::MixedInputScripts(
-                        *first,
-                        *input_type,
-                    )))
-                } else {
-                    Ok(())
-                }
-            })?;
-        }
-
         Ok(MaybeInputsSeen { psbt: self.psbt, params: self.params })
     }
 }
 
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
-/// Call [`check_no_inputs_seen`](struct.MaybeInputsSeen.html#method.check_no_inputs_seen_before) to proceed.
+/// Call [`Self::check_no_inputs_seen_before`] to proceed.
 #[derive(Clone)]
 pub struct MaybeInputsSeen {
     psbt: Psbt,
@@ -290,7 +245,7 @@ impl MaybeInputsSeen {
 /// The receiver has not yet identified which outputs belong to the receiver.
 ///
 /// Only accept PSBTs that send us money.
-/// Identify those outputs with `identify_receiver_outputs()` to proceed
+/// Identify those outputs with [`Self::identify_receiver_outputs`] to proceed.
 #[derive(Clone)]
 pub struct OutputsUnknown {
     psbt: Psbt,
@@ -340,6 +295,8 @@ impl OutputsUnknown {
 }
 
 /// A checked proposal that the receiver may substitute or add outputs to
+///
+/// Call [`Self::commit_outputs`] to proceed.
 #[derive(Debug, Clone)]
 pub struct WantsOutputs {
     original_psbt: Psbt,
@@ -481,6 +438,8 @@ fn interleave_shuffle<T: Clone, R: rand::Rng>(
 }
 
 /// A checked proposal that the receiver may contribute inputs to to make a payjoin
+///
+/// Call [`Self::commit_inputs`] to proceed.
 #[derive(Debug, Clone)]
 pub struct WantsInputs {
     original_psbt: Psbt,
@@ -575,38 +534,44 @@ impl WantsInputs {
 
     /// Add the provided list of inputs to the transaction.
     /// Any excess input amount is added to the change_vout output indicated previously.
-    pub fn contribute_witness_inputs(
+    pub fn contribute_inputs(
         self,
-        inputs: impl IntoIterator<Item = (OutPoint, TxOut)>,
+        inputs: impl IntoIterator<Item = (PsbtInput, TxIn)>,
     ) -> Result<WantsInputs, InputContributionError> {
         let mut payjoin_psbt = self.payjoin_psbt.clone();
         // The payjoin proposal must not introduce mixed input sequence numbers
         let original_sequence = self
-            .payjoin_psbt
+            .original_psbt
             .unsigned_tx
             .input
             .first()
             .map(|input| input.sequence)
             .unwrap_or_default();
+        let uniform_sender_input_type = self.uniform_sender_input_type()?;
 
         // Insert contributions at random indices for privacy
         let mut rng = rand::thread_rng();
         let mut receiver_input_amount = Amount::ZERO;
-        for (outpoint, txo) in inputs.into_iter() {
-            receiver_input_amount += txo.value;
+        for (psbtin, txin) in inputs.into_iter() {
+            let input_pair = InputPair { txin: &txin, psbtin: &psbtin };
+            let input_type =
+                input_pair.address_type().map_err(InternalInputContributionError::AddressType)?;
+
+            if self.params.v == 1 {
+                // v1 payjoin proposals must not introduce mixed input script types
+                self.check_mixed_input_types(input_type, uniform_sender_input_type)?;
+            }
+
+            receiver_input_amount += input_pair
+                .previous_txout()
+                .map_err(InternalInputContributionError::PrevTxOut)?
+                .value;
             let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
-            payjoin_psbt.inputs.insert(
-                index,
-                bitcoin::psbt::Input { witness_utxo: Some(txo), ..Default::default() },
-            );
-            payjoin_psbt.unsigned_tx.input.insert(
-                index,
-                bitcoin::TxIn {
-                    previous_output: outpoint,
-                    sequence: original_sequence,
-                    ..Default::default()
-                },
-            );
+            payjoin_psbt.inputs.insert(index, psbtin);
+            payjoin_psbt
+                .unsigned_tx
+                .input
+                .insert(index, TxIn { sequence: original_sequence, ..txin });
         }
 
         // Add the receiver change amount to the receiver change output, if applicable
@@ -624,6 +589,46 @@ impl WantsInputs {
             params: self.params,
             change_vout: self.change_vout,
         })
+    }
+
+    /// Check for mixed input types and throw an error if conditions are met
+    fn check_mixed_input_types(
+        &self,
+        receiver_input_type: bitcoin::AddressType,
+        uniform_sender_input_type: Option<bitcoin::AddressType>,
+    ) -> Result<(), InputContributionError> {
+        if let Some(uniform_sender_input_type) = uniform_sender_input_type {
+            if receiver_input_type != uniform_sender_input_type {
+                return Err(InternalInputContributionError::MixedInputScripts(
+                    receiver_input_type,
+                    uniform_sender_input_type,
+                )
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    /// Check if the sender's inputs are all of the same type
+    ///
+    /// Returns `None` if the sender inputs are not all of the same type
+    fn uniform_sender_input_type(
+        &self,
+    ) -> Result<Option<bitcoin::AddressType>, InputContributionError> {
+        let mut sender_inputs = self.original_psbt.input_pairs();
+        let first_input_type = sender_inputs
+            .next()
+            .ok_or(InternalInputContributionError::NoSenderInputs)?
+            .address_type()
+            .map_err(InternalInputContributionError::AddressType)?;
+        for input in sender_inputs {
+            if input.address_type().map_err(InternalInputContributionError::AddressType)?
+                != first_input_type
+            {
+                return Ok(None);
+            }
+        }
+        Ok(Some(first_input_type))
     }
 
     // Compute the minimum amount that the receiver must contribute to the transaction as input
@@ -657,6 +662,8 @@ impl WantsInputs {
 
 /// A checked proposal that the receiver may sign and finalize to make a proposal PSBT that the
 /// sender will accept.
+///
+/// Call [`Self::finalize_proposal`] to return a finalized [`PayjoinProposal`].
 #[derive(Debug, Clone)]
 pub struct ProvisionalProposal {
     original_psbt: Psbt,
@@ -744,21 +751,22 @@ impl ProvisionalProposal {
 
     /// Calculate the additional input weight contributed by the receiver
     fn additional_input_weight(&self) -> Result<Weight, RequestError> {
-        // This error should never happen. We check for at least one input in the constructor
-        let input_pair = self
-            .payjoin_psbt
-            .input_pairs()
-            .next()
-            .ok_or(InternalRequestError::OriginalPsbtNotBroadcastable)?;
-        // Calculate the additional weight contribution
-        let input_count = self.payjoin_psbt.inputs.len() - self.original_psbt.inputs.len();
-        log::trace!("input_count : {}", input_count);
-        let weight_per_input =
-            input_pair.expected_input_weight().map_err(InternalRequestError::InputWeight)?;
-        log::trace!("weight_per_input : {}", weight_per_input);
-        let contribution_weight = weight_per_input * input_count as u64;
-        log::trace!("contribution_weight: {}", contribution_weight);
-        Ok(contribution_weight)
+        fn inputs_weight(psbt: &Psbt) -> Result<Weight, RequestError> {
+            psbt.input_pairs().try_fold(
+                Weight::ZERO,
+                |acc, input_pair| -> Result<Weight, RequestError> {
+                    let input_weight = input_pair
+                        .expected_input_weight()
+                        .map_err(InternalRequestError::InputWeight)?;
+                    Ok(acc + input_weight)
+                },
+            )
+        }
+        let payjoin_inputs_weight = inputs_weight(&self.payjoin_psbt)?;
+        let original_inputs_weight = inputs_weight(&self.original_psbt)?;
+        let input_contribution_weight = payjoin_inputs_weight - original_inputs_weight;
+        log::trace!("input_contribution_weight : {}", input_contribution_weight);
+        Ok(input_contribution_weight)
     }
 
     /// Calculate the additional output weight contributed by the receiver
@@ -780,12 +788,7 @@ impl ProvisionalProposal {
         output_contribution_weight
     }
 
-    /// Return a Payjoin Proposal PSBT that the sender will find acceptable.
-    ///
-    /// This attempts to calculate any network fee owed by the receiver, subtract it from their output,
-    /// and return a PSBT that can produce a consensus-valid transaction that the sender will accept.
-    ///
-    /// wallet_process_psbt should sign and finalize receiver inputs
+    /// Prepare the PSBT by clearing the fields that the sender expects to be empty
     fn prepare_psbt(mut self, processed_psbt: Psbt) -> Result<PayjoinProposal, RequestError> {
         self.payjoin_psbt = processed_psbt;
         log::trace!("Preparing PSBT {:#?}", self.payjoin_psbt);
@@ -812,6 +815,7 @@ impl ProvisionalProposal {
         Ok(PayjoinProposal { payjoin_psbt: self.payjoin_psbt, params: self.params })
     }
 
+    /// Return the indexes of the sender inputs
     fn sender_input_indexes(&self) -> Vec<usize> {
         // iterate proposal as mutable WITH the outpoint (previous_output) available too
         let mut original_inputs = self.original_psbt.input_pairs().peekable();
@@ -832,26 +836,34 @@ impl ProvisionalProposal {
         sender_input_indexes
     }
 
+    /// Return a Payjoin Proposal PSBT that the sender will find acceptable.
+    ///
+    /// This attempts to calculate any network fee owed by the receiver, subtract it from their output,
+    /// and return a PSBT that can produce a consensus-valid transaction that the sender will accept.
+    ///
+    /// wallet_process_psbt should sign and finalize receiver inputs
     pub fn finalize_proposal(
         mut self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, Error>,
         min_feerate_sat_per_vb: Option<FeeRate>,
         max_feerate_sat_per_vb: FeeRate,
     ) -> Result<PayjoinProposal, Error> {
+        let mut psbt = self.apply_fee(min_feerate_sat_per_vb, max_feerate_sat_per_vb)?.clone();
+        // Remove now-invalid sender signatures before applying the receiver signatures
         for i in self.sender_input_indexes() {
-            log::trace!("Clearing sender script signatures for input {}", i);
-            self.payjoin_psbt.inputs[i].final_script_sig = None;
-            self.payjoin_psbt.inputs[i].final_script_witness = None;
-            self.payjoin_psbt.inputs[i].tap_key_sig = None;
+            log::trace!("Clearing sender input {}", i);
+            psbt.inputs[i].final_script_sig = None;
+            psbt.inputs[i].final_script_witness = None;
+            psbt.inputs[i].tap_key_sig = None;
         }
-        let psbt = self.apply_fee(min_feerate_sat_per_vb, max_feerate_sat_per_vb)?;
-        let psbt = wallet_process_psbt(psbt)?;
+        let psbt = wallet_process_psbt(&psbt)?;
         let payjoin_proposal = self.prepare_psbt(psbt)?;
         Ok(payjoin_proposal)
     }
 }
 
-/// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+/// A finalized payjoin proposal, complete with fees and receiver signatures, that the sender
+/// should find acceptable.
 #[derive(Clone)]
 pub struct PayjoinProposal {
     payjoin_psbt: Psbt,
@@ -874,8 +886,7 @@ impl PayjoinProposal {
 mod test {
     use std::str::FromStr;
 
-    use bitcoin::hashes::Hash;
-    use bitcoin::{Address, Network, ScriptBuf};
+    use bitcoin::{Address, Network};
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -930,8 +941,6 @@ mod test {
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| Ok(false))
             .expect("No inputs should be owned")
-            .check_no_mixed_input_scripts()
-            .expect("No mixed input scripts")
             .check_no_inputs_seen_before(|_| Ok(false))
             .expect("No inputs should be seen before")
             .identify_receiver_outputs(|script| {
@@ -958,29 +967,13 @@ mod test {
         // Specify excessive fee rate in sender params
         proposal.params.min_feerate = FeeRate::from_sat_per_vb_unchecked(1000);
         // Input contribution for the receiver, from the BIP78 test vector
-        let input: (OutPoint, TxOut) = (
-            OutPoint {
-                txid: "833b085de288cda6ff614c6e8655f61e7ae4f84604a2751998dc25a0d1ba278f"
-                    .parse()
-                    .unwrap(),
-                vout: 1,
-            },
-            TxOut {
-                value: Amount::from_sat(2000000),
-                // HACK: The script pubkey in the original test vector is a nested p2sh witness
-                // script, which is not correctly supported in our current weight calculations.
-                // To get around this limitation, this test uses a native segwit script instead.
-                script_pubkey: ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::hash(
-                    "00145f806655e5924c9204c2d51be5394f4bf9eda210".as_bytes(),
-                )),
-            },
-        );
+        let proposal_psbt = Psbt::from_str("cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAAEBIICEHgAAAAAAF6kUyPLL+cphRyyI5GTUazV0hF2R2NWHAQcXFgAUX4BmVeWSTJIEwtUb5TlPS/ntohABCGsCRzBEAiBnu3tA3yWlT0WBClsXXS9j69Bt+waCs9JcjWtNjtv7VgIge2VYAaBeLPDB6HGFlpqOENXMldsJezF9Gs5amvDQRDQBIQJl1jz1tBt8hNx2owTm+4Du4isx0pmdKNMNIjjaMHFfrQAAAA==").unwrap();
+        let input: (PsbtInput, TxIn) =
+            (proposal_psbt.inputs[1].clone(), proposal_psbt.unsigned_tx.input[1].clone());
         let mut payjoin = proposal
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| Ok(false))
             .expect("No inputs should be owned")
-            .check_no_mixed_input_scripts()
-            .expect("No mixed input scripts")
             .check_no_inputs_seen_before(|_| Ok(false))
             .expect("No inputs should be seen before")
             .identify_receiver_outputs(|script| {
@@ -993,7 +986,7 @@ mod test {
             })
             .expect("Receiver output should be identified")
             .commit_outputs()
-            .contribute_witness_inputs(vec![input])
+            .contribute_inputs(vec![input])
             .expect("Failed to contribute inputs")
             .commit_inputs();
         let mut payjoin_clone = payjoin.clone();
@@ -1021,13 +1014,17 @@ mod test {
 
         // Input weight for a single nested P2WPKH (nested segwit) receiver input
         let nested_p2wpkh_proposal = ProvisionalProposal {
-            original_psbt: Psbt::from_str("cHNidP8BAHECAAAAAX57euL5j6xOst5JB/e/gp58RihmmpxXpsc2hEKKcVFkAAAAAAD9////AhAnAAAAAAAAFgAUtjrU62JOASAnPQ4e30wBM/Exk7ZM0QKVAAAAABYAFL6xh6gjSHmznJnPMbolG7wbGuwtAAAAAAABAIYCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wQCqgAA/////wIA+QKVAAAAABepFOyefe4gjXozL4pzi5vcPrjMeCJwhwAAAAAAAAAAJmokqiGp7eL2HD9x0d79P6mZ36NpU3VcaQaJeZlitIvr2DaXToz5AAAAAAEBIAD5ApUAAAAAF6kU7J597iCNejMvinOLm9w+uMx4InCHAQcXFgAUd6fhKfAd+JIJGpIGkMfMpjd/26sBCGsCRzBEAiBaCDgIrTw5bB1VZrB8RPycgKGNPw/YS6P+psUyxOUwgwIgbJkcbHlMoZxG7vBOVWnQQWayDTSvub6L20dDo1R5SS8BIQK2GCTydo2dJXC6C5wcSKzQ2pCsSygXa0+cMlJrRRnKtwAAIgIC0VgJvaoW2/lbq5atJhxfcgVzs6/gnpafsJHbz+ei484YDOqFk1QAAIABAACAAAAAgAEAAAACAAAAAA==").unwrap(),
-            payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAn57euL5j6xOst5JB/e/gp58RihmmpxXpsc2hEKKcVFkAAAAAAD9////VinByqmVDo3wPNB9LnNELJoJ0g+hOdWiTSXzWEUVtiAAAAAAAP3///8CEBkGKgEAAAAWABSZUDn7eqenP01ziWRBnTCrpwwD6vHQApUAAAAAFgAUvrGHqCNIebOcmc8xuiUbvBsa7C0AAAAAAAEAhgIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////BAKqAAD/////AgD5ApUAAAAAF6kU7J597iCNejMvinOLm9w+uMx4InCHAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEgAPkClQAAAAAXqRTsnn3uII16My+Kc4ub3D64zHgicIcAAQCEAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP////8CYAD/////AgDyBSoBAAAAF6kUx/+ZHBBBZ+6E/US1N2Oe7IDItXiHAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEgAPIFKgEAAAAXqRTH/5kcEEFn7oT9RLU3Y57sgMi1eIcBBxcWABRDVkPBhZHK7tVQqp2uWqQC/GGTCgEIawJHMEQCIEv8/8VpUz0dK4MCcVzS7zoyt+hPRvWwLskZBuaurnFiAiBIuyt1IRaHqFSspDbjDNM607nrDQz4lmDnekNqMNn07AEhAp1Ol7vKvG2Oi8RSrsb7uSPTET83/YXuknx63PhfCG/zAAAA").unwrap(),
+            original_psbt: Psbt::from_str("cHNidP8BAHECAAAAAeOsT9cRWRz3te+bgmtweG1vDLkdSH4057NuoodDNPFWAAAAAAD9////AhAnAAAAAAAAFgAUtp3bPFM/YWThyxD5Cc9OR4mb8tdMygUqAQAAABYAFODlplDoE6EGlZvmqoUngBgsu8qCAAAAAAABAIUCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBZwD/////AgDyBSoBAAAAF6kU2JnIn4Mmcb5kuF3EYeFei8IB43qHAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEgAPIFKgEAAAAXqRTYmcifgyZxvmS4XcRh4V6LwgHjeocBBxcWABSPGoPK1yl60X4Z9OfA7IQPUWCgVwEIawJHMEQCICZG3s2cbulPnLTvK4TwlKhsC+cem8tD2GjZZ3eMJD7FAiADh/xwv0ib8ksOrj1M27DYLiw7WFptxkMkE2YgiNMRVgEhAlDMm5DA8kU+QGiPxEWUyV1S8+XGzUOepUOck257ZOhkAAAiAgP+oMbeca66mt+UtXgHm6v/RIFEpxrwG7IvPDim5KWHpBgfVHrXVAAAgAEAAIAAAACAAQAAAAAAAAAA").unwrap(),
+            payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAuXYOTUaVRiB8cPPhEXzcJ72/SgZOPEpPx5pkG0fNeGCAAAAAAD9////46xP1xFZHPe175uCa3B4bW8MuR1IfjTns26ih0M08VYAAAAAAP3///8CEBkGKgEAAAAWABQHuuu4H4fbQWV51IunoJLUtmMTfEzKBSoBAAAAFgAU4OWmUOgToQaVm+aqhSeAGCy7yoIAAAAAAAEBIADyBSoBAAAAF6kUQ4BssmVBS3r0s95c6dl1DQCHCR+HAQQWABQbDc333XiiOeEXroP523OoYNb1aAABAIUCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBZwD/////AgDyBSoBAAAAF6kU2JnIn4Mmcb5kuF3EYeFei8IB43qHAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEgAPIFKgEAAAAXqRTYmcifgyZxvmS4XcRh4V6LwgHjeocBBxcWABSPGoPK1yl60X4Z9OfA7IQPUWCgVwEIawJHMEQCICZG3s2cbulPnLTvK4TwlKhsC+cem8tD2GjZZ3eMJD7FAiADh/xwv0ib8ksOrj1M27DYLiw7WFptxkMkE2YgiNMRVgEhAlDMm5DA8kU+QGiPxEWUyV1S8+XGzUOepUOck257ZOhkAAAA").unwrap(),
             params: Params::default(),
             change_vout: 0
         };
-        // Currently nested segwit is not supported, see https://github.com/payjoin/rust-payjoin/issues/358
-        assert!(nested_p2wpkh_proposal.additional_input_weight().is_err());
+        assert_eq!(
+            nested_p2wpkh_proposal
+                .additional_input_weight()
+                .expect("should calculate input weight"),
+            Weight::from_wu(364)
+        );
 
         // Input weight for a single P2WPKH (native segwit) receiver input
         let p2wpkh_proposal = ProvisionalProposal {

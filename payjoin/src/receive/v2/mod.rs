@@ -3,8 +3,8 @@ use std::time::{Duration, SystemTime};
 
 use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
-use bitcoin::psbt::Psbt;
-use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::psbt::{Input as PsbtInput, Psbt};
+use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxIn, TxOut};
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -325,29 +325,8 @@ impl MaybeInputsOwned {
     pub fn check_inputs_not_owned(
         self,
         is_owned: impl Fn(&Script) -> Result<bool, Error>,
-    ) -> Result<MaybeMixedInputScripts, Error> {
+    ) -> Result<MaybeInputsSeen, Error> {
         let inner = self.inner.check_inputs_not_owned(is_owned)?;
-        Ok(MaybeMixedInputScripts { inner, context: self.context })
-    }
-}
-
-/// Typestate to validate that the Original PSBT has no mixed input types.
-///
-/// Call [`check_no_mixed_input_types`](struct.UncheckedProposal.html#method.check_no_mixed_input_scripts) to proceed.
-#[derive(Clone)]
-pub struct MaybeMixedInputScripts {
-    inner: super::MaybeMixedInputScripts,
-    context: SessionContext,
-}
-
-impl MaybeMixedInputScripts {
-    /// Verify the original transaction did not have mixed input types
-    /// Call this after checking downstream.
-    ///
-    /// Note: mixed spends do not necessarily indicate distinct wallet fingerprints.
-    /// This check is intended to prevent some types of wallet fingerprinting.
-    pub fn check_no_mixed_input_scripts(self) -> Result<MaybeInputsSeen, RequestError> {
-        let inner = self.inner.check_no_mixed_input_scripts()?;
         Ok(MaybeInputsSeen { inner, context: self.context })
     }
 }
@@ -466,11 +445,11 @@ impl WantsInputs {
 
     /// Add the provided list of inputs to the transaction.
     /// Any excess input amount is added to the change_vout output indicated previously.
-    pub fn contribute_witness_inputs(
+    pub fn contribute_inputs(
         self,
-        inputs: impl IntoIterator<Item = (OutPoint, TxOut)>,
+        inputs: impl IntoIterator<Item = (PsbtInput, TxIn)>,
     ) -> Result<WantsInputs, InputContributionError> {
-        let inner = self.inner.contribute_witness_inputs(inputs)?;
+        let inner = self.inner.contribute_inputs(inputs)?;
         Ok(WantsInputs { inner, context: self.context })
     }
 

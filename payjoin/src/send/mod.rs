@@ -9,11 +9,10 @@
 //! 2. Construct URI request parameters, a finalized “Original PSBT” paying .amount to .address
 //! 3. (optional) Spawn a thread or async task that will broadcast the original PSBT fallback after
 //!    delay (e.g. 1 minute) unless canceled
-//! 4. Construct the request using [`RequestBuilder`] with the PSBT and payjoin uri
-//! 5. Send the request and receive response
-//! 6. Process the response with [`ContextV1::process_response`]
-//! 7. Sign and finalize the Payjoin Proposal PSBT
-//! 8. Broadcast the Payjoin Transaction (and cancel the optional fallback broadcast)
+//! 4. Construct the [`Sender`] using [`SenderBuilder`] with the PSBT and payjoin uri
+//! 5. Send the request(s) and receive response(s) by following on the extracted [`Context`]
+//! 6. Sign and finalize the Payjoin Proposal PSBT
+//! 7. Broadcast the Payjoin Transaction (and cancel the optional fallback broadcast)
 //!
 //! This crate is runtime-agnostic. Data persistence, chain interactions, and networking may be
 //! provided by custom implementations or copy the reference

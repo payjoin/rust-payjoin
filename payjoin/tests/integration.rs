@@ -12,7 +12,7 @@ mod integration {
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use log::{log_enabled, Level};
     use once_cell::sync::{Lazy, OnceCell};
-    use payjoin::send::RequestBuilder;
+    use payjoin::send::SenderBuilder;
     use payjoin::{PjUri, PjUriBuilder, Request, Uri};
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
     use url::Url;
@@ -92,7 +92,7 @@ mod integration {
                 .unwrap();
             let psbt = build_original_psbt(&sender, &uri)?;
             debug!("Original psbt: {:#?}", psbt);
-            let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt, uri)?
+            let (req, ctx) = SenderBuilder::from_psbt_and_uri(psbt, uri)?
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);
@@ -157,7 +157,7 @@ mod integration {
                 .unwrap();
             let psbt = build_original_psbt(&sender, &uri)?;
             debug!("Original psbt: {:#?}", psbt);
-            let (req, _ctx) = RequestBuilder::from_psbt_and_uri(psbt, uri)?
+            let (req, _ctx) = SenderBuilder::from_psbt_and_uri(psbt, uri)?
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);
@@ -178,9 +178,8 @@ mod integration {
 
         use bitcoin::Address;
         use http::StatusCode;
-        use payjoin::receive::v2::{
-            ActiveSession, PayjoinProposal, SessionInitializer, UncheckedProposal,
-        };
+        use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
+        use payjoin::send::Context;
         use payjoin::{OhttpKeys, PjUri, UriExt};
         use reqwest::{Client, ClientBuilder, Error, Response};
         use testcontainers_modules::redis::Redis;
@@ -202,7 +201,7 @@ mod integration {
             let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
             tokio::select!(
                 _ = init_directory(port, (cert.clone(), key)) => assert!(false, "Directory server is long running"),
-                res = enroll_with_bad_keys(directory, bad_ohttp_keys, cert) => {
+                res = try_request_with_bad_keys(directory, bad_ohttp_keys, cert) => {
                     assert_eq!(
                         res.unwrap().headers().get("content-type").unwrap(),
                         "application/problem+json"
@@ -210,7 +209,7 @@ mod integration {
                 }
             );
 
-            async fn enroll_with_bad_keys(
+            async fn try_request_with_bad_keys(
                 directory: Url,
                 bad_ohttp_keys: OhttpKeys,
                 cert_der: Vec<u8>,
@@ -221,13 +220,8 @@ mod integration {
                 let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
                     .unwrap()
                     .assume_checked();
-                let mut bad_initializer = SessionInitializer::new(
-                    mock_address,
-                    directory,
-                    bad_ohttp_keys,
-                    mock_ohttp_relay,
-                    None,
-                );
+                let mut bad_initializer =
+                    Receiver::new(mock_address, directory, bad_ohttp_keys, mock_ohttp_relay, None);
                 let (req, _ctx) = bad_initializer.extract_req().expect("Failed to extract request");
                 agent.post(req.url).body(req.body).send().await
             }
@@ -270,10 +264,8 @@ mod integration {
                     address.clone(),
                     directory.clone(),
                     ohttp_keys.clone(),
-                    cert_der,
                     Some(Duration::from_secs(0)),
-                )
-                .await?;
+                );
                 match session.extract_req() {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
@@ -292,9 +284,9 @@ mod integration {
                     Some(std::time::SystemTime::now()),
                 )
                 .build();
-                let mut expired_req_ctx = RequestBuilder::from_psbt_and_uri(psbt, expired_pj_uri)?
+                let mut expired_req_ctx = SenderBuilder::from_psbt_and_uri(psbt, expired_pj_uri)?
                     .build_non_incentivizing(FeeRate::BROADCAST_MIN)?;
-                match expired_req_ctx.extract_v2(directory.to_owned()) {
+                match expired_req_ctx.extract_highest_version(directory.to_owned()) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
                     _ => assert!(false, "Expired send session should error"),
@@ -340,10 +332,8 @@ mod integration {
                     address.clone(),
                     directory.clone(),
                     ohttp_keys.clone(),
-                    cert_der.clone(),
                     None,
-                )
-                .await?;
+                );
                 println!("session: {:#?}", &session);
                 let pj_uri_string = session.pj_uri_builder().build().to_string();
                 // Poll receive request
@@ -364,10 +354,14 @@ mod integration {
                     .check_pj_supported()
                     .unwrap();
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
-                let mut req_ctx = RequestBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
+                let mut req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
-                    req_ctx.extract_v2(directory.to_owned())?;
+                    req_ctx.extract_highest_version(directory.to_owned())?;
+                let send_ctx = match send_ctx {
+                    Context::V2(ctx) => ctx,
+                    _ => panic!("V2 context expected"),
+                };
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -377,10 +371,9 @@ mod integration {
                     .unwrap();
                 log::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success());
-                let response_body =
+                let send_ctx =
                     send_ctx.process_response(&mut response.bytes().await?.to_vec().as_slice())?;
-                // No response body yet since we are async and pushed fallback_psbt to the buffer
-                assert!(response_body.is_none());
+                // POST Original PSBT
 
                 // **********************
                 // Inside the Receiver:
@@ -394,7 +387,12 @@ mod integration {
                 let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None);
                 assert!(!payjoin_proposal.is_output_substitution_disabled());
                 let (req, ctx) = payjoin_proposal.extract_v2_req()?;
-                let response = agent.post(req.url).body(req.body).send().await?;
+                let response = agent
+                    .post(req.url)
+                    .header("Content-Type", req.content_type)
+                    .body(req.body)
+                    .send()
+                    .await?;
                 let res = response.bytes().await?.to_vec();
                 payjoin_proposal.process_res(res, ctx)?;
 
@@ -402,11 +400,18 @@ mod integration {
                 // Inside the Sender:
                 // Sender checks, signs, finalizes, extracts, and broadcasts
                 // Replay post fallback to get the response
-                let (Request { url, body, .. }, send_ctx) =
-                    req_ctx.extract_v2(directory.to_owned())?;
-                let response = agent.post(url).body(body).send().await?;
+                let (Request { url, body, content_type, .. }, ohttp_ctx) =
+                    send_ctx.extract_req(directory.to_owned())?;
+                let response = agent
+                    .post(url.clone())
+                    .header("Content-Type", content_type)
+                    .body(body.clone())
+                    .send()
+                    .await
+                    .unwrap();
+                log::info!("Response: {:#?}", &response);
                 let checked_payjoin_proposal_psbt = send_ctx
-                    .process_response(&mut response.bytes().await?.to_vec().as_slice())?
+                    .process_response(&mut response.bytes().await?.to_vec().as_slice(), ohttp_ctx)?
                     .unwrap();
                 let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
@@ -493,10 +498,8 @@ mod integration {
                     address.clone(),
                     directory.clone(),
                     ohttp_keys.clone(),
-                    cert_der.clone(),
                     None,
-                )
-                .await?;
+                );
                 println!("session: {:#?}", &session);
                 let pj_uri_string = session.pj_uri_builder().build().to_string();
                 // Poll receive request
@@ -517,10 +520,10 @@ mod integration {
                     .check_pj_supported()
                     .unwrap();
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
-                let mut req_ctx = RequestBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
+                let mut req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
-                let (Request { url, body, content_type, .. }, send_ctx) =
-                    req_ctx.extract_v2(directory.to_owned())?;
+                let (Request { url, body, content_type, .. }, post_ctx) =
+                    req_ctx.extract_highest_version(directory.to_owned())?;
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -530,10 +533,23 @@ mod integration {
                     .unwrap();
                 log::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success());
-                let response_body =
-                    send_ctx.process_response(&mut response.bytes().await?.to_vec().as_slice())?;
+                let get_ctx = match post_ctx {
+                    Context::V2(ctx) =>
+                        ctx.process_response(&mut response.bytes().await?.to_vec().as_slice())?,
+                    _ => panic!("V2 context expected"),
+                };
+                let (Request { url, body, content_type, .. }, ohttp_ctx) =
+                    get_ctx.extract_req(directory.to_owned())?;
+                let response = agent
+                    .post(url.clone())
+                    .header("Content-Type", content_type)
+                    .body(body.clone())
+                    .send()
+                    .await?;
                 // No response body yet since we are async and pushed fallback_psbt to the buffer
-                assert!(response_body.is_none());
+                assert!(get_ctx
+                    .process_response(&mut response.bytes().await?.to_vec().as_slice(), ohttp_ctx)?
+                    .is_none());
 
                 // **********************
                 // Inside the Receiver:
@@ -557,11 +573,16 @@ mod integration {
                 // Inside the Sender:
                 // Sender checks, signs, finalizes, extracts, and broadcasts
                 // Replay post fallback to get the response
-                let (Request { url, body, .. }, send_ctx) =
-                    req_ctx.extract_v2(directory.to_owned())?;
-                let response = agent.post(url).body(body).send().await?;
-                let checked_payjoin_proposal_psbt = send_ctx
-                    .process_response(&mut response.bytes().await?.to_vec().as_slice())?
+                let (Request { url, body, content_type, .. }, ohttp_ctx) =
+                    get_ctx.extract_req(directory.to_owned())?;
+                let response = agent
+                    .post(url.clone())
+                    .header("Content-Type", content_type)
+                    .body(body.clone())
+                    .send()
+                    .await?;
+                let checked_payjoin_proposal_psbt = get_ctx
+                    .process_response(&mut response.bytes().await?.to_vec().as_slice(), ohttp_ctx)?
                     .unwrap();
                 let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
@@ -600,9 +621,9 @@ mod integration {
                 .check_pj_supported()
                 .unwrap();
             let psbt = build_original_psbt(&sender, &pj_uri)?;
-            let mut req_ctx = RequestBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
+            let mut req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
                 .build_recommended(FeeRate::BROADCAST_MIN)?;
-            let (req, ctx) = req_ctx.extract_v2(EXAMPLE_URL.to_owned())?;
+            let (req, ctx) = req_ctx.extract_highest_version(EXAMPLE_URL.to_owned())?;
             let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************
@@ -614,8 +635,11 @@ mod integration {
             // **********************
             // Inside the Sender:
             // Sender checks, signs, finalizes, extracts, and broadcasts
-            let checked_payjoin_proposal_psbt =
-                ctx.process_response(&mut response.as_bytes())?.unwrap();
+            let ctx = match ctx {
+                Context::V1(ctx) => ctx,
+                _ => panic!("V1 context expected"),
+            };
+            let checked_payjoin_proposal_psbt = ctx.process_response(&mut response.as_bytes())?;
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
 
@@ -661,14 +685,7 @@ mod integration {
                         .await?;
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
-                let mut session = initialize_session(
-                    address,
-                    directory,
-                    ohttp_keys.clone(),
-                    cert_der.clone(),
-                    None,
-                )
-                .await?;
+                let mut session = initialize_session(address, directory, ohttp_keys.clone(), None);
 
                 let pj_uri_string = session.pj_uri_builder().build().to_string();
 
@@ -682,7 +699,7 @@ mod integration {
                     .unwrap();
                 let psbt = build_original_psbt(&sender, &pj_uri)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
-                    RequestBuilder::from_psbt_and_uri(psbt, pj_uri)?
+                    SenderBuilder::from_psbt_and_uri(psbt, pj_uri)?
                         .build_with_additional_fee(
                             Amount::from_sat(10000),
                             None,
@@ -780,14 +797,7 @@ mod integration {
             let db = docker.run(Redis::default());
             let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
             println!("Database running on {}", db.get_host_port_ipv4(6379));
-            payjoin_directory::listen_tcp_with_tls(
-                format!("http://localhost:{}", port),
-                port,
-                db_host,
-                timeout,
-                local_cert_key,
-            )
-            .await
+            payjoin_directory::listen_tcp_with_tls(port, db_host, timeout, local_cert_key).await
         }
 
         // generates or gets a DER encoded localhost cert and key.
@@ -802,27 +812,20 @@ mod integration {
             (cert_der, key_der)
         }
 
-        async fn initialize_session(
+        fn initialize_session(
             address: Address,
             directory: Url,
             ohttp_keys: OhttpKeys,
-            cert_der: Vec<u8>,
             custom_expire_after: Option<Duration>,
-        ) -> Result<ActiveSession, BoxError> {
+        ) -> Receiver {
             let mock_ohttp_relay = directory.clone(); // pass through to directory
-            let mut initializer = SessionInitializer::new(
+            Receiver::new(
                 address,
                 directory.clone(),
                 ohttp_keys,
                 mock_ohttp_relay.clone(),
                 custom_expire_after,
-            );
-            let (req, ctx) = initializer.extract_req()?;
-            println!("enroll req: {:#?}", &req);
-            let response =
-                http_agent(cert_der).unwrap().post(req.url).body(req.body).send().await?;
-            assert!(response.status().is_success());
-            Ok(initializer.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?)
+            )
         }
 
         fn handle_directory_proposal(
@@ -1024,7 +1027,7 @@ mod integration {
             let psbt = build_original_psbt(&sender, &uri)?;
             log::debug!("Original psbt: {:#?}", psbt);
             let max_additional_fee = Amount::from_sat(1000);
-            let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt.clone(), uri)?
+            let (req, ctx) = SenderBuilder::from_psbt_and_uri(psbt.clone(), uri)?
                 .build_with_additional_fee(max_additional_fee, None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);
@@ -1101,7 +1104,7 @@ mod integration {
                 .unwrap();
             let psbt = build_original_psbt(&sender, &uri)?;
             log::debug!("Original psbt: {:#?}", psbt);
-            let (req, ctx) = RequestBuilder::from_psbt_and_uri(psbt.clone(), uri)?
+            let (req, ctx) = SenderBuilder::from_psbt_and_uri(psbt.clone(), uri)?
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);

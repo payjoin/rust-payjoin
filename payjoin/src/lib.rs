@@ -28,9 +28,11 @@ pub use crate::receive::Error;
 pub mod send;
 
 #[cfg(feature = "v2")]
-pub(crate) mod v2;
+pub(crate) mod hpke;
 #[cfg(feature = "v2")]
-pub use v2::OhttpKeys;
+pub(crate) mod ohttp;
+#[cfg(feature = "v2")]
+pub use crate::ohttp::OhttpKeys;
 
 #[cfg(feature = "io")]
 pub mod io;

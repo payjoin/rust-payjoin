@@ -9,11 +9,10 @@
 //! 2. Construct URI request parameters, a finalized “Original PSBT” paying .amount to .address
 //! 3. (optional) Spawn a thread or async task that will broadcast the original PSBT fallback after
 //!    delay (e.g. 1 minute) unless canceled
-//! 4. Construct the request using [`RequestBuilder`] with the PSBT and payjoin uri
-//! 5. Send the request and receive response
-//! 6. Process the response with [`ContextV1::process_response`]
-//! 7. Sign and finalize the Payjoin Proposal PSBT
-//! 8. Broadcast the Payjoin Transaction (and cancel the optional fallback broadcast)
+//! 4. Construct the [`Sender`] using [`SenderBuilder`] with the PSBT and payjoin uri
+//! 5. Send the request(s) and receive response(s) by following on the extracted [`Context`]
+//! 6. Sign and finalize the Payjoin Proposal PSBT
+//! 7. Broadcast the Payjoin Transaction (and cancel the optional fallback broadcast)
 //!
 //! This crate is runtime-agnostic. Data persistence, chain interactions, and networking may be
 //! provided by custom implementations or copy the reference
@@ -24,6 +23,8 @@
 
 use std::str::FromStr;
 
+#[cfg(feature = "v2")]
+use bitcoin::base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
 pub use error::{CreateRequestError, ResponseError, ValidationError};
@@ -32,10 +33,12 @@ pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+#[cfg(feature = "v2")]
+use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeKeyPair, HpkePublicKey};
+#[cfg(feature = "v2")]
+use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
 use crate::psbt::PsbtExt;
 use crate::request::Request;
-#[cfg(feature = "v2")]
-use crate::v2::{HpkePublicKey, HpkeSecretKey};
 use crate::PjUri;
 
 // See usize casts
@@ -47,7 +50,7 @@ mod error;
 type InternalResult<T> = Result<T, InternalValidationError>;
 
 #[derive(Clone)]
-pub struct RequestBuilder<'a> {
+pub struct SenderBuilder<'a> {
     psbt: Psbt,
     uri: PjUri<'a>,
     disable_output_substitution: bool,
@@ -61,7 +64,7 @@ pub struct RequestBuilder<'a> {
     min_fee_rate: FeeRate,
 }
 
-impl<'a> RequestBuilder<'a> {
+impl<'a> SenderBuilder<'a> {
     /// Prepare an HTTP request and request context to process the response
     ///
     /// An HTTP client will own the Request data while Context sticks around so
@@ -96,10 +99,7 @@ impl<'a> RequestBuilder<'a> {
     // The minfeerate parameter is set if the contribution is available in change.
     //
     // This method fails if no recommendation can be made or if the PSBT is malformed.
-    pub fn build_recommended(
-        self,
-        min_fee_rate: FeeRate,
-    ) -> Result<RequestContext, CreateRequestError> {
+    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, CreateRequestError> {
         // TODO support optional batched payout scripts. This would require a change to
         // build() which now checks for a single payee.
         let mut payout_scripts = std::iter::once(self.uri.address.script_pubkey());
@@ -177,7 +177,7 @@ impl<'a> RequestBuilder<'a> {
         change_index: Option<usize>,
         min_fee_rate: FeeRate,
         clamp_fee_contribution: bool,
-    ) -> Result<RequestContext, CreateRequestError> {
+    ) -> Result<Sender, CreateRequestError> {
         self.fee_contribution = Some((max_fee_contribution, change_index));
         self.clamp_fee_contribution = clamp_fee_contribution;
         self.min_fee_rate = min_fee_rate;
@@ -191,7 +191,7 @@ impl<'a> RequestBuilder<'a> {
     pub fn build_non_incentivizing(
         mut self,
         min_fee_rate: FeeRate,
-    ) -> Result<RequestContext, CreateRequestError> {
+    ) -> Result<Sender, CreateRequestError> {
         // since this is a builder, these should already be cleared
         // but we'll reset them to be sure
         self.fee_contribution = None;
@@ -200,7 +200,7 @@ impl<'a> RequestBuilder<'a> {
         self.build()
     }
 
-    fn build(self) -> Result<RequestContext, CreateRequestError> {
+    fn build(self) -> Result<Sender, CreateRequestError> {
         let mut psbt =
             self.psbt.validate().map_err(InternalCreateRequestError::InconsistentOriginalPsbt)?;
         psbt.validate_input_utxos(true)
@@ -219,35 +219,31 @@ impl<'a> RequestBuilder<'a> {
         )?;
         clear_unneeded_fields(&mut psbt);
 
-        Ok(RequestContext {
+        Ok(Sender {
             psbt,
             endpoint,
             disable_output_substitution,
             fee_contribution,
             payee,
             min_fee_rate: self.min_fee_rate,
-            #[cfg(feature = "v2")]
-            e: crate::v2::HpkeKeyPair::gen_keypair().secret_key().clone(),
         })
     }
 }
 
 #[derive(Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "v2", derive(Serialize, Deserialize))]
-pub struct RequestContext {
+pub struct Sender {
     psbt: Psbt,
     endpoint: Url,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
     payee: ScriptBuf,
-    #[cfg(feature = "v2")]
-    e: crate::v2::HpkeSecretKey,
 }
 
-impl RequestContext {
+impl Sender {
     /// Extract serialized V1 Request and Context from a Payjoin Proposal
-    pub fn extract_v1(&self) -> Result<(Request, ContextV1), CreateRequestError> {
+    pub fn extract_v1(&self) -> Result<(Request, V1Context), CreateRequestError> {
         let url = serialize_url(
             self.endpoint.clone(),
             self.disable_output_substitution,
@@ -259,13 +255,15 @@ impl RequestContext {
         let body = self.psbt.to_string().as_bytes().to_vec();
         Ok((
             Request::new_v1(url, body),
-            ContextV1 {
-                original_psbt: self.psbt.clone(),
-                disable_output_substitution: self.disable_output_substitution,
-                fee_contribution: self.fee_contribution,
-                payee: self.payee.clone(),
-                min_fee_rate: self.min_fee_rate,
-                allow_mixed_input_scripts: false,
+            V1Context {
+                psbt_context: PsbtContext {
+                    original_psbt: self.psbt.clone(),
+                    disable_output_substitution: self.disable_output_substitution,
+                    fee_contribution: self.fee_contribution,
+                    payee: self.payee.clone(),
+                    min_fee_rate: self.min_fee_rate,
+                    allow_mixed_input_scripts: false,
+                },
             },
         ))
     }
@@ -277,10 +275,10 @@ impl RequestContext {
     ///
     /// The `ohttp_relay` merely passes the encrypted payload to the ohttp gateway of the receiver
     #[cfg(feature = "v2")]
-    pub fn extract_v2(
+    pub fn extract_highest_version(
         &mut self,
         ohttp_relay: Url,
-    ) -> Result<(Request, ContextV2), CreateRequestError> {
+    ) -> Result<(Request, Context), CreateRequestError> {
         use crate::uri::UrlExt;
 
         if let Some(expiry) = self.endpoint.exp() {
@@ -290,11 +288,11 @@ impl RequestContext {
         }
 
         match self.extract_rs_pubkey() {
-            Ok(rs) => self.extract_v2_strict(ohttp_relay, rs),
+            Ok(rs) => self.extract_v2(ohttp_relay, rs),
             Err(e) => {
                 log::warn!("Failed to extract `rs` pubkey, falling back to v1: {}", e);
                 let (req, context_v1) = self.extract_v1()?;
-                Ok((req, ContextV2 { context_v1, rs: None, e: None, ohttp_res: None }))
+                Ok((req, Context::V1(context_v1)))
             }
         }
     }
@@ -304,11 +302,11 @@ impl RequestContext {
     /// This method requires the `rs` pubkey to be extracted from the endpoint
     /// and has no fallback to v1.
     #[cfg(feature = "v2")]
-    fn extract_v2_strict(
+    fn extract_v2(
         &mut self,
         ohttp_relay: Url,
         rs: HpkePublicKey,
-    ) -> Result<(Request, ContextV2), CreateRequestError> {
+    ) -> Result<(Request, Context), CreateRequestError> {
         use crate::uri::UrlExt;
         let url = self.endpoint.clone();
         let body = serialize_v2_body(
@@ -317,18 +315,23 @@ impl RequestContext {
             self.fee_contribution,
             self.min_fee_rate,
         )?;
-        let body = crate::v2::encrypt_message_a(body, &self.e.clone(), &rs)
-            .map_err(InternalCreateRequestError::Hpke)?;
+        let hpke_ctx = HpkeContext::new(rs);
+        let body = encrypt_message_a(
+            body,
+            &hpke_ctx.reply_pair.public_key().clone(),
+            &hpke_ctx.receiver.clone(),
+        )
+        .map_err(InternalCreateRequestError::Hpke)?;
         let mut ohttp =
             self.endpoint.ohttp().ok_or(InternalCreateRequestError::MissingOhttpConfig)?;
-        let (body, ohttp_res) =
-            crate::v2::ohttp_encapsulate(&mut ohttp, "POST", url.as_str(), Some(&body))
-                .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
+        let (body, ohttp_ctx) = ohttp_encapsulate(&mut ohttp, "POST", url.as_str(), Some(&body))
+            .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
         log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
         Ok((
             Request::new_v2(ohttp_relay, body),
-            ContextV2 {
-                context_v1: ContextV1 {
+            Context::V2(V2PostContext {
+                endpoint: self.endpoint.clone(),
+                psbt_ctx: PsbtContext {
                     original_psbt: self.psbt.clone(),
                     disable_output_substitution: self.disable_output_substitution,
                     fee_contribution: self.fee_contribution,
@@ -336,17 +339,14 @@ impl RequestContext {
                     min_fee_rate: self.min_fee_rate,
                     allow_mixed_input_scripts: true,
                 },
-                rs: Some(self.extract_rs_pubkey()?),
-                e: Some(self.e.clone()),
-                ohttp_res: Some(ohttp_res),
-            },
+                hpke_ctx,
+                ohttp_ctx,
+            }),
         ))
     }
 
     #[cfg(feature = "v2")]
     fn extract_rs_pubkey(&self) -> Result<HpkePublicKey, error::ParseSubdirectoryError> {
-        use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
-        use bitcoin::base64::Engine;
         use error::ParseSubdirectoryError;
 
         let subdirectory = self
@@ -366,12 +366,122 @@ impl RequestContext {
     pub fn endpoint(&self) -> &Url { &self.endpoint }
 }
 
+pub enum Context {
+    V1(V1Context),
+    #[cfg(feature = "v2")]
+    V2(V2PostContext),
+}
+
+pub struct V1Context {
+    psbt_context: PsbtContext,
+}
+
+impl V1Context {
+    pub fn process_response(
+        self,
+        response: &mut impl std::io::Read,
+    ) -> Result<Psbt, ResponseError> {
+        self.psbt_context.process_response(response)
+    }
+}
+
+#[cfg(feature = "v2")]
+pub struct V2PostContext {
+    endpoint: Url,
+    psbt_ctx: PsbtContext,
+    hpke_ctx: HpkeContext,
+    ohttp_ctx: ohttp::ClientResponse,
+}
+
+#[cfg(feature = "v2")]
+impl V2PostContext {
+    pub fn process_response(
+        self,
+        response: &mut impl std::io::Read,
+    ) -> Result<V2GetContext, ResponseError> {
+        let mut res_buf = Vec::new();
+        response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
+        let response = ohttp_decapsulate(self.ohttp_ctx, &res_buf)
+            .map_err(InternalValidationError::OhttpEncapsulation)?;
+        match response.status() {
+            http::StatusCode::OK => {
+                // return OK with new Typestate
+                Ok(V2GetContext {
+                    endpoint: self.endpoint,
+                    psbt_ctx: self.psbt_ctx,
+                    hpke_ctx: self.hpke_ctx,
+                })
+            }
+            _ => Err(InternalValidationError::UnexpectedStatusCode)?,
+        }
+    }
+}
+
+#[cfg(feature = "v2")]
+pub struct V2GetContext {
+    endpoint: Url,
+    psbt_ctx: PsbtContext,
+    hpke_ctx: HpkeContext,
+}
+
+#[cfg(feature = "v2")]
+impl V2GetContext {
+    pub fn extract_req(
+        &self,
+        ohttp_relay: Url,
+    ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
+        use crate::uri::UrlExt;
+        let mut url = self.endpoint.clone();
+        let subdir = BASE64_URL_SAFE_NO_PAD
+            .encode(self.hpke_ctx.reply_pair.public_key().to_compressed_bytes());
+        url.set_path(&subdir);
+        let body = encrypt_message_a(
+            Vec::new(),
+            &self.hpke_ctx.reply_pair.public_key().clone(),
+            &self.hpke_ctx.receiver.clone(),
+        )
+        .map_err(InternalCreateRequestError::Hpke)?;
+        let mut ohttp =
+            self.endpoint.ohttp().ok_or(InternalCreateRequestError::MissingOhttpConfig)?;
+        let (body, ohttp_ctx) = ohttp_encapsulate(&mut ohttp, "GET", url.as_str(), Some(&body))
+            .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
+
+        Ok((Request::new_v2(ohttp_relay, body), ohttp_ctx))
+    }
+
+    pub fn process_response(
+        &self,
+        response: &mut impl std::io::Read,
+        ohttp_ctx: ohttp::ClientResponse,
+    ) -> Result<Option<Psbt>, ResponseError> {
+        let mut res_buf = Vec::new();
+        response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
+        let response = ohttp_decapsulate(ohttp_ctx, &res_buf)
+            .map_err(InternalValidationError::OhttpEncapsulation)?;
+        let body = match response.status() {
+            http::StatusCode::OK => response.body().to_vec(),
+            http::StatusCode::ACCEPTED => return Ok(None),
+            _ => return Err(InternalValidationError::UnexpectedStatusCode)?,
+        };
+        let psbt = decrypt_message_b(
+            &body,
+            self.hpke_ctx.receiver.clone(),
+            self.hpke_ctx.reply_pair.secret_key().clone(),
+        )
+        .map_err(InternalValidationError::Hpke)?;
+
+        let proposal = Psbt::deserialize(&psbt).map_err(InternalValidationError::Psbt)?;
+        let processed_proposal = self.psbt_ctx.clone().process_proposal(proposal)?;
+        Ok(Some(processed_proposal))
+    }
+}
+
 /// Data required for validation of response.
 ///
 /// This type is used to process the response. Get it from [`RequestBuilder`]'s build methods.
 /// Then you only need to call [`Self::process_response`] on it to continue BIP78 flow.
 #[derive(Debug, Clone)]
-pub struct ContextV1 {
+pub struct PsbtContext {
     original_psbt: Psbt,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
@@ -381,11 +491,16 @@ pub struct ContextV1 {
 }
 
 #[cfg(feature = "v2")]
-pub struct ContextV2 {
-    context_v1: ContextV1,
-    rs: Option<HpkePublicKey>,
-    e: Option<HpkeSecretKey>,
-    ohttp_res: Option<ohttp::ClientResponse>,
+struct HpkeContext {
+    receiver: HpkePublicKey,
+    reply_pair: HpkeKeyPair,
+}
+
+#[cfg(feature = "v2")]
+impl HpkeContext {
+    pub fn new(receiver: HpkePublicKey) -> Self {
+        Self { receiver, reply_pair: HpkeKeyPair::gen_keypair() }
+    }
 }
 
 macro_rules! check_eq {
@@ -406,43 +521,7 @@ macro_rules! ensure {
     };
 }
 
-#[cfg(feature = "v2")]
-impl ContextV2 {
-    /// Decodes and validates the response.
-    ///
-    /// Call this method with response from receiver to continue BIP-??? flow.
-    /// A successful response can either be None if the directory has not response yet or Some(Psbt).
-    ///
-    /// If the response is some valid PSBT you should sign and broadcast.
-    #[inline]
-    pub fn process_response(
-        self,
-        response: &mut impl std::io::Read,
-    ) -> Result<Option<Psbt>, ResponseError> {
-        match (self.ohttp_res, self.rs, self.e) {
-            (Some(ohttp_res), Some(rs), Some(e)) => {
-                let mut res_buf = Vec::new();
-                response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
-                let response = crate::v2::ohttp_decapsulate(ohttp_res, &res_buf)
-                    .map_err(InternalValidationError::OhttpEncapsulation)?;
-                let body = match response.status() {
-                    http::StatusCode::OK => response.body().to_vec(),
-                    http::StatusCode::ACCEPTED => return Ok(None),
-                    _ => return Err(InternalValidationError::UnexpectedStatusCode)?,
-                };
-                let psbt = crate::v2::decrypt_message_b(&body, rs, e)
-                    .map_err(InternalValidationError::Hpke)?;
-
-                let proposal = Psbt::deserialize(&psbt).map_err(InternalValidationError::Psbt)?;
-                let processed_proposal = self.context_v1.process_proposal(proposal)?;
-                Ok(Some(processed_proposal))
-            }
-            _ => self.context_v1.process_response(response).map(Some),
-        }
-    }
-}
-
-impl ContextV1 {
+impl PsbtContext {
     /// Decodes and validates the response.
     ///
     /// Call this method with response from receiver to continue BIP78 flow. If the response is
@@ -850,11 +929,11 @@ mod test {
     const ORIGINAL_PSBT: &str = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
     const PAYJOIN_PROPOSAL: &str = "cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAQEgqBvXBQAAAAAXqRTeTh6QYcpZE1sDWtXm1HmQRUNU0IcBBBYAFMeKRXJTVYKNVlgHTdUmDV/LaYUwIgYDFZrAGqDVh1TEtNi300ntHt/PCzYrT2tVEGcjooWPhRYYSFzWUDEAAIABAACAAAAAgAEAAAAAAAAAAAEBIICEHgAAAAAAF6kUyPLL+cphRyyI5GTUazV0hF2R2NWHAQcXFgAUX4BmVeWSTJIEwtUb5TlPS/ntohABCGsCRzBEAiBnu3tA3yWlT0WBClsXXS9j69Bt+waCs9JcjWtNjtv7VgIge2VYAaBeLPDB6HGFlpqOENXMldsJezF9Gs5amvDQRDQBIQJl1jz1tBt8hNx2owTm+4Du4isx0pmdKNMNIjjaMHFfrQABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUIgICygvBWB5prpfx61y1HDAwo37kYP3YRJBvAjtunBAur3wYSFzWUDEAAIABAACAAAAAgAEAAAABAAAAAAA=";
 
-    fn create_v1_context() -> super::ContextV1 {
+    fn create_v1_context() -> super::PsbtContext {
         let original_psbt = Psbt::from_str(ORIGINAL_PSBT).unwrap();
         eprintln!("original: {:#?}", original_psbt);
         let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
-        let ctx = super::ContextV1 {
+        let ctx = super::PsbtContext {
             original_psbt,
             disable_output_substitution: false,
             fee_contribution: Some((bitcoin::Amount::from_sat(182), 0)),
@@ -906,20 +985,14 @@ mod test {
     #[test]
     #[cfg(feature = "v2")]
     fn req_ctx_ser_de_roundtrip() {
-        use hpke::Deserializable;
-
         use super::*;
-        let req_ctx = RequestContext {
+        let req_ctx = Sender {
             psbt: Psbt::from_str(ORIGINAL_PSBT).unwrap(),
             endpoint: Url::parse("http://localhost:1234").unwrap(),
             disable_output_substitution: false,
             fee_contribution: None,
             min_fee_rate: FeeRate::ZERO,
             payee: ScriptBuf::from(vec![0x00]),
-            e: HpkeSecretKey(
-                <hpke::kem::SecpK256HkdfSha256 as hpke::Kem>::PrivateKey::from_bytes(&[0x01; 32])
-                    .unwrap(),
-            ),
         };
         let serialized = serde_json::to_string(&req_ctx).unwrap();
         let deserialized = serde_json::from_str(&serialized).unwrap();

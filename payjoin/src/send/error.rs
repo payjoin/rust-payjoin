@@ -58,9 +58,9 @@ pub(crate) enum InternalValidationError {
     FeeRateBelowMinimum,
     Psbt(bitcoin::psbt::Error),
     #[cfg(feature = "v2")]
-    Hpke(crate::v2::HpkeError),
+    Hpke(crate::hpke::HpkeError),
     #[cfg(feature = "v2")]
-    OhttpEncapsulation(crate::v2::OhttpEncapsulationError),
+    OhttpEncapsulation(crate::ohttp::OhttpEncapsulationError),
     #[cfg(feature = "v2")]
     UnexpectedStatusCode,
 }
@@ -190,9 +190,9 @@ pub(crate) enum InternalCreateRequestError {
     AddressType(crate::psbt::AddressTypeError),
     InputWeight(crate::psbt::InputWeightError),
     #[cfg(feature = "v2")]
-    Hpke(crate::v2::HpkeError),
+    Hpke(crate::hpke::HpkeError),
     #[cfg(feature = "v2")]
-    OhttpEncapsulation(crate::v2::OhttpEncapsulationError),
+    OhttpEncapsulation(crate::ohttp::OhttpEncapsulationError),
     #[cfg(feature = "v2")]
     ParseSubdirectory(ParseSubdirectoryError),
     #[cfg(feature = "v2")]
@@ -289,7 +289,7 @@ impl From<ParseSubdirectoryError> for CreateRequestError {
 pub(crate) enum ParseSubdirectoryError {
     MissingSubdirectory,
     SubdirectoryNotBase64(bitcoin::base64::DecodeError),
-    SubdirectoryInvalidPubkey(crate::v2::HpkeError),
+    SubdirectoryInvalidPubkey(crate::hpke::HpkeError),
 }
 
 #[cfg(feature = "v2")]

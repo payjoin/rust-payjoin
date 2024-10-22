@@ -14,10 +14,11 @@ use super::{
     Error, InputContributionError, InternalRequestError, OutputSubstitutionError, RequestError,
     SelectionError,
 };
+use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
+use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
-use crate::v2::{HpkeKeyPair, HpkePublicKey, OhttpEncapsulationError};
-use crate::{OhttpKeys, PjUriBuilder, Request};
+use crate::{PjUriBuilder, Request};
 
 pub(crate) mod error;
 
@@ -45,16 +46,19 @@ where
     Ok(address.assume_checked())
 }
 
-/// Initializes a new payjoin session, including necessary context
-/// information for communication and cryptographic operations.
-#[derive(Debug, Clone)]
-pub struct SessionInitializer {
+fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> String {
+    BASE64_URL_SAFE_NO_PAD.encode(pubkey.to_compressed_bytes())
+}
+
+/// A payjoin V2 receiver, allowing for polled requests to the
+/// payjoin directory and response processing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Receiver {
     context: SessionContext,
 }
 
-#[cfg(feature = "v2")]
-impl SessionInitializer {
-    /// Creates a new `SessionInitializer` with the provided parameters.
+impl Receiver {
+    /// Creates a new `Receiver` with the provided parameters.
     ///
     /// # Parameters
     /// - `address`: The Bitcoin address for the payjoin session.
@@ -64,7 +68,7 @@ impl SessionInitializer {
     /// - `expire_after`: The duration after which the session expires.
     ///
     /// # Returns
-    /// A new instance of `SessionInitializer`.
+    /// A new instance of `Receiver`.
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
@@ -90,62 +94,13 @@ impl SessionInitializer {
         }
     }
 
-    pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
-        let url = self.context.ohttp_relay.clone();
-        let subdirectory = subdir_path_from_pubkey(self.context.s.public_key());
-        let (body, ctx) = crate::v2::ohttp_encapsulate(
-            &mut self.context.ohttp_keys,
-            "POST",
-            self.context.directory.as_str(),
-            Some(subdirectory.as_bytes()),
-        )?;
-        let req = Request::new_v2(url, body);
-        Ok((req, ctx))
-    }
-
-    pub fn process_res(
-        mut self,
-        mut res: impl std::io::Read,
-        ctx: ohttp::ClientResponse,
-    ) -> Result<ActiveSession, Error> {
-        let mut buf = Vec::new();
-        let _ = res.read_to_end(&mut buf);
-        let response = crate::v2::ohttp_decapsulate(ctx, &buf)?;
-        if !response.status().is_success() {
-            return Err(Error::Server("Enrollment failed, expected success status".into()));
-        }
-        log::debug!("Received response headers: {:?}", response.headers());
-        let location = response
-            .headers()
-            .get("location")
-            .ok_or(Error::Server("Missing location header".into()))?
-            .to_str()
-            .map_err(|e| Error::Server(format!("Invalid location header: {}", e).into()))?;
-        self.context.subdirectory =
-            Some(url::Url::parse(location).map_err(|e| Error::Server(e.into()))?);
-
-        Ok(ActiveSession { context: self.context.clone() })
-    }
-}
-
-fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> String {
-    BASE64_URL_SAFE_NO_PAD.encode(pubkey.to_compressed_bytes())
-}
-
-/// An active payjoin V2 session, allowing for polled requests to the
-/// payjoin directory and response processing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActiveSession {
-    context: SessionContext,
-}
-
-impl ActiveSession {
+    /// Extratct an OHTTP Encapsulated HTTP GET request for the Original PSBT
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), SessionError> {
         if SystemTime::now() > self.context.expiry {
             return Err(InternalSessionError::Expired(self.context.expiry).into());
         }
         let (body, ohttp_ctx) =
-            self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulationError)?;
+            self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulation)?;
         let url = self.context.ohttp_relay.clone();
         let req = Request::new_v2(url, body);
         Ok((req, ohttp_ctx))
@@ -161,7 +116,7 @@ impl ActiveSession {
         let mut buf = Vec::new();
         let _ = body.read_to_end(&mut buf);
         log::trace!("decapsulating directory response");
-        let response = crate::v2::ohttp_decapsulate(context, &buf)?;
+        let response = ohttp_decapsulate(context, &buf)?;
         if response.body().is_empty() {
             log::debug!("response is empty");
             return Ok(None);
@@ -178,12 +133,7 @@ impl ActiveSession {
         &mut self,
     ) -> Result<(Vec<u8>, ohttp::ClientResponse), OhttpEncapsulationError> {
         let fallback_target = self.pj_url();
-        crate::v2::ohttp_encapsulate(
-            &mut self.context.ohttp_keys,
-            "GET",
-            fallback_target.as_str(),
-            None,
-        )
+        ohttp_encapsulate(&mut self.context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
 
     fn extract_proposal_from_v1(&mut self, response: String) -> Result<UncheckedProposal, Error> {
@@ -191,8 +141,7 @@ impl ActiveSession {
     }
 
     fn extract_proposal_from_v2(&mut self, response: Vec<u8>) -> Result<UncheckedProposal, Error> {
-        let (payload_bytes, e) =
-            crate::v2::decrypt_message_a(&response, self.context.s.secret_key().clone())?;
+        let (payload_bytes, e) = decrypt_message_a(&response, self.context.s.secret_key().clone())?;
         self.context.e = Some(e);
         let payload = String::from_utf8(payload_bytes).map_err(InternalRequestError::Utf8)?;
         Ok(self.unchecked_from_payload(payload)?)
@@ -507,22 +456,34 @@ impl PayjoinProposal {
 
     #[cfg(feature = "v2")]
     pub fn extract_v2_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
-        let body = match &self.context.e {
-            Some(e) => {
-                let payjoin_bytes = self.inner.payjoin_psbt.serialize();
-                log::debug!("THERE IS AN e: {:?}", e);
-                crate::v2::encrypt_message_b(payjoin_bytes, &self.context.s, e)
-            }
-            None => Ok(self.extract_v1_req().as_bytes().to_vec()),
-        }?;
-        let subdir_path = subdir_path_from_pubkey(self.context.s.public_key());
-        let post_payjoin_target =
-            self.context.directory.join(&subdir_path).map_err(|e| Error::Server(e.into()))?;
-        log::debug!("Payjoin post target: {}", post_payjoin_target.as_str());
-        let (body, ctx) = crate::v2::ohttp_encapsulate(
+        let target_resource: Url;
+        let body: Vec<u8>;
+        let method: &str;
+
+        if let Some(e) = &self.context.e {
+            // Prepare v2 payload
+            let payjoin_bytes = self.inner.payjoin_psbt.serialize();
+            let sender_subdir = subdir_path_from_pubkey(e);
+            target_resource =
+                self.context.directory.join(&sender_subdir).map_err(|e| Error::Server(e.into()))?;
+            body = encrypt_message_b(payjoin_bytes, &self.context.s, e)?;
+            method = "POST";
+        } else {
+            // Prepare v2 wrapped and backwards-compatible v1 payload
+            body = self.extract_v1_req().as_bytes().to_vec();
+            let receiver_subdir = subdir_path_from_pubkey(self.context.s.public_key());
+            target_resource = self
+                .context
+                .directory
+                .join(&receiver_subdir)
+                .map_err(|e| Error::Server(e.into()))?;
+            method = "PUT";
+        }
+        log::debug!("Payjoin PSBT target: {}", target_resource.as_str());
+        let (body, ctx) = ohttp_encapsulate(
             &mut self.context.ohttp_keys,
-            "PUT",
-            post_payjoin_target.as_str(),
+            method,
+            target_resource.as_str(),
             Some(&body),
         )?;
         let url = self.context.ohttp_relay.clone();
@@ -543,7 +504,7 @@ impl PayjoinProposal {
         res: Vec<u8>,
         ohttp_context: ohttp::ClientResponse,
     ) -> Result<(), Error> {
-        let res = crate::v2::ohttp_decapsulate(ohttp_context, &res)?;
+        let res = ohttp_decapsulate(ohttp_context, &res)?;
         if res.status().is_success() {
             Ok(())
         } else {
@@ -561,7 +522,7 @@ mod test {
 
     #[test]
     #[cfg(feature = "v2")]
-    fn active_session_ser_de_roundtrip() {
+    fn receiver_ser_de_roundtrip() {
         use ohttp::hpke::{Aead, Kdf, Kem};
         use ohttp::{KeyId, SymmetricSuite};
         const KEY_ID: KeyId = 1;
@@ -569,7 +530,7 @@ mod test {
         const SYMMETRIC: &[SymmetricSuite] =
             &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
 
-        let session = ActiveSession {
+        let session = Receiver {
             context: SessionContext {
                 address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
                     .unwrap()
@@ -586,7 +547,7 @@ mod test {
             },
         };
         let serialized = serde_json::to_string(&session).unwrap();
-        let deserialized: ActiveSession = serde_json::from_str(&serialized).unwrap();
+        let deserialized: Receiver = serde_json::from_str(&serialized).unwrap();
         assert_eq!(session, deserialized);
     }
 }

@@ -36,6 +36,7 @@ reqwest = { version = "0.12", default-features = false, optional = true }
 rustls = { version = "0.22.4", optional = true }
 url = "2.2.2"
 serde_json = "1.0.108"
+byteorder = "1.4"
 
 [dev-dependencies]
 bitcoind = { version = "0.36.0", features = ["0_21_2"] }

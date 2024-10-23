@@ -3,6 +3,7 @@ use std::{error, fmt};
 
 use bitcoin::key::constants::{ELLSWIFT_ENCODING_SIZE, UNCOMPRESSED_PUBLIC_KEY_SIZE};
 use bitcoin::secp256k1::ellswift::ElligatorSwift;
+use byteorder::{ByteOrder, NetworkEndian};
 use hpke::aead::ChaCha20Poly1305;
 use hpke::kdf::HkdfSha256;
 use hpke::kem::SecpK256HkdfSha256;
@@ -12,9 +13,9 @@ use serde::{Deserialize, Serialize};
 
 pub const PADDED_MESSAGE_BYTES: usize = 7168;
 pub const PADDED_PLAINTEXT_A_LENGTH: usize = PADDED_MESSAGE_BYTES
-    - (ELLSWIFT_ENCODING_SIZE + UNCOMPRESSED_PUBLIC_KEY_SIZE + POLY1305_TAG_SIZE);
+    - (ELLSWIFT_ENCODING_SIZE + UNCOMPRESSED_PUBLIC_KEY_SIZE + POLY1305_TAG_SIZE + 4);
 pub const PADDED_PLAINTEXT_B_LENGTH: usize =
-    PADDED_MESSAGE_BYTES - (ELLSWIFT_ENCODING_SIZE + POLY1305_TAG_SIZE);
+    PADDED_MESSAGE_BYTES - (ELLSWIFT_ENCODING_SIZE + POLY1305_TAG_SIZE + 4);
 pub const POLY1305_TAG_SIZE: usize = 16; // FIXME there is a U16 defined for poly1305, should bitcoin hpke re-export it?
 pub const INFO_A: &[u8; 8] = b"PjV2MsgA";
 pub const INFO_B: &[u8; 8] = b"PjV2MsgB";
@@ -159,10 +160,17 @@ pub fn encrypt_message_a(
             INFO_A,
             &mut OsRng,
         )?;
+
+    let length = UNCOMPRESSED_PUBLIC_KEY_SIZE + body.len();
+
     let mut body = body;
-    pad_plaintext(&mut body, PADDED_PLAINTEXT_A_LENGTH)?;
-    let mut plaintext = reply_pk.to_bytes().to_vec();
+    let extra_pad = if length < 0xfd { 2 } else { 0 }; // add 2 extra bytes of padding if BigSize is 1 byte instead of 3
+    pad_plaintext(&mut body, PADDED_PLAINTEXT_A_LENGTH + extra_pad)?;
+
+    let mut plaintext = encode_tlv(length.try_into().expect("checked by pad_plaintext"));
+    plaintext.extend(reply_pk.to_bytes());
     plaintext.extend(body);
+
     let ciphertext = encryption_context.seal(&plaintext, &[])?;
     let mut message_a = ellswift_bytes_from_encapped_key(&encapsulated_key)?.to_vec();
     message_a.extend(&ciphertext);
@@ -192,18 +200,20 @@ pub fn decrypt_message_a(
     cursor.read_to_end(&mut ciphertext).map_err(|_| HpkeError::PayloadTooShort)?;
     let plaintext = decryption_ctx.open(&ciphertext, &[])?;
 
+    let plaintext = extract_tlv_value(&plaintext)?;
+
     let reply_pk_bytes = &plaintext[..UNCOMPRESSED_PUBLIC_KEY_SIZE];
     let reply_pk = HpkePublicKey(PublicKey::from_bytes(reply_pk_bytes)?);
 
-    let body = &plaintext[UNCOMPRESSED_PUBLIC_KEY_SIZE..];
+    let body = plaintext[UNCOMPRESSED_PUBLIC_KEY_SIZE..].to_vec();
 
-    Ok((body.to_vec(), reply_pk))
+    Ok((body, reply_pk))
 }
 
 /// Message B is sent from the receiver to the sender containing a Payjoin PSBT payload or an error
 #[cfg(feature = "receive")]
 pub fn encrypt_message_b(
-    mut plaintext: Vec<u8>,
+    mut body: Vec<u8>,
     receiver_keypair: &HpkeKeyPair,
     sender_pk: &HpkePublicKey,
 ) -> Result<Vec<u8>, HpkeError> {
@@ -217,8 +227,16 @@ pub fn encrypt_message_b(
             INFO_B,
             &mut OsRng,
         )?;
-    let plaintext: &[u8] = pad_plaintext(&mut plaintext, PADDED_PLAINTEXT_B_LENGTH)?;
-    let ciphertext = encryption_context.seal(plaintext, &[])?;
+
+    let length = body.len();
+    let extra_pad = if length < 0xfd { 2 } else { 0 }; // add 2 extra bytes of padding if BigSize is 1 byte instead of 3
+    pad_plaintext(&mut body, PADDED_PLAINTEXT_B_LENGTH + extra_pad)?;
+
+    let mut plaintext =
+        encode_tlv(length.try_into().expect("length already checked in pad_plaintext"));
+    plaintext.extend(body);
+
+    let ciphertext = encryption_context.seal(&plaintext, &[])?;
     let mut message_b = ellswift_bytes_from_encapped_key(&encapsulated_key)?.to_vec();
     message_b.extend(&ciphertext);
     Ok(message_b.to_vec())
@@ -237,9 +255,11 @@ pub fn decrypt_message_b(
         HkdfSha256,
         SecpK256HkdfSha256,
     >(&OpModeR::Auth(receiver_pk.0), &sender_sk.0, &enc, INFO_B)?;
+
     let plaintext = decryption_ctx
         .open(message_b.get(ELLSWIFT_ENCODING_SIZE..).ok_or(HpkeError::PayloadTooShort)?, &[])?;
-    Ok(plaintext)
+
+    Ok(extract_tlv_value(&plaintext)?.to_vec())
 }
 
 fn pad_plaintext(msg: &mut Vec<u8>, padded_length: usize) -> Result<&[u8], HpkeError> {
@@ -250,6 +270,35 @@ fn pad_plaintext(msg: &mut Vec<u8>, padded_length: usize) -> Result<&[u8], HpkeE
     Ok(msg)
 }
 
+fn encode_tlv(length: u16) -> Vec<u8> {
+    if length < 0xfd {
+        vec![0x00, length.try_into().expect("length checked in conditional")]
+    } else {
+        let mut buf = vec![0x00, 0xfd, 0x00, 0x00];
+        NetworkEndian::write_u16(
+            &mut buf[2..4],
+            length.try_into().expect("length already checked in pad_plaintext"),
+        );
+        buf
+    }
+}
+
+fn extract_tlv_value(plaintext: &[u8]) -> Result<&[u8], HpkeError> {
+    if plaintext[0] != 0x00 {
+        return Err(HpkeError::InvalidPlaintext);
+    }
+
+    let (plaintext, length): (&[u8], usize) = if plaintext[1] < 0xfd {
+        (&plaintext[2..], plaintext[1].into())
+    } else if plaintext[1] == 0xfd {
+        (&plaintext[4..], NetworkEndian::read_u16(&plaintext[2..4]).into())
+    } else {
+        return Err(HpkeError::InvalidPlaintext);
+    };
+
+    Ok(&plaintext[..length])
+}
+
 /// Error from de/encrypting a v2 Hybrid Public Key Encryption payload.
 #[derive(Debug, PartialEq)]
 pub enum HpkeError {
@@ -258,6 +307,7 @@ pub enum HpkeError {
     InvalidKeyLength,
     PayloadTooLarge { actual: usize, max: usize },
     PayloadTooShort,
+    InvalidPlaintext,
 }
 
 impl From<hpke::HpkeError> for HpkeError {
@@ -283,6 +333,7 @@ impl fmt::Display for HpkeError {
                 )
             }
             PayloadTooShort => write!(f, "Payload too small"),
+            InvalidPlaintext => write!(f, "Malformed plaintext"),
             Secp256k1(e) => e.fmt(f),
         }
     }
@@ -296,6 +347,7 @@ impl error::Error for HpkeError {
             Hpke(e) => Some(e),
             PayloadTooLarge { .. } => None,
             InvalidKeyLength | PayloadTooShort => None,
+            InvalidPlaintext => None,
             Secp256k1(e) => Some(e),
         }
     }
@@ -323,13 +375,10 @@ mod test {
         let decrypted = decrypt_message_a(&message_a, receiver_keypair.secret_key().clone())
             .expect("decryption should work");
 
-        assert_eq!(decrypted.0.len(), PADDED_PLAINTEXT_A_LENGTH);
-
-        // decrypted plaintext is padded, so pad the expected plaintext
-        plaintext.resize(PADDED_PLAINTEXT_A_LENGTH, 0);
         assert_eq!(decrypted, (plaintext.to_vec(), reply_keypair.public_key().clone()));
 
         // ensure full plaintext round trips
+        plaintext.resize(PADDED_PLAINTEXT_A_LENGTH, 0);
         plaintext[PADDED_PLAINTEXT_A_LENGTH - 1] = 42;
         let message_a = encrypt_message_a(
             plaintext.clone(),
@@ -397,11 +446,9 @@ mod test {
         )
         .expect("decryption should work");
 
-        assert_eq!(decrypted.len(), PADDED_PLAINTEXT_B_LENGTH);
-        // decrypted plaintext is padded, so pad the expected plaintext
-        plaintext.resize(PADDED_PLAINTEXT_B_LENGTH, 0);
         assert_eq!(decrypted, plaintext.to_vec());
 
+        plaintext.resize(PADDED_PLAINTEXT_B_LENGTH, 0);
         plaintext[PADDED_PLAINTEXT_B_LENGTH - 1] = 42;
         let message_b =
             encrypt_message_b(plaintext.clone(), &receiver_keypair, reply_keypair.public_key())

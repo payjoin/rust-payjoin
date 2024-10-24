@@ -1585,6 +1585,7 @@ dependencies = [
  "bitcoin-hpke",
  "bitcoin-ohttp",
  "bitcoind",
+ "byteorder",
  "http",
  "log",
  "ohttp-relay",

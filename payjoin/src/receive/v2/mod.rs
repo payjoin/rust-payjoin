@@ -466,7 +466,7 @@ impl PayjoinProposal {
             let sender_subdir = subdir_path_from_pubkey(e);
             target_resource =
                 self.context.directory.join(&sender_subdir).map_err(|e| Error::Server(e.into()))?;
-            body = encrypt_message_b(payjoin_bytes, &self.context.s, e)?;
+            body = encrypt_message_b(&payjoin_bytes, &self.context.s, e)?.to_vec();
             method = "POST";
         } else {
             // Prepare v2 wrapped and backwards-compatible v1 payload

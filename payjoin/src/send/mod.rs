@@ -372,6 +372,7 @@ pub enum Context {
     V2(V2PostContext),
 }
 
+#[derive(Debug, Clone)]
 pub struct V1Context {
     psbt_context: PsbtContext,
 }
@@ -418,6 +419,7 @@ impl V2PostContext {
 }
 
 #[cfg(feature = "v2")]
+#[derive(Debug, Clone)]
 pub struct V2GetContext {
     endpoint: Url,
     psbt_ctx: PsbtContext,
@@ -491,6 +493,7 @@ pub struct PsbtContext {
 }
 
 #[cfg(feature = "v2")]
+#[derive(Debug, Clone)]
 struct HpkeContext {
     receiver: HpkePublicKey,
     reply_pair: HpkeKeyPair,

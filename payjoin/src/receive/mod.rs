@@ -168,7 +168,7 @@ impl UncheckedProposal {
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
 /// Call [`Self::check_inputs_not_owned`] to proceed.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct MaybeInputsOwned {
     psbt: Psbt,
     params: Params,
@@ -212,7 +212,7 @@ impl MaybeInputsOwned {
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
 /// Call [`Self::check_no_inputs_seen_before`] to proceed.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct MaybeInputsSeen {
     psbt: Psbt,
     params: Params,
@@ -246,7 +246,7 @@ impl MaybeInputsSeen {
 ///
 /// Only accept PSBTs that send us money.
 /// Identify those outputs with [`Self::identify_receiver_outputs`] to proceed.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct OutputsUnknown {
     psbt: Psbt,
     params: Params,
@@ -864,7 +864,7 @@ impl ProvisionalProposal {
 
 /// A finalized payjoin proposal, complete with fees and receiver signatures, that the sender
 /// should find acceptable.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PayjoinProposal {
     payjoin_psbt: Psbt,
     params: Params,

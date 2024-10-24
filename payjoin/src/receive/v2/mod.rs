@@ -260,7 +260,7 @@ impl UncheckedProposal {
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
 /// Call [`check_no_receiver_owned_inputs()`](struct.UncheckedProposal.html#method.check_no_receiver_owned_inputs) to proceed.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct MaybeInputsOwned {
     inner: super::MaybeInputsOwned,
     context: SessionContext,
@@ -283,7 +283,7 @@ impl MaybeInputsOwned {
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
 /// Call [`check_no_inputs_seen`](struct.MaybeInputsSeen.html#method.check_no_inputs_seen_before) to proceed.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct MaybeInputsSeen {
     inner: super::MaybeInputsSeen,
     context: SessionContext,
@@ -306,7 +306,7 @@ impl MaybeInputsSeen {
 ///
 /// Only accept PSBTs that send us money.
 /// Identify those outputs with `identify_receiver_outputs()` to proceed
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct OutputsUnknown {
     inner: super::OutputsUnknown,
     context: SessionContext,

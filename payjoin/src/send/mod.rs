@@ -34,6 +34,8 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 #[cfg(feature = "v2")]
+use crate::hpke::PADDED_MESSAGE_BYTES;
+#[cfg(feature = "v2")]
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeKeyPair, HpkePublicKey};
 #[cfg(feature = "v2")]
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
@@ -317,7 +319,7 @@ impl Sender {
         )?;
         let hpke_ctx = HpkeContext::new(rs);
         let body = encrypt_message_a(
-            body,
+            &body,
             &hpke_ctx.reply_pair.public_key().clone(),
             &hpke_ctx.receiver.clone(),
         )
@@ -438,7 +440,7 @@ impl V2GetContext {
             .encode(self.hpke_ctx.reply_pair.public_key().to_compressed_bytes());
         url.set_path(&subdir);
         let body = encrypt_message_a(
-            Vec::new(),
+            &[],
             &self.hpke_ctx.reply_pair.public_key().clone(),
             &self.hpke_ctx.receiver.clone(),
         )
@@ -1011,8 +1013,9 @@ mod test {
         })
         .to_string();
         match ctx.process_response(&mut known_json_error.as_bytes()) {
-            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported { .. })) =>
-                assert!(true),
+            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported { .. })) => {
+                assert!(true)
+            }
             _ => panic!("Expected WellKnownError"),
         }
 

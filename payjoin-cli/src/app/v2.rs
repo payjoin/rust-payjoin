@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -365,28 +364,18 @@ fn try_contributing_inputs(
     payjoin: payjoin::receive::v2::WantsInputs,
     bitcoind: &bitcoincore_rpc::Client,
 ) -> Result<payjoin::receive::v2::ProvisionalProposal> {
-    use bitcoin::OutPoint;
-
-    let available_inputs = bitcoind
+    let candidate_inputs = bitcoind
         .list_unspent(None, None, None, None, None)
-        .context("Failed to list unspent from bitcoind")?;
-    let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
-        .iter()
-        .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
-        .collect();
-
-    let selected_outpoint = payjoin
+        .context("Failed to list unspent from bitcoind")?
+        .into_iter()
+        .map(input_pair_from_list_unspent);
+    let selected_input = payjoin
         .try_preserving_privacy(candidate_inputs)
         .map_err(|e| anyhow!("Failed to make privacy preserving selection: {}", e))?;
-    let selected_utxo = available_inputs
-        .iter()
-        .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
-        .context("This shouldn't happen. Failed to retrieve the privacy preserving utxo from those we provided to the seclector.")?;
-    log::debug!("selected utxo: {:#?}", selected_utxo);
-    let input_pair = input_pair_from_list_unspent(selected_utxo);
+    log::debug!("selected input: {:#?}", selected_input);
 
     Ok(payjoin
-        .contribute_inputs(vec![input_pair])
+        .contribute_inputs(vec![selected_input])
         .expect("This shouldn't happen. Failed to contribute inputs.")
         .commit_inputs())
 }

@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
 use bitcoin::psbt::{Input as PsbtInput, Psbt};
-use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxIn, TxOut};
+use bitcoin::{Address, FeeRate, OutPoint, Script, TxIn, TxOut};
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -387,8 +387,8 @@ impl WantsInputs {
     /// https://eprint.iacr.org/2022/589.pdf
     pub fn try_preserving_privacy(
         &self,
-        candidate_inputs: impl IntoIterator<Item = (Amount, OutPoint)>,
-    ) -> Result<OutPoint, SelectionError> {
+        candidate_inputs: impl IntoIterator<Item = (PsbtInput, TxIn)>,
+    ) -> Result<(PsbtInput, TxIn), SelectionError> {
         self.inner.try_preserving_privacy(candidate_inputs)
     }
 

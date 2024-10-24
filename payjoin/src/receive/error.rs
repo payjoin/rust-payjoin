@@ -260,6 +260,8 @@ pub(crate) enum InternalSelectionError {
     TooManyOutputs,
     /// No selection candidates improve privacy
     NotFound,
+    /// Missing previous txout information
+    PrevTxOut(crate::psbt::PrevTxOutError),
 }
 
 impl fmt::Display for SelectionError {
@@ -272,6 +274,8 @@ impl fmt::Display for SelectionError {
             ),
             InternalSelectionError::NotFound =>
                 write!(f, "No selection candidates improve privacy"),
+            InternalSelectionError::PrevTxOut(e) =>
+                write!(f, "Missing previous txout information: {}", e),
         }
     }
 }

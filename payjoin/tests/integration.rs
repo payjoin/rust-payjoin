@@ -560,7 +560,7 @@ mod integration {
                 // POST payjoin
                 let proposal =
                     session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?.unwrap();
-                let inputs = receiver_utxos.iter().map(input_pair_from_list_unspent).collect();
+                let inputs = receiver_utxos.into_iter().map(input_pair_from_list_unspent).collect();
                 let mut payjoin_proposal =
                     handle_directory_proposal(&receiver, proposal, Some(inputs));
                 assert!(!payjoin_proposal.is_output_substitution_disabled());
@@ -874,24 +874,18 @@ mod integration {
             let inputs = match custom_inputs {
                 Some(inputs) => inputs,
                 None => {
-                    let available_inputs =
-                        receiver.list_unspent(None, None, None, None, None).unwrap();
-                    let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
-                        .iter()
-                        .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
-                        .collect();
-
-                    let selected_outpoint = payjoin
+                    let candidate_inputs = receiver
+                        .list_unspent(None, None, None, None, None)
+                        .unwrap()
+                        .into_iter()
+                        .map(input_pair_from_list_unspent);
+                    let selected_input = payjoin
                         .try_preserving_privacy(candidate_inputs)
-                        .expect("Failed to make privacy preserving selection");
-                    let selected_utxo = available_inputs
-                        .iter()
-                        .find(|i| {
-                            i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout
+                        .map_err(|e| {
+                            format!("Failed to make privacy preserving selection: {:?}", e)
                         })
                         .unwrap();
-                    let input_pair = input_pair_from_list_unspent(selected_utxo);
-                    vec![input_pair]
+                    vec![selected_input]
                 }
             };
             let payjoin = payjoin.contribute_inputs(inputs).unwrap().commit_inputs();
@@ -1043,7 +1037,7 @@ mod integration {
                     .script_pubkey(),
             }];
             let drain_script = outputs[0].script_pubkey.clone();
-            let inputs = receiver_utxos.iter().map(input_pair_from_list_unspent).collect();
+            let inputs = receiver_utxos.into_iter().map(input_pair_from_list_unspent).collect();
             let response = handle_v1_pj_request(
                 req,
                 headers,
@@ -1309,21 +1303,14 @@ mod integration {
         let inputs = match custom_inputs {
             Some(inputs) => inputs,
             None => {
-                let available_inputs = receiver.list_unspent(None, None, None, None, None)?;
-                let candidate_inputs: HashMap<Amount, OutPoint> = available_inputs
-                    .iter()
-                    .map(|i| (i.amount, OutPoint { txid: i.txid, vout: i.vout }))
-                    .collect();
-
-                let selected_outpoint = payjoin
+                let candidate_inputs = receiver
+                    .list_unspent(None, None, None, None, None)?
+                    .into_iter()
+                    .map(input_pair_from_list_unspent);
+                let selected_input = payjoin
                     .try_preserving_privacy(candidate_inputs)
                     .map_err(|e| format!("Failed to make privacy preserving selection: {:?}", e))?;
-                let selected_utxo = available_inputs
-                    .iter()
-                    .find(|i| i.txid == selected_outpoint.txid && i.vout == selected_outpoint.vout)
-                    .unwrap();
-                let input_pair = input_pair_from_list_unspent(selected_utxo);
-                vec![input_pair]
+                vec![selected_input]
             }
         };
         let payjoin = payjoin
@@ -1388,7 +1375,7 @@ mod integration {
     }
 
     fn input_pair_from_list_unspent(
-        utxo: &bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry,
+        utxo: bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry,
     ) -> (PsbtInput, TxIn) {
         let psbtin = PsbtInput {
             // NOTE: non_witness_utxo is not necessary because bitcoin-cli always supplies

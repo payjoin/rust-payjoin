@@ -459,8 +459,8 @@ impl WantsInputs {
     /// A simple consolidation is otherwise chosen if available.
     pub fn try_preserving_privacy(
         &self,
-        candidate_inputs: impl IntoIterator<Item = (Amount, OutPoint)>,
-    ) -> Result<OutPoint, SelectionError> {
+        candidate_inputs: impl IntoIterator<Item = (PsbtInput, TxIn)>,
+    ) -> Result<(PsbtInput, TxIn), SelectionError> {
         let mut candidate_inputs = candidate_inputs.into_iter().peekable();
         if candidate_inputs.peek().is_none() {
             return Err(InternalSelectionError::Empty.into());
@@ -486,8 +486,8 @@ impl WantsInputs {
     /// https://eprint.iacr.org/2022/589.pdf
     fn avoid_uih(
         &self,
-        candidate_inputs: impl IntoIterator<Item = (Amount, OutPoint)>,
-    ) -> Result<OutPoint, SelectionError> {
+        candidate_inputs: impl IntoIterator<Item = (PsbtInput, TxIn)>,
+    ) -> Result<(PsbtInput, TxIn), SelectionError> {
         let min_original_out_sats = self
             .payjoin_psbt
             .unsigned_tx
@@ -506,15 +506,17 @@ impl WantsInputs {
 
         let prior_payment_sats = self.payjoin_psbt.unsigned_tx.output[self.change_vout].value;
 
-        for candidate in candidate_inputs {
-            let candidate_sats = candidate.0;
+        for (psbtin, txin) in candidate_inputs {
+            let input_pair = InputPair { txin: &txin, psbtin: &psbtin };
+            let candidate_sats =
+                input_pair.previous_txout().map_err(InternalSelectionError::PrevTxOut)?.value;
             let candidate_min_out = min(min_original_out_sats, prior_payment_sats + candidate_sats);
             let candidate_min_in = min(min_original_in_sats, candidate_sats);
 
             if candidate_min_in > candidate_min_out {
                 // The candidate avoids UIH2 but conforms to UIH1: Optimal change heuristic.
                 // It implies the smallest output is the sender's change address.
-                return Ok(candidate.1);
+                return Ok((psbtin, txin));
             }
         }
 
@@ -524,12 +526,9 @@ impl WantsInputs {
 
     fn select_first_candidate(
         &self,
-        candidate_inputs: impl IntoIterator<Item = (Amount, OutPoint)>,
-    ) -> Result<OutPoint, SelectionError> {
-        candidate_inputs
-            .into_iter()
-            .next()
-            .map_or(Err(InternalSelectionError::NotFound.into()), |(_, outpoint)| Ok(outpoint))
+        candidate_inputs: impl IntoIterator<Item = (PsbtInput, TxIn)>,
+    ) -> Result<(PsbtInput, TxIn), SelectionError> {
+        candidate_inputs.into_iter().next().ok_or(InternalSelectionError::NotFound.into())
     }
 
     /// Add the provided list of inputs to the transaction.

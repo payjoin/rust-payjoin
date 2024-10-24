@@ -124,7 +124,7 @@ fn read_local_cert() -> Result<Vec<u8>> {
 }
 
 pub fn input_pair_from_list_unspent(
-    utxo: &bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry,
+    utxo: bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry,
 ) -> (PsbtInput, TxIn) {
     let psbtin = PsbtInput {
         // NOTE: non_witness_utxo is not necessary because bitcoin-cli always supplies

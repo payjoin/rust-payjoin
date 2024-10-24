@@ -387,8 +387,8 @@ impl WantsInputs {
     /// https://eprint.iacr.org/2022/589.pdf
     pub fn try_preserving_privacy(
         &self,
-        candidate_inputs: impl IntoIterator<Item = (Amount, OutPoint)>,
-    ) -> Result<OutPoint, SelectionError> {
+        candidate_inputs: impl IntoIterator<Item = (PsbtInput, TxIn)>,
+    ) -> Result<(PsbtInput, TxIn), SelectionError> {
         self.inner.try_preserving_privacy(candidate_inputs)
     }
 

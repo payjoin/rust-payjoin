@@ -208,8 +208,7 @@ dependencies = [
 [[package]]
 name = "bip21"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebe7a7f5928d264879d5b65eb18a72ea1890c57f22d62ee2eba93f207a6a020b"
+source = "git+https://github.com/Kixunil/bip21.git?rev=refs/pull/26/head#413f845cc1a77dc85592e1a41a87624826052e1d"
 dependencies = [
  "bitcoin",
  "percent-encoding-rfc3986",

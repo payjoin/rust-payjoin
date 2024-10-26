@@ -7,6 +7,7 @@ use bitcoin::TxIn;
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::psbt::Psbt;
+use payjoin::psbt::InputPair;
 use payjoin::send::Sender;
 use payjoin::{bitcoin, PjUri};
 
@@ -125,7 +126,7 @@ fn read_local_cert() -> Result<Vec<u8>> {
 
 pub fn input_pair_from_list_unspent(
     utxo: bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry,
-) -> (PsbtInput, TxIn) {
+) -> InputPair {
     let psbtin = PsbtInput {
         // NOTE: non_witness_utxo is not necessary because bitcoin-cli always supplies
         // witness_utxo, even for non-witness inputs
@@ -141,5 +142,5 @@ pub fn input_pair_from_list_unspent(
         previous_output: bitcoin::OutPoint { txid: utxo.txid, vout: utxo.vout },
         ..Default::default()
     };
-    (psbtin, txin)
+    InputPair::new(txin, psbtin).expect("Input pair should be valid")
 }

@@ -38,7 +38,7 @@ pub use crate::ohttp::OhttpKeys;
 pub mod io;
 
 #[cfg(any(feature = "send", feature = "receive"))]
-pub(crate) mod psbt;
+pub mod psbt;
 #[cfg(any(feature = "send", all(feature = "receive", feature = "v2")))]
 mod request;
 #[cfg(any(feature = "send", all(feature = "receive", feature = "v2")))]

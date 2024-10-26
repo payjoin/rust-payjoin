@@ -35,7 +35,7 @@ pub(crate) trait PsbtExt: Sized {
     ) -> &mut BTreeMap<bip32::Xpub, (bip32::Fingerprint, bip32::DerivationPath)>;
     fn proprietary_mut(&mut self) -> &mut BTreeMap<psbt::raw::ProprietaryKey, Vec<u8>>;
     fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>>;
-    fn input_pairs(&self) -> Box<dyn Iterator<Item = InputPair<'_>> + '_>;
+    fn input_pairs(&self) -> Box<dyn Iterator<Item = InternalInputPair<'_>> + '_>;
     // guarantees that length of psbt input matches that of unsigned_tx inputs and same
     /// thing for outputs.
     fn validate(self) -> Result<Self, InconsistentPsbt>;
@@ -59,13 +59,13 @@ impl PsbtExt for Psbt {
 
     fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>> { &mut self.unknown }
 
-    fn input_pairs(&self) -> Box<dyn Iterator<Item = InputPair<'_>> + '_> {
+    fn input_pairs(&self) -> Box<dyn Iterator<Item = InternalInputPair<'_>> + '_> {
         Box::new(
             self.unsigned_tx
                 .input
                 .iter()
                 .zip(&self.inputs)
-                .map(|(txin, psbtin)| InputPair { txin, psbtin }),
+                .map(|(txin, psbtin)| InternalInputPair { txin, psbtin }),
         )
     }
 
@@ -106,12 +106,37 @@ fn redeem_script(script_sig: &Script) -> Option<&Script> {
 // https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki#p2wpkh-nested-in-bip16-p2sh
 const NESTED_P2WPKH_MAX: InputWeightPrediction = InputWeightPrediction::from_slice(23, &[72, 33]);
 
-pub(crate) struct InputPair<'a> {
+#[derive(Clone, Debug)]
+pub struct InputPair {
+    txin: TxIn,
+    psbtin: psbt::Input,
+}
+
+impl InputPair {
+    pub fn new(txin: TxIn, psbtin: psbt::Input) -> Result<Self, PsbtInputError> {
+        let input_pair = Self { txin, psbtin };
+        InternalInputPair::from(&input_pair).validate_utxo(true)?;
+        Ok(input_pair)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct InternalInputPair<'a> {
     pub txin: &'a TxIn,
     pub psbtin: &'a psbt::Input,
 }
 
-impl<'a> InputPair<'a> {
+impl<'a> From<&'a InputPair> for InternalInputPair<'a> {
+    fn from(pair: &'a InputPair) -> Self { Self { psbtin: &pair.psbtin, txin: &pair.txin } }
+}
+
+impl<'a> From<&InternalInputPair<'a>> for InputPair {
+    fn from(internal: &InternalInputPair<'a>) -> Self {
+        InputPair { txin: internal.txin.clone(), psbtin: internal.psbtin.clone() }
+    }
+}
+
+impl<'a> InternalInputPair<'a> {
     /// Returns TxOut associated with the input
     pub fn previous_txout(&self) -> Result<&TxOut, PrevTxOutError> {
         match (&self.psbtin.non_witness_utxo, &self.psbtin.witness_utxo) {
@@ -226,7 +251,7 @@ impl<'a> InputPair<'a> {
 }
 
 #[derive(Debug)]
-pub(crate) enum PrevTxOutError {
+pub enum PrevTxOutError {
     MissingUtxoInformation,
     IndexOutOfBounds { output_count: usize, index: u32 },
 }
@@ -245,7 +270,7 @@ impl fmt::Display for PrevTxOutError {
 impl std::error::Error for PrevTxOutError {}
 
 #[derive(Debug)]
-pub(crate) enum PsbtInputError {
+pub enum PsbtInputError {
     PrevTxOut(PrevTxOutError),
     UnequalTxid,
     /// TxOut provided in `segwit_utxo` doesn't match the one in `non_segwit_utxo`

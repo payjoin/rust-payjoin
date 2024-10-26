@@ -28,7 +28,7 @@ use std::cmp::{max, min};
 
 use bitcoin::base64::prelude::BASE64_STANDARD;
 use bitcoin::base64::Engine;
-use bitcoin::psbt::{Input as PsbtInput, Psbt};
+use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, OutPoint, Script, TxIn, TxOut, Weight};
 
 mod error;
@@ -47,7 +47,7 @@ use error::{
 };
 use optional_parameters::Params;
 
-use crate::psbt::{InputPair, PsbtExt};
+use crate::psbt::{InputPair, InternalInputPair, PsbtExt};
 
 pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
@@ -459,8 +459,8 @@ impl WantsInputs {
     /// A simple consolidation is otherwise chosen if available.
     pub fn try_preserving_privacy(
         &self,
-        candidate_inputs: impl IntoIterator<Item = (PsbtInput, TxIn)>,
-    ) -> Result<(PsbtInput, TxIn), SelectionError> {
+        candidate_inputs: impl IntoIterator<Item = InputPair>,
+    ) -> Result<InputPair, SelectionError> {
         let mut candidate_inputs = candidate_inputs.into_iter().peekable();
         if candidate_inputs.peek().is_none() {
             return Err(InternalSelectionError::Empty.into());
@@ -486,8 +486,8 @@ impl WantsInputs {
     /// https://eprint.iacr.org/2022/589.pdf
     fn avoid_uih(
         &self,
-        candidate_inputs: impl IntoIterator<Item = (PsbtInput, TxIn)>,
-    ) -> Result<(PsbtInput, TxIn), SelectionError> {
+        candidate_inputs: impl IntoIterator<Item = InputPair>,
+    ) -> Result<InputPair, SelectionError> {
         let min_original_out_sats = self
             .payjoin_psbt
             .unsigned_tx
@@ -506,8 +506,8 @@ impl WantsInputs {
 
         let prior_payment_sats = self.payjoin_psbt.unsigned_tx.output[self.change_vout].value;
 
-        for (psbtin, txin) in candidate_inputs {
-            let input_pair = InputPair { txin: &txin, psbtin: &psbtin };
+        for input_pair in candidate_inputs {
+            let input_pair = InternalInputPair::from(&input_pair);
             let candidate_sats =
                 input_pair.previous_txout().map_err(InternalSelectionError::PrevTxOut)?.value;
             let candidate_min_out = min(min_original_out_sats, prior_payment_sats + candidate_sats);
@@ -516,7 +516,7 @@ impl WantsInputs {
             if candidate_min_in > candidate_min_out {
                 // The candidate avoids UIH2 but conforms to UIH1: Optimal change heuristic.
                 // It implies the smallest output is the sender's change address.
-                return Ok((psbtin, txin));
+                return Ok(InputPair::from(&input_pair));
             }
         }
 
@@ -526,8 +526,8 @@ impl WantsInputs {
 
     fn select_first_candidate(
         &self,
-        candidate_inputs: impl IntoIterator<Item = (PsbtInput, TxIn)>,
-    ) -> Result<(PsbtInput, TxIn), SelectionError> {
+        candidate_inputs: impl IntoIterator<Item = InputPair>,
+    ) -> Result<InputPair, SelectionError> {
         candidate_inputs.into_iter().next().ok_or(InternalSelectionError::NotFound.into())
     }
 
@@ -535,7 +535,7 @@ impl WantsInputs {
     /// Any excess input amount is added to the change_vout output indicated previously.
     pub fn contribute_inputs(
         self,
-        inputs: impl IntoIterator<Item = (PsbtInput, TxIn)>,
+        inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<WantsInputs, InputContributionError> {
         let mut payjoin_psbt = self.payjoin_psbt.clone();
         // The payjoin proposal must not introduce mixed input sequence numbers
@@ -551,8 +551,8 @@ impl WantsInputs {
         // Insert contributions at random indices for privacy
         let mut rng = rand::thread_rng();
         let mut receiver_input_amount = Amount::ZERO;
-        for (psbtin, txin) in inputs.into_iter() {
-            let input_pair = InputPair { txin: &txin, psbtin: &psbtin };
+        for input_pair in inputs.into_iter() {
+            let input_pair = InternalInputPair::from(&input_pair);
             let input_type =
                 input_pair.address_type().map_err(InternalInputContributionError::AddressType)?;
 
@@ -566,11 +566,11 @@ impl WantsInputs {
                 .map_err(InternalInputContributionError::PrevTxOut)?
                 .value;
             let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
-            payjoin_psbt.inputs.insert(index, psbtin);
+            payjoin_psbt.inputs.insert(index, input_pair.psbtin.clone());
             payjoin_psbt
                 .unsigned_tx
                 .input
-                .insert(index, TxIn { sequence: original_sequence, ..txin });
+                .insert(index, TxIn { sequence: original_sequence, ..input_pair.txin.clone() });
         }
 
         // Add the receiver change amount to the receiver change output, if applicable
@@ -967,8 +967,11 @@ mod test {
         proposal.params.min_feerate = FeeRate::from_sat_per_vb_unchecked(1000);
         // Input contribution for the receiver, from the BIP78 test vector
         let proposal_psbt = Psbt::from_str("cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAAEBIICEHgAAAAAAF6kUyPLL+cphRyyI5GTUazV0hF2R2NWHAQcXFgAUX4BmVeWSTJIEwtUb5TlPS/ntohABCGsCRzBEAiBnu3tA3yWlT0WBClsXXS9j69Bt+waCs9JcjWtNjtv7VgIge2VYAaBeLPDB6HGFlpqOENXMldsJezF9Gs5amvDQRDQBIQJl1jz1tBt8hNx2owTm+4Du4isx0pmdKNMNIjjaMHFfrQAAAA==").unwrap();
-        let input: (PsbtInput, TxIn) =
-            (proposal_psbt.inputs[1].clone(), proposal_psbt.unsigned_tx.input[1].clone());
+        let input = InputPair::new(
+            proposal_psbt.unsigned_tx.input[1].clone(),
+            proposal_psbt.inputs[1].clone(),
+        )
+        .expect("Input pair should be valid");
         let mut payjoin = proposal
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| Ok(false))

@@ -12,6 +12,7 @@ mod integration {
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use log::{log_enabled, Level};
     use once_cell::sync::{Lazy, OnceCell};
+    use payjoin::psbt::InputPair;
     use payjoin::send::SenderBuilder;
     use payjoin::{PjUri, PjUriBuilder, Request, Uri};
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
@@ -831,7 +832,7 @@ mod integration {
         fn handle_directory_proposal(
             receiver: &bitcoincore_rpc::Client,
             proposal: UncheckedProposal,
-            custom_inputs: Option<Vec<(PsbtInput, TxIn)>>,
+            custom_inputs: Option<Vec<InputPair>>,
         ) -> PayjoinProposal {
             // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
             let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
@@ -1240,7 +1241,7 @@ mod integration {
         receiver: &bitcoincore_rpc::Client,
         custom_outputs: Option<Vec<TxOut>>,
         drain_script: Option<&bitcoin::Script>,
-        custom_inputs: Option<Vec<(PsbtInput, TxIn)>>,
+        custom_inputs: Option<Vec<InputPair>>,
     ) -> Result<String, BoxError> {
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
         let proposal = payjoin::receive::UncheckedProposal::from_request(
@@ -1261,7 +1262,7 @@ mod integration {
         receiver: &bitcoincore_rpc::Client,
         custom_outputs: Option<Vec<TxOut>>,
         drain_script: Option<&bitcoin::Script>,
-        custom_inputs: Option<Vec<(PsbtInput, TxIn)>>,
+        custom_inputs: Option<Vec<InputPair>>,
     ) -> Result<payjoin::receive::PayjoinProposal, BoxError> {
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
@@ -1376,7 +1377,7 @@ mod integration {
 
     fn input_pair_from_list_unspent(
         utxo: bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry,
-    ) -> (PsbtInput, TxIn) {
+    ) -> InputPair {
         let psbtin = PsbtInput {
             // NOTE: non_witness_utxo is not necessary because bitcoin-cli always supplies
             // witness_utxo, even for non-witness inputs
@@ -1392,7 +1393,7 @@ mod integration {
             previous_output: OutPoint { txid: utxo.txid, vout: utxo.vout },
             ..Default::default()
         };
-        (psbtin, txin)
+        InputPair::new(txin, psbtin).expect("Input pair should be valid")
     }
 
     struct HeaderMock(HashMap<String, String>);

@@ -47,7 +47,8 @@ use error::{
 };
 use optional_parameters::Params;
 
-use crate::psbt::{InternalInputPair, PsbtExt, PsbtInputError};
+pub use crate::psbt::PsbtInputError;
+use crate::psbt::{InternalInputPair, InternalPsbtInputError, PsbtExt};
 
 pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
@@ -66,9 +67,9 @@ impl InputPair {
         let input_pair = Self { txin, psbtin };
         let raw = InternalInputPair::from(&input_pair);
         raw.validate_utxo(true)?;
-        let address_type = raw.address_type()?;
+        let address_type = raw.address_type().map_err(InternalPsbtInputError::AddressType)?;
         if address_type == AddressType::P2sh && input_pair.psbtin.redeem_script.is_none() {
-            return Err(PsbtInputError::NoRedeemScript);
+            return Err(InternalPsbtInputError::NoRedeemScript.into());
         }
         Ok(input_pair)
     }

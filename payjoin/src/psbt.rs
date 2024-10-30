@@ -133,10 +133,13 @@ impl<'a> InternalInputPair<'a> {
         }
     }
 
-    pub fn validate_utxo(&self, treat_missing_as_error: bool) -> Result<(), PsbtInputError> {
+    pub fn validate_utxo(
+        &self,
+        treat_missing_as_error: bool,
+    ) -> Result<(), InternalPsbtInputError> {
         match (&self.psbtin.non_witness_utxo, &self.psbtin.witness_utxo) {
             (None, None) if treat_missing_as_error =>
-                Err(PsbtInputError::PrevTxOut(PrevTxOutError::MissingUtxoInformation)),
+                Err(InternalPsbtInputError::PrevTxOut(PrevTxOutError::MissingUtxoInformation)),
             (None, None) => Ok(()),
             (Some(tx), None) if tx.compute_txid() == self.txin.previous_output.txid => tx
                 .output
@@ -154,7 +157,7 @@ impl<'a> InternalInputPair<'a> {
                     .into()
                 })
                 .map(drop),
-            (Some(_), None) => Err(PsbtInputError::UnequalTxid),
+            (Some(_), None) => Err(InternalPsbtInputError::UnequalTxid),
             (None, Some(_)) => Ok(()),
             (Some(tx), Some(witness_txout))
                 if tx.compute_txid() == self.txin.previous_output.txid =>
@@ -174,10 +177,10 @@ impl<'a> InternalInputPair<'a> {
                 if witness_txout == non_witness_txout {
                     Ok(())
                 } else {
-                    Err(PsbtInputError::SegWitTxOutMismatch)
+                    Err(InternalPsbtInputError::SegWitTxOutMismatch)
                 }
             }
-            (Some(_), Some(_)) => Err(PsbtInputError::UnequalTxid),
+            (Some(_), Some(_)) => Err(InternalPsbtInputError::UnequalTxid),
         }
     }
 
@@ -227,7 +230,7 @@ impl<'a> InternalInputPair<'a> {
 }
 
 #[derive(Debug)]
-pub enum PrevTxOutError {
+pub(crate) enum PrevTxOutError {
     MissingUtxoInformation,
     IndexOutOfBounds { output_count: usize, index: u32 },
 }
@@ -246,7 +249,7 @@ impl fmt::Display for PrevTxOutError {
 impl std::error::Error for PrevTxOutError {}
 
 #[derive(Debug)]
-pub enum PsbtInputError {
+pub(crate) enum InternalPsbtInputError {
     PrevTxOut(PrevTxOutError),
     UnequalTxid,
     /// TxOut provided in `segwit_utxo` doesn't match the one in `non_segwit_utxo`
@@ -255,7 +258,7 @@ pub enum PsbtInputError {
     NoRedeemScript,
 }
 
-impl fmt::Display for PsbtInputError {
+impl fmt::Display for InternalPsbtInputError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::PrevTxOut(_) => write!(f, "invalid previous transaction output"),
@@ -267,7 +270,7 @@ impl fmt::Display for PsbtInputError {
     }
 }
 
-impl std::error::Error for PsbtInputError {
+impl std::error::Error for InternalPsbtInputError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::PrevTxOut(error) => Some(error),
@@ -279,18 +282,33 @@ impl std::error::Error for PsbtInputError {
     }
 }
 
-impl From<PrevTxOutError> for PsbtInputError {
-    fn from(value: PrevTxOutError) -> Self { PsbtInputError::PrevTxOut(value) }
+impl From<PrevTxOutError> for InternalPsbtInputError {
+    fn from(value: PrevTxOutError) -> Self { InternalPsbtInputError::PrevTxOut(value) }
 }
 
-impl From<AddressTypeError> for PsbtInputError {
+impl From<AddressTypeError> for InternalPsbtInputError {
     fn from(value: AddressTypeError) -> Self { Self::AddressType(value) }
+}
+
+#[derive(Debug)]
+pub struct PsbtInputError(InternalPsbtInputError);
+
+impl From<InternalPsbtInputError> for PsbtInputError {
+    fn from(e: InternalPsbtInputError) -> Self { PsbtInputError(e) }
+}
+
+impl fmt::Display for PsbtInputError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{}", self.0) }
+}
+
+impl std::error::Error for PsbtInputError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { Some(&self.0) }
 }
 
 #[derive(Debug)]
 pub struct PsbtInputsError {
     index: usize,
-    error: PsbtInputError,
+    error: InternalPsbtInputError,
 }
 
 impl fmt::Display for PsbtInputsError {
@@ -304,7 +322,7 @@ impl std::error::Error for PsbtInputsError {
 }
 
 #[derive(Debug)]
-pub enum AddressTypeError {
+pub(crate) enum AddressTypeError {
     PrevTxOut(PrevTxOutError),
     InvalidScript(FromScriptError),
     UnknownAddressType,

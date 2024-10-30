@@ -7,8 +7,9 @@ use bitcoin::TxIn;
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::psbt::Psbt;
+use payjoin::receive::InputPair;
 use payjoin::send::Sender;
-use payjoin::{bitcoin, InputPair, PjUri};
+use payjoin::{bitcoin, PjUri};
 
 pub mod config;
 use crate::app::config::AppConfig;

@@ -16,8 +16,9 @@ use super::{
 };
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
-use crate::psbt::{InputPair, PsbtExt};
+use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
+use crate::receive::InputPair;
 use crate::{PjUriBuilder, Request};
 
 pub(crate) mod error;

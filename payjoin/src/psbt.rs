@@ -107,46 +107,9 @@ fn redeem_script(script_sig: &Script) -> Option<&Script> {
 const NESTED_P2WPKH_MAX: InputWeightPrediction = InputWeightPrediction::from_slice(23, &[72, 33]);
 
 #[derive(Clone, Debug)]
-pub struct InputPair {
-    pub(crate) txin: TxIn,
-    pub(crate) psbtin: psbt::Input,
-}
-
-impl InputPair {
-    pub fn new(txin: TxIn, psbtin: psbt::Input) -> Result<Self, PsbtInputError> {
-        let input_pair = Self { txin, psbtin };
-        // TODO consider whether or not this should live in receive module since it's a baby of that state machine
-        let raw = InternalInputPair::from(&input_pair);
-        raw.validate_utxo(true)?;
-        let address_type = raw.address_type()?;
-        if address_type == AddressType::P2sh && input_pair.psbtin.redeem_script.is_none() {
-            return Err(PsbtInputError::NoRedeemScript);
-        }
-        Ok(input_pair)
-    }
-
-    pub(crate) fn address_type(&self) -> AddressType {
-        InternalInputPair::from(self)
-            .address_type()
-            .expect("address type should have been validated in InputPair::new")
-    }
-
-    pub(crate) fn previous_txout(&self) -> TxOut {
-        InternalInputPair::from(self)
-            .previous_txout()
-            .expect("UTXO information should have been validated in InputPair::new")
-            .clone()
-    }
-}
-
-#[derive(Clone, Debug)]
 pub(crate) struct InternalInputPair<'a> {
     pub txin: &'a TxIn,
     pub psbtin: &'a psbt::Input,
-}
-
-impl<'a> From<&'a InputPair> for InternalInputPair<'a> {
-    fn from(pair: &'a InputPair) -> Self { Self { psbtin: &pair.psbtin, txin: &pair.txin } }
 }
 
 impl<'a> InternalInputPair<'a> {

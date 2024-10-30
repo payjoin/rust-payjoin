@@ -12,9 +12,8 @@ mod integration {
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use log::{log_enabled, Level};
     use once_cell::sync::{Lazy, OnceCell};
-    use payjoin::psbt::InputPair;
     use payjoin::send::SenderBuilder;
-    use payjoin::{PjUri, PjUriBuilder, Request, Uri};
+    use payjoin::{InputPair, PjUri, PjUriBuilder, Request, Uri};
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
     use url::Url;
 

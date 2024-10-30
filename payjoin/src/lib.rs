@@ -38,7 +38,7 @@ pub use crate::ohttp::OhttpKeys;
 pub mod io;
 
 #[cfg(any(feature = "send", feature = "receive"))]
-pub mod psbt;
+pub(crate) mod psbt;
 #[cfg(any(feature = "send", all(feature = "receive", feature = "v2")))]
 mod request;
 #[cfg(any(feature = "send", all(feature = "receive", feature = "v2")))]
@@ -48,5 +48,6 @@ mod uri;
 
 #[cfg(feature = "base64")]
 pub use bitcoin::base64;
+pub use psbt::InputPair;
 pub use uri::{PjParseError, PjUri, PjUriBuilder, Uri, UriExt};
 pub use url::{ParseError, Url};

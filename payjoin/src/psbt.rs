@@ -115,13 +115,32 @@ pub struct InputPair {
 impl InputPair {
     pub fn new(txin: TxIn, psbtin: psbt::Input) -> Result<Self, PsbtInputError> {
         let input_pair = Self { txin, psbtin };
+        // TODO validate and document Input details required for Input Contribution fee estimation
+        // TODO Validate AddressType will return valid AddressType or an error
+        // TODO consider whether or not this should live in receive module since it's a baby of that state machine
         InternalInputPair::from(&input_pair).validate_utxo(true)?;
         Ok(input_pair)
+    }
+
+    pub(crate) fn txin(&self) -> &TxIn { &self.txin }
+
+    pub(crate) fn psbtin(&self) -> &psbt::Input { &self.psbtin }
+
+    pub(crate) fn address_type(&self) -> Result<AddressType, AddressTypeError> {
+        let raw = InternalInputPair { txin: &self.txin, psbtin: &self.psbtin };
+        raw.address_type()
+    }
+
+    pub(crate) fn previous_txout(&self) -> TxOut {
+        InternalInputPair::from(self)
+            .previous_txout()
+            .expect("missing UTXO information should have been validated in InputPair::new")
+            .clone()
     }
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct InternalInputPair<'a> {
+pub struct InternalInputPair<'a> {
     pub txin: &'a TxIn,
     pub psbtin: &'a psbt::Input,
 }

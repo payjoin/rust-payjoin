@@ -47,7 +47,7 @@ use error::{
 };
 use optional_parameters::Params;
 
-use crate::psbt::{InputPair, InternalInputPair, PsbtExt};
+use crate::psbt::{InputPair, PsbtExt};
 
 pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
@@ -507,16 +507,14 @@ impl WantsInputs {
         let prior_payment_sats = self.payjoin_psbt.unsigned_tx.output[self.change_vout].value;
 
         for input_pair in candidate_inputs {
-            let input_pair = InternalInputPair::from(&input_pair);
-            let candidate_sats =
-                input_pair.previous_txout().map_err(InternalSelectionError::PrevTxOut)?.value;
+            let candidate_sats = input_pair.previous_txout().value;
             let candidate_min_out = min(min_original_out_sats, prior_payment_sats + candidate_sats);
             let candidate_min_in = min(min_original_in_sats, candidate_sats);
 
             if candidate_min_in > candidate_min_out {
                 // The candidate avoids UIH2 but conforms to UIH1: Optimal change heuristic.
                 // It implies the smallest output is the sender's change address.
-                return Ok(InputPair::from(&input_pair));
+                return Ok(input_pair);
             }
         }
 
@@ -552,7 +550,6 @@ impl WantsInputs {
         let mut rng = rand::thread_rng();
         let mut receiver_input_amount = Amount::ZERO;
         for input_pair in inputs.into_iter() {
-            let input_pair = InternalInputPair::from(&input_pair);
             let input_type =
                 input_pair.address_type().map_err(InternalInputContributionError::AddressType)?;
 
@@ -561,16 +558,13 @@ impl WantsInputs {
                 self.check_mixed_input_types(input_type, uniform_sender_input_type)?;
             }
 
-            receiver_input_amount += input_pair
-                .previous_txout()
-                .map_err(InternalInputContributionError::PrevTxOut)?
-                .value;
+            receiver_input_amount += input_pair.previous_txout().value;
             let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
-            payjoin_psbt.inputs.insert(index, input_pair.psbtin.clone());
+            payjoin_psbt.inputs.insert(index, input_pair.psbtin().clone());
             payjoin_psbt
                 .unsigned_tx
                 .input
-                .insert(index, TxIn { sequence: original_sequence, ..input_pair.txin.clone() });
+                .insert(index, TxIn { sequence: original_sequence, ..input_pair.txin().clone() });
         }
 
         // Add the receiver change amount to the receiver change output, if applicable

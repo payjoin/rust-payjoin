@@ -260,8 +260,6 @@ pub(crate) enum InternalSelectionError {
     TooManyOutputs,
     /// No selection candidates improve privacy
     NotFound,
-    /// Missing previous txout information
-    PrevTxOut(crate::psbt::PrevTxOutError),
 }
 
 impl fmt::Display for SelectionError {
@@ -274,8 +272,6 @@ impl fmt::Display for SelectionError {
             ),
             InternalSelectionError::NotFound =>
                 write!(f, "No selection candidates improve privacy"),
-            InternalSelectionError::PrevTxOut(e) =>
-                write!(f, "Missing previous txout information: {}", e),
         }
     }
 }
@@ -293,8 +289,6 @@ pub struct InputContributionError(InternalInputContributionError);
 
 #[derive(Debug)]
 pub(crate) enum InternalInputContributionError {
-    /// Missing previous txout information
-    PrevTxOut(crate::psbt::PrevTxOutError),
     /// The address type could not be determined
     AddressType(crate::psbt::AddressTypeError),
     /// The original PSBT has no inputs
@@ -308,8 +302,6 @@ pub(crate) enum InternalInputContributionError {
 impl fmt::Display for InputContributionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
-            InternalInputContributionError::PrevTxOut(e) =>
-                write!(f, "Missing previous txout information: {}", e),
             InternalInputContributionError::AddressType(e) =>
                 write!(f, "The address type could not be determined: {}", e),
             InternalInputContributionError::NoSenderInputs =>

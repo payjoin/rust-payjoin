@@ -108,51 +108,45 @@ const NESTED_P2WPKH_MAX: InputWeightPrediction = InputWeightPrediction::from_sli
 
 #[derive(Clone, Debug)]
 pub struct InputPair {
-    txin: TxIn,
-    psbtin: psbt::Input,
+    pub(crate) txin: TxIn,
+    pub(crate) psbtin: psbt::Input,
 }
 
 impl InputPair {
     pub fn new(txin: TxIn, psbtin: psbt::Input) -> Result<Self, PsbtInputError> {
         let input_pair = Self { txin, psbtin };
-        // TODO validate and document Input details required for Input Contribution fee estimation
-        // TODO Validate AddressType will return valid AddressType or an error
         // TODO consider whether or not this should live in receive module since it's a baby of that state machine
-        InternalInputPair::from(&input_pair).validate_utxo(true)?;
+        let raw = InternalInputPair::from(&input_pair);
+        raw.validate_utxo(true)?;
+        let address_type = raw.address_type()?;
+        if address_type == AddressType::P2sh && input_pair.psbtin.redeem_script.is_none() {
+            return Err(PsbtInputError::NoRedeemScript);
+        }
         Ok(input_pair)
     }
 
-    pub(crate) fn txin(&self) -> &TxIn { &self.txin }
-
-    pub(crate) fn psbtin(&self) -> &psbt::Input { &self.psbtin }
-
-    pub(crate) fn address_type(&self) -> Result<AddressType, AddressTypeError> {
-        let raw = InternalInputPair { txin: &self.txin, psbtin: &self.psbtin };
-        raw.address_type()
+    pub(crate) fn address_type(&self) -> AddressType {
+        InternalInputPair::from(self)
+            .address_type()
+            .expect("address type should have been validated in InputPair::new")
     }
 
     pub(crate) fn previous_txout(&self) -> TxOut {
         InternalInputPair::from(self)
             .previous_txout()
-            .expect("missing UTXO information should have been validated in InputPair::new")
+            .expect("UTXO information should have been validated in InputPair::new")
             .clone()
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct InternalInputPair<'a> {
+pub(crate) struct InternalInputPair<'a> {
     pub txin: &'a TxIn,
     pub psbtin: &'a psbt::Input,
 }
 
 impl<'a> From<&'a InputPair> for InternalInputPair<'a> {
     fn from(pair: &'a InputPair) -> Self { Self { psbtin: &pair.psbtin, txin: &pair.txin } }
-}
-
-impl<'a> From<&InternalInputPair<'a>> for InputPair {
-    fn from(internal: &InternalInputPair<'a>) -> Self {
-        InputPair { txin: internal.txin.clone(), psbtin: internal.psbtin.clone() }
-    }
 }
 
 impl<'a> InternalInputPair<'a> {
@@ -294,14 +288,18 @@ pub enum PsbtInputError {
     UnequalTxid,
     /// TxOut provided in `segwit_utxo` doesn't match the one in `non_segwit_utxo`
     SegWitTxOutMismatch,
+    AddressType(AddressTypeError),
+    NoRedeemScript,
 }
 
 impl fmt::Display for PsbtInputError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            PsbtInputError::PrevTxOut(_) => write!(f, "invalid previous transaction output"),
-            PsbtInputError::UnequalTxid => write!(f, "transaction ID of previous transaction doesn't match one specified in input spending it"),
-            PsbtInputError::SegWitTxOutMismatch => write!(f, "transaction output provided in SegWit UTXO field doesn't match the one in non-SegWit UTXO field"),
+            Self::PrevTxOut(_) => write!(f, "invalid previous transaction output"),
+            Self::UnequalTxid => write!(f, "transaction ID of previous transaction doesn't match one specified in input spending it"),
+            Self::SegWitTxOutMismatch => write!(f, "transaction output provided in SegWit UTXO field doesn't match the one in non-SegWit UTXO field"),
+            Self::AddressType(_) => write!(f, "invalid address type"),
+            Self::NoRedeemScript => write!(f, "provided p2sh PSBT input is missing a redeem_script"),
         }
     }
 }
@@ -309,15 +307,21 @@ impl fmt::Display for PsbtInputError {
 impl std::error::Error for PsbtInputError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            PsbtInputError::PrevTxOut(error) => Some(error),
-            PsbtInputError::UnequalTxid => None,
-            PsbtInputError::SegWitTxOutMismatch => None,
+            Self::PrevTxOut(error) => Some(error),
+            Self::UnequalTxid => None,
+            Self::SegWitTxOutMismatch => None,
+            Self::AddressType(error) => Some(error),
+            Self::NoRedeemScript => None,
         }
     }
 }
 
 impl From<PrevTxOutError> for PsbtInputError {
     fn from(value: PrevTxOutError) -> Self { PsbtInputError::PrevTxOut(value) }
+}
+
+impl From<AddressTypeError> for PsbtInputError {
+    fn from(value: AddressTypeError) -> Self { Self::AddressType(value) }
 }
 
 #[derive(Debug)]
@@ -337,7 +341,7 @@ impl std::error::Error for PsbtInputsError {
 }
 
 #[derive(Debug)]
-pub(crate) enum AddressTypeError {
+pub enum AddressTypeError {
     PrevTxOut(PrevTxOutError),
     InvalidScript(FromScriptError),
     UnknownAddressType,

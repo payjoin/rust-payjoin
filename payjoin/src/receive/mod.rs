@@ -550,9 +550,7 @@ impl WantsInputs {
         let mut rng = rand::thread_rng();
         let mut receiver_input_amount = Amount::ZERO;
         for input_pair in inputs.into_iter() {
-            let input_type =
-                input_pair.address_type().map_err(InternalInputContributionError::AddressType)?;
-
+            let input_type = input_pair.address_type();
             if self.params.v == 1 {
                 // v1 payjoin proposals must not introduce mixed input script types
                 self.check_mixed_input_types(input_type, uniform_sender_input_type)?;
@@ -560,11 +558,11 @@ impl WantsInputs {
 
             receiver_input_amount += input_pair.previous_txout().value;
             let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
-            payjoin_psbt.inputs.insert(index, input_pair.psbtin().clone());
+            payjoin_psbt.inputs.insert(index, input_pair.psbtin);
             payjoin_psbt
                 .unsigned_tx
                 .input
-                .insert(index, TxIn { sequence: original_sequence, ..input_pair.txin().clone() });
+                .insert(index, TxIn { sequence: original_sequence, ..input_pair.txin });
         }
 
         // Add the receiver change amount to the receiver change output, if applicable
@@ -961,11 +959,10 @@ mod test {
         proposal.params.min_feerate = FeeRate::from_sat_per_vb_unchecked(1000);
         // Input contribution for the receiver, from the BIP78 test vector
         let proposal_psbt = Psbt::from_str("cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAAEBIICEHgAAAAAAF6kUyPLL+cphRyyI5GTUazV0hF2R2NWHAQcXFgAUX4BmVeWSTJIEwtUb5TlPS/ntohABCGsCRzBEAiBnu3tA3yWlT0WBClsXXS9j69Bt+waCs9JcjWtNjtv7VgIge2VYAaBeLPDB6HGFlpqOENXMldsJezF9Gs5amvDQRDQBIQJl1jz1tBt8hNx2owTm+4Du4isx0pmdKNMNIjjaMHFfrQAAAA==").unwrap();
-        let input = InputPair::new(
-            proposal_psbt.unsigned_tx.input[1].clone(),
-            proposal_psbt.inputs[1].clone(),
-        )
-        .expect("Input pair should be valid");
+        let input = InputPair {
+            txin: proposal_psbt.unsigned_tx.input[1].clone(),
+            psbtin: proposal_psbt.inputs[1].clone(),
+        };
         let mut payjoin = proposal
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| Ok(false))

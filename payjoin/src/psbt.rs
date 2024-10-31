@@ -35,7 +35,7 @@ pub(crate) trait PsbtExt: Sized {
     ) -> &mut BTreeMap<bip32::Xpub, (bip32::Fingerprint, bip32::DerivationPath)>;
     fn proprietary_mut(&mut self) -> &mut BTreeMap<psbt::raw::ProprietaryKey, Vec<u8>>;
     fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>>;
-    fn input_pairs(&self) -> Box<dyn Iterator<Item = InputPair<'_>> + '_>;
+    fn input_pairs(&self) -> Box<dyn Iterator<Item = InternalInputPair<'_>> + '_>;
     // guarantees that length of psbt input matches that of unsigned_tx inputs and same
     /// thing for outputs.
     fn validate(self) -> Result<Self, InconsistentPsbt>;
@@ -59,13 +59,13 @@ impl PsbtExt for Psbt {
 
     fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>> { &mut self.unknown }
 
-    fn input_pairs(&self) -> Box<dyn Iterator<Item = InputPair<'_>> + '_> {
+    fn input_pairs(&self) -> Box<dyn Iterator<Item = InternalInputPair<'_>> + '_> {
         Box::new(
             self.unsigned_tx
                 .input
                 .iter()
                 .zip(&self.inputs)
-                .map(|(txin, psbtin)| InputPair { txin, psbtin }),
+                .map(|(txin, psbtin)| InternalInputPair { txin, psbtin }),
         )
     }
 
@@ -106,12 +106,13 @@ fn redeem_script(script_sig: &Script) -> Option<&Script> {
 // https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki#p2wpkh-nested-in-bip16-p2sh
 const NESTED_P2WPKH_MAX: InputWeightPrediction = InputWeightPrediction::from_slice(23, &[72, 33]);
 
-pub(crate) struct InputPair<'a> {
+#[derive(Clone, Debug)]
+pub(crate) struct InternalInputPair<'a> {
     pub txin: &'a TxIn,
     pub psbtin: &'a psbt::Input,
 }
 
-impl<'a> InputPair<'a> {
+impl<'a> InternalInputPair<'a> {
     /// Returns TxOut associated with the input
     pub fn previous_txout(&self) -> Result<&TxOut, PrevTxOutError> {
         match (&self.psbtin.non_witness_utxo, &self.psbtin.witness_utxo) {
@@ -132,10 +133,13 @@ impl<'a> InputPair<'a> {
         }
     }
 
-    pub fn validate_utxo(&self, treat_missing_as_error: bool) -> Result<(), PsbtInputError> {
+    pub fn validate_utxo(
+        &self,
+        treat_missing_as_error: bool,
+    ) -> Result<(), InternalPsbtInputError> {
         match (&self.psbtin.non_witness_utxo, &self.psbtin.witness_utxo) {
             (None, None) if treat_missing_as_error =>
-                Err(PsbtInputError::PrevTxOut(PrevTxOutError::MissingUtxoInformation)),
+                Err(InternalPsbtInputError::PrevTxOut(PrevTxOutError::MissingUtxoInformation)),
             (None, None) => Ok(()),
             (Some(tx), None) if tx.compute_txid() == self.txin.previous_output.txid => tx
                 .output
@@ -153,7 +157,7 @@ impl<'a> InputPair<'a> {
                     .into()
                 })
                 .map(drop),
-            (Some(_), None) => Err(PsbtInputError::UnequalTxid),
+            (Some(_), None) => Err(InternalPsbtInputError::UnequalTxid),
             (None, Some(_)) => Ok(()),
             (Some(tx), Some(witness_txout))
                 if tx.compute_txid() == self.txin.previous_output.txid =>
@@ -173,10 +177,10 @@ impl<'a> InputPair<'a> {
                 if witness_txout == non_witness_txout {
                     Ok(())
                 } else {
-                    Err(PsbtInputError::SegWitTxOutMismatch)
+                    Err(InternalPsbtInputError::SegWitTxOutMismatch)
                 }
             }
-            (Some(_), Some(_)) => Err(PsbtInputError::UnequalTxid),
+            (Some(_), Some(_)) => Err(InternalPsbtInputError::UnequalTxid),
         }
     }
 
@@ -245,41 +249,66 @@ impl fmt::Display for PrevTxOutError {
 impl std::error::Error for PrevTxOutError {}
 
 #[derive(Debug)]
-pub(crate) enum PsbtInputError {
+pub(crate) enum InternalPsbtInputError {
     PrevTxOut(PrevTxOutError),
     UnequalTxid,
     /// TxOut provided in `segwit_utxo` doesn't match the one in `non_segwit_utxo`
     SegWitTxOutMismatch,
+    AddressType(AddressTypeError),
+    NoRedeemScript,
+}
+
+impl fmt::Display for InternalPsbtInputError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::PrevTxOut(_) => write!(f, "invalid previous transaction output"),
+            Self::UnequalTxid => write!(f, "transaction ID of previous transaction doesn't match one specified in input spending it"),
+            Self::SegWitTxOutMismatch => write!(f, "transaction output provided in SegWit UTXO field doesn't match the one in non-SegWit UTXO field"),
+            Self::AddressType(_) => write!(f, "invalid address type"),
+            Self::NoRedeemScript => write!(f, "provided p2sh PSBT input is missing a redeem_script"),
+        }
+    }
+}
+
+impl std::error::Error for InternalPsbtInputError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::PrevTxOut(error) => Some(error),
+            Self::UnequalTxid => None,
+            Self::SegWitTxOutMismatch => None,
+            Self::AddressType(error) => Some(error),
+            Self::NoRedeemScript => None,
+        }
+    }
+}
+
+impl From<PrevTxOutError> for InternalPsbtInputError {
+    fn from(value: PrevTxOutError) -> Self { InternalPsbtInputError::PrevTxOut(value) }
+}
+
+impl From<AddressTypeError> for InternalPsbtInputError {
+    fn from(value: AddressTypeError) -> Self { Self::AddressType(value) }
+}
+
+#[derive(Debug)]
+pub struct PsbtInputError(InternalPsbtInputError);
+
+impl From<InternalPsbtInputError> for PsbtInputError {
+    fn from(e: InternalPsbtInputError) -> Self { PsbtInputError(e) }
 }
 
 impl fmt::Display for PsbtInputError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            PsbtInputError::PrevTxOut(_) => write!(f, "invalid previous transaction output"),
-            PsbtInputError::UnequalTxid => write!(f, "transaction ID of previous transaction doesn't match one specified in input spending it"),
-            PsbtInputError::SegWitTxOutMismatch => write!(f, "transaction output provided in SegWit UTXO field doesn't match the one in non-SegWit UTXO field"),
-        }
-    }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{}", self.0) }
 }
 
 impl std::error::Error for PsbtInputError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            PsbtInputError::PrevTxOut(error) => Some(error),
-            PsbtInputError::UnequalTxid => None,
-            PsbtInputError::SegWitTxOutMismatch => None,
-        }
-    }
-}
-
-impl From<PrevTxOutError> for PsbtInputError {
-    fn from(value: PrevTxOutError) -> Self { PsbtInputError::PrevTxOut(value) }
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { Some(&self.0) }
 }
 
 #[derive(Debug)]
 pub struct PsbtInputsError {
     index: usize,
-    error: PsbtInputError,
+    error: InternalPsbtInputError,
 }
 
 impl fmt::Display for PsbtInputsError {

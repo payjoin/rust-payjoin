@@ -3,8 +3,8 @@ use std::time::{Duration, SystemTime};
 
 use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
-use bitcoin::psbt::{Input as PsbtInput, Psbt};
-use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxIn, TxOut};
+use bitcoin::psbt::Psbt;
+use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -18,6 +18,7 @@ use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicK
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
+use crate::receive::InputPair;
 use crate::{PjUriBuilder, Request};
 
 pub(crate) mod error;
@@ -387,8 +388,8 @@ impl WantsInputs {
     /// https://eprint.iacr.org/2022/589.pdf
     pub fn try_preserving_privacy(
         &self,
-        candidate_inputs: impl IntoIterator<Item = (Amount, OutPoint)>,
-    ) -> Result<OutPoint, SelectionError> {
+        candidate_inputs: impl IntoIterator<Item = InputPair>,
+    ) -> Result<InputPair, SelectionError> {
         self.inner.try_preserving_privacy(candidate_inputs)
     }
 
@@ -396,7 +397,7 @@ impl WantsInputs {
     /// Any excess input amount is added to the change_vout output indicated previously.
     pub fn contribute_inputs(
         self,
-        inputs: impl IntoIterator<Item = (PsbtInput, TxIn)>,
+        inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<WantsInputs, InputContributionError> {
         let inner = self.inner.contribute_inputs(inputs)?;
         Ok(WantsInputs { inner, context: self.context })

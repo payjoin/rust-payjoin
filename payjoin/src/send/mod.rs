@@ -288,7 +288,10 @@ impl Sender {
         }
 
         match self.extract_rs_pubkey() {
-            Ok(rs) => self.extract_v2(ohttp_relay, rs),
+            Ok(_rs) => {
+                let (req, context_v2) = self.extract_v2(ohttp_relay)?;
+                Ok((req, Context::V2(context_v2)))
+            }
             Err(e) => {
                 log::warn!("Failed to extract `rs` pubkey, falling back to v1: {}", e);
                 let (req, context_v1) = self.extract_v1()?;
@@ -302,12 +305,12 @@ impl Sender {
     /// This method requires the `rs` pubkey to be extracted from the endpoint
     /// and has no fallback to v1.
     #[cfg(feature = "v2")]
-    fn extract_v2(
-        &mut self,
+    pub fn extract_v2(
+        &self,
         ohttp_relay: Url,
-        rs: HpkePublicKey,
-    ) -> Result<(Request, Context), CreateRequestError> {
+    ) -> Result<(Request, V2PostContext), CreateRequestError> {
         use crate::uri::UrlExt;
+        let rs = self.extract_rs_pubkey()?;
         let url = self.endpoint.clone();
         let body = serialize_v2_body(
             &self.psbt,
@@ -329,7 +332,7 @@ impl Sender {
         log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
         Ok((
             Request::new_v2(ohttp_relay, body),
-            Context::V2(V2PostContext {
+            V2PostContext {
                 endpoint: self.endpoint.clone(),
                 psbt_ctx: PsbtContext {
                     original_psbt: self.psbt.clone(),
@@ -341,7 +344,7 @@ impl Sender {
                 },
                 hpke_ctx,
                 ohttp_ctx,
-            }),
+            },
         ))
     }
 

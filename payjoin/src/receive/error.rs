@@ -70,10 +70,12 @@ pub(crate) enum InternalRequestError {
     MissingPayment,
     /// The original PSBT transaction fails the broadcast check
     OriginalPsbtNotBroadcastable,
+    #[allow(dead_code)]
     /// The sender is trying to spend the receiver input
     InputOwned(bitcoin::ScriptBuf),
     /// The expected input weight cannot be determined
     InputWeight(crate::psbt::InputWeightError),
+    #[allow(dead_code)]
     /// Original PSBT input has been seen before. Only automatic receivers, aka "interactive" in the spec
     /// look out for these to prevent probing attacks.
     InputSeen(bitcoin::OutPoint),

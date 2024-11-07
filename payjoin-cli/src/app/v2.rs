@@ -197,19 +197,18 @@ impl App {
     }
 
     async fn long_poll_post(&self, req_ctx: &mut payjoin::send::Sender) -> Result<Psbt> {
-        let (req, ctx) = req_ctx.extract_highest_version(self.config.ohttp_relay.clone())?;
-        println!("Posting Original PSBT Payload request...");
-        let http = http_agent()?;
-        let response = http
-            .post(req.url)
-            .header("Content-Type", req.content_type)
-            .body(req.body)
-            .send()
-            .await
-            .map_err(map_reqwest_err)?;
-        println!("Sent fallback transaction");
-        match ctx {
-            payjoin::send::Context::V2(ctx) => {
+        match req_ctx.extract_v2(self.config.ohttp_relay.clone()) {
+            Ok((req, ctx)) => {
+                println!("Posting Original PSBT Payload request...");
+                let http = http_agent()?;
+                let response = http
+                    .post(req.url)
+                    .header("Content-Type", req.content_type)
+                    .body(req.body)
+                    .send()
+                    .await
+                    .map_err(map_reqwest_err)?;
+                println!("Sent fallback transaction");
                 let v2_ctx = Arc::new(
                     ctx.process_response(&mut response.bytes().await?.to_vec().as_slice())?,
                 );
@@ -239,8 +238,19 @@ impl App {
                     }
                 }
             }
-            payjoin::send::Context::V1(ctx) => {
-                match ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()) {
+            Err(_) => {
+                let (req, v1_ctx) = req_ctx.extract_v1()?;
+                println!("Posting Original PSBT Payload request...");
+                let http = http_agent()?;
+                let response = http
+                    .post(req.url)
+                    .header("Content-Type", req.content_type)
+                    .body(req.body)
+                    .send()
+                    .await
+                    .map_err(map_reqwest_err)?;
+                println!("Sent fallback transaction");
+                match v1_ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()) {
                     Ok(psbt) => Ok(psbt),
                     Err(re) => {
                         println!("{}", re);

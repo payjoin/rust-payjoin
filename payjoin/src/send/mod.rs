@@ -268,38 +268,6 @@ impl Sender {
         ))
     }
 
-    /// Extract serialized Request and Context from a Payjoin Proposal. Automatically selects the correct version.
-    ///
-    /// In order to support polling, this may need to be called many times to be encrypted with
-    /// new unique nonces to make independent OHTTP requests.
-    ///
-    /// The `ohttp_relay` merely passes the encrypted payload to the ohttp gateway of the receiver
-    #[cfg(feature = "v2")]
-    pub fn extract_highest_version(
-        &mut self,
-        ohttp_relay: Url,
-    ) -> Result<(Request, Context), CreateRequestError> {
-        use crate::uri::UrlExt;
-
-        if let Some(expiry) = self.endpoint.exp() {
-            if std::time::SystemTime::now() > expiry {
-                return Err(InternalCreateRequestError::Expired(expiry).into());
-            }
-        }
-
-        match self.extract_rs_pubkey() {
-            Ok(_rs) => {
-                let (req, context_v2) = self.extract_v2(ohttp_relay)?;
-                Ok((req, Context::V2(context_v2)))
-            }
-            Err(e) => {
-                log::warn!("Failed to extract `rs` pubkey, falling back to v1: {}", e);
-                let (req, context_v1) = self.extract_v1()?;
-                Ok((req, Context::V1(context_v1)))
-            }
-        }
-    }
-
     /// Extract serialized Request and Context from a Payjoin Proposal.
     ///
     /// This method requires the `rs` pubkey to be extracted from the endpoint
@@ -310,6 +278,11 @@ impl Sender {
         ohttp_relay: Url,
     ) -> Result<(Request, V2PostContext), CreateRequestError> {
         use crate::uri::UrlExt;
+        if let Some(expiry) = self.endpoint.exp() {
+            if std::time::SystemTime::now() > expiry {
+                return Err(InternalCreateRequestError::Expired(expiry).into());
+            }
+        }
         let rs = self.extract_rs_pubkey()?;
         let url = self.endpoint.clone();
         let body = serialize_v2_body(
@@ -367,12 +340,6 @@ impl Sender {
     }
 
     pub fn endpoint(&self) -> &Url { &self.endpoint }
-}
-
-pub enum Context {
-    V1(V1Context),
-    #[cfg(feature = "v2")]
-    V2(V2PostContext),
 }
 
 #[derive(Debug, Clone)]

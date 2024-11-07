@@ -451,11 +451,7 @@ impl WantsOutputs {
 /// Shuffles `new` vector, then interleaves its elements with those from `original`,
 /// maintaining the relative order in `original` but randomly inserting elements from `new`.
 /// The combined result replaces the contents of `original`.
-fn interleave_shuffle<T: Clone, R: rand::Rng>(
-    original: &mut Vec<T>,
-    new: &mut Vec<T>,
-    rng: &mut R,
-) {
+fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [T], rng: &mut R) {
     // Shuffle the substitute_outputs
     new.shuffle(rng);
     // Create a new vector to store the combined result

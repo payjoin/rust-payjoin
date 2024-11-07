@@ -38,8 +38,8 @@ impl DbPool {
     async fn push(&self, pubkey_id: &str, channel_type: &str, data: Vec<u8>) -> RedisResult<()> {
         let mut conn = self.client.get_async_connection().await?;
         let key = channel_name(pubkey_id, channel_type);
-        conn.set(&key, data.clone()).await?;
-        conn.publish(&key, "updated").await?;
+        () = conn.set(&key, data.clone()).await?;
+        () = conn.publish(&key, "updated").await?;
         Ok(())
     }
 
@@ -75,8 +75,8 @@ impl DbPool {
             loop {
                 match message_stream.next().await {
                     Some(msg) => {
-                        msg.get_payload()?; // Notification received
-                                            // Try fetching the data again
+                        () = msg.get_payload()?; // Notification received
+                                                 // Try fetching the data again
                         if let Some(data) = conn.get::<_, Option<Vec<u8>>>(&key).await? {
                             if !data.is_empty() {
                                 break data; // Exit the block, returning the data

@@ -53,11 +53,13 @@ mod sealed {
 }
 
 pub trait UriExt<'a>: sealed::UriExt {
-    fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>>;
+    // Error type is boxed to reduce the size of the Result
+    // (See https://rust-lang.github.io/rust-clippy/master/index.html#result_large_err)
+    fn check_pj_supported(self) -> Result<PjUri<'a>, Box<bip21::Uri<'a>>>;
 }
 
 impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
-    fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>> {
+    fn check_pj_supported(self) -> Result<PjUri<'a>, Box<bip21::Uri<'a>>> {
         match self.extras {
             MaybePayjoinExtras::Supported(payjoin) => {
                 let mut uri = bip21::Uri::with_extras(self.address, payjoin);
@@ -73,7 +75,7 @@ impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
                 uri.label = self.label;
                 uri.message = self.message;
 
-                Err(uri)
+                Err(Box::new(uri))
             }
         }
     }

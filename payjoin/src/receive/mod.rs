@@ -976,7 +976,7 @@ mod test {
             .identify_receiver_outputs(|script| {
                 let network = Network::Bitcoin;
                 Ok(Address::from_script(script, network).unwrap()
-                    == Address::from_str(&"3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+                    == Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
                         .unwrap()
                         .require_network(network)
                         .unwrap())
@@ -1011,7 +1011,7 @@ mod test {
             .identify_receiver_outputs(|script| {
                 let network = Network::Bitcoin;
                 Ok(Address::from_script(script, network).unwrap()
-                    == Address::from_str(&"3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+                    == Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
                         .unwrap()
                         .require_network(network)
                         .unwrap())

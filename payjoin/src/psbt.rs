@@ -112,7 +112,7 @@ pub(crate) struct InternalInputPair<'a> {
     pub psbtin: &'a psbt::Input,
 }
 
-impl<'a> InternalInputPair<'a> {
+impl InternalInputPair<'_> {
     /// Returns TxOut associated with the input
     pub fn previous_txout(&self) -> Result<&TxOut, PrevTxOutError> {
         match (&self.psbtin.non_witness_utxo, &self.psbtin.witness_utxo) {

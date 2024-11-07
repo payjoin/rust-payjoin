@@ -1279,7 +1279,7 @@ mod integration {
 
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal.check_inputs_not_owned(|input| {
-            let address = bitcoin::Address::from_script(&input, bitcoin::Network::Regtest).unwrap();
+            let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest).unwrap();
             Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
         })?;
 
@@ -1288,13 +1288,13 @@ mod integration {
             .check_no_inputs_seen_before(|_| Ok(false))?
             .identify_receiver_outputs(|output_script| {
                 let address =
-                    bitcoin::Address::from_script(&output_script, bitcoin::Network::Regtest)
+                    bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
                         .unwrap();
                 Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
             })?;
 
         let payjoin = match custom_outputs {
-            Some(txos) => payjoin.replace_receiver_outputs(txos, &drain_script.unwrap())?,
+            Some(txos) => payjoin.replace_receiver_outputs(txos, drain_script.unwrap())?,
             None => payjoin.substitute_receiver_script(
                 &receiver.get_new_address(None, None)?.assume_checked().script_pubkey(),
             )?,
@@ -1330,7 +1330,7 @@ mod integration {
                     )
                     .map(|res: WalletProcessPsbtResult| {
                         let psbt = Psbt::from_str(&res.psbt).unwrap();
-                        return psbt;
+                        psbt
                     })
                     .unwrap())
             },

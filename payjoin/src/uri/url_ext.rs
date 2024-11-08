@@ -92,12 +92,12 @@ mod tests {
 
         let ohttp_keys =
             OhttpKeys::from_str("AQO6SMScPUqSo60A7MY6Ak2hDO0CGAxz7BLYp60syRu0gw").unwrap();
-        let _ = url.set_ohttp(Some(ohttp_keys.clone()));
+        url.set_ohttp(Some(ohttp_keys.clone()));
         assert_eq!(url.fragment(), Some("ohttp=AQO6SMScPUqSo60A7MY6Ak2hDO0CGAxz7BLYp60syRu0gw"));
 
         assert_eq!(url.ohttp(), Some(ohttp_keys));
 
-        let _ = url.set_ohttp(None);
+        url.set_ohttp(None);
         assert_eq!(url.fragment(), None);
     }
 
@@ -107,12 +107,12 @@ mod tests {
 
         let exp_time =
             std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1720547781);
-        let _ = url.set_exp(Some(exp_time));
+        url.set_exp(Some(exp_time));
         assert_eq!(url.fragment(), Some("exp=1720547781"));
 
         assert_eq!(url.exp(), Some(exp_time));
 
-        let _ = url.set_exp(None);
+        url.set_exp(None);
         assert_eq!(url.fragment(), None);
     }
 

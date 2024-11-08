@@ -1010,8 +1010,7 @@ mod test {
         })
         .to_string();
         match ctx.process_response(&mut known_json_error.as_bytes()) {
-            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported { .. })) =>
-                assert!(true),
+            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported { .. })) => (),
             _ => panic!("Expected WellKnownError"),
         }
 
@@ -1022,7 +1021,7 @@ mod test {
         })
         .to_string();
         match ctx.process_response(&mut invalid_json_error.as_bytes()) {
-            Err(ResponseError::Validation(_)) => assert!(true),
+            Err(ResponseError::Validation(_)) => (),
             _ => panic!("Expected unrecognized JSON error"),
         }
     }

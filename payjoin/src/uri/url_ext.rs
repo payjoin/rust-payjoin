@@ -4,11 +4,13 @@ use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
 use url::Url;
 
+use super::error::ParseReceiverPubkeyError;
 use crate::hpke::HpkePublicKey;
 use crate::OhttpKeys;
 
 /// Parse and set fragment parameters from `&pj=` URI parameter URLs
 pub(crate) trait UrlExt {
+    fn receiver_pubkey(&self) -> Result<HpkePublicKey, ParseReceiverPubkeyError>;
     fn set_receiver_pubkey(&mut self, exp: Option<HpkePublicKey>);
     fn ohttp(&self) -> Option<OhttpKeys>;
     fn set_ohttp(&mut self, ohttp: Option<OhttpKeys>);
@@ -17,6 +19,19 @@ pub(crate) trait UrlExt {
 }
 
 impl UrlExt for Url {
+    /// Retrieve the receiver's public key from the URL fragment
+    fn receiver_pubkey(&self) -> Result<HpkePublicKey, ParseReceiverPubkeyError> {
+        let value = get_param(self, "rk=", |v| Some(v.to_owned()))
+            .ok_or(ParseReceiverPubkeyError::MissingPubkey)?;
+
+        let decoded = BASE64_URL_SAFE_NO_PAD
+            .decode(&value)
+            .map_err(ParseReceiverPubkeyError::PubkeyNotBase64)?;
+
+        HpkePublicKey::from_compressed_bytes(&decoded)
+            .map_err(ParseReceiverPubkeyError::InvalidPubkey)
+    }
+
     /// Set the receiver's public key in the URL fragment
     fn set_receiver_pubkey(&mut self, pubkey: Option<HpkePublicKey>) {
         set_param(

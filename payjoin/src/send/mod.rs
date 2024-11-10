@@ -322,21 +322,11 @@ impl Sender {
     }
 
     #[cfg(feature = "v2")]
-    fn extract_rs_pubkey(&self) -> Result<HpkePublicKey, error::ParseSubdirectoryError> {
-        use error::ParseSubdirectoryError;
-
-        let subdirectory = self
-            .endpoint
-            .path_segments()
-            .and_then(|mut segments| segments.next())
-            .ok_or(ParseSubdirectoryError::MissingSubdirectory)?;
-
-        let pubkey_bytes = BASE64_URL_SAFE_NO_PAD
-            .decode(subdirectory)
-            .map_err(ParseSubdirectoryError::SubdirectoryNotBase64)?;
-
-        HpkePublicKey::from_compressed_bytes(&pubkey_bytes)
-            .map_err(ParseSubdirectoryError::SubdirectoryInvalidPubkey)
+    fn extract_rs_pubkey(
+        &self,
+    ) -> Result<HpkePublicKey, crate::uri::error::ParseReceiverPubkeyError> {
+        use crate::uri::UrlExt;
+        self.endpoint.receiver_pubkey()
     }
 
     pub fn endpoint(&self) -> &Url { &self.endpoint }

@@ -180,7 +180,7 @@ mod integration {
         use bitcoin::Address;
         use http::StatusCode;
         use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
-        use payjoin::{OhttpKeys, PjUri, UriExt};
+        use payjoin::{HpkeKeyPair, OhttpKeys, PjUri, UriExt};
         use reqwest::{Client, ClientBuilder, Error, Response};
         use testcontainers_modules::redis::Redis;
         use testcontainers_modules::testcontainers::clients::Cli;
@@ -280,6 +280,7 @@ mod integration {
                 let expired_pj_uri = payjoin::PjUriBuilder::new(
                     address,
                     directory.clone(),
+                    Some(HpkeKeyPair::gen_keypair().public_key().clone()),
                     Some(ohttp_keys),
                     Some(std::time::SystemTime::now()),
                 )
@@ -601,9 +602,10 @@ mod integration {
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let pj_uri = PjUriBuilder::new(pj_receiver_address, EXAMPLE_URL.to_owned(), None, None)
-                .amount(Amount::ONE_BTC)
-                .build();
+            let pj_uri =
+                PjUriBuilder::new(pj_receiver_address, EXAMPLE_URL.to_owned(), None, None, None)
+                    .amount(Amount::ONE_BTC)
+                    .build();
 
             // **********************
             // Inside the Sender:

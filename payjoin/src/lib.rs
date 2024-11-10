@@ -30,6 +30,8 @@ pub mod send;
 #[cfg(feature = "v2")]
 pub(crate) mod hpke;
 #[cfg(feature = "v2")]
+pub use crate::hpke::{HpkeKeyPair, HpkePublicKey};
+#[cfg(feature = "v2")]
 pub(crate) mod ohttp;
 #[cfg(feature = "v2")]
 pub use crate::ohttp::OhttpKeys;

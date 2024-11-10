@@ -5,6 +5,8 @@ use bitcoin::{Address, Amount};
 pub use error::PjParseError;
 use url::Url;
 
+#[cfg(feature = "v2")]
+use crate::hpke::HpkePublicKey;
 use crate::uri::error::InternalPjParseError;
 #[cfg(feature = "v2")]
 pub(crate) use crate::uri::url_ext::UrlExt;
@@ -114,11 +116,14 @@ impl PjUriBuilder {
     pub fn new(
         address: Address,
         origin: Url,
+        #[cfg(feature = "v2")] receiver_pubkey: Option<HpkePublicKey>,
         #[cfg(feature = "v2")] ohttp_keys: Option<OhttpKeys>,
         #[cfg(feature = "v2")] expiry: Option<std::time::SystemTime>,
     ) -> Self {
         #[allow(unused_mut)]
         let mut pj = origin;
+        #[cfg(feature = "v2")]
+        pj.set_receiver_pubkey(receiver_pubkey);
         #[cfg(feature = "v2")]
         pj.set_ohttp(ohttp_keys);
         #[cfg(feature = "v2")]
@@ -357,6 +362,8 @@ mod tests {
                 let builder = PjUriBuilder::new(
                     address.clone(),
                     Url::parse(pj).unwrap(),
+                    #[cfg(feature = "v2")]
+                    None,
                     #[cfg(feature = "v2")]
                     None,
                     #[cfg(feature = "v2")]

@@ -1,11 +1,15 @@
 use std::str::FromStr;
 
+use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
+use bitcoin::base64::Engine;
 use url::Url;
 
+use crate::hpke::HpkePublicKey;
 use crate::OhttpKeys;
 
 /// Parse and set fragment parameters from `&pj=` URI parameter URLs
 pub(crate) trait UrlExt {
+    fn set_receiver_pubkey(&mut self, exp: Option<HpkePublicKey>);
     fn ohttp(&self) -> Option<OhttpKeys>;
     fn set_ohttp(&mut self, ohttp: Option<OhttpKeys>);
     fn exp(&self) -> Option<std::time::SystemTime>;
@@ -13,6 +17,15 @@ pub(crate) trait UrlExt {
 }
 
 impl UrlExt for Url {
+    /// Set the receiver's public key in the URL fragment
+    fn set_receiver_pubkey(&mut self, pubkey: Option<HpkePublicKey>) {
+        set_param(
+            self,
+            "rk=",
+            pubkey.map(|k| BASE64_URL_SAFE_NO_PAD.encode(k.to_compressed_bytes())),
+        )
+    }
+
     /// Retrieve the ohttp parameter from the URL fragment
     fn ohttp(&self) -> Option<OhttpKeys> {
         get_param(self, "ohttp=", |value| OhttpKeys::from_str(value).ok())

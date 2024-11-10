@@ -182,6 +182,7 @@ impl Receiver {
         PjUriBuilder::new(
             self.context.address.clone(),
             self.pj_url(),
+            Some(self.context.s.public_key().clone()),
             Some(self.context.ohttp_keys.clone()),
             Some(self.context.expiry),
         )

@@ -16,10 +16,10 @@ jobs:
       - name: "Checkout repo"
         uses: actions/checkout@v4
       - name: "Install ${{ matrix.rust }} toolchain"
-        uses: actions-rs/toolchain@v1
+        # https://github.com/dtolnay/rust-toolchain?tab=readme-ov-file#inputs
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
-          override: true
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
       - name: Run tests
@@ -31,10 +31,7 @@ jobs:
       - name: "Checkout repo"
         uses: actions/checkout@v4
       - name: "Install nightly toolchain"
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          override: true
+        uses: dtolnay/rust-toolchain@nightly
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
       - run: rustup component add rustfmt --toolchain nightly-x86_64-unknown-linux-gnu
@@ -47,10 +44,7 @@ jobs:
       - name: "Checkout repo"
         uses: actions/checkout@v4
       - name: "Install nightly toolchain"
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          override: true
+        uses: dtolnay/rust-toolchain@nightly
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
       - name: "Install clippy"

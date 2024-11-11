@@ -200,7 +200,7 @@ mod integration {
             let port = find_free_port();
             let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
             tokio::select!(
-                _ = init_directory(port, (cert.clone(), key)) => assert!(false, "Directory server is long running"),
+                _ = init_directory(port, (cert.clone(), key)) => panic!("Directory server is long running"),
                 res = try_request_with_bad_keys(directory, bad_ohttp_keys, cert) => {
                     assert_eq!(
                         res.unwrap().headers().get("content-type").unwrap(),
@@ -238,8 +238,8 @@ mod integration {
             let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
             let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
             tokio::select!(
-            _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => assert!(false, "Ohttp relay is long running"),
-            _ = init_directory(directory_port, (cert.clone(), key)) => assert!(false, "Directory server is long running"),
+            _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay is long running"),
+            _ = init_directory(directory_port, (cert.clone(), key)) => panic!("Directory server is long running"),
             res = do_expiration_tests(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
@@ -269,7 +269,7 @@ mod integration {
                 match session.extract_req() {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
-                    _ => assert!(false, "Expired receive session should error"),
+                    _ => panic!("Expired receive session should error"),
                 };
                 let pj_uri = session.pj_uri_builder().build();
 
@@ -289,7 +289,7 @@ mod integration {
                 match expired_req_ctx.extract_v2(directory.to_owned()) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
-                    _ => assert!(false, "Expired send session should error"),
+                    _ => panic!("Expired send session should error"),
                 };
                 Ok(())
             }
@@ -306,8 +306,8 @@ mod integration {
             let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
             let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
             tokio::select!(
-            _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => assert!(false, "Ohttp relay is long running"),
-            _ = init_directory(directory_port, (cert.clone(), key)) => assert!(false, "Directory server is long running"),
+            _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay is long running"),
+            _ = init_directory(directory_port, (cert.clone(), key)) => panic!("Directory server is long running"),
             res = do_v2_send_receive(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
@@ -438,8 +438,8 @@ mod integration {
             let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
             let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
             tokio::select!(
-            _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => assert!(false, "Ohttp relay is long running"),
-            _ = init_directory(directory_port, (cert.clone(), key)) => assert!(false, "Directory server is long running"),
+            _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay is long running"),
+            _ = init_directory(directory_port, (cert.clone(), key)) => panic!("Directory server is long running"),
             res = do_v2_send_receive(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
@@ -655,8 +655,8 @@ mod integration {
             let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
             let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
             tokio::select!(
-            _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => assert!(false, "Ohttp relay is long running"),
-            _ = init_directory(directory_port, (cert.clone(), key)) => assert!(false, "Directory server is long running"),
+            _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay is long running"),
+            _ = init_directory(directory_port, (cert.clone(), key)) => panic!("Directory server is long running"),
             res = do_v1_to_v2(ohttp_relay, directory, cert) => assert!(res.is_ok()),
             );
 
@@ -783,7 +783,7 @@ mod integration {
         ) -> Result<(), BoxError> {
             let docker: Cli = Cli::default();
             let timeout = Duration::from_secs(2);
-            let db = docker.run(Redis::default());
+            let db = docker.run(Redis);
             let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
             println!("Database running on {}", db.get_host_port_ipv4(6379));
             payjoin_directory::listen_tcp_with_tls(port, db_host, timeout, local_cert_key).await
@@ -841,7 +841,7 @@ mod integration {
             let proposal = proposal
                 .check_inputs_not_owned(|input| {
                     let address =
-                        bitcoin::Address::from_script(&input, bitcoin::Network::Regtest).unwrap();
+                        bitcoin::Address::from_script(input, bitcoin::Network::Regtest).unwrap();
                     Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
                 })
                 .expect("Receiver should not own any of the inputs");
@@ -852,7 +852,7 @@ mod integration {
                 .unwrap()
                 .identify_receiver_outputs(|output_script| {
                     let address =
-                        bitcoin::Address::from_script(&output_script, bitcoin::Network::Regtest)
+                        bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
                             .unwrap();
                     Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
                 })
@@ -880,7 +880,7 @@ mod integration {
             let payjoin = payjoin.contribute_inputs(inputs).unwrap().commit_inputs();
 
             // Sign and finalize the proposal PSBT
-            let payjoin_proposal = payjoin
+            payjoin
                 .finalize_proposal(
                     |psbt: &Psbt| {
                         Ok(receiver
@@ -890,17 +890,13 @@ mod integration {
                                 None,
                                 Some(true), // check that the receiver properly clears keypaths
                             )
-                            .map(|res: WalletProcessPsbtResult| {
-                                let psbt = Psbt::from_str(&res.psbt).unwrap();
-                                return psbt;
-                            })
+                            .map(|res: WalletProcessPsbtResult| Psbt::from_str(&res.psbt).unwrap())
                             .unwrap())
                     },
                     Some(FeeRate::BROADCAST_MIN),
                     FeeRate::from_sat_per_vb_unchecked(2),
                 )
-                .unwrap();
-            payjoin_proposal
+                .unwrap()
         }
 
         fn http_agent(cert_der: Vec<u8>) -> Result<Client, BoxError> {
@@ -1267,7 +1263,7 @@ mod integration {
 
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal.check_inputs_not_owned(|input| {
-            let address = bitcoin::Address::from_script(&input, bitcoin::Network::Regtest).unwrap();
+            let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest).unwrap();
             Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
         })?;
 
@@ -1276,13 +1272,13 @@ mod integration {
             .check_no_inputs_seen_before(|_| Ok(false))?
             .identify_receiver_outputs(|output_script| {
                 let address =
-                    bitcoin::Address::from_script(&output_script, bitcoin::Network::Regtest)
+                    bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
                         .unwrap();
                 Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
             })?;
 
         let payjoin = match custom_outputs {
-            Some(txos) => payjoin.replace_receiver_outputs(txos, &drain_script.unwrap())?,
+            Some(txos) => payjoin.replace_receiver_outputs(txos, drain_script.unwrap())?,
             None => payjoin.substitute_receiver_script(
                 &receiver.get_new_address(None, None)?.assume_checked().script_pubkey(),
             )?,
@@ -1316,10 +1312,7 @@ mod integration {
                         None,
                         Some(true), // check that the receiver properly clears keypaths
                     )
-                    .map(|res: WalletProcessPsbtResult| {
-                        let psbt = Psbt::from_str(&res.psbt).unwrap();
-                        return psbt;
-                    })
+                    .map(|res: WalletProcessPsbtResult| Psbt::from_str(&res.psbt).unwrap())
                     .unwrap())
             },
             Some(FeeRate::BROADCAST_MIN),

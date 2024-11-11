@@ -90,6 +90,7 @@ impl AppTrait for App {
 }
 
 impl App {
+    #[allow(clippy::incompatible_msrv)]
     async fn spawn_payjoin_sender(&self, mut req_ctx: Sender) -> Result<()> {
         let mut interrupt = self.interrupt.clone();
         tokio::select! {
@@ -104,6 +105,7 @@ impl App {
         Ok(())
     }
 
+    #[allow(clippy::incompatible_msrv)]
     async fn spawn_payjoin_receiver(
         &self,
         mut session: Receiver,
@@ -150,6 +152,7 @@ impl App {
         Ok(())
     }
 
+    #[allow(clippy::incompatible_msrv)]
     pub async fn resume_payjoins(&self) -> Result<()> {
         let recv_sessions = self.db.get_recv_sessions()?;
         let send_sessions = self.db.get_send_sessions()?;

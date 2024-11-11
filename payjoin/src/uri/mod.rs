@@ -48,16 +48,18 @@ mod sealed {
 
     pub trait UriExt: Sized {}
 
-    impl<'a> UriExt for super::Uri<'a, NetworkChecked> {}
-    impl<'a> UriExt for super::PjUri<'a> {}
+    impl UriExt for super::Uri<'_, NetworkChecked> {}
+    impl UriExt for super::PjUri<'_> {}
 }
 
 pub trait UriExt<'a>: sealed::UriExt {
-    fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>>;
+    // Error type is boxed to reduce the size of the Result
+    // (See https://rust-lang.github.io/rust-clippy/master/index.html#result_large_err)
+    fn check_pj_supported(self) -> Result<PjUri<'a>, Box<bip21::Uri<'a>>>;
 }
 
 impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
-    fn check_pj_supported(self) -> Result<PjUri<'a>, bip21::Uri<'a>> {
+    fn check_pj_supported(self) -> Result<PjUri<'a>, Box<bip21::Uri<'a>>> {
         match self.extras {
             MaybePayjoinExtras::Supported(payjoin) => {
                 let mut uri = bip21::Uri::with_extras(self.address, payjoin);
@@ -73,7 +75,7 @@ impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
                 uri.label = self.label;
                 uri.message = self.message;
 
-                Err(uri)
+                Err(Box::new(uri))
             }
         }
     }
@@ -169,7 +171,7 @@ impl bip21::de::DeserializationError for MaybePayjoinExtras {
     type Error = PjParseError;
 }
 
-impl<'a> bip21::de::DeserializeParams<'a> for MaybePayjoinExtras {
+impl bip21::de::DeserializeParams<'_> for MaybePayjoinExtras {
     type DeserializationState = DeserializationState;
 }
 
@@ -179,7 +181,7 @@ pub struct DeserializationState {
     pjos: Option<bool>,
 }
 
-impl<'a> bip21::SerializeParams for &'a MaybePayjoinExtras {
+impl bip21::SerializeParams for &MaybePayjoinExtras {
     type Key = &'static str;
     type Value = String;
     type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
@@ -192,7 +194,7 @@ impl<'a> bip21::SerializeParams for &'a MaybePayjoinExtras {
     }
 }
 
-impl<'a> bip21::SerializeParams for &'a PayjoinExtras {
+impl bip21::SerializeParams for &PayjoinExtras {
     type Key = &'static str;
     type Value = String;
     type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
@@ -206,7 +208,7 @@ impl<'a> bip21::SerializeParams for &'a PayjoinExtras {
     }
 }
 
-impl<'a> bip21::de::DeserializationState<'a> for DeserializationState {
+impl bip21::de::DeserializationState<'_> for DeserializationState {
     type Value = MaybePayjoinExtras;
 
     fn is_param_known(&self, param: &str) -> bool { matches!(param, "pj" | "pjos") }
@@ -348,8 +350,8 @@ mod tests {
         let bech32_upper = "TB1Q6D3A2W975YNY0ASUVD9A67NER4NKS58FF0Q8G4";
         let bech32_lower = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
 
-        for address in vec![base58, bech32_upper, bech32_lower] {
-            for pj in vec![https, onion] {
+        for address in [base58, bech32_upper, bech32_lower] {
+            for pj in [https, onion] {
                 let address = bitcoin::Address::from_str(address).unwrap().assume_checked();
                 let amount = bitcoin::Amount::ONE_BTC;
                 let builder = PjUriBuilder::new(
@@ -371,7 +373,7 @@ mod tests {
                 let message: Cow<'_, str> = uri.message.clone().unwrap().try_into().unwrap();
                 assert_eq!(label, "label");
                 assert_eq!(message, "message");
-                assert_eq!(uri.extras.disable_output_substitution, true);
+                assert!(uri.extras.disable_output_substitution);
                 assert_eq!(uri.extras.endpoint.to_string(), pj.to_string());
             }
         }

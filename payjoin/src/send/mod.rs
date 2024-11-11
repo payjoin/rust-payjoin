@@ -906,15 +906,14 @@ mod test {
         let original_psbt = Psbt::from_str(ORIGINAL_PSBT).unwrap();
         eprintln!("original: {:#?}", original_psbt);
         let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
-        let ctx = super::PsbtContext {
+        super::PsbtContext {
             original_psbt,
             disable_output_substitution: false,
             fee_contribution: Some((bitcoin::Amount::from_sat(182), 0)),
             min_fee_rate: FeeRate::ZERO,
             payee,
             allow_mixed_input_scripts: false,
-        };
-        ctx
+        }
     }
 
     #[test]
@@ -981,8 +980,7 @@ mod test {
         })
         .to_string();
         match ctx.process_response(&mut known_json_error.as_bytes()) {
-            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported { .. })) =>
-                assert!(true),
+            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported { .. })) => (),
             _ => panic!("Expected WellKnownError"),
         }
 
@@ -993,7 +991,7 @@ mod test {
         })
         .to_string();
         match ctx.process_response(&mut invalid_json_error.as_bytes()) {
-            Err(ResponseError::Validation(_)) => assert!(true),
+            Err(ResponseError::Validation(_)) => (),
             _ => panic!("Expected unrecognized JSON error"),
         }
     }

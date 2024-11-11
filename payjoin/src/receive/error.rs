@@ -70,10 +70,12 @@ pub(crate) enum InternalRequestError {
     MissingPayment,
     /// The original PSBT transaction fails the broadcast check
     OriginalPsbtNotBroadcastable,
+    #[allow(dead_code)]
     /// The sender is trying to spend the receiver input
     InputOwned(bitcoin::ScriptBuf),
     /// The expected input weight cannot be determined
     InputWeight(crate::psbt::InputWeightError),
+    #[allow(dead_code)]
     /// Original PSBT input has been seen before. Only automatic receivers, aka "interactive" in the spec
     /// look out for these to prevent probing attacks.
     InputSeen(bitcoin::OutPoint),
@@ -107,18 +109,18 @@ impl fmt::Display for RequestError {
             InternalRequestError::Base64(e) => write_error(f, "base64-decode-error", e),
             InternalRequestError::Io(e) => write_error(f, "io-error", e),
             InternalRequestError::MissingHeader(header) =>
-                write_error(f, "missing-header", &format!("Missing header: {}", header)),
+                write_error(f, "missing-header", format!("Missing header: {}", header)),
             InternalRequestError::InvalidContentType(content_type) => write_error(
                 f,
                 "invalid-content-type",
-                &format!("Invalid content type: {}", content_type),
+                format!("Invalid content type: {}", content_type),
             ),
             InternalRequestError::InvalidContentLength(e) =>
                 write_error(f, "invalid-content-length", e),
             InternalRequestError::ContentLengthTooLarge(length) => write_error(
                 f,
                 "content-length-too-large",
-                &format!("Content length too large: {}.", length),
+                format!("Content length too large: {}.", length),
             ),
             InternalRequestError::SenderParams(e) => match e {
                 super::optional_parameters::Error::UnknownVersion => {
@@ -138,7 +140,7 @@ impl fmt::Display for RequestError {
             InternalRequestError::InconsistentPsbt(e) =>
                 write_error(f, "original-psbt-rejected", e),
             InternalRequestError::PrevTxOut(e) =>
-                write_error(f, "original-psbt-rejected", &format!("PrevTxOut Error: {}", e)),
+                write_error(f, "original-psbt-rejected", format!("PrevTxOut Error: {}", e)),
             InternalRequestError::MissingPayment =>
                 write_error(f, "original-psbt-rejected", "Missing payment."),
             InternalRequestError::OriginalPsbtNotBroadcastable => write_error(
@@ -149,7 +151,7 @@ impl fmt::Display for RequestError {
             InternalRequestError::InputOwned(_) =>
                 write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
             InternalRequestError::InputWeight(e) =>
-                write_error(f, "original-psbt-rejected", &format!("InputWeight Error: {}", e)),
+                write_error(f, "original-psbt-rejected", format!("InputWeight Error: {}", e)),
             InternalRequestError::InputSeen(_) =>
                 write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
             #[cfg(feature = "v2")]
@@ -162,7 +164,7 @@ impl fmt::Display for RequestError {
             ) => write_error(
                 f,
                 "original-psbt-rejected",
-                &format!(
+                format!(
                     "Original PSBT fee rate too low: {} < {}.",
                     original_psbt_fee_rate, receiver_min_fee_rate
                 ),
@@ -170,7 +172,7 @@ impl fmt::Display for RequestError {
             InternalRequestError::FeeTooHigh(proposed_feerate, max_feerate) => write_error(
                 f,
                 "original-psbt-rejected",
-                &format!(
+                format!(
                     "Effective receiver feerate exceeds maximum allowed feerate: {} > {}",
                     proposed_feerate, max_feerate
                 ),

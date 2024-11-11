@@ -3,6 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
+use bitcoin::base64::Engine;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::body::{Body, Bytes, Incoming};
@@ -14,6 +16,8 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
+
+use crate::db::ShortId;
 
 pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
@@ -295,7 +299,7 @@ async fn post_fallback_v1(
     };
 
     let v2_compat_body = format!("{}\n{}", body_str, query);
-    let id = shorten_string(id);
+    let id = decode_short_id(id)?;
     pool.push_default(&id, v2_compat_body.into())
         .await
         .map_err(|e| HandlerError::BadRequest(e.into()))?;
@@ -316,7 +320,7 @@ async fn put_payjoin_v1(
     trace!("Put_payjoin_v1");
     let ok_response = Response::builder().status(StatusCode::OK).body(empty())?;
 
-    let id = shorten_string(id);
+    let id = decode_short_id(id)?;
     let req =
         body.collect().await.map_err(|e| HandlerError::InternalServerError(e.into()))?.to_bytes();
     if req.len() > MAX_BUFFER_SIZE {
@@ -337,7 +341,7 @@ async fn post_subdir(
     let none_response = Response::builder().status(StatusCode::OK).body(empty())?;
     trace!("post_subdir");
 
-    let id = shorten_string(id);
+    let id = decode_short_id(id)?;
     let req =
         body.collect().await.map_err(|e| HandlerError::InternalServerError(e.into()))?.to_bytes();
     if req.len() > MAX_BUFFER_SIZE {
@@ -355,7 +359,7 @@ async fn get_subdir(
     pool: DbPool,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
     trace!("get_subdir");
-    let id = shorten_string(id);
+    let id = decode_short_id(id)?;
     match pool.peek_default(&id).await {
         Some(result) => match result {
             Ok(buffered_req) => Ok(Response::new(full(buffered_req))),
@@ -385,7 +389,15 @@ async fn get_ohttp_keys(
     Ok(res)
 }
 
-fn shorten_string(input: &str) -> String { input.chars().take(8).collect() }
+fn decode_short_id(input: &str) -> Result<ShortId, HandlerError> {
+    let decoded =
+        BASE64_URL_SAFE_NO_PAD.decode(input).map_err(|e| HandlerError::BadRequest(e.into()))?;
+
+    decoded[..8]
+        .try_into()
+        .map_err(|_| HandlerError::BadRequest(anyhow::anyhow!("Invalid subdirectory ID")))
+        .map(ShortId)
+}
 
 fn empty() -> BoxBody<Bytes, hyper::Error> {
     Empty::<Bytes>::new().map_err(|never| match never {}).boxed()

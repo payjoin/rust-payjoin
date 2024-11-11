@@ -3,6 +3,7 @@ use std::time::{Duration, SystemTime};
 
 use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
+use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
 use serde::de::Deserializer;
@@ -48,7 +49,8 @@ where
 }
 
 fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> String {
-    BASE64_URL_SAFE_NO_PAD.encode(pubkey.to_compressed_bytes())
+    let hash = sha256::Hash::hash(&pubkey.to_compressed_bytes());
+    BASE64_URL_SAFE_NO_PAD.encode(&hash.as_byte_array()[..8])
 }
 
 /// A payjoin V2 receiver, allowing for polled requests to the
@@ -188,22 +190,26 @@ impl Receiver {
         )
     }
 
-    // The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
+    // The contents of the `&pj=` query parameter.
     // This identifies a session at the payjoin directory server.
     pub fn pj_url(&self) -> Url {
-        let pubkey = &self.id();
-        let pubkey_base64 = BASE64_URL_SAFE_NO_PAD.encode(pubkey);
+        let id_base64 = BASE64_URL_SAFE_NO_PAD.encode(self.id());
         let mut url = self.context.directory.clone();
         {
             let mut path_segments =
                 url.path_segments_mut().expect("Payjoin Directory URL cannot be a base");
-            path_segments.push(&pubkey_base64);
+            path_segments.push(&id_base64);
         }
         url
     }
 
-    /// The per-session public key to use as an identifier
-    pub fn id(&self) -> [u8; 33] { self.context.s.public_key().to_compressed_bytes() }
+    /// The per-session identifier
+    pub fn id(&self) -> [u8; 8] {
+        let hash = sha256::Hash::hash(&self.context.s.public_key().to_compressed_bytes());
+        hash.as_byte_array()[..8]
+            .try_into()
+            .expect("truncating SHA256 to 8 bytes should always succeed")
+    }
 }
 
 /// The sender's original PSBT and optional parameters

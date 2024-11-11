@@ -25,6 +25,8 @@ use std::str::FromStr;
 
 #[cfg(feature = "v2")]
 use bitcoin::base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
+#[cfg(feature = "v2")]
+use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
 pub use error::{CreateRequestError, ResponseError, ValidationError};
@@ -394,8 +396,10 @@ impl V2GetContext {
     ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
         use crate::uri::UrlExt;
         let mut url = self.endpoint.clone();
-        let subdir = BASE64_URL_SAFE_NO_PAD
-            .encode(self.hpke_ctx.reply_pair.public_key().to_compressed_bytes());
+
+        // TODO unify with receiver's fn subdir_path_from_pubkey
+        let hash = sha256::Hash::hash(&self.hpke_ctx.reply_pair.public_key().to_compressed_bytes());
+        let subdir = BASE64_URL_SAFE_NO_PAD.encode(&hash.as_byte_array()[..8]);
         url.set_path(&subdir);
         let body = encrypt_message_a(
             Vec::new(),

@@ -51,3 +51,23 @@ jobs:
         run: rustup component add clippy --toolchain nightly-x86_64-unknown-linux-gnu
       - name: "Run linting"
         run: bash contrib/lint.sh
+
+  Coverage:
+    name: Code coverage
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - name: "Checkout repo"
+        uses: actions/checkout@v4
+      - name: "Install toolchain"
+        # https://github.com/dtolnay/rust-toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+      - name: "Install cargo-llvm-cov"
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: "Generate code coverage for tests"
+        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+      - name: "Upload report to coveralls"
+        uses: coverallsapp/github-action@v2

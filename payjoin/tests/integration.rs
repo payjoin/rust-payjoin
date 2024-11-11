@@ -180,7 +180,6 @@ mod integration {
         use bitcoin::Address;
         use http::StatusCode;
         use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
-        use payjoin::send::Context;
         use payjoin::{OhttpKeys, PjUri, UriExt};
         use reqwest::{Client, ClientBuilder, Error, Response};
         use testcontainers_modules::redis::Redis;
@@ -285,9 +284,9 @@ mod integration {
                     Some(std::time::SystemTime::now()),
                 )
                 .build();
-                let mut expired_req_ctx = SenderBuilder::from_psbt_and_uri(psbt, expired_pj_uri)?
+                let expired_req_ctx = SenderBuilder::from_psbt_and_uri(psbt, expired_pj_uri)?
                     .build_non_incentivizing(FeeRate::BROADCAST_MIN)?;
-                match expired_req_ctx.extract_highest_version(directory.to_owned()) {
+                match expired_req_ctx.extract_v2(directory.to_owned()) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
                     _ => assert!(false, "Expired send session should error"),
@@ -355,14 +354,10 @@ mod integration {
                     .check_pj_supported()
                     .unwrap();
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
-                let mut req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
+                let req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
-                    req_ctx.extract_highest_version(directory.to_owned())?;
-                let send_ctx = match send_ctx {
-                    Context::V2(ctx) => ctx,
-                    _ => panic!("V2 context expected"),
-                };
+                    req_ctx.extract_v2(directory.to_owned())?;
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -521,10 +516,10 @@ mod integration {
                     .check_pj_supported()
                     .unwrap();
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
-                let mut req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
+                let req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
                 let (Request { url, body, content_type, .. }, post_ctx) =
-                    req_ctx.extract_highest_version(directory.to_owned())?;
+                    req_ctx.extract_v2(directory.to_owned())?;
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -534,11 +529,8 @@ mod integration {
                     .unwrap();
                 log::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success());
-                let get_ctx = match post_ctx {
-                    Context::V2(ctx) =>
-                        ctx.process_response(&mut response.bytes().await?.to_vec().as_slice())?,
-                    _ => panic!("V2 context expected"),
-                };
+                let get_ctx =
+                    post_ctx.process_response(&mut response.bytes().await?.to_vec().as_slice())?;
                 let (Request { url, body, content_type, .. }, ohttp_ctx) =
                     get_ctx.extract_req(directory.to_owned())?;
                 let response = agent
@@ -622,9 +614,9 @@ mod integration {
                 .check_pj_supported()
                 .unwrap();
             let psbt = build_original_psbt(&sender, &pj_uri)?;
-            let mut req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
+            let req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
                 .build_recommended(FeeRate::BROADCAST_MIN)?;
-            let (req, ctx) = req_ctx.extract_highest_version(EXAMPLE_URL.to_owned())?;
+            let (req, ctx) = req_ctx.extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************
@@ -636,10 +628,6 @@ mod integration {
             // **********************
             // Inside the Sender:
             // Sender checks, signs, finalizes, extracts, and broadcasts
-            let ctx = match ctx {
-                Context::V1(ctx) => ctx,
-                _ => panic!("V1 context expected"),
-            };
             let checked_payjoin_proposal_psbt = ctx.process_response(&mut response.as_bytes())?;
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;

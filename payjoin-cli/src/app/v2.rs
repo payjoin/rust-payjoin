@@ -137,14 +137,7 @@ impl App {
             .extract_v2_req()
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         println!("Got a request from the sender. Responding with a Payjoin proposal.");
-        let http = http_agent()?;
-        let res = http
-            .post(req.url)
-            .header("Content-Type", req.content_type)
-            .body(req.body)
-            .send()
-            .await
-            .map_err(map_reqwest_err)?;
+        let res = post_request(req).await?;
         payjoin_proposal
             .process_res(res.bytes().await?.to_vec(), ohttp_ctx)
             .map_err(|e| anyhow!("Failed to deserialize response {}", e))?;
@@ -197,31 +190,17 @@ impl App {
     }
 
     async fn long_poll_post(&self, req_ctx: &mut payjoin::send::Sender) -> Result<Psbt> {
-        let (req, ctx) = req_ctx.extract_highest_version(self.config.ohttp_relay.clone())?;
-        println!("Posting Original PSBT Payload request...");
-        let http = http_agent()?;
-        let response = http
-            .post(req.url)
-            .header("Content-Type", req.content_type)
-            .body(req.body)
-            .send()
-            .await
-            .map_err(map_reqwest_err)?;
-        println!("Sent fallback transaction");
-        match ctx {
-            payjoin::send::Context::V2(ctx) => {
+        match req_ctx.extract_v2(self.config.ohttp_relay.clone()) {
+            Ok((req, ctx)) => {
+                println!("Posting Original PSBT Payload request...");
+                let response = post_request(req).await?;
+                println!("Sent fallback transaction");
                 let v2_ctx = Arc::new(
                     ctx.process_response(&mut response.bytes().await?.to_vec().as_slice())?,
                 );
                 loop {
                     let (req, ohttp_ctx) = v2_ctx.extract_req(self.config.ohttp_relay.clone())?;
-                    let response = http
-                        .post(req.url)
-                        .header("Content-Type", req.content_type)
-                        .body(req.body)
-                        .send()
-                        .await
-                        .map_err(map_reqwest_err)?;
+                    let response = post_request(req).await?;
                     match v2_ctx.process_response(
                         &mut response.bytes().await?.to_vec().as_slice(),
                         ohttp_ctx,
@@ -239,8 +218,12 @@ impl App {
                     }
                 }
             }
-            payjoin::send::Context::V1(ctx) => {
-                match ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()) {
+            Err(_) => {
+                let (req, v1_ctx) = req_ctx.extract_v1()?;
+                println!("Posting Original PSBT Payload request...");
+                let response = post_request(req).await?;
+                println!("Sent fallback transaction");
+                match v1_ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()) {
                     Ok(psbt) => Ok(psbt),
                     Err(re) => {
                         println!("{}", re);
@@ -259,15 +242,7 @@ impl App {
         loop {
             let (req, context) = session.extract_req()?;
             println!("Polling receive request...");
-            let http = http_agent()?;
-            let ohttp_response = http
-                .post(req.url)
-                .header("Content-Type", req.content_type)
-                .body(req.body)
-                .send()
-                .await
-                .map_err(map_reqwest_err)?;
-
+            let ohttp_response = post_request(req).await?;
             let proposal = session
                 .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), context)
                 .map_err(|_| anyhow!("GET fallback failed"))?;
@@ -405,6 +380,16 @@ async fn handle_interrupt(tx: watch::Sender<()>) {
         eprintln!("Error setting up Ctrl-C handler: {}", e);
     }
     let _ = tx.send(());
+}
+
+async fn post_request(req: payjoin::Request) -> Result<reqwest::Response> {
+    let http = http_agent()?;
+    http.post(req.url)
+        .header("Content-Type", req.content_type)
+        .body(req.body)
+        .send()
+        .await
+        .map_err(map_reqwest_err)
 }
 
 fn map_reqwest_err(e: reqwest::Error) -> anyhow::Error {

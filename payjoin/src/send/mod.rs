@@ -268,46 +268,22 @@ impl Sender {
         ))
     }
 
-    /// Extract serialized Request and Context from a Payjoin Proposal. Automatically selects the correct version.
-    ///
-    /// In order to support polling, this may need to be called many times to be encrypted with
-    /// new unique nonces to make independent OHTTP requests.
-    ///
-    /// The `ohttp_relay` merely passes the encrypted payload to the ohttp gateway of the receiver
-    #[cfg(feature = "v2")]
-    pub fn extract_highest_version(
-        &mut self,
-        ohttp_relay: Url,
-    ) -> Result<(Request, Context), CreateRequestError> {
-        use crate::uri::UrlExt;
-
-        if let Some(expiry) = self.endpoint.exp() {
-            if std::time::SystemTime::now() > expiry {
-                return Err(InternalCreateRequestError::Expired(expiry).into());
-            }
-        }
-
-        match self.extract_rs_pubkey() {
-            Ok(rs) => self.extract_v2(ohttp_relay, rs),
-            Err(e) => {
-                log::warn!("Failed to extract `rs` pubkey, falling back to v1: {}", e);
-                let (req, context_v1) = self.extract_v1()?;
-                Ok((req, Context::V1(context_v1)))
-            }
-        }
-    }
-
     /// Extract serialized Request and Context from a Payjoin Proposal.
     ///
     /// This method requires the `rs` pubkey to be extracted from the endpoint
     /// and has no fallback to v1.
     #[cfg(feature = "v2")]
-    fn extract_v2(
-        &mut self,
+    pub fn extract_v2(
+        &self,
         ohttp_relay: Url,
-        rs: HpkePublicKey,
-    ) -> Result<(Request, Context), CreateRequestError> {
+    ) -> Result<(Request, V2PostContext), CreateRequestError> {
         use crate::uri::UrlExt;
+        if let Some(expiry) = self.endpoint.exp() {
+            if std::time::SystemTime::now() > expiry {
+                return Err(InternalCreateRequestError::Expired(expiry).into());
+            }
+        }
+        let rs = self.extract_rs_pubkey()?;
         let url = self.endpoint.clone();
         let body = serialize_v2_body(
             &self.psbt,
@@ -329,7 +305,7 @@ impl Sender {
         log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
         Ok((
             Request::new_v2(ohttp_relay, body),
-            Context::V2(V2PostContext {
+            V2PostContext {
                 endpoint: self.endpoint.clone(),
                 psbt_ctx: PsbtContext {
                     original_psbt: self.psbt.clone(),
@@ -341,7 +317,7 @@ impl Sender {
                 },
                 hpke_ctx,
                 ohttp_ctx,
-            }),
+            },
         ))
     }
 
@@ -364,12 +340,6 @@ impl Sender {
     }
 
     pub fn endpoint(&self) -> &Url { &self.endpoint }
-}
-
-pub enum Context {
-    V1(V1Context),
-    #[cfg(feature = "v2")]
-    V2(V2PostContext),
 }
 
 #[derive(Debug, Clone)]

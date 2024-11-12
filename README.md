@@ -72,7 +72,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [x] CI
 - [x] Integration tests
 - [ ] Fuzzing
-- [ ] Coverage measurement
+- [x] Coverage measurement
 
 ## Minimum Supported Rust Version (MSRV)
 

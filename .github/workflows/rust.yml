@@ -1,10 +1,9 @@
-name: Test and Build
+name: Continuous integration
 
 on: [push, pull_request]
 
 jobs:
-
-  test:
+  Test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -13,43 +12,62 @@ jobs:
           - 1.63.0 # MSRV
           - stable
           - nightly
-
     steps:
-      - uses: actions/checkout@v2
-      - uses: Swatinem/rust-cache@v1.2.0
-      - uses: actions-rs/toolchain@v1
+      - name: "Checkout repo"
+        uses: actions/checkout@v4
+      - name: "Install ${{ matrix.rust }} toolchain"
+        # https://github.com/dtolnay/rust-toolchain?tab=readme-ov-file#inputs
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
-          override: true
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
       - name: Run tests
         run: RUST_LOG=debug bash contrib/test.sh
 
-  rustfmt:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: Swatinem/rust-cache@v1.2.0
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          override: true
-      - run: rustup component add rustfmt --toolchain nightly-x86_64-unknown-linux-gnu
-      - name: fmt check
-        run: cargo fmt --all -- --check
-
-  clippy:
+  Format:
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout repo"
         uses: actions/checkout@v4
-      - name: "Use caching"
-        uses: Swatinem/rust-cache@v1.2.0
       - name: "Install nightly toolchain"
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          override: true
+        uses: dtolnay/rust-toolchain@nightly
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+      - run: rustup component add rustfmt --toolchain nightly-x86_64-unknown-linux-gnu
+      - name: "Run formatting check"
+        run: cargo fmt --all -- --check
+
+  Lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repo"
+        uses: actions/checkout@v4
+      - name: "Install nightly toolchain"
+        uses: dtolnay/rust-toolchain@nightly
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
       - name: "Install clippy"
         run: rustup component add clippy --toolchain nightly-x86_64-unknown-linux-gnu
       - name: "Run linting"
         run: bash contrib/lint.sh
+
+  Coverage:
+    name: Code coverage
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - name: "Checkout repo"
+        uses: actions/checkout@v4
+      - name: "Install toolchain"
+        # https://github.com/dtolnay/rust-toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+      - name: "Install cargo-llvm-cov"
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: "Generate code coverage for tests"
+        run: bash contrib/coverage.sh
+      - name: "Upload report to coveralls"
+        uses: coverallsapp/github-action@v2

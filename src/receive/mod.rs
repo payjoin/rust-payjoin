@@ -7,7 +7,7 @@ use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 use payjoin::receive as pdk;
 
-use crate::bitcoin::{Network, OutPoint, Script, TxOut};
+use crate::bitcoin_ffi::{Network, OutPoint, Script, TxOut};
 use crate::error::PayjoinError;
 use crate::ohttp::OhttpKeys;
 use crate::uri::PjUriBuilder;
@@ -350,8 +350,8 @@ pub struct InputPair(payjoin::receive::InputPair);
 impl InputPair {
     #[cfg_attr(feature = "uniffi", uniffi::constructor)]
     pub fn new(
-        txin: crate::bitcoin::TxIn,
-        psbtin: crate::bitcoin::PsbtInput,
+        txin: bitcoin_ffi::TxIn,
+        psbtin: crate::bitcoin_ffi::PsbtInput,
     ) -> Result<Self, PayjoinError> {
         Ok(Self(payjoin::receive::InputPair::new(txin.into(), psbtin.into())?))
     }

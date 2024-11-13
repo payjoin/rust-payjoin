@@ -199,7 +199,7 @@ impl From<super::V2GetContext> for V2GetContext {
 impl V2GetContext {
     pub fn extract_req(&self, ohttp_relay: Arc<Url>) -> Result<RequestOhttpContext, PayjoinError> {
         self.0
-            .extract_req(Arc::unwrap_or_clone(ohttp_relay.into()))
+            .extract_req(Arc::try_unwrap(ohttp_relay).unwrap_or_else(|arc| (*arc).clone()))
             .map(|(request, ctx)| RequestOhttpContext { request, ohttp_ctx: Arc::new(ctx.into()) })
     }
 

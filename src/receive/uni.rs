@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use super::InputPair;
+use crate::bitcoin_ffi::{Network, OutPoint, Script, TxOut};
 use crate::error::PayjoinError;
-use crate::{
-    ClientResponse, Network, OhttpKeys, OutPoint, PjUriBuilder, Request, Script, TxOut, Url,
-};
+use crate::{ClientResponse, OhttpKeys, PjUriBuilder, Request, Url};
 
 #[derive(Clone, Debug, uniffi::Object)]
 pub struct Receiver(pub super::Receiver);
@@ -307,8 +306,10 @@ impl WantsInputs {
         &self,
         candidate_inputs: Vec<Arc<InputPair>>,
     ) -> Result<Arc<InputPair>, PayjoinError> {
-        let candidate_inputs: Vec<InputPair> =
-            candidate_inputs.into_iter().map(|pair| Arc::unwrap_or_clone(pair).into()).collect();
+        let candidate_inputs: Vec<InputPair> = candidate_inputs
+            .into_iter()
+            .map(|pair| Arc::try_unwrap(pair).unwrap_or_else(|arc| (*arc).clone()).into())
+            .collect();
 
         self.0.try_preserving_privacy(candidate_inputs).map(|t| Arc::new(t.into()))
     }
@@ -317,8 +318,10 @@ impl WantsInputs {
         &self,
         replacement_inputs: Vec<Arc<InputPair>>,
     ) -> Result<Arc<WantsInputs>, PayjoinError> {
-        let replacement_inputs: Vec<InputPair> =
-            replacement_inputs.into_iter().map(|pair| Arc::unwrap_or_clone(pair).into()).collect();
+        let replacement_inputs: Vec<InputPair> = replacement_inputs
+            .into_iter()
+            .map(|pair| Arc::try_unwrap(pair).unwrap_or_else(|arc| (*arc).clone()).into())
+            .collect();
         self.0
             .contribute_inputs(replacement_inputs)
             .map(|t| Arc::new(t.into()))
@@ -381,8 +384,8 @@ impl From<super::PayjoinProposal> for PayjoinProposal {
 
 #[uniffi::export]
 impl PayjoinProposal {
-    pub fn utxos_to_be_locked(&self) -> Vec<OutPoint> {
-        let mut outpoints: Vec<OutPoint> = Vec::new();
+    pub fn utxos_to_be_locked(&self) -> Vec<crate::OutPoint> {
+        let mut outpoints: Vec<crate::OutPoint> = Vec::new();
         for e in <PayjoinProposal as Into<super::PayjoinProposal>>::into(self.clone())
             .utxos_to_be_locked()
         {

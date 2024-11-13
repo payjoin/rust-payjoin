@@ -118,10 +118,7 @@ impl Sender {
     }
 
     /// Extract serialized Request and Context from a Payjoin Proposal.
-    pub fn extract_v2(
-        &self,
-        ohttp_relay: Url,
-    ) -> Result<(Request, V2PostContext), PayjoinError> {
+    pub fn extract_v2(&self, ohttp_relay: Url) -> Result<(Request, V2PostContext), PayjoinError> {
         match self.0.extract_v2(ohttp_relay.into()) {
             Ok((req, ctx)) => Ok((req.into(), ctx.into())),
             Err(e) => Err(e.into()),

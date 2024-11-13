@@ -84,9 +84,9 @@ impl PjUri {
     pub fn address(&self) -> String {
         self.0.clone().address.to_string()
     }
-    /// Number of btc  requested as payment
-    pub fn amount(&self) -> Option<f64> {
-        self.0.clone().amount.map(|e| e.to_btc())
+    /// Number of sats requested as payment
+    pub fn amount_sats(&self) -> Option<u64> {
+        self.0.clone().amount.map(|e| e.to_sat())
     }
     pub fn as_string(&self) -> String {
         self.0.clone().to_string()
@@ -160,7 +160,7 @@ impl PjUriBuilder {
         )
         .into())
     }
-    ///Accepts the amount you want to receive in sats and sets it in btc .
+    /// Accepts the amount you want to receive in sats and sets it in btc .
     pub fn amount(&self, amount: u64) -> Arc<Self> {
         let amount = payjoin::bitcoin::Amount::from_sat(amount);
         Arc::new(self.0.clone().amount(amount).into())
@@ -204,9 +204,9 @@ impl PjUriBuilder {
         )
         .into())
     }
-    ///Accepts the amount you want to receive in sats and sets it in btc .
-    pub fn amount(&self, amount: u64) -> Self {
-        let amount = payjoin::bitcoin::Amount::from_sat(amount);
+    /// Accepts the amount you want to receive in sats and sets it in btc .
+    pub fn amount(&self, sats: u64) -> Self {
+        let amount = payjoin::bitcoin::Amount::from_sat(sats);
         self.0.clone().amount(amount).into()
     }
     /// Set the message.

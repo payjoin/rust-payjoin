@@ -194,21 +194,26 @@ fn build_original_psbt(
 ) -> Result<PartiallySignedTransaction, BoxError> {
     let wallet_mutex = sender_wallet.get_wallet();
     let mut builder = wallet_mutex.build_tx();
+    dbg!("building original psbt");
     let script = bdk::bitcoin::Address::from_str(pj_uri.address().as_str())?
         .assume_checked()
         .script_pubkey();
+    dbg!("adding recipient");
     builder
         .fee_rate(FeeRate::from_sat_per_kwu(2000.0))
-        .add_recipient(script, (pj_uri.amount().unwrap() * 100000000.0) as u64)
+        .add_recipient(script, pj_uri.amount_sats().unwrap())
         .fee_rate(FeeRate::from_sat_per_vb(5.0))
         .only_witness_utxo();
+    dbg!("finishing");
     let (mut psbt, _) = builder.finish()?;
+    dbg!("signing");
     wallet_mutex
         .sign(
             &mut psbt,
             SignOptions { trust_witness_utxo: true, try_finalize: true, ..Default::default() },
         )
         .unwrap();
+    dbg!("removing bip32 derivation paths");
     sender_wallet.remove_bip32_derivation_paths(&mut psbt);
     Ok(psbt)
 }
@@ -221,8 +226,9 @@ mod v2 {
 
     use bdk::bitcoin::Address;
     use bdk::wallet::AddressIndex;
+    use bitcoin_ffi::Network;
     use http::StatusCode;
-    use payjoin_ffi::bitcoin::Network;
+    use payjoin::bitcoin::Amount;
     use payjoin_ffi::error::PayjoinError;
     use payjoin_ffi::receive::{PayjoinProposal, Receiver, UncheckedProposal};
     use payjoin_ffi::send::SenderBuilder;
@@ -269,7 +275,8 @@ mod v2 {
             // test session with expiry in the future
             let session =
                 initialize_session(address.clone(), directory.clone(), ohttp_keys.clone(), None)?;
-            let pj_uri_string = session.pj_uri_builder().amount(5000000).build().as_string();
+            let pj_uri_string =
+                session.pj_uri_builder().amount(Amount::ONE_BTC.to_sat()).build().as_string();
             // Poll receive request
             let (request, client_response) = session.extract_req()?;
             let response = agent.post(request.url.as_string()).body(request.body).send().await?;
@@ -389,7 +396,7 @@ mod v2 {
             .unwrap()
             .identify_receiver_outputs(|script| is_script_owned(&receiver, script.clone()))
             .expect("Receiver should have at least one output");
-        _ = wants_outputs.substitute_receiver_script(&payjoin_ffi::Script::new(
+        _ = wants_outputs.substitute_receiver_script(&bitcoin_ffi::Script::new(
             receiver.get_address(AddressIndex::New).script_pubkey().into_bytes(),
         ));
         let wants_inputs = wants_outputs.commit_outputs();
@@ -470,7 +477,6 @@ fn input_pair_from_local_utxo(utxo: LocalUtxo) -> Result<InputPair, BoxError> {
         ..Default::default()
     };
     InputPair::new(txin.clone().into(), psbtin.clone().into())
-        //    .map(|ip| Arc::new(ip))
         .map_err(|e| format!("Failed to create input pair: {:?}", e).into())
 }
 
@@ -480,7 +486,7 @@ fn is_script_owned(wallet: &Wallet, script: Vec<u8>) -> Result<bool, PayjoinErro
         .map_err(|x| PayjoinError::UnexpectedError { message: x.to_string() })
 }
 
-fn mock_is_output_known(_: payjoin_ffi::OutPoint) -> Result<bool, PayjoinError> {
+fn mock_is_output_known(_: bitcoin_ffi::OutPoint) -> Result<bool, PayjoinError> {
     Ok(false)
 }
 

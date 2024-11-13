@@ -200,7 +200,7 @@ mod integration {
             let port = find_free_port();
             let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
             tokio::select!(
-                _ = init_directory(port, (cert.clone(), key)) => panic!("Directory server is long running"),
+                err = init_directory(port, (cert.clone(), key)) => panic!("Directory server exited early: {:?}", err),
                 res = try_request_with_bad_keys(directory, bad_ohttp_keys, cert) => {
                     assert_eq!(
                         res.unwrap().headers().get("content-type").unwrap(),
@@ -238,8 +238,8 @@ mod integration {
             let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
             let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
             tokio::select!(
-            _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay is long running"),
-            _ = init_directory(directory_port, (cert.clone(), key)) => panic!("Directory server is long running"),
+            err = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay exited early: {:?}", err),
+            err = init_directory(directory_port, (cert.clone(), key)) => panic!("Directory server exited early: {:?}", err),
             res = do_expiration_tests(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
@@ -307,8 +307,8 @@ mod integration {
             let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
             let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
             tokio::select!(
-            _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay is long running"),
-            _ = init_directory(directory_port, (cert.clone(), key)) => panic!("Directory server is long running"),
+            err = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay exited early: {:?}", err),
+            err = init_directory(directory_port, (cert.clone(), key)) => panic!("Directory server exited early: {:?}", err),
             res = do_v2_send_receive(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
@@ -436,8 +436,8 @@ mod integration {
             let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
             let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
             tokio::select!(
-            _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay is long running"),
-            _ = init_directory(directory_port, (cert.clone(), key)) => panic!("Directory server is long running"),
+            err = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay exited early: {:?}", err),
+            err = init_directory(directory_port, (cert.clone(), key)) => panic!("Directory server exited early: {:?}", err),
             res = do_v2_send_receive(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
@@ -648,8 +648,8 @@ mod integration {
             let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
             let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
             tokio::select!(
-            _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay is long running"),
-            _ = init_directory(directory_port, (cert.clone(), key)) => panic!("Directory server is long running"),
+            err = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay exited early: {:?}", err),
+            err = init_directory(directory_port, (cert.clone(), key)) => panic!("Directory server exited early: {:?}", err),
             res = do_v1_to_v2(ohttp_relay, directory, cert) => assert!(res.is_ok()),
             );
 

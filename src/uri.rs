@@ -230,8 +230,6 @@ impl PjUriBuilder {
 #[cfg(test)]
 #[cfg(not(feature = "uniffi"))]
 mod tests {
-    use std::sync::Arc;
-
     use bdk::bitcoin;
 
     use crate::uri::{PjUriBuilder, Url};

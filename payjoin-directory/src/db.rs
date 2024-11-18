@@ -7,6 +7,19 @@ use tracing::debug;
 const DEFAULT_COLUMN: &str = "";
 const PJ_V1_COLUMN: &str = "pjv1";
 
+// TODO move to payjoin crate as pub?
+// TODO impl From<HpkePublicKey> for ShortId
+// TODO impl Display for ShortId (Base64)
+// TODO impl TryFrom<&str> for ShortId (Base64)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ShortId(pub [u8; 8]);
+
+impl ShortId {
+    pub fn column_key(&self, column: &str) -> Vec<u8> {
+        self.0.iter().chain(column.as_bytes()).copied().collect()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct DbPool {
     client: Client,
@@ -19,23 +32,28 @@ impl DbPool {
         Ok(Self { client, timeout })
     }
 
-    pub async fn push_default(&self, pubkey_id: &str, data: Vec<u8>) -> RedisResult<()> {
+    pub async fn push_default(&self, pubkey_id: &ShortId, data: Vec<u8>) -> RedisResult<()> {
         self.push(pubkey_id, DEFAULT_COLUMN, data).await
     }
 
-    pub async fn peek_default(&self, pubkey_id: &str) -> Option<RedisResult<Vec<u8>>> {
+    pub async fn peek_default(&self, pubkey_id: &ShortId) -> Option<RedisResult<Vec<u8>>> {
         self.peek_with_timeout(pubkey_id, DEFAULT_COLUMN).await
     }
 
-    pub async fn push_v1(&self, pubkey_id: &str, data: Vec<u8>) -> RedisResult<()> {
+    pub async fn push_v1(&self, pubkey_id: &ShortId, data: Vec<u8>) -> RedisResult<()> {
         self.push(pubkey_id, PJ_V1_COLUMN, data).await
     }
 
-    pub async fn peek_v1(&self, pubkey_id: &str) -> Option<RedisResult<Vec<u8>>> {
+    pub async fn peek_v1(&self, pubkey_id: &ShortId) -> Option<RedisResult<Vec<u8>>> {
         self.peek_with_timeout(pubkey_id, PJ_V1_COLUMN).await
     }
 
-    async fn push(&self, pubkey_id: &str, channel_type: &str, data: Vec<u8>) -> RedisResult<()> {
+    async fn push(
+        &self,
+        pubkey_id: &ShortId,
+        channel_type: &str,
+        data: Vec<u8>,
+    ) -> RedisResult<()> {
         let mut conn = self.client.get_async_connection().await?;
         let key = channel_name(pubkey_id, channel_type);
         () = conn.set(&key, data.clone()).await?;
@@ -45,13 +63,13 @@ impl DbPool {
 
     async fn peek_with_timeout(
         &self,
-        pubkey_id: &str,
+        pubkey_id: &ShortId,
         channel_type: &str,
     ) -> Option<RedisResult<Vec<u8>>> {
         tokio::time::timeout(self.timeout, self.peek(pubkey_id, channel_type)).await.ok()
     }
 
-    async fn peek(&self, pubkey_id: &str, channel_type: &str) -> RedisResult<Vec<u8>> {
+    async fn peek(&self, pubkey_id: &ShortId, channel_type: &str) -> RedisResult<Vec<u8>> {
         let mut conn = self.client.get_async_connection().await?;
         let key = channel_name(pubkey_id, channel_type);
 
@@ -99,6 +117,6 @@ impl DbPool {
     }
 }
 
-fn channel_name(pubkey_id: &str, channel_type: &str) -> String {
-    format!("{}:{}", pubkey_id, channel_type)
+fn channel_name(pubkey_id: &ShortId, channel_type: &str) -> Vec<u8> {
+    pubkey_id.column_key(channel_type)
 }

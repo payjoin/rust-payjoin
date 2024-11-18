@@ -4,6 +4,9 @@ use bitcoin::locktime::absolute::LockTime;
 use bitcoin::transaction::Version;
 use bitcoin::{AddressType, Sequence};
 
+#[cfg(feature = "v2")]
+use crate::uri::error::ParseReceiverPubkeyError;
+
 /// Error that may occur when the response from receiver is malformed.
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
@@ -194,7 +197,7 @@ pub(crate) enum InternalCreateRequestError {
     #[cfg(feature = "v2")]
     OhttpEncapsulation(crate::ohttp::OhttpEncapsulationError),
     #[cfg(feature = "v2")]
-    ParseSubdirectory(ParseSubdirectoryError),
+    ParseReceiverPubkey(ParseReceiverPubkeyError),
     #[cfg(feature = "v2")]
     MissingOhttpConfig,
     #[cfg(feature = "v2")]
@@ -225,7 +228,7 @@ impl fmt::Display for CreateRequestError {
             #[cfg(feature = "v2")]
             OhttpEncapsulation(e) => write!(f, "v2 error: {}", e),
             #[cfg(feature = "v2")]
-            ParseSubdirectory(e) => write!(f, "cannot parse subdirectory: {}", e),
+            ParseReceiverPubkey(e) => write!(f, "cannot parse receiver public key: {}", e),
             #[cfg(feature = "v2")]
             MissingOhttpConfig => write!(f, "no ohttp configuration with which to make a v2 request available"),
             #[cfg(feature = "v2")]
@@ -258,7 +261,7 @@ impl std::error::Error for CreateRequestError {
             #[cfg(feature = "v2")]
             OhttpEncapsulation(error) => Some(error),
             #[cfg(feature = "v2")]
-            ParseSubdirectory(error) => Some(error),
+            ParseReceiverPubkey(error) => Some(error),
             #[cfg(feature = "v2")]
             MissingOhttpConfig => None,
             #[cfg(feature = "v2")]
@@ -278,44 +281,9 @@ impl From<crate::psbt::AddressTypeError> for CreateRequestError {
 }
 
 #[cfg(feature = "v2")]
-impl From<ParseSubdirectoryError> for CreateRequestError {
-    fn from(value: ParseSubdirectoryError) -> Self {
-        CreateRequestError(InternalCreateRequestError::ParseSubdirectory(value))
-    }
-}
-
-#[cfg(feature = "v2")]
-#[derive(Debug)]
-pub(crate) enum ParseSubdirectoryError {
-    MissingSubdirectory,
-    SubdirectoryNotBase64(bitcoin::base64::DecodeError),
-    SubdirectoryInvalidPubkey(crate::hpke::HpkeError),
-}
-
-#[cfg(feature = "v2")]
-impl std::fmt::Display for ParseSubdirectoryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        use ParseSubdirectoryError::*;
-
-        match &self {
-            MissingSubdirectory => write!(f, "subdirectory is missing"),
-            SubdirectoryNotBase64(e) => write!(f, "subdirectory is not valid base64: {}", e),
-            SubdirectoryInvalidPubkey(e) =>
-                write!(f, "subdirectory does not represent a valid pubkey: {}", e),
-        }
-    }
-}
-
-#[cfg(feature = "v2")]
-impl std::error::Error for ParseSubdirectoryError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        use ParseSubdirectoryError::*;
-
-        match &self {
-            MissingSubdirectory => None,
-            SubdirectoryNotBase64(error) => Some(error),
-            SubdirectoryInvalidPubkey(error) => Some(error),
-        }
+impl From<ParseReceiverPubkeyError> for CreateRequestError {
+    fn from(value: ParseReceiverPubkeyError) -> Self {
+        CreateRequestError(InternalCreateRequestError::ParseReceiverPubkey(value))
     }
 }
 

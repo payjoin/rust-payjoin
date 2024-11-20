@@ -4,7 +4,9 @@ use std::{error, fmt};
 use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
 
-pub fn ohttp_encapsulate(
+pub const PADDED_MESSAGE_BYTES: usize = 8192;
+
+pub(crate) fn ohttp_encapsulate(
     ohttp_keys: &mut ohttp::KeyConfig,
     method: &str,
     target_resource: &str,
@@ -38,7 +40,7 @@ pub fn ohttp_encapsulate(
 }
 
 /// decapsulate ohttp, bhttp response and return http response body and status code
-pub fn ohttp_decapsulate(
+pub(crate) fn ohttp_decapsulate(
     res_ctx: ohttp::ClientResponse,
     ohttp_body: &[u8],
 ) -> Result<http::Response<Vec<u8>>, OhttpEncapsulationError> {
@@ -57,7 +59,7 @@ pub fn ohttp_decapsulate(
 
 /// Error from de/encapsulating an Oblivious HTTP request or response.
 #[derive(Debug)]
-pub enum OhttpEncapsulationError {
+pub(crate) enum OhttpEncapsulationError {
     Http(http::Error),
     Ohttp(ohttp::Error),
     Bhttp(bhttp::Error),

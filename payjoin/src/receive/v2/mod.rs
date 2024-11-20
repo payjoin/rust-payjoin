@@ -113,7 +113,7 @@ impl Receiver {
     /// indicating no UncheckedProposal is available yet.
     pub fn process_res(
         &mut self,
-        mut body: impl std::io::Read,
+        mut body: impl std::io::Read, // FIXME: could be &[u8], not streamed
         context: ohttp::ClientResponse,
     ) -> Result<Option<UncheckedProposal>, Error> {
         let mut buf = Vec::new();
@@ -139,10 +139,12 @@ impl Receiver {
         ohttp_encapsulate(&mut self.context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
 
+    // FIXME: could be &str
     fn extract_proposal_from_v1(&mut self, response: String) -> Result<UncheckedProposal, Error> {
         Ok(self.unchecked_from_payload(response)?)
     }
 
+    // FIXME: could be &[u8] because we've got a known length
     fn extract_proposal_from_v2(&mut self, response: Vec<u8>) -> Result<UncheckedProposal, Error> {
         let (payload_bytes, e) = decrypt_message_a(&response, self.context.s.secret_key().clone())?;
         self.context.e = Some(e);
@@ -152,7 +154,7 @@ impl Receiver {
 
     fn unchecked_from_payload(
         &mut self,
-        payload: String,
+        payload: String, // FIXME: could be &str
     ) -> Result<UncheckedProposal, RequestError> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
@@ -347,9 +349,9 @@ impl WantsOutputs {
     pub fn substitute_receiver_script(
         self,
         output_script: &Script,
-    ) -> Result<WantsOutputs, OutputSubstitutionError> {
+    ) -> Result<Self, OutputSubstitutionError> {
         let inner = self.inner.substitute_receiver_script(output_script)?;
-        Ok(WantsOutputs { inner, context: self.context })
+        Ok(Self { inner, context: self.context })
     }
 
     /// Replace **all** receiver outputs with one or more provided outputs.
@@ -359,11 +361,11 @@ impl WantsOutputs {
     /// receiver needs to pay for additional miner fees (e.g. in the case of adding many outputs).
     pub fn replace_receiver_outputs(
         self,
-        replacement_outputs: Vec<TxOut>,
+        replacement_outputs: Vec<TxOut>, // FIXME could be Iterator<Item = &TxOut>
         drain_script: &Script,
-    ) -> Result<WantsOutputs, OutputSubstitutionError> {
+    ) -> Result<Self, OutputSubstitutionError> {
         let inner = self.inner.replace_receiver_outputs(replacement_outputs, drain_script)?;
-        Ok(WantsOutputs { inner, context: self.context })
+        Ok(Self { inner, context: self.context })
     }
 
     /// Proceed to the input contribution step.
@@ -395,7 +397,7 @@ impl WantsInputs {
     /// https://eprint.iacr.org/2022/589.pdf
     pub fn try_preserving_privacy(
         &self,
-        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        candidate_inputs: impl IntoIterator<Item = &InputPair>, // FIXME &InputPair & clone out
     ) -> Result<InputPair, SelectionError> {
         self.inner.try_preserving_privacy(candidate_inputs)
     }
@@ -404,7 +406,7 @@ impl WantsInputs {
     /// Any excess input amount is added to the change_vout output indicated previously.
     pub fn contribute_inputs(
         self,
-        inputs: impl IntoIterator<Item = InputPair>,
+        inputs: impl IntoIterator<Item = InputPair>, // Own and place in payjoin_psbt
     ) -> Result<WantsInputs, InputContributionError> {
         let inner = self.inner.contribute_inputs(inputs)?;
         Ok(WantsInputs { inner, context: self.context })
@@ -450,10 +452,6 @@ pub struct PayjoinProposal {
 }
 
 impl PayjoinProposal {
-    pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
-        self.inner.utxos_to_be_locked()
-    }
-
     pub fn is_output_substitution_disabled(&self) -> bool {
         self.inner.is_output_substitution_disabled()
     }
@@ -509,7 +507,7 @@ impl PayjoinProposal {
     /// choose to broadcast the original PSBT.
     pub fn process_res(
         &self,
-        res: Vec<u8>,
+        res: Vec<u8>, // FIXME could be &[u8]
         ohttp_context: ohttp::ClientResponse,
     ) -> Result<(), Error> {
         let res = ohttp_decapsulate(ohttp_context, &res)?;

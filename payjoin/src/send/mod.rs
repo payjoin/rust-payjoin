@@ -277,7 +277,7 @@ impl Sender {
     #[cfg(feature = "v2")]
     pub fn extract_v2(
         &self,
-        ohttp_relay: Url,
+        ohttp_relay: Url, // FIXME: could be &Url and clone inside to help caller
     ) -> Result<(Request, V2PostContext), CreateRequestError> {
         use crate::uri::UrlExt;
         if let Some(expiry) = self.endpoint.exp() {
@@ -342,7 +342,7 @@ pub struct V1Context {
 impl V1Context {
     pub fn process_response(
         self,
-        response: &mut impl std::io::Read,
+        response: &mut impl std::io::Read, // FIXME: could be &[u8] bc you need the whole thing
     ) -> Result<Psbt, ResponseError> {
         self.psbt_context.process_response(response)
     }
@@ -360,11 +360,9 @@ pub struct V2PostContext {
 impl V2PostContext {
     pub fn process_response(
         self,
-        response: &mut impl std::io::Read,
+        response: &[u8], // FIXME: could be &[u8] bc caller doesn't need to track read cursor
     ) -> Result<V2GetContext, ResponseError> {
-        let mut res_buf = Vec::new();
-        response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
-        let response = ohttp_decapsulate(self.ohttp_ctx, &res_buf)
+        let response = ohttp_decapsulate(self.ohttp_ctx, response)
             .map_err(InternalValidationError::OhttpEncapsulation)?;
         match response.status() {
             http::StatusCode::OK => {
@@ -392,7 +390,7 @@ pub struct V2GetContext {
 impl V2GetContext {
     pub fn extract_req(
         &self,
-        ohttp_relay: Url,
+        ohttp_relay: Url, // FIXME: could be &Url and clone inside to help caller
     ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
         use crate::uri::UrlExt;
         let mut url = self.endpoint.clone();
@@ -417,12 +415,10 @@ impl V2GetContext {
 
     pub fn process_response(
         &self,
-        response: &mut impl std::io::Read,
+        response: &[u8], // FIXME: could be &[u8] bc caller doesn't need to track read cursor
         ohttp_ctx: ohttp::ClientResponse,
     ) -> Result<Option<Psbt>, ResponseError> {
-        let mut res_buf = Vec::new();
-        response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
-        let response = ohttp_decapsulate(ohttp_ctx, &res_buf)
+        let response = ohttp_decapsulate(ohttp_ctx, response)
             .map_err(InternalValidationError::OhttpEncapsulation)?;
         let body = match response.status() {
             http::StatusCode::OK => response.body().to_vec(),
@@ -465,7 +461,7 @@ struct HpkeContext {
 
 #[cfg(feature = "v2")]
 impl HpkeContext {
-    pub fn new(receiver: HpkePublicKey) -> Self {
+    fn new(receiver: HpkePublicKey) -> Self {
         Self { receiver, reply_pair: HpkeKeyPair::gen_keypair() }
     }
 }
@@ -496,7 +492,7 @@ impl PsbtContext {
     #[inline]
     pub fn process_response(
         self,
-        response: &mut impl std::io::Read,
+        response: &mut impl std::io::Read, // FIXME: could be &[u8] or &str ref IF POSSIBLE
     ) -> Result<Psbt, ResponseError> {
         let mut res_str = String::new();
         response.read_to_string(&mut res_str).map_err(InternalValidationError::Io)?;
@@ -859,7 +855,7 @@ fn serialize_v2_body(
 }
 
 fn serialize_url(
-    endpoint: Url,
+    endpoint: Url, // FIXME: could be &Url and clone inside to help caller
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,

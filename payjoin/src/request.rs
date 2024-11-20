@@ -27,10 +27,14 @@ pub struct Request {
 }
 
 impl Request {
+    // FIXME: could be &Url and clone inside to help caller
+    // FIXME: could be &[u8] and clone inside to help caller
     pub fn new_v1(url: Url, body: Vec<u8>) -> Self {
         Self { url, content_type: V1_REQ_CONTENT_TYPE, body }
     }
 
+    // FIXME: could be &Url and clone inside to help caller
+    // FIXME: could be &[u8] and clone inside to help caller
     #[cfg(feature = "v2")]
     pub fn new_v2(url: Url, body: Vec<u8>) -> Self {
         Self { url, content_type: V2_REQ_CONTENT_TYPE, body }

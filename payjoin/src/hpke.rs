@@ -1,7 +1,9 @@
 use std::ops::Deref;
 use std::{error, fmt};
 
-use bitcoin::key::constants::{ELLSWIFT_ENCODING_SIZE, UNCOMPRESSED_PUBLIC_KEY_SIZE};
+use bitcoin::key::constants::{
+    ELLSWIFT_ENCODING_SIZE, PUBLIC_KEY_SIZE, UNCOMPRESSED_PUBLIC_KEY_SIZE,
+};
 use bitcoin::secp256k1::ellswift::ElligatorSwift;
 use hpke::aead::ChaCha20Poly1305;
 use hpke::kdf::HkdfSha256;
@@ -97,7 +99,7 @@ impl<'de> serde::Deserialize<'de> for HpkeSecretKey {
 pub struct HpkePublicKey(pub PublicKey);
 
 impl HpkePublicKey {
-    pub fn to_compressed_bytes(&self) -> [u8; 33] {
+    pub fn to_compressed_bytes(&self) -> [u8; PUBLIC_KEY_SIZE] {
         let compressed_key = bitcoin::secp256k1::PublicKey::from_slice(&self.0.to_bytes())
             .expect("Invalid public key from known valid bytes");
         compressed_key.serialize()
@@ -148,7 +150,7 @@ impl<'de> serde::Deserialize<'de> for HpkePublicKey {
 /// Message A is sent from the sender to the receiver containing an Original PSBT payload
 #[cfg(feature = "send")]
 pub fn encrypt_message_a(
-    body: Vec<u8>,
+    body: Vec<u8>, // FIXME: could be &[u8]
     reply_pk: &HpkePublicKey,
     receiver_pk: &HpkePublicKey,
 ) -> Result<Vec<u8>, HpkeError> {
@@ -172,7 +174,7 @@ pub fn encrypt_message_a(
 #[cfg(feature = "receive")]
 pub fn decrypt_message_a(
     message_a: &[u8],
-    receiver_sk: HpkeSecretKey,
+    receiver_sk: HpkeSecretKey, // FIXME: could be &HpkeSecretKey
 ) -> Result<(Vec<u8>, HpkePublicKey), HpkeError> {
     use std::io::{Cursor, Read};
 
@@ -203,7 +205,7 @@ pub fn decrypt_message_a(
 /// Message B is sent from the receiver to the sender containing a Payjoin PSBT payload or an error
 #[cfg(feature = "receive")]
 pub fn encrypt_message_b(
-    mut plaintext: Vec<u8>,
+    mut plaintext: Vec<u8>, // FIXME: could be &[u8]
     receiver_keypair: &HpkeKeyPair,
     sender_pk: &HpkePublicKey,
 ) -> Result<Vec<u8>, HpkeError> {
@@ -227,8 +229,8 @@ pub fn encrypt_message_b(
 #[cfg(feature = "send")]
 pub fn decrypt_message_b(
     message_b: &[u8],
-    receiver_pk: HpkePublicKey,
-    sender_sk: HpkeSecretKey,
+    receiver_pk: HpkePublicKey, // FIXME: could be &HpkePublicKey
+    sender_sk: HpkeSecretKey,   // FIXME: could be &HpkeSecretKey
 ) -> Result<Vec<u8>, HpkeError> {
     let enc = message_b.get(..ELLSWIFT_ENCODING_SIZE).ok_or(HpkeError::PayloadTooShort)?;
     let enc = encapped_key_from_ellswift_bytes(enc)?;
@@ -242,6 +244,8 @@ pub fn decrypt_message_b(
     Ok(plaintext)
 }
 
+// FIXME: could be &mut [u8; padded_length] and return &[u8; padded_length]
+// ACTYUALLY function should not exist at all
 fn pad_plaintext(msg: &mut Vec<u8>, padded_length: usize) -> Result<&[u8], HpkeError> {
     if msg.len() > padded_length {
         return Err(HpkeError::PayloadTooLarge { actual: msg.len(), max: padded_length });

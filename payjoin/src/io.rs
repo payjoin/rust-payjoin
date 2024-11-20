@@ -9,7 +9,7 @@ use crate::{OhttpKeys, Url};
 ///
 /// * `payjoin_directory`: The payjoin directory from which to fetch the ohttp keys.  This
 ///   directory stores and forwards payjoin client payloads.
-///
+/// // FIXME split into two functions so that the docstring can be right
 /// * `cert_der` (optional): The DER-encoded certificate to use for local HTTPS connections.  This
 ///   parameter is only available when the "danger-local-https" feature is enabled.
 #[cfg(feature = "v2")]

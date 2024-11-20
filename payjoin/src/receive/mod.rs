@@ -109,7 +109,7 @@ pub struct UncheckedProposal {
 
 impl UncheckedProposal {
     pub fn from_request(
-        mut body: impl std::io::Read,
+        mut body: impl std::io::Read, // FIXME: could be &[u8] bc you need the whole thing
         query: &str,
         headers: impl Headers,
     ) -> Result<Self, RequestError> {
@@ -142,9 +142,7 @@ impl UncheckedProposal {
         let params = Params::from_query_pairs(pairs).map_err(InternalRequestError::SenderParams)?;
         log::debug!("Received request with params: {:?}", params);
 
-        // TODO check that params are valid for the request's Original PSBT
-
-        Ok(UncheckedProposal { psbt, params })
+        Ok(Self { psbt, params })
     }
 
     /// The Sender's Original PSBT transaction
@@ -354,7 +352,7 @@ impl WantsOutputs {
     pub fn substitute_receiver_script(
         self,
         output_script: &Script,
-    ) -> Result<WantsOutputs, OutputSubstitutionError> {
+    ) -> Result<Self, OutputSubstitutionError> {
         let output_value = self.original_psbt.unsigned_tx.output[self.change_vout].value;
         let outputs = vec![TxOut { value: output_value, script_pubkey: output_script.into() }];
         self.replace_receiver_outputs(outputs, output_script)
@@ -369,7 +367,7 @@ impl WantsOutputs {
         self,
         replacement_outputs: Vec<TxOut>,
         drain_script: &Script,
-    ) -> Result<WantsOutputs, OutputSubstitutionError> {
+    ) -> Result<Self, OutputSubstitutionError> {
         let mut payjoin_psbt = self.original_psbt.clone();
         let mut outputs = vec![];
         let mut replacement_outputs = replacement_outputs.clone();
@@ -427,7 +425,7 @@ impl WantsOutputs {
         // Update the payjoin PSBT outputs
         payjoin_psbt.outputs = vec![Default::default(); outputs.len()];
         payjoin_psbt.unsigned_tx.output = outputs;
-        Ok(WantsOutputs {
+        Ok(Self {
             original_psbt: self.original_psbt,
             payjoin_psbt,
             params: self.params,
@@ -494,7 +492,7 @@ impl WantsInputs {
     /// A simple consolidation is otherwise chosen if available.
     pub fn try_preserving_privacy(
         &self,
-        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        candidate_inputs: impl IntoIterator<Item = InputPair>, // FIXME &InputPair & clone out
     ) -> Result<InputPair, SelectionError> {
         let mut candidate_inputs = candidate_inputs.into_iter().peekable();
         if candidate_inputs.peek().is_none() {
@@ -521,7 +519,7 @@ impl WantsInputs {
     /// https://eprint.iacr.org/2022/589.pdf
     fn avoid_uih(
         &self,
-        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        candidate_inputs: impl IntoIterator<Item = InputPair>, // FIXME &InputPair & clone out
     ) -> Result<InputPair, SelectionError> {
         let min_original_out_sats = self
             .payjoin_psbt
@@ -559,7 +557,7 @@ impl WantsInputs {
 
     fn select_first_candidate(
         &self,
-        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        candidate_inputs: impl IntoIterator<Item = InputPair>, // FIXME &InputPair & clone out
     ) -> Result<InputPair, SelectionError> {
         candidate_inputs.into_iter().next().ok_or(InternalSelectionError::NotFound.into())
     }
@@ -569,7 +567,7 @@ impl WantsInputs {
     pub fn contribute_inputs(
         self,
         inputs: impl IntoIterator<Item = InputPair>,
-    ) -> Result<WantsInputs, InputContributionError> {
+    ) -> Result<Self, InputContributionError> {
         let mut payjoin_psbt = self.payjoin_psbt.clone();
         // The payjoin proposal must not introduce mixed input sequence numbers
         let original_sequence = self
@@ -609,7 +607,7 @@ impl WantsInputs {
             return Err(InternalInputContributionError::ValueTooLow.into());
         }
 
-        Ok(WantsInputs {
+        Ok(Self {
             original_psbt: self.original_psbt,
             payjoin_psbt,
             params: self.params,
@@ -897,10 +895,6 @@ pub struct PayjoinProposal {
 }
 
 impl PayjoinProposal {
-    pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
-        self.payjoin_psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
-    }
-
     pub fn is_output_substitution_disabled(&self) -> bool {
         self.params.disable_output_substitution
     }

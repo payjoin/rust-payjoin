@@ -61,6 +61,8 @@ pub trait UriExt<'a>: sealed::UriExt {
 }
 
 impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
+    // FIXME custom enum since error is actually a default fallback for pj unsupported
+    // enumerate reasons why this might fail
     fn check_pj_supported(self) -> Result<PjUri<'a>, Box<bip21::Uri<'a>>> {
         match self.extras {
             MaybePayjoinExtras::Supported(payjoin) => {
@@ -116,7 +118,7 @@ impl PjUriBuilder {
     pub fn new(
         address: Address,
         origin: Url,
-        #[cfg(feature = "v2")] receiver_pubkey: Option<HpkePublicKey>,
+        #[cfg(feature = "v2")] receiver_pubkey: Option<HpkePublicKey>, // FIXME make Option<(pk, keys, exp)>
         #[cfg(feature = "v2")] ohttp_keys: Option<OhttpKeys>,
         #[cfg(feature = "v2")] expiry: Option<std::time::SystemTime>,
     ) -> Self {
@@ -149,6 +151,7 @@ impl PjUriBuilder {
     }
 
     /// Set whether or not payjoin output substitution is allowed.
+    #[cfg(not(feature = "v2"))] // TODO ensure v2 options are set imply pjos=true
     pub fn pjos(mut self, pjos: bool) -> Self {
         self.pjos = pjos;
         self

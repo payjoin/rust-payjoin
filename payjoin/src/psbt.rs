@@ -36,9 +36,9 @@ pub(crate) trait PsbtExt: Sized {
     fn proprietary_mut(&mut self) -> &mut BTreeMap<psbt::raw::ProprietaryKey, Vec<u8>>;
     fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>>;
     fn input_pairs(&self) -> Box<dyn Iterator<Item = InternalInputPair<'_>> + '_>;
-    // guarantees that length of psbt input matches that of unsigned_tx inputs and same
+    /// guarantees that length of psbt input matches that of unsigned_tx inputs and same
     /// thing for outputs.
-    fn validate(self) -> Result<Self, InconsistentPsbt>;
+    fn validate(self) -> Result<Self, InconsistentPsbt>; // FIXME a ValidPsbt wrapper makes more semantic sense
     fn validate_input_utxos(&self, treat_missing_as_error: bool) -> Result<(), PsbtInputsError>;
 }
 
@@ -70,6 +70,8 @@ impl PsbtExt for Psbt {
     }
 
     fn validate(self) -> Result<Self, InconsistentPsbt> {
+        // TODO try to simplify trait to handle all validation
+        // TODO use validate_input_utxos here
         let tx_ins = self.unsigned_tx.input.len();
         let psbt_ins = self.inputs.len();
         let tx_outs = self.unsigned_tx.output.len();
@@ -135,7 +137,7 @@ impl InternalInputPair<'_> {
 
     pub fn validate_utxo(
         &self,
-        treat_missing_as_error: bool,
+        treat_missing_as_error: bool, // FIXME never used! remove!
     ) -> Result<(), InternalPsbtInputError> {
         match (&self.psbtin.non_witness_utxo, &self.psbtin.witness_utxo) {
             (None, None) if treat_missing_as_error =>

@@ -4,6 +4,8 @@ use std::{error, fmt};
 use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
 
+pub const PADDED_MESSAGE_BYTES: usize = 8192;
+
 pub fn ohttp_encapsulate(
     ohttp_keys: &mut ohttp::KeyConfig,
     method: &str,
@@ -33,6 +35,7 @@ pub fn ohttp_encapsulate(
     }
     let mut bhttp_req = Vec::new();
     let _ = bhttp_message.write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_req);
+    bhttp_req.resize(PADDED_MESSAGE_BYTES, 0);
     let encapsulated = ctx.encapsulate(&bhttp_req)?;
     Ok(encapsulated)
 }

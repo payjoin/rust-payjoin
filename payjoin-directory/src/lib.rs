@@ -23,7 +23,8 @@ pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
 pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
-const MAX_BUFFER_SIZE: usize = 65536;
+const PADDED_BHTTP_BYTES: usize = 8192;
+const V1_MAX_BUFFER_SIZE: usize = 65536;
 
 const V1_REJECT_RES_JSON: &str =
     r#"{{"errorCode": "original-psbt-rejected ", "message": "Body is not a string"}}"#;
@@ -208,6 +209,7 @@ async fn handle_ohttp_gateway(
     bhttp_res
         .write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_bytes)
         .map_err(|e| HandlerError::InternalServerError(e.into()))?;
+    bhttp_bytes.resize(PADDED_BHTTP_BYTES, 0);
     let ohttp_res = res_ctx
         .encapsulate(&bhttp_bytes)
         .map_err(|e| HandlerError::InternalServerError(e.into()))?;
@@ -323,7 +325,7 @@ async fn put_payjoin_v1(
     let id = decode_short_id(id)?;
     let req =
         body.collect().await.map_err(|e| HandlerError::InternalServerError(e.into()))?.to_bytes();
-    if req.len() > MAX_BUFFER_SIZE {
+    if req.len() > V1_MAX_BUFFER_SIZE {
         return Err(HandlerError::PayloadTooLarge);
     }
 
@@ -344,7 +346,7 @@ async fn post_subdir(
     let id = decode_short_id(id)?;
     let req =
         body.collect().await.map_err(|e| HandlerError::InternalServerError(e.into()))?.to_bytes();
-    if req.len() > MAX_BUFFER_SIZE {
+    if req.len() > V1_MAX_BUFFER_SIZE {
         return Err(HandlerError::PayloadTooLarge);
     }
 

@@ -523,7 +523,7 @@ impl WantsInputs {
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<InputPair, SelectionError> {
-        let min_original_out_sats = self
+        let min_out_sats = self
             .payjoin_psbt
             .unsigned_tx
             .output
@@ -532,7 +532,7 @@ impl WantsInputs {
             .min()
             .unwrap_or(Amount::MAX_MONEY);
 
-        let min_original_in_sats = self
+        let min_in_sats = self
             .payjoin_psbt
             .input_pairs()
             .filter_map(|input| input.previous_txout().ok().map(|txo| txo.value))
@@ -543,8 +543,8 @@ impl WantsInputs {
 
         for input_pair in candidate_inputs {
             let candidate_sats = input_pair.previous_txout().value;
-            let candidate_min_out = min(min_original_out_sats, prior_payment_sats + candidate_sats);
-            let candidate_min_in = min(min_original_in_sats, candidate_sats);
+            let candidate_min_out = min(min_out_sats, prior_payment_sats + candidate_sats);
+            let candidate_min_in = min(min_in_sats, candidate_sats);
 
             if candidate_min_in > candidate_min_out {
                 // The candidate avoids UIH2 but conforms to UIH1: Optimal change heuristic.

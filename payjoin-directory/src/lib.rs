@@ -23,7 +23,11 @@ pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
 pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
-const PADDED_BHTTP_BYTES: usize = 8192;
+const ENCAPSULATED_MESSAGE_BYTES: usize = 8192;
+const CHACHA20_POLY1305_NONCE_LEN: usize = 32; // chacha20poly1305 n_k
+const POLY1305_TAG_SIZE: usize = 16;
+pub const BHTTP_REQ_BYTES: usize =
+    ENCAPSULATED_MESSAGE_BYTES - (CHACHA20_POLY1305_NONCE_LEN + POLY1305_TAG_SIZE);
 const V1_MAX_BUFFER_SIZE: usize = 65536;
 
 const V1_REJECT_RES_JSON: &str =
@@ -209,10 +213,11 @@ async fn handle_ohttp_gateway(
     bhttp_res
         .write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_bytes)
         .map_err(|e| HandlerError::InternalServerError(e.into()))?;
-    bhttp_bytes.resize(PADDED_BHTTP_BYTES, 0);
+    bhttp_bytes.resize(BHTTP_REQ_BYTES, 0);
     let ohttp_res = res_ctx
         .encapsulate(&bhttp_bytes)
         .map_err(|e| HandlerError::InternalServerError(e.into()))?;
+    assert!(ohttp_res.len() == ENCAPSULATED_MESSAGE_BYTES, "Unexpected OHTTP response size");
     Ok(Response::new(full(ohttp_res)))
 }
 

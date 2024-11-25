@@ -358,13 +358,12 @@ pub struct V2PostContext {
 
 #[cfg(feature = "v2")]
 impl V2PostContext {
-    pub fn process_response(
-        self,
-        response: &mut impl std::io::Read,
-    ) -> Result<V2GetContext, ResponseError> {
-        let mut res_buf = Vec::new();
-        response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
-        let response = ohttp_decapsulate(self.ohttp_ctx, &res_buf)
+    pub fn process_response(self, response: &[u8]) -> Result<V2GetContext, ResponseError> {
+        let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
+            response
+                .try_into()
+                .map_err(|_| InternalValidationError::UnexpectedResponseSize(response.len()))?;
+        let response = ohttp_decapsulate(self.ohttp_ctx, response_array)
             .map_err(InternalValidationError::OhttpEncapsulation)?;
         match response.status() {
             http::StatusCode::OK => {
@@ -417,12 +416,15 @@ impl V2GetContext {
 
     pub fn process_response(
         &self,
-        response: &mut impl std::io::Read,
+        response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
     ) -> Result<Option<Psbt>, ResponseError> {
-        let mut res_buf = Vec::new();
-        response.read_to_end(&mut res_buf).map_err(InternalValidationError::Io)?;
-        let response = ohttp_decapsulate(ohttp_ctx, &res_buf)
+        let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
+            response
+                .try_into()
+                .map_err(|_| InternalValidationError::UnexpectedResponseSize(response.len()))?;
+
+        let response = ohttp_decapsulate(ohttp_ctx, response_array)
             .map_err(InternalValidationError::OhttpEncapsulation)?;
         let body = match response.status() {
             http::StatusCode::OK => response.body().to_vec(),

@@ -368,8 +368,7 @@ mod integration {
                     .unwrap();
                 log::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success());
-                let send_ctx =
-                    send_ctx.process_response(&mut response.bytes().await?.to_vec().as_slice())?;
+                let send_ctx = send_ctx.process_response(&response.bytes().await?)?;
                 // POST Original PSBT
 
                 // **********************
@@ -390,8 +389,7 @@ mod integration {
                     .body(req.body)
                     .send()
                     .await?;
-                let res = response.bytes().await?.to_vec();
-                payjoin_proposal.process_res(res, ctx)?;
+                payjoin_proposal.process_res(&response.bytes().await?, ctx)?;
 
                 // **********************
                 // Inside the Sender:
@@ -407,9 +405,8 @@ mod integration {
                     .await
                     .unwrap();
                 log::info!("Response: {:#?}", &response);
-                let checked_payjoin_proposal_psbt = send_ctx
-                    .process_response(&mut response.bytes().await?.to_vec().as_slice(), ohttp_ctx)?
-                    .unwrap();
+                let checked_payjoin_proposal_psbt =
+                    send_ctx.process_response(&response.bytes().await?, ohttp_ctx)?.unwrap();
                 let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
                 log::info!("sent");
@@ -503,8 +500,7 @@ mod integration {
                 let (req, ctx) = session.extract_req()?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 assert!(response.status().is_success());
-                let response_body =
-                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx).unwrap();
+                let response_body = session.process_res(&response.bytes().await?, ctx).unwrap();
                 // No proposal yet since sender has not responded
                 assert!(response_body.is_none());
 
@@ -530,8 +526,7 @@ mod integration {
                     .unwrap();
                 log::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success());
-                let get_ctx =
-                    post_ctx.process_response(&mut response.bytes().await?.to_vec().as_slice())?;
+                let get_ctx = post_ctx.process_response(&response.bytes().await?)?;
                 let (Request { url, body, content_type, .. }, ohttp_ctx) =
                     get_ctx.extract_req(directory.to_owned())?;
                 let response = agent
@@ -541,9 +536,7 @@ mod integration {
                     .send()
                     .await?;
                 // No response body yet since we are async and pushed fallback_psbt to the buffer
-                assert!(get_ctx
-                    .process_response(&mut response.bytes().await?.to_vec().as_slice(), ohttp_ctx)?
-                    .is_none());
+                assert!(get_ctx.process_response(&response.bytes().await?, ohttp_ctx)?.is_none());
 
                 // **********************
                 // Inside the Receiver:
@@ -560,8 +553,7 @@ mod integration {
                 assert!(!payjoin_proposal.is_output_substitution_disabled());
                 let (req, ctx) = payjoin_proposal.extract_v2_req()?;
                 let response = agent.post(req.url).body(req.body).send().await?;
-                let res = response.bytes().await?.to_vec();
-                payjoin_proposal.process_res(res, ctx)?;
+                payjoin_proposal.process_res(&response.bytes().await?, ctx)?;
 
                 // **********************
                 // Inside the Sender:
@@ -575,9 +567,8 @@ mod integration {
                     .body(body.clone())
                     .send()
                     .await?;
-                let checked_payjoin_proposal_psbt = get_ctx
-                    .process_response(&mut response.bytes().await?.to_vec().as_slice(), ohttp_ctx)?
-                    .unwrap();
+                let checked_payjoin_proposal_psbt =
+                    get_ctx.process_response(&response.bytes().await?, ohttp_ctx)?.unwrap();
                 let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
                 log::info!("sent");
@@ -739,7 +730,7 @@ mod integration {
                     let (req, ctx) = payjoin_proposal.extract_v2_req().unwrap();
                     let response = agent_clone.post(req.url).body(req.body).send().await?;
                     payjoin_proposal
-                        .process_res(response.bytes().await?.to_vec(), ctx)
+                        .process_res(&response.bytes().await?, ctx)
                         .map_err(|e| e.to_string())?;
                     Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
                 });

@@ -3,15 +3,21 @@ use std::{error, fmt};
 
 use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bitcoin::base64::Engine;
+use bitcoin::key::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE;
 
-pub const PADDED_MESSAGE_BYTES: usize = 8192;
+pub const ENCAPSULATED_MESSAGE_BYTES: usize = 8192;
+const N_ENC: usize = UNCOMPRESSED_PUBLIC_KEY_SIZE;
+const N_T: usize = crate::hpke::POLY1305_TAG_SIZE;
+const OHTTP_REQ_HEADER_BYTES: usize = 7;
+pub const PADDED_BHTTP_REQ_BYTES: usize =
+    ENCAPSULATED_MESSAGE_BYTES - (N_ENC + N_T + OHTTP_REQ_HEADER_BYTES);
 
 pub fn ohttp_encapsulate(
     ohttp_keys: &mut ohttp::KeyConfig,
     method: &str,
     target_resource: &str,
     body: Option<&[u8]>,
-) -> Result<(Vec<u8>, ohttp::ClientResponse), OhttpEncapsulationError> {
+) -> Result<([u8; ENCAPSULATED_MESSAGE_BYTES], ohttp::ClientResponse), OhttpEncapsulationError> {
     use std::fmt::Write;
 
     let ctx = ohttp::ClientRequest::from_config(ohttp_keys)?;
@@ -33,17 +39,21 @@ pub fn ohttp_encapsulate(
     if let Some(body) = body {
         bhttp_message.write_content(body);
     }
-    let mut bhttp_req = Vec::new();
-    let _ = bhttp_message.write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_req);
-    bhttp_req.resize(PADDED_MESSAGE_BYTES, 0);
-    let encapsulated = ctx.encapsulate(&bhttp_req)?;
-    Ok(encapsulated)
+
+    let mut bhttp_req = [0u8; PADDED_BHTTP_REQ_BYTES];
+    let _ = bhttp_message.write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_req.as_mut_slice());
+    let (encapsulated, ohttp_ctx) = ctx.encapsulate(&bhttp_req)?;
+
+    let mut buffer = [0u8; ENCAPSULATED_MESSAGE_BYTES];
+    let len = encapsulated.len().min(ENCAPSULATED_MESSAGE_BYTES);
+    buffer[..len].copy_from_slice(&encapsulated[..len]);
+    Ok((buffer, ohttp_ctx))
 }
 
 /// decapsulate ohttp, bhttp response and return http response body and status code
 pub fn ohttp_decapsulate(
     res_ctx: ohttp::ClientResponse,
-    ohttp_body: &[u8],
+    ohttp_body: &[u8; ENCAPSULATED_MESSAGE_BYTES],
 ) -> Result<http::Response<Vec<u8>>, OhttpEncapsulationError> {
     let bhttp_body = res_ctx.decapsulate(ohttp_body)?;
     let mut r = std::io::Cursor::new(bhttp_body);

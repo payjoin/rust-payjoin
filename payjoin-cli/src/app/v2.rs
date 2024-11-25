@@ -141,7 +141,7 @@ impl App {
         println!("Got a request from the sender. Responding with a Payjoin proposal.");
         let res = post_request(req).await?;
         payjoin_proposal
-            .process_res(res.bytes().await?.to_vec(), ohttp_ctx)
+            .process_res(&res.bytes().await?, ohttp_ctx)
             .map_err(|e| anyhow!("Failed to deserialize response {}", e))?;
         let payjoin_psbt = payjoin_proposal.psbt().clone();
         println!(
@@ -198,16 +198,11 @@ impl App {
                 println!("Posting Original PSBT Payload request...");
                 let response = post_request(req).await?;
                 println!("Sent fallback transaction");
-                let v2_ctx = Arc::new(
-                    ctx.process_response(&mut response.bytes().await?.to_vec().as_slice())?,
-                );
+                let v2_ctx = Arc::new(ctx.process_response(&response.bytes().await?)?);
                 loop {
                     let (req, ohttp_ctx) = v2_ctx.extract_req(self.config.ohttp_relay.clone())?;
                     let response = post_request(req).await?;
-                    match v2_ctx.process_response(
-                        &mut response.bytes().await?.to_vec().as_slice(),
-                        ohttp_ctx,
-                    ) {
+                    match v2_ctx.process_response(&response.bytes().await?, ohttp_ctx) {
                         Ok(Some(psbt)) => return Ok(psbt),
                         Ok(None) => {
                             println!("No response yet.");

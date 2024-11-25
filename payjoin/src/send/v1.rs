@@ -219,7 +219,7 @@ pub struct Sender {
     /// Disallow reciever to substitute original outputs.
     pub(crate) disable_output_substitution: bool,
     /// (maxadditionalfeecontribution, additionalfeeoutputindex)
-    pub(crate) fee_contribution: Option<(bitcoin::Amount, usize)>,
+    pub(crate) fee_contribution: Option<AdditionalFeeContribution>,
     pub(crate) min_fee_rate: FeeRate,
     /// Script of the person being paid
     pub(crate) payee: ScriptBuf,

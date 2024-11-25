@@ -30,12 +30,19 @@ pub mod v2;
 
 type InternalResult<T> = Result<T, InternalProposalError>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "v2", derive(serde::Serialize, serde::Deserialize))]
+pub(crate) struct AdditionalFeeContribution {
+    max_amount: Amount,
+    vout: usize,
+}
+
 /// Data required to validate the response against the original PSBT.
 #[derive(Debug, Clone)]
 pub struct PsbtContext {
     original_psbt: Psbt,
     disable_output_substitution: bool,
-    fee_contribution: Option<(bitcoin::Amount, usize)>,
+    fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
     payee: ScriptBuf,
 }
@@ -217,7 +224,10 @@ impl PsbtContext {
                 // fee output
                 (
                     Some((original_output_index, original_output)),
-                    Some((max_fee_contrib, fee_contrib_idx)),
+                    Some(AdditionalFeeContribution {
+                        max_amount: max_fee_contrib,
+                        vout: fee_contrib_idx,
+                    }),
                 ) if proposed_txout.script_pubkey == original_output.script_pubkey
                     && *original_output_index == fee_contrib_idx =>
                 {
@@ -331,7 +341,7 @@ fn find_change_index(
     payee: &Script,
     fee: bitcoin::Amount,
     clamp_fee_contribution: bool,
-) -> Result<Option<(bitcoin::Amount, usize)>, InternalBuildSenderError> {
+) -> Result<Option<AdditionalFeeContribution>, InternalBuildSenderError> {
     match (psbt.unsigned_tx.output.len(), clamp_fee_contribution) {
         (0, _) => return Err(InternalBuildSenderError::NoOutputs),
         (1, false) if psbt.unsigned_tx.output[0].script_pubkey == *payee =>
@@ -349,7 +359,10 @@ fn find_change_index(
         .find(|(_, output)| output.script_pubkey != *payee)
         .ok_or(InternalBuildSenderError::MultiplePayeeOutputs)?;
 
-    Ok(Some((check_fee_output_amount(output, fee, clamp_fee_contribution)?, index)))
+    Ok(Some(AdditionalFeeContribution {
+        max_amount: check_fee_output_amount(output, fee, clamp_fee_contribution)?,
+        vout: index,
+    }))
 }
 
 /// Check that the change output index is not out of bounds
@@ -360,7 +373,7 @@ fn check_change_index(
     fee: bitcoin::Amount,
     index: usize,
     clamp_fee_contribution: bool,
-) -> Result<(bitcoin::Amount, usize), InternalBuildSenderError> {
+) -> Result<AdditionalFeeContribution, InternalBuildSenderError> {
     let output = psbt
         .unsigned_tx
         .output
@@ -369,7 +382,10 @@ fn check_change_index(
     if output.script_pubkey == *payee {
         return Err(InternalBuildSenderError::ChangeIndexPointsAtPayee);
     }
-    Ok((check_fee_output_amount(output, fee, clamp_fee_contribution)?, index))
+    Ok(AdditionalFeeContribution {
+        max_amount: check_fee_output_amount(output, fee, clamp_fee_contribution)?,
+        vout: index,
+    })
 }
 
 fn determine_fee_contribution(
@@ -377,7 +393,7 @@ fn determine_fee_contribution(
     payee: &Script,
     fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
     clamp_fee_contribution: bool,
-) -> Result<Option<(bitcoin::Amount, usize)>, InternalBuildSenderError> {
+) -> Result<Option<AdditionalFeeContribution>, InternalBuildSenderError> {
     Ok(match fee_contribution {
         Some((fee, None)) => find_change_index(psbt, payee, fee, clamp_fee_contribution)?,
         Some((fee, Some(index))) =>
@@ -389,7 +405,7 @@ fn determine_fee_contribution(
 fn serialize_url(
     endpoint: Url,
     disable_output_substitution: bool,
-    fee_contribution: Option<(bitcoin::Amount, usize)>,
+    fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
     version: &str,
 ) -> Result<Url, url::ParseError> {
@@ -398,10 +414,10 @@ fn serialize_url(
     if disable_output_substitution {
         url.query_pairs_mut().append_pair("disableoutputsubstitution", "true");
     }
-    if let Some((amount, index)) = fee_contribution {
+    if let Some(AdditionalFeeContribution { max_amount, vout }) = fee_contribution {
         url.query_pairs_mut()
-            .append_pair("additionalfeeoutputindex", &index.to_string())
-            .append_pair("maxadditionalfeecontribution", &amount.to_sat().to_string());
+            .append_pair("additionalfeeoutputindex", &vout.to_string())
+            .append_pair("maxadditionalfeecontribution", &max_amount.to_sat().to_string());
     }
     if min_fee_rate > FeeRate::ZERO {
         // TODO serialize in rust-bitcoin <https://github.com/rust-bitcoin/rust-bitcoin/pull/1787/files#diff-c2ea40075e93ccd068673873166cfa3312ec7439d6bc5a4cbc03e972c7e045c4>
@@ -421,6 +437,7 @@ pub(crate) mod test {
 
     use super::serialize_url;
     use crate::psbt::PsbtExt;
+    use crate::send::AdditionalFeeContribution;
 
     pub(crate) const ORIGINAL_PSBT: &str = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
     const PAYJOIN_PROPOSAL: &str = "cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAQEgqBvXBQAAAAAXqRTeTh6QYcpZE1sDWtXm1HmQRUNU0IcBBBYAFMeKRXJTVYKNVlgHTdUmDV/LaYUwIgYDFZrAGqDVh1TEtNi300ntHt/PCzYrT2tVEGcjooWPhRYYSFzWUDEAAIABAACAAAAAgAEAAAAAAAAAAAEBIICEHgAAAAAAF6kUyPLL+cphRyyI5GTUazV0hF2R2NWHAQcXFgAUX4BmVeWSTJIEwtUb5TlPS/ntohABCGsCRzBEAiBnu3tA3yWlT0WBClsXXS9j69Bt+waCs9JcjWtNjtv7VgIge2VYAaBeLPDB6HGFlpqOENXMldsJezF9Gs5amvDQRDQBIQJl1jz1tBt8hNx2owTm+4Du4isx0pmdKNMNIjjaMHFfrQABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUIgICygvBWB5prpfx61y1HDAwo37kYP3YRJBvAjtunBAur3wYSFzWUDEAAIABAACAAAAAgAEAAAABAAAAAAA=";
@@ -432,7 +449,10 @@ pub(crate) mod test {
         super::PsbtContext {
             original_psbt,
             disable_output_substitution: false,
-            fee_contribution: Some((bitcoin::Amount::from_sat(182), 0)),
+            fee_contribution: Some(AdditionalFeeContribution {
+                max_amount: bitcoin::Amount::from_sat(182),
+                vout: 0,
+            }),
             min_fee_rate: FeeRate::ZERO,
             payee,
         }

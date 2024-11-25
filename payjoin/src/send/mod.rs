@@ -51,6 +51,11 @@ mod error;
 
 type InternalResult<T> = Result<T, InternalValidationError>;
 
+/// An output's amount and its index
+/// this correlates to maxadditionalfeecontribution, additionalfeeoutputindex
+/// Bip21 params
+type OutputAmountAndIndex = (bitcoin::Amount, usize);
+
 #[derive(Clone)]
 pub struct SenderBuilder<'a> {
     psbt: Psbt,
@@ -238,7 +243,7 @@ pub struct Sender {
     psbt: Psbt,
     endpoint: Url,
     disable_output_substitution: bool,
-    fee_contribution: Option<(bitcoin::Amount, usize)>,
+    fee_contribution: Option<OutputAmountAndIndex>,
     min_fee_rate: FeeRate,
     payee: ScriptBuf,
 }
@@ -450,7 +455,7 @@ impl V2GetContext {
 pub struct PsbtContext {
     original_psbt: Psbt,
     disable_output_substitution: bool,
-    fee_contribution: Option<(bitcoin::Amount, usize)>,
+    fee_contribution: Option<OutputAmountAndIndex>,
     min_fee_rate: FeeRate,
     payee: ScriptBuf,
     allow_mixed_input_scripts: bool,
@@ -784,7 +789,7 @@ fn find_change_index(
     payee: &Script,
     fee: bitcoin::Amount,
     clamp_fee_contribution: bool,
-) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
+) -> Result<Option<OutputAmountAndIndex>, InternalCreateRequestError> {
     match (psbt.unsigned_tx.output.len(), clamp_fee_contribution) {
         (0, _) => return Err(InternalCreateRequestError::NoOutputs),
         (1, false) if psbt.unsigned_tx.output[0].script_pubkey == *payee =>
@@ -811,7 +816,7 @@ fn check_change_index(
     fee: bitcoin::Amount,
     index: usize,
     clamp_fee_contribution: bool,
-) -> Result<(bitcoin::Amount, usize), InternalCreateRequestError> {
+) -> Result<OutputAmountAndIndex, InternalCreateRequestError> {
     let output = psbt
         .unsigned_tx
         .output
@@ -828,7 +833,7 @@ fn determine_fee_contribution(
     payee: &Script,
     fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
     clamp_fee_contribution: bool,
-) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
+) -> Result<Option<OutputAmountAndIndex>, InternalCreateRequestError> {
     Ok(match fee_contribution {
         Some((fee, None)) => find_change_index(psbt, payee, fee, clamp_fee_contribution)?,
         Some((fee, Some(index))) =>
@@ -841,7 +846,7 @@ fn determine_fee_contribution(
 fn serialize_v2_body(
     psbt: &Psbt,
     disable_output_substitution: bool,
-    fee_contribution: Option<(bitcoin::Amount, usize)>,
+    fee_contribution: Option<OutputAmountAndIndex>,
     min_feerate: FeeRate,
 ) -> Result<Vec<u8>, CreateRequestError> {
     // Grug say localhost base be discarded anyway. no big brain needed.
@@ -861,7 +866,7 @@ fn serialize_v2_body(
 fn serialize_url(
     endpoint: Url,
     disable_output_substitution: bool,
-    fee_contribution: Option<(bitcoin::Amount, usize)>,
+    fee_contribution: Option<OutputAmountAndIndex>,
     min_fee_rate: FeeRate,
     version: &str,
 ) -> Result<Url, url::ParseError> {

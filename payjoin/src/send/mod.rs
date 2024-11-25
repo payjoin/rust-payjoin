@@ -235,11 +235,16 @@ impl<'a> SenderBuilder<'a> {
 #[derive(Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "v2", derive(Serialize, Deserialize))]
 pub struct Sender {
+    /// The original PSBT.
     psbt: Psbt,
+    /// The payjoin directory subdirectory to send the request to.
     endpoint: Url,
+    /// Disallow reciever to substitute original outputs.
     disable_output_substitution: bool,
+    /// (maxadditionalfeecontribution, additionalfeeoutputindex)
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
+    /// Script of the person being paid
     payee: ScriptBuf,
 }
 
@@ -350,6 +355,7 @@ impl V1Context {
 
 #[cfg(feature = "v2")]
 pub struct V2PostContext {
+    /// The payjoin directory subdirectory to send the request to.
     endpoint: Url,
     psbt_ctx: PsbtContext,
     hpke_ctx: HpkeContext,
@@ -383,6 +389,7 @@ impl V2PostContext {
 #[cfg(feature = "v2")]
 #[derive(Debug, Clone)]
 pub struct V2GetContext {
+    /// The payjoin directory subdirectory to send the request to.
     endpoint: Url,
     psbt_ctx: PsbtContext,
     hpke_ctx: HpkeContext,
@@ -558,7 +565,7 @@ impl PsbtContext {
         Ok(())
     }
 
-    // version and lock time
+    /// Check that the version and lock time are the same as in the original PSBT.
     fn basic_checks(&self, proposal: &Psbt) -> InternalResult<()> {
         check_eq!(
             proposal.unsigned_tx.version,
@@ -638,9 +645,9 @@ impl PsbtContext {
         Ok(())
     }
 
-    // Restore Original PSBT utxos that the receiver stripped.
-    // The BIP78 spec requires utxo information to be removed, but many wallets
-    // require it to be present to sign.
+    /// Restore Original PSBT utxos that the receiver stripped.
+    /// The BIP78 spec requires utxo information to be removed, but many wallets
+    /// require it to be present to sign.
     fn restore_original_utxos(&self, proposal: &mut Psbt) -> InternalResult<()> {
         let mut original_inputs = self.original_psbt.input_pairs().peekable();
         let proposal_inputs =
@@ -714,6 +721,8 @@ impl PsbtContext {
     }
 }
 
+/// Ensure that the payee's output scriptPubKey appears in the list of outputs exactly once,
+/// and that the payee's output amount matches the requested amount.
 fn check_single_payee(
     psbt: &Psbt,
     script_pubkey: &Script,
@@ -763,6 +772,7 @@ fn clear_unneeded_fields(psbt: &mut Psbt) {
     }
 }
 
+/// Ensure that an additional fee output is sufficient to pay for the specified additional fee
 fn check_fee_output_amount(
     output: &TxOut,
     fee: bitcoin::Amount,
@@ -779,6 +789,7 @@ fn check_fee_output_amount(
     }
 }
 
+/// Find the sender's change output index by eliminating the payee's output as a candidate.
 fn find_change_index(
     psbt: &Psbt,
     payee: &Script,
@@ -805,6 +816,8 @@ fn find_change_index(
     Ok(Some((check_fee_output_amount(output, fee, clamp_fee_contribution)?, index)))
 }
 
+/// Check that the change output index is not out of bounds
+/// and that the additional fee contribution is not less than specified.
 fn check_change_index(
     psbt: &Psbt,
     payee: &Script,

@@ -24,7 +24,7 @@ io = ["reqwest/rustls-tls"]
 danger-local-https = ["io", "reqwest/rustls-tls", "rustls"]
 
 [dependencies]
-bitcoin = { version = "0.32.2", features = ["base64"] }
+bitcoin = { version = "0.32.4", features = ["base64"] }
 bip21 = "0.5.0"
 hpke = { package = "bitcoin-hpke", version = "0.13.0", optional = true }
 log = { version = "0.4.14"}

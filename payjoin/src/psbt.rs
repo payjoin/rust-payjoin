@@ -4,10 +4,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use bitcoin::address::FromScriptError;
-use bitcoin::blockdata::script::Instruction;
 use bitcoin::psbt::Psbt;
 use bitcoin::transaction::InputWeightPrediction;
-use bitcoin::{bip32, psbt, Address, AddressType, Network, Script, TxIn, TxOut, Weight};
+use bitcoin::{bip32, psbt, Address, AddressType, Network, TxIn, TxOut, Weight};
 
 #[derive(Debug)]
 pub(crate) enum InconsistentPsbt {
@@ -90,14 +89,6 @@ impl PsbtExt for Psbt {
                 .validate_utxo(treat_missing_as_error)
                 .map_err(|error| PsbtInputsError { index, error })
         })
-    }
-}
-
-/// Gets redeemScript from the script_sig following BIP16 rules regarding P2SH spending.
-fn redeem_script(script_sig: &Script) -> Option<&Script> {
-    match script_sig.instructions().last()?.ok()? {
-        Instruction::PushBytes(bytes) => Some(Script::from_bytes(bytes.as_bytes())),
-        Instruction::Op(_) => None,
     }
 }
 
@@ -202,7 +193,7 @@ impl InternalInputPair<'_> {
             P2sh => {
                 // redeemScript can be extracted from scriptSig for signed P2SH inputs
                 let redeem_script = if let Some(ref script_sig) = self.psbtin.final_script_sig {
-                    redeem_script(script_sig)
+                    script_sig.redeem_script()
                 // try the PSBT redeem_script field for unsigned inputs.
                 } else {
                     self.psbtin.redeem_script.as_ref().map(|script| script.as_ref())

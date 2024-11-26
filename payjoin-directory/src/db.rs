@@ -55,7 +55,7 @@ impl DbPool {
         data: Vec<u8>,
     ) -> RedisResult<()> {
         let mut conn = self.client.get_async_connection().await?;
-        let key = channel_name(pubkey_id, channel_type);
+        let key = pubkey_id.column_key(channel_type);
         () = conn.set(&key, data.clone()).await?;
         () = conn.publish(&key, "updated").await?;
         Ok(())
@@ -71,7 +71,7 @@ impl DbPool {
 
     async fn peek(&self, pubkey_id: &ShortId, channel_type: &str) -> RedisResult<Vec<u8>> {
         let mut conn = self.client.get_async_connection().await?;
-        let key = channel_name(pubkey_id, channel_type);
+        let key = pubkey_id.column_key(channel_type);
 
         // Attempt to fetch existing content for the given pubkey_id and channel_type
         if let Ok(data) = conn.get::<_, Vec<u8>>(&key).await {
@@ -83,7 +83,7 @@ impl DbPool {
 
         // Set up a temporary listener for changes
         let mut pubsub_conn = self.client.get_async_connection().await?.into_pubsub();
-        let channel_name = channel_name(pubkey_id, channel_type);
+        let channel_name = pubkey_id.column_key(channel_type);
         pubsub_conn.subscribe(&channel_name).await?;
 
         // Use a block to limit the scope of the mutable borrow
@@ -115,8 +115,4 @@ impl DbPool {
 
         Ok(data)
     }
-}
-
-fn channel_name(pubkey_id: &ShortId, channel_type: &str) -> Vec<u8> {
-    pubkey_id.column_key(channel_type)
 }

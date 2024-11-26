@@ -18,7 +18,7 @@ danger-local-https = ["hyper-rustls", "rustls", "tokio-rustls"]
 
 [dependencies]
 anyhow = "1.0.71"
-bitcoin = { version = "0.32.2", features = ["base64"] }
+bitcoin = { version = "0.32.4", features = ["base64"] }
 bhttp = { version = "=0.5.1", features = ["http"] }
 futures = "0.3.17"
 http-body-util = "0.1.2"

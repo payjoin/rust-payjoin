@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/logs:/var/log/nginx
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/certs:/etc/ssl/certs
+      - ./nginx/html:/var/www/html
+    networks:
+      - payjoin-network
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./nginx/certs:/etc/letsencrypt
+      - ./nginx/html:/var/www/html
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/html --deploy-hook "nginx -s reload"; sleep 12h & wait $${!}; done;'
+    depends_on:
+      - nginx
+    networks:
+      - payjoin-network
+
+  payjoin-directory:
+    image: dangould/payjoin-directory:0.0.1
+    environment:
+      RUST_LOG: "trace"
+      PJ_DB_HOST: "redis:6379"
+      PJ_DIR_PORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+    networks:
+      - payjoin-network
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - payjoin-network
+
+networks:
+  payjoin-network:
+    driver: bridge
+
+volumes:
+  redis-data:

@@ -97,7 +97,7 @@ impl Receiver {
         }
     }
 
-    /// Extratct an OHTTP Encapsulated HTTP GET request for the Original PSBT
+    /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
     pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), SessionError> {
         if SystemTime::now() > self.context.expiry {
             return Err(InternalSessionError::Expired(self.context.expiry).into());
@@ -237,7 +237,7 @@ impl UncheckedProposal {
     ///
     /// Receiver MUST check that the Original PSBT from the sender
     /// can be broadcast, i.e. `testmempoolaccept` bitcoind rpc returns { "allowed": true,.. }
-    /// for `extract_tx_to_sheculed_broadcast()` before calling this method.
+    /// for `extract_tx_to_schedule_broadcast()` before calling this method.
     ///
     /// Do this check if you generate bitcoin uri to receive Payjoin on sender request without manual human approval, like a payment processor.
     /// Such so called "non-interactive" receivers are otherwise vulnerable to probing attacks.

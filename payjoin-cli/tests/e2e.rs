@@ -170,6 +170,7 @@ mod e2e {
         use url::Url;
 
         type Error = Box<dyn std::error::Error + 'static>;
+        type BoxSendSyncError = Box<dyn std::error::Error + Send + Sync>;
         type Result<T> = std::result::Result<T, Error>;
 
         static INIT_TRACING: OnceCell<()> = OnceCell::new();
@@ -180,8 +181,13 @@ mod e2e {
         let (cert, key) = local_cert_key();
         let ohttp_relay_port = find_free_port();
         let ohttp_relay = Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
-        let directory_port = find_free_port();
-        let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
+        let docker: Cli = Cli::default();
+        let db = docker.run(Redis);
+        let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
+        let (port, directory_handle) =
+            init_directory(db_host, (cert.clone(), key)).await.expect("Failed to init directory");
+        let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
+
         let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
 
         let temp_dir = env::temp_dir();
@@ -189,7 +195,7 @@ mod e2e {
         let sender_db_path = temp_dir.join("sender_db");
         let result: Result<()> = tokio::select! {
             res = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => Err(format!("Ohttp relay is long running: {:?}", res).into()),
-            res = init_directory(directory_port, (cert.clone(), key)) => Err(format!("Directory server is long running: {:?}", res).into()),
+            res = directory_handle => Err(format!("Directory server is long running: {:?}", res).into()),
             res = send_receive_cli_async(ohttp_relay, directory, cert, receiver_db_path.clone(), sender_db_path.clone()) => res.map_err(|e| format!("send_receive failed: {:?}", e).into()),
         };
 
@@ -476,13 +482,17 @@ mod e2e {
             Err("Timeout waiting for service to be ready".into())
         }
 
-        async fn init_directory(port: u16, local_cert_key: (Vec<u8>, Vec<u8>)) -> Result<()> {
-            let docker: Cli = Cli::default();
+        async fn init_directory(
+            db_host: String,
+            local_cert_key: (Vec<u8>, Vec<u8>),
+        ) -> std::result::Result<
+            (u16, tokio::task::JoinHandle<std::result::Result<(), BoxSendSyncError>>),
+            BoxSendSyncError,
+        > {
+            println!("Database running on {}", db_host);
             let timeout = Duration::from_secs(2);
-            let db = docker.run(Redis);
-            let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
-            println!("Database running on {}", db.get_host_port_ipv4(6379));
-            payjoin_directory::listen_tcp_with_tls(port, db_host, timeout, local_cert_key).await
+            payjoin_directory::listen_tcp_with_tls_on_free_port(db_host, timeout, local_cert_key)
+                .await
         }
 
         // generates or gets a DER encoded localhost cert and key.

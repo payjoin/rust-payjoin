@@ -36,6 +36,67 @@ const ID_LENGTH: usize = 13;
 mod db;
 use crate::db::DbPool;
 
+#[cfg(feature = "_danger-local-https")]
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+#[cfg(feature = "_danger-local-https")]
+pub async fn listen_tcp_with_tls_on_free_port(
+    db_host: String,
+    timeout: Duration,
+    cert_key: (Vec<u8>, Vec<u8>),
+) -> Result<(u16, tokio::task::JoinHandle<Result<(), BoxError>>), BoxError> {
+    let listener = tokio::net::TcpListener::bind("[::]:0").await?;
+    let port = listener.local_addr()?.port();
+    println!("Directory server binding to port {}", listener.local_addr()?);
+    let handle = listen_tcp_with_tls_on_listener(listener, db_host, timeout, cert_key).await?;
+    Ok((port, handle))
+}
+
+// Helper function to avoid code duplication
+#[cfg(feature = "_danger-local-https")]
+async fn listen_tcp_with_tls_on_listener(
+    listener: tokio::net::TcpListener,
+    db_host: String,
+    timeout: Duration,
+    tls_config: (Vec<u8>, Vec<u8>),
+) -> Result<tokio::task::JoinHandle<Result<(), BoxError>>, BoxError> {
+    let pool = DbPool::new(timeout, db_host).await?;
+    let ohttp = Arc::new(Mutex::new(init_ohttp()?));
+    let tls_acceptor = init_tls_acceptor(tls_config)?;
+    // Spawn the connection handling loop in a separate task
+    let handle = tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let pool = pool.clone();
+            let ohttp = ohttp.clone();
+            let tls_acceptor = tls_acceptor.clone();
+            tokio::spawn(async move {
+                let tls_stream = match tls_acceptor.accept(stream).await {
+                    Ok(tls_stream) => tls_stream,
+                    Err(e) => {
+                        error!("TLS accept error: {}", e);
+                        return;
+                    }
+                };
+                if let Err(err) = http1::Builder::new()
+                    .serve_connection(
+                        TokioIo::new(tls_stream),
+                        service_fn(move |req| {
+                            serve_payjoin_directory(req, pool.clone(), ohttp.clone())
+                        }),
+                    )
+                    .with_upgrades()
+                    .await
+                {
+                    error!("Error serving connection: {:?}", err);
+                }
+            });
+        }
+        Ok(())
+    });
+    Ok(handle)
+}
+
+// Modify existing listen_tcp_with_tls to use the new helper
 pub async fn listen_tcp(
     port: u16,
     db_host: String,
@@ -73,41 +134,11 @@ pub async fn listen_tcp_with_tls(
     port: u16,
     db_host: String,
     timeout: Duration,
-    tls_config: (Vec<u8>, Vec<u8>),
-) -> Result<(), Box<dyn std::error::Error>> {
-    let pool = DbPool::new(timeout, db_host).await?;
-    let ohttp = Arc::new(Mutex::new(init_ohttp()?));
-    let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
-    let tls_acceptor = init_tls_acceptor(tls_config)?;
-    let listener = TcpListener::bind(bind_addr).await?;
-    while let Ok((stream, _)) = listener.accept().await {
-        let pool = pool.clone();
-        let ohttp = ohttp.clone();
-        let tls_acceptor = tls_acceptor.clone();
-        tokio::spawn(async move {
-            let tls_stream = match tls_acceptor.accept(stream).await {
-                Ok(tls_stream) => tls_stream,
-                Err(e) => {
-                    error!("TLS accept error: {}", e);
-                    return;
-                }
-            };
-            if let Err(err) = http1::Builder::new()
-                .serve_connection(
-                    TokioIo::new(tls_stream),
-                    service_fn(move |req| {
-                        serve_payjoin_directory(req, pool.clone(), ohttp.clone())
-                    }),
-                )
-                .with_upgrades()
-                .await
-            {
-                error!("Error serving connection: {:?}", err);
-            }
-        });
-    }
-
-    Ok(())
+    cert_key: (Vec<u8>, Vec<u8>),
+) -> Result<tokio::task::JoinHandle<Result<(), BoxError>>, BoxError> {
+    let addr = format!("0.0.0.0:{}", port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    listen_tcp_with_tls_on_listener(listener, db_host, timeout, cert_key).await
 }
 
 #[cfg(feature = "_danger-local-https")]

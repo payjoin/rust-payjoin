@@ -1,8 +1,6 @@
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
-use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
-use bitcoin::base64::Engine;
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
@@ -20,6 +18,7 @@ use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError
 use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
 use crate::receive::InputPair;
+use crate::uri::ShortId;
 use crate::{PjUriBuilder, Request};
 
 pub(crate) mod error;
@@ -48,9 +47,8 @@ where
     Ok(address.assume_checked())
 }
 
-fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> String {
-    let hash = sha256::Hash::hash(&pubkey.to_compressed_bytes());
-    BASE64_URL_SAFE_NO_PAD.encode(&hash.as_byte_array()[..8])
+fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
+    sha256::Hash::hash(&pubkey.to_compressed_bytes()).into()
 }
 
 /// A payjoin V2 receiver, allowing for polled requests to the
@@ -200,22 +198,18 @@ impl Receiver {
     // The contents of the `&pj=` query parameter.
     // This identifies a session at the payjoin directory server.
     pub fn pj_url(&self) -> Url {
-        let id_base64 = BASE64_URL_SAFE_NO_PAD.encode(self.id());
         let mut url = self.context.directory.clone();
         {
             let mut path_segments =
                 url.path_segments_mut().expect("Payjoin Directory URL cannot be a base");
-            path_segments.push(&id_base64);
+            path_segments.push(&self.id().to_string());
         }
         url
     }
 
     /// The per-session identifier
-    pub fn id(&self) -> [u8; 8] {
-        let hash = sha256::Hash::hash(&self.context.s.public_key().to_compressed_bytes());
-        hash.as_byte_array()[..8]
-            .try_into()
-            .expect("truncating SHA256 to 8 bytes should always succeed")
+    pub fn id(&self) -> ShortId {
+        sha256::Hash::hash(&self.context.s.public_key().to_compressed_bytes()).into()
     }
 }
 
@@ -479,8 +473,11 @@ impl PayjoinProposal {
             // Prepare v2 payload
             let payjoin_bytes = self.inner.payjoin_psbt.serialize();
             let sender_subdir = subdir_path_from_pubkey(e);
-            target_resource =
-                self.context.directory.join(&sender_subdir).map_err(|e| Error::Server(e.into()))?;
+            target_resource = self
+                .context
+                .directory
+                .join(&sender_subdir.to_string())
+                .map_err(|e| Error::Server(e.into()))?;
             body = encrypt_message_b(payjoin_bytes, &self.context.s, e)?;
             method = "POST";
         } else {
@@ -490,7 +487,7 @@ impl PayjoinProposal {
             target_resource = self
                 .context
                 .directory
-                .join(&receiver_subdir)
+                .join(&receiver_subdir.to_string())
                 .map_err(|e| Error::Server(e.into()))?;
             method = "PUT";
         }

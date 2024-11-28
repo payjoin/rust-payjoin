@@ -24,8 +24,6 @@
 use std::str::FromStr;
 
 #[cfg(feature = "v2")]
-use bitcoin::base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
-#[cfg(feature = "v2")]
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
@@ -41,6 +39,8 @@ use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeKeyPair, HpkePublicK
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
 use crate::psbt::PsbtExt;
 use crate::request::Request;
+#[cfg(feature = "v2")]
+use crate::uri::ShortId;
 use crate::PjUri;
 
 // See usize casts
@@ -405,8 +405,8 @@ impl V2GetContext {
 
         // TODO unify with receiver's fn subdir_path_from_pubkey
         let hash = sha256::Hash::hash(&self.hpke_ctx.reply_pair.public_key().to_compressed_bytes());
-        let subdir = BASE64_URL_SAFE_NO_PAD.encode(&hash.as_byte_array()[..8]);
-        url.set_path(&subdir);
+        let subdir: ShortId = hash.into();
+        url.set_path(&subdir.to_string());
         let body = encrypt_message_a(
             Vec::new(),
             &self.hpke_ctx.reply_pair.public_key().clone(),

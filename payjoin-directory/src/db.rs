@@ -7,19 +7,6 @@ use tracing::debug;
 const DEFAULT_COLUMN: &str = "";
 const PJ_V1_COLUMN: &str = "pjv1";
 
-// TODO move to payjoin crate as pub?
-// TODO impl From<HpkePublicKey> for ShortId
-// TODO impl Display for ShortId (Base64)
-// TODO impl TryFrom<&str> for ShortId (Base64)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ShortId(pub [u8; 8]);
-
-impl ShortId {
-    pub fn column_key(&self, column: &str) -> Vec<u8> {
-        self.0.iter().chain(column.as_bytes()).copied().collect()
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct DbPool {
     client: Client,
@@ -32,30 +19,30 @@ impl DbPool {
         Ok(Self { client, timeout })
     }
 
-    pub async fn push_default(&self, pubkey_id: &ShortId, data: Vec<u8>) -> RedisResult<()> {
-        self.push(pubkey_id, DEFAULT_COLUMN, data).await
+    pub async fn push_default(&self, subdirectory_id: &str, data: Vec<u8>) -> RedisResult<()> {
+        self.push(subdirectory_id, DEFAULT_COLUMN, data).await
     }
 
-    pub async fn peek_default(&self, pubkey_id: &ShortId) -> Option<RedisResult<Vec<u8>>> {
-        self.peek_with_timeout(pubkey_id, DEFAULT_COLUMN).await
+    pub async fn peek_default(&self, subdirectory_id: &str) -> Option<RedisResult<Vec<u8>>> {
+        self.peek_with_timeout(subdirectory_id, DEFAULT_COLUMN).await
     }
 
-    pub async fn push_v1(&self, pubkey_id: &ShortId, data: Vec<u8>) -> RedisResult<()> {
-        self.push(pubkey_id, PJ_V1_COLUMN, data).await
+    pub async fn push_v1(&self, subdirectory_id: &str, data: Vec<u8>) -> RedisResult<()> {
+        self.push(subdirectory_id, PJ_V1_COLUMN, data).await
     }
 
-    pub async fn peek_v1(&self, pubkey_id: &ShortId) -> Option<RedisResult<Vec<u8>>> {
-        self.peek_with_timeout(pubkey_id, PJ_V1_COLUMN).await
+    pub async fn peek_v1(&self, subdirectory_id: &str) -> Option<RedisResult<Vec<u8>>> {
+        self.peek_with_timeout(subdirectory_id, PJ_V1_COLUMN).await
     }
 
     async fn push(
         &self,
-        pubkey_id: &ShortId,
+        subdirectory_id: &str,
         channel_type: &str,
         data: Vec<u8>,
     ) -> RedisResult<()> {
         let mut conn = self.client.get_async_connection().await?;
-        let key = pubkey_id.column_key(channel_type);
+        let key = channel_name(subdirectory_id, channel_type);
         () = conn.set(&key, data.clone()).await?;
         () = conn.publish(&key, "updated").await?;
         Ok(())
@@ -63,17 +50,17 @@ impl DbPool {
 
     async fn peek_with_timeout(
         &self,
-        pubkey_id: &ShortId,
+        subdirectory_id: &str,
         channel_type: &str,
     ) -> Option<RedisResult<Vec<u8>>> {
-        tokio::time::timeout(self.timeout, self.peek(pubkey_id, channel_type)).await.ok()
+        tokio::time::timeout(self.timeout, self.peek(subdirectory_id, channel_type)).await.ok()
     }
 
-    async fn peek(&self, pubkey_id: &ShortId, channel_type: &str) -> RedisResult<Vec<u8>> {
+    async fn peek(&self, subdirectory_id: &str, channel_type: &str) -> RedisResult<Vec<u8>> {
         let mut conn = self.client.get_async_connection().await?;
-        let key = pubkey_id.column_key(channel_type);
+        let key = channel_name(subdirectory_id, channel_type);
 
-        // Attempt to fetch existing content for the given pubkey_id and channel_type
+        // Attempt to fetch existing content for the given subdirectory_id and channel_type
         if let Ok(data) = conn.get::<_, Vec<u8>>(&key).await {
             if !data.is_empty() {
                 return Ok(data);
@@ -83,7 +70,7 @@ impl DbPool {
 
         // Set up a temporary listener for changes
         let mut pubsub_conn = self.client.get_async_connection().await?.into_pubsub();
-        let channel_name = pubkey_id.column_key(channel_type);
+        let channel_name = channel_name(subdirectory_id, channel_type);
         pubsub_conn.subscribe(&channel_name).await?;
 
         // Use a block to limit the scope of the mutable borrow
@@ -115,4 +102,8 @@ impl DbPool {
 
         Ok(data)
     }
+}
+
+fn channel_name(subdirectory_id: &str, channel_type: &str) -> Vec<u8> {
+    (subdirectory_id.to_owned() + channel_type).into_bytes()
 }

@@ -263,9 +263,19 @@ impl bip21::SerializeParams for &PayjoinExtras {
     type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
 
     fn serialize_params(self) -> Self::Iterator {
+        // normalizing to uppercase enables QR alphanumeric mode encoding
+        // unfortunately Url normalizes these to be lowercase
+        let scheme = self.endpoint.scheme();
+        let host = self.endpoint.host_str().expect("host must be set");
+        let endpoint_str = self
+            .endpoint
+            .as_str()
+            .replacen(scheme, &scheme.to_uppercase(), 1)
+            .replacen(host, &host.to_uppercase(), 1);
+
         vec![
-            ("pj", self.endpoint.as_str().to_string()),
             ("pjos", if self.disable_output_substitution { "1" } else { "0" }.to_string()),
+            ("pj", endpoint_str),
         ]
         .into_iter()
     }

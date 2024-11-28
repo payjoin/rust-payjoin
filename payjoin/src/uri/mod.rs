@@ -181,11 +181,17 @@ impl PjUriBuilder {
         #[allow(unused_mut)]
         let mut pj = origin;
         #[cfg(feature = "v2")]
-        pj.set_receiver_pubkey(receiver_pubkey);
+        if let Some(receiver_pubkey) = receiver_pubkey {
+            pj.set_receiver_pubkey(receiver_pubkey);
+        }
         #[cfg(feature = "v2")]
-        pj.set_ohttp(ohttp_keys);
+        if let Some(ohttp_keys) = ohttp_keys {
+            pj.set_ohttp(ohttp_keys);
+        }
         #[cfg(feature = "v2")]
-        pj.set_exp(expiry);
+        if let Some(expiry) = expiry {
+            pj.set_exp(expiry);
+        }
         Self { address, amount: None, message: None, label: None, pj, pjos: false }
     }
     /// Set the amount you want to receive.

@@ -12,11 +12,11 @@ use crate::OhttpKeys;
 /// Parse and set fragment parameters from `&pj=` URI parameter URLs
 pub(crate) trait UrlExt {
     fn receiver_pubkey(&self) -> Result<HpkePublicKey, ParseReceiverPubkeyError>;
-    fn set_receiver_pubkey(&mut self, exp: Option<HpkePublicKey>);
+    fn set_receiver_pubkey(&mut self, exp: HpkePublicKey);
     fn ohttp(&self) -> Option<OhttpKeys>;
-    fn set_ohttp(&mut self, ohttp: Option<OhttpKeys>);
+    fn set_ohttp(&mut self, ohttp: OhttpKeys);
     fn exp(&self) -> Option<std::time::SystemTime>;
-    fn set_exp(&mut self, exp: Option<std::time::SystemTime>);
+    fn set_exp(&mut self, exp: std::time::SystemTime);
 }
 
 impl UrlExt for Url {
@@ -38,16 +38,14 @@ impl UrlExt for Url {
     }
 
     /// Set the receiver's public key in the URL fragment
-    fn set_receiver_pubkey(&mut self, pubkey: Option<HpkePublicKey>) {
+    fn set_receiver_pubkey(&mut self, pubkey: HpkePublicKey) {
         let rk_hrp: Hrp = Hrp::parse("RK").unwrap();
 
         set_param(
             self,
             "RK1",
-            pubkey.map(|k| {
-                crate::bech32::nochecksum::encode(rk_hrp, &k.to_compressed_bytes())
-                    .expect("encoding compressed pubkey bytes should never fail")
-            }),
+            &crate::bech32::nochecksum::encode(rk_hrp, &pubkey.to_compressed_bytes())
+                .expect("encoding compressed pubkey bytes should never fail"),
         )
     }
 
@@ -57,9 +55,7 @@ impl UrlExt for Url {
     }
 
     /// Set the ohttp parameter in the URL fragment
-    fn set_ohttp(&mut self, ohttp: Option<OhttpKeys>) {
-        set_param(self, "OH1", ohttp.map(|o| o.to_string()))
-    }
+    fn set_ohttp(&mut self, ohttp: OhttpKeys) { set_param(self, "OH1", &ohttp.to_string()) }
 
     /// Retrieve the exp parameter from the URL fragment
     fn exp(&self) -> Option<std::time::SystemTime> {
@@ -81,21 +77,21 @@ impl UrlExt for Url {
     }
 
     /// Set the exp parameter in the URL fragment
-    fn set_exp(&mut self, exp: Option<std::time::SystemTime>) {
-        let exp_str = exp.map(|e| {
-            let t = match e.duration_since(std::time::UNIX_EPOCH) {
-                Ok(duration) => duration.as_secs().try_into().unwrap(), // TODO Result type instead of Option & unwrap
-                Err(_) => 0u32,
-            };
+    fn set_exp(&mut self, exp: std::time::SystemTime) {
+        let t = match exp.duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs().try_into().unwrap(), // TODO Result type instead of Option & unwrap
+            Err(_) => 0u32,
+        };
 
-            let mut buf = [0u8; 4];
-            t.consensus_encode(&mut &mut buf[..]).unwrap(); // TODO no unwrap
+        let mut buf = [0u8; 4];
+        t.consensus_encode(&mut &mut buf[..]).unwrap(); // TODO no unwrap
 
-            let ex_hrp: Hrp = Hrp::parse("EX").unwrap();
-            crate::bech32::nochecksum::encode(ex_hrp, &buf)
-                .expect("encoding u32 timestamp should never fail")
-        });
-        set_param(self, "EX1", exp_str)
+        let ex_hrp: Hrp = Hrp::parse("EX").unwrap();
+
+        let exp_str = crate::bech32::nochecksum::encode(ex_hrp, &buf)
+            .expect("encoding u32 timestamp should never fail");
+
+        set_param(self, "EX1", &exp_str)
     }
 }
 
@@ -113,7 +109,7 @@ where
     None
 }
 
-fn set_param(url: &mut Url, prefix: &str, param: Option<String>) {
+fn set_param(url: &mut Url, prefix: &str, param: &str) {
     let fragment = url.fragment().unwrap_or("");
     let mut fragment = fragment.to_string();
     if let Some(start) = fragment.find(prefix) {
@@ -124,12 +120,10 @@ fn set_param(url: &mut Url, prefix: &str, param: Option<String>) {
         }
     }
 
-    if let Some(param) = param {
-        if !fragment.is_empty() {
-            fragment.push('+');
-        }
-        fragment.push_str(&param);
+    if !fragment.is_empty() {
+        fragment.push('+');
     }
+    fragment.push_str(param);
 
     url.set_fragment(if fragment.is_empty() { None } else { Some(&fragment) });
 }
@@ -145,13 +139,10 @@ mod tests {
 
         let serialized = "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
         let ohttp_keys = OhttpKeys::from_str(serialized).unwrap();
-        url.set_ohttp(Some(ohttp_keys.clone()));
+        url.set_ohttp(ohttp_keys.clone());
 
         assert_eq!(url.fragment(), Some(serialized));
         assert_eq!(url.ohttp(), Some(ohttp_keys));
-
-        url.set_ohttp(None);
-        assert_eq!(url.fragment(), None);
     }
 
     #[test]
@@ -160,13 +151,10 @@ mod tests {
 
         let exp_time =
             std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1720547781);
-        url.set_exp(Some(exp_time));
+        url.set_exp(exp_time);
         assert_eq!(url.fragment(), Some("EX1C4UC6ES"));
 
         assert_eq!(url.exp(), Some(exp_time));
-
-        url.set_exp(None);
-        assert_eq!(url.fragment(), None);
     }
 
     #[test]

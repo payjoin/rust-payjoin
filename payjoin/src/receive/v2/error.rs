@@ -12,6 +12,8 @@ pub(crate) enum InternalSessionError {
     Expired(std::time::SystemTime),
     /// OHTTP Encapsulation failed
     OhttpEncapsulation(OhttpEncapsulationError),
+    /// Unexpected response size
+    UnexpectedResponseSize(usize),
 }
 
 impl fmt::Display for SessionError {
@@ -20,6 +22,12 @@ impl fmt::Display for SessionError {
             InternalSessionError::Expired(expiry) => write!(f, "Session expired at {:?}", expiry),
             InternalSessionError::OhttpEncapsulation(e) =>
                 write!(f, "OHTTP Encapsulation Error: {}", e),
+            InternalSessionError::UnexpectedResponseSize(size) => write!(
+                f,
+                "Unexpected response size {}, expected {} bytes",
+                size,
+                crate::ohttp::ENCAPSULATED_MESSAGE_BYTES
+            ),
         }
     }
 }
@@ -29,6 +37,7 @@ impl error::Error for SessionError {
         match &self.0 {
             InternalSessionError::Expired(_) => None,
             InternalSessionError::OhttpEncapsulation(e) => Some(e),
+            InternalSessionError::UnexpectedResponseSize(_) => None,
         }
     }
 }

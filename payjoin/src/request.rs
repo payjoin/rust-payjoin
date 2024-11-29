@@ -32,7 +32,7 @@ impl Request {
     }
 
     #[cfg(feature = "v2")]
-    pub fn new_v2(url: Url, body: Vec<u8>) -> Self {
-        Self { url, content_type: V2_REQ_CONTENT_TYPE, body }
+    pub fn new_v2(url: Url, body: [u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES]) -> Self {
+        Self { url, content_type: V2_REQ_CONTENT_TYPE, body: body.to_vec() }
     }
 }

@@ -113,13 +113,17 @@ impl Receiver {
     /// indicating no UncheckedProposal is available yet.
     pub fn process_res(
         &mut self,
-        mut body: impl std::io::Read,
+        body: &[u8],
         context: ohttp::ClientResponse,
     ) -> Result<Option<UncheckedProposal>, Error> {
-        let mut buf = Vec::new();
-        let _ = body.read_to_end(&mut buf);
+        let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
+            body.try_into().map_err(|_| {
+                Error::Server(Box::new(SessionError::from(
+                    InternalSessionError::UnexpectedResponseSize(body.len()),
+                )))
+            })?;
         log::trace!("decapsulating directory response");
-        let response = ohttp_decapsulate(context, &buf)?;
+        let response = ohttp_decapsulate(context, response_array)?;
         if response.body().is_empty() {
             log::debug!("response is empty");
             return Ok(None);
@@ -134,7 +138,10 @@ impl Receiver {
 
     fn fallback_req_body(
         &mut self,
-    ) -> Result<(Vec<u8>, ohttp::ClientResponse), OhttpEncapsulationError> {
+    ) -> Result<
+        ([u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES], ohttp::ClientResponse),
+        OhttpEncapsulationError,
+    > {
         let fallback_target = self.pj_url();
         ohttp_encapsulate(&mut self.context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
@@ -509,10 +516,16 @@ impl PayjoinProposal {
     /// choose to broadcast the original PSBT.
     pub fn process_res(
         &self,
-        res: Vec<u8>,
+        res: &[u8],
         ohttp_context: ohttp::ClientResponse,
     ) -> Result<(), Error> {
-        let res = ohttp_decapsulate(ohttp_context, &res)?;
+        let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
+            res.try_into().map_err(|_| {
+                Error::Server(Box::new(SessionError::from(
+                    InternalSessionError::UnexpectedResponseSize(res.len()),
+                )))
+            })?;
+        let res = ohttp_decapsulate(ohttp_context, response_array)?;
         if res.status().is_success() {
             Ok(())
         } else {

@@ -276,7 +276,7 @@ mod v2 {
             let session =
                 initialize_session(address.clone(), directory.clone(), ohttp_keys.clone(), None)?;
             let pj_uri_string =
-                session.pj_uri_builder().amount(Amount::ONE_BTC.to_sat()).build().as_string();
+                session.pj_uri_builder().amount_sats(Amount::ONE_BTC.to_sat()).build().as_string();
             // Poll receive request
             let (request, client_response) = session.extract_req()?;
             let response = agent.post(request.url.as_string()).body(request.body).send().await?;

@@ -32,9 +32,9 @@ impl Uri {
     pub fn address(&self) -> String {
         self.clone().0.address.to_string()
     }
-    ///Gets the amount in satoshis.
-    pub fn amount(&self) -> Option<f64> {
-        self.0.amount.map(|x| x.to_btc())
+    /// Gets the amount in satoshis.
+    pub fn amount_sats(&self) -> Option<u64> {
+        self.0.amount.map(|x| x.to_sat())
     }
     #[cfg(not(feature = "uniffi"))]
     pub fn check_pj_supported(&self) -> Result<PjUri, PayjoinError> {
@@ -160,8 +160,8 @@ impl PjUriBuilder {
         )
         .into())
     }
-    /// Accepts the amount you want to receive in sats and sets it in btc .
-    pub fn amount(&self, amount: u64) -> Arc<Self> {
+    /// Accepts the amount you want to receive in sats.
+    pub fn amount_sats(&self, amount: u64) -> Arc<Self> {
         let amount = payjoin::bitcoin::Amount::from_sat(amount);
         Arc::new(self.0.clone().amount(amount).into())
     }
@@ -204,8 +204,8 @@ impl PjUriBuilder {
         )
         .into())
     }
-    /// Accepts the amount you want to receive in sats and sets it in btc .
-    pub fn amount(&self, sats: u64) -> Self {
+    /// Accepts the amount you want to receive in sats.
+    pub fn amount_sats(&self, sats: u64) -> Self {
         let amount = payjoin::bitcoin::Amount::from_sat(sats);
         self.0.clone().amount(amount).into()
     }
@@ -252,7 +252,7 @@ mod tests {
                 )
                 .unwrap();
                 let uri = builder
-                    .amount(amount.to_sat())
+                    .amount_sats(amount.to_sat())
                     .message("message".to_string())
                     .pjos(true)
                     .label("label".to_string())

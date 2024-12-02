@@ -23,7 +23,7 @@ use super::config::AppConfig;
 use super::App as AppTrait;
 use crate::app::{http_agent, input_pair_from_list_unspent};
 use crate::db::Database;
-#[cfg(feature = "danger-local-https")]
+#[cfg(feature = "_danger-local-https")]
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
 
 struct Headers<'a>(&'a hyper::HeaderMap);
@@ -140,14 +140,14 @@ impl App {
         let listener = TcpListener::bind(addr).await?;
         let app = self.clone();
 
-        #[cfg(feature = "danger-local-https")]
+        #[cfg(feature = "_danger-local-https")]
         let tls_acceptor = Self::init_tls_acceptor()?;
         while let Ok((stream, _)) = listener.accept().await {
             let app = app.clone();
-            #[cfg(feature = "danger-local-https")]
+            #[cfg(feature = "_danger-local-https")]
             let tls_acceptor = tls_acceptor.clone();
             tokio::spawn(async move {
-                #[cfg(feature = "danger-local-https")]
+                #[cfg(feature = "_danger-local-https")]
                 let stream = match tls_acceptor.accept(stream).await {
                     Ok(tls_stream) => tls_stream,
                     Err(e) => {
@@ -167,7 +167,7 @@ impl App {
         Ok(())
     }
 
-    #[cfg(feature = "danger-local-https")]
+    #[cfg(feature = "_danger-local-https")]
     fn init_tls_acceptor() -> Result<tokio_rustls::TlsAcceptor> {
         use std::io::Write;
 

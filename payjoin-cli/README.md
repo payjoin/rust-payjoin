@@ -79,11 +79,11 @@ rpcport = 18443
 From the directory you'll run payjoin-cli, assuming "boom" is the name of the receiving wallet, 18443 is the rpc port, and you wish to request 10,000 sats run:
 
 ```console
-RUST_LOG=debug cargo run --features=danger-local-https -- -r "http://localhost:18443/wallet/boom" receive 10000
+RUST_LOG=debug cargo run --features=_danger-local-https -- -r "http://localhost:18443/wallet/boom" receive 10000
 ```
 
 The default configuration listens for payjoin requests at `http://localhost:3000` and expects you to relay https requests there.
-Payjoin requires a secure endpoint, either https and .onion are valid. In order to receive payjoin in a local testing environment one may enable the  `danger-local-https` feature which will provision a self-signed certificate and host the `https://localhost:3000` endpoint. Emphasis on HTTP**S**.
+Payjoin requires a secure endpoint, either https and .onion are valid. In order to receive payjoin in a local testing environment one may enable the  `_danger-local-https` feature which will provision a self-signed certificate and host the `https://localhost:3000` endpoint. Emphasis on HTTP**S**.
 
 This will generate a payjoin capable bip21 URI with which to accept payjoin:
 
@@ -103,7 +103,7 @@ Using the previously generated bip21 URI, run the following command
 from the sender directory:
 
 ```console
- RUST_LOG=debug cargo run --features=danger-local-https -- send <BIP21> --fee-rate <FEE_SAT_PER_VB>
+ RUST_LOG=debug cargo run --features=_danger-local-https -- send <BIP21> --fee-rate <FEE_SAT_PER_VB>
 ```
 
 You should see the payjoin transaction occur and be able to verify the Partially Signed Bitcoin Transaction (PSBT), inputs, and Unspent Transaction Outputs (UTXOs).

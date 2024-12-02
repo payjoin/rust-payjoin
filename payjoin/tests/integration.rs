@@ -171,7 +171,7 @@ mod integration {
         }
     }
 
-    #[cfg(feature = "danger-local-https")]
+    #[cfg(feature = "_danger-local-https")]
     #[cfg(feature = "v2")]
     mod v2 {
         use std::sync::Arc;

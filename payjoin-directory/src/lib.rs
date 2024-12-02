@@ -64,7 +64,7 @@ pub async fn listen_tcp(
     Ok(())
 }
 
-#[cfg(feature = "danger-local-https")]
+#[cfg(feature = "_danger-local-https")]
 pub async fn listen_tcp_with_tls(
     port: u16,
     db_host: String,
@@ -106,7 +106,7 @@ pub async fn listen_tcp_with_tls(
     Ok(())
 }
 
-#[cfg(feature = "danger-local-https")]
+#[cfg(feature = "_danger-local-https")]
 fn init_tls_acceptor(cert_key: (Vec<u8>, Vec<u8>)) -> Result<tokio_rustls::TlsAcceptor> {
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use rustls::ServerConfig;

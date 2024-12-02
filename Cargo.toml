@@ -15,7 +15,6 @@ uniffi = { version = "0.28.0", features = ["build"] }
 [dev-dependencies]
 uniffi = { version = "0.28.0", features = ["bindgen-tests"] }
 bdk = { version = "0.29.0", features = ["all-keys", "use-esplora-ureq", "keys-bip39", "rpc"] }
-#bitcoin-ffi = { git = "https://github.com/bitcoindevkit/bitcoin-ffi" }
 bitcoind = { version = "0.36.0", features = ["0_21_2"] }
 bitcoincore-rpc = "0.19.0"
 http = "1"
@@ -28,10 +27,10 @@ testcontainers = "0.15.0"
 testcontainers-modules = { version = "0.1.3", features = ["redis"] }
 tokio = { version = "1.12.0", features = ["full"] }
 [dependencies]
-
+bitcoin-ffi = { git = "https://github.com/bitcoindevkit/bitcoin-ffi.git", rev = "4cd8e644dbf4e001d71d5fffb232480fa5ff2246" }
 payjoin = { git = "https://github.com/payjoin/rust-payjoin", rev = "ef2ce55a57fe5270bc761bfcda58024ae45a93aa", features = ["send", "receive", "base64", "v2", "io"] }
 uniffi = { version = "0.28.0", optional = true }
-thiserror = "1.0.47"
+thiserror = "1.0.58"
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }
 url = "2.5.0"
 base64 = "0.22.1"
@@ -51,5 +50,5 @@ strip = true
 
 
 [features]
-uniffi = ["uniffi/cli"]
+uniffi = ["uniffi/cli", "bitcoin-ffi/default"]
 danger-local-https = ["payjoin/danger-local-https"]

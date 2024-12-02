@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::io::Cursor;
 use std::str::FromStr;
 use std::time::Duration;
@@ -7,7 +6,7 @@ use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 use payjoin::receive as pdk;
 
-use crate::bitcoin::{Network, OutPoint, Script, TxOut};
+use crate::bitcoin_ffi::{Network, OutPoint, Script, TxOut};
 use crate::error::PayjoinError;
 use crate::ohttp::OhttpKeys;
 use crate::uri::PjUriBuilder;
@@ -15,30 +14,6 @@ use crate::{ClientResponse, Request, Url};
 
 #[cfg(feature = "uniffi")]
 pub mod uni;
-
-#[derive(Clone)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
-pub struct Headers(pub HashMap<String, String>);
-
-#[cfg_attr(feature = "uniffi", uniffi::export)]
-impl Headers {
-    #[cfg_attr(feature = "uniffi", uniffi::constructor)]
-    pub fn from_vec(body: Vec<u8>) -> Self {
-        let mut h = HashMap::new();
-        h.insert("content-type".to_string(), "text/plain".to_string());
-        h.insert("content-length".to_string(), body.len().to_string());
-        Headers(h)
-    }
-    pub fn get_map(&self) -> HashMap<String, String> {
-        self.0.clone()
-    }
-}
-
-impl payjoin::receive::Headers for Headers {
-    fn get_header(&self, key: &str) -> Option<&str> {
-        self.0.get(key).map(|e| e.as_str())
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct Receiver(pub payjoin::receive::v2::Receiver);
@@ -350,8 +325,8 @@ pub struct InputPair(payjoin::receive::InputPair);
 impl InputPair {
     #[cfg_attr(feature = "uniffi", uniffi::constructor)]
     pub fn new(
-        txin: crate::bitcoin::TxIn,
-        psbtin: crate::bitcoin::PsbtInput,
+        txin: bitcoin_ffi::TxIn,
+        psbtin: crate::bitcoin_ffi::PsbtInput,
     ) -> Result<Self, PayjoinError> {
         Ok(Self(payjoin::receive::InputPair::new(txin.into(), psbtin.into())?))
     }

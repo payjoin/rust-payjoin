@@ -32,9 +32,9 @@ impl Uri {
     pub fn address(&self) -> String {
         self.clone().0.address.to_string()
     }
-    ///Gets the amount in satoshis.
-    pub fn amount(&self) -> Option<f64> {
-        self.0.amount.map(|x| x.to_btc())
+    /// Gets the amount in satoshis.
+    pub fn amount_sats(&self) -> Option<u64> {
+        self.0.amount.map(|x| x.to_sat())
     }
     #[cfg(not(feature = "uniffi"))]
     pub fn check_pj_supported(&self) -> Result<PjUri, PayjoinError> {
@@ -84,9 +84,9 @@ impl PjUri {
     pub fn address(&self) -> String {
         self.0.clone().address.to_string()
     }
-    /// Number of btc  requested as payment
-    pub fn amount(&self) -> Option<f64> {
-        self.0.clone().amount.map(|e| e.to_btc())
+    /// Number of sats requested as payment
+    pub fn amount_sats(&self) -> Option<u64> {
+        self.0.clone().amount.map(|e| e.to_sat())
     }
     pub fn as_string(&self) -> String {
         self.0.clone().to_string()
@@ -160,8 +160,8 @@ impl PjUriBuilder {
         )
         .into())
     }
-    ///Accepts the amount you want to receive in sats and sets it in btc .
-    pub fn amount(&self, amount: u64) -> Arc<Self> {
+    /// Accepts the amount you want to receive in sats.
+    pub fn amount_sats(&self, amount: u64) -> Arc<Self> {
         let amount = payjoin::bitcoin::Amount::from_sat(amount);
         Arc::new(self.0.clone().amount(amount).into())
     }
@@ -204,9 +204,9 @@ impl PjUriBuilder {
         )
         .into())
     }
-    ///Accepts the amount you want to receive in sats and sets it in btc .
-    pub fn amount(&self, amount: u64) -> Self {
-        let amount = payjoin::bitcoin::Amount::from_sat(amount);
+    /// Accepts the amount you want to receive in sats.
+    pub fn amount_sats(&self, sats: u64) -> Self {
+        let amount = payjoin::bitcoin::Amount::from_sat(sats);
         self.0.clone().amount(amount).into()
     }
     /// Set the message.
@@ -230,8 +230,6 @@ impl PjUriBuilder {
 #[cfg(test)]
 #[cfg(not(feature = "uniffi"))]
 mod tests {
-    use std::sync::Arc;
-
     use bdk::bitcoin;
 
     use crate::uri::{PjUriBuilder, Url};
@@ -254,7 +252,7 @@ mod tests {
                 )
                 .unwrap();
                 let uri = builder
-                    .amount(amount.to_sat())
+                    .amount_sats(amount.to_sat())
                     .message("message".to_string())
                     .pjos(true)
                     .label("label".to_string())

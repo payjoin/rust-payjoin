@@ -118,14 +118,8 @@ impl Sender {
     }
 
     /// Extract serialized Request and Context from a Payjoin Proposal.
-    ///
-    /// This method requires the `rs` pubkey to be extracted from the endpoint
-    /// and has no fallback to v1.
-    pub fn extract_v2(
-        &self,
-        ohttp_proxy_url: Url,
-    ) -> Result<(Request, V2PostContext), PayjoinError> {
-        match self.0.extract_v2(ohttp_proxy_url.into()) {
+    pub fn extract_v2(&self, ohttp_relay: Url) -> Result<(Request, V2PostContext), PayjoinError> {
+        match self.0.extract_v2(ohttp_relay.into()) {
             Ok((req, ctx)) => Ok((req.into(), ctx.into())),
             Err(e) => Err(e.into()),
         }

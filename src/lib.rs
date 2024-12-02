@@ -1,6 +1,6 @@
 #![crate_name = "payjoin_ffi"]
 
-pub mod bitcoin;
+pub mod bitcoin_ffi;
 pub mod error;
 pub mod io;
 pub mod ohttp;
@@ -9,7 +9,7 @@ pub mod request;
 pub mod send;
 pub mod uri;
 
-pub use crate::bitcoin::*;
+pub use crate::bitcoin_ffi::*;
 pub use crate::error::PayjoinError;
 pub use crate::ohttp::*;
 #[cfg(feature = "uniffi")]

@@ -3,8 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
-use bitcoin::base64::Engine;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::body::{Body, Bytes, Incoming};
@@ -16,8 +14,6 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
-
-use crate::db::ShortId;
 
 pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
@@ -33,6 +29,9 @@ const V1_MAX_BUFFER_SIZE: usize = 65536;
 const V1_REJECT_RES_JSON: &str =
     r#"{{"errorCode": "original-psbt-rejected ", "message": "Body is not a string"}}"#;
 const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message": "V2 receiver offline. V1 sends require synchronous communications."}}"#;
+
+// 8 bytes as bech32 is 12.8 characters
+const ID_LENGTH: usize = 13;
 
 mod db;
 use crate::db::DbPool;
@@ -306,11 +305,11 @@ async fn post_fallback_v1(
     };
 
     let v2_compat_body = format!("{}\n{}", body_str, query);
-    let id = decode_short_id(id)?;
-    pool.push_default(&id, v2_compat_body.into())
+    let id = check_id_length(id)?;
+    pool.push_default(id, v2_compat_body.into())
         .await
         .map_err(|e| HandlerError::BadRequest(e.into()))?;
-    match pool.peek_v1(&id).await {
+    match pool.peek_v1(id).await {
         Some(result) => match result {
             Ok(buffered_req) => Ok(Response::new(full(buffered_req))),
             Err(e) => Err(HandlerError::BadRequest(e.into())),
@@ -327,17 +326,27 @@ async fn put_payjoin_v1(
     trace!("Put_payjoin_v1");
     let ok_response = Response::builder().status(StatusCode::OK).body(empty())?;
 
-    let id = decode_short_id(id)?;
+    let id = check_id_length(id)?;
     let req =
         body.collect().await.map_err(|e| HandlerError::InternalServerError(e.into()))?.to_bytes();
     if req.len() > V1_MAX_BUFFER_SIZE {
         return Err(HandlerError::PayloadTooLarge);
     }
 
-    match pool.push_v1(&id, req.into()).await {
+    match pool.push_v1(id, req.into()).await {
         Ok(_) => Ok(ok_response),
         Err(e) => Err(HandlerError::BadRequest(e.into())),
     }
+}
+
+fn check_id_length(id: &str) -> Result<&str, HandlerError> {
+    if id.len() != ID_LENGTH {
+        return Err(HandlerError::BadRequest(anyhow::anyhow!(
+            "subdirectory ID must be 13 bech32 characters",
+        )));
+    }
+
+    Ok(id)
 }
 
 async fn post_subdir(
@@ -348,14 +357,15 @@ async fn post_subdir(
     let none_response = Response::builder().status(StatusCode::OK).body(empty())?;
     trace!("post_subdir");
 
-    let id = decode_short_id(id)?;
+    let id = check_id_length(id)?;
+
     let req =
         body.collect().await.map_err(|e| HandlerError::InternalServerError(e.into()))?.to_bytes();
     if req.len() > V1_MAX_BUFFER_SIZE {
         return Err(HandlerError::PayloadTooLarge);
     }
 
-    match pool.push_default(&id, req.into()).await {
+    match pool.push_default(id, req.into()).await {
         Ok(_) => Ok(none_response),
         Err(e) => Err(HandlerError::BadRequest(e.into())),
     }
@@ -366,8 +376,8 @@ async fn get_subdir(
     pool: DbPool,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
     trace!("get_subdir");
-    let id = decode_short_id(id)?;
-    match pool.peek_default(&id).await {
+    let id = check_id_length(id)?;
+    match pool.peek_default(id).await {
         Some(result) => match result {
             Ok(buffered_req) => Ok(Response::new(full(buffered_req))),
             Err(e) => Err(HandlerError::BadRequest(e.into())),
@@ -394,16 +404,6 @@ async fn get_ohttp_keys(
     let mut res = Response::new(full(ohttp_keys));
     res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/ohttp-keys"));
     Ok(res)
-}
-
-fn decode_short_id(input: &str) -> Result<ShortId, HandlerError> {
-    let decoded =
-        BASE64_URL_SAFE_NO_PAD.decode(input).map_err(|e| HandlerError::BadRequest(e.into()))?;
-
-    decoded[..8]
-        .try_into()
-        .map_err(|_| HandlerError::BadRequest(anyhow::anyhow!("Invalid subdirectory ID")))
-        .map(ShortId)
 }
 
 fn empty() -> BoxBody<Bytes, hyper::Error> {

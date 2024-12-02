@@ -17,6 +17,64 @@ pub mod error;
 #[cfg(feature = "v2")]
 pub(crate) mod url_ext;
 
+#[cfg(feature = "v2")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShortId(pub [u8; 8]);
+
+#[cfg(feature = "v2")]
+impl ShortId {
+    pub fn as_bytes(&self) -> &[u8] { &self.0 }
+    pub fn as_slice(&self) -> &[u8] { &self.0 }
+}
+
+#[cfg(feature = "v2")]
+impl std::fmt::Display for ShortId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let id_hrp = bitcoin::bech32::Hrp::parse("ID").unwrap();
+        f.write_str(
+            crate::bech32::nochecksum::encode(id_hrp, &self.0)
+                .expect("bech32 encoding of short ID must succeed")
+                .strip_prefix("ID1")
+                .expect("human readable part must be ID1"),
+        )
+    }
+}
+
+#[cfg(feature = "v2")]
+#[derive(Debug)]
+pub enum ShortIdError {
+    DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
+    IncorrectLength(std::array::TryFromSliceError),
+}
+
+#[cfg(feature = "v2")]
+impl std::convert::From<bitcoin::hashes::sha256::Hash> for ShortId {
+    fn from(h: bitcoin::hashes::sha256::Hash) -> Self {
+        bitcoin::hashes::Hash::as_byte_array(&h)[..8]
+            .try_into()
+            .expect("truncating SHA256 to 8 bytes should always succeed")
+    }
+}
+
+#[cfg(feature = "v2")]
+impl std::convert::TryFrom<&[u8]> for ShortId {
+    type Error = ShortIdError;
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        let bytes: [u8; 8] = bytes.try_into().map_err(ShortIdError::IncorrectLength)?;
+        Ok(Self(bytes))
+    }
+}
+
+#[cfg(feature = "v2")]
+impl std::str::FromStr for ShortId {
+    type Err = ShortIdError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (_, bytes) = crate::bech32::nochecksum::decode(&("ID1".to_string() + s))
+            .map_err(ShortIdError::DecodeBech32)?;
+        (&bytes[..]).try_into()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum MaybePayjoinExtras {
     Supported(PayjoinExtras),
@@ -123,11 +181,17 @@ impl PjUriBuilder {
         #[allow(unused_mut)]
         let mut pj = origin;
         #[cfg(feature = "v2")]
-        pj.set_receiver_pubkey(receiver_pubkey);
+        if let Some(receiver_pubkey) = receiver_pubkey {
+            pj.set_receiver_pubkey(receiver_pubkey);
+        }
         #[cfg(feature = "v2")]
-        pj.set_ohttp(ohttp_keys);
+        if let Some(ohttp_keys) = ohttp_keys {
+            pj.set_ohttp(ohttp_keys);
+        }
         #[cfg(feature = "v2")]
-        pj.set_exp(expiry);
+        if let Some(expiry) = expiry {
+            pj.set_exp(expiry);
+        }
         Self { address, amount: None, message: None, label: None, pj, pjos: false }
     }
     /// Set the amount you want to receive.
@@ -205,9 +269,19 @@ impl bip21::SerializeParams for &PayjoinExtras {
     type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
 
     fn serialize_params(self) -> Self::Iterator {
+        // normalizing to uppercase enables QR alphanumeric mode encoding
+        // unfortunately Url normalizes these to be lowercase
+        let scheme = self.endpoint.scheme();
+        let host = self.endpoint.host_str().expect("host must be set");
+        let endpoint_str = self
+            .endpoint
+            .as_str()
+            .replacen(scheme, &scheme.to_uppercase(), 1)
+            .replacen(host, &host.to_uppercase(), 1);
+
         vec![
-            ("pj", self.endpoint.as_str().to_string()),
             ("pjos", if self.disable_output_substitution { "1" } else { "0" }.to_string()),
+            ("pj", endpoint_str),
         ]
         .into_iter()
     }

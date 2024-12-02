@@ -15,7 +15,8 @@ pub(crate) enum InternalPjParseError {
 #[derive(Debug)]
 pub(crate) enum ParseReceiverPubkeyError {
     MissingPubkey,
-    PubkeyNotBase64(bitcoin::base64::DecodeError),
+    InvalidHrp(bitcoin::bech32::Hrp),
+    DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
     InvalidPubkey(crate::hpke::HpkeError),
 }
 
@@ -26,7 +27,8 @@ impl std::fmt::Display for ParseReceiverPubkeyError {
 
         match &self {
             MissingPubkey => write!(f, "receiver public key is missing"),
-            PubkeyNotBase64(e) => write!(f, "receiver public is not valid base64: {}", e),
+            InvalidHrp(h) => write!(f, "incorrect hrp for receiver key: {}", h),
+            DecodeBech32(e) => write!(f, "receiver public is not valid base64: {}", e),
             InvalidPubkey(e) =>
                 write!(f, "receiver public key does not represent a valid pubkey: {}", e),
         }
@@ -40,7 +42,8 @@ impl std::error::Error for ParseReceiverPubkeyError {
 
         match &self {
             MissingPubkey => None,
-            PubkeyNotBase64(error) => Some(error),
+            InvalidHrp(_) => None,
+            DecodeBech32(error) => Some(error),
             InvalidPubkey(error) => Some(error),
         }
     }

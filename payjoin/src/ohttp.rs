@@ -1,8 +1,7 @@
 use std::ops::{Deref, DerefMut};
 use std::{error, fmt};
 
-use bitcoin::base64::prelude::BASE64_URL_SAFE_NO_PAD;
-use bitcoin::base64::Engine;
+use bitcoin::bech32::{self, EncodeError};
 use bitcoin::key::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE;
 
 pub const ENCAPSULATED_MESSAGE_BYTES: usize = 8192;
@@ -145,19 +144,19 @@ impl fmt::Display for OhttpKeys {
         let mut buf = vec![key_id];
         buf.extend_from_slice(&compressed_pubkey);
 
-        let encoded = BASE64_URL_SAFE_NO_PAD.encode(buf);
-        write!(f, "{}", encoded)
+        let oh_hrp: bech32::Hrp = bech32::Hrp::parse("OH").unwrap();
+
+        crate::bech32::nochecksum::encode_to_fmt(f, oh_hrp, &buf).map_err(|e| match e {
+            EncodeError::Fmt(e) => e,
+            _ => fmt::Error,
+        })
     }
 }
 
-impl std::str::FromStr for OhttpKeys {
-    type Err = ParseOhttpKeysError;
+impl TryFrom<&[u8]> for OhttpKeys {
+    type Error = ParseOhttpKeysError;
 
-    /// Parses a base64URL-encoded string into OhttpKeys.
-    /// The string format is: key_id || compressed_public_key
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let bytes = BASE64_URL_SAFE_NO_PAD.decode(s).map_err(ParseOhttpKeysError::DecodeBase64)?;
-
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         let key_id = *bytes.first().ok_or(ParseOhttpKeysError::InvalidFormat)?;
         let compressed_pk = bytes.get(1..34).ok_or(ParseOhttpKeysError::InvalidFormat)?;
 
@@ -171,6 +170,26 @@ impl std::str::FromStr for OhttpKeys {
         buf.extend_from_slice(SYMMETRIC_KDF_AEAD);
 
         ohttp::KeyConfig::decode(&buf).map(Self).map_err(ParseOhttpKeysError::DecodeKeyConfig)
+    }
+}
+
+impl std::str::FromStr for OhttpKeys {
+    type Err = ParseOhttpKeysError;
+
+    /// Parses a base64URL-encoded string into OhttpKeys.
+    /// The string format is: key_id || compressed_public_key
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // TODO extract to utility function
+        let oh_hrp: bech32::Hrp = bech32::Hrp::parse("OH").unwrap();
+
+        let (hrp, bytes) =
+            crate::bech32::nochecksum::decode(s).map_err(ParseOhttpKeysError::DecodeBech32)?;
+
+        if hrp != oh_hrp {
+            return Err(ParseOhttpKeysError::InvalidFormat);
+        }
+
+        Self::try_from(&bytes[..])
     }
 }
 
@@ -220,7 +239,7 @@ impl serde::Serialize for OhttpKeys {
 pub enum ParseOhttpKeysError {
     InvalidFormat,
     InvalidPublicKey,
-    DecodeBase64(bitcoin::base64::DecodeError),
+    DecodeBech32(bech32::primitives::decode::CheckedHrpstringError),
     DecodeKeyConfig(ohttp::Error),
 }
 
@@ -229,7 +248,7 @@ impl std::fmt::Display for ParseOhttpKeysError {
         match self {
             ParseOhttpKeysError::InvalidFormat => write!(f, "Invalid format"),
             ParseOhttpKeysError::InvalidPublicKey => write!(f, "Invalid public key"),
-            ParseOhttpKeysError::DecodeBase64(e) => write!(f, "Failed to decode base64: {}", e),
+            ParseOhttpKeysError::DecodeBech32(e) => write!(f, "Failed to decode base64: {}", e),
             ParseOhttpKeysError::DecodeKeyConfig(e) =>
                 write!(f, "Failed to decode KeyConfig: {}", e),
         }
@@ -239,7 +258,7 @@ impl std::fmt::Display for ParseOhttpKeysError {
 impl std::error::Error for ParseOhttpKeysError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            ParseOhttpKeysError::DecodeBase64(e) => Some(e),
+            ParseOhttpKeysError::DecodeBech32(e) => Some(e),
             ParseOhttpKeysError::DecodeKeyConfig(e) => Some(e),
             ParseOhttpKeysError::InvalidFormat | ParseOhttpKeysError::InvalidPublicKey => None,
         }

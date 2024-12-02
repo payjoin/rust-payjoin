@@ -35,6 +35,8 @@ pub use crate::hpke::{HpkeKeyPair, HpkePublicKey};
 pub(crate) mod ohttp;
 #[cfg(feature = "v2")]
 pub use crate::ohttp::OhttpKeys;
+#[cfg(feature = "v2")]
+pub(crate) mod bech32;
 
 #[cfg(feature = "io")]
 pub mod io;

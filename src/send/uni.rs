@@ -169,7 +169,7 @@ impl V2PostContext {
     /// Decodes and validates the response.
     /// Call this method with response from receiver to continue BIP-??? flow. A successful response can either be None if the relay has not response yet or Some(Psbt).
     /// If the response is some valid PSBT you should sign and broadcast.
-    pub fn process_response(&self, response: Vec<u8>) -> Result<Arc<V2GetContext>, PayjoinError> {
+    pub fn process_response(&self, response: &[u8]) -> Result<Arc<V2GetContext>, PayjoinError> {
         self.0.process_response(response).map(|t| Arc::new(t.into()))
     }
 }
@@ -208,7 +208,7 @@ impl V2GetContext {
     /// If the response is some valid PSBT you should sign and broadcast.
     pub fn process_response(
         &self,
-        response: Vec<u8>,
+        response: &[u8],
         ohttp_ctx: Arc<ClientResponse>,
     ) -> Result<Option<String>, PayjoinError> {
         self.0.process_response(response, ohttp_ctx.as_ref())

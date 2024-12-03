@@ -10,7 +10,7 @@ use crate::uri::Url;
 ///
 /// * `payjoin_directory`: The payjoin directory from which to fetch the ohttp keys.  This
 /// directory stores and forwards payjoin client payloads.
-#[cfg(not(feature = "danger-local-https"))]
+#[cfg(not(feature = "_danger-local-https"))]
 pub async fn fetch_ohttp_keys(
     ohttp_relay: Url,
     payjoin_directory: Url,
@@ -31,7 +31,7 @@ pub async fn fetch_ohttp_keys(
 /// directory stores and forwards payjoin client payloads.
 ///
 /// * `cert_der`: The DER-encoded certificate to use for local HTTPS connections.
-#[cfg(feature = "danger-local-https")]
+#[cfg(feature = "_danger-local-https")]
 pub async fn fetch_ohttp_keys(
     ohttp_relay: Url,
     payjoin_directory: Url,

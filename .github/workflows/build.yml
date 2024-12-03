@@ -18,7 +18,7 @@ jobs:
           override: true
           profile: minimal
       - name: Build on Rust ${{ matrix.toolchain }}
-        run: cargo build --color always --all-targets --features danger-local-https
+        run: cargo build --color always --all-targets --features _danger-local-https
       - name: Check formatting (nightly only)
         if: matrix.rust == 'nightly'
         run: rustup component add rustfmt && cargo fmt --all -- --check

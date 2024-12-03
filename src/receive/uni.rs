@@ -66,7 +66,7 @@ impl Receiver {
     ///The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
     pub fn process_res(
         &self,
-        body: Vec<u8>,
+        body: &[u8],
         context: Arc<ClientResponse>,
     ) -> Result<Option<Arc<UncheckedProposal>>, PayjoinError> {
         <Self as Into<super::Receiver>>::into(self.clone())
@@ -84,7 +84,7 @@ impl Receiver {
         Arc::new(self.0.pj_url())
     }
     ///The per-session public key to use as an identifier
-    pub fn id(&self) -> Vec<u8> {
+    pub fn id(&self) -> String {
         self.0.id()
     }
 }
@@ -417,7 +417,7 @@ impl PayjoinProposal {
     /// This function decapsulates the response using the provided OHTTP context. If the response status is successful, it indicates that the Payjoin proposal has been accepted. Otherwise, it returns an error with the status code.
     ///
     /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or choose to broadcast the original PSBT.
-    pub fn process_res(&self, body: Vec<u8>, ctx: Arc<ClientResponse>) -> Result<(), PayjoinError> {
+    pub fn process_res(&self, body: &[u8], ctx: Arc<ClientResponse>) -> Result<(), PayjoinError> {
         self.0.process_res(body, ctx.as_ref())
     }
 }

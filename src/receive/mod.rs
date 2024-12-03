@@ -1,4 +1,3 @@
-use std::io::Cursor;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -75,11 +74,11 @@ impl Receiver {
     ///The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
     pub fn process_res(
         &self,
-        body: Vec<u8>,
+        body: &[u8],
         ctx: &ClientResponse,
     ) -> Result<Option<UncheckedProposal>, PayjoinError> {
         <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone())
-            .process_res(Cursor::new(body), ctx.into())
+            .process_res(body, ctx.into())
             .map(|e| e.map(|o| o.into()))
             .map_err(|e| e.into())
     }
@@ -95,8 +94,8 @@ impl Receiver {
     }
 
     ///The per-session public key to use as an identifier
-    pub fn id(&self) -> Vec<u8> {
-        <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone()).id().to_vec()
+    pub fn id(&self) -> String {
+        <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone()).id().to_string()
     }
 }
 
@@ -437,7 +436,7 @@ impl PayjoinProposal {
     /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or choose to broadcast the original PSBT.
     pub fn process_res(
         &self,
-        body: Vec<u8>,
+        body: &[u8],
         ohttp_context: &ClientResponse,
     ) -> Result<(), PayjoinError> {
         <PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())

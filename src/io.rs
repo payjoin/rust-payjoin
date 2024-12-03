@@ -5,11 +5,11 @@ use crate::uri::Url;
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
 ///
 /// * `ohttp_relay`: The http CONNNECT method proxy to request the ohttp keys from a payjoin
-/// directory.  Proxying requests for ohttp keys ensures a client IP address is never revealed to
-/// the payjoin directory.
+///   directory.  Proxying requests for ohttp keys ensures a client IP address is never revealed to
+///   the payjoin directory.
 ///
 /// * `payjoin_directory`: The payjoin directory from which to fetch the ohttp keys.  This
-/// directory stores and forwards payjoin client payloads.
+///   directory stores and forwards payjoin client payloads.
 #[cfg(not(feature = "_danger-local-https"))]
 pub async fn fetch_ohttp_keys(
     ohttp_relay: Url,
@@ -24,11 +24,11 @@ pub async fn fetch_ohttp_keys(
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
 ///
 /// * `ohttp_relay`: The http CONNNECT method proxy to request the ohttp keys from a payjoin
-/// directory.  Proxying requests for ohttp keys ensures a client IP address is never revealed to
-/// the payjoin directory.
+///   directory.  Proxying requests for ohttp keys ensures a client IP address is never revealed to
+///   the payjoin directory.
 ///
 /// * `payjoin_directory`: The payjoin directory from which to fetch the ohttp keys.  This
-/// directory stores and forwards payjoin client payloads.
+///   directory stores and forwards payjoin client payloads.
 ///
 /// * `cert_der`: The DER-encoded certificate to use for local HTTPS connections.
 #[cfg(feature = "_danger-local-https")]

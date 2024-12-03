@@ -21,7 +21,7 @@ impl From<payjoin::Uri<'static, NetworkChecked>> for Uri {
 }
 
 impl Uri {
-    pub fn from_str(uri: String) -> Result<Self, PayjoinError> {
+    pub fn parse(uri: String) -> Result<Self, PayjoinError> {
         match payjoin::Uri::from_str(uri.as_str()) {
             Ok(e) => Ok(e.assume_checked().into()),
             Err(e) => Err(PayjoinError::PjParseError { message: e.to_string() }),
@@ -110,8 +110,8 @@ pub struct Url(payjoin::Url);
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 impl Url {
     #[cfg_attr(feature = "uniffi", uniffi::constructor)]
-    pub fn from_str(input: String) -> Result<Url, PayjoinError> {
-        match payjoin::Url::from_str(input.as_str()) {
+    pub fn parse(input: String) -> Result<Url, PayjoinError> {
+        match payjoin::Url::parse(input.as_str()) {
             Ok(e) => Ok(Self(e)),
             Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
         }

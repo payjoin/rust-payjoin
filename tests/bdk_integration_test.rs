@@ -248,9 +248,9 @@ mod v2 {
     async fn v2_to_v2_full_cycle() {
         let (cert, key) = local_cert_key();
         let ohttp_relay_port = find_free_port();
-        let ohttp_relay = Url::from_str(format!("http://localhost:{}", ohttp_relay_port)).unwrap();
+        let ohttp_relay = Url::parse(format!("http://localhost:{}", ohttp_relay_port)).unwrap();
         let directory_port = find_free_port();
-        let directory = Url::from_str(format!("https://localhost:{}", directory_port)).unwrap();
+        let directory = Url::parse(format!("https://localhost:{}", directory_port)).unwrap();
         let gateway_origin = http::Uri::from_str(directory.as_string().as_str()).unwrap();
         tokio::select!(
         _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => assert!(false, "Ohttp relay is long running"),
@@ -289,7 +289,7 @@ mod v2 {
             // **********************
             // Inside the Sender:
             // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-            let pj_uri = Uri::from_str(pj_uri_string).unwrap().check_pj_supported().unwrap();
+            let pj_uri = Uri::parse(pj_uri_string).unwrap().check_pj_supported().unwrap();
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             println!("\nOriginal sender psbt: {:#?}", psbt.to_string());
 

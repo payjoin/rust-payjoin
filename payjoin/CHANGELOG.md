@@ -1,5 +1,28 @@
 # Payjoin Changelog
 
+## 0.21.0
+
+- Upgrade rustls v0.22.4
+- Depend on [bitcoin-ohttp](https://docs.rs/bitcoin-ohttp/latest/bitcoin_ohttp/)
+- Allow receiver to contribute multiple inputs and outputs
+- Remove `contribute_witness_inputs` and `contribute_non_witness_inputs` in favor of a single consolidated `contribute_inputs` function
+- Make `InputPair` public to facilitate working with inputs in coin selection and input contributions
+- Enable receiver fee contributions in `apply_fee`, which now requires a max_feerate parameter
+- Fix weight estimations for nested segwit inputs
+- Fix mixed input scripts receiver check in Payjoin V1 to only error if the receiver would *introduce* mixed types
+- Allow mixed input scripts in Payjoin V2
+- Implement client end-to-end encryption using HPKE using [bitcoin-hpke](https://docs.rs/bitcoin-hpke/latest/bitcoin_hpke/)
+- Make session initialization implicit
+- Make payloads uniform by removing sender auth key
+- Shorten subdirectory IDs to 64 pseudorandom bits [#386](https://github.com/payjoin/rust-payjoin/pull/386)
+- Clarify send and receive module documentation [#407](https://github.com/payjoin/rust-payjoin/pull/407)
+- Pad ohttp messages to consistent 8192 bytes [#395](https://github.com/payjoin/rust-payjoin/pull/395)
+- encode subdirectory IDs in bech32 and other QR optimizations [#417](https://github.com/payjoin/rust-payjoin/pull/417)
+- Upgrade to bitcoin v0.32.5
+- Work around '#' escaping bug in bip21 crate [#373](https://github.com/payjoin/rust-payjoin/pull/373)
+- Hide `_danger-local-https` feature behind `_` prefix so it doesn't show up in docs [#423](https://github.com/payjoin/rust-payjoin/pull/423)
+
+
 ## 0.20.0
 
 - remove `contribute_non_witness_input` because it was unused

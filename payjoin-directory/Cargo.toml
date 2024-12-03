@@ -14,7 +14,7 @@ resolver = "2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-danger-local-https = ["hyper-rustls", "rustls", "tokio-rustls"]
+_danger-local-https = ["hyper-rustls", "rustls", "tokio-rustls"]
 
 [dependencies]
 anyhow = "1.0.71"

@@ -361,12 +361,12 @@ async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::
         println!("Bootstrapping private network transport over Oblivious HTTP");
         let ohttp_relay = config.ohttp_relay.clone();
         let payjoin_directory = config.pj_directory.clone();
-        #[cfg(feature = "danger-local-https")]
+        #[cfg(feature = "_danger-local-https")]
         let cert_der = crate::app::read_local_cert()?;
         Ok(payjoin::io::fetch_ohttp_keys(
             ohttp_relay,
             payjoin_directory,
-            #[cfg(feature = "danger-local-https")]
+            #[cfg(feature = "_danger-local-https")]
             cert_der,
         )
         .await?)

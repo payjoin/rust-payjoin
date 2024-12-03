@@ -11,20 +11,20 @@ use crate::{OhttpKeys, Url};
 ///   directory stores and forwards payjoin client payloads.
 ///
 /// * `cert_der` (optional): The DER-encoded certificate to use for local HTTPS connections.  This
-///   parameter is only available when the "danger-local-https" feature is enabled.
+///   parameter is only available when the "_danger-local-https" feature is enabled.
 #[cfg(feature = "v2")]
 pub async fn fetch_ohttp_keys(
     ohttp_relay: Url,
     payjoin_directory: Url,
-    #[cfg(feature = "danger-local-https")] cert_der: Vec<u8>,
+    #[cfg(feature = "_danger-local-https")] cert_der: Vec<u8>,
 ) -> Result<OhttpKeys, Error> {
     use reqwest::{Client, Proxy};
 
     let ohttp_keys_url = payjoin_directory.join("/ohttp-keys")?;
     let proxy = Proxy::all(ohttp_relay.as_str())?;
-    #[cfg(not(feature = "danger-local-https"))]
+    #[cfg(not(feature = "_danger-local-https"))]
     let client = Client::builder().proxy(proxy).build()?;
-    #[cfg(feature = "danger-local-https")]
+    #[cfg(feature = "_danger-local-https")]
     let client = Client::builder()
         .danger_accept_invalid_certs(true)
         .use_rustls_tls()
@@ -44,7 +44,7 @@ enum InternalError {
     ParseUrl(crate::ParseError),
     Reqwest(reqwest::Error),
     Io(std::io::Error),
-    #[cfg(feature = "danger-local-https")]
+    #[cfg(feature = "_danger-local-https")]
     Rustls(rustls::Error),
     #[cfg(feature = "v2")]
     InvalidOhttpKeys(String),
@@ -61,7 +61,7 @@ macro_rules! impl_from_error {
 impl_from_error!(reqwest::Error, Reqwest);
 impl_from_error!(crate::ParseError, ParseUrl);
 impl_from_error!(std::io::Error, Io);
-#[cfg(feature = "danger-local-https")]
+#[cfg(feature = "_danger-local-https")]
 impl_from_error!(rustls::Error, Rustls);
 
 impl std::fmt::Display for Error {
@@ -76,7 +76,7 @@ impl std::fmt::Display for Error {
             InvalidOhttpKeys(e) => {
                 write!(f, "Invalid ohttp keys returned from payjoin directory: {}", e)
             }
-            #[cfg(feature = "danger-local-https")]
+            #[cfg(feature = "_danger-local-https")]
             Rustls(e) => e.fmt(f),
         }
     }
@@ -92,7 +92,7 @@ impl std::error::Error for Error {
             Io(e) => Some(e),
             #[cfg(feature = "v2")]
             InvalidOhttpKeys(_) => None,
-            #[cfg(feature = "danger-local-https")]
+            #[cfg(feature = "_danger-local-https")]
             Rustls(e) => Some(e),
         }
     }

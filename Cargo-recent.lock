@@ -1590,6 +1590,7 @@ dependencies = [
  "ohttp-relay",
  "once_cell",
  "payjoin-directory",
+ "payjoin-test-utils",
  "rcgen",
  "reqwest",
  "rustls 0.22.4",
@@ -1624,6 +1625,7 @@ dependencies = [
  "once_cell",
  "payjoin",
  "payjoin-directory",
+ "payjoin-test-utils",
  "rcgen",
  "reqwest",
  "rustls 0.22.4",
@@ -1657,6 +1659,21 @@ dependencies = [
  "tokio-rustls",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "payjoin-test-utils"
+version = "0.1.0"
+dependencies = [
+ "bitcoincore-rpc",
+ "bitcoind",
+ "http",
+ "log",
+ "ohttp-relay",
+ "payjoin-directory",
+ "rcgen",
+ "testcontainers",
+ "testcontainers-modules",
 ]
 
 [[package]]

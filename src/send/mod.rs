@@ -155,7 +155,7 @@ impl V2PostContext {
     /// Call this method with response from receiver to continue BIP-??? flow. A successful response can either be None if the relay has not response yet or Some(Psbt).
     /// If the response is some valid PSBT you should sign and broadcast.
     pub fn process_response(&self, response: &[u8]) -> Result<V2GetContext, PayjoinError> {
-        <&V2PostContext as Into<payjoin::send::V2PostContext>>::into(&self)
+        <&V2PostContext as Into<payjoin::send::V2PostContext>>::into(self)
             .process_response(response)
             .map(|t| t.clone().into())
             .map_err(|e| e.into())

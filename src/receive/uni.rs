@@ -58,9 +58,9 @@ impl Receiver {
     }
 
     pub fn extract_req(&self) -> Result<RequestResponse, PayjoinError> {
-        self.0.extract_req().map(|(request, ctx)| {
-            RequestResponse { request, client_response: Arc::new(ctx.into()) }
-        })
+        self.0
+            .extract_req()
+            .map(|(request, ctx)| RequestResponse { request, client_response: Arc::new(ctx) })
     }
 
     ///The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
@@ -75,7 +75,7 @@ impl Receiver {
     }
 
     pub fn pj_uri_builder(&self) -> Arc<PjUriBuilder> {
-        Arc::new(self.0.pj_uri_builder().into())
+        Arc::new(self.0.pj_uri_builder())
     }
     /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
     /// This identifies a session at the payjoin directory server.
@@ -139,7 +139,6 @@ impl UncheckedProposal {
                 can_broadcast.callback(transaction.to_vec())
             })
             .map(|e| Arc::new(e.into()))
-            .map_err(|e| e.into())
     }
 
     /// Call this method if the only way to initiate a Payjoin with this receiver
@@ -208,7 +207,7 @@ impl MaybeInputsSeen {
     ) -> Result<Arc<OutputsUnknown>, PayjoinError> {
         self.0
             .clone()
-            .check_no_inputs_seen_before(|outpoint| is_known.callback(outpoint.clone()))
+            .check_no_inputs_seen_before(|outpoint| is_known.callback(*outpoint))
             .map(|t| Arc::new(t.into()))
     }
 }
@@ -308,10 +307,10 @@ impl WantsInputs {
     ) -> Result<Arc<InputPair>, PayjoinError> {
         let candidate_inputs: Vec<InputPair> = candidate_inputs
             .into_iter()
-            .map(|pair| Arc::try_unwrap(pair).unwrap_or_else(|arc| (*arc).clone()).into())
+            .map(|pair| Arc::try_unwrap(pair).unwrap_or_else(|arc| (*arc).clone()))
             .collect();
 
-        self.0.try_preserving_privacy(candidate_inputs).map(|t| Arc::new(t.into()))
+        self.0.try_preserving_privacy(candidate_inputs).map(Arc::new)
     }
 
     pub fn contribute_inputs(
@@ -320,12 +319,9 @@ impl WantsInputs {
     ) -> Result<Arc<WantsInputs>, PayjoinError> {
         let replacement_inputs: Vec<InputPair> = replacement_inputs
             .into_iter()
-            .map(|pair| Arc::try_unwrap(pair).unwrap_or_else(|arc| (*arc).clone()).into())
+            .map(|pair| Arc::try_unwrap(pair).unwrap_or_else(|arc| (*arc).clone()))
             .collect();
-        self.0
-            .contribute_inputs(replacement_inputs)
-            .map(|t| Arc::new(t.into()))
-            .map_err(|e| e.into())
+        self.0.contribute_inputs(replacement_inputs).map(|t| Arc::new(t.into()))
     }
 
     pub fn commit_inputs(&self) -> Arc<ProvisionalProposal> {
@@ -358,7 +354,6 @@ impl ProvisionalProposal {
                 max_fee_rate_sat_per_vb,
             )
             .map(|e| Arc::new(e.into()))
-            .map_err(|e| e.into())
     }
 }
 
@@ -389,7 +384,7 @@ impl PayjoinProposal {
         for e in <PayjoinProposal as Into<super::PayjoinProposal>>::into(self.clone())
             .utxos_to_be_locked()
         {
-            outpoints.push(e.to_owned().into());
+            outpoints.push(e.to_owned());
         }
         outpoints
     }
@@ -409,7 +404,7 @@ impl PayjoinProposal {
 
     pub fn extract_v2_req(&self) -> Result<RequestResponse, PayjoinError> {
         let (req, res) = self.0.extract_v2_req()?;
-        Ok(RequestResponse { request: req.into(), client_response: Arc::new(res.into()) })
+        Ok(RequestResponse { request: req, client_response: Arc::new(res) })
     }
 
     ///Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.

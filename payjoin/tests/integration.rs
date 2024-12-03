@@ -55,16 +55,16 @@ mod integration {
             do_v1_to_v1(sender, receiver, false)
         }
 
-        // TODO: Not supported by bitcoind 0_21_2. Later versions fail for unknown reasons
-        //#[test]
-        //fn v1_to_v1_taproot() -> Result<(), BoxError> {
-        //    init_tracing();
-        //    let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(
-        //        Some(AddressType::Bech32m),
-        //        Some(AddressType::Bech32m),
-        //    )?;
-        //    do_v1_to_v1(sender, receiver, false)
-        //}
+        #[ignore] // TODO: Not supported by bitcoind 0_21_2. Later versions fail for unknown reasons
+        #[test]
+        fn v1_to_v1_taproot() -> Result<(), BoxError> {
+            init_tracing();
+            let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(
+                Some(AddressType::Bech32m),
+                Some(AddressType::Bech32m),
+            )?;
+            do_v1_to_v1(sender, receiver, false)
+        }
 
         fn do_v1_to_v1(
             sender: bitcoincore_rpc::Client,

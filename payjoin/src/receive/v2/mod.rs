@@ -216,7 +216,7 @@ impl Receiver {
 /// The sender's original PSBT and optional parameters
 ///
 /// This type is used to process the request. It is returned by
-/// [`UncheckedProposal::from_request()`](super::::UncheckedProposal::from_request()).
+/// [`Receiver::process_res()`].
 ///
 /// If you are implementing an interactive payment processor, you should get extract the original
 /// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
@@ -393,7 +393,7 @@ impl WantsInputs {
     /// UIH1 and UIH2 according to the BlockSci practice
     /// BlockSci UIH1 and UIH2:
     /// if min(in) > min(out) then UIH1 else UIH2
-    /// https://eprint.iacr.org/2022/589.pdf
+    /// <https://eprint.iacr.org/2022/589.pdf>
     pub fn try_preserving_privacy(
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,

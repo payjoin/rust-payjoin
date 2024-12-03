@@ -518,7 +518,7 @@ impl WantsInputs {
     /// UIH1 and UIH2 according to the BlockSci practice
     /// BlockSci UIH1 and UIH2:
     /// if min(in) > min(out) then UIH1 else UIH2
-    /// https://eprint.iacr.org/2022/589.pdf
+    /// <https://eprint.iacr.org/2022/589.pdf>
     fn avoid_uih(
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,

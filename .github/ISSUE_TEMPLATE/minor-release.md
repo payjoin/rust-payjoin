@@ -56,8 +56,8 @@ Tag and publish new release:
   - In the body of the tag message put a copy of the **Summary** and **Changelog** for the release.
   - Make sure the tag is signed, for extra safety use the explicit `--sign` flag.
 - [ ] Wait for the CI to finish one last time.
-- [ ] Push the new tag to the `payjoin/rust-payjoin` repo.
 - [ ] Build the docs locally to ensure they are building correctly.
+- [ ] Push the new tag to the `payjoin/rust-payjoin` repo.
 - [ ] Publish the crate in question crates to crates.io.
 - [ ] Create the release on GitHub.
   - Go to "tags", click on the dots on the right and select "Create Release".

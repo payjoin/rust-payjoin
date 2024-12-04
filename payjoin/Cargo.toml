@@ -20,8 +20,9 @@ send = []
 receive = ["bitcoin/rand"]
 base64 = ["bitcoin/base64"]
 v2 = ["bitcoin/rand", "bitcoin/serde", "hpke", "dep:http", "bhttp", "ohttp", "serde", "url/serde" ]
-io = ["reqwest/rustls-tls"]
-_danger-local-https = ["io", "reqwest/rustls-tls", "rustls"]
+#[doc = "Functions to fetch OHTTP keys via CONNECT proxy using reqwest. Enables `v2` since only `v2` uses OHTTP."]
+io = ["v2", "reqwest/rustls-tls"]
+_danger-local-https = ["reqwest/rustls-tls", "rustls"]
 
 [dependencies]
 bitcoin = { version = "0.32.5", features = ["base64"] }

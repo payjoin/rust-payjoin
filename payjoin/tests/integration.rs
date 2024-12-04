@@ -1,4 +1,4 @@
-#[cfg(all(feature = "send", feature = "receive"))]
+#[cfg(all(feature = "send", feature = "receive", feature = "_danger-local-https"))]
 mod integration {
     use std::collections::HashMap;
     use std::env;
@@ -171,8 +171,7 @@ mod integration {
         }
     }
 
-    #[cfg(feature = "_danger-local-https")]
-    #[cfg(feature = "v2")]
+    #[cfg(all(feature = "io", feature = "v2"))]
     mod v2 {
         use std::sync::Arc;
         use std::time::Duration;
@@ -252,9 +251,12 @@ mod integration {
                 let agent = Arc::new(http_agent(cert_der.clone())?);
                 wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await.unwrap();
                 wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
-                let ohttp_keys =
-                    payjoin::io::fetch_ohttp_keys(ohttp_relay, directory.clone(), cert_der.clone())
-                        .await?;
+                let ohttp_keys = payjoin::io::fetch_ohttp_keys_with_cert(
+                    ohttp_relay,
+                    directory.clone(),
+                    cert_der,
+                )
+                .await?;
 
                 // **********************
                 // Inside the Receiver:
@@ -321,9 +323,12 @@ mod integration {
                 let agent = Arc::new(http_agent(cert_der.clone())?);
                 wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await.unwrap();
                 wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
-                let ohttp_keys =
-                    payjoin::io::fetch_ohttp_keys(ohttp_relay, directory.clone(), cert_der.clone())
-                        .await?;
+                let ohttp_keys = payjoin::io::fetch_ohttp_keys_with_cert(
+                    ohttp_relay,
+                    directory.clone(),
+                    cert_der.clone(),
+                )
+                .await?;
                 // **********************
                 // Inside the Receiver:
                 let address = receiver.get_new_address(None, None)?.assume_checked();
@@ -450,9 +455,12 @@ mod integration {
                 let agent = Arc::new(http_agent(cert_der.clone())?);
                 wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await.unwrap();
                 wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
-                let ohttp_keys =
-                    payjoin::io::fetch_ohttp_keys(ohttp_relay, directory.clone(), cert_der.clone())
-                        .await?;
+                let ohttp_keys = payjoin::io::fetch_ohttp_keys_with_cert(
+                    ohttp_relay,
+                    directory.clone(),
+                    cert_der,
+                )
+                .await?;
                 // **********************
                 // Inside the Receiver:
                 // make utxos with different script types
@@ -662,9 +670,12 @@ mod integration {
                 let agent: Arc<Client> = Arc::new(http_agent(cert_der.clone())?);
                 wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await?;
                 wait_for_service_ready(directory.clone(), agent.clone()).await?;
-                let ohttp_keys =
-                    payjoin::io::fetch_ohttp_keys(ohttp_relay, directory.clone(), cert_der.clone())
-                        .await?;
+                let ohttp_keys = payjoin::io::fetch_ohttp_keys_with_cert(
+                    ohttp_relay,
+                    directory.clone(),
+                    cert_der.clone(),
+                )
+                .await?;
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
                 let mut session = initialize_session(address, directory, ohttp_keys.clone(), None);

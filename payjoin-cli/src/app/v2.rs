@@ -360,14 +360,14 @@ async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::
         let ohttp_relay = config.ohttp_relay.clone();
         let payjoin_directory = config.pj_directory.clone();
         #[cfg(feature = "_danger-local-https")]
-        let cert_der = crate::app::read_local_cert()?;
-        Ok(payjoin::io::fetch_ohttp_keys(
-            ohttp_relay,
-            payjoin_directory,
-            #[cfg(feature = "_danger-local-https")]
-            cert_der,
-        )
-        .await?)
+        let ohttp_keys = {
+            let cert_der = crate::app::read_local_cert()?;
+            payjoin::io::fetch_ohttp_keys_with_cert(ohttp_relay, payjoin_directory, cert_der)
+                .await?
+        };
+        #[cfg(not(feature = "_danger-local-https"))]
+        let ohttp_keys = payjoin::io::fetch_ohttp_keys(ohttp_relay, payjoin_directory).await?;
+        Ok(ohttp_keys)
     }
 }
 

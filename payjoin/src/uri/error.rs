@@ -13,6 +13,25 @@ pub(crate) enum InternalPjParseError {
 
 #[cfg(feature = "v2")]
 #[derive(Debug)]
+pub(crate) enum ParseOhttpKeysParamError {
+    MissingOhttpKeys,
+    InvalidOhttpKeys(crate::ohttp::ParseOhttpKeysError),
+}
+
+#[cfg(feature = "v2")]
+impl std::fmt::Display for ParseOhttpKeysParamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ParseOhttpKeysParamError::*;
+
+        match &self {
+            MissingOhttpKeys => write!(f, "ohttp keys are missing"),
+            InvalidOhttpKeys(o) => write!(f, "invalid ohttp keys: {}", o),
+        }
+    }
+}
+
+#[cfg(feature = "v2")]
+#[derive(Debug)]
 pub(crate) enum ParseReceiverPubkeyError {
     MissingPubkey,
     InvalidHrp(bitcoin::bech32::Hrp),

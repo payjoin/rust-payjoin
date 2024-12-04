@@ -306,7 +306,7 @@ impl Sender {
         )
         .map_err(InternalCreateRequestError::Hpke)?;
         let mut ohttp =
-            self.endpoint.ohttp().ok_or(InternalCreateRequestError::MissingOhttpConfig)?;
+            self.endpoint.ohttp().map_err(|_| InternalCreateRequestError::MissingOhttpConfig)?;
         let (body, ohttp_ctx) = ohttp_encapsulate(&mut ohttp, "POST", url.as_str(), Some(&body))
             .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
         log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
@@ -418,7 +418,7 @@ impl V2GetContext {
         )
         .map_err(InternalCreateRequestError::Hpke)?;
         let mut ohttp =
-            self.endpoint.ohttp().ok_or(InternalCreateRequestError::MissingOhttpConfig)?;
+            self.endpoint.ohttp().map_err(|_| InternalCreateRequestError::MissingOhttpConfig)?;
         let (body, ohttp_ctx) = ohttp_encapsulate(&mut ohttp, "GET", url.as_str(), Some(&body))
             .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
 

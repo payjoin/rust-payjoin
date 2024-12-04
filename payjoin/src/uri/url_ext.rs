@@ -5,15 +5,15 @@ use bitcoin::consensus::encode::Decodable;
 use bitcoin::consensus::Encodable;
 use url::Url;
 
-use super::error::ParseReceiverPubkeyError;
+use super::error::{ParseOhttpKeysParamError, ParseReceiverPubkeyError};
 use crate::hpke::HpkePublicKey;
-use crate::OhttpKeys;
+use crate::ohttp::OhttpKeys;
 
 /// Parse and set fragment parameters from `&pj=` URI parameter URLs
 pub(crate) trait UrlExt {
     fn receiver_pubkey(&self) -> Result<HpkePublicKey, ParseReceiverPubkeyError>;
     fn set_receiver_pubkey(&mut self, exp: HpkePublicKey);
-    fn ohttp(&self) -> Option<OhttpKeys>;
+    fn ohttp(&self) -> Result<OhttpKeys, ParseOhttpKeysParamError>;
     fn set_ohttp(&mut self, ohttp: OhttpKeys);
     fn exp(&self) -> Option<std::time::SystemTime>;
     fn set_exp(&mut self, exp: std::time::SystemTime);
@@ -50,8 +50,10 @@ impl UrlExt for Url {
     }
 
     /// Retrieve the ohttp parameter from the URL fragment
-    fn ohttp(&self) -> Option<OhttpKeys> {
-        get_param(self, "OH1", |value| OhttpKeys::from_str(value).ok())
+    fn ohttp(&self) -> Result<OhttpKeys, ParseOhttpKeysParamError> {
+        let value = get_param(self, "OH1", |v| Some(v.to_owned()))
+            .ok_or(ParseOhttpKeysParamError::MissingOhttpKeys)?;
+        OhttpKeys::from_str(&value).map_err(ParseOhttpKeysParamError::InvalidOhttpKeys)
     }
 
     /// Set the ohttp parameter in the URL fragment
@@ -142,7 +144,24 @@ mod tests {
         url.set_ohttp(ohttp_keys.clone());
 
         assert_eq!(url.fragment(), Some(serialized));
-        assert_eq!(url.ohttp(), Some(ohttp_keys));
+        assert_eq!(url.ohttp().unwrap(), ohttp_keys);
+    }
+
+    #[test]
+    fn test_errors_when_parsing_ohttp() {
+        let missing_ohttp_url = Url::parse("https://example.com").unwrap();
+        assert!(matches!(
+            missing_ohttp_url.ohttp(),
+            Err(ParseOhttpKeysParamError::MissingOhttpKeys)
+        ));
+
+        let invalid_ohttp_url =
+            Url::parse("https://example.com?pj=https://test-payjoin-url#OH1invalid_bech_32")
+                .unwrap();
+        assert!(matches!(
+            invalid_ohttp_url.ohttp(),
+            Err(ParseOhttpKeysParamError::InvalidOhttpKeys(_))
+        ));
     }
 
     #[test]
@@ -163,7 +182,7 @@ mod tests {
                    &pjos=0&pj=HTTPS://EXAMPLE.COM/\
                    %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
         let pjuri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
-        assert!(pjuri.extras.endpoint().ohttp().is_some());
+        assert!(pjuri.extras.endpoint().ohttp().is_ok());
         assert_eq!(format!("{}", pjuri), uri);
 
         let reordered = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
@@ -172,7 +191,7 @@ mod tests {
                    &pjos=0";
         let pjuri =
             Uri::try_from(reordered).unwrap().assume_checked().check_pj_supported().unwrap();
-        assert!(pjuri.extras.endpoint().ohttp().is_some());
+        assert!(pjuri.extras.endpoint().ohttp().is_ok());
         assert_eq!(format!("{}", pjuri), uri);
     }
 }

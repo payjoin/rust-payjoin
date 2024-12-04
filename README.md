@@ -120,11 +120,11 @@ If you are adding a new feature please add tests for it.
 
 If your change requires a dependency to be upgraded you must please run `contrib/update-lock-files.sh` before submitting any changes.
 
-## Code Formatting
+### Code Formatting
 
 We use the nightly Rust formatter for this project. Please run `rustfmt` using the nightly toolchain before submitting any changes.
 
-## Linting
+### Linting
 
 We use `clippy` for linting. Please run `contrib/lint.sh` using the nightly toolchain before submitting any changes.
 

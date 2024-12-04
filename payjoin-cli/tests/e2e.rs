@@ -240,9 +240,12 @@ mod e2e {
 
             // fetch for setup here since ohttp_relay doesn't know the certificate for the directory
             // so payjoin-cli is set up with the mock_ohttp_relay which is the directory
-            let ohttp_keys =
-                payjoin::io::fetch_ohttp_keys(ohttp_relay.clone(), directory.clone(), cert.clone())
-                    .await?;
+            let ohttp_keys = payjoin::io::fetch_ohttp_keys_with_cert(
+                ohttp_relay.clone(),
+                directory.clone(),
+                cert.clone(),
+            )
+            .await?;
             let ohttp_keys_path = temp_dir.join("ohttp_keys");
             tokio::fs::write(&ohttp_keys_path, ohttp_keys.encode()?).await?;
 

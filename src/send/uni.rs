@@ -107,9 +107,9 @@ impl From<Sender> for super::Sender {
 #[uniffi::export]
 impl Sender {
     pub fn extract_v1(&self) -> Result<RequestV1Context, PayjoinError> {
-        self.0.extract_v1().map(|(req, ctx)| {
-            RequestV1Context { request: req.into(), context: Arc::new(ctx.into()) }
-        })
+        self.0
+            .extract_v1()
+            .map(|(req, ctx)| RequestV1Context { request: req, context: Arc::new(ctx.into()) })
     }
 
     /// Extract serialized Request and Context from a Payjoin Proposal.
@@ -120,11 +120,9 @@ impl Sender {
         &self,
         ohttp_proxy_url: Arc<Url>,
     ) -> Result<RequestV2PostContext, PayjoinError> {
-        match self.0.extract_v2((*ohttp_proxy_url).clone().into()) {
-            Ok((req, ctx)) => {
-                Ok(RequestV2PostContext { request: req.into(), context: Arc::new(ctx.into()) })
-            }
-            Err(e) => Err(e.into()),
+        match self.0.extract_v2((*ohttp_proxy_url).clone()) {
+            Ok((req, ctx)) => Ok(RequestV2PostContext { request: req, context: Arc::new(ctx) }),
+            Err(e) => Err(e),
         }
     }
 }
@@ -169,7 +167,7 @@ impl V2PostContext {
     /// Decodes and validates the response.
     /// Call this method with response from receiver to continue BIP-??? flow. A successful response can either be None if the relay has not response yet or Some(Psbt).
     /// If the response is some valid PSBT you should sign and broadcast.
-    pub fn process_response(&self, response: Vec<u8>) -> Result<Arc<V2GetContext>, PayjoinError> {
+    pub fn process_response(&self, response: &[u8]) -> Result<Arc<V2GetContext>, PayjoinError> {
         self.0.process_response(response).map(|t| Arc::new(t.into()))
     }
 }
@@ -200,7 +198,7 @@ impl V2GetContext {
     pub fn extract_req(&self, ohttp_relay: Arc<Url>) -> Result<RequestOhttpContext, PayjoinError> {
         self.0
             .extract_req(Arc::try_unwrap(ohttp_relay).unwrap_or_else(|arc| (*arc).clone()))
-            .map(|(request, ctx)| RequestOhttpContext { request, ohttp_ctx: Arc::new(ctx.into()) })
+            .map(|(request, ctx)| RequestOhttpContext { request, ohttp_ctx: Arc::new(ctx) })
     }
 
     /// Decodes and validates the response.
@@ -208,7 +206,7 @@ impl V2GetContext {
     /// If the response is some valid PSBT you should sign and broadcast.
     pub fn process_response(
         &self,
-        response: Vec<u8>,
+        response: &[u8],
         ohttp_ctx: Arc<ClientResponse>,
     ) -> Result<Option<String>, PayjoinError> {
         self.0.process_response(response, ohttp_ctx.as_ref())

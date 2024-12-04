@@ -5,7 +5,7 @@ This test suite ensures the soundness of `payjoin_ffi` types. It verifies that t
 
 The tests simulate a full cycle of PayJoin transactions, including wallet initialization, transaction creation, and broadcasting. They cover both v1 and v2 PayJoin protocols, ensuring that the integration with `bdk` and `bitcoind` is seamless and reliable.
 */
-#![cfg(all(feature = "danger-local-https", not(feature = "uniffi")))]
+#![cfg(all(feature = "_danger-local-https", not(feature = "uniffi")))]
 
 use std::str::FromStr;
 use std::sync::{Mutex, MutexGuard};
@@ -218,7 +218,7 @@ fn build_original_psbt(
     Ok(psbt)
 }
 
-#[cfg(feature = "danger-local-https")]
+#[cfg(feature = "_danger-local-https")]
 mod v2 {
     use std::str::FromStr;
     use std::sync::Arc;
@@ -248,9 +248,9 @@ mod v2 {
     async fn v2_to_v2_full_cycle() {
         let (cert, key) = local_cert_key();
         let ohttp_relay_port = find_free_port();
-        let ohttp_relay = Url::from_str(format!("http://localhost:{}", ohttp_relay_port)).unwrap();
+        let ohttp_relay = Url::parse(format!("http://localhost:{}", ohttp_relay_port)).unwrap();
         let directory_port = find_free_port();
-        let directory = Url::from_str(format!("https://localhost:{}", directory_port)).unwrap();
+        let directory = Url::parse(format!("https://localhost:{}", directory_port)).unwrap();
         let gateway_origin = http::Uri::from_str(directory.as_string().as_str()).unwrap();
         tokio::select!(
         _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => assert!(false, "Ohttp relay is long running"),
@@ -282,14 +282,14 @@ mod v2 {
             let response = agent.post(request.url.as_string()).body(request.body).send().await?;
             assert!(response.status().is_success());
             let response_body =
-                session.process_res(response.bytes().await?.to_vec(), &client_response).unwrap();
+                session.process_res(&response.bytes().await?, &client_response).unwrap();
             // No proposal yet since sender has not responded
             assert!(response_body.is_none());
 
             // **********************
             // Inside the Sender:
             // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-            let pj_uri = Uri::from_str(pj_uri_string).unwrap().check_pj_supported().unwrap();
+            let pj_uri = Uri::parse(pj_uri_string).unwrap().check_pj_supported().unwrap();
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             println!("\nOriginal sender psbt: {:#?}", psbt.to_string());
 
@@ -304,7 +304,7 @@ mod v2 {
                 .await
                 .unwrap();
             assert!(response.status().is_success());
-            let send_ctx = context.process_response(response.bytes().await?.to_vec())?;
+            let send_ctx = context.process_response(&response.bytes().await?)?;
 
             // **********************
             // Inside the Receiver:
@@ -313,13 +313,12 @@ mod v2 {
             let (request, client_response) = session.extract_req()?;
             let response = agent.post(request.url.as_string()).body(request.body).send().await?;
             let proposal =
-                session.process_res(response.bytes().await?.to_vec(), &client_response)?.unwrap();
+                session.process_res(&response.bytes().await?, &client_response)?.unwrap();
             let payjoin_proposal = handle_directory_proposal(receiver, proposal);
             assert!(!payjoin_proposal.is_output_substitution_disabled());
             let (request, client_response) = payjoin_proposal.extract_v2_req()?;
             let response = agent.post(request.url.as_string()).body(request.body).send().await?;
-            let res = response.bytes().await?.to_vec();
-            payjoin_proposal.process_res(res, &client_response)?;
+            payjoin_proposal.process_res(&response.bytes().await?, &client_response)?;
 
             // **********************
             // Inside the Sender:
@@ -334,7 +333,7 @@ mod v2 {
                 .send()
                 .await?;
             let checked_payjoin_proposal_psbt =
-                send_ctx.process_response(response.bytes().await?.to_vec(), &ohttp_ctx)?.unwrap();
+                send_ctx.process_response(&response.bytes().await?, &ohttp_ctx)?.unwrap();
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt.as_str())?;
             blockchain_client.broadcast(payjoin_tx).unwrap();
             Ok(())

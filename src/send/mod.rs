@@ -154,10 +154,9 @@ impl V2PostContext {
     /// Decodes and validates the response.
     /// Call this method with response from receiver to continue BIP-??? flow. A successful response can either be None if the relay has not response yet or Some(Psbt).
     /// If the response is some valid PSBT you should sign and broadcast.
-    pub fn process_response(&self, response: Vec<u8>) -> Result<V2GetContext, PayjoinError> {
-        let mut decoder = Cursor::new(response);
-        <&V2PostContext as Into<payjoin::send::V2PostContext>>::into(&self)
-            .process_response(&mut decoder)
+    pub fn process_response(&self, response: &[u8]) -> Result<V2GetContext, PayjoinError> {
+        <&V2PostContext as Into<payjoin::send::V2PostContext>>::into(self)
+            .process_response(response)
             .map(|t| t.clone().into())
             .map_err(|e| e.into())
     }
@@ -197,11 +196,10 @@ impl V2GetContext {
     /// If the response is some valid PSBT you should sign and broadcast.
     pub fn process_response(
         &self,
-        response: Vec<u8>,
+        response: &[u8],
         ohttp_ctx: &ClientResponse,
     ) -> Result<Option<String>, PayjoinError> {
-        let mut decoder = Cursor::new(response);
-        match self.0.process_response(&mut decoder, ohttp_ctx.into()) {
+        match self.0.process_response(response, ohttp_ctx.into()) {
             Ok(Some(psbt)) => Ok(Some(psbt.to_string())),
             Ok(None) => Ok(None),
             Err(e) => Err(e.into()),

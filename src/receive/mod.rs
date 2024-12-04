@@ -1,4 +1,3 @@
-use std::io::Cursor;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -53,8 +52,8 @@ impl Receiver {
         ohttp_relay: Url,
         expire_after: Option<u64>,
     ) -> Result<Self, PayjoinError> {
-        let address = payjoin::bitcoin::Address::from_str(address.as_str())?
-            .require_network(network.into())?;
+        let address =
+            payjoin::bitcoin::Address::from_str(address.as_str())?.require_network(network)?;
         Ok(payjoin::receive::v2::Receiver::new(
             address,
             directory.into(),
@@ -75,11 +74,11 @@ impl Receiver {
     ///The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
     pub fn process_res(
         &self,
-        body: Vec<u8>,
+        body: &[u8],
         ctx: &ClientResponse,
     ) -> Result<Option<UncheckedProposal>, PayjoinError> {
         <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone())
-            .process_res(Cursor::new(body), ctx.into())
+            .process_res(body, ctx.into())
             .map(|e| e.map(|o| o.into()))
             .map_err(|e| e.into())
     }
@@ -95,8 +94,8 @@ impl Receiver {
     }
 
     ///The per-session public key to use as an identifier
-    pub fn id(&self) -> Vec<u8> {
-        <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone()).id().to_vec()
+    pub fn id(&self) -> String {
+        <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone()).id().to_string()
     }
 }
 
@@ -192,7 +191,7 @@ impl MaybeInputsSeen {
         self.0
             .clone()
             .check_no_inputs_seen_before(|outpoint| {
-                is_known(&(*outpoint).into()).map_err(|e| pdk::Error::Server(Box::new(e)))
+                is_known(outpoint).map_err(|e| pdk::Error::Server(Box::new(e)))
             })
             .map_err(Into::into)
             .map(Into::into)
@@ -371,7 +370,7 @@ impl ProvisionalProposal {
                         Err(e) => Err(pdk::Error::Server(Box::new(e))),
                     }
                 },
-                min_feerate_sat_per_vb.and_then(|x| FeeRate::from_sat_per_vb(x)),
+                min_feerate_sat_per_vb.and_then(FeeRate::from_sat_per_vb),
                 FeeRate::from_sat_per_vb(max_fee_rate_sat_per_vb).expect("FIXME throw error"),
             )
             .map(Into::into)
@@ -401,7 +400,7 @@ impl PayjoinProposal {
             <PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
                 .utxos_to_be_locked()
         {
-            outpoints.push(e.to_owned().into());
+            outpoints.push(e.to_owned());
         }
         outpoints
     }
@@ -437,7 +436,7 @@ impl PayjoinProposal {
     /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or choose to broadcast the original PSBT.
     pub fn process_res(
         &self,
-        body: Vec<u8>,
+        body: &[u8],
         ohttp_context: &ClientResponse,
     ) -> Result<(), PayjoinError> {
         <PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())

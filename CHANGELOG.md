@@ -1,3 +1,11 @@
+## [0.21.0]
+This release updates the bindings libraries to `payjoin` version `0.21.0`.
+#### APIs changed
+- Major overhaul to attempt a stable BIP 77 protocol implementation.
+- v1 support is now only available through the V2 backwards-compatible APIs.
+- see [payjoin-0.21.0 changelog](https://github.com/payjoin/rust-payjoin/blob/master/payjoin/CHANGELOG.md#0210) for more details.
+- Separate `payjoin_ffi` and `payjoin_ffi::uni` UniFFI types into two layers.
+
 ## [0.20.0]
 #### APIs added
 - Make backwards-compatible `v2` to `v1` sends possible.

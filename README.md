@@ -110,6 +110,12 @@ cargo update -p zstd-sys --precise 2.0.8+zstd.1.5.5
 
 ## Contributing
 
+### Testing
+
+We test a few different features combinations in CI. To run all of the combinations locally, have Docker running and run `contrib/test.sh`.
+
+If you are adding a new feature please add tests for it.
+
 ### Upgrading dependencies
 
 If your change requires a dependency to be upgraded you must please run `contrib/update-lock-files.sh` before submitting any changes.

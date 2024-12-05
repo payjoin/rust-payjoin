@@ -32,7 +32,7 @@ impl std::fmt::Display for ParseOhttpKeysParamError {
 
 #[cfg(feature = "v2")]
 #[derive(Debug)]
-pub(crate) enum ParseReceiverPubkeyError {
+pub(crate) enum ParseReceiverPubkeyParamError {
     MissingPubkey,
     InvalidHrp(bitcoin::bech32::Hrp),
     DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
@@ -40,9 +40,9 @@ pub(crate) enum ParseReceiverPubkeyError {
 }
 
 #[cfg(feature = "v2")]
-impl std::fmt::Display for ParseReceiverPubkeyError {
+impl std::fmt::Display for ParseReceiverPubkeyParamError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        use ParseReceiverPubkeyError::*;
+        use ParseReceiverPubkeyParamError::*;
 
         match &self {
             MissingPubkey => write!(f, "receiver public key is missing"),
@@ -55,9 +55,9 @@ impl std::fmt::Display for ParseReceiverPubkeyError {
 }
 
 #[cfg(feature = "v2")]
-impl std::error::Error for ParseReceiverPubkeyError {
+impl std::error::Error for ParseReceiverPubkeyParamError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        use ParseReceiverPubkeyError::*;
+        use ParseReceiverPubkeyParamError::*;
 
         match &self {
             MissingPubkey => None,

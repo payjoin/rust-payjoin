@@ -5,13 +5,13 @@ use bitcoin::consensus::encode::Decodable;
 use bitcoin::consensus::Encodable;
 use url::Url;
 
-use super::error::{ParseOhttpKeysParamError, ParseReceiverPubkeyError};
+use super::error::{ParseOhttpKeysParamError, ParseReceiverPubkeyParamError};
 use crate::hpke::HpkePublicKey;
 use crate::ohttp::OhttpKeys;
 
 /// Parse and set fragment parameters from `&pj=` URI parameter URLs
 pub(crate) trait UrlExt {
-    fn receiver_pubkey(&self) -> Result<HpkePublicKey, ParseReceiverPubkeyError>;
+    fn receiver_pubkey(&self) -> Result<HpkePublicKey, ParseReceiverPubkeyParamError>;
     fn set_receiver_pubkey(&mut self, exp: HpkePublicKey);
     fn ohttp(&self) -> Result<OhttpKeys, ParseOhttpKeysParamError>;
     fn set_ohttp(&mut self, ohttp: OhttpKeys);
@@ -21,20 +21,20 @@ pub(crate) trait UrlExt {
 
 impl UrlExt for Url {
     /// Retrieve the receiver's public key from the URL fragment
-    fn receiver_pubkey(&self) -> Result<HpkePublicKey, ParseReceiverPubkeyError> {
+    fn receiver_pubkey(&self) -> Result<HpkePublicKey, ParseReceiverPubkeyParamError> {
         let value = get_param(self, "RK1", |v| Some(v.to_owned()))
-            .ok_or(ParseReceiverPubkeyError::MissingPubkey)?;
+            .ok_or(ParseReceiverPubkeyParamError::MissingPubkey)?;
 
         let (hrp, bytes) = crate::bech32::nochecksum::decode(&value)
-            .map_err(ParseReceiverPubkeyError::DecodeBech32)?;
+            .map_err(ParseReceiverPubkeyParamError::DecodeBech32)?;
 
         let rk_hrp: Hrp = Hrp::parse("RK").unwrap();
         if hrp != rk_hrp {
-            return Err(ParseReceiverPubkeyError::InvalidHrp(hrp));
+            return Err(ParseReceiverPubkeyParamError::InvalidHrp(hrp));
         }
 
         HpkePublicKey::from_compressed_bytes(&bytes[..])
-            .map_err(ParseReceiverPubkeyError::InvalidPubkey)
+            .map_err(ParseReceiverPubkeyParamError::InvalidPubkey)
     }
 
     /// Set the receiver's public key in the URL fragment

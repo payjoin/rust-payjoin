@@ -1,3 +1,6 @@
+## [0.21.1]
+- Add `to_json` and `from_json` methods to `Sender` and `Receiver` UniFFI types. ([#39](https://github.com/LtbLightning/payjoin-ffi/pull/39))
+
 ## [0.21.0]
 This release updates the bindings libraries to `payjoin` version `0.21.0`.
 #### APIs changed

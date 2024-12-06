@@ -2058,6 +2058,7 @@ dependencies = [
  "rcgen",
  "reqwest",
  "rustls 0.22.4",
+ "serde_json",
  "testcontainers",
  "testcontainers-modules",
  "thiserror 1.0.69",

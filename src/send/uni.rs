@@ -125,6 +125,15 @@ impl Sender {
             Err(e) => Err(e),
         }
     }
+
+    pub fn to_json(&self) -> Result<String, PayjoinError> {
+        self.0.to_json()
+    }
+
+    #[uniffi::constructor]
+    pub fn from_json(json: &str) -> Result<Self, PayjoinError> {
+        super::Sender::from_json(json).map(Into::into)
+    }
 }
 
 #[derive(uniffi::Object)]

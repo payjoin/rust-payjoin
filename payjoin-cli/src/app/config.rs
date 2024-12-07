@@ -102,15 +102,13 @@ impl AppConfig {
                         .set_override_option(
                             "ohttp_keys",
                             matches.get_one::<String>("ohttp_keys").and_then(|s| {
-                                std::fs::read(s)
-                                    .map_err(|e| {
-                                        log::error!("Failed to read ohttp_keys file: {}", e);
-                                        ConfigError::Message(format!(
-                                            "Failed to read ohttp_keys file: {}",
-                                            e
-                                        ))
-                                    })
-                                    .ok()
+                                Some(std::fs::read(s).map_err(|e| {
+                                    log::error!("Failed to read ohttp_keys file: {}", e);
+                                    ConfigError::Message(format!(
+                                        "Failed to read ohttp_keys file: {}",
+                                        e
+                                    ))
+                                })?)
                             }),
                         )?
                 };

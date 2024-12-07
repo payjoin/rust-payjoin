@@ -124,6 +124,16 @@ impl Sender {
             Err(e) => Err(e.into()),
         }
     }
+
+    pub fn to_json(&self) -> Result<String, PayjoinError> {
+        serde_json::to_string(&self.0).map_err(|e| e.into())
+    }
+
+    pub fn from_json(json: &str) -> Result<Self, PayjoinError> {
+        let sender = serde_json::from_str::<payjoin::send::Sender>(json)
+            .map_err(<serde_json::Error as Into<PayjoinError>>::into)?;
+        Ok(sender.into())
+    }
 }
 
 /// Data required for validation of response.

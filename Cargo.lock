@@ -2042,7 +2042,7 @@ dependencies = [
 
 [[package]]
 name = "payjoin_ffi"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "base64 0.22.1",
  "bdk",
@@ -2058,6 +2058,7 @@ dependencies = [
  "rcgen",
  "reqwest",
  "rustls 0.22.4",
+ "serde_json",
  "testcontainers",
  "testcontainers-modules",
  "thiserror 1.0.69",

@@ -87,6 +87,15 @@ impl Receiver {
     pub fn id(&self) -> String {
         self.0.id()
     }
+
+    pub fn to_json(&self) -> Result<String, PayjoinError> {
+        self.0.to_json()
+    }
+
+    #[uniffi::constructor]
+    pub fn from_json(json: &str) -> Result<Self, PayjoinError> {
+        super::Receiver::from_json(json).map(Into::into)
+    }
 }
 
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]

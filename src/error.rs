@@ -74,6 +74,9 @@ pub enum PayjoinError {
 
     #[error("{message}")]
     InputPairError { message: String },
+
+    #[error("{message}")]
+    SerdeJsonError { message: String },
 }
 
 macro_rules! impl_from_error {
@@ -99,6 +102,7 @@ impl_from_error! {
     OutputSubstitutionError => OutputSubstitutionError,
     InputContributionError => InputContributionError,
     PsbtInputError => InputPairError,
+    serde_json::Error => SerdeJsonError,
 }
 
 #[cfg(feature = "uniffi")]

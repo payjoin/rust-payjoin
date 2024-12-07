@@ -93,26 +93,23 @@ impl AppConfig {
                 };
 
                 #[cfg(feature = "v2")]
+                let ohttp_keys = matches
+                    .get_one::<String>("ohttp_keys")
+                    .map(std::fs::read)
+                    .transpose()
+                    .map_err(|e| {
+                        log::error!("Failed to read ohttp_keys file: {}", e);
+                        ConfigError::Message(format!("Failed to read ohttp_keys file: {}", e))
+                    })?;
+
+                #[cfg(feature = "v2")]
                 let builder = {
                     builder
                         .set_override_option(
                             "pj_directory",
                             matches.get_one::<Url>("pj_directory").map(|s| s.as_str()),
                         )?
-                        .set_override_option(
-                            "ohttp_keys",
-                            matches.get_one::<String>("ohttp_keys").and_then(|s| {
-                                std::fs::read(s)
-                                    .map_err(|e| {
-                                        log::error!("Failed to read ohttp_keys file: {}", e);
-                                        ConfigError::Message(format!(
-                                            "Failed to read ohttp_keys file: {}",
-                                            e
-                                        ))
-                                    })
-                                    .ok()
-                            }),
-                        )?
+                        .set_override_option("ohttp_keys", ohttp_keys)?
                 };
 
                 let max_fee_rate = matches

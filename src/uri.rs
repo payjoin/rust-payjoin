@@ -86,6 +86,11 @@ impl PjUri {
     pub fn amount_sats(&self) -> Option<u64> {
         self.0.clone().amount.map(|e| e.to_sat())
     }
+
+    pub fn pj_endpoint(&self) -> String {
+        self.0.extras.endpoint().to_string()
+    }
+
     pub fn as_string(&self) -> String {
         self.0.clone().to_string()
     }

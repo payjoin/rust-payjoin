@@ -5,7 +5,7 @@ use bitcoin::transaction::Version;
 use bitcoin::{AddressType, Sequence};
 
 #[cfg(feature = "v2")]
-use crate::uri::error::ParseReceiverPubkeyError;
+use crate::uri::error::ParseReceiverPubkeyParamError;
 
 /// Error that may occur when the response from receiver is malformed.
 ///
@@ -203,7 +203,7 @@ pub(crate) enum InternalCreateRequestError {
     #[cfg(feature = "v2")]
     OhttpEncapsulation(crate::ohttp::OhttpEncapsulationError),
     #[cfg(feature = "v2")]
-    ParseReceiverPubkey(ParseReceiverPubkeyError),
+    ParseReceiverPubkey(ParseReceiverPubkeyParamError),
     #[cfg(feature = "v2")]
     MissingOhttpConfig,
     #[cfg(feature = "v2")]
@@ -287,8 +287,8 @@ impl From<crate::psbt::AddressTypeError> for CreateRequestError {
 }
 
 #[cfg(feature = "v2")]
-impl From<ParseReceiverPubkeyError> for CreateRequestError {
-    fn from(value: ParseReceiverPubkeyError) -> Self {
+impl From<ParseReceiverPubkeyParamError> for CreateRequestError {
+    fn from(value: ParseReceiverPubkeyParamError) -> Self {
         CreateRequestError(InternalCreateRequestError::ParseReceiverPubkey(value))
     }
 }

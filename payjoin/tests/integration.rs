@@ -174,12 +174,16 @@ mod integration {
     #[cfg(feature = "danger-local-https")]
     #[cfg(feature = "v2")]
     mod v2 {
+        use core::panic;
         use std::sync::Arc;
         use std::time::Duration;
 
         use bitcoin::Address;
         use http::StatusCode;
-        use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
+        use payjoin::receive::v2::{
+            MultiPartyProposal, PayjoinProposal, Receiver, UnMergedMultiPartyProposal,
+            UncheckedProposal,
+        };
         use payjoin::{HpkeKeyPair, OhttpKeys, PjUri, UriExt};
         use reqwest::{Client, ClientBuilder, Error, Response};
         use testcontainers_modules::redis::Redis;
@@ -292,6 +296,298 @@ mod integration {
                     Err(err) => assert!(err.to_string().contains("expired")),
                     _ => panic!("Expired send session should error"),
                 };
+                Ok(())
+            }
+        }
+
+        #[tokio::test]
+        async fn test_2s1r() {
+            init_tracing();
+            let (cert, key) = local_cert_key();
+            let ohttp_relay_port = find_free_port();
+            let ohttp_relay =
+                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
+            let directory_port = find_free_port();
+            let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
+            let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
+
+            tokio::select!(
+            _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay is long running"),
+            _ = init_directory(directory_port, (cert.clone(), key)) => panic!("Directory server is long running"),
+            res = test_2s1r(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v3 2S1R failed: {:#?}", res)
+            );
+
+            async fn test_2s1r(
+                ohttp_relay: Url,
+                directory: Url,
+                cert_der: Vec<u8>,
+            ) -> Result<(), BoxError> {
+                let (_bitcoind, senders, receiver) = init_bitcoind_multi_sender_single_reciever(2)?;
+                assert_eq!(senders.len(), 2);
+
+                let agent = Arc::new(http_agent(cert_der.clone())?);
+                wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await.unwrap();
+                wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
+                let ohttp_keys =
+                    payjoin::io::fetch_ohttp_keys(ohttp_relay, directory.clone(), cert_der.clone())
+                        .await?;
+                // **********************
+                // Inside the Receiver:
+                // lets generate two different addresses for two senders
+                let address_1 = receiver.get_new_address(None, None)?.assume_checked();
+                let address_2 = receiver.get_new_address(None, None)?.assume_checked();
+                println!("address_1: {:?}", address_1);
+                println!("address_2: {:?}", address_2);
+                assert_ne!(address_1, address_2);
+
+                // We are going to create two reciever sessions just two use different addresses
+                // but they share the same directory keys
+                let mut receiver_session_1 = initialize_session(
+                    address_1.clone(),
+                    directory.clone(),
+                    ohttp_keys.clone(),
+                    None,
+                );
+
+                let mut reciever_session_2 = initialize_session(
+                    address_2.clone(),
+                    directory.clone(),
+                    ohttp_keys.clone(),
+                    None,
+                );
+
+                // These bip21's should be using the different addresses but the same directory keys
+                // Senders will append their psbt's to the same subdir id
+                // And use the same reciever pk to encrypt the payload
+                let pj_uri_string_1 = receiver_session_1.pj_uri_builder().build().to_string();
+                println!("pj_uri_string_1: {:#?}", pj_uri_string_1);
+                let pj_uri_string_2 = reciever_session_2.pj_uri_builder().build().to_string();
+                println!("pj_uri_string_2: {:#?}", pj_uri_string_2);
+
+                // **********************
+                // Inside Sender 1
+                let pj_uri_1 = Uri::from_str(&pj_uri_string_1)
+                    .unwrap()
+                    .assume_checked()
+                    .check_pj_supported()
+                    .unwrap();
+                let psbt_1 = build_sweep_psbt(&senders[0], &pj_uri_1)?;
+                let sender_ctx_1 =
+                    SenderBuilder::from_psbt_and_uri(psbt_1.clone(), pj_uri_1.clone())?
+                        .build_recommended(FeeRate::BROADCAST_MIN)?;
+                let (Request { url, body, content_type, .. }, send_post_ctx_1) =
+                    sender_ctx_1.extract_v2(directory.to_owned())?;
+                let response = agent
+                    .post(url.clone())
+                    .header("Content-Type", content_type)
+                    .body(body.clone())
+                    .send()
+                    .await
+                    .unwrap();
+                assert!(response.status().is_success());
+                let sender_get_ctx_1 = send_post_ctx_1
+                    .process_response(&mut response.bytes().await?.to_vec().as_slice())?;
+                //**********************
+                // Inside Sender 2
+                // Sender 2 will POST a different psbt to the same subdir id
+                let pj_uri_2 = Uri::from_str(&pj_uri_string_2)
+                    .unwrap()
+                    .assume_checked()
+                    .check_pj_supported()
+                    .unwrap();
+                let psbt_2 = build_sweep_psbt(&senders[1], &pj_uri_2)?;
+
+                let sender_ctx_2 =
+                    SenderBuilder::from_psbt_and_uri(psbt_2.clone(), pj_uri_2.clone())?
+                        .build_recommended(FeeRate::BROADCAST_MIN)?;
+                let (Request { url, body, content_type, .. }, send_post_ctx_2) =
+                    sender_ctx_2.extract_v2(directory.to_owned())?;
+
+                let response = agent
+                    .post(url.clone())
+                    .header("Content-Type", content_type)
+                    .body(body.clone())
+                    .send()
+                    .await
+                    .unwrap();
+                assert!(response.status().is_success());
+                let sender_get_ctx_2 = send_post_ctx_2
+                    .process_response(&mut response.bytes().await?.to_vec().as_slice())?;
+
+                // psbt's should be different
+                assert_ne!(psbt_1, psbt_2);
+
+                // **********************
+                // Inside the Receiver:
+                // GET fallback psbt for sender 1
+                let (req, reciever_ctx_1) = receiver_session_1.extract_req()?;
+                let response_1 = agent.post(req.url).body(req.body).send().await?;
+                assert!(response_1.status().is_success());
+
+                // GET fallback psbt for sender 2
+                let (req, reciever_ctx_2) = reciever_session_2.extract_req()?;
+                let response_2 = agent.post(req.url).body(req.body).send().await?;
+                assert!(response_2.status().is_success());
+
+                // POST payjoin
+                let proposal_1 = receiver_session_1
+                    .process_res(response_1.bytes().await?.to_vec().as_slice(), reciever_ctx_1)?
+                    .unwrap();
+                let proposal_2 = reciever_session_2
+                    .process_res(response_2.bytes().await?.to_vec().as_slice(), reciever_ctx_2)?
+                    .unwrap();
+
+                // Order of the proposals is not important
+                let multi_party_proposal =
+                    UnMergedMultiPartyProposal::new(vec![proposal_1, proposal_2]);
+
+                // Merge and finalize all the reciever inputs
+                let mut payjoin_proposal =
+                    handle_multi_party_proposal(&receiver, multi_party_proposal);
+
+                // Send the payjoin proposals to the senders
+                for proposal in payjoin_proposal.iter_mut() {
+                    let (req, ctx) = proposal.extract_v2_req()?;
+                    let response = agent
+                        .post(req.url)
+                        .header("Content-Type", req.content_type)
+                        .body(req.body)
+                        .send()
+                        .await?;
+
+                    assert!(response.status().is_success());
+                    let res = response.bytes().await?.to_vec();
+                    proposal.process_res(res, ctx)?;
+                }
+
+                // Check resulting transaction and balances
+                // **********************
+                // Inside the Sender 1:
+                let (Request { url, body, content_type, .. }, ohttp_ctx) =
+                    sender_get_ctx_1.extract_req(directory.to_owned())?;
+                let sender_1_response = agent
+                    .post(url.clone())
+                    .header("Content-Type", content_type)
+                    .body(body.clone())
+                    .send()
+                    .await
+                    .unwrap();
+                // Keep this mut so we can combine with the other sender's psbt
+                let checked_payjoin_proposal_psbt_1 = sender_get_ctx_1
+                    .process_response(
+                        &mut sender_1_response.bytes().await?.to_vec().as_slice(),
+                        ohttp_ctx,
+                    )?
+                    .unwrap();
+
+                let finalized_psbt_1 =
+                    finalize_psbt(&senders[0], &checked_payjoin_proposal_psbt_1)?;
+                let sender_ctx_1 =
+                    SenderBuilder::from_psbt_and_uri(finalized_psbt_1.clone(), pj_uri_1.clone())?
+                        .build_with_multiple_senders()?;
+                let (Request { url, body, content_type, .. }, send_post_ctx_1) =
+                    sender_ctx_1.extract_v2(directory.to_owned())?;
+                let response = agent
+                    .post(url.clone())
+                    .header("Content-Type", content_type)
+                    .body(body.clone())
+                    .send()
+                    .await
+                    .unwrap();
+                assert!(response.status().is_success());
+                send_post_ctx_1
+                    .process_response(&mut response.bytes().await?.to_vec().as_slice())?;
+
+                // **********************
+                // Inside the Sender 2:
+                let (Request { url, body, content_type, .. }, ohttp_ctx) =
+                    sender_get_ctx_2.extract_req(directory.to_owned())?;
+                let sender_2_response = agent
+                    .post(url.clone())
+                    .header("Content-Type", content_type)
+                    .body(body.clone())
+                    .send()
+                    .await
+                    .unwrap();
+
+                let checked_payjoin_proposal_psbt_2 = sender_get_ctx_2
+                    .process_response(
+                        &mut sender_2_response.bytes().await?.to_vec().as_slice(),
+                        ohttp_ctx,
+                    )?
+                    .unwrap();
+                let finalized_psbt_2 =
+                    finalize_psbt(&senders[1], &checked_payjoin_proposal_psbt_2)?;
+                let sender_ctx_2 =
+                    SenderBuilder::from_psbt_and_uri(finalized_psbt_2.clone(), pj_uri_2.clone())?
+                        .build_with_multiple_senders()?;
+                let (Request { url, body, content_type, .. }, send_post_ctx_2) =
+                    sender_ctx_2.extract_v2(directory.to_owned())?;
+                let response = agent
+                    .post(url.clone())
+                    .header("Content-Type", content_type)
+                    .body(body.clone())
+                    .send()
+                    .await
+                    .unwrap();
+                assert!(response.status().is_success());
+                send_post_ctx_2
+                    .process_response(&mut response.bytes().await?.to_vec().as_slice())?;
+
+                // At this point the two psbt should have the same unsigned tx
+                assert_eq!(
+                    checked_payjoin_proposal_psbt_1.unsigned_tx,
+                    checked_payjoin_proposal_psbt_2.unsigned_tx
+                );
+
+                //**********************
+                // Inside the Receiver:
+                // Reciver should pull the final psbts from both sub dirs
+
+                let (req, reciever_ctx_1) = receiver_session_1.extract_req()?;
+                let response_1 = agent.post(req.url).body(req.body).send().await?;
+                assert!(response_1.status().is_success());
+
+                // GET fallback psbt for sender 2
+                let (req, reciever_ctx_2) = reciever_session_2.extract_req()?;
+                let response_2 = agent.post(req.url).body(req.body).send().await?;
+                assert!(response_2.status().is_success());
+
+                let finalized_response_1 = receiver_session_1
+                    .process_res(response_1.bytes().await?.to_vec().as_slice(), reciever_ctx_1)?
+                    .unwrap();
+                let finalized_response_2 = reciever_session_2
+                    .process_res(response_2.bytes().await?.to_vec().as_slice(), reciever_ctx_2)?
+                    .unwrap();
+
+                let mut finalized_psbt_1 = finalized_response_1.psbt().clone();
+                let finalized_psbt_2 = finalized_response_2.psbt().clone();
+
+                finalized_psbt_1.combine(finalized_psbt_2).unwrap();
+                let network_fees = finalized_psbt_1.fee().unwrap();
+
+                let tx = finalized_psbt_1.extract_tx()?;
+
+                receiver.send_raw_transaction(&tx).expect("Failed to send raw transaction");
+
+                // let network_fees = predicted_tx_weight(&tx) * FeeRate::BROADCAST_MIN;
+                println!("2s1R tx sent");
+                println!("tx: {:#?}", &tx);
+
+                assert_eq!(tx.input.len(), 3);
+                assert_eq!(tx.output.len(), 2);
+                assert_eq!(
+                    senders[0].get_balances()?.mine.untrusted_pending,
+                    Amount::from_btc(0.0)?
+                );
+                assert_eq!(
+                    senders[1].get_balances()?.mine.untrusted_pending,
+                    Amount::from_btc(0.0)?
+                );
+                assert_eq!(
+                    receiver.get_balances()?.mine.untrusted_pending,
+                    Amount::from_btc(150.0)? - network_fees
+                );
                 Ok(())
             }
         }
@@ -819,6 +1115,94 @@ mod integration {
             )
         }
 
+        fn handle_multi_party_proposal(
+            receiver: &bitcoincore_rpc::Client,
+            mut multi_party_proposal: UnMergedMultiPartyProposal,
+            // TODO (armins): add custom inputs function param
+        ) -> Vec<PayjoinProposal> {
+            // For now we are supporting only two parties
+            assert_eq!(multi_party_proposal.len(), 2, "Only two parties are supported");
+            let proposal_1 = multi_party_proposal.get(0);
+            let proposal_2 = multi_party_proposal.get(1);
+            // Check each proposal independently valid
+            handle_directory_proposal(receiver, proposal_1.clone(), None);
+            handle_directory_proposal(receiver, proposal_2.clone(), None);
+
+            let merged_proposal = multi_party_proposal.try_merge().unwrap();
+            // Recieve check 1: Can Broadcast
+            // Since we have merged two psbt that are independently valid, the merged psbt is not broadcastable
+
+            let proposal = merged_proposal
+                .proposal()
+                .clone()
+                .check_broadcast_suitability(None, |_| Ok(true))
+                .expect("returning true");
+
+            // Receive Check 2: receiver can't sign for proposal inputs
+            let proposal = proposal
+                .check_inputs_not_owned(|input| {
+                    let address =
+                        bitcoin::Address::from_script(input, bitcoin::Network::Regtest).unwrap();
+                    Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
+                })
+                .expect("Receiver should not own any of the inputs");
+
+            // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
+            let payjoin = proposal
+                .check_no_inputs_seen_before(|_| Ok(false))
+                .unwrap()
+                .identify_receiver_outputs(|output_script| {
+                    let address =
+                        bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
+                            .unwrap();
+                    Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
+                })
+                .expect("Receiver should have at least one output");
+
+            let payjoin = payjoin.commit_outputs();
+            let selected_inputs = {
+                let candidate_inputs = receiver
+                    .list_unspent(None, None, None, None, None)
+                    .unwrap()
+                    .into_iter()
+                    .map(input_pair_from_list_unspent);
+                let selected_input = payjoin
+                    .try_preserving_privacy(candidate_inputs)
+                    .map_err(|e| format!("Failed to make privacy preserving selection: {:?}", e))
+                    .unwrap();
+                vec![selected_input]
+            };
+
+            let payjoin = payjoin.contribute_inputs(selected_inputs).unwrap().commit_inputs();
+
+            // Sign and finalize the proposal PSBT
+            let payjoin_proposal = payjoin
+                .finalize_proposal(
+                    |psbt: &Psbt| {
+                        Ok(receiver
+                            .wallet_process_psbt(
+                                &psbt.to_string(),
+                                None,
+                                None,
+                                Some(true), // check that the receiver properly clears keypaths
+                            )
+                            .map(|res: WalletProcessPsbtResult| Psbt::from_str(&res.psbt).unwrap())
+                            .unwrap())
+                    },
+                    Some(FeeRate::BROADCAST_MIN),
+                    FeeRate::from_sat_per_vb_unchecked(2),
+                )
+                .unwrap();
+
+            let sender_contexts = merged_proposal.contexts();
+            let mut pj1 = payjoin_proposal.clone();
+            pj1.set_context(sender_contexts[0].clone());
+            let mut pj2 = payjoin_proposal.clone();
+            pj2.set_context(sender_contexts[1].clone());
+
+            vec![pj1, pj2]
+        }
+
         fn handle_directory_proposal(
             receiver: &bitcoincore_rpc::Client,
             proposal: UncheckedProposal,
@@ -1193,6 +1577,32 @@ mod integration {
         Ok((bitcoind, sender, receiver))
     }
 
+    fn init_bitcoind_multi_sender_single_reciever(
+        number_of_senders: usize,
+    ) -> Result<(bitcoind::BitcoinD, Vec<bitcoincore_rpc::Client>, bitcoincore_rpc::Client), BoxError>
+    {
+        let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
+        let mut senders = vec![sender];
+        for i in 1..number_of_senders {
+            let wallet_name = format!("sender_{}", i);
+            let sender = bitcoind.create_wallet(wallet_name.clone())?;
+            let address = sender.get_new_address(Some(&wallet_name), None)?.assume_checked();
+            println!("address: {:#?}", address);
+            bitcoind.client.generate_to_address(101, &address)?;
+
+            println!("sender balance: {:#?}", sender.get_balances()?);
+
+            assert_eq!(
+                Amount::from_btc(50.0)?,
+                sender.get_balances()?.mine.trusted,
+                "sender doesn't own bitcoin"
+            );
+            senders.push(sender);
+        }
+
+        Ok((bitcoind, senders, receiver))
+    }
+
     fn build_original_psbt(
         sender: &bitcoincore_rpc::Client,
         pj_uri: &PjUri,
@@ -1333,6 +1743,12 @@ mod integration {
         tracing::debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
 
         Ok(payjoin_psbt.extract_tx()?)
+    }
+
+    fn finalize_psbt(sender: &bitcoincore_rpc::Client, psbt: &Psbt) -> Result<Psbt, BoxError> {
+        let payjoin_psbt = sender.wallet_process_psbt(&psbt.to_string(), None, None, None)?.psbt;
+        let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.unwrap();
+        Ok(Psbt::from_str(&payjoin_psbt)?)
     }
 
     /// Simplified input weight predictions for a fully-signed transaction

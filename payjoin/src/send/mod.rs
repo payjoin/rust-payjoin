@@ -207,6 +207,21 @@ impl<'a> SenderBuilder<'a> {
         self.build()
     }
 
+    pub fn build_with_multiple_senders(&self) -> Result<Sender, CreateRequestError> {
+        let mut psbt = self.psbt.clone();
+        clear_unneeded_fields(&mut psbt);
+
+        Ok(Sender {
+            psbt,
+            endpoint: self.uri.extras.endpoint.clone(),
+            disable_output_substitution: self.disable_output_substitution,
+            // TODO(armins) add fee contribution output. Right now this is hardcoded to None
+            fee_contribution: None,
+            min_fee_rate: self.min_fee_rate,
+            payee: self.uri.address.script_pubkey(),
+        })
+    }
+
     fn build(self) -> Result<Sender, CreateRequestError> {
         let mut psbt =
             self.psbt.validate().map_err(InternalCreateRequestError::InconsistentOriginalPsbt)?;
@@ -442,8 +457,9 @@ impl V2GetContext {
         .map_err(InternalValidationError::Hpke)?;
 
         let proposal = Psbt::deserialize(&psbt).map_err(InternalValidationError::Psbt)?;
-        let processed_proposal = self.psbt_ctx.clone().process_proposal(proposal)?;
-        Ok(Some(processed_proposal))
+        // TODO(armins) commented out for now we need to a v3 multi party process proposal function
+        // let processed_proposal = self.psbt_ctx.clone().process_proposal(proposal)?;
+        Ok(Some(proposal))
     }
 }
 

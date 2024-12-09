@@ -27,7 +27,7 @@ pub(crate) mod error;
 static TWENTY_FOUR_HOURS_DEFAULT_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct SessionContext {
+pub struct SessionContext {
     #[serde(deserialize_with = "deserialize_address_assume_checked")]
     address: Address,
     directory: url::Url,
@@ -212,6 +212,50 @@ impl Receiver {
     }
 }
 
+// TODO move multiparty stuff to v3 module
+pub struct UnMergedMultiPartyProposal {
+    proposals: Vec<UncheckedProposal>,
+}
+
+impl UnMergedMultiPartyProposal {
+    pub fn new(proposals: Vec<UncheckedProposal>) -> Self { Self { proposals } }
+
+    pub fn len(&self) -> usize { self.proposals.len() }
+
+    pub fn get(&self, index: usize) -> &UncheckedProposal { &self.proposals[index] }
+
+    pub fn try_merge(&mut self) -> Result<MultiPartyProposal, Error> {
+        // For now we lets assume there are two proposals
+        let mut proposal_1 = self.proposals[0].clone();
+        let mut proposal_2 = self.proposals[1].clone();
+
+        proposal_1.inner.psbt.dangerous_clear_signatures();
+        proposal_2.inner.psbt.dangerous_clear_signatures();
+        proposal_1.inner.psbt.merge_unsigned_tx(proposal_2.inner.psbt).unwrap();
+
+        Ok(MultiPartyProposal::new(
+            proposal_1.clone(),
+            vec![proposal_1.context.clone(), proposal_2.context.clone()],
+        ))
+    }
+}
+
+/// A multi-party proposal that has been merged by the receiver
+pub struct MultiPartyProposal {
+    proposal: UncheckedProposal,
+    sender_contexts: Vec<SessionContext>,
+}
+
+impl MultiPartyProposal {
+    pub fn new(proposal: UncheckedProposal, sender_contexts: Vec<SessionContext>) -> Self {
+        Self { proposal, sender_contexts }
+    }
+
+    pub fn contexts(&self) -> &Vec<SessionContext> { &self.sender_contexts }
+
+    pub fn proposal(&self) -> &UncheckedProposal { &self.proposal }
+}
+
 /// The sender's original PSBT and optional parameters
 ///
 /// This type is used to process the request. It is returned by
@@ -228,6 +272,12 @@ pub struct UncheckedProposal {
 }
 
 impl UncheckedProposal {
+    // TODO hack to get v3 working, remove later
+    pub fn context(&self) -> &SessionContext { &self.context }
+
+    // TODO hack to get v3 working, remove later
+    pub fn psbt(&self) -> &Psbt { &self.inner.psbt }
+
     /// The Sender's Original PSBT
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
         self.inner.extract_tx_to_schedule_broadcast()
@@ -450,6 +500,9 @@ pub struct PayjoinProposal {
 }
 
 impl PayjoinProposal {
+    /// TODO this was a hack to get v3 working, remove later
+    pub fn set_context(&mut self, context: SessionContext) { self.context = context; }
+
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
         self.inner.utxos_to_be_locked()
     }

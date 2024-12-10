@@ -206,7 +206,6 @@ impl App {
                         Ok(Some(psbt)) => return Ok(psbt),
                         Ok(None) => {
                             println!("No response yet.");
-                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                         }
                         Err(re) => {
                             println!("{}", re);
@@ -245,9 +244,8 @@ impl App {
                 .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), context)
                 .map_err(|_| anyhow!("GET fallback failed"))?;
             log::debug!("got response");
-            match proposal {
-                Some(proposal) => break Ok(proposal),
-                None => std::thread::sleep(std::time::Duration::from_secs(5)),
+            if let Some(proposal) = proposal {
+                break Ok(proposal);
             }
         }
     }

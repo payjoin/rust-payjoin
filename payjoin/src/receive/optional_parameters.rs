@@ -11,13 +11,13 @@ pub(crate) const SUPPORTED_VERSIONS: [usize; 1] = [1];
 
 #[derive(Debug, Clone)]
 pub(crate) struct Params {
-    // version
+    /// version
     pub v: usize,
-    // disableoutputsubstitution
+    /// disableoutputsubstitution
     pub disable_output_substitution: bool,
-    // maxadditionalfeecontribution, additionalfeeoutputindex
+    /// maxadditionalfeecontribution, additionalfeeoutputindex
     pub additional_fee_contribution: Option<(bitcoin::Amount, usize)>,
-    // minfeerate
+    /// minfeerate
     pub min_feerate: FeeRate,
 }
 

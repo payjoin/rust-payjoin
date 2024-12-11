@@ -1,3 +1,6 @@
+## [0.21.2]
+- Add `pj_endpoint` method to `PjUri` types. ([#40](https://github.com/LtbLightning/payjoin-ffi/pull/40))
+
 ## [0.21.1]
 - Add `to_json` and `from_json` methods to `Sender` and `Receiver` UniFFI types. ([#39](https://github.com/LtbLightning/payjoin-ffi/pull/39))
 

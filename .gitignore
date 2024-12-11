@@ -3,3 +3,4 @@ target
 !example.config.toml
 *payjoin.sled
 Cargo.lock
+.vscode

@@ -69,6 +69,9 @@ pub struct SenderBuilder<'a> {
     /// be just lowered in the request to match the change amount.
     clamp_fee_contribution: bool,
     min_fee_rate: FeeRate,
+    /// Opt in to optimistic psbt merge
+    opt_in_to_optimistic_merge: bool,
+
 }
 
 impl<'a> SenderBuilder<'a> {
@@ -86,6 +89,7 @@ impl<'a> SenderBuilder<'a> {
             fee_contribution: None,
             clamp_fee_contribution: false,
             min_fee_rate: FeeRate::ZERO,
+            opt_in_to_optimistic_merge: false,
         })
     }
 
@@ -97,6 +101,12 @@ impl<'a> SenderBuilder<'a> {
     /// receiver will **not** reward the sender with a discount.
     pub fn always_disable_output_substitution(mut self, disable: bool) -> Self {
         self.disable_output_substitution = disable;
+        self
+    }
+
+    /// Allow for optimistic merge
+    pub fn allow_optimistic_merge(mut self) -> Self {
+        self.opt_in_to_optimistic_merge = true;
         self
     }
 
@@ -210,7 +220,8 @@ impl<'a> SenderBuilder<'a> {
     pub fn build_with_multiple_senders(&self) -> Result<Sender, CreateRequestError> {
         let mut psbt = self.psbt.clone();
         clear_unneeded_fields(&mut psbt);
-
+        // TODO(armins) add fee contribution output. Right now this is hardcoded to None
+        // TODO(armins) this is where we check for optimistic merge being true and check for all the normal conditions
         Ok(Sender {
             psbt,
             endpoint: self.uri.extras.endpoint.clone(),
@@ -219,6 +230,7 @@ impl<'a> SenderBuilder<'a> {
             fee_contribution: None,
             min_fee_rate: self.min_fee_rate,
             payee: self.uri.address.script_pubkey(),
+            opt_in_to_optimistic_merge: self.opt_in_to_optimistic_merge,
         })
     }
 
@@ -248,6 +260,7 @@ impl<'a> SenderBuilder<'a> {
             fee_contribution,
             payee,
             min_fee_rate: self.min_fee_rate,
+            opt_in_to_optimistic_merge: self.opt_in_to_optimistic_merge,
         })
     }
 }
@@ -261,6 +274,7 @@ pub struct Sender {
     fee_contribution: Option<OutputAmountAndIndex>,
     min_fee_rate: FeeRate,
     payee: ScriptBuf,
+    opt_in_to_optimistic_merge: bool,
 }
 
 impl Sender {
@@ -271,7 +285,8 @@ impl Sender {
             self.disable_output_substitution,
             self.fee_contribution,
             self.min_fee_rate,
-            "1", // payjoin version
+            "1",   // payjoin version
+            false, // opt in to optimistic merge is false by default for v1 pj
         )
         .map_err(InternalCreateRequestError::Url)?;
         let body = self.psbt.to_string().as_bytes().to_vec();
@@ -312,6 +327,7 @@ impl Sender {
             self.disable_output_substitution,
             self.fee_contribution,
             self.min_fee_rate,
+            self.opt_in_to_optimistic_merge,
         )?;
         let hpke_ctx = HpkeContext::new(rs);
         let body = encrypt_message_a(
@@ -864,6 +880,7 @@ fn serialize_v2_body(
     disable_output_substitution: bool,
     fee_contribution: Option<OutputAmountAndIndex>,
     min_feerate: FeeRate,
+    opt_in_to_optimistic_merge: bool,
 ) -> Result<Vec<u8>, CreateRequestError> {
     // Grug say localhost base be discarded anyway. no big brain needed.
     let placeholder_url = serialize_url(
@@ -872,6 +889,7 @@ fn serialize_v2_body(
         fee_contribution,
         min_feerate,
         "2", // payjoin version
+        opt_in_to_optimistic_merge,
     )
     .map_err(InternalCreateRequestError::Url)?;
     let query_params = placeholder_url.query().unwrap_or_default();
@@ -885,6 +903,7 @@ fn serialize_url(
     fee_contribution: Option<OutputAmountAndIndex>,
     min_fee_rate: FeeRate,
     version: &str,
+    opt_in_to_optimistic_merge: bool,
 ) -> Result<Url, url::ParseError> {
     let mut url = endpoint;
     url.query_pairs_mut().append_pair("v", version);
@@ -895,6 +914,9 @@ fn serialize_url(
         url.query_pairs_mut()
             .append_pair("additionalfeeoutputindex", &index.to_string())
             .append_pair("maxadditionalfeecontribution", &amount.to_sat().to_string());
+    }
+    if opt_in_to_optimistic_merge {
+        url.query_pairs_mut().append_pair("optimisticmerge", "1");
     }
     if min_fee_rate > FeeRate::ZERO {
         // TODO serialize in rust-bitcoin <https://github.com/rust-bitcoin/rust-bitcoin/pull/1787/files#diff-c2ea40075e93ccd068673873166cfa3312ec7439d6bc5a4cbc03e972c7e045c4>
@@ -980,6 +1002,7 @@ mod test {
             fee_contribution: None,
             min_fee_rate: FeeRate::ZERO,
             payee: ScriptBuf::from(vec![0x00]),
+            opt_in_to_optimistic_merge: false,
         };
         let serialized = serde_json::to_string(&req_ctx).unwrap();
         let deserialized = serde_json::from_str(&serialized).unwrap();

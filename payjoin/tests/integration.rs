@@ -181,7 +181,7 @@ mod integration {
         use bitcoin::Address;
         use http::StatusCode;
         use payjoin::receive::v2::{
-            MultiPartyProposal, PayjoinProposal, Receiver, UnMergedMultiPartyProposal,
+            PayjoinProposal, Receiver, UnMergedMultiPartyProposal,
             UncheckedProposal,
         };
         use payjoin::{HpkeKeyPair, OhttpKeys, PjUri, UriExt};
@@ -374,9 +374,11 @@ mod integration {
                 let psbt_1 = build_sweep_psbt(&senders[0], &pj_uri_1)?;
                 let sender_ctx_1 =
                     SenderBuilder::from_psbt_and_uri(psbt_1.clone(), pj_uri_1.clone())?
+                        .allow_optimistic_merge()
                         .build_recommended(FeeRate::BROADCAST_MIN)?;
                 let (Request { url, body, content_type, .. }, send_post_ctx_1) =
                     sender_ctx_1.extract_v2(directory.to_owned())?;
+
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -387,6 +389,7 @@ mod integration {
                 assert!(response.status().is_success());
                 let sender_get_ctx_1 = send_post_ctx_1
                     .process_response(&mut response.bytes().await?.to_vec().as_slice())?;
+
                 //**********************
                 // Inside Sender 2
                 // Sender 2 will POST a different psbt to the same subdir id
@@ -399,6 +402,7 @@ mod integration {
 
                 let sender_ctx_2 =
                     SenderBuilder::from_psbt_and_uri(psbt_2.clone(), pj_uri_2.clone())?
+                        .allow_optimistic_merge()
                         .build_recommended(FeeRate::BROADCAST_MIN)?;
                 let (Request { url, body, content_type, .. }, send_post_ctx_2) =
                     sender_ctx_2.extract_v2(directory.to_owned())?;

@@ -90,8 +90,7 @@ impl Params {
                     },
                 ("disableoutputsubstitution", v) =>
                     params.disable_output_substitution = v == "true",
-                ("optimisticmerge", v) =>
-                    params.optimistic_merge = Some(v == "true"),
+                ("optimisticmerge", v) => params.optimistic_merge = Some(v == "true"),
                 _ => (),
             }
         }

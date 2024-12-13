@@ -285,7 +285,7 @@ impl Sender {
         ohttp_relay: Url,
     ) -> Result<(Request, V2PostContext), CreateRequestError> {
         use crate::uri::UrlExt;
-        if let Some(expiry) = self.endpoint.exp() {
+        if let Ok(expiry) = self.endpoint.exp() {
             if std::time::SystemTime::now() > expiry {
                 return Err(InternalCreateRequestError::Expired(expiry).into());
             }

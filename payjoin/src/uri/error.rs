@@ -19,6 +19,29 @@ pub(crate) enum ParseOhttpKeysParamError {
 }
 
 #[cfg(feature = "v2")]
+#[derive(Debug)]
+pub(crate) enum ParseExpParamError {
+    MissingExp,
+    InvalidHrp(bitcoin::bech32::Hrp),
+    DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
+    InvalidExp(bitcoin::consensus::encode::Error),
+}
+
+#[cfg(feature = "v2")]
+impl std::fmt::Display for ParseExpParamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ParseExpParamError::*;
+
+        match &self {
+            MissingExp => write!(f, "exp is missing"),
+            InvalidHrp(h) => write!(f, "incorrect hrp for exp: {}", h),
+            DecodeBech32(d) => write!(f, "exp is not valid bech32: {}", d),
+            InvalidExp(i) => write!(f, "exp param does not contain a bitcoin consensus encoded u32: {}", i),
+        }
+    }
+}
+
+#[cfg(feature = "v2")]
 impl std::fmt::Display for ParseOhttpKeysParamError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use ParseOhttpKeysParamError::*;

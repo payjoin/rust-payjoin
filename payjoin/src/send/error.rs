@@ -5,7 +5,7 @@ use bitcoin::transaction::Version;
 use bitcoin::{AddressType, Sequence};
 
 #[cfg(feature = "v2")]
-use crate::uri::error::ParseReceiverPubkeyParamError;
+use crate::uri::url_ext::ParseReceiverPubkeyParamError;
 
 /// Error that may occur when the response from receiver is malformed.
 ///

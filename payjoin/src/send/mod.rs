@@ -331,7 +331,7 @@ impl Sender {
     #[cfg(feature = "v2")]
     fn extract_rs_pubkey(
         &self,
-    ) -> Result<HpkePublicKey, crate::uri::error::ParseReceiverPubkeyParamError> {
+    ) -> Result<HpkePublicKey, crate::uri::url_ext::ParseReceiverPubkeyParamError> {
         use crate::uri::UrlExt;
         self.endpoint.receiver_pubkey()
     }

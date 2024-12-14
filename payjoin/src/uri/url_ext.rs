@@ -5,7 +5,6 @@ use bitcoin::consensus::encode::Decodable;
 use bitcoin::consensus::Encodable;
 use url::Url;
 
-use super::error::{ParseOhttpKeysParamError, ParseReceiverPubkeyParamError};
 use crate::hpke::HpkePublicKey;
 use crate::ohttp::OhttpKeys;
 
@@ -15,7 +14,7 @@ pub(crate) trait UrlExt {
     fn set_receiver_pubkey(&mut self, exp: HpkePublicKey);
     fn ohttp(&self) -> Result<OhttpKeys, ParseOhttpKeysParamError>;
     fn set_ohttp(&mut self, ohttp: OhttpKeys);
-    fn exp(&self) -> Option<std::time::SystemTime>;
+    fn exp(&self) -> Result<std::time::SystemTime, ParseExpParamError>;
     fn set_exp(&mut self, exp: std::time::SystemTime);
 }
 
@@ -60,22 +59,23 @@ impl UrlExt for Url {
     fn set_ohttp(&mut self, ohttp: OhttpKeys) { set_param(self, "OH1", &ohttp.to_string()) }
 
     /// Retrieve the exp parameter from the URL fragment
-    fn exp(&self) -> Option<std::time::SystemTime> {
-        get_param(self, "EX1", |value| {
-            let (hrp, bytes) = crate::bech32::nochecksum::decode(value).ok()?;
+    fn exp(&self) -> Result<std::time::SystemTime, ParseExpParamError> {
+        let value =
+            get_param(self, "EX1", |v| Some(v.to_owned())).ok_or(ParseExpParamError::MissingExp)?;
 
-            let ex_hrp: Hrp = Hrp::parse("EX").unwrap();
-            if hrp != ex_hrp {
-                return None;
-            }
+        let (hrp, bytes) =
+            crate::bech32::nochecksum::decode(&value).map_err(ParseExpParamError::DecodeBech32)?;
 
-            let mut cursor = &bytes[..];
-            u32::consensus_decode(&mut cursor)
-                .map(|timestamp| {
-                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(timestamp as u64)
-                })
-                .ok()
-        })
+        let ex_hrp: Hrp = Hrp::parse("EX").unwrap();
+        if hrp != ex_hrp {
+            return Err(ParseExpParamError::InvalidHrp(hrp));
+        }
+
+        u32::consensus_decode(&mut &bytes[..])
+            .map(|timestamp| {
+                std::time::UNIX_EPOCH + std::time::Duration::from_secs(timestamp as u64)
+            })
+            .map_err(ParseExpParamError::InvalidExp)
     }
 
     /// Set the exp parameter in the URL fragment
@@ -130,6 +130,87 @@ fn set_param(url: &mut Url, prefix: &str, param: &str) {
     url.set_fragment(if fragment.is_empty() { None } else { Some(&fragment) });
 }
 
+#[cfg(feature = "v2")]
+#[derive(Debug)]
+pub(crate) enum ParseOhttpKeysParamError {
+    MissingOhttpKeys,
+    InvalidOhttpKeys(crate::ohttp::ParseOhttpKeysError),
+}
+
+#[cfg(feature = "v2")]
+impl std::fmt::Display for ParseOhttpKeysParamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ParseOhttpKeysParamError::*;
+
+        match &self {
+            MissingOhttpKeys => write!(f, "ohttp keys are missing"),
+            InvalidOhttpKeys(o) => write!(f, "invalid ohttp keys: {}", o),
+        }
+    }
+}
+
+#[cfg(feature = "v2")]
+#[derive(Debug)]
+pub(crate) enum ParseExpParamError {
+    MissingExp,
+    InvalidHrp(bitcoin::bech32::Hrp),
+    DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
+    InvalidExp(bitcoin::consensus::encode::Error),
+}
+
+#[cfg(feature = "v2")]
+impl std::fmt::Display for ParseExpParamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ParseExpParamError::*;
+
+        match &self {
+            MissingExp => write!(f, "exp is missing"),
+            InvalidHrp(h) => write!(f, "incorrect hrp for exp: {}", h),
+            DecodeBech32(d) => write!(f, "exp is not valid bech32: {}", d),
+            InvalidExp(i) =>
+                write!(f, "exp param does not contain a bitcoin consensus encoded u32: {}", i),
+        }
+    }
+}
+
+#[cfg(feature = "v2")]
+#[derive(Debug)]
+pub(crate) enum ParseReceiverPubkeyParamError {
+    MissingPubkey,
+    InvalidHrp(bitcoin::bech32::Hrp),
+    DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
+    InvalidPubkey(crate::hpke::HpkeError),
+}
+
+#[cfg(feature = "v2")]
+impl std::fmt::Display for ParseReceiverPubkeyParamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        use ParseReceiverPubkeyParamError::*;
+
+        match &self {
+            MissingPubkey => write!(f, "receiver public key is missing"),
+            InvalidHrp(h) => write!(f, "incorrect hrp for receiver key: {}", h),
+            DecodeBech32(e) => write!(f, "receiver public is not valid base64: {}", e),
+            InvalidPubkey(e) =>
+                write!(f, "receiver public key does not represent a valid pubkey: {}", e),
+        }
+    }
+}
+
+#[cfg(feature = "v2")]
+impl std::error::Error for ParseReceiverPubkeyParamError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use ParseReceiverPubkeyParamError::*;
+
+        match &self {
+            MissingPubkey => None,
+            InvalidHrp(_) => None,
+            DecodeBech32(error) => Some(error),
+            InvalidPubkey(error) => Some(error),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,7 +254,29 @@ mod tests {
         url.set_exp(exp_time);
         assert_eq!(url.fragment(), Some("EX1C4UC6ES"));
 
-        assert_eq!(url.exp(), Some(exp_time));
+        assert_eq!(url.exp().unwrap(), exp_time);
+    }
+
+    #[test]
+    fn test_errors_when_parsing_exp() {
+        let missing_exp_url = Url::parse("http://example.com").unwrap();
+        assert!(matches!(missing_exp_url.exp(), Err(ParseExpParamError::MissingExp)));
+
+        let invalid_bech32_exp_url =
+            Url::parse("http://example.com?pj=https://test-payjoin-url#EX1invalid_bech_32")
+                .unwrap();
+        assert!(matches!(invalid_bech32_exp_url.exp(), Err(ParseExpParamError::DecodeBech32(_))));
+
+        // Since the HRP is everything to the left of the right-most separator, the invalid url in
+        // this test would have it's HRP being parsed as EX101 instead of the expected EX1
+        let invalid_hrp_exp_url =
+            Url::parse("http://example.com?pj=https://test-payjoin-url#EX1010").unwrap();
+        assert!(matches!(invalid_hrp_exp_url.exp(), Err(ParseExpParamError::InvalidHrp(_))));
+
+        // Not enough data to decode into a u32
+        let invalid_timestamp_exp_url =
+            Url::parse("http://example.com?pj=https://test-payjoin-url#EX10").unwrap();
+        assert!(matches!(invalid_timestamp_exp_url.exp(), Err(ParseExpParamError::InvalidExp(_))))
     }
 
     #[test]

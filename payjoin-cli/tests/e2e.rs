@@ -4,45 +4,24 @@ mod e2e {
     use std::process::Stdio;
 
     use bitcoincore_rpc::json::AddressType;
-    use bitcoind::bitcoincore_rpc::RpcApi;
-    use log::{log_enabled, Level};
-    use payjoin::bitcoin::Amount;
+    use payjoin_test_utils::*;
     use tokio::fs;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::process::Command;
 
     const RECEIVE_SATS: &str = "54321";
 
+    type Error = Box<dyn std::error::Error + 'static>;
+    type Result<T> = std::result::Result<T, Error>;
+
     #[cfg(not(feature = "v2"))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn send_receive_payjoin() {
-        let bitcoind_exe = env::var("BITCOIND_EXE")
-            .ok()
-            .or_else(|| bitcoind::downloaded_exe_path().ok())
-            .expect("version feature or env BITCOIND_EXE is required for tests");
-        let mut conf = bitcoind::Conf::default();
-        conf.view_stdout = log_enabled!(Level::Debug);
-        let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &conf).unwrap();
-        let receiver = bitcoind.create_wallet("receiver").unwrap();
-        let receiver_address =
-            receiver.get_new_address(None, Some(AddressType::Bech32)).unwrap().assume_checked();
-        let sender = bitcoind.create_wallet("sender").unwrap();
-        let sender_address =
-            sender.get_new_address(None, Some(AddressType::Bech32)).unwrap().assume_checked();
-        bitcoind.client.generate_to_address(1, &receiver_address).unwrap();
-        bitcoind.client.generate_to_address(101, &sender_address).unwrap();
-
-        assert_eq!(
-            Amount::from_btc(50.0).unwrap(),
-            receiver.get_balances().unwrap().mine.trusted,
-            "receiver doesn't own bitcoin"
-        );
-
-        assert_eq!(
-            Amount::from_btc(50.0).unwrap(),
-            sender.get_balances().unwrap().mine.trusted,
-            "sender doesn't own bitcoin"
-        );
+    async fn send_receive_payjoin() -> Result<()> {
+        // _sender and _receiver are called by the payjoin-cli using RPC directly
+        let (bitcoind, _sender, _receiver) = payjoin_test_utils::init_bitcoind_sender_receiver(
+            Some(AddressType::Bech32),
+            Some(AddressType::Bech32),
+        )?;
 
         let temp_dir = env::temp_dir();
         let receiver_db_path = temp_dir.join("receiver_db");
@@ -151,6 +130,7 @@ mod e2e {
             payjoin_sent.unwrap().unwrap_or(Some(false)).unwrap(),
             "Payjoin send was not detected"
         );
+        Ok(())
     }
 
     #[cfg(feature = "v2")]
@@ -164,20 +144,15 @@ mod e2e {
         use http::StatusCode;
         use once_cell::sync::{Lazy, OnceCell};
         use reqwest::{Client, ClientBuilder};
-        use testcontainers::clients::Cli;
-        use testcontainers_modules::redis::Redis;
         use tokio::process::Child;
         use url::Url;
-
-        type Error = Box<dyn std::error::Error + 'static>;
-        type Result<T> = std::result::Result<T, Error>;
 
         static INIT_TRACING: OnceCell<()> = OnceCell::new();
         static TESTS_TIMEOUT: Lazy<Duration> = Lazy::new(|| Duration::from_secs(20));
         static WAIT_SERVICE_INTERVAL: Lazy<Duration> = Lazy::new(|| Duration::from_secs(3));
 
         init_tracing();
-        let (cert, key) = local_cert_key();
+        let (cert, key) = payjoin_test_utils::local_cert_key();
         let ohttp_relay_port = find_free_port();
         let ohttp_relay = Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
         let directory_port = find_free_port();
@@ -189,7 +164,7 @@ mod e2e {
         let sender_db_path = temp_dir.join("sender_db");
         let result: Result<()> = tokio::select! {
             res = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => Err(format!("Ohttp relay is long running: {:?}", res).into()),
-            res = init_directory(directory_port, (cert.clone(), key)) => Err(format!("Directory server is long running: {:?}", res).into()),
+            res = payjoin_test_utils::init_directory(directory_port, (cert.clone(), key)) => Err(format!("Directory server is long running: {:?}", res).into()),
             res = send_receive_cli_async(ohttp_relay, directory, cert, receiver_db_path.clone(), sender_db_path.clone()) => res.map_err(|e| format!("send_receive failed: {:?}", e).into()),
         };
 
@@ -204,33 +179,13 @@ mod e2e {
             receiver_db_path: PathBuf,
             sender_db_path: PathBuf,
         ) -> Result<()> {
-            let bitcoind_exe = env::var("BITCOIND_EXE")
-                .ok()
-                .or_else(|| bitcoind::downloaded_exe_path().ok())
-                .expect("version feature or env BITCOIND_EXE is required for tests");
-            let mut conf = bitcoind::Conf::default();
-            conf.view_stdout = log_enabled!(Level::Debug);
-            let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &conf)?;
-            let receiver = bitcoind.create_wallet("receiver")?;
-            let receiver_address =
-                receiver.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
-            let sender = bitcoind.create_wallet("sender")?;
-            let sender_address =
-                sender.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
-            bitcoind.client.generate_to_address(1, &receiver_address)?;
-            bitcoind.client.generate_to_address(101, &sender_address)?;
+            // _sender and _receiver are called by the payjoin-cli using RPC directly
+            let (bitcoind, _sender, _receiver) = payjoin_test_utils::init_bitcoind_sender_receiver(
+                Some(AddressType::Bech32),
+                Some(AddressType::Bech32),
+            )
+            .unwrap();
 
-            assert_eq!(
-                Amount::from_btc(50.0)?,
-                receiver.get_balances()?.mine.trusted,
-                "receiver doesn't own bitcoin"
-            );
-
-            assert_eq!(
-                Amount::from_btc(50.0)?,
-                sender.get_balances()?.mine.trusted,
-                "sender doesn't own bitcoin"
-            );
             let temp_dir = env::temp_dir();
             let cert_path = temp_dir.join("localhost.der");
             tokio::fs::write(&cert_path, cert.clone()).await?;
@@ -476,27 +431,6 @@ mod e2e {
             Err("Timeout waiting for service to be ready".into())
         }
 
-        async fn init_directory(port: u16, local_cert_key: (Vec<u8>, Vec<u8>)) -> Result<()> {
-            let docker: Cli = Cli::default();
-            let timeout = Duration::from_secs(2);
-            let db = docker.run(Redis);
-            let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
-            println!("Database running on {}", db.get_host_port_ipv4(6379));
-            payjoin_directory::listen_tcp_with_tls(port, db_host, timeout, local_cert_key).await
-        }
-
-        // generates or gets a DER encoded localhost cert and key.
-        fn local_cert_key() -> (Vec<u8>, Vec<u8>) {
-            let cert = rcgen::generate_simple_self_signed(vec![
-                "0.0.0.0".to_string(),
-                "localhost".to_string(),
-            ])
-            .expect("Failed to generate cert");
-            let cert_der = cert.serialize_der().expect("Failed to serialize cert");
-            let key_der = cert.serialize_private_key_der();
-            (cert_der, key_der)
-        }
-
         fn http_agent(cert_der: Vec<u8>) -> Result<Client> {
             Ok(http_agent_builder(cert_der)?.build()?)
         }
@@ -519,11 +453,6 @@ mod e2e {
                     .expect("failed to set global default subscriber");
             });
         }
-    }
-
-    fn find_free_port() -> u16 {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.local_addr().unwrap().port()
     }
 
     async fn cleanup_temp_file(path: &std::path::Path) {

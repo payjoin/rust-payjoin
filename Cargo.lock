@@ -2042,7 +2042,7 @@ dependencies = [
 
 [[package]]
 name = "payjoin_ffi"
-version = "0.21.2"
+version = "0.22.0"
 dependencies = [
  "base64 0.22.1",
  "bdk",

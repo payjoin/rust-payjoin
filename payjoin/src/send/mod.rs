@@ -34,7 +34,9 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 #[cfg(feature = "v2")]
-use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeKeyPair, HpkePublicKey};
+use crate::hpke::{
+    decrypt_message_b, encrypt_message_a, HpkeKeyPair, HpkePublicKey, HpkeSecretKey,
+};
 #[cfg(feature = "v2")]
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
 use crate::psbt::PsbtExt;
@@ -228,6 +230,8 @@ impl<'a> SenderBuilder<'a> {
             fee_contribution,
             payee,
             min_fee_rate: self.min_fee_rate,
+            #[cfg(feature = "v2")]
+            reply_key: HpkeKeyPair::gen_keypair().0,
         })
     }
 }
@@ -246,6 +250,8 @@ pub struct Sender {
     min_fee_rate: FeeRate,
     /// Script of the person being paid
     payee: ScriptBuf,
+    #[cfg(feature = "v2")]
+    reply_key: HpkeSecretKey,
 }
 
 impl Sender {
@@ -298,7 +304,7 @@ impl Sender {
             self.fee_contribution,
             self.min_fee_rate,
         )?;
-        let hpke_ctx = HpkeContext::new(rs);
+        let hpke_ctx = HpkeContext::new(rs, &self.reply_key);
         let body = encrypt_message_a(
             body,
             &hpke_ctx.reply_pair.public_key().clone(),
@@ -475,8 +481,8 @@ struct HpkeContext {
 
 #[cfg(feature = "v2")]
 impl HpkeContext {
-    pub fn new(receiver: HpkePublicKey) -> Self {
-        Self { receiver, reply_pair: HpkeKeyPair::gen_keypair() }
+    pub fn new(receiver: HpkePublicKey, reply_key: &HpkeSecretKey) -> Self {
+        Self { receiver, reply_pair: HpkeKeyPair::from_secret_key(reply_key) }
     }
 }
 
@@ -975,6 +981,7 @@ mod test {
             fee_contribution: None,
             min_fee_rate: FeeRate::ZERO,
             payee: ScriptBuf::from(vec![0x00]),
+            reply_key: HpkeKeyPair::gen_keypair().0,
         };
         let serialized = serde_json::to_string(&req_ctx).unwrap();
         let deserialized = serde_json::from_str(&serialized).unwrap();

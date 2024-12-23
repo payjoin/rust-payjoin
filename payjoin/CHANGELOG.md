@@ -1,5 +1,10 @@
 # Payjoin Changelog
 
+## 0.22.0
+
+- Propagate Uri Fragment parameter errors to the caller
+- Have `Sender` to persist reply key so resumption listens where a previous sender left off
+
 ## 0.21.0
 
 - Upgrade rustls v0.22.4

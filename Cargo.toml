@@ -25,7 +25,7 @@ base64 = "0.22.1"
 bitcoin-ffi = { git = "https://github.com/bitcoindevkit/bitcoin-ffi.git", rev = "4cd8e644dbf4e001d71d5fffb232480fa5ff2246" }
 hex = "0.4.3"
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }
-payjoin = { version = "0.21.0", features = ["send", "receive", "base64", "v2", "io"] }
+payjoin = { version = "0.22.0", features = ["send", "receive", "base64", "v2", "io"] }
 serde_json = "1.0.128"
 thiserror = "1.0.58"
 uniffi = { version = "0.28.0", optional = true }
@@ -37,7 +37,7 @@ bitcoind = { version = "0.36.0", features = ["0_21_2"] }
 bitcoincore-rpc = "0.19.0"
 http = "1"
 ohttp-relay = "0.0.8"
-payjoin-directory = { git = "https://github.com/payjoin/rust-payjoin", rev = "a1fbac5", features = ["_danger-local-https"] }
+payjoin-directory = { git = "https://github.com/payjoin/rust-payjoin", rev = "f202098", features = ["_danger-local-https"] }
 rcgen = { version = "0.11" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rustls = "0.22.2"

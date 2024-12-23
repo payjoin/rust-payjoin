@@ -293,7 +293,7 @@ mod e2e {
                 .stderr(Stdio::inherit())
                 .spawn()
                 .expect("Failed to execute payjoin-cli");
-            let _ = send_until_request_timeout(cli_send_initiator).await;
+            send_until_request_timeout(cli_send_initiator).await?;
 
             let cli_receive_resumer = Command::new(payjoin_cli)
                 .arg("--rpchost")
@@ -309,7 +309,7 @@ mod e2e {
                 .stderr(Stdio::inherit())
                 .spawn()
                 .expect("Failed to execute payjoin-cli");
-            let _ = respond_with_payjoin(cli_receive_resumer).await;
+            respond_with_payjoin(cli_receive_resumer).await?;
 
             let cli_send_resumer = Command::new(payjoin_cli)
                 .arg("--rpchost")
@@ -328,7 +328,7 @@ mod e2e {
                 .stderr(Stdio::inherit())
                 .spawn()
                 .expect("Failed to execute payjoin-cli");
-            let _ = check_payjoin_sent(cli_send_resumer).await;
+            check_payjoin_sent(cli_send_resumer).await?;
             Ok(())
         }
 

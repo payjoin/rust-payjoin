@@ -31,6 +31,11 @@ impl From<HpkeKeyPair> for (HpkeSecretKey, HpkePublicKey) {
 }
 
 impl HpkeKeyPair {
+    pub fn from_secret_key(secret_key: &HpkeSecretKey) -> Self {
+        let public_key = <SecpK256HkdfSha256 as hpke::Kem>::sk_to_pk(&secret_key.0);
+        Self(secret_key.clone(), HpkePublicKey(public_key))
+    }
+
     pub fn gen_keypair() -> Self {
         let (sk, pk) = <SecpK256HkdfSha256 as hpke::Kem>::gen_keypair(&mut OsRng);
         Self(HpkeSecretKey(sk), HpkePublicKey(pk))

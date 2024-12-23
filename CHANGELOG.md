@@ -1,3 +1,6 @@
+## [0.22.0]
+- Update `payjoin` to `0.22.0`. (Serialize reply_key with Sender [#41](https://github.com/LtbLightning/payjoin-ffi/pull/41))
+
 ## [0.21.2]
 - Add `pj_endpoint` method to `PjUri` types. ([#40](https://github.com/LtbLightning/payjoin-ffi/pull/40))
 

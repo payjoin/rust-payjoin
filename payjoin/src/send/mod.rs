@@ -517,7 +517,7 @@ impl PsbtContext {
         let mut res_str = String::new();
         response.read_to_string(&mut res_str).map_err(InternalValidationError::Io)?;
         let proposal = Psbt::from_str(&res_str).map_err(|_| ResponseError::parse(&res_str))?;
-        self.process_proposal(proposal).map(Into::into).map_err(Into::into)
+        self.process_proposal(proposal).map_err(Into::into)
     }
 
     fn process_proposal(self, mut proposal: Psbt) -> InternalResult<Psbt> {

@@ -411,12 +411,12 @@ impl V2GetContext {
         ohttp_relay: Url,
     ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
         use crate::uri::UrlExt;
-        let mut url = self.endpoint.clone();
+        let base_url = self.endpoint.clone();
 
         // TODO unify with receiver's fn subdir_path_from_pubkey
         let hash = sha256::Hash::hash(&self.hpke_ctx.reply_pair.public_key().to_compressed_bytes());
         let subdir: ShortId = hash.into();
-        url.set_path(&subdir.to_string());
+        let url = base_url.join(&subdir.to_string()).map_err(InternalCreateRequestError::Url)?;
         let body = encrypt_message_a(
             Vec::new(),
             &self.hpke_ctx.reply_pair.public_key().clone(),

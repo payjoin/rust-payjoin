@@ -1450,9 +1450,9 @@ dependencies = [
 
 [[package]]
 name = "ohttp-relay"
-version = "0.0.8"
+version = "0.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7850c40a0aebcba289d3252c0a45f93cba6ad4b0c46b88a5fc51dba6ddce8632"
+checksum = "4f8e8aef13b8327b680aaaca807aa11ba5979fc5858203e7b77c68128ede61a2"
 dependencies = [
  "futures",
  "http",

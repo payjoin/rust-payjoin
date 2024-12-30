@@ -151,6 +151,11 @@ mod e2e {
             payjoin_sent.unwrap().unwrap_or(Some(false)).unwrap(),
             "Payjoin send was not detected"
         );
+
+        fn find_free_port() -> u16 {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap().port()
+        }
     }
 
     #[cfg(feature = "v2")]
@@ -179,8 +184,6 @@ mod e2e {
 
         init_tracing();
         let (cert, key) = local_cert_key();
-        let ohttp_relay_port = find_free_port();
-        let ohttp_relay = Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
         let docker: Cli = Cli::default();
         let db = docker.run(Redis);
         let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
@@ -189,12 +192,17 @@ mod e2e {
         let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
 
         let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
+        let (ohttp_relay_port, ohttp_relay_handle) =
+            ohttp_relay::listen_tcp_on_free_port(gateway_origin)
+                .await
+                .expect("Failed to init ohttp relay");
+        let ohttp_relay = Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
 
         let temp_dir = env::temp_dir();
         let receiver_db_path = temp_dir.join("receiver_db");
         let sender_db_path = temp_dir.join("sender_db");
         let result: Result<()> = tokio::select! {
-            res = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => Err(format!("Ohttp relay is long running: {:?}", res).into()),
+            res = ohttp_relay_handle => Err(format!("Ohttp relay is long running: {:?}", res).into()),
             res = directory_handle => Err(format!("Directory server is long running: {:?}", res).into()),
             res = send_receive_cli_async(ohttp_relay, directory, cert, receiver_db_path.clone(), sender_db_path.clone()) => res.map_err(|e| format!("send_receive failed: {:?}", e).into()),
         };
@@ -529,11 +537,6 @@ mod e2e {
                     .expect("failed to set global default subscriber");
             });
         }
-    }
-
-    fn find_free_port() -> u16 {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.local_addr().unwrap().port()
     }
 
     async fn cleanup_temp_file(path: &std::path::Path) {

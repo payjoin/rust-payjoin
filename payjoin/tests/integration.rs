@@ -240,9 +240,6 @@ mod integration {
         async fn test_session_expiration() {
             init_tracing();
             let (cert, key) = local_cert_key();
-            let ohttp_relay_port = find_free_port();
-            let ohttp_relay =
-                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
             let docker: Cli = Cli::default();
             let db = docker.run(Redis);
             let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
@@ -252,8 +249,14 @@ mod integration {
                 .expect("Failed to init directory");
             let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
             let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
+            let (ohttp_relay_port, ohttp_relay_handle) =
+                ohttp_relay::listen_tcp_on_free_port(gateway_origin)
+                    .await
+                    .expect("Failed to init ohttp relay");
+            let ohttp_relay =
+                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
             tokio::select!(
-            err = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay exited early: {:?}", err),
+            err = ohttp_relay_handle => panic!("Ohttp relay exited early: {:?}", err),
             err = directory_handle => panic!("Directory server exited early: {:?}", err),
             res = do_expiration_tests(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
@@ -315,9 +318,6 @@ mod integration {
         async fn v2_to_v2() {
             init_tracing();
             let (cert, key) = local_cert_key();
-            let ohttp_relay_port = find_free_port();
-            let ohttp_relay =
-                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
             let docker: Cli = Cli::default();
             let db = docker.run(Redis);
             let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
@@ -327,8 +327,14 @@ mod integration {
                 .expect("Failed to init directory");
             let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
             let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
+            let (ohttp_relay_port, ohttp_relay_handle) =
+                ohttp_relay::listen_tcp_on_free_port(gateway_origin)
+                    .await
+                    .expect("Failed to init ohttp relay");
+            let ohttp_relay =
+                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
             tokio::select!(
-            err = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay exited early: {:?}", err),
+            err = ohttp_relay_handle => panic!("Ohttp relay exited early: {:?}", err),
             err = directory_handle => panic!("Directory server exited early: {:?}", err),
             res = do_v2_send_receive(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
@@ -450,9 +456,6 @@ mod integration {
         async fn v2_to_v2_mixed_input_script_types() {
             init_tracing();
             let (cert, key) = local_cert_key();
-            let ohttp_relay_port = find_free_port();
-            let ohttp_relay =
-                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
             let docker: Cli = Cli::default();
             let db = docker.run(Redis);
             let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
@@ -462,8 +465,14 @@ mod integration {
                 .expect("Failed to init directory");
             let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
             let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
+            let (ohttp_relay_port, ohttp_relay_handle) =
+                ohttp_relay::listen_tcp_on_free_port(gateway_origin)
+                    .await
+                    .expect("Failed to init ohttp relay");
+            let ohttp_relay =
+                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
             tokio::select!(
-            err = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay exited early: {:?}", err),
+            err = ohttp_relay_handle => panic!("Ohttp relay exited early: {:?}", err),
             err = directory_handle => panic!("Directory server exited early: {:?}", err),
             res = do_v2_send_receive(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
@@ -668,9 +677,6 @@ mod integration {
         async fn v1_to_v2() {
             init_tracing();
             let (cert, key) = local_cert_key();
-            let ohttp_relay_port = find_free_port();
-            let ohttp_relay =
-                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
             let docker: Cli = Cli::default();
             let db = docker.run(Redis);
             let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
@@ -679,8 +685,14 @@ mod integration {
                 .expect("Failed to init directory");
             let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
             let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
+            let (ohttp_relay_port, ohttp_relay_handle) =
+                ohttp_relay::listen_tcp_on_free_port(gateway_origin)
+                    .await
+                    .expect("Failed to init ohttp relay");
+            let ohttp_relay =
+                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
             tokio::select!(
-            err = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => panic!("Ohttp relay exited early: {:?}", err),
+            err = ohttp_relay_handle => panic!("Ohttp relay exited early: {:?}", err),
             err = directory_handle => panic!("Directory server exited early: {:?}", err),
             res = do_v1_to_v2(ohttp_relay, directory, cert) => assert!(res.is_ok()),
             );
@@ -934,11 +946,6 @@ mod integration {
                 .add_root_certificate(
                     reqwest::tls::Certificate::from_der(cert_der.as_slice()).unwrap(),
                 ))
-        }
-
-        fn find_free_port() -> u16 {
-            let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
-            listener.local_addr().unwrap().port()
         }
 
         async fn wait_for_service_ready(

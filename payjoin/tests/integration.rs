@@ -1,4 +1,4 @@
-#[cfg(all(feature = "send", feature = "receive", feature = "_danger-local-https"))]
+#[cfg(all(feature = "send", feature = "receive"))]
 mod integration {
     use std::collections::HashMap;
     use std::env;
@@ -171,7 +171,7 @@ mod integration {
         }
     }
 
-    #[cfg(all(feature = "io", feature = "v2"))]
+    #[cfg(all(feature = "io", feature = "v2", feature = "_danger-local-https"))]
     mod v2 {
         use std::sync::Arc;
         use std::time::Duration;

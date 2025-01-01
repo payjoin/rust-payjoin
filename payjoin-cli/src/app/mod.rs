@@ -67,8 +67,7 @@ pub trait App {
             .psbt;
         let psbt = Psbt::from_str(&psbt).with_context(|| "Failed to load PSBT from base64")?;
         log::debug!("Original psbt: {:#?}", psbt);
-        let req_ctx = payjoin::send::SenderBuilder::from_psbt_and_uri(psbt, uri.clone())
-            .with_context(|| "Failed to build payjoin request")?
+        let req_ctx = payjoin::send::SenderBuilder::new(psbt, uri.clone())
             .build_recommended(fee_rate)
             .with_context(|| "Failed to build payjoin request")?;
 

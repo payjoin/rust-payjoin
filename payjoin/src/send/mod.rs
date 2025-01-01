@@ -27,8 +27,10 @@ use std::str::FromStr;
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
-pub use error::{CreateRequestError, ResponseError, ValidationError};
-pub(crate) use error::{InternalCreateRequestError, InternalValidationError};
+pub use error::{BuildSenderError, CreateRequestError, ResponseError, ValidationError};
+pub(crate) use error::{
+    InternalBuildSenderError, InternalCreateRequestError, InternalValidationError,
+};
 #[cfg(feature = "v2")]
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -69,13 +71,12 @@ pub struct SenderBuilder<'a> {
 }
 
 impl<'a> SenderBuilder<'a> {
-    /// Prepare an HTTP request and request context to process the response
+    /// Prepare the context from which to make Sender requests
     ///
-    /// An HTTP client will own the Request data while Context sticks around so
-    /// a `(Request, Context)` tuple is returned from [`SenderBuilder::build_recommended()`]
-    /// (or other `build` methods) to keep them separated.
-    pub fn from_psbt_and_uri(psbt: Psbt, uri: PjUri<'a>) -> Result<Self, CreateRequestError> {
-        Ok(Self {
+    /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
+    /// to create a [`Sender`]
+    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self {
+        Self {
             psbt,
             uri,
             // Sender's optional parameters
@@ -83,7 +84,7 @@ impl<'a> SenderBuilder<'a> {
             fee_contribution: None,
             clamp_fee_contribution: false,
             min_fee_rate: FeeRate::ZERO,
-        })
+        }
     }
 
     /// Disable output substitution even if the receiver didn't.
@@ -103,7 +104,7 @@ impl<'a> SenderBuilder<'a> {
     // The minfeerate parameter is set if the contribution is available in change.
     //
     // This method fails if no recommendation can be made or if the PSBT is malformed.
-    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, CreateRequestError> {
+    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, BuildSenderError> {
         // TODO support optional batched payout scripts. This would require a change to
         // build() which now checks for a single payee.
         let mut payout_scripts = std::iter::once(self.uri.address.script_pubkey());
@@ -126,11 +127,10 @@ impl<'a> SenderBuilder<'a> {
             .map(|(i, txo)| (i, txo.value))
         {
             let mut input_pairs = self.psbt.input_pairs();
-            let first_input_pair =
-                input_pairs.next().ok_or(InternalCreateRequestError::NoInputs)?;
+            let first_input_pair = input_pairs.next().ok_or(InternalBuildSenderError::NoInputs)?;
             let mut input_weight = first_input_pair
                 .expected_input_weight()
-                .map_err(InternalCreateRequestError::InputWeight)?;
+                .map_err(InternalBuildSenderError::InputWeight)?;
             for input_pair in input_pairs {
                 // use cheapest default if mixed input types
                 if input_pair.address_type()? != first_input_pair.address_type()? {
@@ -181,7 +181,7 @@ impl<'a> SenderBuilder<'a> {
         change_index: Option<usize>,
         min_fee_rate: FeeRate,
         clamp_fee_contribution: bool,
-    ) -> Result<Sender, CreateRequestError> {
+    ) -> Result<Sender, BuildSenderError> {
         self.fee_contribution = Some((max_fee_contribution, change_index));
         self.clamp_fee_contribution = clamp_fee_contribution;
         self.min_fee_rate = min_fee_rate;
@@ -195,7 +195,7 @@ impl<'a> SenderBuilder<'a> {
     pub fn build_non_incentivizing(
         mut self,
         min_fee_rate: FeeRate,
-    ) -> Result<Sender, CreateRequestError> {
+    ) -> Result<Sender, BuildSenderError> {
         // since this is a builder, these should already be cleared
         // but we'll reset them to be sure
         self.fee_contribution = None;
@@ -204,11 +204,10 @@ impl<'a> SenderBuilder<'a> {
         self.build()
     }
 
-    fn build(self) -> Result<Sender, CreateRequestError> {
+    fn build(self) -> Result<Sender, BuildSenderError> {
         let mut psbt =
-            self.psbt.validate().map_err(InternalCreateRequestError::InconsistentOriginalPsbt)?;
-        psbt.validate_input_utxos(true)
-            .map_err(InternalCreateRequestError::InvalidOriginalInput)?;
+            self.psbt.validate().map_err(InternalBuildSenderError::InconsistentOriginalPsbt)?;
+        psbt.validate_input_utxos(true).map_err(InternalBuildSenderError::InvalidOriginalInput)?;
         let endpoint = self.uri.extras.endpoint.clone();
         let disable_output_substitution =
             self.uri.extras.disable_output_substitution || self.disable_output_substitution;
@@ -736,17 +735,17 @@ fn check_single_payee(
     psbt: &Psbt,
     script_pubkey: &Script,
     amount: Option<bitcoin::Amount>,
-) -> Result<(), InternalCreateRequestError> {
+) -> Result<(), InternalBuildSenderError> {
     let mut payee_found = false;
     for output in &psbt.unsigned_tx.output {
         if output.script_pubkey == *script_pubkey {
             if let Some(amount) = amount {
                 if output.value != amount {
-                    return Err(InternalCreateRequestError::PayeeValueNotEqual);
+                    return Err(InternalBuildSenderError::PayeeValueNotEqual);
                 }
             }
             if payee_found {
-                return Err(InternalCreateRequestError::MultiplePayeeOutputs);
+                return Err(InternalBuildSenderError::MultiplePayeeOutputs);
             }
             payee_found = true;
         }
@@ -754,7 +753,7 @@ fn check_single_payee(
     if payee_found {
         Ok(())
     } else {
-        Err(InternalCreateRequestError::MissingPayeeOutput)
+        Err(InternalBuildSenderError::MissingPayeeOutput)
     }
 }
 
@@ -786,12 +785,12 @@ fn check_fee_output_amount(
     output: &TxOut,
     fee: bitcoin::Amount,
     clamp_fee_contribution: bool,
-) -> Result<bitcoin::Amount, InternalCreateRequestError> {
+) -> Result<bitcoin::Amount, InternalBuildSenderError> {
     if output.value < fee {
         if clamp_fee_contribution {
             Ok(output.value)
         } else {
-            Err(InternalCreateRequestError::FeeOutputValueLowerThanFeeContribution)
+            Err(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution)
         }
     } else {
         Ok(fee)
@@ -804,15 +803,15 @@ fn find_change_index(
     payee: &Script,
     fee: bitcoin::Amount,
     clamp_fee_contribution: bool,
-) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
+) -> Result<Option<(bitcoin::Amount, usize)>, InternalBuildSenderError> {
     match (psbt.unsigned_tx.output.len(), clamp_fee_contribution) {
-        (0, _) => return Err(InternalCreateRequestError::NoOutputs),
+        (0, _) => return Err(InternalBuildSenderError::NoOutputs),
         (1, false) if psbt.unsigned_tx.output[0].script_pubkey == *payee =>
-            return Err(InternalCreateRequestError::FeeOutputValueLowerThanFeeContribution),
+            return Err(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution),
         (1, true) if psbt.unsigned_tx.output[0].script_pubkey == *payee => return Ok(None),
-        (1, _) => return Err(InternalCreateRequestError::MissingPayeeOutput),
+        (1, _) => return Err(InternalBuildSenderError::MissingPayeeOutput),
         (2, _) => (),
-        _ => return Err(InternalCreateRequestError::AmbiguousChangeOutput),
+        _ => return Err(InternalBuildSenderError::AmbiguousChangeOutput),
     }
     let (index, output) = psbt
         .unsigned_tx
@@ -820,7 +819,7 @@ fn find_change_index(
         .iter()
         .enumerate()
         .find(|(_, output)| output.script_pubkey != *payee)
-        .ok_or(InternalCreateRequestError::MultiplePayeeOutputs)?;
+        .ok_or(InternalBuildSenderError::MultiplePayeeOutputs)?;
 
     Ok(Some((check_fee_output_amount(output, fee, clamp_fee_contribution)?, index)))
 }
@@ -833,14 +832,14 @@ fn check_change_index(
     fee: bitcoin::Amount,
     index: usize,
     clamp_fee_contribution: bool,
-) -> Result<(bitcoin::Amount, usize), InternalCreateRequestError> {
+) -> Result<(bitcoin::Amount, usize), InternalBuildSenderError> {
     let output = psbt
         .unsigned_tx
         .output
         .get(index)
-        .ok_or(InternalCreateRequestError::ChangeIndexOutOfBounds)?;
+        .ok_or(InternalBuildSenderError::ChangeIndexOutOfBounds)?;
     if output.script_pubkey == *payee {
-        return Err(InternalCreateRequestError::ChangeIndexPointsAtPayee);
+        return Err(InternalBuildSenderError::ChangeIndexPointsAtPayee);
     }
     Ok((check_fee_output_amount(output, fee, clamp_fee_contribution)?, index))
 }
@@ -850,7 +849,7 @@ fn determine_fee_contribution(
     payee: &Script,
     fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
     clamp_fee_contribution: bool,
-) -> Result<Option<(bitcoin::Amount, usize)>, InternalCreateRequestError> {
+) -> Result<Option<(bitcoin::Amount, usize)>, InternalBuildSenderError> {
     Ok(match fee_contribution {
         Some((fee, None)) => find_change_index(psbt, payee, fee, clamp_fee_contribution)?,
         Some((fee, Some(index))) =>

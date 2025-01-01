@@ -93,7 +93,7 @@ mod integration {
                 .unwrap();
             let psbt = build_original_psbt(&sender, &uri)?;
             debug!("Original psbt: {:#?}", psbt);
-            let (req, ctx) = SenderBuilder::from_psbt_and_uri(psbt, uri)?
+            let (req, ctx) = SenderBuilder::new(psbt, uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);
@@ -158,7 +158,7 @@ mod integration {
                 .unwrap();
             let psbt = build_original_psbt(&sender, &uri)?;
             debug!("Original psbt: {:#?}", psbt);
-            let (req, _ctx) = SenderBuilder::from_psbt_and_uri(psbt, uri)?
+            let (req, _ctx) = SenderBuilder::new(psbt, uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);
@@ -305,7 +305,7 @@ mod integration {
                     Some(std::time::SystemTime::now()),
                 )
                 .build();
-                let expired_req_ctx = SenderBuilder::from_psbt_and_uri(psbt, expired_pj_uri)?
+                let expired_req_ctx = SenderBuilder::new(psbt, expired_pj_uri)
                     .build_non_incentivizing(FeeRate::BROADCAST_MIN)?;
                 match expired_req_ctx.extract_v2(directory.to_owned()) {
                     // Internal error types are private, so check against a string
@@ -387,7 +387,7 @@ mod integration {
                     .check_pj_supported()
                     .unwrap();
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
-                let req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
+                let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
                     req_ctx.extract_v2(directory.to_owned())?;
@@ -557,7 +557,7 @@ mod integration {
                     .check_pj_supported()
                     .unwrap();
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
-                let req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
+                let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
                 let (Request { url, body, content_type, .. }, post_ctx) =
                     req_ctx.extract_v2(directory.to_owned())?;
@@ -651,7 +651,7 @@ mod integration {
                 .check_pj_supported()
                 .unwrap();
             let psbt = build_original_psbt(&sender, &pj_uri)?;
-            let req_ctx = SenderBuilder::from_psbt_and_uri(psbt.clone(), pj_uri.clone())?
+            let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
                 .build_recommended(FeeRate::BROADCAST_MIN)?;
             let (req, ctx) = req_ctx.extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);
@@ -736,7 +736,7 @@ mod integration {
                     .unwrap();
                 let psbt = build_original_psbt(&sender, &pj_uri)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
-                    SenderBuilder::from_psbt_and_uri(psbt, pj_uri)?
+                    SenderBuilder::new(psbt, pj_uri)
                         .build_with_additional_fee(
                             Amount::from_sat(10000),
                             None,
@@ -1047,7 +1047,7 @@ mod integration {
             let psbt = build_original_psbt(&sender, &uri)?;
             log::debug!("Original psbt: {:#?}", psbt);
             let max_additional_fee = Amount::from_sat(1000);
-            let (req, ctx) = SenderBuilder::from_psbt_and_uri(psbt.clone(), uri)?
+            let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)
                 .build_with_additional_fee(max_additional_fee, None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);
@@ -1124,7 +1124,7 @@ mod integration {
                 .unwrap();
             let psbt = build_original_psbt(&sender, &uri)?;
             log::debug!("Original psbt: {:#?}", psbt);
-            let (req, ctx) = SenderBuilder::from_psbt_and_uri(psbt.clone(), uri)?
+            let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);

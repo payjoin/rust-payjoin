@@ -27,10 +27,12 @@ use std::str::FromStr;
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
-pub use error::{BuildSenderError, CreateRequestError, ResponseError, ValidationError};
-pub(crate) use error::{
-    InternalBuildSenderError, InternalCreateRequestError, InternalValidationError,
-};
+#[cfg(feature = "v2")]
+pub use error::CreateRequestError;
+#[cfg(feature = "v2")]
+pub(crate) use error::InternalCreateRequestError;
+pub use error::{BuildSenderError, ResponseError, ValidationError};
+pub(crate) use error::{InternalBuildSenderError, InternalValidationError};
 #[cfg(feature = "v2")]
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -255,15 +257,14 @@ pub struct Sender {
 
 impl Sender {
     /// Extract serialized V1 Request and Context from a Payjoin Proposal
-    pub fn extract_v1(&self) -> Result<(Request, V1Context), CreateRequestError> {
+    pub fn extract_v1(&self) -> Result<(Request, V1Context), url::ParseError> {
         let url = serialize_url(
             self.endpoint.clone(),
             self.disable_output_substitution,
             self.fee_contribution,
             self.min_fee_rate,
             "1", // payjoin version
-        )
-        .map_err(InternalCreateRequestError::Url)?;
+        )?;
         let body = self.psbt.to_string().as_bytes().to_vec();
         Ok((
             Request::new_v1(url, body),

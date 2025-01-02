@@ -1,6 +1,6 @@
 use bitcoincore_rpc::jsonrpc::serde_json;
 use payjoin::receive::v2::Receiver;
-use payjoin::send::Sender;
+use payjoin::send::v2::Sender;
 use sled::{IVec, Tree};
 use url::Url;
 

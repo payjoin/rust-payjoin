@@ -7,7 +7,7 @@ use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v2::Receiver;
-use payjoin::send::Sender;
+use payjoin::send::v2::{Sender, SenderBuilder};
 use payjoin::{bitcoin, Error, Uri};
 use tokio::signal;
 use tokio::sync::watch;
@@ -65,7 +65,12 @@ impl AppTrait for App {
         let req_ctx = match self.db.get_send_session(url)? {
             Some(send_session) => send_session,
             None => {
-                let mut req_ctx = self.create_pj_request(&uri, fee_rate)?;
+                let psbt = self.create_original_psbt(&uri, fee_rate)?;
+                let fee_rate_sat_per_kwu = fee_rate * 250.0_f32;
+                let fee_rate = FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64);
+                let mut req_ctx = SenderBuilder::new(psbt, uri.clone())
+                    .build_recommended(fee_rate)
+                    .with_context(|| "Failed to build payjoin request")?;
                 self.db.insert_send_session(&mut req_ctx, url)?;
                 req_ctx
             }
@@ -192,7 +197,7 @@ impl App {
         Ok(())
     }
 
-    async fn long_poll_post(&self, req_ctx: &mut payjoin::send::Sender) -> Result<Psbt> {
+    async fn long_poll_post(&self, req_ctx: &mut Sender) -> Result<Psbt> {
         match req_ctx.extract_v2(self.config.ohttp_relay.clone()) {
             Ok((req, ctx)) => {
                 println!("Posting Original PSBT Payload request...");

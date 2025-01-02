@@ -4,8 +4,82 @@ use bitcoin::locktime::absolute::LockTime;
 use bitcoin::transaction::Version;
 use bitcoin::{AddressType, Sequence};
 
-#[cfg(feature = "v2")]
-use crate::uri::url_ext::ParseReceiverPubkeyParamError;
+/// Error building a Sender from a SenderBuilder.
+///
+/// This error is unrecoverable.
+#[derive(Debug)]
+pub struct BuildSenderError(InternalBuildSenderError);
+
+#[derive(Debug)]
+pub(crate) enum InternalBuildSenderError {
+    InvalidOriginalInput(crate::psbt::PsbtInputsError),
+    InconsistentOriginalPsbt(crate::psbt::InconsistentPsbt),
+    NoInputs,
+    PayeeValueNotEqual,
+    NoOutputs,
+    MultiplePayeeOutputs,
+    MissingPayeeOutput,
+    FeeOutputValueLowerThanFeeContribution,
+    AmbiguousChangeOutput,
+    ChangeIndexOutOfBounds,
+    ChangeIndexPointsAtPayee,
+    InputWeight(crate::psbt::InputWeightError),
+    AddressType(crate::psbt::AddressTypeError),
+}
+
+impl From<InternalBuildSenderError> for BuildSenderError {
+    fn from(value: InternalBuildSenderError) -> Self { BuildSenderError(value) }
+}
+
+impl From<crate::psbt::AddressTypeError> for BuildSenderError {
+    fn from(value: crate::psbt::AddressTypeError) -> Self {
+        BuildSenderError(InternalBuildSenderError::AddressType(value))
+    }
+}
+
+impl fmt::Display for BuildSenderError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use InternalBuildSenderError::*;
+
+        match &self.0 {
+            InvalidOriginalInput(e) => write!(f, "an input in the original transaction is invalid: {:#?}", e),
+            InconsistentOriginalPsbt(e) => write!(f, "the original transaction is inconsistent: {:#?}", e),
+            NoInputs => write!(f, "the original transaction has no inputs"),
+            PayeeValueNotEqual => write!(f, "the value in original transaction doesn't equal value requested in the payment link"),
+            NoOutputs => write!(f, "the original transaction has no outputs"),
+            MultiplePayeeOutputs => write!(f, "the original transaction has more than one output belonging to the payee"),
+            MissingPayeeOutput => write!(f, "the output belonging to payee is missing from the original transaction"),
+            FeeOutputValueLowerThanFeeContribution => write!(f, "the value of fee output is lower than maximum allowed contribution"),
+            AmbiguousChangeOutput => write!(f, "can not determine which output is change because there's more than two outputs"),
+            ChangeIndexOutOfBounds => write!(f, "fee output index is points out of bounds"),
+            ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
+            AddressType(e) => write!(f, "can not determine input address type: {}", e),
+            InputWeight(e) => write!(f, "can not determine expected input weight: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for BuildSenderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use InternalBuildSenderError::*;
+
+        match &self.0 {
+            InvalidOriginalInput(error) => Some(error),
+            InconsistentOriginalPsbt(error) => Some(error),
+            NoInputs => None,
+            PayeeValueNotEqual => None,
+            NoOutputs => None,
+            MultiplePayeeOutputs => None,
+            MissingPayeeOutput => None,
+            FeeOutputValueLowerThanFeeContribution => None,
+            AmbiguousChangeOutput => None,
+            ChangeIndexOutOfBounds => None,
+            ChangeIndexPointsAtPayee => None,
+            AddressType(error) => Some(error),
+            InputWeight(error) => Some(error),
+        }
+    }
+}
 
 /// Error that may occur when the response from receiver is malformed.
 ///
@@ -171,125 +245,6 @@ impl std::error::Error for ValidationError {
             #[cfg(feature = "v2")]
             UnexpectedResponseSize(_) => None,
         }
-    }
-}
-
-/// Error returned when request could not be created.
-///
-/// This error can currently only happen due to programmer mistake.
-/// `unwrap()`ing it is thus considered OK in Rust but you may achieve nicer message by displaying
-/// it.
-#[derive(Debug)]
-pub struct CreateRequestError(InternalCreateRequestError);
-
-#[derive(Debug)]
-pub(crate) enum InternalCreateRequestError {
-    InvalidOriginalInput(crate::psbt::PsbtInputsError),
-    InconsistentOriginalPsbt(crate::psbt::InconsistentPsbt),
-    NoInputs,
-    PayeeValueNotEqual,
-    NoOutputs,
-    MultiplePayeeOutputs,
-    MissingPayeeOutput,
-    FeeOutputValueLowerThanFeeContribution,
-    AmbiguousChangeOutput,
-    ChangeIndexOutOfBounds,
-    ChangeIndexPointsAtPayee,
-    Url(url::ParseError),
-    AddressType(crate::psbt::AddressTypeError),
-    InputWeight(crate::psbt::InputWeightError),
-    #[cfg(feature = "v2")]
-    Hpke(crate::hpke::HpkeError),
-    #[cfg(feature = "v2")]
-    OhttpEncapsulation(crate::ohttp::OhttpEncapsulationError),
-    #[cfg(feature = "v2")]
-    ParseReceiverPubkey(ParseReceiverPubkeyParamError),
-    #[cfg(feature = "v2")]
-    MissingOhttpConfig,
-    #[cfg(feature = "v2")]
-    Expired(std::time::SystemTime),
-}
-
-impl fmt::Display for CreateRequestError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use InternalCreateRequestError::*;
-
-        match &self.0 {
-            InvalidOriginalInput(e) => write!(f, "an input in the original transaction is invalid: {:#?}", e),
-            InconsistentOriginalPsbt(e) => write!(f, "the original transaction is inconsistent: {:#?}", e),
-            NoInputs => write!(f, "the original transaction has no inputs"),
-            PayeeValueNotEqual => write!(f, "the value in original transaction doesn't equal value requested in the payment link"),
-            NoOutputs => write!(f, "the original transaction has no outputs"),
-            MultiplePayeeOutputs => write!(f, "the original transaction has more than one output belonging to the payee"),
-            MissingPayeeOutput => write!(f, "the output belonging to payee is missing from the original transaction"),
-            FeeOutputValueLowerThanFeeContribution => write!(f, "the value of fee output is lower than maximum allowed contribution"),
-            AmbiguousChangeOutput => write!(f, "can not determine which output is change because there's more than two outputs"),
-            ChangeIndexOutOfBounds => write!(f, "fee output index is points out of bounds"),
-            ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
-            Url(e) => write!(f, "cannot parse url: {:#?}", e),
-            AddressType(e) => write!(f, "can not determine input address type: {}", e),
-            InputWeight(e) => write!(f, "can not determine expected input weight: {}", e),
-            #[cfg(feature = "v2")]
-            Hpke(e) => write!(f, "v2 error: {}", e),
-            #[cfg(feature = "v2")]
-            OhttpEncapsulation(e) => write!(f, "v2 error: {}", e),
-            #[cfg(feature = "v2")]
-            ParseReceiverPubkey(e) => write!(f, "cannot parse receiver public key: {}", e),
-            #[cfg(feature = "v2")]
-            MissingOhttpConfig => write!(f, "no ohttp configuration with which to make a v2 request available"),
-            #[cfg(feature = "v2")]
-            Expired(expiry) => write!(f, "session expired at {:?}", expiry),
-        }
-    }
-}
-
-impl std::error::Error for CreateRequestError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        use InternalCreateRequestError::*;
-
-        match &self.0 {
-            InvalidOriginalInput(error) => Some(error),
-            InconsistentOriginalPsbt(error) => Some(error),
-            NoInputs => None,
-            PayeeValueNotEqual => None,
-            NoOutputs => None,
-            MultiplePayeeOutputs => None,
-            MissingPayeeOutput => None,
-            FeeOutputValueLowerThanFeeContribution => None,
-            AmbiguousChangeOutput => None,
-            ChangeIndexOutOfBounds => None,
-            ChangeIndexPointsAtPayee => None,
-            Url(error) => Some(error),
-            AddressType(error) => Some(error),
-            InputWeight(error) => Some(error),
-            #[cfg(feature = "v2")]
-            Hpke(error) => Some(error),
-            #[cfg(feature = "v2")]
-            OhttpEncapsulation(error) => Some(error),
-            #[cfg(feature = "v2")]
-            ParseReceiverPubkey(error) => Some(error),
-            #[cfg(feature = "v2")]
-            MissingOhttpConfig => None,
-            #[cfg(feature = "v2")]
-            Expired(_) => None,
-        }
-    }
-}
-
-impl From<InternalCreateRequestError> for CreateRequestError {
-    fn from(value: InternalCreateRequestError) -> Self { CreateRequestError(value) }
-}
-
-impl From<crate::psbt::AddressTypeError> for CreateRequestError {
-    fn from(value: crate::psbt::AddressTypeError) -> Self {
-        CreateRequestError(InternalCreateRequestError::AddressType(value))
-    }
-}
-
-#[cfg(feature = "v2")]
-impl From<ParseReceiverPubkeyParamError> for CreateRequestError {
-    fn from(value: ParseReceiverPubkeyParamError) -> Self {
-        CreateRequestError(InternalCreateRequestError::ParseReceiverPubkey(value))
     }
 }
 

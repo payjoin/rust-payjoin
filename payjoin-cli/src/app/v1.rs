@@ -16,6 +16,7 @@ use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{self, FeeRate};
 use payjoin::receive::{PayjoinProposal, UncheckedProposal};
+use payjoin::send::v1::SenderBuilder;
 use payjoin::{Error, PjUriBuilder, Uri, UriExt};
 use tokio::net::TcpListener;
 
@@ -72,7 +73,13 @@ impl AppTrait for App {
             Uri::try_from(bip21).map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
         let uri = uri.assume_checked();
         let uri = uri.check_pj_supported().map_err(|_| anyhow!("URI does not support Payjoin"))?;
-        let (req, ctx) = self.create_pj_request(&uri, fee_rate)?.extract_v1()?;
+        let psbt = self.create_original_psbt(&uri, fee_rate)?;
+        let fee_rate_sat_per_kwu = fee_rate * 250.0_f32;
+        let fee_rate = FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64);
+        let (req, ctx) = SenderBuilder::new(psbt, uri.clone())
+            .build_recommended(fee_rate)
+            .with_context(|| "Failed to build payjoin request")?
+            .extract_v1()?;
         let http = http_agent()?;
         let body = String::from_utf8(req.body.clone()).unwrap();
         println!("Sending fallback request to {}", &req.url);

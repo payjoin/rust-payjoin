@@ -4,9 +4,6 @@ use bitcoin::locktime::absolute::LockTime;
 use bitcoin::transaction::Version;
 use bitcoin::{AddressType, Sequence};
 
-#[cfg(feature = "v2")]
-use crate::uri::url_ext::ParseReceiverPubkeyParamError;
-
 /// Error building a Sender from a SenderBuilder.
 ///
 /// This error is unrecoverable.
@@ -81,71 +78,6 @@ impl std::error::Error for BuildSenderError {
             AddressType(error) => Some(error),
             InputWeight(error) => Some(error),
         }
-    }
-}
-
-/// Error returned when request could not be created.
-///
-/// This error can currently only happen due to programmer mistake.
-/// `unwrap()`ing it is thus considered OK in Rust but you may achieve nicer message by displaying
-/// it.
-#[derive(Debug)]
-#[cfg(feature = "v2")]
-pub struct CreateRequestError(InternalCreateRequestError);
-
-#[derive(Debug)]
-#[cfg(feature = "v2")]
-pub(crate) enum InternalCreateRequestError {
-    Url(url::ParseError),
-    Hpke(crate::hpke::HpkeError),
-    OhttpEncapsulation(crate::ohttp::OhttpEncapsulationError),
-    ParseReceiverPubkey(ParseReceiverPubkeyParamError),
-    MissingOhttpConfig,
-    Expired(std::time::SystemTime),
-}
-
-#[cfg(feature = "v2")]
-impl fmt::Display for CreateRequestError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use InternalCreateRequestError::*;
-
-        match &self.0 {
-            Url(e) => write!(f, "cannot parse url: {:#?}", e),
-            Hpke(e) => write!(f, "v2 error: {}", e),
-            OhttpEncapsulation(e) => write!(f, "v2 error: {}", e),
-            ParseReceiverPubkey(e) => write!(f, "cannot parse receiver public key: {}", e),
-            MissingOhttpConfig =>
-                write!(f, "no ohttp configuration with which to make a v2 request available"),
-            Expired(expiry) => write!(f, "session expired at {:?}", expiry),
-        }
-    }
-}
-
-#[cfg(feature = "v2")]
-impl std::error::Error for CreateRequestError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        use InternalCreateRequestError::*;
-
-        match &self.0 {
-            Url(error) => Some(error),
-            Hpke(error) => Some(error),
-            OhttpEncapsulation(error) => Some(error),
-            ParseReceiverPubkey(error) => Some(error),
-            MissingOhttpConfig => None,
-            Expired(_) => None,
-        }
-    }
-}
-
-#[cfg(feature = "v2")]
-impl From<InternalCreateRequestError> for CreateRequestError {
-    fn from(value: InternalCreateRequestError) -> Self { CreateRequestError(value) }
-}
-
-#[cfg(feature = "v2")]
-impl From<ParseReceiverPubkeyParamError> for CreateRequestError {
-    fn from(value: ParseReceiverPubkeyParamError) -> Self {
-        CreateRequestError(InternalCreateRequestError::ParseReceiverPubkey(value))
     }
 }
 

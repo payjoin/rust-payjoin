@@ -13,7 +13,6 @@ mod integration {
     use log::{log_enabled, Level};
     use once_cell::sync::{Lazy, OnceCell};
     use payjoin::receive::InputPair;
-    use payjoin::send::SenderBuilder;
     use payjoin::{PjUri, PjUriBuilder, Request, Uri};
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
     use url::Url;
@@ -27,6 +26,7 @@ mod integration {
     #[cfg(not(feature = "v2"))]
     mod v1 {
         use log::debug;
+        use payjoin::send::v1::SenderBuilder;
         use payjoin::UriExt;
 
         use super::*;
@@ -179,6 +179,7 @@ mod integration {
         use bitcoin::Address;
         use http::StatusCode;
         use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
+        use payjoin::send::v2::SenderBuilder;
         use payjoin::{HpkeKeyPair, OhttpKeys, PjUri, UriExt};
         use reqwest::{Client, ClientBuilder, Error, Response};
         use testcontainers_modules::redis::Redis;
@@ -1009,6 +1010,7 @@ mod integration {
 
     #[cfg(not(feature = "v2"))]
     mod batching {
+        use payjoin::send::v1::SenderBuilder;
         use payjoin::UriExt;
 
         use super::*;

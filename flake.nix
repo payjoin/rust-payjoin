@@ -41,6 +41,10 @@
               (rust-bin.override {
                 extensions = ["rust-src" "rustfmt"];
               })
+              cargo-edit
+              cargo-nextest
+              cargo-watch
+              rust-analyzer
             ];
           };
         devShells = builtins.mapAttrs (_name: rustVersion: mkShell rustVersion) rustVersions;

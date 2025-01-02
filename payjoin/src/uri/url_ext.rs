@@ -97,18 +97,19 @@ impl UrlExt for Url {
     }
 }
 
+/// Get a parameter from the URL fragment
+///
+/// This function is case insensitive
 fn get_param<F, T>(url: &Url, prefix: &str, parse: F) -> Option<T>
 where
     F: Fn(&str) -> Option<T>,
 {
-    if let Some(fragment) = url.fragment() {
-        for param in fragment.split('+') {
-            if param.starts_with(prefix) {
-                return parse(param);
-            }
-        }
-    }
-    None
+    let prefix = prefix.to_uppercase();
+    url.fragment()?
+        .to_uppercase()
+        .split('+')
+        .find(|param| param[..prefix.len()] == prefix)
+        .and_then(parse)
 }
 
 fn set_param(url: &mut Url, prefix: &str, param: &str) {

@@ -8,7 +8,7 @@ rustc --version
 
 for crate in $CRATES; do
     (
-        cd $crate
+        cd "$crate"
         ./contrib/test.sh
     )
 done

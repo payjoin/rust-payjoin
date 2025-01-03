@@ -9,8 +9,8 @@ for dep in $DEPS; do
     rustc --version
 
     # Some tests require certain toolchain types.
-    NIGHTLY=false
-    STABLE=true
+    export NIGHTLY=false
+    export STABLE=true
     if cargo --version | grep nightly; then
         STABLE=false
         NIGHTLY=true
@@ -23,7 +23,7 @@ for dep in $DEPS; do
 
     for crate in $CRATES; do
         (
-            cd $crate
+            cd "$crate"
             ./contrib/test.sh
         )
     done

@@ -54,7 +54,7 @@ impl AppTrait for App {
         .with_context(|| "Failed to connect to bitcoind")
     }
 
-    async fn send_payjoin(&self, bip21: &str, fee_rate: &f32) -> Result<()> {
+    async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {
         use payjoin::UriExt;
         let uri =
             Uri::try_from(bip21).map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
@@ -66,8 +66,6 @@ impl AppTrait for App {
             Some(send_session) => send_session,
             None => {
                 let psbt = self.create_original_psbt(&uri, fee_rate)?;
-                let fee_rate_sat_per_kwu = fee_rate * 250.0_f32;
-                let fee_rate = FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64);
                 let mut req_ctx = SenderBuilder::new(psbt, uri.clone())
                     .build_recommended(fee_rate)
                     .with_context(|| "Failed to build payjoin request")?;

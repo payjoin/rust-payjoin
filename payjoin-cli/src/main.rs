@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use app::config::AppConfig;
 use app::App as AppTrait;
 use clap::{arg, value_parser, Arg, ArgMatches, Command};
+use payjoin::bitcoin::FeeRate;
 use url::Url;
 
 mod app;
@@ -23,9 +24,10 @@ async fn main() -> Result<()> {
     match matches.subcommand() {
         Some(("send", sub_matches)) => {
             let bip21 = sub_matches.get_one::<String>("BIP21").context("Missing BIP21 argument")?;
-            let fee_rate_sat_per_vb =
-                sub_matches.get_one::<f32>("fee_rate").context("Missing --fee-rate argument")?;
-            app.send_payjoin(bip21, fee_rate_sat_per_vb).await?;
+            let fee_rate = sub_matches
+                .get_one::<FeeRate>("fee_rate")
+                .context("Missing --fee-rate argument")?;
+            app.send_payjoin(bip21, *fee_rate).await?;
         }
         Some(("receive", sub_matches)) => {
             let amount =
@@ -98,7 +100,7 @@ fn cli() -> ArgMatches {
                     .long("fee-rate")
                     .value_name("FEE_SAT_PER_VB")
                     .help("Fee rate in sat/vB")
-                    .value_parser(value_parser!(f32)),
+                    .value_parser(parse_feerate_in_sat_per_vb),
             ),
     );
 
@@ -151,4 +153,10 @@ fn cli() -> ArgMatches {
 
     cmd = cmd.subcommand(receive_cmd);
     cmd.get_matches()
+}
+
+fn parse_feerate_in_sat_per_vb(s: &str) -> Result<FeeRate, std::num::ParseFloatError> {
+    let fee_rate_sat_per_vb: f32 = s.parse()?;
+    let fee_rate_sat_per_kwu = fee_rate_sat_per_vb * 250.0_f32;
+    Ok(FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64))
 }

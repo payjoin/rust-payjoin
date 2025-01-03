@@ -15,6 +15,8 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
 
+use crate::db::{DbPool, Error};
+
 pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
 pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
@@ -34,7 +36,6 @@ const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message"
 const ID_LENGTH: usize = 13;
 
 mod db;
-use crate::db::DbPool;
 
 #[cfg(feature = "_danger-local-https")]
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -312,6 +313,22 @@ impl From<hyper::http::Error> for HandlerError {
     fn from(e: hyper::http::Error) -> Self { HandlerError::InternalServerError(e.into()) }
 }
 
+fn handle_peek(
+    result: Result<Vec<u8>, Error>,
+    timeout_response: Response<BoxBody<Bytes, hyper::Error>>,
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
+    match result {
+        Ok(buffered_req) => Ok(Response::new(full(buffered_req))),
+        Err(e) => match e {
+            Error::Redis(re) => {
+                error!("Redis error: {}", re);
+                Err(HandlerError::InternalServerError(anyhow::Error::msg("Internal server error")))
+            }
+            Error::Timeout(_) => Ok(timeout_response),
+        },
+    }
+}
+
 async fn post_fallback_v1(
     id: &str,
     query: String,
@@ -340,13 +357,7 @@ async fn post_fallback_v1(
     pool.push_default(id, v2_compat_body.into())
         .await
         .map_err(|e| HandlerError::BadRequest(e.into()))?;
-    match pool.peek_v1(id).await {
-        Some(result) => match result {
-            Ok(buffered_req) => Ok(Response::new(full(buffered_req))),
-            Err(e) => Err(HandlerError::BadRequest(e.into())),
-        },
-        None => Ok(none_response),
-    }
+    handle_peek(pool.peek_v1(id).await, none_response)
 }
 
 async fn put_payjoin_v1(
@@ -408,13 +419,8 @@ async fn get_subdir(
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
     trace!("get_subdir");
     let id = check_id_length(id)?;
-    match pool.peek_default(id).await {
-        Some(result) => match result {
-            Ok(buffered_req) => Ok(Response::new(full(buffered_req))),
-            Err(e) => Err(HandlerError::BadRequest(e.into())),
-        },
-        None => Ok(Response::builder().status(StatusCode::ACCEPTED).body(empty())?),
-    }
+    let timeout_response = Response::builder().status(StatusCode::ACCEPTED).body(empty())?;
+    handle_peek(pool.peek_default(id).await, timeout_response)
 }
 
 fn not_found() -> Response<BoxBody<Bytes, hyper::Error>> {

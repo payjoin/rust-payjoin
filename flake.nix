@@ -171,6 +171,15 @@
                 shfmt -d -s -i 4 -ci ${src}
               '';
             };
+
+            shellcheck = simpleCheck rec {
+              name = "shell-checks";
+              src = pkgs.lib.sources.sourceFilesBySuffices ./. [".sh"];
+              nativeBuildInputs = [pkgs.shellcheck];
+              checkPhase = ''
+                shellcheck -x ${src}
+              '';
+            };
           };
       }
     );

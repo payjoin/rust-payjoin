@@ -4,14 +4,13 @@ set -e
 DEPS="recent minimal"
 CRATES="payjoin payjoin-cli payjoin-directory"
 
-for dep in $DEPS
-do
+for dep in $DEPS; do
     cargo --version
     rustc --version
 
     # Some tests require certain toolchain types.
-    NIGHTLY=false
-    STABLE=true
+    export NIGHTLY=false
+    export STABLE=true
     if cargo --version | grep nightly; then
         STABLE=false
         NIGHTLY=true
@@ -22,10 +21,9 @@ do
 
     cp "Cargo-$dep.lock" Cargo.lock
 
-    for crate in $CRATES
-    do
+    for crate in $CRATES; do
         (
-            cd $crate
+            cd "$crate"
             ./contrib/test.sh
         )
     done

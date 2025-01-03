@@ -6,10 +6,9 @@ CRATES="payjoin payjoin-cli payjoin-directory"
 cargo --version
 rustc --version
 
-for crate in $CRATES
-do
+for crate in $CRATES; do
     (
-        cd $crate
+        cd "$crate"
         ./contrib/test.sh
     )
 done

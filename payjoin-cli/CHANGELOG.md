@@ -1,5 +1,15 @@
 # payjoin-cli Changelog
 
+## 0.1.0
+
+- Bump payjoin to v0.22.0 with stable wire protocol
+  - Allow mixed input scripts in v2 (#367)
+
+- Fix bug to propagate missing `ohttp_keys` config parameter or argument error (#441)
+- Don't pause between long polling requests (#463)
+- Hide danger-local-https feature with _ prefix (#423)
+
+
 ## 0.0.9-alpha
 
 - Make backwards-compatible v2 to v1 sends possible

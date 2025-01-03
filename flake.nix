@@ -162,6 +162,15 @@
                 alejandra -c .
               '';
             };
+
+            shfmt = simpleCheck rec {
+              name = "shell-checks";
+              src = pkgs.lib.sources.sourceFilesBySuffices ./. [".sh"];
+              nativeBuildInputs = [pkgs.shfmt];
+              checkPhase = ''
+                shfmt -d -s -i 4 -ci ${src}
+              '';
+            };
           };
       }
     );

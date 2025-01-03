@@ -4,8 +4,7 @@ set -e
 DEPS="recent minimal"
 CRATES="payjoin payjoin-cli payjoin-directory"
 
-for dep in $DEPS
-do
+for dep in $DEPS; do
     cargo --version
     rustc --version
 
@@ -22,8 +21,7 @@ do
 
     cp "Cargo-$dep.lock" Cargo.lock
 
-    for crate in $CRATES
-    do
+    for crate in $CRATES; do
         (
             cd $crate
             ./contrib/test.sh

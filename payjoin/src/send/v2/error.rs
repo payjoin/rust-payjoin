@@ -60,3 +60,59 @@ impl From<ParseReceiverPubkeyParamError> for CreateRequestError {
         CreateRequestError(InternalCreateRequestError::ParseReceiverPubkey(value))
     }
 }
+
+/// Error returned for v2-specific payload encapsulation errors.
+#[derive(Debug)]
+pub struct EncapsulationError {
+    internal: InternalEncapsulationError,
+}
+
+#[derive(Debug)]
+pub(crate) enum InternalEncapsulationError {
+    /// The response size is not the expected size.
+    InvalidSize(usize),
+    /// The status code is not the expected status code.
+    UnexpectedStatusCode(http::StatusCode),
+    /// The HPKE failed.
+    Hpke(crate::hpke::HpkeError),
+    /// The encapsulation failed.
+    Ohttp(crate::ohttp::OhttpEncapsulationError),
+}
+
+impl fmt::Display for EncapsulationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use InternalEncapsulationError::*;
+
+        match &self.internal {
+            InvalidSize(size) => write!(f, "invalid size: {}", size),
+            UnexpectedStatusCode(status) => write!(f, "unexpected status code: {}", status),
+            Ohttp(error) => write!(f, "OHTTP encapsulation error: {}", error),
+            Hpke(error) => write!(f, "HPKE error: {}", error),
+        }
+    }
+}
+
+impl std::error::Error for EncapsulationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use InternalEncapsulationError::*;
+
+        match &self.internal {
+            InvalidSize(_) => None,
+            UnexpectedStatusCode(_) => None,
+            Ohttp(error) => Some(error),
+            Hpke(error) => Some(error),
+        }
+    }
+}
+
+impl From<InternalEncapsulationError> for EncapsulationError {
+    fn from(value: InternalEncapsulationError) -> Self { EncapsulationError { internal: value } }
+}
+
+impl From<InternalEncapsulationError> for super::ResponseError {
+    fn from(value: InternalEncapsulationError) -> Self {
+        super::ResponseError::Validation(
+            super::InternalValidationError::V2Encapsulation(value.into()).into(),
+        )
+    }
+}

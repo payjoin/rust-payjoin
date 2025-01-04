@@ -135,13 +135,7 @@ pub(crate) enum InternalValidationError {
     FeeRateBelowMinimum,
     Psbt(bitcoin::psbt::Error),
     #[cfg(feature = "v2")]
-    Hpke(crate::hpke::HpkeError),
-    #[cfg(feature = "v2")]
-    OhttpEncapsulation(crate::ohttp::OhttpEncapsulationError),
-    #[cfg(feature = "v2")]
-    UnexpectedStatusCode,
-    #[cfg(feature = "v2")]
-    UnexpectedResponseSize(usize),
+    V2Encapsulation(crate::send::v2::EncapsulationError),
 }
 
 impl From<InternalValidationError> for ValidationError {
@@ -190,13 +184,7 @@ impl fmt::Display for ValidationError {
             FeeRateBelowMinimum =>  write!(f, "the fee rate of proposed transaction is below minimum"),
             Psbt(e) => write!(f, "psbt error: {}", e),
             #[cfg(feature = "v2")]
-            Hpke(e) => write!(f, "v2 error: {}", e),
-            #[cfg(feature = "v2")]
-            OhttpEncapsulation(e) => write!(f, "Ohttp encapsulation error: {}", e),
-            #[cfg(feature = "v2")]
-            UnexpectedStatusCode => write!(f, "unexpected status code"),
-            #[cfg(feature = "v2")]
-            UnexpectedResponseSize(size) => write!(f, "unexpected response size {}, expected {} bytes", size, crate::ohttp::ENCAPSULATED_MESSAGE_BYTES),
+            V2Encapsulation(e) => write!(f, "v2 encapsulation error: {}", e),
         }
     }
 }
@@ -237,13 +225,7 @@ impl std::error::Error for ValidationError {
             FeeRateBelowMinimum => None,
             Psbt(error) => Some(error),
             #[cfg(feature = "v2")]
-            Hpke(error) => Some(error),
-            #[cfg(feature = "v2")]
-            OhttpEncapsulation(error) => Some(error),
-            #[cfg(feature = "v2")]
-            UnexpectedStatusCode => None,
-            #[cfg(feature = "v2")]
-            UnexpectedResponseSize(_) => None,
+            V2Encapsulation(e) => Some(e),
         }
     }
 }

@@ -22,8 +22,8 @@
 //! wallet and http client.
 
 use bitcoin::hashes::{sha256, Hash};
-pub use error::CreateRequestError;
-use error::InternalCreateRequestError;
+pub use error::{CreateRequestError, EncapsulationError};
+use error::{InternalCreateRequestError, InternalEncapsulationError};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -223,13 +223,13 @@ pub struct V2PostContext {
 }
 
 impl V2PostContext {
-    pub fn process_response(self, response: &[u8]) -> Result<V2GetContext, ResponseError> {
+    pub fn process_response(self, response: &[u8]) -> Result<V2GetContext, EncapsulationError> {
         let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
             response
                 .try_into()
-                .map_err(|_| InternalValidationError::UnexpectedResponseSize(response.len()))?;
+                .map_err(|_| InternalEncapsulationError::InvalidSize(response.len()))?;
         let response = ohttp_decapsulate(self.ohttp_ctx, response_array)
-            .map_err(InternalValidationError::OhttpEncapsulation)?;
+            .map_err(InternalEncapsulationError::Ohttp)?;
         match response.status() {
             http::StatusCode::OK => {
                 // return OK with new Typestate
@@ -239,7 +239,7 @@ impl V2PostContext {
                     hpke_ctx: self.hpke_ctx,
                 })
             }
-            _ => Err(InternalValidationError::UnexpectedStatusCode)?,
+            _ => Err(InternalEncapsulationError::UnexpectedStatusCode(response.status()))?,
         }
     }
 }
@@ -286,21 +286,21 @@ impl V2GetContext {
         let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
             response
                 .try_into()
-                .map_err(|_| InternalValidationError::UnexpectedResponseSize(response.len()))?;
+                .map_err(|_| InternalEncapsulationError::InvalidSize(response.len()))?;
 
         let response = ohttp_decapsulate(ohttp_ctx, response_array)
-            .map_err(InternalValidationError::OhttpEncapsulation)?;
+            .map_err(InternalEncapsulationError::Ohttp)?;
         let body = match response.status() {
             http::StatusCode::OK => response.body().to_vec(),
             http::StatusCode::ACCEPTED => return Ok(None),
-            _ => return Err(InternalValidationError::UnexpectedStatusCode)?,
+            _ => return Err(InternalEncapsulationError::UnexpectedStatusCode(response.status()))?,
         };
         let psbt = decrypt_message_b(
             &body,
             self.hpke_ctx.receiver.clone(),
             self.hpke_ctx.reply_pair.secret_key().clone(),
         )
-        .map_err(InternalValidationError::Hpke)?;
+        .map_err(InternalEncapsulationError::Hpke)?;
 
         let proposal = Psbt::deserialize(&psbt).map_err(InternalValidationError::Psbt)?;
         let processed_proposal = self.psbt_ctx.clone().process_proposal(proposal)?;

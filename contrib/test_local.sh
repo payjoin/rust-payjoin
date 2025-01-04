@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 CRATES="payjoin payjoin-cli payjoin-directory"

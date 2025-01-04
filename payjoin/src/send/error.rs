@@ -262,17 +262,19 @@ pub enum ResponseError {
     ///
     /// [`BIP78::ReceiverWellKnownError`]: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-Receivers_well_known_errors
     WellKnown(WellKnownError),
-    /// `Unrecognized` Errors are NOT defined in the [`BIP78::ReceiverWellKnownError`] spec.
-    ///
-    /// Its not safe to display `Unrecognized` errors to end users as they could be used
-    /// maliciously to phish a non technical user. Only display them in debug logs.
-    ///
-    /// [`BIP78::ReceiverWellKnownError`]: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-Receivers_well_known_errors
-    Unrecognized { error_code: String, message: String },
+
     /// Errors caused by malformed responses.
     ///
     /// These errors are only displayed in debug logs.
     Validation(ValidationError),
+
+    /// `Unrecognized` Errors are NOT defined in the [`BIP78::ReceiverWellKnownError`] spec.
+    ///
+    /// It is NOT safe to display `Unrecognized` errors to end users as they could be used
+    /// maliciously to phish a non technical user. Only display them in debug logs.
+    ///
+    /// [`BIP78::ReceiverWellKnownError`]: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-Receivers_well_known_errors
+    Unrecognized { error_code: String, message: String },
 }
 
 impl ResponseError {
@@ -342,14 +344,14 @@ impl From<InternalProposalError> for ResponseError {
     }
 }
 
-// It is imperative to carefully display pre-defined messages to end users and the details in debug.
 impl Display for ResponseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::WellKnown(e) => e.fmt(f),
-            // Don't display unknowns to end users, only debug logs
-            Self::Unrecognized { .. } => write!(f, "The receiver sent an unrecognized error."),
             Self::Validation(_) => write!(f, "The receiver sent an invalid response."),
+
+            // Do NOT display unrecognized errors to end users, only debug logs
+            Self::Unrecognized { .. } => write!(f, "The receiver sent an unrecognized error."),
         }
     }
 }
@@ -364,12 +366,13 @@ impl fmt::Debug for ResponseError {
                 e.error_code(),
                 e.message()
             ),
+            Self::Validation(e) => write!(f, "Validation({:?})", e),
+
             Self::Unrecognized { error_code, message } => write!(
                 f,
                 r#"Unrecognized error: {{ "errorCode": "{}", "message": "{}" }}"#,
                 error_code, message
             ),
-            Self::Validation(e) => write!(f, "Validation({:?})", e),
         }
     }
 }

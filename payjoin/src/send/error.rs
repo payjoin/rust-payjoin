@@ -264,8 +264,6 @@ pub enum ResponseError {
     WellKnown(WellKnownError),
 
     /// Errors caused by malformed responses.
-    ///
-    /// These errors are only displayed in debug logs.
     Validation(ValidationError),
 
     /// `Unrecognized` Errors are NOT defined in the [`BIP78::ReceiverWellKnownError`] spec.
@@ -348,7 +346,7 @@ impl Display for ResponseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::WellKnown(e) => e.fmt(f),
-            Self::Validation(_) => write!(f, "The receiver sent an invalid response."),
+            Self::Validation(e) => write!(f, "The receiver sent an invalid response: {}", e),
 
             // Do NOT display unrecognized errors to end users, only debug logs
             Self::Unrecognized { .. } => write!(f, "The receiver sent an unrecognized error."),
@@ -444,9 +442,9 @@ mod tests {
             "err": "random",
             "message": "This version of payjoin is not supported."
         });
-        assert_eq!(
-            ResponseError::from_json(invalid_json_error).to_string(),
-            "The receiver sent an invalid response."
-        );
+        assert!(matches!(
+            ResponseError::from_json(invalid_json_error),
+            ResponseError::Validation(_)
+        ));
     }
 }

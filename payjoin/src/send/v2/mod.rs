@@ -302,7 +302,7 @@ impl V2GetContext {
         )
         .map_err(InternalEncapsulationError::Hpke)?;
 
-        let proposal = Psbt::deserialize(&psbt).map_err(InternalValidationError::Psbt)?;
+        let proposal = Psbt::deserialize(&psbt).map_err(InternalProposalError::Psbt)?;
         let processed_proposal = self.psbt_ctx.clone().process_proposal(proposal)?;
         Ok(Some(processed_proposal))
     }

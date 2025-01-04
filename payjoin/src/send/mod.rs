@@ -11,7 +11,7 @@ use std::str::FromStr;
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
 pub use error::{BuildSenderError, ResponseError, ValidationError};
-pub(crate) use error::{InternalBuildSenderError, InternalValidationError};
+pub(crate) use error::{InternalBuildSenderError, InternalProposalError, InternalValidationError};
 use url::Url;
 
 use crate::psbt::PsbtExt;
@@ -25,7 +25,7 @@ pub mod v1;
 #[cfg(feature = "v2")]
 pub mod v2;
 
-type InternalResult<T> = Result<T, InternalValidationError>;
+type InternalResult<T> = Result<T, InternalProposalError>;
 
 /// Data required to validate the response.
 ///
@@ -60,7 +60,7 @@ macro_rules! check_eq {
     ($proposed:expr, $original:expr, $error:ident) => {
         match ($proposed, $original) {
             (proposed, original) if proposed != original =>
-                return Err(InternalValidationError::$error { proposed, original }),
+                return Err(InternalProposalError::$error { proposed, original }),
             _ => (),
         }
     };
@@ -69,7 +69,7 @@ macro_rules! check_eq {
 macro_rules! ensure {
     ($cond:expr, $error:ident) => {
         if !($cond) {
-            return Err(InternalValidationError::$error);
+            return Err(InternalProposalError::$error);
         }
     };
 }
@@ -100,8 +100,8 @@ impl PsbtContext {
     }
 
     fn check_fees(&self, proposal: &Psbt, contributed_fee: Amount) -> InternalResult<()> {
-        let proposed_fee = proposal.fee().map_err(InternalValidationError::Psbt)?;
-        let original_fee = self.original_psbt.fee().map_err(InternalValidationError::Psbt)?;
+        let proposed_fee = proposal.fee().map_err(InternalProposalError::Psbt)?;
+        let original_fee = self.original_psbt.fee().map_err(InternalProposalError::Psbt)?;
         ensure!(original_fee <= proposed_fee, AbsoluteFeeDecreased);
         ensure!(contributed_fee <= proposed_fee - original_fee, PayeeTookContributedFee);
         let original_weight = self.original_psbt.clone().extract_tx_unchecked_fee_rate().weight();
@@ -112,7 +112,7 @@ impl PsbtContext {
             .map(|input_pair| {
                 input_pair
                     .previous_txout()
-                    .map_err(InternalValidationError::PrevTxOut)
+                    .map_err(InternalProposalError::PrevTxOut)
                     .map(|txout| txout.script_pubkey.clone())
             })
             .collect::<InternalResult<Vec<ScriptBuf>>>()?;
@@ -121,14 +121,14 @@ impl PsbtContext {
             |acc, input_pair| -> InternalResult<Weight> {
                 let spk = &input_pair
                     .previous_txout()
-                    .map_err(InternalValidationError::PrevTxOut)?
+                    .map_err(InternalProposalError::PrevTxOut)?
                     .script_pubkey;
                 if original_spks.contains(spk) {
                     Ok(acc)
                 } else {
                     let weight = input_pair
                         .expected_input_weight()
-                        .map_err(InternalValidationError::InputWeight)?;
+                        .map_err(InternalProposalError::InputWeight)?;
                     Ok(acc + weight)
                 }
             },
@@ -196,7 +196,7 @@ impl PsbtContext {
                         .original_psbt
                         .input_pairs()
                         .next()
-                        .ok_or(InternalValidationError::NoInputs)?;
+                        .ok_or(InternalProposalError::NoInputs)?;
                     // Verify the PSBT input is finalized
                     ensure!(
                         proposed.psbtin.final_script_sig.is_some()

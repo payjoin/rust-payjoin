@@ -94,22 +94,63 @@ pub struct ValidationError {
 pub(crate) enum InternalValidationError {
     Parse,
     Io(std::io::Error),
+    Proposal(InternalProposalError),
+    #[cfg(feature = "v2")]
+    V2Encapsulation(crate::send::v2::EncapsulationError),
+}
+
+impl From<InternalValidationError> for ValidationError {
+    fn from(value: InternalValidationError) -> Self { ValidationError { internal: value } }
+}
+
+impl From<crate::psbt::AddressTypeError> for ValidationError {
+    fn from(value: crate::psbt::AddressTypeError) -> Self {
+        ValidationError {
+            internal: InternalValidationError::Proposal(InternalProposalError::InvalidAddressType(
+                value,
+            )),
+        }
+    }
+}
+
+impl fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use InternalValidationError::*;
+
+        match &self.internal {
+            Parse => write!(f, "couldn't decode as PSBT or JSON",),
+            Io(e) => write!(f, "couldn't read PSBT: {}", e),
+            Proposal(e) => write!(f, "proposal PSBT error: {}", e),
+            #[cfg(feature = "v2")]
+            V2Encapsulation(e) => write!(f, "v2 encapsulation error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for ValidationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use InternalValidationError::*;
+
+        match &self.internal {
+            Parse => None,
+            Io(error) => Some(error),
+            Proposal(e) => Some(e),
+            #[cfg(feature = "v2")]
+            V2Encapsulation(e) => Some(e),
+        }
+    }
+}
+
+/// Error that may occur when the proposal PSBT from receiver is malformed.
+#[derive(Debug)]
+pub(crate) enum InternalProposalError {
     InvalidAddressType(crate::psbt::AddressTypeError),
     NoInputs,
     PrevTxOut(crate::psbt::PrevTxOutError),
     InputWeight(crate::psbt::InputWeightError),
-    VersionsDontMatch {
-        proposed: Version,
-        original: Version,
-    },
-    LockTimesDontMatch {
-        proposed: LockTime,
-        original: LockTime,
-    },
-    SenderTxinSequenceChanged {
-        proposed: Sequence,
-        original: Sequence,
-    },
+    VersionsDontMatch { proposed: Version, original: Version },
+    LockTimesDontMatch { proposed: LockTime, original: LockTime },
+    SenderTxinSequenceChanged { proposed: Sequence, original: Sequence },
     SenderTxinContainsNonWitnessUtxo,
     SenderTxinContainsWitnessUtxo,
     SenderTxinContainsFinalScriptSig,
@@ -119,10 +160,7 @@ pub(crate) enum InternalValidationError {
     ReceiverTxinNotFinalized,
     ReceiverTxinMissingUtxoInfo,
     MixedSequence,
-    MixedInputTypes {
-        proposed: AddressType,
-        original: AddressType,
-    },
+    MixedInputTypes { proposed: AddressType, original: AddressType },
     MissingOrShuffledInputs,
     TxOutContainsKeyPaths,
     FeeContributionExceedsMaximum,
@@ -134,27 +172,19 @@ pub(crate) enum InternalValidationError {
     FeeContributionPaysOutputSizeIncrease,
     FeeRateBelowMinimum,
     Psbt(bitcoin::psbt::Error),
-    #[cfg(feature = "v2")]
-    V2Encapsulation(crate::send::v2::EncapsulationError),
 }
 
-impl From<InternalValidationError> for ValidationError {
-    fn from(value: InternalValidationError) -> Self { ValidationError { internal: value } }
-}
-
-impl From<crate::psbt::AddressTypeError> for InternalValidationError {
+impl From<crate::psbt::AddressTypeError> for InternalProposalError {
     fn from(value: crate::psbt::AddressTypeError) -> Self {
-        InternalValidationError::InvalidAddressType(value)
+        InternalProposalError::InvalidAddressType(value)
     }
 }
 
-impl fmt::Display for ValidationError {
+impl fmt::Display for InternalProposalError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use InternalValidationError::*;
+        use InternalProposalError::*;
 
-        match &self.internal {
-            Parse => write!(f, "couldn't decode as PSBT or JSON",),
-            Io(e) => write!(f, "couldn't read PSBT: {}", e),
+        match &self {
             InvalidAddressType(e) => write!(f, "invalid input address type: {}", e),
             NoInputs => write!(f, "PSBT doesn't have any inputs"),
             PrevTxOut(e) => write!(f, "missing previous txout information: {}", e),
@@ -183,19 +213,15 @@ impl fmt::Display for ValidationError {
             FeeContributionPaysOutputSizeIncrease => write!(f, "fee contribution pays for additional outputs"),
             FeeRateBelowMinimum =>  write!(f, "the fee rate of proposed transaction is below minimum"),
             Psbt(e) => write!(f, "psbt error: {}", e),
-            #[cfg(feature = "v2")]
-            V2Encapsulation(e) => write!(f, "v2 encapsulation error: {}", e),
         }
     }
 }
 
-impl std::error::Error for ValidationError {
+impl std::error::Error for InternalProposalError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        use InternalValidationError::*;
+        use InternalProposalError::*;
 
-        match &self.internal {
-            Parse => None,
-            Io(error) => Some(error),
+        match self {
             InvalidAddressType(error) => Some(error),
             NoInputs => None,
             PrevTxOut(error) => Some(error),
@@ -224,8 +250,6 @@ impl std::error::Error for ValidationError {
             FeeContributionPaysOutputSizeIncrease => None,
             FeeRateBelowMinimum => None,
             Psbt(error) => Some(error),
-            #[cfg(feature = "v2")]
-            V2Encapsulation(e) => Some(e),
         }
     }
 }
@@ -307,6 +331,14 @@ impl From<WellKnownError> for ResponseError {
 impl From<InternalValidationError> for ResponseError {
     fn from(value: InternalValidationError) -> Self {
         Self::Validation(ValidationError { internal: value })
+    }
+}
+
+impl From<InternalProposalError> for ResponseError {
+    fn from(value: InternalProposalError) -> Self {
+        ResponseError::Validation(ValidationError {
+            internal: InternalValidationError::Proposal(value),
+        })
     }
 }
 

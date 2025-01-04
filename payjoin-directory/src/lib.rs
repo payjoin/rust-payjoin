@@ -341,11 +341,11 @@ async fn post_fallback_v1(
         .await
         .map_err(|e| HandlerError::BadRequest(e.into()))?;
     match pool.peek_v1(id).await {
-        Some(result) => match result {
+        Ok(result) => match result {
             Ok(buffered_req) => Ok(Response::new(full(buffered_req))),
             Err(e) => Err(HandlerError::BadRequest(e.into())),
         },
-        None => Ok(none_response),
+        _ => Ok(none_response),
     }
 }
 
@@ -409,11 +409,11 @@ async fn get_subdir(
     trace!("get_subdir");
     let id = check_id_length(id)?;
     match pool.peek_default(id).await {
-        Some(result) => match result {
+        Ok(result) => match result {
             Ok(buffered_req) => Ok(Response::new(full(buffered_req))),
             Err(e) => Err(HandlerError::BadRequest(e.into())),
         },
-        None => Ok(Response::builder().status(StatusCode::ACCEPTED).body(empty())?),
+        _ => Ok(Response::builder().status(StatusCode::ACCEPTED).body(empty())?),
     }
 }
 

@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use redis::{AsyncCommands, Client, ErrorKind, RedisError, RedisResult};
+use tokio::time::error::Elapsed;
 use tracing::debug;
 
 const DEFAULT_COLUMN: &str = "";
@@ -23,7 +24,10 @@ impl DbPool {
         self.push(subdirectory_id, DEFAULT_COLUMN, data).await
     }
 
-    pub async fn peek_default(&self, subdirectory_id: &str) -> Option<RedisResult<Vec<u8>>> {
+    pub async fn peek_default(
+        &self,
+        subdirectory_id: &str,
+    ) -> Result<RedisResult<Vec<u8>>, Elapsed> {
         self.peek_with_timeout(subdirectory_id, DEFAULT_COLUMN).await
     }
 
@@ -31,7 +35,7 @@ impl DbPool {
         self.push(subdirectory_id, PJ_V1_COLUMN, data).await
     }
 
-    pub async fn peek_v1(&self, subdirectory_id: &str) -> Option<RedisResult<Vec<u8>>> {
+    pub async fn peek_v1(&self, subdirectory_id: &str) -> Result<RedisResult<Vec<u8>>, Elapsed> {
         self.peek_with_timeout(subdirectory_id, PJ_V1_COLUMN).await
     }
 
@@ -52,8 +56,8 @@ impl DbPool {
         &self,
         subdirectory_id: &str,
         channel_type: &str,
-    ) -> Option<RedisResult<Vec<u8>>> {
-        tokio::time::timeout(self.timeout, self.peek(subdirectory_id, channel_type)).await.ok()
+    ) -> Result<RedisResult<Vec<u8>>, Elapsed> {
+        tokio::time::timeout(self.timeout, self.peek(subdirectory_id, channel_type)).await
     }
 
     async fn peek(&self, subdirectory_id: &str, channel_type: &str) -> RedisResult<Vec<u8>> {

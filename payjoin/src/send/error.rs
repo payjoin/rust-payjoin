@@ -434,10 +434,10 @@ mod tests {
             _ => panic!("Expected WellKnown error"),
         };
         let unrecognized_error = r#"{"errorCode":"random", "message":"random"}"#;
-        assert_eq!(
-            ResponseError::parse(unrecognized_error).to_string(),
-            "The receiver sent an unrecognized error."
-        );
+        assert!(matches!(
+            ResponseError::parse(unrecognized_error),
+            ResponseError::Unrecognized { .. }
+        ));
         let invalid_json_error = json!({
             "err": "random",
             "message": "This version of payjoin is not supported."

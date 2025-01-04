@@ -76,9 +76,8 @@ impl AppTrait for App {
         self.spawn_payjoin_sender(req_ctx).await
     }
 
-    async fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
+    async fn receive_payjoin(self, amount: Amount) -> Result<()> {
         let address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
-        let amount = Amount::from_sat(amount_arg.parse()?);
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
         let session = Receiver::new(
             address,

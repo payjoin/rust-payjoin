@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use app::config::AppConfig;
 use app::App as AppTrait;
 use clap::{arg, value_parser, Arg, ArgMatches, Command};
-use payjoin::bitcoin::FeeRate;
+use payjoin::bitcoin::amount::ParseAmountError;
+use payjoin::bitcoin::{Amount, FeeRate};
 use url::Url;
 
 mod app;
@@ -31,8 +32,8 @@ async fn main() -> Result<()> {
         }
         Some(("receive", sub_matches)) => {
             let amount =
-                sub_matches.get_one::<String>("AMOUNT").context("Missing AMOUNT argument")?;
-            app.receive_payjoin(amount).await?;
+                sub_matches.get_one::<Amount>("AMOUNT").context("Missing AMOUNT argument")?;
+            app.receive_payjoin(*amount).await?;
         }
         #[cfg(feature = "v2")]
         Some(("resume", _)) => {
@@ -106,7 +107,7 @@ fn cli() -> ArgMatches {
 
     let mut receive_cmd = Command::new("receive")
         .arg_required_else_help(true)
-        .arg(arg!(<AMOUNT> "The amount to receive in satoshis"))
+        .arg(arg!(<AMOUNT> "The amount to receive in satoshis").value_parser(parse_amount_in_sat))
         .arg_required_else_help(true);
 
     #[cfg(feature = "v2")]
@@ -153,6 +154,10 @@ fn cli() -> ArgMatches {
 
     cmd = cmd.subcommand(receive_cmd);
     cmd.get_matches()
+}
+
+fn parse_amount_in_sat(s: &str) -> Result<Amount, ParseAmountError> {
+    Amount::from_str_in(s, payjoin::bitcoin::Denomination::Satoshi)
 }
 
 fn parse_feerate_in_sat_per_vb(s: &str) -> Result<FeeRate, std::num::ParseFloatError> {

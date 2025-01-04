@@ -107,8 +107,8 @@ impl AppTrait for App {
         Ok(())
     }
 
-    async fn receive_payjoin(self, amount_arg: &str) -> Result<()> {
-        let pj_uri_string = self.construct_payjoin_uri(amount_arg, None)?;
+    async fn receive_payjoin(self, amount: Amount) -> Result<()> {
+        let pj_uri_string = self.construct_payjoin_uri(amount, None)?;
         println!(
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
             self.config.port
@@ -123,11 +123,10 @@ impl AppTrait for App {
 impl App {
     fn construct_payjoin_uri(
         &self,
-        amount_arg: &str,
+        amount: Amount,
         fallback_target: Option<&str>,
     ) -> Result<String> {
         let pj_receiver_address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
-        let amount = Amount::from_sat(amount_arg.parse()?);
         let pj_part = match fallback_target {
             Some(target) => target,
             None => self.config.pj_endpoint.as_str(),

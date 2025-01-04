@@ -324,7 +324,6 @@ impl HpkeContext {
 
 mod test {
     #[test]
-    #[cfg(feature = "v2")]
     fn req_ctx_ser_de_roundtrip() {
         use super::*;
         use crate::send::test::ORIGINAL_PSBT;

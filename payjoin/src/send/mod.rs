@@ -27,24 +27,6 @@ pub mod v2;
 
 type InternalResult<T> = Result<T, InternalProposalError>;
 
-/// Data required to validate the response.
-///
-/// This type is used to process a BIP78 response.
-/// Then call [`Self::process_response`] on it to continue BIP78 flow.
-#[derive(Debug, Clone)]
-pub struct V1Context {
-    psbt_context: PsbtContext,
-}
-
-impl V1Context {
-    pub fn process_response(
-        self,
-        response: &mut impl std::io::Read,
-    ) -> Result<Psbt, ResponseError> {
-        self.psbt_context.process_response(response)
-    }
-}
-
 /// Data required to validate the response against the original PSBT.
 #[derive(Debug, Clone)]
 pub struct PsbtContext {

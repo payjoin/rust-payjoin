@@ -4,7 +4,7 @@
 //! Usage is pretty simple:
 //!
 //! 1. Generate a pj_uri [BIP 21](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki)
-//!    using [`payjoin::Uri`](crate::Uri)::from_str
+//!    using [`build_v1_pj_uri`]
 //! 2. Listen for a sender's request on the `pj` endpoint
 //! 3. Parse the request using
 //!    [`UncheckedProposal::from_request()`](crate::receive::UncheckedProposal::from_request())
@@ -90,6 +90,16 @@ impl InputPair {
 
 impl<'a> From<&'a InputPair> for InternalInputPair<'a> {
     fn from(pair: &'a InputPair) -> Self { Self { psbtin: &pair.psbtin, txin: &pair.txin } }
+}
+
+pub fn build_v1_pj_uri<'a>(
+    address: &bitcoin::Address,
+    endpoint: &url::Url,
+    disable_output_substitution: bool,
+) -> crate::uri::PjUri<'a> {
+    let extras =
+        crate::uri::PayjoinExtras { endpoint: endpoint.clone(), disable_output_substitution };
+    bitcoin_uri::Uri::with_extras(address.clone(), extras)
 }
 
 /// The sender's original PSBT and optional parameters

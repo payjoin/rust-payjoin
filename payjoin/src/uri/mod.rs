@@ -1,17 +1,12 @@
 use std::borrow::Cow;
 
 use bitcoin::address::NetworkChecked;
-use bitcoin::{Address, Amount};
 pub use error::PjParseError;
 use url::Url;
 
-#[cfg(feature = "v2")]
-use crate::hpke::HpkePublicKey;
 use crate::uri::error::InternalPjParseError;
 #[cfg(feature = "v2")]
 pub(crate) use crate::uri::url_ext::UrlExt;
-#[cfg(feature = "v2")]
-use crate::OhttpKeys;
 
 pub mod error;
 #[cfg(feature = "v2")]
@@ -138,97 +133,6 @@ impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
                 Err(Box::new(uri))
             }
         }
-    }
-}
-
-/// Build a valid `PjUri`.
-///
-/// Payjoin receiver can use this builder to create a payjoin
-/// uri to send to the sender.
-#[derive(Clone)]
-pub struct PjUriBuilder {
-    /// Address you want to receive funds to.
-    address: Address,
-    /// Amount you want to receive.
-    ///
-    /// If `None` the amount will be left unspecified.
-    amount: Option<Amount>,
-    /// Message
-    message: Option<String>,
-    /// Label
-    label: Option<String>,
-    /// Payjoin endpoint url listening for payjoin requests.
-    pj: Url,
-    /// Whether or not payjoin output substitution is allowed
-    pjos: bool,
-}
-
-impl PjUriBuilder {
-    /// Create a new `PjUriBuilder` with required parameters.
-    ///
-    /// ## Parameters
-    /// - `address`: Represents a bitcoin address.
-    /// - `origin`: Represents either the payjoin endpoint in v1 or the directory in v2.
-    /// - `ohttp_keys`: Optional OHTTP keys for v2 (only available if the "v2" feature is enabled).
-    /// - `expiry`: Optional non-default expiry for the payjoin session (only available if the "v2" feature is enabled).
-    pub fn new(
-        address: Address,
-        origin: Url,
-        #[cfg(feature = "v2")] receiver_pubkey: Option<HpkePublicKey>,
-        #[cfg(feature = "v2")] ohttp_keys: Option<OhttpKeys>,
-        #[cfg(feature = "v2")] expiry: Option<std::time::SystemTime>,
-    ) -> Self {
-        #[allow(unused_mut)]
-        let mut pj = origin;
-        #[cfg(feature = "v2")]
-        if let Some(receiver_pubkey) = receiver_pubkey {
-            pj.set_receiver_pubkey(receiver_pubkey);
-        }
-        #[cfg(feature = "v2")]
-        if let Some(ohttp_keys) = ohttp_keys {
-            pj.set_ohttp(ohttp_keys);
-        }
-        #[cfg(feature = "v2")]
-        if let Some(expiry) = expiry {
-            pj.set_exp(expiry);
-        }
-        Self { address, amount: None, message: None, label: None, pj, pjos: false }
-    }
-    /// Set the amount you want to receive.
-    pub fn amount(mut self, amount: Amount) -> Self {
-        self.amount = Some(amount);
-        self
-    }
-
-    /// Set the message.
-    pub fn message(mut self, message: String) -> Self {
-        self.message = Some(message);
-        self
-    }
-
-    /// Set the label.
-    pub fn label(mut self, label: String) -> Self {
-        self.label = Some(label);
-        self
-    }
-
-    /// Set whether or not payjoin output substitution is allowed.
-    pub fn pjos(mut self, pjos: bool) -> Self {
-        self.pjos = pjos;
-        self
-    }
-
-    /// Build payjoin URI.
-    ///
-    /// Constructs a `bitcoin_uri::Uri` with PayjoinParams from the
-    /// parameters set in the builder.
-    pub fn build<'a>(self) -> PjUri<'a> {
-        let extras = PayjoinExtras { endpoint: self.pj, disable_output_substitution: self.pjos };
-        let mut pj_uri = bitcoin_uri::Uri::with_extras(self.address, extras);
-        pj_uri.amount = self.amount;
-        pj_uri.label = self.label.map(Into::into);
-        pj_uri.message = self.message.map(Into::into);
-        pj_uri
     }
 }
 
@@ -416,48 +320,5 @@ mod tests {
             .unwrap()
             .extras
             .pj_is_supported());
-    }
-
-    #[test]
-    fn test_builder() {
-        use std::str::FromStr;
-
-        use url::Url;
-        use PjUriBuilder;
-        let https = "https://example.com/";
-        let onion = "http://vjdpwgybvubne5hda6v4c5iaeeevhge6jvo3w2cl6eocbwwvwxp7b7qd.onion/";
-        let base58 = "12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX";
-        let bech32_upper = "TB1Q6D3A2W975YNY0ASUVD9A67NER4NKS58FF0Q8G4";
-        let bech32_lower = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
-
-        for address in [base58, bech32_upper, bech32_lower] {
-            for pj in [https, onion] {
-                let address = bitcoin::Address::from_str(address).unwrap().assume_checked();
-                let amount = bitcoin::Amount::ONE_BTC;
-                let builder = PjUriBuilder::new(
-                    address.clone(),
-                    Url::parse(pj).unwrap(),
-                    #[cfg(feature = "v2")]
-                    None,
-                    #[cfg(feature = "v2")]
-                    None,
-                    #[cfg(feature = "v2")]
-                    None,
-                )
-                .amount(amount)
-                .message("message".to_string())
-                .label("label".to_string())
-                .pjos(true);
-                let uri = builder.build();
-                assert_eq!(uri.address, address);
-                assert_eq!(uri.amount.unwrap(), bitcoin::Amount::ONE_BTC);
-                let label: Cow<'_, str> = uri.label.clone().unwrap().try_into().unwrap();
-                let message: Cow<'_, str> = uri.message.clone().unwrap().try_into().unwrap();
-                assert_eq!(label, "label");
-                assert_eq!(message, "message");
-                assert!(uri.extras.disable_output_substitution);
-                assert_eq!(uri.extras.endpoint.to_string(), pj.to_string());
-            }
-        }
     }
 }

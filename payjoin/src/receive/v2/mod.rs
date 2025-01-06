@@ -19,7 +19,7 @@ use crate::psbt::PsbtExt;
 use crate::receive::optional_parameters::Params;
 use crate::receive::InputPair;
 use crate::uri::ShortId;
-use crate::{PjUriBuilder, Request};
+use crate::Request;
 
 pub(crate) mod error;
 
@@ -140,7 +140,7 @@ impl Receiver {
         ([u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES], ohttp::ClientResponse),
         OhttpEncapsulationError,
     > {
-        let fallback_target = self.pj_url();
+        let fallback_target = self.subdir();
         ohttp_encapsulate(&mut self.context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
 
@@ -185,19 +185,20 @@ impl Receiver {
         Ok(UncheckedProposal { inner, context: self.context.clone() })
     }
 
-    pub fn pj_uri_builder(&self) -> PjUriBuilder {
-        PjUriBuilder::new(
-            self.context.address.clone(),
-            self.pj_url(),
-            Some(self.context.s.public_key().clone()),
-            Some(self.context.ohttp_keys.clone()),
-            Some(self.context.expiry),
-        )
+    /// Build a V2 Payjoin URI from the receiver's context
+    pub fn pj_uri<'a>(&self) -> crate::PjUri<'a> {
+        use crate::uri::{PayjoinExtras, UrlExt};
+        let mut pj = self.subdir().clone();
+        pj.set_receiver_pubkey(self.context.s.public_key().clone());
+        pj.set_ohttp(self.context.ohttp_keys.clone());
+        pj.set_exp(self.context.expiry);
+        let extras = PayjoinExtras { endpoint: pj, disable_output_substitution: false };
+        bitcoin_uri::Uri::with_extras(self.context.address.clone(), extras)
     }
 
-    // The contents of the `&pj=` query parameter.
-    // This identifies a session at the payjoin directory server.
-    pub fn pj_url(&self) -> Url {
+    /// The subdirectory for this Payjoin receiver session.
+    /// It consists of a directory URL and the session ShortID in the path.
+    pub fn subdir(&self) -> Url {
         let mut url = self.context.directory.clone();
         {
             let mut path_segments =
@@ -567,5 +568,32 @@ mod test {
         let serialized = serde_json::to_string(&session).unwrap();
         let deserialized: Receiver = serde_json::from_str(&serialized).unwrap();
         assert_eq!(session, deserialized);
+    }
+
+    #[test]
+    fn test_v2_pj_uri() {
+        let address = bitcoin::Address::from_str("12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX")
+            .unwrap()
+            .assume_checked();
+        let receiver_keys = crate::hpke::HpkeKeyPair::gen_keypair();
+        let ohttp_keys =
+            OhttpKeys::from_str("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
+                .expect("Invalid OhttpKeys");
+        let arbitrary_url = Url::parse("https://example.com").unwrap();
+        let uri = Receiver {
+            context: SessionContext {
+                address,
+                directory: arbitrary_url.clone(),
+                subdirectory: None,
+                ohttp_keys,
+                ohttp_relay: arbitrary_url.clone(),
+                expiry: SystemTime::now() + Duration::from_secs(60),
+                s: receiver_keys,
+                e: None,
+            },
+        }
+        .pj_uri();
+        assert_ne!(uri.extras.endpoint, arbitrary_url);
+        assert!(!uri.extras.disable_output_substitution);
     }
 }

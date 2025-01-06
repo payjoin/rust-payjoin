@@ -17,7 +17,7 @@ use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{self, FeeRate};
 use payjoin::receive::{PayjoinProposal, UncheckedProposal};
 use payjoin::send::v1::SenderBuilder;
-use payjoin::{Error, PjUriBuilder, Uri, UriExt};
+use payjoin::{Error, Uri, UriExt};
 use tokio::net::TcpListener;
 
 use super::config::AppConfig;
@@ -137,7 +137,8 @@ impl App {
         let pj_part = payjoin::Url::parse(pj_part)
             .map_err(|e| anyhow!("Failed to parse pj_endpoint: {}", e))?;
 
-        let pj_uri = PjUriBuilder::new(pj_receiver_address, pj_part).amount(amount).build();
+        let mut pj_uri = payjoin::receive::build_v1_pj_uri(&pj_receiver_address, &pj_part, false);
+        pj_uri.amount = Some(amount);
 
         Ok(pj_uri.to_string())
     }
@@ -263,7 +264,7 @@ impl App {
         } else {
             format!("{}?pj={}", address.to_qr_uri(), self.config.pj_endpoint)
         };
-        let uri = payjoin::Uri::try_from(uri_string.clone())
+        let uri = Uri::try_from(uri_string.clone())
             .map_err(|_| Error::Server(anyhow!("Could not parse payjoin URI string.").into()))?;
         let _ = uri.assume_checked(); // we just got it from bitcoind above
 

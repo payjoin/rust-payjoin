@@ -12,8 +12,8 @@ mod integration {
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use log::{log_enabled, Level};
     use once_cell::sync::{Lazy, OnceCell};
-    use payjoin::receive::InputPair;
-    use payjoin::{PjUri, PjUriBuilder, Request, Uri};
+    use payjoin::receive::{build_v1_pj_uri, InputPair};
+    use payjoin::{PjUri, Request, Uri};
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
     use url::Url;
 
@@ -79,9 +79,8 @@ mod integration {
         ) -> Result<(), BoxError> {
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let pj_uri = PjUriBuilder::new(pj_receiver_address, EXAMPLE_URL.to_owned())
-                .amount(Amount::ONE_BTC)
-                .build();
+            let mut pj_uri = build_v1_pj_uri(&pj_receiver_address, &EXAMPLE_URL, false);
+            pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************
             // Inside the Sender:
@@ -144,9 +143,8 @@ mod integration {
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let pj_uri = PjUriBuilder::new(pj_receiver_address, EXAMPLE_URL.to_owned())
-                .amount(Amount::ONE_BTC)
-                .build();
+            let mut pj_uri = build_v1_pj_uri(&pj_receiver_address, &EXAMPLE_URL, false);
+            pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************
             // Inside the Sender:
@@ -180,7 +178,7 @@ mod integration {
         use http::StatusCode;
         use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
         use payjoin::send::v2::SenderBuilder;
-        use payjoin::{HpkeKeyPair, OhttpKeys, PjUri, UriExt};
+        use payjoin::{OhttpKeys, PjUri, UriExt};
         use reqwest::{Client, ClientBuilder, Error, Response};
         use testcontainers_modules::redis::Redis;
         use testcontainers_modules::testcontainers::clients::Cli;
@@ -281,32 +279,23 @@ mod integration {
                 // Inside the Receiver:
                 let address = receiver.get_new_address(None, None)?.assume_checked();
                 // test session with expiry in the past
-                let mut session = initialize_session(
+                let mut expired_receiver = initialize_session(
                     address.clone(),
                     directory.clone(),
                     ohttp_keys.clone(),
                     Some(Duration::from_secs(0)),
                 );
-                match session.extract_req() {
+                match expired_receiver.extract_req() {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
                     _ => panic!("Expired receive session should error"),
                 };
-                let pj_uri = session.pj_uri_builder().build();
 
                 // **********************
                 // Inside the Sender:
-                let psbt = build_original_psbt(&sender, &pj_uri)?;
+                let psbt = build_original_psbt(&sender, &expired_receiver.pj_uri())?;
                 // Test that an expired pj_url errors
-                let expired_pj_uri = payjoin::PjUriBuilder::new(
-                    address,
-                    directory.clone(),
-                    Some(HpkeKeyPair::gen_keypair().public_key().clone()),
-                    Some(ohttp_keys),
-                    Some(std::time::SystemTime::now()),
-                )
-                .build();
-                let expired_req_ctx = SenderBuilder::new(psbt, expired_pj_uri)
+                let expired_req_ctx = SenderBuilder::new(psbt, expired_receiver.pj_uri())
                     .build_non_incentivizing(FeeRate::BROADCAST_MIN)?;
                 match expired_req_ctx.extract_v2(directory.to_owned()) {
                     // Internal error types are private, so check against a string
@@ -369,7 +358,7 @@ mod integration {
                     None,
                 );
                 println!("session: {:#?}", &session);
-                let pj_uri_string = session.pj_uri_builder().build().to_string();
+                let pj_uri_string = session.pj_uri().to_string();
                 // Poll receive request
                 let (req, ctx) = session.extract_req()?;
                 let response = agent.post(req.url).body(req.body).send().await?;
@@ -540,7 +529,7 @@ mod integration {
                     None,
                 );
                 println!("session: {:#?}", &session);
-                let pj_uri_string = session.pj_uri_builder().build().to_string();
+                let pj_uri_string = session.pj_uri().to_string();
                 // Poll receive request
                 let (req, ctx) = session.extract_req()?;
                 let response = agent.post(req.url).body(req.body).send().await?;
@@ -638,10 +627,8 @@ mod integration {
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let pj_uri =
-                PjUriBuilder::new(pj_receiver_address, EXAMPLE_URL.to_owned(), None, None, None)
-                    .amount(Amount::ONE_BTC)
-                    .build();
+            let mut pj_uri = build_v1_pj_uri(&pj_receiver_address, &EXAMPLE_URL, false);
+            pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************
             // Inside the Sender:
@@ -725,7 +712,7 @@ mod integration {
 
                 let mut session = initialize_session(address, directory, ohttp_keys.clone(), None);
 
-                let pj_uri_string = session.pj_uri_builder().build().to_string();
+                let pj_uri_string = session.pj_uri().to_string();
 
                 // **********************
                 // Inside the V1 Sender:
@@ -1034,9 +1021,8 @@ mod integration {
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let pj_uri = PjUriBuilder::new(pj_receiver_address, EXAMPLE_URL.to_owned())
-                .amount(Amount::ONE_BTC)
-                .build();
+            let mut pj_uri = build_v1_pj_uri(&pj_receiver_address, &EXAMPLE_URL, false);
+            pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************
             // Inside the Sender:
@@ -1112,9 +1098,8 @@ mod integration {
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let pj_uri = PjUriBuilder::new(pj_receiver_address, EXAMPLE_URL.to_owned())
-                .amount(Amount::ONE_BTC)
-                .build();
+            let mut pj_uri = build_v1_pj_uri(&pj_receiver_address, &EXAMPLE_URL, false);
+            pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************
             // Inside the Sender:

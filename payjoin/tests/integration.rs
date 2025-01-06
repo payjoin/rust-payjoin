@@ -24,7 +24,6 @@ mod integration {
     static EXAMPLE_URL: Lazy<Url> =
         Lazy::new(|| Url::parse("https://example.com").expect("Invalid Url"));
 
-    #[cfg(not(feature = "v2"))]
     mod v1 {
         use log::debug;
         use payjoin::send::v1::SenderBuilder;
@@ -996,7 +995,6 @@ mod integration {
         }
     }
 
-    #[cfg(not(feature = "v2"))]
     mod batching {
         use payjoin::send::v1::SenderBuilder;
         use payjoin::UriExt;

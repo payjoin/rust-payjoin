@@ -86,9 +86,7 @@ impl std::error::Error for BuildSenderError {
 /// This is currently opaque type because we aren't sure which variants will stay.
 /// You can only display it.
 #[derive(Debug)]
-pub struct ValidationError {
-    internal: InternalValidationError,
-}
+pub struct ValidationError(InternalValidationError);
 
 #[derive(Debug)]
 pub(crate) enum InternalValidationError {
@@ -100,16 +98,14 @@ pub(crate) enum InternalValidationError {
 }
 
 impl From<InternalValidationError> for ValidationError {
-    fn from(value: InternalValidationError) -> Self { ValidationError { internal: value } }
+    fn from(value: InternalValidationError) -> Self { ValidationError(value) }
 }
 
 impl From<crate::psbt::AddressTypeError> for ValidationError {
     fn from(value: crate::psbt::AddressTypeError) -> Self {
-        ValidationError {
-            internal: InternalValidationError::Proposal(InternalProposalError::InvalidAddressType(
-                value,
-            )),
-        }
+        ValidationError(InternalValidationError::Proposal(
+            InternalProposalError::InvalidAddressType(value),
+        ))
     }
 }
 
@@ -117,7 +113,7 @@ impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use InternalValidationError::*;
 
-        match &self.internal {
+        match &self.0 {
             Parse => write!(f, "couldn't decode as PSBT or JSON",),
             Io(e) => write!(f, "couldn't read PSBT: {}", e),
             Proposal(e) => write!(f, "proposal PSBT error: {}", e),
@@ -131,7 +127,7 @@ impl std::error::Error for ValidationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         use InternalValidationError::*;
 
-        match &self.internal {
+        match &self.0 {
             Parse => None,
             Io(error) => Some(error),
             Proposal(e) => Some(e),
@@ -329,16 +325,12 @@ impl From<WellKnownError> for ResponseError {
 }
 
 impl From<InternalValidationError> for ResponseError {
-    fn from(value: InternalValidationError) -> Self {
-        Self::Validation(ValidationError { internal: value })
-    }
+    fn from(value: InternalValidationError) -> Self { Self::Validation(ValidationError(value)) }
 }
 
 impl From<InternalProposalError> for ResponseError {
     fn from(value: InternalProposalError) -> Self {
-        ResponseError::Validation(ValidationError {
-            internal: InternalValidationError::Proposal(value),
-        })
+        ResponseError::Validation(ValidationError(InternalValidationError::Proposal(value)))
     }
 }
 

@@ -63,9 +63,7 @@ impl From<ParseReceiverPubkeyParamError> for CreateRequestError {
 
 /// Error returned for v2-specific payload encapsulation errors.
 #[derive(Debug)]
-pub struct EncapsulationError {
-    internal: InternalEncapsulationError,
-}
+pub struct EncapsulationError(InternalEncapsulationError);
 
 #[derive(Debug)]
 pub(crate) enum InternalEncapsulationError {
@@ -83,7 +81,7 @@ impl fmt::Display for EncapsulationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use InternalEncapsulationError::*;
 
-        match &self.internal {
+        match &self.0 {
             InvalidSize(size) => write!(f, "invalid size: {}", size),
             UnexpectedStatusCode(status) => write!(f, "unexpected status code: {}", status),
             Ohttp(error) => write!(f, "OHTTP encapsulation error: {}", error),
@@ -96,7 +94,7 @@ impl std::error::Error for EncapsulationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         use InternalEncapsulationError::*;
 
-        match &self.internal {
+        match &self.0 {
             InvalidSize(_) => None,
             UnexpectedStatusCode(_) => None,
             Ohttp(error) => Some(error),
@@ -106,7 +104,7 @@ impl std::error::Error for EncapsulationError {
 }
 
 impl From<InternalEncapsulationError> for EncapsulationError {
-    fn from(value: InternalEncapsulationError) -> Self { EncapsulationError { internal: value } }
+    fn from(value: InternalEncapsulationError) -> Self { EncapsulationError(value) }
 }
 
 impl From<InternalEncapsulationError> for super::ResponseError {

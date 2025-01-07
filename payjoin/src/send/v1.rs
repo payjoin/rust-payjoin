@@ -253,3 +253,21 @@ impl Sender {
 
     pub fn endpoint(&self) -> &Url { &self.endpoint }
 }
+
+/// Data required to validate the response.
+///
+/// This type is used to process a BIP78 response.
+/// Then call [`Self::process_response`] on it to continue BIP78 flow.
+#[derive(Debug, Clone)]
+pub struct V1Context {
+    psbt_context: PsbtContext,
+}
+
+impl V1Context {
+    pub fn process_response(
+        self,
+        response: &mut impl std::io::Read,
+    ) -> Result<Psbt, ResponseError> {
+        self.psbt_context.process_response(response)
+    }
+}

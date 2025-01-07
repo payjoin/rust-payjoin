@@ -86,30 +86,67 @@ impl std::error::Error for BuildSenderError {
 /// This is currently opaque type because we aren't sure which variants will stay.
 /// You can only display it.
 #[derive(Debug)]
-pub struct ValidationError {
-    internal: InternalValidationError,
-}
+pub struct ValidationError(InternalValidationError);
 
 #[derive(Debug)]
 pub(crate) enum InternalValidationError {
     Parse,
     Io(std::io::Error),
+    Proposal(InternalProposalError),
+    #[cfg(feature = "v2")]
+    V2Encapsulation(crate::send::v2::EncapsulationError),
+}
+
+impl From<InternalValidationError> for ValidationError {
+    fn from(value: InternalValidationError) -> Self { ValidationError(value) }
+}
+
+impl From<crate::psbt::AddressTypeError> for ValidationError {
+    fn from(value: crate::psbt::AddressTypeError) -> Self {
+        ValidationError(InternalValidationError::Proposal(
+            InternalProposalError::InvalidAddressType(value),
+        ))
+    }
+}
+
+impl fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use InternalValidationError::*;
+
+        match &self.0 {
+            Parse => write!(f, "couldn't decode as PSBT or JSON",),
+            Io(e) => write!(f, "couldn't read PSBT: {}", e),
+            Proposal(e) => write!(f, "proposal PSBT error: {}", e),
+            #[cfg(feature = "v2")]
+            V2Encapsulation(e) => write!(f, "v2 encapsulation error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for ValidationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use InternalValidationError::*;
+
+        match &self.0 {
+            Parse => None,
+            Io(error) => Some(error),
+            Proposal(e) => Some(e),
+            #[cfg(feature = "v2")]
+            V2Encapsulation(e) => Some(e),
+        }
+    }
+}
+
+/// Error that may occur when the proposal PSBT from receiver is malformed.
+#[derive(Debug)]
+pub(crate) enum InternalProposalError {
     InvalidAddressType(crate::psbt::AddressTypeError),
     NoInputs,
     PrevTxOut(crate::psbt::PrevTxOutError),
     InputWeight(crate::psbt::InputWeightError),
-    VersionsDontMatch {
-        proposed: Version,
-        original: Version,
-    },
-    LockTimesDontMatch {
-        proposed: LockTime,
-        original: LockTime,
-    },
-    SenderTxinSequenceChanged {
-        proposed: Sequence,
-        original: Sequence,
-    },
+    VersionsDontMatch { proposed: Version, original: Version },
+    LockTimesDontMatch { proposed: LockTime, original: LockTime },
+    SenderTxinSequenceChanged { proposed: Sequence, original: Sequence },
     SenderTxinContainsNonWitnessUtxo,
     SenderTxinContainsWitnessUtxo,
     SenderTxinContainsFinalScriptSig,
@@ -119,10 +156,7 @@ pub(crate) enum InternalValidationError {
     ReceiverTxinNotFinalized,
     ReceiverTxinMissingUtxoInfo,
     MixedSequence,
-    MixedInputTypes {
-        proposed: AddressType,
-        original: AddressType,
-    },
+    MixedInputTypes { proposed: AddressType, original: AddressType },
     MissingOrShuffledInputs,
     TxOutContainsKeyPaths,
     FeeContributionExceedsMaximum,
@@ -134,33 +168,19 @@ pub(crate) enum InternalValidationError {
     FeeContributionPaysOutputSizeIncrease,
     FeeRateBelowMinimum,
     Psbt(bitcoin::psbt::Error),
-    #[cfg(feature = "v2")]
-    Hpke(crate::hpke::HpkeError),
-    #[cfg(feature = "v2")]
-    OhttpEncapsulation(crate::ohttp::OhttpEncapsulationError),
-    #[cfg(feature = "v2")]
-    UnexpectedStatusCode,
-    #[cfg(feature = "v2")]
-    UnexpectedResponseSize(usize),
 }
 
-impl From<InternalValidationError> for ValidationError {
-    fn from(value: InternalValidationError) -> Self { ValidationError { internal: value } }
-}
-
-impl From<crate::psbt::AddressTypeError> for InternalValidationError {
+impl From<crate::psbt::AddressTypeError> for InternalProposalError {
     fn from(value: crate::psbt::AddressTypeError) -> Self {
-        InternalValidationError::InvalidAddressType(value)
+        InternalProposalError::InvalidAddressType(value)
     }
 }
 
-impl fmt::Display for ValidationError {
+impl fmt::Display for InternalProposalError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use InternalValidationError::*;
+        use InternalProposalError::*;
 
-        match &self.internal {
-            Parse => write!(f, "couldn't decode as PSBT or JSON",),
-            Io(e) => write!(f, "couldn't read PSBT: {}", e),
+        match &self {
             InvalidAddressType(e) => write!(f, "invalid input address type: {}", e),
             NoInputs => write!(f, "PSBT doesn't have any inputs"),
             PrevTxOut(e) => write!(f, "missing previous txout information: {}", e),
@@ -189,25 +209,15 @@ impl fmt::Display for ValidationError {
             FeeContributionPaysOutputSizeIncrease => write!(f, "fee contribution pays for additional outputs"),
             FeeRateBelowMinimum =>  write!(f, "the fee rate of proposed transaction is below minimum"),
             Psbt(e) => write!(f, "psbt error: {}", e),
-            #[cfg(feature = "v2")]
-            Hpke(e) => write!(f, "v2 error: {}", e),
-            #[cfg(feature = "v2")]
-            OhttpEncapsulation(e) => write!(f, "Ohttp encapsulation error: {}", e),
-            #[cfg(feature = "v2")]
-            UnexpectedStatusCode => write!(f, "unexpected status code"),
-            #[cfg(feature = "v2")]
-            UnexpectedResponseSize(size) => write!(f, "unexpected response size {}, expected {} bytes", size, crate::ohttp::ENCAPSULATED_MESSAGE_BYTES),
         }
     }
 }
 
-impl std::error::Error for ValidationError {
+impl std::error::Error for InternalProposalError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        use InternalValidationError::*;
+        use InternalProposalError::*;
 
-        match &self.internal {
-            Parse => None,
-            Io(error) => Some(error),
+        match self {
             InvalidAddressType(error) => Some(error),
             NoInputs => None,
             PrevTxOut(error) => Some(error),
@@ -236,14 +246,6 @@ impl std::error::Error for ValidationError {
             FeeContributionPaysOutputSizeIncrease => None,
             FeeRateBelowMinimum => None,
             Psbt(error) => Some(error),
-            #[cfg(feature = "v2")]
-            Hpke(error) => Some(error),
-            #[cfg(feature = "v2")]
-            OhttpEncapsulation(error) => Some(error),
-            #[cfg(feature = "v2")]
-            UnexpectedStatusCode => None,
-            #[cfg(feature = "v2")]
-            UnexpectedResponseSize(_) => None,
         }
     }
 }
@@ -256,17 +258,17 @@ pub enum ResponseError {
     ///
     /// [`BIP78::ReceiverWellKnownError`]: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-Receivers_well_known_errors
     WellKnown(WellKnownError),
+
+    /// Errors caused by malformed responses.
+    Validation(ValidationError),
+
     /// `Unrecognized` Errors are NOT defined in the [`BIP78::ReceiverWellKnownError`] spec.
     ///
-    /// Its not safe to display `Unrecognized` errors to end users as they could be used
+    /// It is NOT safe to display `Unrecognized` errors to end users as they could be used
     /// maliciously to phish a non technical user. Only display them in debug logs.
     ///
     /// [`BIP78::ReceiverWellKnownError`]: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-Receivers_well_known_errors
     Unrecognized { error_code: String, message: String },
-    /// Errors caused by malformed responses.
-    ///
-    /// These errors are only displayed in debug logs.
-    Validation(ValidationError),
 }
 
 impl ResponseError {
@@ -323,19 +325,23 @@ impl From<WellKnownError> for ResponseError {
 }
 
 impl From<InternalValidationError> for ResponseError {
-    fn from(value: InternalValidationError) -> Self {
-        Self::Validation(ValidationError { internal: value })
+    fn from(value: InternalValidationError) -> Self { Self::Validation(ValidationError(value)) }
+}
+
+impl From<InternalProposalError> for ResponseError {
+    fn from(value: InternalProposalError) -> Self {
+        ResponseError::Validation(ValidationError(InternalValidationError::Proposal(value)))
     }
 }
 
-// It is imperative to carefully display pre-defined messages to end users and the details in debug.
 impl Display for ResponseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::WellKnown(e) => e.fmt(f),
-            // Don't display unknowns to end users, only debug logs
+            Self::Validation(e) => write!(f, "The receiver sent an invalid response: {}", e),
+
+            // Do NOT display unrecognized errors to end users, only debug logs
             Self::Unrecognized { .. } => write!(f, "The receiver sent an unrecognized error."),
-            Self::Validation(_) => write!(f, "The receiver sent an invalid response."),
         }
     }
 }
@@ -350,12 +356,13 @@ impl fmt::Debug for ResponseError {
                 e.error_code(),
                 e.message()
             ),
+            Self::Validation(e) => write!(f, "Validation({:?})", e),
+
             Self::Unrecognized { error_code, message } => write!(
                 f,
                 r#"Unrecognized error: {{ "errorCode": "{}", "message": "{}" }}"#,
                 error_code, message
             ),
-            Self::Validation(e) => write!(f, "Validation({:?})", e),
         }
     }
 }
@@ -419,17 +426,17 @@ mod tests {
             _ => panic!("Expected WellKnown error"),
         };
         let unrecognized_error = r#"{"errorCode":"random", "message":"random"}"#;
-        assert_eq!(
-            ResponseError::parse(unrecognized_error).to_string(),
-            "The receiver sent an unrecognized error."
-        );
+        assert!(matches!(
+            ResponseError::parse(unrecognized_error),
+            ResponseError::Unrecognized { .. }
+        ));
         let invalid_json_error = json!({
             "err": "random",
             "message": "This version of payjoin is not supported."
         });
-        assert_eq!(
-            ResponseError::from_json(invalid_json_error).to_string(),
-            "The receiver sent an invalid response."
-        );
+        assert!(matches!(
+            ResponseError::from_json(invalid_json_error),
+            ResponseError::Validation(_)
+        ));
     }
 }

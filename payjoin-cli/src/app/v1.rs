@@ -15,7 +15,7 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{self, FeeRate};
-use payjoin::receive::{PayjoinProposal, UncheckedProposal};
+use payjoin::receive::v1::{PayjoinProposal, UncheckedProposal};
 use payjoin::send::v1::SenderBuilder;
 use payjoin::{Error, Uri, UriExt};
 use tokio::net::TcpListener;
@@ -28,7 +28,7 @@ use crate::db::Database;
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
 
 struct Headers<'a>(&'a hyper::HeaderMap);
-impl payjoin::receive::Headers for Headers<'_> {
+impl payjoin::receive::v1::Headers for Headers<'_> {
     fn get_header(&self, key: &str) -> Option<&str> {
         self.0.get(key).map(|v| v.to_str()).transpose().ok().flatten()
     }
@@ -137,7 +137,8 @@ impl App {
         let pj_part = payjoin::Url::parse(pj_part)
             .map_err(|e| anyhow!("Failed to parse pj_endpoint: {}", e))?;
 
-        let mut pj_uri = payjoin::receive::build_v1_pj_uri(&pj_receiver_address, &pj_part, false);
+        let mut pj_uri =
+            payjoin::receive::v1::build_v1_pj_uri(&pj_receiver_address, &pj_part, false);
         pj_uri.amount = Some(amount);
 
         Ok(pj_uri.to_string())
@@ -279,8 +280,7 @@ impl App {
         let headers = Headers(&parts.headers);
         let query_string = parts.uri.query().unwrap_or("");
         let body = body.collect().await.map_err(|e| Error::Server(e.into()))?.aggregate().reader();
-        let proposal =
-            payjoin::receive::UncheckedProposal::from_request(body, query_string, headers)?;
+        let proposal = UncheckedProposal::from_request(body, query_string, headers)?;
 
         let payjoin_proposal = self.process_v1_proposal(proposal)?;
         let psbt = payjoin_proposal.psbt();
@@ -380,9 +380,9 @@ impl App {
 }
 
 fn try_contributing_inputs(
-    payjoin: payjoin::receive::WantsInputs,
+    payjoin: payjoin::receive::v1::WantsInputs,
     bitcoind: &bitcoincore_rpc::Client,
-) -> Result<payjoin::receive::ProvisionalProposal> {
+) -> Result<payjoin::receive::v1::ProvisionalProposal> {
     let candidate_inputs = bitcoind
         .list_unspent(None, None, None, None, None)
         .context("Failed to list unspent from bitcoind")?

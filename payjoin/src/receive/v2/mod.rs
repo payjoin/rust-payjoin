@@ -8,10 +8,10 @@ use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use super::error::InternalRequestError;
 use super::v2::error::{InternalSessionError, SessionError};
 use super::{
-    Error, InputContributionError, InternalRequestError, OutputSubstitutionError, RequestError,
-    SelectionError,
+    v1, Error, InputContributionError, OutputSubstitutionError, RequestError, SelectionError,
 };
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
@@ -181,8 +181,8 @@ impl Receiver {
         }
 
         log::debug!("Received request with params: {:?}", params);
-        let inner = super::UncheckedProposal { psbt, params };
-        Ok(UncheckedProposal { inner, context: self.context.clone() })
+        let inner = v1::UncheckedProposal { psbt, params };
+        Ok(UncheckedProposal { v1: inner, context: self.context.clone() })
     }
 
     /// Build a V2 Payjoin URI from the receiver's context
@@ -225,14 +225,14 @@ impl Receiver {
 /// call assume_interactive_receive to proceed with validation.
 #[derive(Debug, Clone)]
 pub struct UncheckedProposal {
-    inner: super::UncheckedProposal,
+    v1: v1::UncheckedProposal,
     context: SessionContext,
 }
 
 impl UncheckedProposal {
     /// The Sender's Original PSBT
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
-        self.inner.extract_tx_to_schedule_broadcast()
+        self.v1.extract_tx_to_schedule_broadcast()
     }
 
     /// Call after checking that the Original PSBT can be broadcast.
@@ -252,8 +252,8 @@ impl UncheckedProposal {
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, Error>,
     ) -> Result<MaybeInputsOwned, Error> {
-        let inner = self.inner.check_broadcast_suitability(min_fee_rate, can_broadcast)?;
-        Ok(MaybeInputsOwned { inner, context: self.context })
+        let inner = self.v1.check_broadcast_suitability(min_fee_rate, can_broadcast)?;
+        Ok(MaybeInputsOwned { v1: inner, context: self.context })
     }
 
     /// Call this method if the only way to initiate a Payjoin with this receiver
@@ -262,8 +262,8 @@ impl UncheckedProposal {
     /// So-called "non-interactive" receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks.
     /// Those receivers call `extract_tx_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
     pub fn assume_interactive_receiver(self) -> MaybeInputsOwned {
-        let inner = self.inner.assume_interactive_receiver();
-        MaybeInputsOwned { inner, context: self.context }
+        let inner = self.v1.assume_interactive_receiver();
+        MaybeInputsOwned { v1: inner, context: self.context }
     }
 }
 
@@ -272,7 +272,7 @@ impl UncheckedProposal {
 /// Call [`check_no_receiver_owned_inputs()`](struct.UncheckedProposal.html#method.check_no_receiver_owned_inputs) to proceed.
 #[derive(Debug, Clone)]
 pub struct MaybeInputsOwned {
-    inner: super::MaybeInputsOwned,
+    v1: v1::MaybeInputsOwned,
     context: SessionContext,
 }
 
@@ -285,8 +285,8 @@ impl MaybeInputsOwned {
         self,
         is_owned: impl Fn(&Script) -> Result<bool, Error>,
     ) -> Result<MaybeInputsSeen, Error> {
-        let inner = self.inner.check_inputs_not_owned(is_owned)?;
-        Ok(MaybeInputsSeen { inner, context: self.context })
+        let inner = self.v1.check_inputs_not_owned(is_owned)?;
+        Ok(MaybeInputsSeen { v1: inner, context: self.context })
     }
 }
 
@@ -295,7 +295,7 @@ impl MaybeInputsOwned {
 /// Call [`check_no_inputs_seen`](struct.MaybeInputsSeen.html#method.check_no_inputs_seen_before) to proceed.
 #[derive(Debug, Clone)]
 pub struct MaybeInputsSeen {
-    inner: super::MaybeInputsSeen,
+    v1: v1::MaybeInputsSeen,
     context: SessionContext,
 }
 
@@ -307,7 +307,7 @@ impl MaybeInputsSeen {
         self,
         is_known: impl Fn(&OutPoint) -> Result<bool, Error>,
     ) -> Result<OutputsUnknown, Error> {
-        let inner = self.inner.check_no_inputs_seen_before(is_known)?;
+        let inner = self.v1.check_no_inputs_seen_before(is_known)?;
         Ok(OutputsUnknown { inner, context: self.context })
     }
 }
@@ -318,7 +318,7 @@ impl MaybeInputsSeen {
 /// Identify those outputs with `identify_receiver_outputs()` to proceed
 #[derive(Debug, Clone)]
 pub struct OutputsUnknown {
-    inner: super::OutputsUnknown,
+    inner: v1::OutputsUnknown,
     context: SessionContext,
 }
 
@@ -329,20 +329,20 @@ impl OutputsUnknown {
         is_receiver_output: impl Fn(&Script) -> Result<bool, Error>,
     ) -> Result<WantsOutputs, Error> {
         let inner = self.inner.identify_receiver_outputs(is_receiver_output)?;
-        Ok(WantsOutputs { inner, context: self.context })
+        Ok(WantsOutputs { v1: inner, context: self.context })
     }
 }
 
 /// A checked proposal that the receiver may substitute or add outputs to
 #[derive(Debug, Clone)]
 pub struct WantsOutputs {
-    inner: super::WantsOutputs,
+    v1: v1::WantsOutputs,
     context: SessionContext,
 }
 
 impl WantsOutputs {
     pub fn is_output_substitution_disabled(&self) -> bool {
-        self.inner.is_output_substitution_disabled()
+        self.v1.is_output_substitution_disabled()
     }
 
     /// Substitute the receiver output script with the provided script.
@@ -350,8 +350,8 @@ impl WantsOutputs {
         self,
         output_script: &Script,
     ) -> Result<WantsOutputs, OutputSubstitutionError> {
-        let inner = self.inner.substitute_receiver_script(output_script)?;
-        Ok(WantsOutputs { inner, context: self.context })
+        let inner = self.v1.substitute_receiver_script(output_script)?;
+        Ok(WantsOutputs { v1: inner, context: self.context })
     }
 
     /// Replace **all** receiver outputs with one or more provided outputs.
@@ -364,22 +364,22 @@ impl WantsOutputs {
         replacement_outputs: Vec<TxOut>,
         drain_script: &Script,
     ) -> Result<WantsOutputs, OutputSubstitutionError> {
-        let inner = self.inner.replace_receiver_outputs(replacement_outputs, drain_script)?;
-        Ok(WantsOutputs { inner, context: self.context })
+        let inner = self.v1.replace_receiver_outputs(replacement_outputs, drain_script)?;
+        Ok(WantsOutputs { v1: inner, context: self.context })
     }
 
     /// Proceed to the input contribution step.
     /// Outputs cannot be modified after this function is called.
     pub fn commit_outputs(self) -> WantsInputs {
-        let inner = self.inner.commit_outputs();
-        WantsInputs { inner, context: self.context }
+        let inner = self.v1.commit_outputs();
+        WantsInputs { v1: inner, context: self.context }
     }
 }
 
 /// A checked proposal that the receiver may contribute inputs to to make a payjoin
 #[derive(Debug, Clone)]
 pub struct WantsInputs {
-    inner: super::WantsInputs,
+    v1: v1::WantsInputs,
     context: SessionContext,
 }
 
@@ -399,7 +399,7 @@ impl WantsInputs {
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<InputPair, SelectionError> {
-        self.inner.try_preserving_privacy(candidate_inputs)
+        self.v1.try_preserving_privacy(candidate_inputs)
     }
 
     /// Add the provided list of inputs to the transaction.
@@ -408,15 +408,15 @@ impl WantsInputs {
         self,
         inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<WantsInputs, InputContributionError> {
-        let inner = self.inner.contribute_inputs(inputs)?;
-        Ok(WantsInputs { inner, context: self.context })
+        let inner = self.v1.contribute_inputs(inputs)?;
+        Ok(WantsInputs { v1: inner, context: self.context })
     }
 
     /// Proceed to the proposal finalization step.
     /// Inputs cannot be modified after this function is called.
     pub fn commit_inputs(self) -> ProvisionalProposal {
-        let inner = self.inner.commit_inputs();
-        ProvisionalProposal { inner, context: self.context }
+        let inner = self.v1.commit_inputs();
+        ProvisionalProposal { v1: inner, context: self.context }
     }
 }
 
@@ -424,7 +424,7 @@ impl WantsInputs {
 /// sender will accept.
 #[derive(Debug, Clone)]
 pub struct ProvisionalProposal {
-    inner: super::ProvisionalProposal,
+    v1: v1::ProvisionalProposal,
     context: SessionContext,
 }
 
@@ -435,34 +435,34 @@ impl ProvisionalProposal {
         min_feerate_sat_per_vb: Option<FeeRate>,
         max_feerate_sat_per_vb: FeeRate,
     ) -> Result<PayjoinProposal, Error> {
-        let inner = self.inner.finalize_proposal(
+        let inner = self.v1.finalize_proposal(
             wallet_process_psbt,
             min_feerate_sat_per_vb,
             max_feerate_sat_per_vb,
         )?;
-        Ok(PayjoinProposal { inner, context: self.context })
+        Ok(PayjoinProposal { v1: inner, context: self.context })
     }
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
 #[derive(Clone)]
 pub struct PayjoinProposal {
-    inner: super::PayjoinProposal,
+    v1: v1::PayjoinProposal,
     context: SessionContext,
 }
 
 impl PayjoinProposal {
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
-        self.inner.utxos_to_be_locked()
+        self.v1.utxos_to_be_locked()
     }
 
     pub fn is_output_substitution_disabled(&self) -> bool {
-        self.inner.is_output_substitution_disabled()
+        self.v1.is_output_substitution_disabled()
     }
 
-    pub fn psbt(&self) -> &Psbt { self.inner.psbt() }
+    pub fn psbt(&self) -> &Psbt { self.v1.psbt() }
 
-    pub fn extract_v1_req(&self) -> String { self.inner.payjoin_psbt.to_string() }
+    pub fn extract_v1_req(&self) -> String { self.v1.psbt().to_string() }
 
     #[cfg(feature = "v2")]
     pub fn extract_v2_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
@@ -472,7 +472,7 @@ impl PayjoinProposal {
 
         if let Some(e) = &self.context.e {
             // Prepare v2 payload
-            let payjoin_bytes = self.inner.payjoin_psbt.serialize();
+            let payjoin_bytes = self.v1.psbt().serialize();
             let sender_subdir = subdir_path_from_pubkey(e);
             target_resource = self
                 .context

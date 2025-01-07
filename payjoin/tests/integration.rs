@@ -12,7 +12,8 @@ mod integration {
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use log::{log_enabled, Level};
     use once_cell::sync::{Lazy, OnceCell};
-    use payjoin::receive::{build_v1_pj_uri, InputPair};
+    use payjoin::receive::v1::build_v1_pj_uri;
+    use payjoin::receive::InputPair;
     use payjoin::{PjUri, Request, Uri};
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
     use url::Url;
@@ -1249,14 +1250,14 @@ mod integration {
     // In production it it will come in as an HTTP request (over ssl or onion)
     fn handle_v1_pj_request(
         req: Request,
-        headers: impl payjoin::receive::Headers,
+        headers: impl payjoin::receive::v1::Headers,
         receiver: &bitcoincore_rpc::Client,
         custom_outputs: Option<Vec<TxOut>>,
         drain_script: Option<&bitcoin::Script>,
         custom_inputs: Option<Vec<InputPair>>,
     ) -> Result<String, BoxError> {
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
-        let proposal = payjoin::receive::UncheckedProposal::from_request(
+        let proposal = payjoin::receive::v1::UncheckedProposal::from_request(
             req.body.as_slice(),
             req.url.query().unwrap_or(""),
             headers,
@@ -1270,12 +1271,12 @@ mod integration {
     }
 
     fn handle_proposal(
-        proposal: payjoin::receive::UncheckedProposal,
+        proposal: payjoin::receive::v1::UncheckedProposal,
         receiver: &bitcoincore_rpc::Client,
         custom_outputs: Option<Vec<TxOut>>,
         drain_script: Option<&bitcoin::Script>,
         custom_inputs: Option<Vec<InputPair>>,
-    ) -> Result<payjoin::receive::PayjoinProposal, BoxError> {
+    ) -> Result<payjoin::receive::v1::PayjoinProposal, BoxError> {
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
@@ -1407,7 +1408,7 @@ mod integration {
 
     struct HeaderMock(HashMap<String, String>);
 
-    impl payjoin::receive::Headers for HeaderMock {
+    impl payjoin::receive::v1::Headers for HeaderMock {
         fn get_header(&self, key: &str) -> Option<&str> { self.0.get(key).map(|e| e.as_str()) }
     }
 

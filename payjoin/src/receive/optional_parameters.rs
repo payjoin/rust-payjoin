@@ -4,11 +4,6 @@ use std::fmt;
 use bitcoin::FeeRate;
 use log::warn;
 
-#[cfg(feature = "v2")]
-pub(crate) const SUPPORTED_VERSIONS: [usize; 2] = [1, 2];
-#[cfg(not(feature = "v2"))]
-pub(crate) const SUPPORTED_VERSIONS: [usize; 1] = [1];
-
 #[derive(Debug, Clone)]
 pub(crate) struct Params {
     // version
@@ -33,8 +28,10 @@ impl Default for Params {
 }
 
 impl Params {
-    #[cfg(feature = "receive")]
-    pub fn from_query_pairs<K, V, I>(pairs: I) -> Result<Self, Error>
+    pub fn from_query_pairs<K, V, I>(
+        pairs: I,
+        supported_versions: &'static [usize],
+    ) -> Result<Self, Error>
     where
         I: Iterator<Item = (K, V)>,
         K: Borrow<str> + Into<String>,
@@ -49,8 +46,8 @@ impl Params {
             match (key.borrow(), v.borrow()) {
                 ("v", version) =>
                     params.v = match version.parse::<usize>() {
-                        Ok(version) if SUPPORTED_VERSIONS.contains(&version) => version,
-                        _ => return Err(Error::UnknownVersion),
+                        Ok(version) if supported_versions.contains(&version) => version,
+                        _ => return Err(Error::UnknownVersion { supported_versions }),
                     },
                 ("additionalfeeoutputindex", index) =>
                     additional_fee_output_index = match index.parse::<usize>() {
@@ -107,14 +104,14 @@ impl Params {
 
 #[derive(Debug)]
 pub(crate) enum Error {
-    UnknownVersion,
+    UnknownVersion { supported_versions: &'static [usize] },
     FeeRate,
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::UnknownVersion => write!(f, "unknown version"),
+            Error::UnknownVersion { .. } => write!(f, "unknown version"),
             Error::FeeRate => write!(f, "could not parse feerate"),
         }
     }

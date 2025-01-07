@@ -43,6 +43,8 @@ use super::{
 };
 use crate::psbt::PsbtExt;
 
+const SUPPORTED_VERSIONS: &[usize] = &[1];
+
 pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
 }
@@ -104,7 +106,8 @@ impl UncheckedProposal {
         log::debug!("Received original psbt: {:?}", psbt);
 
         let pairs = url::form_urlencoded::parse(query.as_bytes());
-        let params = Params::from_query_pairs(pairs).map_err(InternalRequestError::SenderParams)?;
+        let params = Params::from_query_pairs(pairs, SUPPORTED_VERSIONS)
+            .map_err(InternalRequestError::SenderParams)?;
         log::debug!("Received request with params: {:?}", params);
 
         // TODO check that params are valid for the request's Original PSBT

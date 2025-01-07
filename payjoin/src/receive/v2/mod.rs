@@ -23,6 +23,8 @@ use crate::Request;
 
 pub(crate) mod error;
 
+const SUPPORTED_VERSIONS: &[usize] = &[1, 2];
+
 static TWENTY_FOUR_HOURS_DEFAULT_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,8 +167,11 @@ impl Receiver {
         let unchecked_psbt = Psbt::from_str(base64).map_err(InternalRequestError::ParsePsbt)?;
         let psbt = unchecked_psbt.validate().map_err(InternalRequestError::InconsistentPsbt)?;
         log::debug!("Received original psbt: {:?}", psbt);
-        let mut params = Params::from_query_pairs(url::form_urlencoded::parse(query.as_bytes()))
-            .map_err(InternalRequestError::SenderParams)?;
+        let mut params = Params::from_query_pairs(
+            url::form_urlencoded::parse(query.as_bytes()),
+            SUPPORTED_VERSIONS,
+        )
+        .map_err(InternalRequestError::SenderParams)?;
 
         // Output substitution must be disabled for V1 sessions in V2 contexts.
         //

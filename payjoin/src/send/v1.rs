@@ -264,10 +264,52 @@ pub struct V1Context {
 }
 
 impl V1Context {
+    /// Decodes and validates the response.
+    ///
+    /// Call this method with response from receiver to continue BIP78 flow. If the response is
+    /// valid you will get appropriate PSBT that you should sign and broadcast.
+    #[inline]
     pub fn process_response(
         self,
         response: &mut impl std::io::Read,
     ) -> Result<Psbt, ResponseError> {
-        self.psbt_context.process_response(response)
+        let mut res_str = String::new();
+        response.read_to_string(&mut res_str).map_err(InternalValidationError::Io)?;
+        let proposal = Psbt::from_str(&res_str).map_err(|_| ResponseError::parse(&res_str))?;
+        self.psbt_context.process_proposal(proposal).map_err(Into::into)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::send::error::{ResponseError, WellKnownError};
+
+    fn create_v1_context() -> super::V1Context {
+        super::V1Context { psbt_context: crate::send::test::create_psbt_context() }
+    }
+
+    #[test]
+    fn handle_json_errors() {
+        let ctx = create_v1_context();
+        let known_json_error = serde_json::json!({
+            "errorCode": "version-unsupported",
+            "message": "This version of payjoin is not supported."
+        })
+        .to_string();
+        match ctx.process_response(&mut known_json_error.as_bytes()) {
+            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported { .. })) => (),
+            _ => panic!("Expected WellKnownError"),
+        }
+
+        let ctx = create_v1_context();
+        let invalid_json_error = serde_json::json!({
+            "err": "random",
+            "message": "This version of payjoin is not supported."
+        })
+        .to_string();
+        match ctx.process_response(&mut invalid_json_error.as_bytes()) {
+            Err(ResponseError::Validation(_)) => (),
+            _ => panic!("Expected unrecognized JSON error"),
+        }
     }
 }

@@ -228,8 +228,10 @@ mod integration {
                     .unwrap()
                     .assume_checked();
                 let mut bad_initializer =
-                    Receiver::new(mock_address, directory, bad_ohttp_keys, mock_ohttp_relay, None);
-                let (req, _ctx) = bad_initializer.extract_req().expect("Failed to extract request");
+                    Receiver::new(mock_address, directory, bad_ohttp_keys, None);
+                let (req, _ctx) = bad_initializer
+                    .extract_req(&mock_ohttp_relay)
+                    .expect("Failed to extract request");
                 agent.post(req.url).body(req.body).send().await
             }
         }
@@ -269,7 +271,7 @@ mod integration {
                 wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await.unwrap();
                 wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
                 let ohttp_keys = payjoin::io::fetch_ohttp_keys_with_cert(
-                    ohttp_relay,
+                    ohttp_relay.clone(),
                     directory.clone(),
                     cert_der,
                 )
@@ -279,13 +281,13 @@ mod integration {
                 // Inside the Receiver:
                 let address = receiver.get_new_address(None, None)?.assume_checked();
                 // test session with expiry in the past
-                let mut expired_receiver = initialize_session(
+                let mut expired_receiver = Receiver::new(
                     address.clone(),
                     directory.clone(),
                     ohttp_keys.clone(),
                     Some(Duration::from_secs(0)),
                 );
-                match expired_receiver.extract_req() {
+                match expired_receiver.extract_req(&ohttp_relay) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
                     _ => panic!("Expired receive session should error"),
@@ -341,7 +343,7 @@ mod integration {
                 wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await.unwrap();
                 wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
                 let ohttp_keys = payjoin::io::fetch_ohttp_keys_with_cert(
-                    ohttp_relay,
+                    ohttp_relay.clone(),
                     directory.clone(),
                     cert_der.clone(),
                 )
@@ -351,16 +353,13 @@ mod integration {
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
                 // test session with expiry in the future
-                let mut session = initialize_session(
-                    address.clone(),
-                    directory.clone(),
-                    ohttp_keys.clone(),
-                    None,
-                );
+                let mut session =
+                    Receiver::new(address.clone(), directory.clone(), ohttp_keys.clone(), None);
                 println!("session: {:#?}", &session);
                 let pj_uri_string = session.pj_uri().to_string();
                 // Poll receive request
-                let (req, ctx) = session.extract_req()?;
+                let mock_ohttp_relay = directory.clone();
+                let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 assert!(response.status().is_success());
                 let response_body =
@@ -380,7 +379,7 @@ mod integration {
                 let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
-                    req_ctx.extract_v2(directory.to_owned())?;
+                    req_ctx.extract_v2(mock_ohttp_relay.to_owned())?;
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -397,14 +396,14 @@ mod integration {
                 // Inside the Receiver:
 
                 // GET fallback psbt
-                let (req, ctx) = session.extract_req()?;
+                let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 // POST payjoin
                 let proposal =
                     session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?.unwrap();
                 let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None);
                 assert!(!payjoin_proposal.is_output_substitution_disabled());
-                let (req, ctx) = payjoin_proposal.extract_v2_req()?;
+                let (req, ctx) = payjoin_proposal.extract_v2_req(&mock_ohttp_relay)?;
                 let response = agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -418,7 +417,7 @@ mod integration {
                 // Sender checks, signs, finalizes, extracts, and broadcasts
                 // Replay post fallback to get the response
                 let (Request { url, body, content_type, .. }, ohttp_ctx) =
-                    send_ctx.extract_req(directory.to_owned())?;
+                    send_ctx.extract_req(mock_ohttp_relay.to_owned())?;
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -482,7 +481,7 @@ mod integration {
                 wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await.unwrap();
                 wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
                 let ohttp_keys = payjoin::io::fetch_ohttp_keys_with_cert(
-                    ohttp_relay,
+                    ohttp_relay.clone(),
                     directory.clone(),
                     cert_der,
                 )
@@ -522,16 +521,13 @@ mod integration {
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
                 // test session with expiry in the future
-                let mut session = initialize_session(
-                    address.clone(),
-                    directory.clone(),
-                    ohttp_keys.clone(),
-                    None,
-                );
+                let mut session =
+                    Receiver::new(address.clone(), directory.clone(), ohttp_keys.clone(), None);
                 println!("session: {:#?}", &session);
                 let pj_uri_string = session.pj_uri().to_string();
                 // Poll receive request
-                let (req, ctx) = session.extract_req()?;
+                let mock_ohttp_relay = directory.clone();
+                let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 assert!(response.status().is_success());
                 let response_body = session.process_res(&response.bytes().await?, ctx).unwrap();
@@ -550,7 +546,7 @@ mod integration {
                 let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
                 let (Request { url, body, content_type, .. }, post_ctx) =
-                    req_ctx.extract_v2(directory.to_owned())?;
+                    req_ctx.extract_v2(mock_ohttp_relay.to_owned())?;
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -562,7 +558,7 @@ mod integration {
                 assert!(response.status().is_success());
                 let get_ctx = post_ctx.process_response(&response.bytes().await?)?;
                 let (Request { url, body, content_type, .. }, ohttp_ctx) =
-                    get_ctx.extract_req(directory.to_owned())?;
+                    get_ctx.extract_req(mock_ohttp_relay.to_owned())?;
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -576,7 +572,7 @@ mod integration {
                 // Inside the Receiver:
 
                 // GET fallback psbt
-                let (req, ctx) = session.extract_req()?;
+                let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 // POST payjoin
                 let proposal =
@@ -585,7 +581,7 @@ mod integration {
                 let mut payjoin_proposal =
                     handle_directory_proposal(&receiver, proposal, Some(inputs));
                 assert!(!payjoin_proposal.is_output_substitution_disabled());
-                let (req, ctx) = payjoin_proposal.extract_v2_req()?;
+                let (req, ctx) = payjoin_proposal.extract_v2_req(&mock_ohttp_relay)?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 payjoin_proposal.process_res(&response.bytes().await?, ctx)?;
 
@@ -594,7 +590,7 @@ mod integration {
                 // Sender checks, signs, finalizes, extracts, and broadcasts
                 // Replay post fallback to get the response
                 let (Request { url, body, content_type, .. }, ohttp_ctx) =
-                    get_ctx.extract_req(directory.to_owned())?;
+                    get_ctx.extract_req(mock_ohttp_relay.to_owned())?;
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -703,14 +699,15 @@ mod integration {
                 wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await?;
                 wait_for_service_ready(directory.clone(), agent.clone()).await?;
                 let ohttp_keys = payjoin::io::fetch_ohttp_keys_with_cert(
-                    ohttp_relay,
+                    ohttp_relay.clone(),
                     directory.clone(),
                     cert_der.clone(),
                 )
                 .await?;
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
-                let mut session = initialize_session(address, directory, ohttp_keys.clone(), None);
+                let mut session =
+                    Receiver::new(address, directory.clone(), ohttp_keys.clone(), None);
 
                 let pj_uri_string = session.pj_uri().to_string();
 
@@ -746,10 +743,11 @@ mod integration {
                 let agent_clone: Arc<Client> = agent.clone();
                 let receiver: Arc<bitcoincore_rpc::Client> = Arc::new(receiver);
                 let receiver_clone = receiver.clone();
+                let mock_ohttp_relay = directory.clone();
                 let receiver_loop = tokio::task::spawn(async move {
                     let agent_clone = agent_clone.clone();
                     let (response, ctx) = loop {
-                        let (req, ctx) = session.extract_req().unwrap();
+                        let (req, ctx) = session.extract_req(&mock_ohttp_relay).unwrap();
                         let response = agent_clone.post(req.url).body(req.body).send().await?;
 
                         if response.status() == 200 {
@@ -770,7 +768,7 @@ mod integration {
                     assert!(payjoin_proposal.is_output_substitution_disabled());
                     // Respond with payjoin psbt within the time window the sender is willing to wait
                     // this response would be returned as http response to the sender
-                    let (req, ctx) = payjoin_proposal.extract_v2_req().unwrap();
+                    let (req, ctx) = payjoin_proposal.extract_v2_req(&mock_ohttp_relay).unwrap();
                     let response = agent_clone.post(req.url).body(req.body).send().await?;
                     payjoin_proposal
                         .process_res(&response.bytes().await?, ctx)
@@ -834,22 +832,6 @@ mod integration {
             let cert_der = cert.serialize_der().expect("Failed to serialize cert");
             let key_der = cert.serialize_private_key_der();
             (cert_der, key_der)
-        }
-
-        fn initialize_session(
-            address: Address,
-            directory: Url,
-            ohttp_keys: OhttpKeys,
-            custom_expire_after: Option<Duration>,
-        ) -> Receiver {
-            let mock_ohttp_relay = directory.clone(); // pass through to directory
-            Receiver::new(
-                address,
-                directory.clone(),
-                ohttp_keys,
-                mock_ohttp_relay.clone(),
-                custom_expire_after,
-            )
         }
 
         fn handle_directory_proposal(

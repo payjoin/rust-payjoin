@@ -82,13 +82,8 @@ impl AppTrait for App {
         let address = self.bitcoind()?.get_new_address(None, None)?.assume_checked();
         let amount = Amount::from_sat(amount_arg.parse()?);
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
-        let session = Receiver::new(
-            address,
-            self.config.pj_directory.clone(),
-            ohttp_keys.clone(),
-            self.config.ohttp_relay.clone(),
-            None,
-        );
+        let session =
+            Receiver::new(address, self.config.pj_directory.clone(), ohttp_keys.clone(), None);
         self.db.insert_recv_session(session.clone())?;
         self.spawn_payjoin_receiver(session, Some(amount)).await
     }
@@ -138,7 +133,7 @@ impl App {
             .process_v2_proposal(res)
             .map_err(|e| anyhow!("Failed to process proposal {}", e))?;
         let (req, ohttp_ctx) = payjoin_proposal
-            .extract_v2_req()
+            .extract_v2_req(&self.config.ohttp_relay)
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         println!("Got a request from the sender. Responding with a Payjoin proposal.");
         let res = post_request(req).await?;
@@ -239,7 +234,7 @@ impl App {
         session: &mut payjoin::receive::v2::Receiver,
     ) -> Result<payjoin::receive::v2::UncheckedProposal> {
         loop {
-            let (req, context) = session.extract_req()?;
+            let (req, context) = session.extract_req(&self.config.ohttp_relay)?;
             println!("Polling receive request...");
             let ohttp_response = post_request(req).await?;
             let proposal = session

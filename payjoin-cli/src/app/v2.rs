@@ -117,11 +117,8 @@ impl App {
         amount: Option<Amount>,
     ) -> Result<()> {
         println!("Receive session established");
-        let mut pj_uri_builder = session.pj_uri_builder();
-        if let Some(amount) = amount {
-            pj_uri_builder = pj_uri_builder.amount(amount);
-        }
-        let pj_uri = pj_uri_builder.build();
+        let mut pj_uri = session.pj_uri();
+        pj_uri.amount = amount;
 
         println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{}", pj_uri);

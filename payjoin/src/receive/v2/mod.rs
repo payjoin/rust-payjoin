@@ -467,8 +467,6 @@ impl PayjoinProposal {
 
     pub fn psbt(&self) -> &Psbt { self.v1.psbt() }
 
-    pub fn extract_v1_req(&self) -> String { self.v1.psbt().to_string() }
-
     #[cfg(feature = "v2")]
     pub fn extract_v2_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
         let target_resource: Url;
@@ -488,7 +486,7 @@ impl PayjoinProposal {
             method = "POST";
         } else {
             // Prepare v2 wrapped and backwards-compatible v1 payload
-            body = self.extract_v1_req().as_bytes().to_vec();
+            body = self.v1.psbt().to_string().as_bytes().to_vec();
             let receiver_subdir = subdir_path_from_pubkey(self.context.s.public_key());
             target_resource = self
                 .context

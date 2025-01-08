@@ -4,15 +4,14 @@ use std::time::{Duration, SystemTime};
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
+pub(crate) use error::{InternalRequestError, InternalSessionError};
+pub use error::{RequestError, SessionError};
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use super::error::InternalRequestError;
-use super::v2::error::{InternalSessionError, SessionError};
-use super::{
-    v1, Error, InputContributionError, OutputSubstitutionError, RequestError, SelectionError,
-};
+use super::error::InputContributionError;
+use super::{v1, Error, InternalPayloadError, OutputSubstitutionError, SelectionError};
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::psbt::PsbtExt;
@@ -146,31 +145,28 @@ impl Receiver {
     }
 
     fn extract_proposal_from_v1(&mut self, response: String) -> Result<UncheckedProposal, Error> {
-        Ok(self.unchecked_from_payload(response)?)
+        self.unchecked_from_payload(response)
     }
 
     fn extract_proposal_from_v2(&mut self, response: Vec<u8>) -> Result<UncheckedProposal, Error> {
         let (payload_bytes, e) = decrypt_message_a(&response, self.context.s.secret_key().clone())?;
         self.context.e = Some(e);
         let payload = String::from_utf8(payload_bytes).map_err(InternalRequestError::Utf8)?;
-        Ok(self.unchecked_from_payload(payload)?)
+        self.unchecked_from_payload(payload)
     }
 
-    fn unchecked_from_payload(
-        &mut self,
-        payload: String,
-    ) -> Result<UncheckedProposal, RequestError> {
+    fn unchecked_from_payload(&mut self, payload: String) -> Result<UncheckedProposal, Error> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
         log::trace!("Received query: {}, base64: {}", query, base64); // my guess is no \n so default is wrong
         let unchecked_psbt = Psbt::from_str(base64).map_err(InternalRequestError::ParsePsbt)?;
-        let psbt = unchecked_psbt.validate().map_err(InternalRequestError::InconsistentPsbt)?;
+        let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
         log::debug!("Received original psbt: {:?}", psbt);
         let mut params = Params::from_query_pairs(
             url::form_urlencoded::parse(query.as_bytes()),
             SUPPORTED_VERSIONS,
         )
-        .map_err(InternalRequestError::SenderParams)?;
+        .map_err(InternalPayloadError::SenderParams)?;
 
         // Output substitution must be disabled for V1 sessions in V2 contexts.
         //
@@ -632,7 +628,7 @@ mod test {
         );
         let (_req, _ctx) = proposal.clone().extract_err_req(&server_error, &EXAMPLE_OHTTP_RELAY)?;
 
-        let internal_error = Error::Validation(RequestError(InternalRequestError::MissingPayment));
+        let internal_error = Error::Validation(InternalPayloadError::MissingPayment.into());
         let (_req, _ctx) = proposal.extract_err_req(&internal_error, &EXAMPLE_OHTTP_RELAY)?;
         Ok(())
     }

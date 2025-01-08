@@ -262,8 +262,9 @@ impl App {
         } else {
             format!("{}?pj={}", address.to_qr_uri(), self.config.pj_endpoint)
         };
-        let uri = Uri::try_from(uri_string.clone())
-            .map_err(|_| Error::Implementation(anyhow!("Could not parse payjoin URI string.").into()))?;
+        let uri = Uri::try_from(uri_string.clone()).map_err(|_| {
+            Error::Implementation(anyhow!("Could not parse payjoin URI string.").into())
+        })?;
         let _ = uri.assume_checked(); // we just got it from bitcoind above
 
         Ok(Response::new(full(uri_string)))
@@ -297,13 +298,15 @@ impl App {
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // The network is used for checks later
-        let network = bitcoind.get_blockchain_info().map_err(|e| Error::Implementation(e.into()))?.chain;
+        let network =
+            bitcoind.get_blockchain_info().map_err(|e| Error::Implementation(e.into()))?.chain;
 
         // Receive Check 1: Can Broadcast
         let proposal = proposal.check_broadcast_suitability(None, |tx| {
             let raw_tx = bitcoin::consensus::encode::serialize_hex(&tx);
-            let mempool_results =
-                bitcoind.test_mempool_accept(&[raw_tx]).map_err(|e| Error::Implementation(e.into()))?;
+            let mempool_results = bitcoind
+                .test_mempool_accept(&[raw_tx])
+                .map_err(|e| Error::Implementation(e.into()))?;
             match mempool_results.first() {
                 Some(result) => Ok(result.allowed),
                 None => Err(Error::Implementation(
@@ -365,12 +368,15 @@ impl App {
             |psbt: &Psbt| {
                 bitcoind
                     .wallet_process_psbt(&psbt.to_string(), None, None, Some(false))
-                    .map(|res| Psbt::from_str(&res.psbt).map_err(|e| Error::Implementation(e.into())))
+                    .map(|res| {
+                        Psbt::from_str(&res.psbt).map_err(|e| Error::Implementation(e.into()))
+                    })
                     .map_err(|e| Error::Implementation(e.into()))?
             },
             Some(bitcoin::FeeRate::MIN),
             self.config.max_fee_rate.map_or(Ok(FeeRate::ZERO), |fee_rate| {
-                FeeRate::from_sat_per_vb(fee_rate).ok_or(Error::Implementation("Invalid fee rate".into()))
+                FeeRate::from_sat_per_vb(fee_rate)
+                    .ok_or(Error::Implementation("Invalid fee rate".into()))
             })?,
         )?;
         Ok(payjoin_proposal)

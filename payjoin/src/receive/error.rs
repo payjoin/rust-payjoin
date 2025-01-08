@@ -1,5 +1,8 @@
-use std::error;
-use std::fmt::{self, Display};
+use std::{error, fmt};
+
+use crate::receive::v1;
+#[cfg(feature = "v2")]
+use crate::receive::v2;
 
 /// The top-level error type for the payjoin receiver, representing all possible failures that can occur
 /// during the processing of a payjoin request.
@@ -14,7 +17,7 @@ pub enum Error {
     /// Error arising from the payjoin state machine
     ///
     /// e.g. PSBT validation, HTTP request validation, protocol version checks
-    Validation(RequestError),
+    Validation(ValidationError),
     /// Error arising due to the specific receiver implementation
     ///
     /// e.g. database errors, network failures, wallet errors
@@ -26,8 +29,7 @@ impl Error {
         match self {
             Self::Validation(e) => e.to_string(),
             Self::Implementation(_) =>
-                "{{ \"errorCode\": \"unavailable\", \"message\": \"Receiver error\" }}"
-                    .to_string(),
+                "{{ \"errorCode\": \"unavailable\", \"message\": \"Receiver error\" }}".to_string(),
         }
     }
 }
@@ -44,46 +46,82 @@ impl fmt::Display for Error {
 impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
-            Self::Validation(_) => None,
+            Self::Validation(e) => e.source(),
             Self::Implementation(e) => Some(e.as_ref()),
         }
     }
 }
 
-impl From<RequestError> for Error {
-    fn from(e: RequestError) -> Self { Error::Validation(e) }
+impl From<InternalPayloadError> for Error {
+    fn from(e: InternalPayloadError) -> Self {
+        Error::Validation(ValidationError::Payload(e.into()))
+    }
 }
 
-impl From<InternalRequestError> for Error {
-    fn from(e: InternalRequestError) -> Self { Error::Validation(e.into()) }
+impl From<v1::InternalRequestError> for Error {
+    fn from(e: v1::InternalRequestError) -> Self { Error::Validation(e.into()) }
 }
 
-#[cfg(feature = "v2")]
-impl From<crate::hpke::HpkeError> for Error {
-    fn from(e: crate::hpke::HpkeError) -> Self { Error::Implementation(Box::new(e)) }
-}
-
-#[cfg(feature = "v2")]
-impl From<crate::ohttp::OhttpEncapsulationError> for Error {
-    fn from(e: crate::ohttp::OhttpEncapsulationError) -> Self { Error::Implementation(Box::new(e)) }
-}
-
-/// Error that may occur when the request from sender is malformed.
+/// An error that occurs during validation of a payjoin request, encompassing all possible validation
+/// failures across different protocol versions and stages.
 ///
-/// This is currently opaque type because we aren't sure which variants will stay.
-/// You can only display it.
+/// This abstraction serves as the primary error type for the validation phase of request processing,
+/// allowing uniform error handling while maintaining protocol version specifics internally.
 #[derive(Debug)]
-pub struct RequestError(pub(crate) InternalRequestError);
+pub enum ValidationError {
+    /// Error arising from validation of the original PSBT payload
+    Payload(PayloadError),
+    /// Protocol-specific errors for BIP-78 v1 requests (e.g. HTTP request validation, parameter checks)
+    V1(v1::RequestError),
+    /// Protocol-specific errors for BIP-77 v2 sessions (e.g. session management, OHTTP, HPKE encryption)
+    #[cfg(feature = "v2")]
+    V2(v2::RequestError),
+}
+
+impl From<InternalPayloadError> for ValidationError {
+    fn from(e: InternalPayloadError) -> Self { ValidationError::Payload(e.into()) }
+}
+
+impl From<v1::InternalRequestError> for ValidationError {
+    fn from(e: v1::InternalRequestError) -> Self { ValidationError::V1(e.into()) }
+}
+
+#[cfg(feature = "v2")]
+impl From<v2::InternalRequestError> for ValidationError {
+    fn from(e: v2::InternalRequestError) -> Self { ValidationError::V2(e.into()) }
+}
+
+impl fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ValidationError::Payload(e) => write!(f, "{}", e),
+            ValidationError::V1(e) => write!(f, "{}", e),
+            #[cfg(feature = "v2")]
+            ValidationError::V2(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl std::error::Error for ValidationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ValidationError::Payload(e) => Some(e),
+            ValidationError::V1(e) => Some(e),
+            #[cfg(feature = "v2")]
+            ValidationError::V2(e) => Some(e),
+        }
+    }
+}
 
 #[derive(Debug)]
-pub(crate) enum InternalRequestError {
-    Psbt(bitcoin::psbt::Error),
-    Base64(bitcoin::base64::DecodeError),
-    Io(std::io::Error),
-    MissingHeader(&'static str),
-    InvalidContentType(String),
-    InvalidContentLength(std::num::ParseIntError),
-    ContentLengthTooLarge(u64),
+pub struct PayloadError(pub(crate) InternalPayloadError);
+
+impl From<InternalPayloadError> for PayloadError {
+    fn from(value: InternalPayloadError) -> Self { PayloadError(value) }
+}
+
+#[derive(Debug)]
+pub(crate) enum InternalPayloadError {
     SenderParams(super::optional_parameters::Error),
     /// The raw PSBT fails bip78-specific validation.
     InconsistentPsbt(crate::psbt::InconsistentPsbt),
@@ -102,11 +140,6 @@ pub(crate) enum InternalRequestError {
     /// Original PSBT input has been seen before. Only automatic receivers, aka "interactive" in the spec
     /// look out for these to prevent probing attacks.
     InputSeen(bitcoin::OutPoint),
-    /// Serde deserialization failed
-    #[cfg(feature = "v2")]
-    ParsePsbt(bitcoin::psbt::PsbtParseError),
-    #[cfg(feature = "v2")]
-    Utf8(std::string::FromUtf8Error),
     /// Original PSBT fee rate is below minimum fee rate set by the receiver.
     ///
     /// First argument is the calculated fee rate of the original PSBT.
@@ -117,35 +150,20 @@ pub(crate) enum InternalRequestError {
     FeeTooHigh(bitcoin::FeeRate, bitcoin::FeeRate),
 }
 
-impl From<InternalRequestError> for RequestError {
-    fn from(value: InternalRequestError) -> Self { RequestError(value) }
-}
-
-impl fmt::Display for RequestError {
+impl fmt::Display for PayloadError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fn write_error(f: &mut fmt::Formatter, code: &str, message: impl Display) -> fmt::Result {
+        use InternalPayloadError::*;
+
+        fn write_error(
+            f: &mut fmt::Formatter,
+            code: &str,
+            message: impl fmt::Display,
+        ) -> fmt::Result {
             write!(f, r#"{{ "errorCode": "{}", "message": "{}" }}"#, code, message)
         }
 
         match &self.0 {
-            InternalRequestError::Psbt(e) => write_error(f, "psbt-error", e),
-            InternalRequestError::Base64(e) => write_error(f, "base64-decode-error", e),
-            InternalRequestError::Io(e) => write_error(f, "io-error", e),
-            InternalRequestError::MissingHeader(header) =>
-                write_error(f, "missing-header", format!("Missing header: {}", header)),
-            InternalRequestError::InvalidContentType(content_type) => write_error(
-                f,
-                "invalid-content-type",
-                format!("Invalid content type: {}", content_type),
-            ),
-            InternalRequestError::InvalidContentLength(e) =>
-                write_error(f, "invalid-content-length", e),
-            InternalRequestError::ContentLengthTooLarge(length) => write_error(
-                f,
-                "content-length-too-large",
-                format!("Content length too large: {}.", length),
-            ),
-            InternalRequestError::SenderParams(e) => match e {
+            SenderParams(e) => match e {
                 super::optional_parameters::Error::UnknownVersion { supported_versions } => {
                     write!(
                         f,
@@ -159,31 +177,22 @@ impl fmt::Display for RequestError {
                 }
                 _ => write_error(f, "sender-params-error", e),
             },
-            InternalRequestError::InconsistentPsbt(e) =>
-                write_error(f, "original-psbt-rejected", e),
-            InternalRequestError::PrevTxOut(e) =>
+            InconsistentPsbt(e) => write_error(f, "original-psbt-rejected", e),
+            PrevTxOut(e) =>
                 write_error(f, "original-psbt-rejected", format!("PrevTxOut Error: {}", e)),
-            InternalRequestError::MissingPayment =>
-                write_error(f, "original-psbt-rejected", "Missing payment."),
-            InternalRequestError::OriginalPsbtNotBroadcastable => write_error(
+            MissingPayment => write_error(f, "original-psbt-rejected", "Missing payment."),
+            OriginalPsbtNotBroadcastable => write_error(
                 f,
                 "original-psbt-rejected",
                 "Can't broadcast. PSBT rejected by mempool.",
             ),
-            InternalRequestError::InputOwned(_) =>
+            InputOwned(_) =>
                 write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
-            InternalRequestError::InputWeight(e) =>
+            InputWeight(e) =>
                 write_error(f, "original-psbt-rejected", format!("InputWeight Error: {}", e)),
-            InternalRequestError::InputSeen(_) =>
+            InputSeen(_) =>
                 write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
-            #[cfg(feature = "v2")]
-            InternalRequestError::ParsePsbt(e) => write_error(f, "Error parsing PSBT:", e),
-            #[cfg(feature = "v2")]
-            InternalRequestError::Utf8(e) => write_error(f, "Error parsing PSBT:", e),
-            InternalRequestError::PsbtBelowFeeRate(
-                original_psbt_fee_rate,
-                receiver_min_fee_rate,
-            ) => write_error(
+            PsbtBelowFeeRate(original_psbt_fee_rate, receiver_min_fee_rate) => write_error(
                 f,
                 "original-psbt-rejected",
                 format!(
@@ -191,7 +200,7 @@ impl fmt::Display for RequestError {
                     original_psbt_fee_rate, receiver_min_fee_rate
                 ),
             ),
-            InternalRequestError::FeeTooHigh(proposed_feerate, max_feerate) => write_error(
+            FeeTooHigh(proposed_feerate, max_feerate) => write_error(
                 f,
                 "original-psbt-rejected",
                 format!(
@@ -203,22 +212,16 @@ impl fmt::Display for RequestError {
     }
 }
 
-impl std::error::Error for RequestError {
+impl std::error::Error for PayloadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use InternalPayloadError::*;
         match &self.0 {
-            InternalRequestError::Psbt(e) => Some(e),
-            InternalRequestError::Base64(e) => Some(e),
-            InternalRequestError::Io(e) => Some(e),
-            InternalRequestError::InvalidContentLength(e) => Some(e),
-            InternalRequestError::SenderParams(e) => Some(e),
-            InternalRequestError::InconsistentPsbt(e) => Some(e),
-            InternalRequestError::PrevTxOut(e) => Some(e),
-            InternalRequestError::InputWeight(e) => Some(e),
-            #[cfg(feature = "v2")]
-            InternalRequestError::ParsePsbt(e) => Some(e),
-            #[cfg(feature = "v2")]
-            InternalRequestError::Utf8(e) => Some(e),
-            InternalRequestError::PsbtBelowFeeRate(_, _) => None,
+            SenderParams(e) => Some(e),
+            InconsistentPsbt(e) => Some(e),
+            PrevTxOut(e) => Some(e),
+            InputWeight(e) => Some(e),
+            PsbtBelowFeeRate(_, _) => None,
+            FeeTooHigh(_, _) => None,
             _ => None,
         }
     }

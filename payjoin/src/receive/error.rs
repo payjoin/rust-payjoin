@@ -9,6 +9,17 @@ pub enum Error {
     Server(Box<dyn error::Error>),
 }
 
+impl Error {
+    pub fn to_json(&self) -> String {
+        match self {
+            Self::BadRequest(e) => e.to_string(),
+            Self::Server(_) =>
+                "{{ \"errorCode\": \"server-error\", \"message\": \"Internal server error\" }}"
+                    .to_string(),
+        }
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {

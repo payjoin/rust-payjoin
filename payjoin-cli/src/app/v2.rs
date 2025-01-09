@@ -6,7 +6,9 @@ use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::receive::v2::Receiver;
+use payjoin::receive::v2::{
+    InitialState, PayjoinProposal, ProvisionalProposal, Receiver, UncheckedProposal, WantsInputs,
+};
 use payjoin::send::v2::{Sender, SenderBuilder};
 use payjoin::{bitcoin, Error, Uri};
 use tokio::signal;
@@ -113,7 +115,7 @@ impl App {
     #[allow(clippy::incompatible_msrv)]
     async fn spawn_payjoin_receiver(
         &self,
-        mut session: Receiver,
+        mut session: Receiver<InitialState>,
         amount: Option<Amount>,
     ) -> Result<()> {
         println!("Receive session established");
@@ -236,8 +238,8 @@ impl App {
 
     async fn long_poll_fallback(
         &self,
-        session: &mut payjoin::receive::v2::Receiver,
-    ) -> Result<payjoin::receive::v2::UncheckedProposal> {
+        session: &mut Receiver<InitialState>,
+    ) -> Result<Receiver<UncheckedProposal>> {
         loop {
             let (req, context) = session.extract_req()?;
             println!("Polling receive request...");
@@ -254,8 +256,8 @@ impl App {
 
     fn process_v2_proposal(
         &self,
-        proposal: payjoin::receive::v2::UncheckedProposal,
-    ) -> Result<payjoin::receive::v2::PayjoinProposal, Error> {
+        proposal: Receiver<UncheckedProposal>,
+    ) -> Result<Receiver<PayjoinProposal>, Error> {
         let bitcoind = self.bitcoind().map_err(|e| Error::Server(e.into()))?;
 
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
@@ -334,9 +336,9 @@ impl App {
 }
 
 fn try_contributing_inputs(
-    payjoin: payjoin::receive::v2::WantsInputs,
+    payjoin: Receiver<WantsInputs>,
     bitcoind: &bitcoincore_rpc::Client,
-) -> Result<payjoin::receive::v2::ProvisionalProposal> {
+) -> Result<Receiver<ProvisionalProposal>> {
     let candidate_inputs = bitcoind
         .list_unspent(None, None, None, None, None)
         .context("Failed to list unspent from bitcoind")?

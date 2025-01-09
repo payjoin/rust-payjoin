@@ -176,7 +176,7 @@ mod integration {
 
         use bitcoin::Address;
         use http::StatusCode;
-        use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
+        use payjoin::receive::v2::{InitialState, PayjoinProposal, Receiver, UncheckedProposal};
         use payjoin::send::v2::SenderBuilder;
         use payjoin::{OhttpKeys, PjUri, UriExt};
         use reqwest::{Client, ClientBuilder, Error, Response};
@@ -841,7 +841,7 @@ mod integration {
             directory: Url,
             ohttp_keys: OhttpKeys,
             custom_expire_after: Option<Duration>,
-        ) -> Receiver {
+        ) -> Receiver<InitialState> {
             let mock_ohttp_relay = directory.clone(); // pass through to directory
             Receiver::new(
                 address,
@@ -854,9 +854,9 @@ mod integration {
 
         fn handle_directory_proposal(
             receiver: &bitcoincore_rpc::Client,
-            proposal: UncheckedProposal,
+            proposal: Receiver<UncheckedProposal>,
             custom_inputs: Option<Vec<InputPair>>,
-        ) -> PayjoinProposal {
+        ) -> Receiver<PayjoinProposal> {
             // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
             let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 

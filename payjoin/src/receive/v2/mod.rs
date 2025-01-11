@@ -88,6 +88,7 @@ impl<S: State> Receiver<S> {
     pub fn extract_err_req(
         &mut self,
         err: Error,
+        ohttp_relay: &Url,
     ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
         let subdir = self.subdir();
         let (body, ohttp_ctx) = ohttp_encapsulate(
@@ -97,9 +98,34 @@ impl<S: State> Receiver<S> {
             Some(err.to_json().as_bytes()),
         )
         .map_err(InternalSessionError::OhttpEncapsulation)?;
-        let url = self.subdir();
+        let url = ohttp_relay.clone();
         let req = Request::new_v2(url, body);
         Ok((req, ohttp_ctx))
+    }
+
+    pub fn process_err_res(
+        &mut self,
+        body: &[u8],
+        context: ohttp::ClientResponse,
+    ) -> Result<(), SessionError> {
+        let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
+            body.try_into().map_err(|_| {
+                SessionError::from(InternalSessionError::UnexpectedResponseSize(body.len()))
+            })?;
+        log::trace!("decapsulating directory response");
+        let response = ohttp_decapsulate(context, response_array)?;
+        match response.status() {
+            http::StatusCode::OK => {
+                log::debug!("response is ok");
+                Ok(())
+            }
+            _ => {
+                log::debug!("response is not ok");
+                Err(SessionError::from(InternalSessionError::UnexpectedStatusCode(
+                    response.status(),
+                )))
+            }
+        }
     }
 
     /// Build a V2 Payjoin URI from the receiver's context

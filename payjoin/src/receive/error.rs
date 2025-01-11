@@ -6,7 +6,7 @@ pub enum Error {
     /// To be returned as HTTP 400
     BadRequest(RequestError),
     // To be returned as HTTP 500
-    Server(Box<dyn error::Error>),
+    Server(Box<dyn error::Error + Send + Sync>),
 }
 
 impl Error {

@@ -126,7 +126,7 @@ impl App {
         println!("{}", pj_uri);
 
         let mut interrupt = self.interrupt.clone();
-        let res = tokio::select! {
+        let receiver = tokio::select! {
             res = self.long_poll_fallback(&mut session) => res,
             _ = interrupt.changed() => {
                 println!("Interrupted. Call the `resume` command to resume all sessions.");
@@ -135,10 +135,14 @@ impl App {
         }?;
 
         println!("Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:");
-        println!("{}", serialize_hex(&res.extract_tx_to_schedule_broadcast()));
-        let mut payjoin_proposal = self
-            .process_v2_proposal(res)
-            .map_err(|e| anyhow!("Failed to process proposal {}", e))?;
+        println!("{}", serialize_hex(&receiver.extract_tx_to_schedule_broadcast()));
+        let mut payjoin_proposal = match self.process_v2_proposal(receiver.clone()) {
+            Ok(proposal) => proposal,
+            Err(e) => {
+                handle_request_error(e, receiver, &self.config.ohttp_relay).await?;
+                unreachable!("handle_request_error always returns Err")
+            }
+        };
         let (req, ohttp_ctx) = payjoin_proposal
             .extract_v2_req()
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
@@ -333,6 +337,25 @@ impl App {
         log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
         Ok(payjoin_proposal)
     }
+}
+
+/// Handle request error by sending an error response to the sender and processing the error response
+async fn handle_request_error(
+    e: Error,
+    mut receiver: Receiver<UncheckedProposal>,
+    ohttp_relay: &payjoin::Url,
+) -> Result<(), anyhow::Error> {
+    let (err_req, err_ctx) = receiver
+        .extract_err_req(e, ohttp_relay)
+        .map_err(|e| anyhow!("Failed to extract error request: {}", e))?;
+
+    let err_response = post_request(err_req).await?;
+
+    let err_bytes = err_response.bytes().await?;
+    receiver
+        .process_err_res(&err_bytes, err_ctx)
+        .map_err(|e| anyhow!("Failed to process error response: {}", e))?;
+    Err(anyhow!("Failed to process proposal"))
 }
 
 fn try_contributing_inputs(

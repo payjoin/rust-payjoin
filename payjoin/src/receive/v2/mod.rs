@@ -600,6 +600,8 @@ mod test {
     static EXAMPLE_DIRECTORY_URL: Lazy<Url> =
         Lazy::new(|| Url::parse("https://directory.com").unwrap());
 
+    static EXAMPLE_OHTTP_RELAY: Lazy<Url> = Lazy::new(|| Url::parse("https://relay.com").unwrap());
+
     static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
         address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
             .unwrap()
@@ -611,6 +613,29 @@ mod test {
         s: HpkeKeyPair::gen_keypair(),
         e: None,
     });
+
+    #[test]
+    fn extract_err_req() -> Result<(), Box<dyn std::error::Error>> {
+        let mut proposal = UncheckedProposal {
+            v1: crate::receive::v1::test::proposal_from_test_vector().unwrap(),
+            context: SHARED_CONTEXT.clone(),
+        };
+
+        let server_error = proposal
+            .clone()
+            .check_broadcast_suitability(None, |_| Err(Error::Server("mock error".into())))
+            .err()
+            .unwrap();
+        assert_eq!(
+            server_error.to_json(),
+            "{{ \"errorCode\": \"server-error\", \"message\": \"Internal server error\" }}"
+        );
+        let (_req, _ctx) = proposal.clone().extract_err_req(&server_error, &EXAMPLE_OHTTP_RELAY)?;
+
+        let internal_error = Error::BadRequest(RequestError(InternalRequestError::MissingPayment));
+        let (_req, _ctx) = proposal.extract_err_req(&internal_error, &EXAMPLE_OHTTP_RELAY)?;
+        Ok(())
+    }
 
     #[test]
     fn receiver_ser_de_roundtrip() {

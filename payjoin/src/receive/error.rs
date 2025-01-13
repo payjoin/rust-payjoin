@@ -61,7 +61,7 @@ impl From<crate::ohttp::OhttpEncapsulationError> for Error {
 /// This is currently opaque type because we aren't sure which variants will stay.
 /// You can only display it.
 #[derive(Debug)]
-pub struct RequestError(InternalRequestError);
+pub struct RequestError(pub(crate) InternalRequestError);
 
 #[derive(Debug)]
 pub(crate) enum InternalRequestError {

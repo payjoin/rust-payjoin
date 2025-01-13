@@ -585,33 +585,37 @@ fn id(s: &HpkeKeyPair) -> ShortId {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
+    use ohttp::hpke::{Aead, Kdf, Kem};
+    use ohttp::{KeyId, SymmetricSuite};
+    use once_cell::sync::Lazy;
+
     use super::*;
+
+    const KEY_ID: KeyId = 1;
+    const KEM: Kem = Kem::K256Sha256;
+    const SYMMETRIC: &[SymmetricSuite] =
+        &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
+    static EXAMPLE_DIRECTORY_URL: Lazy<Url> =
+        Lazy::new(|| Url::parse("https://directory.com").unwrap());
+
+    static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
+        address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
+            .unwrap()
+            .assume_checked(),
+        directory: EXAMPLE_DIRECTORY_URL.clone(),
+        subdirectory: None,
+        ohttp_keys: OhttpKeys(ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap()),
+        expiry: SystemTime::now() + Duration::from_secs(60),
+        s: HpkeKeyPair::gen_keypair(),
+        e: None,
+    });
 
     #[test]
     #[cfg(feature = "v2")]
     fn receiver_ser_de_roundtrip() {
-        use ohttp::hpke::{Aead, Kdf, Kem};
-        use ohttp::{KeyId, SymmetricSuite};
-        const KEY_ID: KeyId = 1;
-        const KEM: Kem = Kem::K256Sha256;
-        const SYMMETRIC: &[SymmetricSuite] =
-            &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
-
-        let session = Receiver {
-            context: SessionContext {
-                address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
-                    .unwrap()
-                    .assume_checked(),
-                directory: url::Url::parse("https://directory.com").unwrap(),
-                subdirectory: None,
-                ohttp_keys: OhttpKeys(
-                    ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap(),
-                ),
-                expiry: SystemTime::now() + Duration::from_secs(60),
-                s: HpkeKeyPair::gen_keypair(),
-                e: None,
-            },
-        };
+        let session = Receiver { context: SHARED_CONTEXT.clone() };
         let serialized = serde_json::to_string(&session).unwrap();
         let deserialized: Receiver = serde_json::from_str(&serialized).unwrap();
         assert_eq!(session, deserialized);
@@ -619,27 +623,8 @@ mod test {
 
     #[test]
     fn test_v2_pj_uri() {
-        let address = bitcoin::Address::from_str("12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX")
-            .unwrap()
-            .assume_checked();
-        let receiver_keys = crate::hpke::HpkeKeyPair::gen_keypair();
-        let ohttp_keys =
-            OhttpKeys::from_str("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
-                .expect("Invalid OhttpKeys");
-        let arbitrary_url = Url::parse("https://example.com").unwrap();
-        let uri = Receiver {
-            context: SessionContext {
-                address,
-                directory: arbitrary_url.clone(),
-                subdirectory: None,
-                ohttp_keys,
-                expiry: SystemTime::now() + Duration::from_secs(60),
-                s: receiver_keys,
-                e: None,
-            },
-        }
-        .pj_uri();
-        assert_ne!(uri.extras.endpoint, arbitrary_url);
+        let uri = Receiver { context: SHARED_CONTEXT.clone() }.pj_uri();
+        assert_ne!(uri.extras.endpoint, EXAMPLE_DIRECTORY_URL.clone());
         assert!(!uri.extras.disable_output_substitution);
     }
 }

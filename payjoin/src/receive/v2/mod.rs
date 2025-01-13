@@ -613,7 +613,6 @@ mod test {
     });
 
     #[test]
-    #[cfg(feature = "v2")]
     fn receiver_ser_de_roundtrip() {
         let session = Receiver { context: SHARED_CONTEXT.clone() };
         let serialized = serde_json::to_string(&session).unwrap();

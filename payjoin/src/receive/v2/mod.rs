@@ -269,6 +269,64 @@ impl UncheckedProposal {
         let inner = self.v1.assume_interactive_receiver();
         MaybeInputsOwned { v1: inner, context: self.context }
     }
+
+    /// Extract an OHTTP Encapsulated HTTP POST request to return
+    /// a Receiver Error Response
+    pub fn extract_err_req(
+        &mut self,
+        err: &Error,
+        ohttp_relay: &Url,
+    ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
+        let subdir = self.subdir();
+        let (body, ohttp_ctx) = ohttp_encapsulate(
+            &mut self.context.ohttp_keys,
+            "POST",
+            subdir.as_str(),
+            Some(err.to_json().as_bytes()),
+        )
+        .map_err(InternalSessionError::OhttpEncapsulation)?;
+
+        let req = Request::new_v2(ohttp_relay.clone(), body);
+        Ok((req, ohttp_ctx))
+    }
+
+    /// Process an OHTTP Encapsulated HTTP POST Error response
+    /// to ensure it has been posted properly
+    pub fn process_err_res(
+        &mut self,
+        body: &[u8],
+        context: ohttp::ClientResponse,
+    ) -> Result<(), SessionError> {
+        let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
+            body.try_into().map_err(|_| {
+                SessionError::from(InternalSessionError::UnexpectedResponseSize(body.len()))
+            })?;
+        let response = ohttp_decapsulate(context, response_array)?;
+
+        match response.status() {
+            http::StatusCode::OK => Ok(()),
+            _ => Err(SessionError::from(InternalSessionError::UnexpectedStatusCode(
+                response.status(),
+            ))),
+        }
+    }
+
+    /// The subdirectory for this Payjoin receiver session.
+    /// It consists of a directory URL and the session ShortID in the path.
+    pub fn subdir(&self) -> Url {
+        let mut url = self.context.directory.clone();
+        {
+            let mut path_segments =
+                url.path_segments_mut().expect("Payjoin Directory URL cannot be a base");
+            path_segments.push(&self.id().to_string());
+        }
+        url
+    }
+
+    /// The per-session identifier
+    pub fn id(&self) -> ShortId {
+        sha256::Hash::hash(&self.context.s.public_key().to_compressed_bytes()).into()
+    }
 }
 
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.

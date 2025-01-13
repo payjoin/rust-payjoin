@@ -6,7 +6,18 @@ pub enum Error {
     /// To be returned as HTTP 400
     BadRequest(RequestError),
     // To be returned as HTTP 500
-    Server(Box<dyn error::Error>),
+    Server(Box<dyn error::Error + Send + Sync>),
+}
+
+impl Error {
+    pub fn to_json(&self) -> String {
+        match self {
+            Self::BadRequest(e) => e.to_string(),
+            Self::Server(_) =>
+                "{{ \"errorCode\": \"server-error\", \"message\": \"Internal server error\" }}"
+                    .to_string(),
+        }
+    }
 }
 
 impl fmt::Display for Error {

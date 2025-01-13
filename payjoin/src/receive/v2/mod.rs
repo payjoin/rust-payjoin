@@ -35,7 +35,6 @@ struct SessionContext {
     subdirectory: Option<url::Url>,
     ohttp_keys: OhttpKeys,
     expiry: SystemTime,
-    ohttp_relay: url::Url,
     s: HpkeKeyPair,
     e: Option<HpkePublicKey>,
 }
@@ -67,7 +66,6 @@ impl Receiver {
     /// - `address`: The Bitcoin address for the payjoin session.
     /// - `directory`: The URL of the store-and-forward payjoin directory.
     /// - `ohttp_keys`: The OHTTP keys used for encrypting and decrypting HTTP requests and responses.
-    /// - `ohttp_relay`: The URL of the OHTTP relay, used to keep client IP address confidential.
     /// - `expire_after`: The duration after which the session expires.
     ///
     /// # Returns
@@ -79,7 +77,6 @@ impl Receiver {
         address: Address,
         directory: Url,
         ohttp_keys: OhttpKeys,
-        ohttp_relay: Url,
         expire_after: Option<Duration>,
     ) -> Self {
         Self {
@@ -88,7 +85,6 @@ impl Receiver {
                 directory,
                 subdirectory: None,
                 ohttp_keys,
-                ohttp_relay,
                 expiry: SystemTime::now()
                     + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
                 s: HpkeKeyPair::gen_keypair(),
@@ -98,13 +94,16 @@ impl Receiver {
     }
 
     /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
-    pub fn extract_req(&mut self) -> Result<(Request, ohttp::ClientResponse), SessionError> {
+    pub fn extract_req(
+        &mut self,
+        ohttp_relay: &Url,
+    ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
         if SystemTime::now() > self.context.expiry {
             return Err(InternalSessionError::Expired(self.context.expiry).into());
         }
         let (body, ohttp_ctx) =
             self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulation)?;
-        let url = self.context.ohttp_relay.clone();
+        let url = ohttp_relay.clone();
         let req = Request::new_v2(url, body);
         Ok((req, ohttp_ctx))
     }
@@ -468,7 +467,10 @@ impl PayjoinProposal {
     pub fn psbt(&self) -> &Psbt { self.v1.psbt() }
 
     #[cfg(feature = "v2")]
-    pub fn extract_v2_req(&mut self) -> Result<(Request, ohttp::ClientResponse), Error> {
+    pub fn extract_v2_req(
+        &mut self,
+        ohttp_relay: &Url,
+    ) -> Result<(Request, ohttp::ClientResponse), Error> {
         let target_resource: Url;
         let body: Vec<u8>;
         let method: &str;
@@ -502,8 +504,7 @@ impl PayjoinProposal {
             target_resource.as_str(),
             Some(&body),
         )?;
-        let url = self.context.ohttp_relay.clone();
-        let req = Request::new_v2(url, body);
+        let req = Request::new_v2(ohttp_relay.clone(), body);
         Ok((req, ctx))
     }
 
@@ -562,7 +563,6 @@ mod test {
                 ohttp_keys: OhttpKeys(
                     ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap(),
                 ),
-                ohttp_relay: url::Url::parse("https://relay.com").unwrap(),
                 expiry: SystemTime::now() + Duration::from_secs(60),
                 s: HpkeKeyPair::gen_keypair(),
                 e: None,
@@ -589,7 +589,6 @@ mod test {
                 directory: arbitrary_url.clone(),
                 subdirectory: None,
                 ohttp_keys,
-                ohttp_relay: arbitrary_url.clone(),
                 expiry: SystemTime::now() + Duration::from_secs(60),
                 s: receiver_keys,
                 e: None,

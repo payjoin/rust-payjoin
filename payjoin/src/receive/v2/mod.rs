@@ -141,7 +141,7 @@ impl Receiver {
         ([u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES], ohttp::ClientResponse),
         OhttpEncapsulationError,
     > {
-        let fallback_target = self.subdir();
+        let fallback_target = subdir(&self.context.directory, &self.id());
         ohttp_encapsulate(&mut self.context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
 
@@ -192,7 +192,7 @@ impl Receiver {
     /// Build a V2 Payjoin URI from the receiver's context
     pub fn pj_uri<'a>(&self) -> crate::PjUri<'a> {
         use crate::uri::{PayjoinExtras, UrlExt};
-        let mut pj = self.subdir().clone();
+        let mut pj = subdir(&self.context.directory, &self.id()).clone();
         pj.set_receiver_pubkey(self.context.s.public_key().clone());
         pj.set_ohttp(self.context.ohttp_keys.clone());
         pj.set_exp(self.context.expiry);
@@ -200,22 +200,8 @@ impl Receiver {
         bitcoin_uri::Uri::with_extras(self.context.address.clone(), extras)
     }
 
-    /// The subdirectory for this Payjoin receiver session.
-    /// It consists of a directory URL and the session ShortID in the path.
-    pub fn subdir(&self) -> Url {
-        let mut url = self.context.directory.clone();
-        {
-            let mut path_segments =
-                url.path_segments_mut().expect("Payjoin Directory URL cannot be a base");
-            path_segments.push(&self.id().to_string());
-        }
-        url
-    }
-
     /// The per-session identifier
-    pub fn id(&self) -> ShortId {
-        sha256::Hash::hash(&self.context.s.public_key().to_compressed_bytes()).into()
-    }
+    pub fn id(&self) -> ShortId { id(&self.context.s) }
 }
 
 /// The sender's original PSBT and optional parameters
@@ -277,7 +263,7 @@ impl UncheckedProposal {
         err: &Error,
         ohttp_relay: &Url,
     ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
-        let subdir = self.subdir();
+        let subdir = subdir(&self.context.directory, &id(&self.context.s));
         let (body, ohttp_ctx) = ohttp_encapsulate(
             &mut self.context.ohttp_keys,
             "POST",
@@ -309,23 +295,6 @@ impl UncheckedProposal {
                 response.status(),
             ))),
         }
-    }
-
-    /// The subdirectory for this Payjoin receiver session.
-    /// It consists of a directory URL and the session ShortID in the path.
-    pub fn subdir(&self) -> Url {
-        let mut url = self.context.directory.clone();
-        {
-            let mut path_segments =
-                url.path_segments_mut().expect("Payjoin Directory URL cannot be a base");
-            path_segments.push(&self.id().to_string());
-        }
-        url
-    }
-
-    /// The per-session identifier
-    pub fn id(&self) -> ShortId {
-        sha256::Hash::hash(&self.context.s.public_key().to_compressed_bytes()).into()
     }
 }
 
@@ -595,6 +564,23 @@ impl PayjoinProposal {
             ))
         }
     }
+}
+
+/// The subdirectory for this Payjoin receiver session.
+/// It consists of a directory URL and the session ShortID in the path.
+fn subdir(directory: &Url, id: &ShortId) -> Url {
+    let mut url = directory.clone();
+    {
+        let mut path_segments =
+            url.path_segments_mut().expect("Payjoin Directory URL cannot be a base");
+        path_segments.push(&id.to_string());
+    }
+    url
+}
+
+/// The per-session identifier
+fn id(s: &HpkeKeyPair) -> ShortId {
+    sha256::Hash::hash(&s.public_key().to_compressed_bytes()).into()
 }
 
 #[cfg(test)]

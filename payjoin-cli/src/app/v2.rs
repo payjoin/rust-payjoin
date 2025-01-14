@@ -6,7 +6,7 @@ use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::receive::v2::Receiver;
+use payjoin::receive::v2::{Receiver, UncheckedProposal};
 use payjoin::send::v2::{Sender, SenderBuilder};
 use payjoin::{bitcoin, Error, Uri};
 use tokio::signal;
@@ -119,7 +119,7 @@ impl App {
         println!("{}", pj_uri);
 
         let mut interrupt = self.interrupt.clone();
-        let res = tokio::select! {
+        let receiver = tokio::select! {
             res = self.long_poll_fallback(&mut session) => res,
             _ = interrupt.changed() => {
                 println!("Interrupted. Call the `resume` command to resume all sessions.");
@@ -128,10 +128,13 @@ impl App {
         }?;
 
         println!("Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:");
-        println!("{}", serialize_hex(&res.extract_tx_to_schedule_broadcast()));
-        let mut payjoin_proposal = self
-            .process_v2_proposal(res)
-            .map_err(|e| anyhow!("Failed to process proposal {}", e))?;
+        println!("{}", serialize_hex(&receiver.extract_tx_to_schedule_broadcast()));
+        let mut payjoin_proposal = match self.process_v2_proposal(receiver.clone()) {
+            Ok(proposal) => proposal,
+            Err(e) => {
+                return Err(handle_request_error(e, receiver, &self.config.ohttp_relay).await);
+            }
+        };
         let (req, ohttp_ctx) = payjoin_proposal
             .extract_v2_req(&self.config.ohttp_relay)
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
@@ -326,6 +329,34 @@ impl App {
         log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
         Ok(payjoin_proposal)
     }
+}
+
+/// Handle request error by sending an error response over the directory
+async fn handle_request_error(
+    e: Error,
+    mut receiver: UncheckedProposal,
+    ohttp_relay: &payjoin::Url,
+) -> anyhow::Error {
+    let (err_req, err_ctx) = match receiver.extract_err_req(&e, ohttp_relay) {
+        Ok(req_ctx) => req_ctx,
+        Err(e) => return anyhow!("Failed to extract error request: {}", e),
+    };
+
+    let err_response = match post_request(err_req).await {
+        Ok(response) => response,
+        Err(e) => return anyhow!("Failed to post error request: {}", e),
+    };
+
+    let err_bytes = match err_response.bytes().await {
+        Ok(bytes) => bytes,
+        Err(e) => return anyhow!("Failed to get error response bytes: {}", e),
+    };
+
+    if let Err(e) = receiver.process_err_res(&err_bytes, err_ctx) {
+        return anyhow!("Failed to process error response: {}", e);
+    }
+
+    e.into()
 }
 
 fn try_contributing_inputs(

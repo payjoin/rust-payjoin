@@ -877,7 +877,7 @@ impl PayjoinProposal {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use std::str::FromStr;
 
     use bitcoin::{Address, Network};
@@ -891,7 +891,6 @@ mod test {
     }
 
     impl MockHeaders {
-        #[cfg(test)]
         fn new(length: u64) -> MockHeaders { MockHeaders { length: length.to_string() } }
     }
 
@@ -905,7 +904,7 @@ mod test {
         }
     }
 
-    fn proposal_from_test_vector() -> Result<UncheckedProposal, RequestError> {
+    pub fn proposal_from_test_vector() -> Result<UncheckedProposal, RequestError> {
         // OriginalPSBT Test Vector from BIP
         // | InputScriptType | Orginal PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
         // |-----------------|-----------------------|------------------------------|-------------------------|

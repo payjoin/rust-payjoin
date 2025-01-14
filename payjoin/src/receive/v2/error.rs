@@ -14,6 +14,8 @@ pub(crate) enum InternalSessionError {
     OhttpEncapsulation(OhttpEncapsulationError),
     /// Unexpected response size
     UnexpectedResponseSize(usize),
+    /// Unexpected status code
+    UnexpectedStatusCode(http::StatusCode),
 }
 
 impl fmt::Display for SessionError {
@@ -28,6 +30,8 @@ impl fmt::Display for SessionError {
                 size,
                 crate::ohttp::ENCAPSULATED_MESSAGE_BYTES
             ),
+            InternalSessionError::UnexpectedStatusCode(status) =>
+                write!(f, "Unexpected status code: {}", status),
         }
     }
 }
@@ -38,6 +42,7 @@ impl error::Error for SessionError {
             InternalSessionError::Expired(_) => None,
             InternalSessionError::OhttpEncapsulation(e) => Some(e),
             InternalSessionError::UnexpectedResponseSize(_) => None,
+            InternalSessionError::UnexpectedStatusCode(_) => None,
         }
     }
 }

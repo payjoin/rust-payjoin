@@ -141,7 +141,7 @@ impl Receiver {
         ([u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES], ohttp::ClientResponse),
         OhttpEncapsulationError,
     > {
-        let fallback_target = self.subdir();
+        let fallback_target = subdir(&self.context.directory, &self.id());
         ohttp_encapsulate(&mut self.context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
 
@@ -192,7 +192,7 @@ impl Receiver {
     /// Build a V2 Payjoin URI from the receiver's context
     pub fn pj_uri<'a>(&self) -> crate::PjUri<'a> {
         use crate::uri::{PayjoinExtras, UrlExt};
-        let mut pj = self.subdir().clone();
+        let mut pj = subdir(&self.context.directory, &self.id()).clone();
         pj.set_receiver_pubkey(self.context.s.public_key().clone());
         pj.set_ohttp(self.context.ohttp_keys.clone());
         pj.set_exp(self.context.expiry);
@@ -200,22 +200,8 @@ impl Receiver {
         bitcoin_uri::Uri::with_extras(self.context.address.clone(), extras)
     }
 
-    /// The subdirectory for this Payjoin receiver session.
-    /// It consists of a directory URL and the session ShortID in the path.
-    pub fn subdir(&self) -> Url {
-        let mut url = self.context.directory.clone();
-        {
-            let mut path_segments =
-                url.path_segments_mut().expect("Payjoin Directory URL cannot be a base");
-            path_segments.push(&self.id().to_string());
-        }
-        url
-    }
-
     /// The per-session identifier
-    pub fn id(&self) -> ShortId {
-        sha256::Hash::hash(&self.context.s.public_key().to_compressed_bytes()).into()
-    }
+    pub fn id(&self) -> ShortId { id(&self.context.s) }
 }
 
 /// The sender's original PSBT and optional parameters
@@ -268,6 +254,47 @@ impl UncheckedProposal {
     pub fn assume_interactive_receiver(self) -> MaybeInputsOwned {
         let inner = self.v1.assume_interactive_receiver();
         MaybeInputsOwned { v1: inner, context: self.context }
+    }
+
+    /// Extract an OHTTP Encapsulated HTTP POST request to return
+    /// a Receiver Error Response
+    pub fn extract_err_req(
+        &mut self,
+        err: &Error,
+        ohttp_relay: &Url,
+    ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
+        let subdir = subdir(&self.context.directory, &id(&self.context.s));
+        let (body, ohttp_ctx) = ohttp_encapsulate(
+            &mut self.context.ohttp_keys,
+            "POST",
+            subdir.as_str(),
+            Some(err.to_json().as_bytes()),
+        )
+        .map_err(InternalSessionError::OhttpEncapsulation)?;
+
+        let req = Request::new_v2(ohttp_relay.clone(), body);
+        Ok((req, ohttp_ctx))
+    }
+
+    /// Process an OHTTP Encapsulated HTTP POST Error response
+    /// to ensure it has been posted properly
+    pub fn process_err_res(
+        &mut self,
+        body: &[u8],
+        context: ohttp::ClientResponse,
+    ) -> Result<(), SessionError> {
+        let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
+            body.try_into().map_err(|_| {
+                SessionError::from(InternalSessionError::UnexpectedResponseSize(body.len()))
+            })?;
+        let response = ohttp_decapsulate(context, response_array)?;
+
+        match response.status() {
+            http::StatusCode::OK => Ok(()),
+            _ => Err(SessionError::from(InternalSessionError::UnexpectedStatusCode(
+                response.status(),
+            ))),
+        }
     }
 }
 
@@ -539,35 +566,80 @@ impl PayjoinProposal {
     }
 }
 
+/// The subdirectory for this Payjoin receiver session.
+/// It consists of a directory URL and the session ShortID in the path.
+fn subdir(directory: &Url, id: &ShortId) -> Url {
+    let mut url = directory.clone();
+    {
+        let mut path_segments =
+            url.path_segments_mut().expect("Payjoin Directory URL cannot be a base");
+        path_segments.push(&id.to_string());
+    }
+    url
+}
+
+/// The per-session identifier
+fn id(s: &HpkeKeyPair) -> ShortId {
+    sha256::Hash::hash(&s.public_key().to_compressed_bytes()).into()
+}
+
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
+    use ohttp::hpke::{Aead, Kdf, Kem};
+    use ohttp::{KeyId, SymmetricSuite};
+    use once_cell::sync::Lazy;
+
     use super::*;
 
-    #[test]
-    #[cfg(feature = "v2")]
-    fn receiver_ser_de_roundtrip() {
-        use ohttp::hpke::{Aead, Kdf, Kem};
-        use ohttp::{KeyId, SymmetricSuite};
-        const KEY_ID: KeyId = 1;
-        const KEM: Kem = Kem::K256Sha256;
-        const SYMMETRIC: &[SymmetricSuite] =
-            &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
+    const KEY_ID: KeyId = 1;
+    const KEM: Kem = Kem::K256Sha256;
+    const SYMMETRIC: &[SymmetricSuite] =
+        &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
+    static EXAMPLE_DIRECTORY_URL: Lazy<Url> =
+        Lazy::new(|| Url::parse("https://directory.com").unwrap());
 
-        let session = Receiver {
-            context: SessionContext {
-                address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
-                    .unwrap()
-                    .assume_checked(),
-                directory: url::Url::parse("https://directory.com").unwrap(),
-                subdirectory: None,
-                ohttp_keys: OhttpKeys(
-                    ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap(),
-                ),
-                expiry: SystemTime::now() + Duration::from_secs(60),
-                s: HpkeKeyPair::gen_keypair(),
-                e: None,
-            },
+    static EXAMPLE_OHTTP_RELAY: Lazy<Url> = Lazy::new(|| Url::parse("https://relay.com").unwrap());
+
+    static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
+        address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
+            .unwrap()
+            .assume_checked(),
+        directory: EXAMPLE_DIRECTORY_URL.clone(),
+        subdirectory: None,
+        ohttp_keys: OhttpKeys(ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap()),
+        expiry: SystemTime::now() + Duration::from_secs(60),
+        s: HpkeKeyPair::gen_keypair(),
+        e: None,
+    });
+
+    #[test]
+    fn extract_err_req() -> Result<(), Box<dyn std::error::Error>> {
+        let mut proposal = UncheckedProposal {
+            v1: crate::receive::v1::test::proposal_from_test_vector().unwrap(),
+            context: SHARED_CONTEXT.clone(),
         };
+
+        let server_error = proposal
+            .clone()
+            .check_broadcast_suitability(None, |_| Err(Error::Server("mock error".into())))
+            .err()
+            .unwrap();
+        assert_eq!(
+            server_error.to_json(),
+            "{{ \"errorCode\": \"server-error\", \"message\": \"Internal server error\" }}"
+        );
+        let (_req, _ctx) = proposal.clone().extract_err_req(&server_error, &EXAMPLE_OHTTP_RELAY)?;
+
+        let internal_error = Error::BadRequest(RequestError(InternalRequestError::MissingPayment));
+        let (_req, _ctx) = proposal.extract_err_req(&internal_error, &EXAMPLE_OHTTP_RELAY)?;
+        Ok(())
+    }
+
+    #[test]
+    fn receiver_ser_de_roundtrip() {
+        let session = Receiver { context: SHARED_CONTEXT.clone() };
         let serialized = serde_json::to_string(&session).unwrap();
         let deserialized: Receiver = serde_json::from_str(&serialized).unwrap();
         assert_eq!(session, deserialized);
@@ -575,27 +647,8 @@ mod test {
 
     #[test]
     fn test_v2_pj_uri() {
-        let address = bitcoin::Address::from_str("12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX")
-            .unwrap()
-            .assume_checked();
-        let receiver_keys = crate::hpke::HpkeKeyPair::gen_keypair();
-        let ohttp_keys =
-            OhttpKeys::from_str("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
-                .expect("Invalid OhttpKeys");
-        let arbitrary_url = Url::parse("https://example.com").unwrap();
-        let uri = Receiver {
-            context: SessionContext {
-                address,
-                directory: arbitrary_url.clone(),
-                subdirectory: None,
-                ohttp_keys,
-                expiry: SystemTime::now() + Duration::from_secs(60),
-                s: receiver_keys,
-                e: None,
-            },
-        }
-        .pj_uri();
-        assert_ne!(uri.extras.endpoint, arbitrary_url);
+        let uri = Receiver { context: SHARED_CONTEXT.clone() }.pj_uri();
+        assert_ne!(uri.extras.endpoint, EXAMPLE_DIRECTORY_URL.clone());
         assert!(!uri.extras.disable_output_substitution);
     }
 }

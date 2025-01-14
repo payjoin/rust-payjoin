@@ -7,6 +7,7 @@ use bitcoin::TxIn;
 use bitcoincore_rpc::bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use payjoin::bitcoin::psbt::Psbt;
+use payjoin::bitcoin::FeeRate;
 use payjoin::receive::InputPair;
 use payjoin::{bitcoin, PjUri};
 
@@ -27,18 +28,15 @@ pub trait App {
     where
         Self: Sized;
     fn bitcoind(&self) -> Result<bitcoincore_rpc::Client>;
-    async fn send_payjoin(&self, bip21: &str, fee_rate: &f32) -> Result<()>;
-    async fn receive_payjoin(self, amount_arg: &str) -> Result<()>;
+    async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()>;
+    async fn receive_payjoin(self, amount: Amount) -> Result<()>;
 
-    fn create_original_psbt(&self, uri: &PjUri, fee_rate: &f32) -> Result<Psbt> {
+    fn create_original_psbt(&self, uri: &PjUri, fee_rate: FeeRate) -> Result<Psbt> {
         let amount = uri.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
 
         // wallet_create_funded_psbt requires a HashMap<address: String, Amount>
         let mut outputs = HashMap::with_capacity(1);
         outputs.insert(uri.address.to_string(), amount);
-        let fee_rate_sat_per_kwu = fee_rate * 250.0_f32;
-        let fee_rate: bitcoin::FeeRate =
-            bitcoin::FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64);
         let fee_sat_per_kvb =
             fee_rate.to_sat_per_kwu().checked_mul(4).ok_or(anyhow!("Invalid fee rate"))?;
         let fee_per_kvb = Amount::from_sat(fee_sat_per_kvb);

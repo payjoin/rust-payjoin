@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use app::config::AppConfig;
 use app::App as AppTrait;
 use clap::{arg, value_parser, Arg, ArgMatches, Command};
+use payjoin::bitcoin::amount::ParseAmountError;
+use payjoin::bitcoin::{Amount, FeeRate};
 use url::Url;
 
 mod app;
@@ -23,14 +25,15 @@ async fn main() -> Result<()> {
     match matches.subcommand() {
         Some(("send", sub_matches)) => {
             let bip21 = sub_matches.get_one::<String>("BIP21").context("Missing BIP21 argument")?;
-            let fee_rate_sat_per_vb =
-                sub_matches.get_one::<f32>("fee_rate").context("Missing --fee-rate argument")?;
-            app.send_payjoin(bip21, fee_rate_sat_per_vb).await?;
+            let fee_rate = sub_matches
+                .get_one::<FeeRate>("fee_rate")
+                .context("Missing --fee-rate argument")?;
+            app.send_payjoin(bip21, *fee_rate).await?;
         }
         Some(("receive", sub_matches)) => {
             let amount =
-                sub_matches.get_one::<String>("AMOUNT").context("Missing AMOUNT argument")?;
-            app.receive_payjoin(amount).await?;
+                sub_matches.get_one::<Amount>("AMOUNT").context("Missing AMOUNT argument")?;
+            app.receive_payjoin(*amount).await?;
         }
         #[cfg(feature = "v2")]
         Some(("resume", _)) => {
@@ -98,13 +101,13 @@ fn cli() -> ArgMatches {
                     .long("fee-rate")
                     .value_name("FEE_SAT_PER_VB")
                     .help("Fee rate in sat/vB")
-                    .value_parser(value_parser!(f32)),
+                    .value_parser(parse_feerate_in_sat_per_vb),
             ),
     );
 
     let mut receive_cmd = Command::new("receive")
         .arg_required_else_help(true)
-        .arg(arg!(<AMOUNT> "The amount to receive in satoshis"))
+        .arg(arg!(<AMOUNT> "The amount to receive in satoshis").value_parser(parse_amount_in_sat))
         .arg_required_else_help(true);
 
     #[cfg(feature = "v2")]
@@ -151,4 +154,14 @@ fn cli() -> ArgMatches {
 
     cmd = cmd.subcommand(receive_cmd);
     cmd.get_matches()
+}
+
+fn parse_amount_in_sat(s: &str) -> Result<Amount, ParseAmountError> {
+    Amount::from_str_in(s, payjoin::bitcoin::Denomination::Satoshi)
+}
+
+fn parse_feerate_in_sat_per_vb(s: &str) -> Result<FeeRate, std::num::ParseFloatError> {
+    let fee_rate_sat_per_vb: f32 = s.parse()?;
+    let fee_rate_sat_per_kwu = fee_rate_sat_per_vb * 250.0_f32;
+    Ok(FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64))
 }

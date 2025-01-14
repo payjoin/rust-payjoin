@@ -1,20 +1,32 @@
 use std::error;
 use std::fmt::{self, Display};
 
+/// The top-level error type for the payjoin receiver, representing all possible failures that can occur
+/// during the processing of a payjoin request.
+///
+/// The error handling is designed to:
+/// 1. Provide structured error responses for protocol-level failures
+/// 2. Hide implementation details of external errors for security
+/// 3. Support proper error propagation through the receiver stack
+/// 4. Provide errors according to BIP-78 JSON error specifications for return using [`Error::to_json`]
 #[derive(Debug)]
 pub enum Error {
-    /// To be returned as HTTP 400
-    BadRequest(RequestError),
-    // To be returned as HTTP 500
-    Server(Box<dyn error::Error + Send + Sync>),
+    /// Error arising from the payjoin state machine
+    ///
+    /// e.g. PSBT validation, HTTP request validation, protocol version checks
+    Validation(RequestError),
+    /// Error arising due to the specific receiver implementation
+    ///
+    /// e.g. database errors, network failures, wallet errors
+    Implementation(Box<dyn error::Error + Send + Sync>),
 }
 
 impl Error {
     pub fn to_json(&self) -> String {
         match self {
-            Self::BadRequest(e) => e.to_string(),
-            Self::Server(_) =>
-                "{{ \"errorCode\": \"server-error\", \"message\": \"Internal server error\" }}"
+            Self::Validation(e) => e.to_string(),
+            Self::Implementation(_) =>
+                "{{ \"errorCode\": \"unavailable\", \"message\": \"Receiver error\" }}"
                     .to_string(),
         }
     }
@@ -23,8 +35,8 @@ impl Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
-            Self::BadRequest(e) => e.fmt(f),
-            Self::Server(e) => write!(f, "Internal Server Error: {}", e),
+            Self::Validation(e) => e.fmt(f),
+            Self::Implementation(e) => write!(f, "Internal Server Error: {}", e),
         }
     }
 }
@@ -32,28 +44,28 @@ impl fmt::Display for Error {
 impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
-            Self::BadRequest(_) => None,
-            Self::Server(e) => Some(e.as_ref()),
+            Self::Validation(_) => None,
+            Self::Implementation(e) => Some(e.as_ref()),
         }
     }
 }
 
 impl From<RequestError> for Error {
-    fn from(e: RequestError) -> Self { Error::BadRequest(e) }
+    fn from(e: RequestError) -> Self { Error::Validation(e) }
 }
 
 impl From<InternalRequestError> for Error {
-    fn from(e: InternalRequestError) -> Self { Error::BadRequest(e.into()) }
+    fn from(e: InternalRequestError) -> Self { Error::Validation(e.into()) }
 }
 
 #[cfg(feature = "v2")]
 impl From<crate::hpke::HpkeError> for Error {
-    fn from(e: crate::hpke::HpkeError) -> Self { Error::Server(Box::new(e)) }
+    fn from(e: crate::hpke::HpkeError) -> Self { Error::Implementation(Box::new(e)) }
 }
 
 #[cfg(feature = "v2")]
 impl From<crate::ohttp::OhttpEncapsulationError> for Error {
-    fn from(e: crate::ohttp::OhttpEncapsulationError) -> Self { Error::Server(Box::new(e)) }
+    fn from(e: crate::ohttp::OhttpEncapsulationError) -> Self { Error::Implementation(Box::new(e)) }
 }
 
 /// Error that may occur when the request from sender is malformed.

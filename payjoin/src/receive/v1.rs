@@ -197,15 +197,15 @@ impl MaybeInputsOwned {
             .scan(&mut err, |err, input| match input.previous_txout() {
                 Ok(txout) => Some(txout.script_pubkey.to_owned()),
                 Err(e) => {
-                    **err = Err(Error::BadRequest(InternalRequestError::PrevTxOut(e).into()));
+                    **err = Err(Error::Validation(InternalRequestError::PrevTxOut(e).into()));
                     None
                 }
             })
             .find_map(|script| match is_owned(&script) {
                 Ok(false) => None,
                 Ok(true) =>
-                    Some(Error::BadRequest(InternalRequestError::InputOwned(script).into())),
-                Err(e) => Some(Error::Server(e.into())),
+                    Some(Error::Validation(InternalRequestError::InputOwned(script).into())),
+                Err(e) => Some(Error::Implementation(e.into())),
             })
         {
             return Err(e);
@@ -237,11 +237,11 @@ impl MaybeInputsSeen {
                 Ok(false) => Ok::<(), Error>(()),
                 Ok(true) =>  {
                     log::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
-                    Err(Error::BadRequest(
+                    Err(Error::Validation(
                         InternalRequestError::InputSeen(input.txin.previous_output).into(),
                     ))?
                 },
-                Err(e) => Err(Error::Server(e.into()))?,
+                Err(e) => Err(Error::Implementation(e.into()))?,
             }
         })?;
 
@@ -279,7 +279,7 @@ impl OutputsUnknown {
             .collect::<Result<Vec<_>, _>>()?;
 
         if owned_vouts.is_empty() {
-            return Err(Error::BadRequest(InternalRequestError::MissingPayment.into()));
+            return Err(Error::Validation(InternalRequestError::MissingPayment.into()));
         }
 
         let mut params = self.params.clone();

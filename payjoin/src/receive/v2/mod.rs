@@ -117,7 +117,7 @@ impl Receiver {
     ) -> Result<Option<UncheckedProposal>, Error> {
         let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
             body.try_into().map_err(|_| {
-                Error::Server(Box::new(SessionError::from(
+                Error::Implementation(Box::new(SessionError::from(
                     InternalSessionError::UnexpectedResponseSize(body.len()),
                 )))
             })?;
@@ -510,7 +510,7 @@ impl PayjoinProposal {
                 .context
                 .directory
                 .join(&sender_subdir.to_string())
-                .map_err(|e| Error::Server(e.into()))?;
+                .map_err(|e| Error::Implementation(e.into()))?;
             body = encrypt_message_b(payjoin_bytes, &self.context.s, e)?;
             method = "POST";
         } else {
@@ -521,7 +521,7 @@ impl PayjoinProposal {
                 .context
                 .directory
                 .join(&receiver_subdir.to_string())
-                .map_err(|e| Error::Server(e.into()))?;
+                .map_err(|e| Error::Implementation(e.into()))?;
             method = "PUT";
         }
         log::debug!("Payjoin PSBT target: {}", target_resource.as_str());
@@ -550,7 +550,7 @@ impl PayjoinProposal {
     ) -> Result<(), Error> {
         let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
             res.try_into().map_err(|_| {
-                Error::Server(Box::new(SessionError::from(
+                Error::Implementation(Box::new(SessionError::from(
                     InternalSessionError::UnexpectedResponseSize(res.len()),
                 )))
             })?;
@@ -558,7 +558,7 @@ impl PayjoinProposal {
         if res.status().is_success() {
             Ok(())
         } else {
-            Err(Error::Server(
+            Err(Error::Implementation(
                 format!("Payjoin Post failed, expected Success status, got {}", res.status())
                     .into(),
             ))
@@ -623,16 +623,16 @@ mod test {
 
         let server_error = proposal
             .clone()
-            .check_broadcast_suitability(None, |_| Err(Error::Server("mock error".into())))
+            .check_broadcast_suitability(None, |_| Err(Error::Implementation("mock error".into())))
             .err()
             .unwrap();
         assert_eq!(
             server_error.to_json(),
-            "{{ \"errorCode\": \"server-error\", \"message\": \"Internal server error\" }}"
+            "{{ \"errorCode\": \"unavailable\", \"message\": \"Receiver error\" }}"
         );
         let (_req, _ctx) = proposal.clone().extract_err_req(&server_error, &EXAMPLE_OHTTP_RELAY)?;
 
-        let internal_error = Error::BadRequest(RequestError(InternalRequestError::MissingPayment));
+        let internal_error = Error::Validation(RequestError(InternalRequestError::MissingPayment));
         let (_req, _ctx) = proposal.extract_err_req(&internal_error, &EXAMPLE_OHTTP_RELAY)?;
         Ok(())
     }

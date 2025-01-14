@@ -1,6 +1,5 @@
 mod integration {
     use std::collections::HashMap;
-    use std::env;
     use std::str::FromStr;
 
     use bitcoin::policy::DEFAULT_MIN_RELAY_TX_FEE;
@@ -9,17 +8,13 @@ mod integration {
     use bitcoin::{Amount, FeeRate, OutPoint, TxIn, TxOut, Weight};
     use bitcoind::bitcoincore_rpc::json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
-    use log::{log_enabled, Level};
-    use once_cell::sync::{Lazy, OnceCell};
+    use once_cell::sync::Lazy;
     use payjoin::receive::v1::build_v1_pj_uri;
     use payjoin::receive::InputPair;
     use payjoin::{PjUri, Request, Uri};
-    use tracing_subscriber::{EnvFilter, FmtSubscriber};
+    use payjoin_test_utils::{init_bitcoind_sender_receiver, init_tracing, BoxError};
     use url::Url;
 
-    type BoxError = Box<dyn std::error::Error + 'static>;
-
-    static INIT_TRACING: OnceCell<()> = OnceCell::new();
     static EXAMPLE_URL: Lazy<Url> =
         Lazy::new(|| Url::parse("https://example.com").expect("Invalid Url"));
 
@@ -178,16 +173,14 @@ mod integration {
         use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
         use payjoin::send::v2::SenderBuilder;
         use payjoin::{OhttpKeys, PjUri, UriExt};
-        use reqwest::{Client, ClientBuilder, Error, Response};
+        use payjoin_test_utils::{
+            http_agent, init_directory, local_cert_key, wait_for_service_ready,
+        };
+        use reqwest::{Client, Error, Response};
         use testcontainers_modules::redis::Redis;
         use testcontainers_modules::testcontainers::clients::Cli;
 
         use super::*;
-
-        type BoxSendSyncError = Box<dyn std::error::Error + Send + Sync>;
-
-        static TESTS_TIMEOUT: Lazy<Duration> = Lazy::new(|| Duration::from_secs(20));
-        static WAIT_SERVICE_INTERVAL: Lazy<Duration> = Lazy::new(|| Duration::from_secs(3));
 
         #[tokio::test]
         async fn test_bad_ohttp_keys() {
@@ -810,29 +803,6 @@ mod integration {
             }
         }
 
-        async fn init_directory(
-            db_host: String,
-            local_cert_key: (Vec<u8>, Vec<u8>),
-        ) -> Result<(u16, tokio::task::JoinHandle<Result<(), BoxSendSyncError>>), BoxSendSyncError>
-        {
-            println!("Database running on {}", db_host);
-            let timeout = Duration::from_secs(2);
-            payjoin_directory::listen_tcp_with_tls_on_free_port(db_host, timeout, local_cert_key)
-                .await
-        }
-
-        // generates or gets a DER encoded localhost cert and key.
-        fn local_cert_key() -> (Vec<u8>, Vec<u8>) {
-            let cert = rcgen::generate_simple_self_signed(vec![
-                "0.0.0.0".to_string(),
-                "localhost".to_string(),
-            ])
-            .expect("Failed to generate cert");
-            let cert_der = cert.serialize_der().expect("Failed to serialize cert");
-            let key_der = cert.serialize_private_key_der();
-            (cert_der, key_der)
-        }
-
         fn handle_directory_proposal(
             receiver: &bitcoincore_rpc::Client,
             proposal: UncheckedProposal,
@@ -913,39 +883,6 @@ mod integration {
                     FeeRate::from_sat_per_vb_unchecked(2),
                 )
                 .unwrap()
-        }
-
-        fn http_agent(cert_der: Vec<u8>) -> Result<Client, BoxError> {
-            Ok(http_agent_builder(cert_der)?.build()?)
-        }
-
-        fn http_agent_builder(cert_der: Vec<u8>) -> Result<ClientBuilder, BoxError> {
-            Ok(ClientBuilder::new()
-                .danger_accept_invalid_certs(true)
-                .use_rustls_tls()
-                .add_root_certificate(
-                    reqwest::tls::Certificate::from_der(cert_der.as_slice()).unwrap(),
-                ))
-        }
-
-        async fn wait_for_service_ready(
-            service_url: Url,
-            agent: Arc<Client>,
-        ) -> Result<(), &'static str> {
-            let health_url = service_url.join("/health").map_err(|_| "Invalid URL")?;
-            let start = std::time::Instant::now();
-
-            while start.elapsed() < *TESTS_TIMEOUT {
-                let request_result =
-                    agent.get(health_url.as_str()).send().await.map_err(|_| "Bad request")?;
-                match request_result.status() {
-                    StatusCode::OK => return Ok(()),
-                    StatusCode::NOT_FOUND => return Err("Endpoint not found"),
-                    _ => std::thread::sleep(*WAIT_SERVICE_INTERVAL),
-                }
-            }
-
-            Err("Timeout waiting for service to be ready")
         }
 
         fn build_sweep_psbt(
@@ -1153,50 +1090,6 @@ mod integration {
             assert_eq!(sender.get_balances()?.mine.trusted, Amount::from_btc(49.0)? - sender_fee);
             Ok(())
         }
-    }
-
-    fn init_tracing() {
-        INIT_TRACING.get_or_init(|| {
-            let subscriber = FmtSubscriber::builder()
-                .with_env_filter(EnvFilter::from_default_env())
-                .with_test_writer()
-                .finish();
-
-            tracing::subscriber::set_global_default(subscriber)
-                .expect("failed to set global default subscriber");
-        });
-    }
-
-    fn init_bitcoind_sender_receiver(
-        sender_address_type: Option<AddressType>,
-        receiver_address_type: Option<AddressType>,
-    ) -> Result<(bitcoind::BitcoinD, bitcoincore_rpc::Client, bitcoincore_rpc::Client), BoxError>
-    {
-        let bitcoind_exe =
-            env::var("BITCOIND_EXE").ok().or_else(|| bitcoind::downloaded_exe_path().ok()).unwrap();
-        let mut conf = bitcoind::Conf::default();
-        conf.view_stdout = log_enabled!(Level::Debug);
-        let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &conf)?;
-        let receiver = bitcoind.create_wallet("receiver")?;
-        let receiver_address =
-            receiver.get_new_address(None, receiver_address_type)?.assume_checked();
-        let sender = bitcoind.create_wallet("sender")?;
-        let sender_address = sender.get_new_address(None, sender_address_type)?.assume_checked();
-        bitcoind.client.generate_to_address(1, &receiver_address)?;
-        bitcoind.client.generate_to_address(101, &sender_address)?;
-
-        assert_eq!(
-            Amount::from_btc(50.0)?,
-            receiver.get_balances()?.mine.trusted,
-            "receiver doesn't own bitcoin"
-        );
-
-        assert_eq!(
-            Amount::from_btc(50.0)?,
-            sender.get_balances()?.mine.trusted,
-            "sender doesn't own bitcoin"
-        );
-        Ok((bitcoind, sender, receiver))
     }
 
     fn build_original_psbt(

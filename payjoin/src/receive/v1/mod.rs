@@ -25,9 +25,8 @@
 //! [reference implementation](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli)
 
 use std::cmp::{max, min};
+use std::str::FromStr;
 
-use bitcoin::base64::prelude::BASE64_STANDARD;
-use bitcoin::base64::Engine;
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::rand::seq::SliceRandom;
 use bitcoin::secp256k1::rand::{self, Rng};
@@ -102,8 +101,8 @@ impl UncheckedProposal {
         // enforce the limit
         let mut buf = vec![0; content_length as usize]; // 4_000_000 * 4 / 3 fits in u32
         body.read_exact(&mut buf).map_err(InternalRequestError::Io)?;
-        let base64 = BASE64_STANDARD.decode(&buf).map_err(InternalRequestError::Base64)?;
-        let unchecked_psbt = Psbt::deserialize(&base64).map_err(InternalRequestError::Psbt)?;
+        let base64 = String::from_utf8(buf).map_err(InternalPayloadError::Utf8)?;
+        let unchecked_psbt = Psbt::from_str(&base64).map_err(InternalPayloadError::ParsePsbt)?;
 
         let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
         log::debug!("Received original psbt: {:?}", psbt);

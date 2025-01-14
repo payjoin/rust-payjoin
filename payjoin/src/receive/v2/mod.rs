@@ -151,7 +151,7 @@ impl Receiver {
     fn extract_proposal_from_v2(&mut self, response: Vec<u8>) -> Result<UncheckedProposal, Error> {
         let (payload_bytes, e) = decrypt_message_a(&response, self.context.s.secret_key().clone())?;
         self.context.e = Some(e);
-        let payload = String::from_utf8(payload_bytes).map_err(InternalRequestError::Utf8)?;
+        let payload = String::from_utf8(payload_bytes).map_err(InternalPayloadError::Utf8)?;
         self.unchecked_from_payload(payload)
     }
 
@@ -159,7 +159,7 @@ impl Receiver {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
         log::trace!("Received query: {}, base64: {}", query, base64); // my guess is no \n so default is wrong
-        let unchecked_psbt = Psbt::from_str(base64).map_err(InternalRequestError::ParsePsbt)?;
+        let unchecked_psbt = Psbt::from_str(base64).map_err(InternalPayloadError::ParsePsbt)?;
         let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
         log::debug!("Received original psbt: {:?}", psbt);
         let mut params = Params::from_query_pairs(

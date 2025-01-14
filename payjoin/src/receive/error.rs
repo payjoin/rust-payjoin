@@ -113,6 +113,19 @@ impl std::error::Error for ValidationError {
     }
 }
 
+/// An error that occurs during validation of the original PSBT payload sent by the sender.
+///
+/// This type provides a public abstraction over internal validation errors while maintaining a stable public API.
+/// It handles various failure modes like:
+/// - Invalid UTF-8 encoding
+/// - PSBT parsing errors
+/// - BIP-78 specific PSBT validation failures
+/// - Fee rate validation
+/// - Input ownership validation
+/// - Previous transaction output validation
+///
+/// The error messages are formatted as JSON strings suitable for HTTP responses according to the BIP-78 spec,
+/// with appropriate error codes and human-readable messages.
 #[derive(Debug)]
 pub struct PayloadError(pub(crate) InternalPayloadError);
 
@@ -122,6 +135,11 @@ impl From<InternalPayloadError> for PayloadError {
 
 #[derive(Debug)]
 pub(crate) enum InternalPayloadError {
+    /// The payload is not valid utf-8
+    Utf8(std::string::FromUtf8Error),
+    /// The payload is not a valid PSBT
+    ParsePsbt(bitcoin::psbt::PsbtParseError),
+    /// Invalid sender parameters
     SenderParams(super::optional_parameters::Error),
     /// The raw PSBT fails bip78-specific validation.
     InconsistentPsbt(crate::psbt::InconsistentPsbt),
@@ -163,6 +181,8 @@ impl fmt::Display for PayloadError {
         }
 
         match &self.0 {
+            Utf8(e) => write_error(f, "original-psbt-rejected", e),
+            ParsePsbt(e) => write_error(f, "original-psbt-rejected", e),
             SenderParams(e) => match e {
                 super::optional_parameters::Error::UnknownVersion { supported_versions } => {
                     write!(
@@ -216,6 +236,8 @@ impl std::error::Error for PayloadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         use InternalPayloadError::*;
         match &self.0 {
+            Utf8(e) => Some(e),
+            ParsePsbt(e) => Some(e),
             SenderParams(e) => Some(e),
             InconsistentPsbt(e) => Some(e),
             PrevTxOut(e) => Some(e),

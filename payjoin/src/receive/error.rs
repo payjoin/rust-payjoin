@@ -75,7 +75,7 @@ pub enum ValidationError {
     V1(v1::RequestError),
     /// Protocol-specific errors for BIP-77 v2 sessions (e.g. session management, OHTTP, HPKE encryption)
     #[cfg(feature = "v2")]
-    V2(v2::RequestError),
+    V2(v2::SessionError),
 }
 
 impl From<InternalPayloadError> for ValidationError {
@@ -87,8 +87,8 @@ impl From<v1::InternalRequestError> for ValidationError {
 }
 
 #[cfg(feature = "v2")]
-impl From<v2::InternalRequestError> for ValidationError {
-    fn from(e: v2::InternalRequestError) -> Self { ValidationError::V2(e.into()) }
+impl From<v2::InternalSessionError> for ValidationError {
+    fn from(e: v2::InternalSessionError) -> Self { ValidationError::V2(e.into()) }
 }
 
 impl fmt::Display for ValidationError {

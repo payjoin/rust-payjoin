@@ -4,8 +4,8 @@ use std::time::{Duration, SystemTime};
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
-pub(crate) use error::{InternalRequestError, InternalSessionError};
-pub use error::{RequestError, SessionError};
+pub(crate) use error::InternalSessionError;
+pub use error::SessionError;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -96,7 +96,7 @@ impl Receiver {
     pub fn extract_req(
         &mut self,
         ohttp_relay: &Url,
-    ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
+    ) -> Result<(Request, ohttp::ClientResponse), Error> {
         if SystemTime::now() > self.context.expiry {
             return Err(InternalSessionError::Expired(self.context.expiry).into());
         }
@@ -116,9 +116,7 @@ impl Receiver {
     ) -> Result<Option<UncheckedProposal>, Error> {
         let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
             body.try_into().map_err(|_| {
-                Error::Implementation(Box::new(SessionError::from(
-                    InternalSessionError::UnexpectedResponseSize(body.len()),
-                )))
+                Error::Validation(InternalSessionError::UnexpectedResponseSize(body.len()).into())
             })?;
         log::trace!("decapsulating directory response");
         let response = ohttp_decapsulate(context, response_array)?;
@@ -279,17 +277,15 @@ impl UncheckedProposal {
         body: &[u8],
         context: ohttp::ClientResponse,
     ) -> Result<(), SessionError> {
-        let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
-            body.try_into().map_err(|_| {
-                SessionError::from(InternalSessionError::UnexpectedResponseSize(body.len()))
-            })?;
-        let response = ohttp_decapsulate(context, response_array)?;
+        let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] = body
+            .try_into()
+            .map_err(|_| InternalSessionError::UnexpectedResponseSize(body.len()))?;
+        let response = ohttp_decapsulate(context, response_array)
+            .map_err(InternalSessionError::OhttpEncapsulation)?;
 
         match response.status() {
             http::StatusCode::OK => Ok(()),
-            _ => Err(SessionError::from(InternalSessionError::UnexpectedStatusCode(
-                response.status(),
-            ))),
+            _ => Err(InternalSessionError::UnexpectedStatusCode(response.status()).into()),
         }
     }
 }
@@ -546,9 +542,7 @@ impl PayjoinProposal {
     ) -> Result<(), Error> {
         let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
             res.try_into().map_err(|_| {
-                Error::Implementation(Box::new(SessionError::from(
-                    InternalSessionError::UnexpectedResponseSize(res.len()),
-                )))
+                Error::Validation(InternalSessionError::UnexpectedResponseSize(res.len()).into())
             })?;
         let res = ohttp_decapsulate(ohttp_context, response_array)?;
         if res.status().is_success() {

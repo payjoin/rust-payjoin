@@ -7,8 +7,9 @@ use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v2::{Receiver, UncheckedProposal};
+use payjoin::receive::Error;
 use payjoin::send::v2::{Sender, SenderBuilder};
-use payjoin::{bitcoin, Error, Uri};
+use payjoin::{bitcoin, Uri};
 use tokio::signal;
 use tokio::sync::watch;
 

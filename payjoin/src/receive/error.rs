@@ -244,7 +244,10 @@ impl std::error::Error for PayloadError {
             InputWeight(e) => Some(e),
             PsbtBelowFeeRate(_, _) => None,
             FeeTooHigh(_, _) => None,
-            _ => None,
+            MissingPayment => None,
+            OriginalPsbtNotBroadcastable => None,
+            InputOwned(_) => None,
+            InputSeen(_) => None,
         }
     }
 }

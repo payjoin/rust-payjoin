@@ -13,17 +13,45 @@ pub(crate) struct DbPool {
     timeout: Duration,
 }
 
+/// Errors pertaining to [`DbPool`]
+#[derive(Debug)]
+pub(crate) enum Error {
+    Redis(RedisError),
+    Timeout(tokio::time::error::Elapsed),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Error::*;
+
+        match &self {
+            Redis(error) => write!(f, "Redis error: {}", error),
+            Timeout(timeout) => write!(f, "Timeout: {}", timeout),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::Redis(e) => Some(e),
+            Error::Timeout(e) => Some(e),
+        }
+    }
+}
+
 impl DbPool {
     pub async fn new(timeout: Duration, db_host: String) -> RedisResult<Self> {
         let client = Client::open(format!("redis://{}", db_host))?;
         Ok(Self { client, timeout })
     }
 
+    /// Peek using [`DEFAULT_COLUMN`] as the channel type.
     pub async fn push_default(&self, subdirectory_id: &str, data: Vec<u8>) -> RedisResult<()> {
         self.push(subdirectory_id, DEFAULT_COLUMN, data).await
     }
 
-    pub async fn peek_default(&self, subdirectory_id: &str) -> Option<RedisResult<Vec<u8>>> {
+    pub async fn peek_default(&self, subdirectory_id: &str) -> Result<Vec<u8>, Error> {
         self.peek_with_timeout(subdirectory_id, DEFAULT_COLUMN).await
     }
 
@@ -31,7 +59,8 @@ impl DbPool {
         self.push(subdirectory_id, PJ_V1_COLUMN, data).await
     }
 
-    pub async fn peek_v1(&self, subdirectory_id: &str) -> Option<RedisResult<Vec<u8>>> {
+    /// Peek using [`PJ_V1_COLUMN`] as the channel type.
+    pub async fn peek_v1(&self, subdirectory_id: &str) -> Result<Vec<u8>, Error> {
         self.peek_with_timeout(subdirectory_id, PJ_V1_COLUMN).await
     }
 
@@ -52,8 +81,14 @@ impl DbPool {
         &self,
         subdirectory_id: &str,
         channel_type: &str,
-    ) -> Option<RedisResult<Vec<u8>>> {
-        tokio::time::timeout(self.timeout, self.peek(subdirectory_id, channel_type)).await.ok()
+    ) -> Result<Vec<u8>, Error> {
+        match tokio::time::timeout(self.timeout, self.peek(subdirectory_id, channel_type)).await {
+            Ok(redis_result) => match redis_result {
+                Ok(result) => Ok(result),
+                Err(redis_err) => Err(Error::Redis(redis_err)),
+            },
+            Err(elapsed) => Err(Error::Timeout(elapsed)),
+        }
     }
 
     async fn peek(&self, subdirectory_id: &str, channel_type: &str) -> RedisResult<Vec<u8>> {

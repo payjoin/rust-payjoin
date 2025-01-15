@@ -406,7 +406,7 @@ fn serialize_url(
     let mut url = endpoint;
     url.query_pairs_mut().append_pair("v", version);
     if disable_output_substitution {
-        url.query_pairs_mut().append_pair("disableoutputsubstitution", "1");
+        url.query_pairs_mut().append_pair("disableoutputsubstitution", "true");
     }
     if let Some((amount, index)) = fee_contribution {
         url.query_pairs_mut()
@@ -427,7 +427,9 @@ pub(crate) mod test {
 
     use bitcoin::psbt::Psbt;
     use bitcoin::FeeRate;
+    use url::Url;
 
+    use super::serialize_url;
     use crate::psbt::PsbtExt;
 
     pub(crate) const ORIGINAL_PSBT: &str = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
@@ -483,5 +485,18 @@ pub(crate) mod test {
         proposal.unsigned_tx.output[0].value -= bitcoin::Amount::from_btc(0.5).unwrap();
         proposal.unsigned_tx.output[1].value += bitcoin::Amount::from_btc(0.5).unwrap();
         ctx.process_proposal(proposal).unwrap();
+    }
+
+    #[test]
+    fn test_disable_output_substitution_query_param() {
+        let url =
+            serialize_url(Url::parse("http://localhost").unwrap(), true, None, FeeRate::ZERO, "2")
+                .unwrap();
+        assert_eq!(url, Url::parse("http://localhost?v=2&disableoutputsubstitution=true").unwrap());
+
+        let url =
+            serialize_url(Url::parse("http://localhost").unwrap(), false, None, FeeRate::ZERO, "2")
+                .unwrap();
+        assert_eq!(url, Url::parse("http://localhost?v=2").unwrap());
     }
 }

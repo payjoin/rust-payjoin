@@ -71,7 +71,9 @@ impl error::Error for RequestError {
             InternalRequestError::Psbt(e) => Some(e),
             InternalRequestError::Io(e) => Some(e),
             InternalRequestError::InvalidContentLength(e) => Some(e),
-            _ => None,
+            InternalRequestError::MissingHeader(_) => None,
+            InternalRequestError::InvalidContentType(_) => None,
+            InternalRequestError::ContentLengthTooLarge(_) => None,
         }
     }
 }

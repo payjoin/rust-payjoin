@@ -644,7 +644,7 @@ mod integration {
                             .unwrap())
                     },
                     Some(FeeRate::BROADCAST_MIN),
-                    FeeRate::from_sat_per_vb_unchecked(2),
+                    Some(FeeRate::from_sat_per_vb_unchecked(2)),
                 )
                 .unwrap()
         }
@@ -982,7 +982,7 @@ mod integration {
                     .unwrap())
             },
             Some(FeeRate::BROADCAST_MIN),
-            FeeRate::from_sat_per_vb_unchecked(2),
+            Some(FeeRate::from_sat_per_vb_unchecked(2)),
         )?;
         Ok(payjoin_proposal)
     }

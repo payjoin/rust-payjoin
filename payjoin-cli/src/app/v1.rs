@@ -375,7 +375,7 @@ impl App {
                     .map_err(|e| Error::Implementation(e.into()))?
             },
             None,
-            self.config.max_fee_rate.unwrap_or(FeeRate::ZERO),
+            self.config.max_fee_rate,
         )?;
         Ok(payjoin_proposal)
     }

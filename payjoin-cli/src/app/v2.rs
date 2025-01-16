@@ -323,7 +323,7 @@ impl App {
                     .map_err(|e| Error::Implementation(e.into()))?
             },
             None,
-            self.config.max_fee_rate.unwrap_or(FeeRate::ZERO),
+            self.config.max_fee_rate,
         )?;
         let payjoin_proposal_psbt = payjoin_proposal.psbt();
         log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);

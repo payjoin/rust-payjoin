@@ -571,19 +571,25 @@ impl ProvisionalProposal {
     /// Apply additional fee contribution now that the receiver has contributed input
     /// this is kind of a "build_proposal" step before we sign and finalize and extract
     ///
-    /// max_feerate is the maximum effective feerate that the receiver is willing to pay for their
-    /// own input/output contributions. A max_feerate of zero indicates that the receiver is not
-    /// willing to pay any additional fees.
+    /// max_feerate is the maximum effective feerate that the receiver is
+    /// willing to pay for their own input/output contributions. A max_feerate
+    /// of zero indicates that the receiver is not willing to pay any additional
+    /// fees.
+    ///
+    /// If not provided, min_feerate and max_effective_feerate default to the
+    /// minimum relay fee, as defined by [`FeeRate::BROADCAST_MIN`].
     fn apply_fee(
         &mut self,
         min_feerate: Option<FeeRate>,
-        max_feerate: FeeRate,
+        max_effective_feerate: Option<FeeRate>,
     ) -> Result<&Psbt, InternalPayloadError> {
         let min_feerate = min_feerate.unwrap_or(FeeRate::BROADCAST_MIN);
         log::trace!("min_feerate: {:?}", min_feerate);
         log::trace!("params.min_feerate: {:?}", self.params.min_feerate);
         let min_feerate = max(min_feerate, self.params.min_feerate);
         log::debug!("min_feerate: {:?}", min_feerate);
+
+        let max_feerate = max_effective_feerate.unwrap_or(FeeRate::BROADCAST_MIN);
 
         // If the sender specified a fee contribution, the receiver is allowed to decrease the
         // sender's fee output to pay for additional input fees. Any fees in excess of
@@ -740,10 +746,10 @@ impl ProvisionalProposal {
     pub fn finalize_proposal(
         mut self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, Error>,
-        min_feerate_sat_per_vb: Option<FeeRate>,
-        max_feerate_sat_per_vb: FeeRate,
+        min_fee_rate: Option<FeeRate>,
+        max_effective_fee_rate: Option<FeeRate>,
     ) -> Result<PayjoinProposal, Error> {
-        let mut psbt = self.apply_fee(min_feerate_sat_per_vb, max_feerate_sat_per_vb)?.clone();
+        let mut psbt = self.apply_fee(min_fee_rate, max_effective_fee_rate)?.clone();
         // Remove now-invalid sender signatures before applying the receiver signatures
         for i in self.sender_input_indexes() {
             log::trace!("Clearing sender input {}", i);
@@ -811,7 +817,7 @@ pub(crate) mod test {
     fn unchecked_proposal_unlocks_after_checks() {
         let proposal = proposal_from_test_vector().unwrap();
         assert_eq!(proposal.psbt_fee_rate().unwrap().to_sat_per_vb_floor(), 2);
-        let mut payjoin = proposal
+        let payjoin = proposal
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| Ok(false))
             .expect("No inputs should be owned")
@@ -829,9 +835,16 @@ pub(crate) mod test {
             .commit_outputs()
             .commit_inputs();
 
-        let payjoin = payjoin.apply_fee(None, FeeRate::ZERO);
-
-        assert!(payjoin.is_ok(), "Payjoin should be a valid PSBT");
+        {
+            let mut payjoin = payjoin.clone();
+            let psbt = payjoin.apply_fee(None, None);
+            assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
+        }
+        {
+            let mut payjoin = payjoin.clone();
+            let psbt = payjoin.apply_fee(None, Some(FeeRate::ZERO));
+            assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
+        }
     }
 
     #[test]
@@ -866,9 +879,9 @@ pub(crate) mod test {
             .expect("Failed to contribute inputs")
             .commit_inputs();
         let mut payjoin_clone = payjoin.clone();
-        let psbt = payjoin.apply_fee(None, FeeRate::from_sat_per_vb_unchecked(1000));
+        let psbt = payjoin.apply_fee(None, Some(FeeRate::from_sat_per_vb_unchecked(1000)));
         assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
-        let psbt = payjoin_clone.apply_fee(None, FeeRate::from_sat_per_vb_unchecked(995));
+        let psbt = payjoin_clone.apply_fee(None, Some(FeeRate::from_sat_per_vb_unchecked(995)));
         assert!(psbt.is_err(), "Payjoin exceeds receiver fee preference and should error");
     }
 

@@ -7,8 +7,9 @@ use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v2::{Receiver, UncheckedProposal};
+use payjoin::receive::Error;
 use payjoin::send::v2::{Sender, SenderBuilder};
-use payjoin::{bitcoin, Error, Uri};
+use payjoin::{bitcoin, Uri};
 use tokio::signal;
 use tokio::sync::watch;
 
@@ -251,21 +252,23 @@ impl App {
         &self,
         proposal: payjoin::receive::v2::UncheckedProposal,
     ) -> Result<payjoin::receive::v2::PayjoinProposal, Error> {
-        let bitcoind = self.bitcoind().map_err(|e| Error::Server(e.into()))?;
+        let bitcoind = self.bitcoind().map_err(|e| Error::Implementation(e.into()))?;
 
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // The network is used for checks later
-        let network = bitcoind.get_blockchain_info().map_err(|e| Error::Server(e.into()))?.chain;
+        let network =
+            bitcoind.get_blockchain_info().map_err(|e| Error::Implementation(e.into()))?.chain;
         // Receive Check 1: Can Broadcast
         let proposal = proposal.check_broadcast_suitability(None, |tx| {
             let raw_tx = bitcoin::consensus::encode::serialize_hex(&tx);
-            let mempool_results =
-                bitcoind.test_mempool_accept(&[raw_tx]).map_err(|e| Error::Server(e.into()))?;
+            let mempool_results = bitcoind
+                .test_mempool_accept(&[raw_tx])
+                .map_err(|e| Error::Implementation(e.into()))?;
             match mempool_results.first() {
                 Some(result) => Ok(result.allowed),
-                None => Err(Error::Server(
+                None => Err(Error::Implementation(
                     anyhow!("No mempool results returned on broadcast check").into(),
                 )),
             }
@@ -278,7 +281,7 @@ impl App {
                 bitcoind
                     .get_address_info(&address)
                     .map(|info| info.is_mine.unwrap_or(false))
-                    .map_err(|e| Error::Server(e.into()))
+                    .map_err(|e| Error::Implementation(e.into()))
             } else {
                 Ok(false)
             }
@@ -287,7 +290,7 @@ impl App {
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let payjoin = proposal.check_no_inputs_seen_before(|input| {
-            self.db.insert_input_seen_before(*input).map_err(|e| Error::Server(e.into()))
+            self.db.insert_input_seen_before(*input).map_err(|e| Error::Implementation(e.into()))
         })?;
         log::trace!("check3");
 
@@ -297,7 +300,7 @@ impl App {
                     bitcoind
                         .get_address_info(&address)
                         .map(|info| info.is_mine.unwrap_or(false))
-                        .map_err(|e| Error::Server(e.into()))
+                        .map_err(|e| Error::Implementation(e.into()))
                 } else {
                     Ok(false)
                 }
@@ -314,12 +317,15 @@ impl App {
             |psbt: &Psbt| {
                 bitcoind
                     .wallet_process_psbt(&psbt.to_string(), None, None, Some(false))
-                    .map(|res| Psbt::from_str(&res.psbt).map_err(|e| Error::Server(e.into())))
-                    .map_err(|e| Error::Server(e.into()))?
+                    .map(|res| {
+                        Psbt::from_str(&res.psbt).map_err(|e| Error::Implementation(e.into()))
+                    })
+                    .map_err(|e| Error::Implementation(e.into()))?
             },
             Some(bitcoin::FeeRate::MIN),
             self.config.max_fee_rate.map_or(Ok(FeeRate::ZERO), |fee_rate| {
-                FeeRate::from_sat_per_vb(fee_rate).ok_or(Error::Server("Invalid fee rate".into()))
+                FeeRate::from_sat_per_vb(fee_rate)
+                    .ok_or(Error::Implementation("Invalid fee rate".into()))
             })?,
         )?;
         let payjoin_proposal_psbt = payjoin_proposal.psbt();

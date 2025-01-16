@@ -25,23 +25,25 @@
 //! [reference implementation](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli)
 
 use std::cmp::{max, min};
+use std::str::FromStr;
 
-use bitcoin::base64::prelude::BASE64_STANDARD;
-use bitcoin::base64::Engine;
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::rand::seq::SliceRandom;
 use bitcoin::secp256k1::rand::{self, Rng};
 use bitcoin::{Amount, FeeRate, OutPoint, Script, TxIn, TxOut, Weight};
+pub(crate) use error::InternalRequestError;
+pub use error::RequestError;
 
 use super::error::{
-    InternalInputContributionError, InternalOutputSubstitutionError, InternalRequestError,
+    InputContributionError, InternalInputContributionError, InternalOutputSubstitutionError,
     InternalSelectionError,
 };
 use super::optional_parameters::Params;
-use super::{
-    Error, InputContributionError, InputPair, OutputSubstitutionError, RequestError, SelectionError,
-};
+use super::{Error, InputPair, OutputSubstitutionError, SelectionError};
 use crate::psbt::PsbtExt;
+use crate::receive::InternalPayloadError;
+
+mod error;
 
 const SUPPORTED_VERSIONS: &[usize] = &[1];
 
@@ -79,7 +81,7 @@ impl UncheckedProposal {
         mut body: impl std::io::Read,
         query: &str,
         headers: impl Headers,
-    ) -> Result<Self, RequestError> {
+    ) -> Result<Self, Error> {
         let content_type = headers
             .get_header("content-type")
             .ok_or(InternalRequestError::MissingHeader("Content-Type"))?;
@@ -99,15 +101,15 @@ impl UncheckedProposal {
         // enforce the limit
         let mut buf = vec![0; content_length as usize]; // 4_000_000 * 4 / 3 fits in u32
         body.read_exact(&mut buf).map_err(InternalRequestError::Io)?;
-        let base64 = BASE64_STANDARD.decode(&buf).map_err(InternalRequestError::Base64)?;
-        let unchecked_psbt = Psbt::deserialize(&base64).map_err(InternalRequestError::Psbt)?;
+        let base64 = String::from_utf8(buf).map_err(InternalPayloadError::Utf8)?;
+        let unchecked_psbt = Psbt::from_str(&base64).map_err(InternalPayloadError::ParsePsbt)?;
 
-        let psbt = unchecked_psbt.validate().map_err(InternalRequestError::InconsistentPsbt)?;
+        let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
         log::debug!("Received original psbt: {:?}", psbt);
 
         let pairs = url::form_urlencoded::parse(query.as_bytes());
         let params = Params::from_query_pairs(pairs, SUPPORTED_VERSIONS)
-            .map_err(InternalRequestError::SenderParams)?;
+            .map_err(InternalPayloadError::SenderParams)?;
         log::debug!("Received request with params: {:?}", params);
 
         // TODO check that params are valid for the request's Original PSBT
@@ -120,7 +122,7 @@ impl UncheckedProposal {
         self.psbt.clone().extract_tx_unchecked_fee_rate()
     }
 
-    fn psbt_fee_rate(&self) -> Result<FeeRate, Error> {
+    fn psbt_fee_rate(&self) -> Result<FeeRate, InternalRequestError> {
         let original_psbt_fee = self.psbt.fee().map_err(InternalRequestError::Psbt)?;
         Ok(original_psbt_fee / self.extract_tx_to_schedule_broadcast().weight())
     }
@@ -148,7 +150,7 @@ impl UncheckedProposal {
         let original_psbt_fee_rate = self.psbt_fee_rate()?;
         if let Some(min_fee_rate) = min_fee_rate {
             if original_psbt_fee_rate < min_fee_rate {
-                return Err(InternalRequestError::PsbtBelowFeeRate(
+                return Err(InternalPayloadError::PsbtBelowFeeRate(
                     original_psbt_fee_rate,
                     min_fee_rate,
                 )
@@ -158,7 +160,7 @@ impl UncheckedProposal {
         if can_broadcast(&self.psbt.clone().extract_tx_unchecked_fee_rate())? {
             Ok(MaybeInputsOwned { psbt: self.psbt, params: self.params })
         } else {
-            Err(InternalRequestError::OriginalPsbtNotBroadcastable.into())
+            Err(InternalPayloadError::OriginalPsbtNotBroadcastable.into())
         }
     }
 
@@ -197,15 +199,15 @@ impl MaybeInputsOwned {
             .scan(&mut err, |err, input| match input.previous_txout() {
                 Ok(txout) => Some(txout.script_pubkey.to_owned()),
                 Err(e) => {
-                    **err = Err(Error::BadRequest(InternalRequestError::PrevTxOut(e).into()));
+                    **err = Err(Error::Validation(InternalPayloadError::PrevTxOut(e).into()));
                     None
                 }
             })
             .find_map(|script| match is_owned(&script) {
                 Ok(false) => None,
                 Ok(true) =>
-                    Some(Error::BadRequest(InternalRequestError::InputOwned(script).into())),
-                Err(e) => Some(Error::Server(e.into())),
+                    Some(Error::Validation(InternalPayloadError::InputOwned(script).into())),
+                Err(e) => Some(Error::Implementation(e.into())),
             })
         {
             return Err(e);
@@ -237,11 +239,11 @@ impl MaybeInputsSeen {
                 Ok(false) => Ok::<(), Error>(()),
                 Ok(true) =>  {
                     log::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
-                    Err(Error::BadRequest(
-                        InternalRequestError::InputSeen(input.txin.previous_output).into(),
+                    Err(Error::Validation(
+                        InternalPayloadError::InputSeen(input.txin.previous_output).into(),
                     ))?
                 },
-                Err(e) => Err(Error::Server(e.into()))?,
+                Err(e) => Err(Error::Implementation(e.into()))?,
             }
         })?;
 
@@ -279,7 +281,7 @@ impl OutputsUnknown {
             .collect::<Result<Vec<_>, _>>()?;
 
         if owned_vouts.is_empty() {
-            return Err(Error::BadRequest(InternalRequestError::MissingPayment.into()));
+            return Err(Error::Validation(InternalPayloadError::MissingPayment.into()));
         }
 
         let mut params = self.params.clone();
@@ -677,7 +679,7 @@ impl ProvisionalProposal {
         &mut self,
         min_feerate: Option<FeeRate>,
         max_feerate: FeeRate,
-    ) -> Result<&Psbt, RequestError> {
+    ) -> Result<&Psbt, InternalPayloadError> {
         let min_feerate = min_feerate.unwrap_or(FeeRate::MIN);
         log::trace!("min_feerate: {:?}", min_feerate);
         log::trace!("params.min_feerate: {:?}", self.params.min_feerate);
@@ -734,7 +736,7 @@ impl ProvisionalProposal {
         if receiver_additional_fee > max_fee {
             let proposed_feerate =
                 receiver_additional_fee / (input_contribution_weight + output_contribution_weight);
-            return Err(InternalRequestError::FeeTooHigh(proposed_feerate, max_feerate).into());
+            return Err(InternalPayloadError::FeeTooHigh(proposed_feerate, max_feerate));
         }
         if receiver_additional_fee > Amount::ZERO {
             // Remove additional miner fee from the receiver's specified output
@@ -744,14 +746,14 @@ impl ProvisionalProposal {
     }
 
     /// Calculate the additional input weight contributed by the receiver
-    fn additional_input_weight(&self) -> Result<Weight, RequestError> {
-        fn inputs_weight(psbt: &Psbt) -> Result<Weight, RequestError> {
+    fn additional_input_weight(&self) -> Result<Weight, InternalPayloadError> {
+        fn inputs_weight(psbt: &Psbt) -> Result<Weight, InternalPayloadError> {
             psbt.input_pairs().try_fold(
                 Weight::ZERO,
-                |acc, input_pair| -> Result<Weight, RequestError> {
+                |acc, input_pair| -> Result<Weight, InternalPayloadError> {
                     let input_weight = input_pair
                         .expected_input_weight()
-                        .map_err(InternalRequestError::InputWeight)?;
+                        .map_err(InternalPayloadError::InputWeight)?;
                     Ok(acc + input_weight)
                 },
             )
@@ -783,7 +785,7 @@ impl ProvisionalProposal {
     }
 
     /// Prepare the PSBT by clearing the fields that the sender expects to be empty
-    fn prepare_psbt(mut self, processed_psbt: Psbt) -> Result<PayjoinProposal, RequestError> {
+    fn prepare_psbt(mut self, processed_psbt: Psbt) -> PayjoinProposal {
         self.payjoin_psbt = processed_psbt;
         log::trace!("Preparing PSBT {:#?}", self.payjoin_psbt);
         for output in self.payjoin_psbt.outputs_mut() {
@@ -806,7 +808,7 @@ impl ProvisionalProposal {
             self.payjoin_psbt.inputs[i].tap_key_sig = None;
         }
 
-        Ok(PayjoinProposal { payjoin_psbt: self.payjoin_psbt, params: self.params })
+        PayjoinProposal { payjoin_psbt: self.payjoin_psbt, params: self.params }
     }
 
     /// Return the indexes of the sender inputs
@@ -851,7 +853,7 @@ impl ProvisionalProposal {
             psbt.inputs[i].tap_key_sig = None;
         }
         let psbt = wallet_process_psbt(&psbt)?;
-        let payjoin_proposal = self.prepare_psbt(psbt)?;
+        let payjoin_proposal = self.prepare_psbt(psbt);
         Ok(payjoin_proposal)
     }
 }
@@ -904,7 +906,7 @@ pub(crate) mod test {
         }
     }
 
-    pub fn proposal_from_test_vector() -> Result<UncheckedProposal, RequestError> {
+    pub(crate) fn proposal_from_test_vector() -> Result<UncheckedProposal, Error> {
         // OriginalPSBT Test Vector from BIP
         // | InputScriptType | Orginal PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
         // |-----------------|-----------------------|------------------------------|-------------------------|

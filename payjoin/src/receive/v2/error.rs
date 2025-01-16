@@ -1,10 +1,24 @@
 use core::fmt;
 use std::error;
 
+use super::Error;
+use crate::hpke::HpkeError;
 use crate::ohttp::OhttpEncapsulationError;
 
+/// Error that may occur during a v2 session typestate change
+///
+/// This is currently opaque type because we aren't sure which variants will stay.
+/// You can only display it.
 #[derive(Debug)]
 pub struct SessionError(InternalSessionError);
+
+impl From<InternalSessionError> for SessionError {
+    fn from(value: InternalSessionError) -> Self { SessionError(value) }
+}
+
+impl From<InternalSessionError> for super::Error {
+    fn from(e: InternalSessionError) -> Self { super::Error::Validation(e.into()) }
+}
 
 #[derive(Debug)]
 pub(crate) enum InternalSessionError {
@@ -12,10 +26,26 @@ pub(crate) enum InternalSessionError {
     Expired(std::time::SystemTime),
     /// OHTTP Encapsulation failed
     OhttpEncapsulation(OhttpEncapsulationError),
+    /// Hybrid Public Key Encryption failed
+    Hpke(HpkeError),
     /// Unexpected response size
     UnexpectedResponseSize(usize),
     /// Unexpected status code
     UnexpectedStatusCode(http::StatusCode),
+}
+
+impl From<std::time::SystemTime> for Error {
+    fn from(e: std::time::SystemTime) -> Self { InternalSessionError::Expired(e).into() }
+}
+
+impl From<OhttpEncapsulationError> for Error {
+    fn from(e: OhttpEncapsulationError) -> Self {
+        InternalSessionError::OhttpEncapsulation(e).into()
+    }
+}
+
+impl From<HpkeError> for Error {
+    fn from(e: HpkeError) -> Self { InternalSessionError::Hpke(e).into() }
 }
 
 impl fmt::Display for SessionError {
@@ -24,6 +54,7 @@ impl fmt::Display for SessionError {
             InternalSessionError::Expired(expiry) => write!(f, "Session expired at {:?}", expiry),
             InternalSessionError::OhttpEncapsulation(e) =>
                 write!(f, "OHTTP Encapsulation Error: {}", e),
+            InternalSessionError::Hpke(e) => write!(f, "Hpke decryption failed: {}", e),
             InternalSessionError::UnexpectedResponseSize(size) => write!(
                 f,
                 "Unexpected response size {}, expected {} bytes",
@@ -41,18 +72,9 @@ impl error::Error for SessionError {
         match &self.0 {
             InternalSessionError::Expired(_) => None,
             InternalSessionError::OhttpEncapsulation(e) => Some(e),
+            InternalSessionError::Hpke(e) => Some(e),
             InternalSessionError::UnexpectedResponseSize(_) => None,
             InternalSessionError::UnexpectedStatusCode(_) => None,
         }
-    }
-}
-
-impl From<InternalSessionError> for SessionError {
-    fn from(e: InternalSessionError) -> Self { SessionError(e) }
-}
-
-impl From<OhttpEncapsulationError> for SessionError {
-    fn from(e: OhttpEncapsulationError) -> Self {
-        SessionError(InternalSessionError::OhttpEncapsulation(e))
     }
 }

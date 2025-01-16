@@ -1,13 +1,12 @@
 use bitcoin::{psbt, AddressType, TxIn, TxOut};
-pub use error::{
-    Error, InputContributionError, OutputSubstitutionError, RequestError, SelectionError,
-};
+pub(crate) use error::InternalPayloadError;
+pub use error::{Error, OutputSubstitutionError, PayloadError, SelectionError};
 
 pub use crate::psbt::PsbtInputError;
 use crate::psbt::{InternalInputPair, InternalPsbtInputError};
 
 mod error;
-mod optional_parameters;
+pub(crate) mod optional_parameters;
 pub mod v1;
 #[cfg(feature = "v2")]
 pub mod v2;

@@ -40,36 +40,37 @@ impl std::error::Error for Error {
     }
 }
 
+impl From<RedisError> for Error {
+    fn from(value: RedisError) -> Self { Error::Redis(value) }
+}
+
+pub(crate) type Result<T> = core::result::Result<T, Error>;
+
 impl DbPool {
-    pub async fn new(timeout: Duration, db_host: String) -> RedisResult<Self> {
+    pub async fn new(timeout: Duration, db_host: String) -> Result<Self> {
         let client = Client::open(format!("redis://{}", db_host))?;
         Ok(Self { client, timeout })
     }
 
     /// Peek using [`DEFAULT_COLUMN`] as the channel type.
-    pub async fn push_default(&self, subdirectory_id: &str, data: Vec<u8>) -> RedisResult<()> {
+    pub async fn push_default(&self, subdirectory_id: &str, data: Vec<u8>) -> Result<()> {
         self.push(subdirectory_id, DEFAULT_COLUMN, data).await
     }
 
-    pub async fn peek_default(&self, subdirectory_id: &str) -> Result<Vec<u8>, Error> {
+    pub async fn peek_default(&self, subdirectory_id: &str) -> Result<Vec<u8>> {
         self.peek_with_timeout(subdirectory_id, DEFAULT_COLUMN).await
     }
 
-    pub async fn push_v1(&self, subdirectory_id: &str, data: Vec<u8>) -> RedisResult<()> {
+    pub async fn push_v1(&self, subdirectory_id: &str, data: Vec<u8>) -> Result<()> {
         self.push(subdirectory_id, PJ_V1_COLUMN, data).await
     }
 
     /// Peek using [`PJ_V1_COLUMN`] as the channel type.
-    pub async fn peek_v1(&self, subdirectory_id: &str) -> Result<Vec<u8>, Error> {
+    pub async fn peek_v1(&self, subdirectory_id: &str) -> Result<Vec<u8>> {
         self.peek_with_timeout(subdirectory_id, PJ_V1_COLUMN).await
     }
 
-    async fn push(
-        &self,
-        subdirectory_id: &str,
-        channel_type: &str,
-        data: Vec<u8>,
-    ) -> RedisResult<()> {
+    async fn push(&self, subdirectory_id: &str, channel_type: &str, data: Vec<u8>) -> Result<()> {
         let mut conn = self.client.get_async_connection().await?;
         let key = channel_name(subdirectory_id, channel_type);
         () = conn.set(&key, data.clone()).await?;
@@ -81,7 +82,7 @@ impl DbPool {
         &self,
         subdirectory_id: &str,
         channel_type: &str,
-    ) -> Result<Vec<u8>, Error> {
+    ) -> Result<Vec<u8>> {
         match tokio::time::timeout(self.timeout, self.peek(subdirectory_id, channel_type)).await {
             Ok(redis_result) => match redis_result {
                 Ok(result) => Ok(result),

@@ -314,7 +314,7 @@ impl From<hyper::http::Error> for HandlerError {
 }
 
 fn handle_peek(
-    result: Result<Vec<u8>, db::Error>,
+    result: db::Result<Vec<u8>>,
     timeout_response: Response<BoxBody<Bytes, hyper::Error>>,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
     match result {

@@ -139,12 +139,10 @@ mod e2e {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn send_receive_payjoin() {
         use std::path::PathBuf;
-        use std::str::FromStr;
         use std::sync::Arc;
 
         use payjoin_test_utils::{
-            http_agent, init_directory, init_tracing, local_cert_key, wait_for_service_ready,
-            BoxError,
+            http_agent, init_tracing, wait_for_service_ready, BoxError, TestServices,
         };
         use testcontainers::clients::Cli;
         use testcontainers_modules::redis::Redis;
@@ -154,28 +152,17 @@ mod e2e {
         type Result<T> = std::result::Result<T, BoxError>;
 
         init_tracing();
-        let (cert, key) = local_cert_key();
         let docker: Cli = Cli::default();
         let db = docker.run(Redis);
         let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
-        let (port, directory_handle) =
-            init_directory(db_host, (cert.clone(), key)).await.expect("Failed to init directory");
-        let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
-
-        let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
-        let (ohttp_relay_port, ohttp_relay_handle) =
-            ohttp_relay::listen_tcp_on_free_port(gateway_origin)
-                .await
-                .expect("Failed to init ohttp relay");
-        let ohttp_relay = Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
-
+        let mut services = TestServices::initialize(db_host).await.unwrap();
         let temp_dir = env::temp_dir();
         let receiver_db_path = temp_dir.join("receiver_db");
         let sender_db_path = temp_dir.join("sender_db");
         let result: Result<()> = tokio::select! {
-            res = ohttp_relay_handle => Err(format!("Ohttp relay is long running: {:?}", res).into()),
-            res = directory_handle => Err(format!("Directory server is long running: {:?}", res).into()),
-            res = send_receive_cli_async(ohttp_relay, directory, cert, receiver_db_path.clone(), sender_db_path.clone()) => res.map_err(|e| format!("send_receive failed: {:?}", e).into()),
+            res = services.take_ohttp_relay_handle().unwrap() => Err(format!("Ohttp relay is long running: {:?}", res).into()),
+            res = services.take_directory_handle().unwrap() => Err(format!("Directory server is long running: {:?}", res).into()),
+            res = send_receive_cli_async(services.ohttp_relay_url(), services.directory_url(), services.cert(), receiver_db_path.clone(), sender_db_path.clone()) => res.map_err(|e| format!("send_receive failed: {:?}", e).into()),
         };
 
         cleanup_temp_file(&receiver_db_path).await;

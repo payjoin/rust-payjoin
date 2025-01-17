@@ -1,4 +1,6 @@
 use std::env;
+use std::result::Result;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,6 +11,7 @@ use http::StatusCode;
 use log::{log_enabled, Level};
 use once_cell::sync::OnceCell;
 use reqwest::{Client, ClientBuilder};
+use tokio::task::JoinHandle;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 use url::Url;
 
@@ -27,6 +30,45 @@ pub fn init_tracing() {
         tracing::subscriber::set_global_default(subscriber)
             .expect("failed to set global default subscriber");
     });
+}
+
+pub struct TestServices {
+    cert_key: (Vec<u8>, Vec<u8>),
+    directory: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
+    ohttp_relay: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
+}
+
+impl TestServices {
+    pub async fn initialize(db_host: String) -> Result<Self, BoxSendSyncError> {
+        let cert_key = local_cert_key();
+        let directory = init_directory(db_host, cert_key.clone()).await?;
+        let gateway_origin =
+            http::Uri::from_str(&format!("https://localhost:{}", directory.0)).unwrap();
+        let ohttp_relay = ohttp_relay::listen_tcp_on_free_port(gateway_origin).await?;
+        Ok(Self {
+            cert_key,
+            directory: (directory.0, Some(directory.1)),
+            ohttp_relay: (ohttp_relay.0, Some(ohttp_relay.1)),
+        })
+    }
+
+    pub fn cert(&self) -> Vec<u8> { self.cert_key.0.clone() }
+
+    pub fn directory_url(&self) -> Url {
+        Url::parse(&format!("https://localhost:{}", self.directory.0)).unwrap()
+    }
+
+    pub fn take_directory_handle(&mut self) -> Option<JoinHandle<Result<(), BoxSendSyncError>>> {
+        self.directory.1.take()
+    }
+
+    pub fn ohttp_relay_url(&self) -> Url {
+        Url::parse(&format!("http://localhost:{}", self.ohttp_relay.0)).unwrap()
+    }
+
+    pub fn take_ohttp_relay_handle(&mut self) -> Option<JoinHandle<Result<(), BoxSendSyncError>>> {
+        self.ohttp_relay.1.take()
+    }
 }
 
 pub async fn init_directory(

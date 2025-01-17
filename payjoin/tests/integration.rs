@@ -173,9 +173,7 @@ mod integration {
         use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
         use payjoin::send::v2::SenderBuilder;
         use payjoin::{OhttpKeys, PjUri, UriExt};
-        use payjoin_test_utils::{
-            http_agent, init_directory, local_cert_key, wait_for_service_ready,
-        };
+        use payjoin_test_utils::{http_agent, wait_for_service_ready, TestServices};
         use reqwest::{Client, Error, Response};
         use testcontainers_modules::redis::Redis;
         use testcontainers_modules::testcontainers::clients::Cli;
@@ -188,19 +186,14 @@ mod integration {
                 OhttpKeys::from_str("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
                     .expect("Invalid OhttpKeys");
 
-            let (cert, key) = local_cert_key();
             let docker: Cli = Cli::default();
             let db = docker.run(Redis);
             let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
 
-            let (port, directory_handle) = init_directory(db_host, (cert.clone(), key))
-                .await
-                .expect("Failed to init directory");
-            let directory = Url::parse(&format!("https://localhost:{}", port)).unwrap();
-
+            let mut services = TestServices::initialize(db_host).await.unwrap();
             tokio::select!(
-                err = directory_handle => panic!("Directory server exited early: {:?}", err),
-                res = try_request_with_bad_keys(directory, bad_ohttp_keys, cert) => {
+            err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
+                res = try_request_with_bad_keys(services.directory_url(), bad_ohttp_keys, services.cert()) => {
                     assert_eq!(
                         res.unwrap().headers().get("content-type").unwrap(),
                         "application/problem+json"
@@ -231,26 +224,16 @@ mod integration {
         #[tokio::test]
         async fn test_session_expiration() {
             init_tracing();
-            let (cert, key) = local_cert_key();
             let docker: Cli = Cli::default();
             let db = docker.run(Redis);
             let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
 
-            let (directory_port, directory_handle) = init_directory(db_host, (cert.clone(), key))
-                .await
-                .expect("Failed to init directory");
-            let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
-            let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
-            let (ohttp_relay_port, ohttp_relay_handle) =
-                ohttp_relay::listen_tcp_on_free_port(gateway_origin)
-                    .await
-                    .expect("Failed to init ohttp relay");
-            let ohttp_relay =
-                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
+            let mut services = TestServices::initialize(db_host).await.unwrap();
+
             tokio::select!(
-            err = ohttp_relay_handle => panic!("Ohttp relay exited early: {:?}", err),
-            err = directory_handle => panic!("Directory server exited early: {:?}", err),
-            res = do_expiration_tests(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
+            err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
+            err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
+            res = do_expiration_tests(services.ohttp_relay_url(), services.directory_url(), services.cert()) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
             async fn do_expiration_tests(
@@ -303,26 +286,15 @@ mod integration {
         #[tokio::test]
         async fn v2_to_v2() {
             init_tracing();
-            let (cert, key) = local_cert_key();
             let docker: Cli = Cli::default();
             let db = docker.run(Redis);
             let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
 
-            let (directory_port, directory_handle) = init_directory(db_host, (cert.clone(), key))
-                .await
-                .expect("Failed to init directory");
-            let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
-            let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
-            let (ohttp_relay_port, ohttp_relay_handle) =
-                ohttp_relay::listen_tcp_on_free_port(gateway_origin)
-                    .await
-                    .expect("Failed to init ohttp relay");
-            let ohttp_relay =
-                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
+            let mut services = TestServices::initialize(db_host).await.unwrap();
             tokio::select!(
-            err = ohttp_relay_handle => panic!("Ohttp relay exited early: {:?}", err),
-            err = directory_handle => panic!("Directory server exited early: {:?}", err),
-            res = do_v2_send_receive(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
+            err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
+            err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
+            res = do_v2_send_receive(services.ohttp_relay_url(), services.directory_url(), services.cert()) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
             async fn do_v2_send_receive(
@@ -441,26 +413,15 @@ mod integration {
         #[tokio::test]
         async fn v2_to_v2_mixed_input_script_types() {
             init_tracing();
-            let (cert, key) = local_cert_key();
             let docker: Cli = Cli::default();
             let db = docker.run(Redis);
             let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
 
-            let (directory_port, directory_handle) = init_directory(db_host, (cert.clone(), key))
-                .await
-                .expect("Failed to init directory");
-            let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
-            let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
-            let (ohttp_relay_port, ohttp_relay_handle) =
-                ohttp_relay::listen_tcp_on_free_port(gateway_origin)
-                    .await
-                    .expect("Failed to init ohttp relay");
-            let ohttp_relay =
-                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
+            let mut services = TestServices::initialize(db_host).await.unwrap();
             tokio::select!(
-            err = ohttp_relay_handle => panic!("Ohttp relay exited early: {:?}", err),
-            err = directory_handle => panic!("Directory server exited early: {:?}", err),
-            res = do_v2_send_receive(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
+            err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
+            err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
+            res = do_v2_send_receive(services.ohttp_relay_url(), services.directory_url(), services.cert()) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
             async fn do_v2_send_receive(
@@ -660,25 +621,14 @@ mod integration {
         #[tokio::test]
         async fn v1_to_v2() {
             init_tracing();
-            let (cert, key) = local_cert_key();
             let docker: Cli = Cli::default();
             let db = docker.run(Redis);
             let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
-            let (directory_port, directory_handle) = init_directory(db_host, (cert.clone(), key))
-                .await
-                .expect("Failed to init directory");
-            let directory = Url::parse(&format!("https://localhost:{}", directory_port)).unwrap();
-            let gateway_origin = http::Uri::from_str(directory.as_str()).unwrap();
-            let (ohttp_relay_port, ohttp_relay_handle) =
-                ohttp_relay::listen_tcp_on_free_port(gateway_origin)
-                    .await
-                    .expect("Failed to init ohttp relay");
-            let ohttp_relay =
-                Url::parse(&format!("http://localhost:{}", ohttp_relay_port)).unwrap();
+            let mut services = TestServices::initialize(db_host).await.unwrap();
             tokio::select!(
-            err = ohttp_relay_handle => panic!("Ohttp relay exited early: {:?}", err),
-            err = directory_handle => panic!("Directory server exited early: {:?}", err),
-            res = do_v1_to_v2(ohttp_relay, directory, cert) => assert!(res.is_ok()),
+            err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
+            err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
+            res = do_v1_to_v2(services.ohttp_relay_url(), services.directory_url(), services.cert()) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
             async fn do_v1_to_v2(

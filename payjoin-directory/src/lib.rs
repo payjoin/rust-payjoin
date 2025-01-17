@@ -15,7 +15,7 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
 
-use crate::db::{DbPool, Error};
+use crate::db::DbPool;
 
 pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
@@ -314,17 +314,17 @@ impl From<hyper::http::Error> for HandlerError {
 }
 
 fn handle_peek(
-    result: Result<Vec<u8>, Error>,
+    result: db::Result<Vec<u8>>,
     timeout_response: Response<BoxBody<Bytes, hyper::Error>>,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
     match result {
         Ok(buffered_req) => Ok(Response::new(full(buffered_req))),
         Err(e) => match e {
-            Error::Redis(re) => {
+            db::Error::Redis(re) => {
                 error!("Redis error: {}", re);
                 Err(HandlerError::InternalServerError(anyhow::Error::msg("Internal server error")))
             }
-            Error::Timeout(_) => Ok(timeout_response),
+            db::Error::Timeout(_) => Ok(timeout_response),
         },
     }
 }

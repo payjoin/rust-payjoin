@@ -10,6 +10,8 @@ use bitcoind::bitcoincore_rpc::{self, RpcApi};
 use http::StatusCode;
 use log::{log_enabled, Level};
 use once_cell::sync::OnceCell;
+use payjoin::io::{fetch_ohttp_keys_with_cert, Error as IOError};
+use payjoin::OhttpKeys;
 use reqwest::{Client, ClientBuilder};
 use tokio::task::JoinHandle;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
@@ -36,6 +38,7 @@ pub struct TestServices {
     cert_key: (Vec<u8>, Vec<u8>),
     directory: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
     ohttp_relay: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
+    http_agent: Arc<Client>,
 }
 
 impl TestServices {
@@ -45,10 +48,12 @@ impl TestServices {
         let gateway_origin =
             http::Uri::from_str(&format!("https://localhost:{}", directory.0)).unwrap();
         let ohttp_relay = ohttp_relay::listen_tcp_on_free_port(gateway_origin).await?;
+        let http_agent: Arc<Client> = Arc::new(http_agent(cert_key.0.clone()).unwrap());
         Ok(Self {
             cert_key,
             directory: (directory.0, Some(directory.1)),
             ohttp_relay: (ohttp_relay.0, Some(ohttp_relay.1)),
+            http_agent,
         })
     }
 
@@ -68,6 +73,18 @@ impl TestServices {
 
     pub fn take_ohttp_relay_handle(&mut self) -> Option<JoinHandle<Result<(), BoxSendSyncError>>> {
         self.ohttp_relay.1.take()
+    }
+
+    pub fn http_agent(&self) -> Arc<Client> { self.http_agent.clone() }
+
+    pub async fn wait_for_services_ready(&self) -> Result<(), &'static str> {
+        wait_for_service_ready(self.ohttp_relay_url(), self.http_agent()).await?;
+        wait_for_service_ready(self.directory_url(), self.http_agent()).await?;
+        Ok(())
+    }
+
+    pub async fn fetch_ohttp_keys(&self) -> Result<OhttpKeys, IOError> {
+        fetch_ohttp_keys_with_cert(self.ohttp_relay_url(), self.directory_url(), self.cert()).await
     }
 }
 

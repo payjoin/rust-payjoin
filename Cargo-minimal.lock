@@ -1695,6 +1695,7 @@ dependencies = [
  "log",
  "ohttp-relay",
  "once_cell",
+ "payjoin",
  "payjoin-directory",
  "rcgen",
  "reqwest",

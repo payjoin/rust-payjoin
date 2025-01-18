@@ -173,7 +173,7 @@ mod integration {
         use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
         use payjoin::send::v2::SenderBuilder;
         use payjoin::{OhttpKeys, PjUri, UriExt};
-        use payjoin_test_utils::{http_agent, wait_for_service_ready, TestServices};
+        use payjoin_test_utils::TestServices;
         use reqwest::{Client, Error, Response};
         use testcontainers_modules::redis::Redis;
         use testcontainers_modules::testcontainers::clients::Cli;
@@ -193,7 +193,7 @@ mod integration {
             let mut services = TestServices::initialize(db_host).await.unwrap();
             tokio::select!(
             err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
-                res = try_request_with_bad_keys(services.directory_url(), bad_ohttp_keys, services.cert()) => {
+                res = try_request_with_bad_keys(&services, bad_ohttp_keys) => {
                     assert_eq!(
                         res.unwrap().headers().get("content-type").unwrap(),
                         "application/problem+json"
@@ -202,12 +202,12 @@ mod integration {
             );
 
             async fn try_request_with_bad_keys(
-                directory: Url,
+                services: &TestServices,
                 bad_ohttp_keys: OhttpKeys,
-                cert_der: Vec<u8>,
             ) -> Result<Response, Error> {
-                let agent = Arc::new(http_agent(cert_der.clone()).unwrap());
-                wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
+                let agent = services.http_agent();
+                services.wait_for_services_ready().await.unwrap();
+                let directory = services.directory_url();
                 let mock_ohttp_relay = directory.clone(); // pass through to directory
                 let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
                     .unwrap()
@@ -233,25 +233,15 @@ mod integration {
             tokio::select!(
             err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
             err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
-            res = do_expiration_tests(services.ohttp_relay_url(), services.directory_url(), services.cert()) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
+            res = do_expiration_tests(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
-            async fn do_expiration_tests(
-                ohttp_relay: Url,
-                directory: Url,
-                cert_der: Vec<u8>,
-            ) -> Result<(), BoxError> {
+            async fn do_expiration_tests(services: &TestServices) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
-                let agent = Arc::new(http_agent(cert_der.clone())?);
-                wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await.unwrap();
-                wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
-                let ohttp_keys = payjoin::io::fetch_ohttp_keys_with_cert(
-                    ohttp_relay.clone(),
-                    directory.clone(),
-                    cert_der,
-                )
-                .await?;
-
+                services.wait_for_services_ready().await?;
+                let directory = services.directory_url();
+                let ohttp_relay = services.ohttp_relay_url();
+                let ohttp_keys = services.fetch_ohttp_keys().await?;
                 // **********************
                 // Inside the Receiver:
                 let address = receiver.get_new_address(None, None)?.assume_checked();
@@ -294,24 +284,15 @@ mod integration {
             tokio::select!(
             err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
             err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
-            res = do_v2_send_receive(services.ohttp_relay_url(), services.directory_url(), services.cert()) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
+            res = do_v2_send_receive(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
-            async fn do_v2_send_receive(
-                ohttp_relay: Url,
-                directory: Url,
-                cert_der: Vec<u8>,
-            ) -> Result<(), BoxError> {
+            async fn do_v2_send_receive(services: &TestServices) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
-                let agent = Arc::new(http_agent(cert_der.clone())?);
-                wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await.unwrap();
-                wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
-                let ohttp_keys = payjoin::io::fetch_ohttp_keys_with_cert(
-                    ohttp_relay.clone(),
-                    directory.clone(),
-                    cert_der.clone(),
-                )
-                .await?;
+                let agent = services.http_agent();
+                services.wait_for_services_ready().await?;
+                let directory = services.directory_url();
+                let ohttp_keys = services.fetch_ohttp_keys().await?;
                 // **********************
                 // Inside the Receiver:
                 let address = receiver.get_new_address(None, None)?.assume_checked();
@@ -421,24 +402,15 @@ mod integration {
             tokio::select!(
             err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
             err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
-            res = do_v2_send_receive(services.ohttp_relay_url(), services.directory_url(), services.cert()) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
+            res = do_v2_send_receive(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
-            async fn do_v2_send_receive(
-                ohttp_relay: Url,
-                directory: Url,
-                cert_der: Vec<u8>,
-            ) -> Result<(), BoxError> {
+            async fn do_v2_send_receive(services: &TestServices) -> Result<(), BoxError> {
                 let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
-                let agent = Arc::new(http_agent(cert_der.clone())?);
-                wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await.unwrap();
-                wait_for_service_ready(directory.clone(), agent.clone()).await.unwrap();
-                let ohttp_keys = payjoin::io::fetch_ohttp_keys_with_cert(
-                    ohttp_relay.clone(),
-                    directory.clone(),
-                    cert_der,
-                )
-                .await?;
+                let agent = services.http_agent();
+                services.wait_for_services_ready().await?;
+                let directory = services.directory_url();
+                let ohttp_keys = services.fetch_ohttp_keys().await?;
                 // **********************
                 // Inside the Receiver:
                 // make utxos with different script types
@@ -628,24 +600,15 @@ mod integration {
             tokio::select!(
             err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
             err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
-            res = do_v1_to_v2(services.ohttp_relay_url(), services.directory_url(), services.cert()) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
+            res = do_v1_to_v2(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
-            async fn do_v1_to_v2(
-                ohttp_relay: Url,
-                directory: Url,
-                cert_der: Vec<u8>,
-            ) -> Result<(), BoxError> {
+            async fn do_v1_to_v2(services: &TestServices) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
-                let agent: Arc<Client> = Arc::new(http_agent(cert_der.clone())?);
-                wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await?;
-                wait_for_service_ready(directory.clone(), agent.clone()).await?;
-                let ohttp_keys = payjoin::io::fetch_ohttp_keys_with_cert(
-                    ohttp_relay.clone(),
-                    directory.clone(),
-                    cert_der.clone(),
-                )
-                .await?;
+                let agent = services.http_agent();
+                services.wait_for_services_ready().await?;
+                let directory = services.directory_url();
+                let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
                 let mut session =

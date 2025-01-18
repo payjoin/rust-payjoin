@@ -139,15 +139,11 @@ mod e2e {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn send_receive_payjoin() {
         use std::path::PathBuf;
-        use std::sync::Arc;
 
-        use payjoin_test_utils::{
-            http_agent, init_tracing, wait_for_service_ready, BoxError, TestServices,
-        };
+        use payjoin_test_utils::{init_tracing, BoxError, TestServices};
         use testcontainers::clients::Cli;
         use testcontainers_modules::redis::Redis;
         use tokio::process::Child;
-        use url::Url;
 
         type Result<T> = std::result::Result<T, BoxError>;
 
@@ -162,7 +158,7 @@ mod e2e {
         let result: Result<()> = tokio::select! {
             res = services.take_ohttp_relay_handle().unwrap() => Err(format!("Ohttp relay is long running: {:?}", res).into()),
             res = services.take_directory_handle().unwrap() => Err(format!("Directory server is long running: {:?}", res).into()),
-            res = send_receive_cli_async(services.ohttp_relay_url(), services.directory_url(), services.cert(), receiver_db_path.clone(), sender_db_path.clone()) => res.map_err(|e| format!("send_receive failed: {:?}", e).into()),
+            res = send_receive_cli_async(&services, receiver_db_path.clone(), sender_db_path.clone()) => res.map_err(|e| format!("send_receive failed: {:?}", e).into()),
         };
 
         cleanup_temp_file(&receiver_db_path).await;
@@ -170,28 +166,16 @@ mod e2e {
         assert!(result.is_ok(), "{}", result.unwrap_err());
 
         async fn send_receive_cli_async(
-            ohttp_relay: Url,
-            directory: Url,
-            cert: Vec<u8>,
+            services: &TestServices,
             receiver_db_path: PathBuf,
             sender_db_path: PathBuf,
         ) -> Result<()> {
             let (bitcoind, _sender, _receiver) = init_bitcoind_sender_receiver(None, None)?;
             let temp_dir = env::temp_dir();
             let cert_path = temp_dir.join("localhost.der");
-            tokio::fs::write(&cert_path, cert.clone()).await?;
-            let agent = Arc::new(http_agent(cert.clone()).unwrap());
-            wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await?;
-            wait_for_service_ready(directory.clone(), agent).await?;
-
-            // fetch for setup here since ohttp_relay doesn't know the certificate for the directory
-            // so payjoin-cli is set up with the mock_ohttp_relay which is the directory
-            let ohttp_keys = payjoin::io::fetch_ohttp_keys_with_cert(
-                ohttp_relay.clone(),
-                directory.clone(),
-                cert.clone(),
-            )
-            .await?;
+            tokio::fs::write(&cert_path, services.cert()).await?;
+            services.wait_for_services_ready().await?;
+            let ohttp_keys = services.fetch_ohttp_keys().await?;
             let ohttp_keys_path = temp_dir.join("ohttp_keys");
             tokio::fs::write(&ohttp_keys_path, ohttp_keys.encode()?).await?;
 
@@ -201,7 +185,7 @@ mod e2e {
 
             let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
 
-            let directory = directory.as_str();
+            let directory = &services.directory_url().to_string();
             // Mock ohttp_relay since the ohttp_relay's http client doesn't have the certificate for the directory
             let mock_ohttp_relay = directory;
 

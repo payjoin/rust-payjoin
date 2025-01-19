@@ -1,7 +1,7 @@
 use std::ops::Deref;
 use std::{error, fmt};
 
-use bitcoin::key::constants::{ELLSWIFT_ENCODING_SIZE, UNCOMPRESSED_PUBLIC_KEY_SIZE};
+use bitcoin::key::constants::{ELLSWIFT_ENCODING_SIZE, PUBLIC_KEY_SIZE};
 use bitcoin::secp256k1::ellswift::ElligatorSwift;
 use hpke::aead::ChaCha20Poly1305;
 use hpke::kdf::HkdfSha256;
@@ -11,8 +11,8 @@ use hpke::{Deserializable, OpModeR, OpModeS, Serializable};
 use serde::{Deserialize, Serialize};
 
 pub const PADDED_MESSAGE_BYTES: usize = 7168;
-pub const PADDED_PLAINTEXT_A_LENGTH: usize = PADDED_MESSAGE_BYTES
-    - (ELLSWIFT_ENCODING_SIZE + UNCOMPRESSED_PUBLIC_KEY_SIZE + POLY1305_TAG_SIZE);
+pub const PADDED_PLAINTEXT_A_LENGTH: usize =
+    PADDED_MESSAGE_BYTES - (ELLSWIFT_ENCODING_SIZE + PUBLIC_KEY_SIZE + POLY1305_TAG_SIZE);
 pub const PADDED_PLAINTEXT_B_LENGTH: usize =
     PADDED_MESSAGE_BYTES - (ELLSWIFT_ENCODING_SIZE + POLY1305_TAG_SIZE);
 pub const POLY1305_TAG_SIZE: usize = 16; // FIXME there is a U16 defined for poly1305, should bitcoin hpke re-export it?
@@ -42,6 +42,23 @@ impl HpkeKeyPair {
     }
     pub fn secret_key(&self) -> &HpkeSecretKey { &self.0 }
     pub fn public_key(&self) -> &HpkePublicKey { &self.1 }
+}
+
+fn pubkey_from_compressed_bytes(pk_bytes: &[u8]) -> Result<HpkePublicKey, HpkeError> {
+    let uncompressed_pk_bytes =
+        bitcoin::secp256k1::PublicKey::from_slice(pk_bytes)?.serialize_uncompressed();
+
+    Ok(HpkePublicKey(
+        PublicKey::from_bytes(&uncompressed_pk_bytes)
+            .expect("conversion to uncompressed pubkey must not fail"),
+    ))
+}
+
+fn compressed_bytes_from_pubkey(pk: &HpkePublicKey) -> [u8; PUBLIC_KEY_SIZE] {
+    let reply_pk_uncompressed = pk.to_bytes();
+    bitcoin::secp256k1::PublicKey::from_slice(&reply_pk_uncompressed[..])
+        .expect("parsing a pubkey immediately after serializing it must not fail")
+        .serialize()
 }
 
 fn encapped_key_from_ellswift_bytes(encoded: &[u8]) -> Result<EncappedKey, HpkeError> {
@@ -166,7 +183,7 @@ pub fn encrypt_message_a(
         )?;
     let mut body = body;
     pad_plaintext(&mut body, PADDED_PLAINTEXT_A_LENGTH)?;
-    let mut plaintext = reply_pk.to_bytes().to_vec();
+    let mut plaintext = compressed_bytes_from_pubkey(reply_pk).to_vec();
     plaintext.extend(body);
     let ciphertext = encryption_context.seal(&plaintext, &[])?;
     let mut message_a = ellswift_bytes_from_encapped_key(&encapsulated_key)?.to_vec();
@@ -197,10 +214,9 @@ pub fn decrypt_message_a(
     cursor.read_to_end(&mut ciphertext).map_err(|_| HpkeError::PayloadTooShort)?;
     let plaintext = decryption_ctx.open(&ciphertext, &[])?;
 
-    let reply_pk_bytes = &plaintext[..UNCOMPRESSED_PUBLIC_KEY_SIZE];
-    let reply_pk = HpkePublicKey(PublicKey::from_bytes(reply_pk_bytes)?);
+    let reply_pk = pubkey_from_compressed_bytes(&plaintext[..PUBLIC_KEY_SIZE])?;
 
-    let body = &plaintext[UNCOMPRESSED_PUBLIC_KEY_SIZE..];
+    let body = &plaintext[PUBLIC_KEY_SIZE..];
 
     Ok((body.to_vec(), reply_pk))
 }

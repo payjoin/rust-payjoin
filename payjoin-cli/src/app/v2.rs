@@ -322,7 +322,7 @@ impl App {
                     })
                     .map_err(|e| Error::Implementation(e.into()))?
             },
-            Some(bitcoin::FeeRate::MIN),
+            None,
             self.config.max_fee_rate.map_or(Ok(FeeRate::ZERO), |fee_rate| {
                 FeeRate::from_sat_per_vb(fee_rate)
                     .ok_or(Error::Implementation("Invalid fee rate".into()))

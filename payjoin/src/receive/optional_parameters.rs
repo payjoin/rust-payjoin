@@ -22,7 +22,7 @@ impl Default for Params {
             v: 1,
             disable_output_substitution: false,
             additional_fee_contribution: None,
-            min_feerate: FeeRate::ZERO,
+            min_feerate: FeeRate::BROADCAST_MIN,
         }
     }
 }

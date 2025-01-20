@@ -19,7 +19,7 @@ path = "src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-default = ["v1"]
+default = ["v2"]
 native-certs = ["reqwest/rustls-tls-native-roots"]
 _danger-local-https = ["rcgen", "reqwest/rustls-tls", "rustls", "hyper-rustls", "payjoin/_danger-local-https", "tokio-rustls"]
 v1 = ["payjoin/v1","hyper", "hyper-util", "http-body-util"]
@@ -37,7 +37,7 @@ hyper = { version = "1", features = ["http1", "server"], optional = true }
 hyper-rustls = { version = "0.26", optional = true }
 hyper-util = { version = "0.1", optional = true }
 log = "0.4.7"
-payjoin = { version = "0.22.0", features = ["base64"] }
+payjoin = { version = "0.22.0", features = ["base64"], default-features = false }
 rcgen = { version = "0.11.1", optional = true }
 reqwest = { version = "0.12", default-features = false }
 rustls = { version = "0.22.4", optional = true }

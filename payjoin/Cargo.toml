@@ -16,6 +16,7 @@ exclude = ["tests"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
+default = ["v2"]
 base64 = ["bitcoin/base64"]
 v1 = ["bitcoin/rand"]
 v2 = ["bitcoin/rand", "bitcoin/serde", "hpke", "dep:http", "bhttp", "ohttp", "serde", "url/serde" ]

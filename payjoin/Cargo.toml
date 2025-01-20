@@ -17,6 +17,7 @@ exclude = ["tests"]
 
 [features]
 base64 = ["bitcoin/base64"]
+v1 = ["bitcoin/rand"]
 v2 = ["bitcoin/rand", "bitcoin/serde", "hpke", "dep:http", "bhttp", "ohttp", "serde", "url/serde" ]
 #[doc = "Functions to fetch OHTTP keys via CONNECT proxy using reqwest. Enables `v2` since only `v2` uses OHTTP."]
 io = ["v2", "reqwest/rustls-tls"]

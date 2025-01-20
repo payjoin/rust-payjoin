@@ -20,7 +20,6 @@
 pub extern crate bitcoin;
 
 pub mod receive;
-
 pub mod send;
 
 #[cfg(feature = "v2")]

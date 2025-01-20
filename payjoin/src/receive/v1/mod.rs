@@ -680,7 +680,7 @@ impl ProvisionalProposal {
         min_feerate: Option<FeeRate>,
         max_feerate: FeeRate,
     ) -> Result<&Psbt, InternalPayloadError> {
-        let min_feerate = min_feerate.unwrap_or(FeeRate::MIN);
+        let min_feerate = min_feerate.unwrap_or(FeeRate::BROADCAST_MIN);
         log::trace!("min_feerate: {:?}", min_feerate);
         log::trace!("params.min_feerate: {:?}", self.params.min_feerate);
         let min_feerate = max(min_feerate, self.params.min_feerate);

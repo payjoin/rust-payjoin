@@ -6,10 +6,17 @@ mod e2e {
     use bitcoincore_rpc::json::AddressType;
     use bitcoind::bitcoincore_rpc::RpcApi;
     use log::{log_enabled, Level};
+    use nix::sys::signal::{kill, Signal};
+    use nix::unistd::Pid;
     use payjoin::bitcoin::Amount;
     use tokio::fs;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::process::Command;
+
+    fn sigint(child: &tokio::process::Child) -> nix::Result<()> {
+        let pid = child.id().expect("Failed to get child PID");
+        kill(Pid::from_raw(pid as i32), Signal::SIGINT)
+    }
 
     const RECEIVE_SATS: &str = "54321";
 
@@ -139,8 +146,8 @@ mod e2e {
             let timeout = tokio::time::Duration::from_secs(10);
             let payjoin_sent = tokio::time::timeout(timeout, rx.recv()).await;
 
-            cli_receiver.kill().await.expect("Failed to kill payjoin-cli");
-            cli_sender.kill().await.expect("Failed to kill payjoin-cli");
+            sigint(&cli_receiver).expect("Failed to kill payjoin-cli");
+            sigint(&cli_sender).expect("Failed to kill payjoin-cli");
             payjoin_sent
         })
         .await;
@@ -373,7 +380,7 @@ mod e2e {
             }
             log::debug!("Got bip21 {}", &bip21);
 
-            cli_receiver.kill().await.expect("Failed to kill payjoin-cli");
+            sigint(&cli_receiver).expect("Failed to kill payjoin-cli");
             bip21
         }
 
@@ -402,7 +409,7 @@ mod e2e {
             let timeout = tokio::time::Duration::from_secs(35);
             let fallback_sent = tokio::time::timeout(timeout, rx.recv()).await?;
 
-            cli_sender.kill().await.expect("Failed to kill payjoin-cli initial sender");
+            sigint(&cli_sender).expect("Failed to kill payjoin-cli initial sender");
 
             assert!(fallback_sent.unwrap_or(false), "Fallback send was not detected");
             Ok(())
@@ -434,7 +441,7 @@ mod e2e {
             let timeout = tokio::time::Duration::from_secs(10);
             let response_successful = tokio::time::timeout(timeout, rx.recv()).await?;
 
-            cli_receive_resumer.kill().await.expect("Failed to kill payjoin-cli");
+            sigint(&cli_receive_resumer).expect("Failed to kill payjoin-cli");
 
             assert!(response_successful.unwrap_or(false), "Did not respond with Payjoin PSBT");
             Ok(())
@@ -466,7 +473,7 @@ mod e2e {
             let timeout = tokio::time::Duration::from_secs(10);
             let payjoin_sent = tokio::time::timeout(timeout, rx.recv()).await?;
 
-            cli_send_resumer.kill().await.expect("Failed to kill payjoin-cli");
+            sigint(&cli_send_resumer).expect("Failed to kill payjoin-cli");
 
             assert!(payjoin_sent.unwrap_or(false), "Payjoin send was not detected");
             Ok(())

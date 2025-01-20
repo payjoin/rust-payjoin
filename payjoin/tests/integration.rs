@@ -1,4 +1,3 @@
-#[cfg(all(feature = "send", feature = "receive"))]
 mod integration {
     use std::collections::HashMap;
     use std::env;

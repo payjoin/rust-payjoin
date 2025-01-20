@@ -169,7 +169,6 @@ impl<'de> serde::Deserialize<'de> for HpkePublicKey {
 }
 
 /// Message A is sent from the sender to the receiver containing an Original PSBT payload
-#[cfg(feature = "send")]
 pub fn encrypt_message_a(
     body: Vec<u8>,
     reply_pk: &HpkePublicKey,
@@ -192,7 +191,6 @@ pub fn encrypt_message_a(
     Ok(message_a.to_vec())
 }
 
-#[cfg(feature = "receive")]
 pub fn decrypt_message_a(
     message_a: &[u8],
     receiver_sk: HpkeSecretKey,
@@ -223,7 +221,6 @@ pub fn decrypt_message_a(
 }
 
 /// Message B is sent from the receiver to the sender containing a Payjoin PSBT payload or an error
-#[cfg(feature = "receive")]
 pub fn encrypt_message_b(
     mut plaintext: Vec<u8>,
     receiver_keypair: &HpkeKeyPair,
@@ -246,7 +243,6 @@ pub fn encrypt_message_b(
     Ok(message_b.to_vec())
 }
 
-#[cfg(feature = "send")]
 pub fn decrypt_message_b(
     message_b: &[u8],
     receiver_pk: HpkePublicKey,

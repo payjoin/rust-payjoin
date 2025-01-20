@@ -1,5 +1,3 @@
-use std::fmt;
-
 use bitcoin::bech32::primitives::decode::{CheckedHrpstring, CheckedHrpstringError};
 use bitcoin::bech32::{self, EncodeError, Hrp, NoChecksum};
 
@@ -15,8 +13,13 @@ pub mod nochecksum {
         bech32::encode_upper::<NoChecksum>(hrp, data)
     }
 
-    pub fn encode_to_fmt(f: &mut fmt::Formatter, hrp: Hrp, data: &[u8]) -> Result<(), EncodeError> {
-        bech32::encode_upper_to_fmt::<NoChecksum, fmt::Formatter>(f, hrp, data)
+    #[cfg(feature = "v2")]
+    pub fn encode_to_fmt(
+        f: &mut core::fmt::Formatter,
+        hrp: Hrp,
+        data: &[u8],
+    ) -> Result<(), EncodeError> {
+        bech32::encode_upper_to_fmt::<NoChecksum, core::fmt::Formatter>(f, hrp, data)
     }
 }
 

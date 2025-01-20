@@ -1,4 +1,5 @@
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,6 +12,7 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode, Uri};
 use hyper_util::rt::TokioIo;
+use payjoin::directory::{ShortId, ShortIdError};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
@@ -31,9 +33,6 @@ const V1_MAX_BUFFER_SIZE: usize = 65536;
 const V1_REJECT_RES_JSON: &str =
     r#"{{"errorCode": "original-psbt-rejected ", "message": "Body is not a string"}}"#;
 const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message": "V2 receiver offline. V1 sends require synchronous communications."}}"#;
-
-// 8 bytes as bech32 is 12.8 characters
-const ID_LENGTH: usize = 13;
 
 mod db;
 
@@ -313,6 +312,12 @@ impl From<hyper::http::Error> for HandlerError {
     fn from(e: hyper::http::Error) -> Self { HandlerError::InternalServerError(e.into()) }
 }
 
+impl From<ShortIdError> for HandlerError {
+    fn from(_: ShortIdError) -> Self {
+        HandlerError::BadRequest(anyhow::anyhow!("subdirectory ID must be 13 bech32 characters"))
+    }
+}
+
 fn handle_peek(
     result: db::Result<Vec<u8>>,
     timeout_response: Response<BoxBody<Bytes, hyper::Error>>,
@@ -353,11 +358,11 @@ async fn post_fallback_v1(
     };
 
     let v2_compat_body = format!("{}\n{}", body_str, query);
-    let id = check_id_length(id)?;
-    pool.push_default(id, v2_compat_body.into())
+    let id = ShortId::from_str(id)?;
+    pool.push_default(&id, v2_compat_body.into())
         .await
         .map_err(|e| HandlerError::BadRequest(e.into()))?;
-    handle_peek(pool.peek_v1(id).await, none_response)
+    handle_peek(pool.peek_v1(&id).await, none_response)
 }
 
 async fn put_payjoin_v1(
@@ -368,27 +373,17 @@ async fn put_payjoin_v1(
     trace!("Put_payjoin_v1");
     let ok_response = Response::builder().status(StatusCode::OK).body(empty())?;
 
-    let id = check_id_length(id)?;
+    let id = ShortId::from_str(id)?;
     let req =
         body.collect().await.map_err(|e| HandlerError::InternalServerError(e.into()))?.to_bytes();
     if req.len() > V1_MAX_BUFFER_SIZE {
         return Err(HandlerError::PayloadTooLarge);
     }
 
-    match pool.push_v1(id, req.into()).await {
+    match pool.push_v1(&id, req.into()).await {
         Ok(_) => Ok(ok_response),
         Err(e) => Err(HandlerError::BadRequest(e.into())),
     }
-}
-
-fn check_id_length(id: &str) -> Result<&str, HandlerError> {
-    if id.len() != ID_LENGTH {
-        return Err(HandlerError::BadRequest(anyhow::anyhow!(
-            "subdirectory ID must be 13 bech32 characters",
-        )));
-    }
-
-    Ok(id)
 }
 
 async fn post_subdir(
@@ -399,7 +394,7 @@ async fn post_subdir(
     let none_response = Response::builder().status(StatusCode::OK).body(empty())?;
     trace!("post_subdir");
 
-    let id = check_id_length(id)?;
+    let id = ShortId::from_str(id)?;
 
     let req =
         body.collect().await.map_err(|e| HandlerError::InternalServerError(e.into()))?.to_bytes();
@@ -407,7 +402,7 @@ async fn post_subdir(
         return Err(HandlerError::PayloadTooLarge);
     }
 
-    match pool.push_default(id, req.into()).await {
+    match pool.push_default(&id, req.into()).await {
         Ok(_) => Ok(none_response),
         Err(e) => Err(HandlerError::BadRequest(e.into())),
     }
@@ -418,9 +413,9 @@ async fn get_subdir(
     pool: DbPool,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
     trace!("get_subdir");
-    let id = check_id_length(id)?;
+    let id = ShortId::from_str(id)?;
     let timeout_response = Response::builder().status(StatusCode::ACCEPTED).body(empty())?;
-    handle_peek(pool.peek_default(id).await, timeout_response)
+    handle_peek(pool.peek_default(&id).await, timeout_response)
 }
 
 fn not_found() -> Response<BoxBody<Bytes, hyper::Error>> {

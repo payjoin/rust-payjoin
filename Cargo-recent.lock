@@ -1674,6 +1674,7 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "hyper-util",
+ "payjoin",
  "redis",
  "rustls 0.22.4",
  "tokio",

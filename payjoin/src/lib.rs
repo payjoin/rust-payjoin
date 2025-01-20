@@ -33,8 +33,10 @@ pub use crate::hpke::{HpkeKeyPair, HpkePublicKey};
 pub(crate) mod ohttp;
 #[cfg(feature = "v2")]
 pub use crate::ohttp::OhttpKeys;
-#[cfg(feature = "v2")]
+#[cfg(any(feature = "v2", feature = "directory"))]
 pub(crate) mod bech32;
+#[cfg(feature = "directory")]
+pub mod directory;
 
 #[cfg(feature = "io")]
 pub mod io;

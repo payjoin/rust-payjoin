@@ -88,7 +88,7 @@
                   inherit src;
                 })
           ) {
-            "payjoin" = "--features v2,send,receive";
+            "payjoin" = "--features v2";
             "payjoin-cli" = "--features v1,v2";
             "payjoin-directory" = "";
           };

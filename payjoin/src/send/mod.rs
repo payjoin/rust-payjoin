@@ -2,8 +2,11 @@
 //!
 //! This module contains types and methods used to implement sending via Payjoin.
 //!
-//! For most use cases, it is recommended to start with the [`v2`] module, as it is
-//! backwards compatible and provides the latest features. If you specifically need to use
+//! For most use cases, we recommended enabling the `v2` feature, as it is
+//! backwards compatible and provides the most convenient experience for users and implementors.
+#![cfg_attr(feature = "v2", doc = "To use version 2, refer to [`v2`] module documentation.")]
+//!
+//! If you specifically need to use
 //! version 1, refer to the [`v1`] module documentation.
 
 use std::str::FromStr;

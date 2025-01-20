@@ -16,9 +16,9 @@ exclude = ["tests"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-send = []
-receive = ["bitcoin/rand"]
+default = ["v2"]
 base64 = ["bitcoin/base64"]
+v1 = ["bitcoin/rand"]
 v2 = ["bitcoin/rand", "bitcoin/serde", "hpke", "dep:http", "bhttp", "ohttp", "serde", "url/serde" ]
 #[doc = "Functions to fetch OHTTP keys via CONNECT proxy using reqwest. Enables `v2` since only `v2` uses OHTTP."]
 io = ["v2", "reqwest/rustls-tls"]
@@ -54,4 +54,4 @@ tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 
 [package.metadata.docs.rs]
-features = ["send", "receive", "base64", "v2", "io"]
+features = ["base64", "v2", "io"]

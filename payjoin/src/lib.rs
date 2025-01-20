@@ -19,10 +19,7 @@
 
 pub extern crate bitcoin;
 
-#[cfg(feature = "receive")]
 pub mod receive;
-
-#[cfg(feature = "send")]
 pub mod send;
 
 #[cfg(feature = "v2")]
@@ -39,11 +36,8 @@ pub(crate) mod bech32;
 #[cfg(feature = "io")]
 pub mod io;
 
-#[cfg(any(feature = "send", feature = "receive"))]
 pub(crate) mod psbt;
-#[cfg(any(feature = "send", all(feature = "receive", feature = "v2")))]
 mod request;
-#[cfg(any(feature = "send", all(feature = "receive", feature = "v2")))]
 pub use request::*;
 
 mod uri;

@@ -1,3 +1,4 @@
+#[cfg(all(feature = "v1", feature = "v2"))]
 mod integration {
     use std::collections::HashMap;
     use std::env;
@@ -23,6 +24,7 @@ mod integration {
     static EXAMPLE_URL: Lazy<Url> =
         Lazy::new(|| Url::parse("https://example.com").expect("Invalid Url"));
 
+    #[cfg(feature = "v1")]
     mod v1 {
         use log::debug;
         use payjoin::send::v1::SenderBuilder;
@@ -976,6 +978,7 @@ mod integration {
         }
     }
 
+    #[cfg(feature = "v1")]
     mod batching {
         use payjoin::send::v1::SenderBuilder;
         use payjoin::UriExt;

@@ -1,6 +1,8 @@
 use core::fmt;
 use std::error;
 
+use crate::receive::error::ValidationError;
+
 /// Error that occurs during validation of an incoming v1 payjoin request.
 ///
 /// This type provides a stable public API for v1 request validation errors while keeping internal
@@ -30,6 +32,14 @@ pub(crate) enum InternalRequestError {
 
 impl From<InternalRequestError> for RequestError {
     fn from(value: InternalRequestError) -> Self { RequestError(value) }
+}
+
+impl From<InternalRequestError> for super::Error {
+    fn from(e: InternalRequestError) -> Self { super::Error::Validation(e.into()) }
+}
+
+impl From<InternalRequestError> for ValidationError {
+    fn from(e: InternalRequestError) -> Self { ValidationError::V1(e.into()) }
 }
 
 impl fmt::Display for RequestError {

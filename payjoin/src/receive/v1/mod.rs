@@ -122,8 +122,10 @@ impl UncheckedProposal {
         self.psbt.clone().extract_tx_unchecked_fee_rate()
     }
 
-    fn psbt_fee_rate(&self) -> Result<FeeRate, InternalRequestError> {
-        let original_psbt_fee = self.psbt.fee().map_err(InternalRequestError::Psbt)?;
+    fn psbt_fee_rate(&self) -> Result<FeeRate, InternalPayloadError> {
+        let original_psbt_fee = self.psbt.fee().map_err(|e| {
+            InternalPayloadError::ParsePsbt(bitcoin::psbt::PsbtParseError::PsbtEncoding(e))
+        })?;
         Ok(original_psbt_fee / self.extract_tx_to_schedule_broadcast().weight())
     }
 

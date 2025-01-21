@@ -16,8 +16,6 @@ pub struct RequestError(InternalRequestError);
 
 #[derive(Debug)]
 pub(crate) enum InternalRequestError {
-    /// Error parsing or validating the PSBT
-    Psbt(bitcoin::psbt::Error),
     /// I/O error while reading the request body
     Io(std::io::Error),
     /// A required HTTP header is missing from the request
@@ -45,7 +43,6 @@ impl fmt::Display for RequestError {
         }
 
         match &self.0 {
-            InternalRequestError::Psbt(e) => write_error(f, "psbt-error", e),
             InternalRequestError::Io(e) => write_error(f, "io-error", e),
             InternalRequestError::MissingHeader(header) =>
                 write_error(f, "missing-header", format!("Missing header: {}", header)),
@@ -68,7 +65,6 @@ impl fmt::Display for RequestError {
 impl error::Error for RequestError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self.0 {
-            InternalRequestError::Psbt(e) => Some(e),
             InternalRequestError::Io(e) => Some(e),
             InternalRequestError::InvalidContentLength(e) => Some(e),
             InternalRequestError::MissingHeader(_) => None,

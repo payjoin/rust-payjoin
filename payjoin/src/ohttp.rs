@@ -4,7 +4,8 @@ use std::{error, fmt};
 use bitcoin::bech32::{self, EncodeError};
 use bitcoin::key::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE;
 
-pub const ENCAPSULATED_MESSAGE_BYTES: usize = 8192;
+use crate::directory::ENCAPSULATED_MESSAGE_BYTES;
+
 const N_ENC: usize = UNCOMPRESSED_PUBLIC_KEY_SIZE;
 const N_T: usize = crate::hpke::POLY1305_TAG_SIZE;
 const OHTTP_REQ_HEADER_BYTES: usize = 7;

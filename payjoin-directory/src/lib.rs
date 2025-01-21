@@ -12,7 +12,7 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode, Uri};
 use hyper_util::rt::TokioIo;
-use payjoin::directory::{ShortId, ShortIdError};
+use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
@@ -23,7 +23,6 @@ pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
 pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
-const ENCAPSULATED_MESSAGE_BYTES: usize = 8192;
 const CHACHA20_POLY1305_NONCE_LEN: usize = 32; // chacha20poly1305 n_k
 const POLY1305_TAG_SIZE: usize = 16;
 pub const BHTTP_REQ_BYTES: usize =

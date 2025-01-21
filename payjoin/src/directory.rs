@@ -1,3 +1,5 @@
+pub const ENCAPSULATED_MESSAGE_BYTES: usize = 8192;
+
 /// A 64-bit identifier used to identify Payjoin Directory entries.
 ///
 /// ShortId is derived from a truncated SHA256 hash of a compressed public key. While SHA256 is used

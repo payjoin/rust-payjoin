@@ -4,6 +4,7 @@ use std::{error, fmt};
 use bitcoin::key::constants::{
     ELLSWIFT_ENCODING_SIZE, PUBLIC_KEY_SIZE, UNCOMPRESSED_PUBLIC_KEY_SIZE,
 };
+use bitcoin::secp256k1;
 use bitcoin::secp256k1::ellswift::ElligatorSwift;
 use hpke::aead::ChaCha20Poly1305;
 use hpke::kdf::HkdfSha256;
@@ -121,8 +122,8 @@ impl<'de> serde::Deserialize<'de> for HpkeSecretKey {
 pub struct HpkePublicKey(pub PublicKey);
 
 impl HpkePublicKey {
-    pub fn to_compressed_bytes(&self) -> [u8; PUBLIC_KEY_SIZE] {
-        let compressed_key = bitcoin::secp256k1::PublicKey::from_slice(&self.0.to_bytes())
+    pub fn to_compressed_bytes(&self) -> [u8; 33] {
+        let compressed_key = secp256k1::PublicKey::from_slice(&self.0.to_bytes())
             .expect("Invalid public key from known valid bytes");
         compressed_key.serialize()
     }

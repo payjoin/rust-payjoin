@@ -130,7 +130,7 @@ mod integration {
         }
 
         #[test]
-        fn disallow_mixed_input_scripts() -> Result<(), BoxError> {
+        fn allow_mixed_input_scripts() -> Result<(), BoxError> {
             init_tracing();
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(
                 Some(AddressType::Bech32),
@@ -159,8 +159,8 @@ mod integration {
 
             // **********************
             // Inside the Receiver:
-            // This should error because the receiver is attempting to introduce mixed input script types
-            assert!(handle_v1_pj_request(req, headers, &receiver, None, None, None).is_err());
+            // This should NOT error because the receiver is attempting to introduce mixed input script types
+            assert!(handle_v1_pj_request(req, headers, &receiver, None, None, None).is_ok());
             Ok(())
         }
     }
@@ -387,157 +387,6 @@ mod integration {
                 assert_eq!(
                     receiver.get_balances()?.mine.untrusted_pending,
                     Amount::from_btc(100.0)? - network_fees
-                );
-                assert_eq!(sender.get_balances()?.mine.untrusted_pending, Amount::from_btc(0.0)?);
-                Ok(())
-            }
-        }
-
-        #[tokio::test]
-        async fn v2_to_v2_mixed_input_script_types() {
-            init_tracing();
-            let docker: Cli = Cli::default();
-            let db = docker.run(Redis);
-            let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
-
-            let mut services = TestServices::initialize(db_host).await.unwrap();
-            tokio::select!(
-            err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
-            err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
-            res = do_v2_send_receive(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
-            );
-
-            async fn do_v2_send_receive(services: &TestServices) -> Result<(), BoxError> {
-                let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
-                let agent = services.http_agent();
-                services.wait_for_services_ready().await?;
-                let directory = services.directory_url();
-                let ohttp_keys = services.fetch_ohttp_keys().await?;
-                // **********************
-                // Inside the Receiver:
-                // make utxos with different script types
-
-                let legacy_address =
-                    receiver.get_new_address(None, Some(AddressType::Legacy))?.assume_checked();
-                let nested_segwit_address =
-                    receiver.get_new_address(None, Some(AddressType::P2shSegwit))?.assume_checked();
-                let segwit_address =
-                    receiver.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
-                // TODO:
-                //let taproot_address =
-                //    receiver.get_new_address(None, Some(AddressType::Bech32m))?.assume_checked();
-                bitcoind.client.generate_to_address(1, &legacy_address)?;
-                bitcoind.client.generate_to_address(1, &nested_segwit_address)?;
-                bitcoind.client.generate_to_address(101, &segwit_address)?;
-                let receiver_utxos = receiver
-                    .list_unspent(
-                        None,
-                        None,
-                        Some(&[&legacy_address, &nested_segwit_address, &segwit_address]),
-                        None,
-                        None,
-                    )
-                    .unwrap();
-                assert_eq!(3, receiver_utxos.len(), "receiver doesn't have enough UTXOs");
-                assert_eq!(
-                    Amount::from_btc(150.0)?,
-                    receiver_utxos.iter().fold(Amount::ZERO, |acc, txo| acc + txo.amount),
-                    "receiver doesn't have enough bitcoin"
-                );
-
-                let address = receiver.get_new_address(None, None)?.assume_checked();
-
-                // test session with expiry in the future
-                let mut session =
-                    Receiver::new(address.clone(), directory.clone(), ohttp_keys.clone(), None);
-                println!("session: {:#?}", &session);
-                let pj_uri_string = session.pj_uri().to_string();
-                // Poll receive request
-                let mock_ohttp_relay = directory.clone();
-                let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
-                let response = agent.post(req.url).body(req.body).send().await?;
-                assert!(response.status().is_success());
-                let response_body = session.process_res(&response.bytes().await?, ctx).unwrap();
-                // No proposal yet since sender has not responded
-                assert!(response_body.is_none());
-
-                // **********************
-                // Inside the Sender:
-                // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-                let pj_uri = Uri::from_str(&pj_uri_string)
-                    .unwrap()
-                    .assume_checked()
-                    .check_pj_supported()
-                    .unwrap();
-                let psbt = build_sweep_psbt(&sender, &pj_uri)?;
-                let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
-                    .build_recommended(FeeRate::BROADCAST_MIN)?;
-                let (Request { url, body, content_type, .. }, post_ctx) =
-                    req_ctx.extract_v2(mock_ohttp_relay.to_owned())?;
-                let response = agent
-                    .post(url.clone())
-                    .header("Content-Type", content_type)
-                    .body(body.clone())
-                    .send()
-                    .await
-                    .unwrap();
-                log::info!("Response: {:#?}", &response);
-                assert!(response.status().is_success());
-                let get_ctx = post_ctx.process_response(&response.bytes().await?)?;
-                let (Request { url, body, content_type, .. }, ohttp_ctx) =
-                    get_ctx.extract_req(mock_ohttp_relay.to_owned())?;
-                let response = agent
-                    .post(url.clone())
-                    .header("Content-Type", content_type)
-                    .body(body.clone())
-                    .send()
-                    .await?;
-                // No response body yet since we are async and pushed fallback_psbt to the buffer
-                assert!(get_ctx.process_response(&response.bytes().await?, ohttp_ctx)?.is_none());
-
-                // **********************
-                // Inside the Receiver:
-
-                // GET fallback psbt
-                let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
-                let response = agent.post(req.url).body(req.body).send().await?;
-                // POST payjoin
-                let proposal =
-                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?.unwrap();
-                let inputs = receiver_utxos.into_iter().map(input_pair_from_list_unspent).collect();
-                let mut payjoin_proposal =
-                    handle_directory_proposal(&receiver, proposal, Some(inputs));
-                assert!(!payjoin_proposal.is_output_substitution_disabled());
-                let (req, ctx) = payjoin_proposal.extract_v2_req(&mock_ohttp_relay)?;
-                let response = agent.post(req.url).body(req.body).send().await?;
-                payjoin_proposal.process_res(&response.bytes().await?, ctx)?;
-
-                // **********************
-                // Inside the Sender:
-                // Sender checks, signs, finalizes, extracts, and broadcasts
-                // Replay post fallback to get the response
-                let (Request { url, body, content_type, .. }, ohttp_ctx) =
-                    get_ctx.extract_req(mock_ohttp_relay.to_owned())?;
-                let response = agent
-                    .post(url.clone())
-                    .header("Content-Type", content_type)
-                    .body(body.clone())
-                    .send()
-                    .await?;
-                let checked_payjoin_proposal_psbt =
-                    get_ctx.process_response(&response.bytes().await?, ohttp_ctx)?.unwrap();
-                let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
-                sender.send_raw_transaction(&payjoin_tx)?;
-                log::info!("sent");
-
-                // Check resulting transaction and balances
-                let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
-                // Sender sent the entire value of their utxo to receiver (minus fees)
-                assert_eq!(payjoin_tx.input.len(), 4);
-                assert_eq!(payjoin_tx.output.len(), 1);
-                assert_eq!(
-                    receiver.get_balances()?.mine.untrusted_pending,
-                    Amount::from_btc(200.0)? - network_fees
                 );
                 assert_eq!(sender.get_balances()?.mine.untrusted_pending, Amount::from_btc(0.0)?);
                 Ok(())

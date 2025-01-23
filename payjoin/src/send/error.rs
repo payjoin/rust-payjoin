@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use bitcoin::locktime::absolute::LockTime;
 use bitcoin::transaction::Version;
-use bitcoin::{AddressType, Sequence};
+use bitcoin::Sequence;
 
 /// Error building a Sender from a SenderBuilder.
 ///
@@ -154,7 +154,6 @@ pub(crate) enum InternalProposalError {
     ReceiverTxinNotFinalized,
     ReceiverTxinMissingUtxoInfo,
     MixedSequence,
-    MixedInputTypes { proposed: AddressType, original: AddressType },
     MissingOrShuffledInputs,
     TxOutContainsKeyPaths,
     FeeContributionExceedsMaximum,
@@ -193,7 +192,6 @@ impl fmt::Display for InternalProposalError {
             ReceiverTxinNotFinalized => write!(f, "an input in proposed transaction belonging to the receiver is not finalized"),
             ReceiverTxinMissingUtxoInfo => write!(f, "an input in proposed transaction belonging to the receiver is missing UTXO information"),
             MixedSequence => write!(f, "inputs of proposed transaction contain mixed sequence numbers"),
-            MixedInputTypes { proposed, original, } => write!(f, "proposed transaction contains input of type {:?} while original contains inputs of type {:?}", proposed, original),
             MissingOrShuffledInputs => write!(f, "proposed transaction is missing inputs of the sender or they are shuffled"),
             TxOutContainsKeyPaths => write!(f, "proposed transaction outputs contain key paths"),
             FeeContributionExceedsMaximum => write!(f, "fee contribution exceeds allowed maximum"),
@@ -228,7 +226,6 @@ impl std::error::Error for InternalProposalError {
             ReceiverTxinNotFinalized => None,
             ReceiverTxinMissingUtxoInfo => None,
             MixedSequence => None,
-            MixedInputTypes { .. } => None,
             MissingOrShuffledInputs => None,
             TxOutContainsKeyPaths => None,
             FeeContributionExceedsMaximum => None,

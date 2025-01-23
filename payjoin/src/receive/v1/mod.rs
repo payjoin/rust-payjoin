@@ -495,18 +495,11 @@ impl WantsInputs {
             .first()
             .map(|input| input.sequence)
             .unwrap_or_default();
-        let uniform_sender_input_type = self.uniform_sender_input_type()?;
 
         // Insert contributions at random indices for privacy
         let mut rng = rand::thread_rng();
         let mut receiver_input_amount = Amount::ZERO;
         for input_pair in inputs.into_iter() {
-            let input_type = input_pair.address_type();
-            if self.params.v == 1 {
-                // v1 payjoin proposals must not introduce mixed input script types
-                self.check_mixed_input_types(input_type, uniform_sender_input_type)?;
-            }
-
             receiver_input_amount += input_pair.previous_txout().value;
             let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
             payjoin_psbt.inputs.insert(index, input_pair.psbtin);
@@ -531,46 +524,6 @@ impl WantsInputs {
             params: self.params,
             change_vout: self.change_vout,
         })
-    }
-
-    /// Check for mixed input types and throw an error if conditions are met
-    fn check_mixed_input_types(
-        &self,
-        receiver_input_type: bitcoin::AddressType,
-        uniform_sender_input_type: Option<bitcoin::AddressType>,
-    ) -> Result<(), InputContributionError> {
-        if let Some(uniform_sender_input_type) = uniform_sender_input_type {
-            if receiver_input_type != uniform_sender_input_type {
-                return Err(InternalInputContributionError::MixedInputScripts(
-                    receiver_input_type,
-                    uniform_sender_input_type,
-                )
-                .into());
-            }
-        }
-        Ok(())
-    }
-
-    /// Check if the sender's inputs are all of the same type
-    ///
-    /// Returns `None` if the sender inputs are not all of the same type
-    fn uniform_sender_input_type(
-        &self,
-    ) -> Result<Option<bitcoin::AddressType>, InputContributionError> {
-        let mut sender_inputs = self.original_psbt.input_pairs();
-        let first_input_type = sender_inputs
-            .next()
-            .ok_or(InternalInputContributionError::NoSenderInputs)?
-            .address_type()
-            .map_err(InternalInputContributionError::AddressType)?;
-        for input in sender_inputs {
-            if input.address_type().map_err(InternalInputContributionError::AddressType)?
-                != first_input_type
-            {
-                return Ok(None);
-            }
-        }
-        Ok(Some(first_input_type))
     }
 
     // Compute the minimum amount that the receiver must contribute to the transaction as input

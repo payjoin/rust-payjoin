@@ -36,12 +36,6 @@ impl InputPair {
         Ok(input_pair)
     }
 
-    pub(crate) fn address_type(&self) -> AddressType {
-        InternalInputPair::from(self)
-            .address_type()
-            .expect("address type should have been validated in InputPair::new")
-    }
-
     pub(crate) fn previous_txout(&self) -> TxOut {
         InternalInputPair::from(self)
             .previous_txout()

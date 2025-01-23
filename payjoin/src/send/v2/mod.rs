@@ -177,7 +177,6 @@ impl Sender {
                     fee_contribution: self.v1.fee_contribution,
                     payee: self.v1.payee.clone(),
                     min_fee_rate: self.v1.min_fee_rate,
-                    allow_mixed_input_scripts: true,
                 },
                 hpke_ctx,
                 ohttp_ctx,

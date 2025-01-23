@@ -38,7 +38,6 @@ pub struct PsbtContext {
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_fee_rate: FeeRate,
     payee: ScriptBuf,
-    allow_mixed_input_scripts: bool,
 }
 
 macro_rules! check_eq {
@@ -175,13 +174,6 @@ impl PsbtContext {
                         ReceiverTxinMissingUtxoInfo
                     );
                     ensure!(proposed.txin.sequence == original.txin.sequence, MixedSequence);
-                    if !self.allow_mixed_input_scripts {
-                        check_eq!(
-                            proposed.address_type()?,
-                            original.address_type()?,
-                            MixedInputTypes
-                        );
-                    }
                 }
             }
         }
@@ -443,7 +435,6 @@ pub(crate) mod test {
             fee_contribution: Some((bitcoin::Amount::from_sat(182), 0)),
             min_fee_rate: FeeRate::ZERO,
             payee,
-            allow_mixed_input_scripts: false,
         }
     }
 

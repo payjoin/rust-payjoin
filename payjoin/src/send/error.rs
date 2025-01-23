@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use bitcoin::locktime::absolute::LockTime;
 use bitcoin::transaction::Version;
-use bitcoin::{AddressType, Sequence};
+use bitcoin::Sequence;
 
 /// Error building a Sender from a SenderBuilder.
 ///
@@ -147,8 +147,6 @@ pub(crate) enum InternalProposalError {
     VersionsDontMatch { proposed: Version, original: Version },
     LockTimesDontMatch { proposed: LockTime, original: LockTime },
     SenderTxinSequenceChanged { proposed: Sequence, original: Sequence },
-    SenderTxinContainsNonWitnessUtxo,
-    SenderTxinContainsWitnessUtxo,
     SenderTxinContainsFinalScriptSig,
     SenderTxinContainsFinalScriptWitness,
     TxInContainsKeyPaths,
@@ -156,7 +154,6 @@ pub(crate) enum InternalProposalError {
     ReceiverTxinNotFinalized,
     ReceiverTxinMissingUtxoInfo,
     MixedSequence,
-    MixedInputTypes { proposed: AddressType, original: AddressType },
     MissingOrShuffledInputs,
     TxOutContainsKeyPaths,
     FeeContributionExceedsMaximum,
@@ -188,8 +185,6 @@ impl fmt::Display for InternalProposalError {
             VersionsDontMatch { proposed, original, } => write!(f, "proposed transaction version {} doesn't match the original {}", proposed, original),
             LockTimesDontMatch { proposed, original, } => write!(f, "proposed transaction lock time {} doesn't match the original {}", proposed, original),
             SenderTxinSequenceChanged { proposed, original, } => write!(f, "proposed transaction sequence number {} doesn't match the original {}", proposed, original),
-            SenderTxinContainsNonWitnessUtxo => write!(f, "an input in proposed transaction belonging to the sender contains non-witness UTXO information"),
-            SenderTxinContainsWitnessUtxo => write!(f, "an input in proposed transaction belonging to the sender contains witness UTXO information"),
             SenderTxinContainsFinalScriptSig => write!(f, "an input in proposed transaction belonging to the sender contains finalized non-witness signature"),
             SenderTxinContainsFinalScriptWitness => write!(f, "an input in proposed transaction belonging to the sender contains finalized witness signature"),
             TxInContainsKeyPaths => write!(f, "proposed transaction inputs contain key paths"),
@@ -197,7 +192,6 @@ impl fmt::Display for InternalProposalError {
             ReceiverTxinNotFinalized => write!(f, "an input in proposed transaction belonging to the receiver is not finalized"),
             ReceiverTxinMissingUtxoInfo => write!(f, "an input in proposed transaction belonging to the receiver is missing UTXO information"),
             MixedSequence => write!(f, "inputs of proposed transaction contain mixed sequence numbers"),
-            MixedInputTypes { proposed, original, } => write!(f, "proposed transaction contains input of type {:?} while original contains inputs of type {:?}", proposed, original),
             MissingOrShuffledInputs => write!(f, "proposed transaction is missing inputs of the sender or they are shuffled"),
             TxOutContainsKeyPaths => write!(f, "proposed transaction outputs contain key paths"),
             FeeContributionExceedsMaximum => write!(f, "fee contribution exceeds allowed maximum"),
@@ -225,8 +219,6 @@ impl std::error::Error for InternalProposalError {
             VersionsDontMatch { proposed: _, original: _ } => None,
             LockTimesDontMatch { proposed: _, original: _ } => None,
             SenderTxinSequenceChanged { proposed: _, original: _ } => None,
-            SenderTxinContainsNonWitnessUtxo => None,
-            SenderTxinContainsWitnessUtxo => None,
             SenderTxinContainsFinalScriptSig => None,
             SenderTxinContainsFinalScriptWitness => None,
             TxInContainsKeyPaths => None,
@@ -234,7 +226,6 @@ impl std::error::Error for InternalProposalError {
             ReceiverTxinNotFinalized => None,
             ReceiverTxinMissingUtxoInfo => None,
             MixedSequence => None,
-            MixedInputTypes { .. } => None,
             MissingOrShuffledInputs => None,
             TxOutContainsKeyPaths => None,
             FeeContributionExceedsMaximum => None,

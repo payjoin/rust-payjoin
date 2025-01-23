@@ -337,12 +337,6 @@ pub struct InputContributionError(InternalInputContributionError);
 
 #[derive(Debug)]
 pub(crate) enum InternalInputContributionError {
-    /// The address type could not be determined
-    AddressType(crate::psbt::AddressTypeError),
-    /// The original PSBT has no inputs
-    NoSenderInputs,
-    /// The proposed receiver inputs would introduce mixed input script types
-    MixedInputScripts(bitcoin::AddressType, bitcoin::AddressType),
     /// Total input value is not enough to cover additional output value
     ValueTooLow,
 }
@@ -350,15 +344,6 @@ pub(crate) enum InternalInputContributionError {
 impl fmt::Display for InputContributionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
-            InternalInputContributionError::AddressType(e) =>
-                write!(f, "The address type could not be determined: {}", e),
-            InternalInputContributionError::NoSenderInputs =>
-                write!(f, "The original PSBT has no inputs"),
-            InternalInputContributionError::MixedInputScripts(type_a, type_b) => write!(
-                f,
-                "The proposed receiver inputs would introduce mixed input script types: {}; {}.",
-                type_a, type_b
-            ),
             InternalInputContributionError::ValueTooLow =>
                 write!(f, "Total input value is not enough to cover additional output value"),
         }

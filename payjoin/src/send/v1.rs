@@ -245,7 +245,6 @@ impl Sender {
                     fee_contribution: self.fee_contribution,
                     payee: self.payee.clone(),
                     min_fee_rate: self.min_fee_rate,
-                    allow_mixed_input_scripts: false,
                 },
             },
         ))

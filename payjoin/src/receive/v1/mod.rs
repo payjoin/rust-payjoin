@@ -25,14 +25,11 @@
 //! [reference implementation](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli)
 
 use std::cmp::{max, min};
-use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::rand::seq::SliceRandom;
 use bitcoin::secp256k1::rand::{self, Rng};
 use bitcoin::{Amount, FeeRate, OutPoint, Script, TxIn, TxOut, Weight};
-pub(crate) use error::InternalRequestError;
-pub use error::RequestError;
 
 use super::error::{
     InputContributionError, InternalInputContributionError, InternalOutputSubstitutionError,
@@ -43,23 +40,10 @@ use super::{Error, InputPair, OutputSubstitutionError, SelectionError};
 use crate::psbt::PsbtExt;
 use crate::receive::InternalPayloadError;
 
-mod error;
-
-const SUPPORTED_VERSIONS: &[usize] = &[1];
-
-pub trait Headers {
-    fn get_header(&self, key: &str) -> Option<&str>;
-}
-
-pub fn build_v1_pj_uri<'a>(
-    address: &bitcoin::Address,
-    endpoint: &url::Url,
-    disable_output_substitution: bool,
-) -> crate::uri::PjUri<'a> {
-    let extras =
-        crate::uri::PayjoinExtras { endpoint: endpoint.clone(), disable_output_substitution };
-    bitcoin_uri::Uri::with_extras(address.clone(), extras)
-}
+#[cfg(feature = "v1")]
+mod exclusive;
+#[cfg(feature = "v1")]
+pub use exclusive::*;
 
 /// The sender's original PSBT and optional parameters
 ///
@@ -77,53 +61,15 @@ pub struct UncheckedProposal {
 }
 
 impl UncheckedProposal {
-    pub fn from_request(
-        mut body: impl std::io::Read,
-        query: &str,
-        headers: impl Headers,
-    ) -> Result<Self, Error> {
-        let content_type = headers
-            .get_header("content-type")
-            .ok_or(InternalRequestError::MissingHeader("Content-Type"))?;
-        if !content_type.starts_with("text/plain") {
-            return Err(InternalRequestError::InvalidContentType(content_type.to_owned()).into());
-        }
-        let content_length = headers
-            .get_header("content-length")
-            .ok_or(InternalRequestError::MissingHeader("Content-Length"))?
-            .parse::<u64>()
-            .map_err(InternalRequestError::InvalidContentLength)?;
-        // 4M block size limit with base64 encoding overhead => maximum reasonable size of content-length
-        if content_length > 4_000_000 * 4 / 3 {
-            return Err(InternalRequestError::ContentLengthTooLarge(content_length).into());
-        }
-
-        // enforce the limit
-        let mut buf = vec![0; content_length as usize]; // 4_000_000 * 4 / 3 fits in u32
-        body.read_exact(&mut buf).map_err(InternalRequestError::Io)?;
-        let base64 = String::from_utf8(buf).map_err(InternalPayloadError::Utf8)?;
-        let unchecked_psbt = Psbt::from_str(&base64).map_err(InternalPayloadError::ParsePsbt)?;
-
-        let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
-        log::debug!("Received original psbt: {:?}", psbt);
-
-        let pairs = url::form_urlencoded::parse(query.as_bytes());
-        let params = Params::from_query_pairs(pairs, SUPPORTED_VERSIONS)
-            .map_err(InternalPayloadError::SenderParams)?;
-        log::debug!("Received request with params: {:?}", params);
-
-        // TODO check that params are valid for the request's Original PSBT
-
-        Ok(UncheckedProposal { psbt, params })
-    }
-
     /// The Sender's Original PSBT transaction
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
         self.psbt.clone().extract_tx_unchecked_fee_rate()
     }
 
-    fn psbt_fee_rate(&self) -> Result<FeeRate, InternalRequestError> {
-        let original_psbt_fee = self.psbt.fee().map_err(InternalRequestError::Psbt)?;
+    fn psbt_fee_rate(&self) -> Result<FeeRate, InternalPayloadError> {
+        let original_psbt_fee = self.psbt.fee().map_err(|e| {
+            InternalPayloadError::ParsePsbt(bitcoin::psbt::PsbtParseError::PsbtEncoding(e))
+        })?;
         Ok(original_psbt_fee / self.extract_tx_to_schedule_broadcast().weight())
     }
 
@@ -888,38 +834,18 @@ pub(crate) mod test {
 
     use super::*;
 
-    struct MockHeaders {
-        length: String,
-    }
+    // OriginalPSBT Test Vector from BIP
+    // | InputScriptType | Orginal PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
+    // |-----------------|-----------------------|------------------------------|-------------------------|
+    // | P2SH-P2WPKH     |  2 sat/vbyte          | 0.00000182                   | 0                       |
+    pub const ORIGINAL_PSBT: &str = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+    pub const QUERY_PARAMS: &str = "maxadditionalfeecontribution=182&additionalfeeoutputindex=0";
 
-    impl MockHeaders {
-        fn new(length: u64) -> MockHeaders { MockHeaders { length: length.to_string() } }
-    }
-
-    impl Headers for MockHeaders {
-        fn get_header(&self, key: &str) -> Option<&str> {
-            match key {
-                "content-length" => Some(&self.length),
-                "content-type" => Some("text/plain"),
-                _ => None,
-            }
-        }
-    }
-
-    pub(crate) fn proposal_from_test_vector() -> Result<UncheckedProposal, Error> {
-        // OriginalPSBT Test Vector from BIP
-        // | InputScriptType | Orginal PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
-        // |-----------------|-----------------------|------------------------------|-------------------------|
-        // | P2SH-P2WPKH     |  2 sat/vbyte          | 0.00000182                   | 0                       |
-        let original_psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
-
-        let body = original_psbt.as_bytes();
-        let headers = MockHeaders::new(body.len() as u64);
-        UncheckedProposal::from_request(
-            body,
-            "maxadditionalfeecontribution=182&additionalfeeoutputindex=0",
-            headers,
-        )
+    pub(crate) fn proposal_from_test_vector(
+    ) -> Result<UncheckedProposal, Box<dyn std::error::Error>> {
+        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
+        let params = Params::from_query_pairs(pairs, &[1])?;
+        Ok(UncheckedProposal { psbt: bitcoin::Psbt::from_str(ORIGINAL_PSBT)?, params })
     }
 
     #[test]

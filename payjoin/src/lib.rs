@@ -17,9 +17,12 @@
 //!
 //! To use this library as a receiver (server, payee), you need to enable `receive` Cargo feature.
 
+#[cfg(feature = "_core")]
 pub extern crate bitcoin;
 
+#[cfg(feature = "_core")]
 pub mod receive;
+#[cfg(feature = "_core")]
 pub mod send;
 
 #[cfg(feature = "v2")]
@@ -30,19 +33,25 @@ pub use crate::hpke::{HpkeKeyPair, HpkePublicKey};
 pub(crate) mod ohttp;
 #[cfg(feature = "v2")]
 pub use crate::ohttp::OhttpKeys;
-#[cfg(feature = "v2")]
+#[cfg(any(feature = "v2", feature = "directory"))]
 pub(crate) mod bech32;
+#[cfg(feature = "directory")]
+pub mod directory;
 
 #[cfg(feature = "io")]
 pub mod io;
-
+#[cfg(feature = "_core")]
 pub(crate) mod psbt;
+#[cfg(feature = "_core")]
 mod request;
+#[cfg(feature = "_core")]
 pub use request::*;
-
+#[cfg(feature = "_core")]
 mod uri;
 
 #[cfg(feature = "base64")]
 pub use bitcoin::base64;
+#[cfg(feature = "_core")]
 pub use uri::{PjParseError, PjUri, Uri, UriExt};
+#[cfg(feature = "_core")]
 pub use url::{ParseError, Url};

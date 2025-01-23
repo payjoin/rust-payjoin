@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use futures::StreamExt;
+use payjoin::directory::ShortId;
 use redis::{AsyncCommands, Client, ErrorKind, RedisError, RedisResult};
 use tracing::debug;
 
@@ -53,24 +54,29 @@ impl DbPool {
     }
 
     /// Peek using [`DEFAULT_COLUMN`] as the channel type.
-    pub async fn push_default(&self, subdirectory_id: &str, data: Vec<u8>) -> Result<()> {
+    pub async fn push_default(&self, subdirectory_id: &ShortId, data: Vec<u8>) -> Result<()> {
         self.push(subdirectory_id, DEFAULT_COLUMN, data).await
     }
 
-    pub async fn peek_default(&self, subdirectory_id: &str) -> Result<Vec<u8>> {
+    pub async fn peek_default(&self, subdirectory_id: &ShortId) -> Result<Vec<u8>> {
         self.peek_with_timeout(subdirectory_id, DEFAULT_COLUMN).await
     }
 
-    pub async fn push_v1(&self, subdirectory_id: &str, data: Vec<u8>) -> Result<()> {
+    pub async fn push_v1(&self, subdirectory_id: &ShortId, data: Vec<u8>) -> Result<()> {
         self.push(subdirectory_id, PJ_V1_COLUMN, data).await
     }
 
     /// Peek using [`PJ_V1_COLUMN`] as the channel type.
-    pub async fn peek_v1(&self, subdirectory_id: &str) -> Result<Vec<u8>> {
+    pub async fn peek_v1(&self, subdirectory_id: &ShortId) -> Result<Vec<u8>> {
         self.peek_with_timeout(subdirectory_id, PJ_V1_COLUMN).await
     }
 
-    async fn push(&self, subdirectory_id: &str, channel_type: &str, data: Vec<u8>) -> Result<()> {
+    async fn push(
+        &self,
+        subdirectory_id: &ShortId,
+        channel_type: &str,
+        data: Vec<u8>,
+    ) -> Result<()> {
         let mut conn = self.client.get_async_connection().await?;
         let key = channel_name(subdirectory_id, channel_type);
         () = conn.set(&key, data.clone()).await?;
@@ -80,7 +86,7 @@ impl DbPool {
 
     async fn peek_with_timeout(
         &self,
-        subdirectory_id: &str,
+        subdirectory_id: &ShortId,
         channel_type: &str,
     ) -> Result<Vec<u8>> {
         match tokio::time::timeout(self.timeout, self.peek(subdirectory_id, channel_type)).await {
@@ -92,7 +98,7 @@ impl DbPool {
         }
     }
 
-    async fn peek(&self, subdirectory_id: &str, channel_type: &str) -> RedisResult<Vec<u8>> {
+    async fn peek(&self, subdirectory_id: &ShortId, channel_type: &str) -> RedisResult<Vec<u8>> {
         let mut conn = self.client.get_async_connection().await?;
         let key = channel_name(subdirectory_id, channel_type);
 
@@ -140,6 +146,6 @@ impl DbPool {
     }
 }
 
-fn channel_name(subdirectory_id: &str, channel_type: &str) -> Vec<u8> {
-    (subdirectory_id.to_owned() + channel_type).into_bytes()
+fn channel_name(subdirectory_id: &ShortId, channel_type: &str) -> Vec<u8> {
+    (subdirectory_id.to_string() + channel_type).into_bytes()
 }

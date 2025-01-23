@@ -1,5 +1,6 @@
 use std::{error, fmt};
 
+#[cfg(feature = "v1")]
 use crate::receive::v1;
 #[cfg(feature = "v2")]
 use crate::receive::v2;
@@ -58,10 +59,6 @@ impl From<InternalPayloadError> for Error {
     }
 }
 
-impl From<v1::InternalRequestError> for Error {
-    fn from(e: v1::InternalRequestError) -> Self { Error::Validation(e.into()) }
-}
-
 /// An error that occurs during validation of a payjoin request, encompassing all possible validation
 /// failures across different protocol versions and stages.
 ///
@@ -72,6 +69,7 @@ pub enum ValidationError {
     /// Error arising from validation of the original PSBT payload
     Payload(PayloadError),
     /// Protocol-specific errors for BIP-78 v1 requests (e.g. HTTP request validation, parameter checks)
+    #[cfg(feature = "v1")]
     V1(v1::RequestError),
     /// Protocol-specific errors for BIP-77 v2 sessions (e.g. session management, OHTTP, HPKE encryption)
     #[cfg(feature = "v2")]
@@ -80,10 +78,6 @@ pub enum ValidationError {
 
 impl From<InternalPayloadError> for ValidationError {
     fn from(e: InternalPayloadError) -> Self { ValidationError::Payload(e.into()) }
-}
-
-impl From<v1::InternalRequestError> for ValidationError {
-    fn from(e: v1::InternalRequestError) -> Self { ValidationError::V1(e.into()) }
 }
 
 #[cfg(feature = "v2")]
@@ -95,6 +89,7 @@ impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ValidationError::Payload(e) => write!(f, "{}", e),
+            #[cfg(feature = "v1")]
             ValidationError::V1(e) => write!(f, "{}", e),
             #[cfg(feature = "v2")]
             ValidationError::V2(e) => write!(f, "{}", e),
@@ -106,6 +101,7 @@ impl std::error::Error for ValidationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             ValidationError::Payload(e) => Some(e),
+            #[cfg(feature = "v1")]
             ValidationError::V1(e) => Some(e),
             #[cfg(feature = "v2")]
             ValidationError::V2(e) => Some(e),

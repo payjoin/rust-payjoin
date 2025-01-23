@@ -224,10 +224,9 @@ pub struct V2PostContext {
 
 impl V2PostContext {
     pub fn process_response(self, response: &[u8]) -> Result<V2GetContext, EncapsulationError> {
-        let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
-            response
-                .try_into()
-                .map_err(|_| InternalEncapsulationError::InvalidSize(response.len()))?;
+        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] = response
+            .try_into()
+            .map_err(|_| InternalEncapsulationError::InvalidSize(response.len()))?;
         let response = ohttp_decapsulate(self.ohttp_ctx, response_array)
             .map_err(InternalEncapsulationError::Ohttp)?;
         match response.status() {
@@ -283,10 +282,9 @@ impl V2GetContext {
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
     ) -> Result<Option<Psbt>, ResponseError> {
-        let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
-            response
-                .try_into()
-                .map_err(|_| InternalEncapsulationError::InvalidSize(response.len()))?;
+        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] = response
+            .try_into()
+            .map_err(|_| InternalEncapsulationError::InvalidSize(response.len()))?;
 
         let response = ohttp_decapsulate(ohttp_ctx, response_array)
             .map_err(InternalEncapsulationError::Ohttp)?;

@@ -114,7 +114,7 @@ impl Receiver {
         body: &[u8],
         context: ohttp::ClientResponse,
     ) -> Result<Option<UncheckedProposal>, Error> {
-        let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
+        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
             body.try_into().map_err(|_| {
                 Error::Validation(InternalSessionError::UnexpectedResponseSize(body.len()).into())
             })?;
@@ -135,7 +135,7 @@ impl Receiver {
     fn fallback_req_body(
         &mut self,
     ) -> Result<
-        ([u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES], ohttp::ClientResponse),
+        ([u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES], ohttp::ClientResponse),
         OhttpEncapsulationError,
     > {
         let fallback_target = subdir(&self.context.directory, &self.id());
@@ -277,9 +277,9 @@ impl UncheckedProposal {
         body: &[u8],
         context: ohttp::ClientResponse,
     ) -> Result<(), SessionError> {
-        let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] = body
-            .try_into()
-            .map_err(|_| InternalSessionError::UnexpectedResponseSize(body.len()))?;
+        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
+            body.try_into()
+                .map_err(|_| InternalSessionError::UnexpectedResponseSize(body.len()))?;
         let response = ohttp_decapsulate(context, response_array)
             .map_err(InternalSessionError::OhttpEncapsulation)?;
 
@@ -540,7 +540,7 @@ impl PayjoinProposal {
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
     ) -> Result<(), Error> {
-        let response_array: &[u8; crate::ohttp::ENCAPSULATED_MESSAGE_BYTES] =
+        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
             res.try_into().map_err(|_| {
                 Error::Validation(InternalSessionError::UnexpectedResponseSize(res.len()).into())
             })?;

@@ -1,6 +1,8 @@
 use core::fmt;
 use std::error;
 
+use crate::receive::error::ValidationError;
+
 /// Error that occurs during validation of an incoming v1 payjoin request.
 ///
 /// This type provides a stable public API for v1 request validation errors while keeping internal
@@ -16,8 +18,6 @@ pub struct RequestError(InternalRequestError);
 
 #[derive(Debug)]
 pub(crate) enum InternalRequestError {
-    /// Error parsing or validating the PSBT
-    Psbt(bitcoin::psbt::Error),
     /// I/O error while reading the request body
     Io(std::io::Error),
     /// A required HTTP header is missing from the request
@@ -34,6 +34,14 @@ impl From<InternalRequestError> for RequestError {
     fn from(value: InternalRequestError) -> Self { RequestError(value) }
 }
 
+impl From<InternalRequestError> for super::Error {
+    fn from(e: InternalRequestError) -> Self { super::Error::Validation(e.into()) }
+}
+
+impl From<InternalRequestError> for ValidationError {
+    fn from(e: InternalRequestError) -> Self { ValidationError::V1(e.into()) }
+}
+
 impl fmt::Display for RequestError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fn write_error(
@@ -45,7 +53,6 @@ impl fmt::Display for RequestError {
         }
 
         match &self.0 {
-            InternalRequestError::Psbt(e) => write_error(f, "psbt-error", e),
             InternalRequestError::Io(e) => write_error(f, "io-error", e),
             InternalRequestError::MissingHeader(header) =>
                 write_error(f, "missing-header", format!("Missing header: {}", header)),
@@ -68,7 +75,6 @@ impl fmt::Display for RequestError {
 impl error::Error for RequestError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self.0 {
-            InternalRequestError::Psbt(e) => Some(e),
             InternalRequestError::Io(e) => Some(e),
             InternalRequestError::InvalidContentLength(e) => Some(e),
             InternalRequestError::MissingHeader(_) => None,

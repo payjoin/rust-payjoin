@@ -59,7 +59,7 @@ impl fmt::Display for SessionError {
                 f,
                 "Unexpected response size {}, expected {} bytes",
                 size,
-                crate::ohttp::ENCAPSULATED_MESSAGE_BYTES
+                crate::directory::ENCAPSULATED_MESSAGE_BYTES
             ),
             InternalSessionError::UnexpectedStatusCode(status) =>
                 write!(f, "Unexpected status code: {}", status),

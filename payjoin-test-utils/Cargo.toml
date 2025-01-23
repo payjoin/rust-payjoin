@@ -1,0 +1,26 @@
+[package]
+name = "payjoin-test-utils"
+version = "0.1.0"
+edition = "2021"
+authors = ["Dan Gould <d@ngould.dev>"]
+rust-version = "1.63"
+license = "MIT"
+
+[dependencies]
+bitcoin = { version = "0.32.5", features = ["base64"] }
+bitcoincore-rpc = "0.19.0"
+bitcoind = { version = "0.36.0", features = ["0_21_2"] }
+http = "1"
+log = "0.4.7"
+ohttp-relay = { version = "0.0.9", features = ["_test-util"] }
+once_cell = "1"
+payjoin = { path = "../payjoin", features = ["io", "_danger-local-https"] }
+payjoin-directory = { path = "../payjoin-directory", features = ["_danger-local-https"] }
+rcgen = "0.11"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+testcontainers = "0.15.0"
+testcontainers-modules = { version = "0.1.3", features = ["redis"] }
+tokio = { version = "1.12.0", features = ["full"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+url = "2.2.2"

@@ -54,6 +54,7 @@ nix = "0.26.4"
 ohttp-relay = { version = "0.0.9", features = ["_test-util"] }
 once_cell = "1"
 payjoin-directory = { path = "../payjoin-directory", features = ["_danger-local-https"] }
+payjoin-test-utils = { path = "../payjoin-test-utils" }
 testcontainers = "0.15.0"
 testcontainers-modules = { version = "0.1.3", features = ["redis"] }
 tokio = { version = "1.12.0", features = ["full"] }

@@ -25,14 +25,39 @@ pub enum Error {
     Implementation(Box<dyn error::Error + Send + Sync>),
 }
 
-impl Error {
-    pub fn to_json(&self) -> String {
+/// A trait for errors that can be serialized to JSON in a standardized format.
+///
+/// The JSON output follows the structure:
+/// ```json
+/// {
+///     "errorCode": "specific-error-code",
+///     "message": "Human readable error message"
+/// }
+/// ```
+pub trait JsonError {
+    /// Converts the error into a JSON string representation.
+    fn to_json(&self) -> String;
+}
+
+impl JsonError for Error {
+    fn to_json(&self) -> String {
         match self {
-            Self::Validation(e) => e.to_string(),
-            Self::Implementation(_) =>
-                "{{ \"errorCode\": \"unavailable\", \"message\": \"Receiver error\" }}".to_string(),
+            Self::Validation(e) => e.to_json(),
+            Self::Implementation(_) => serialize_json_error("unavailable", "Receiver error"),
         }
     }
+}
+
+pub(crate) fn serialize_json_error(code: &str, message: impl fmt::Display) -> String {
+    format!(r#"{{ "errorCode": "{}", "message": "{}" }}"#, code, message)
+}
+
+pub(crate) fn serialize_json_plus_fields(
+    code: &str,
+    message: impl fmt::Display,
+    additional_fields: &str,
+) -> String {
+    format!(r#"{{ "errorCode": "{}", "message": "{}", {} }}"#, code, message, additional_fields)
 }
 
 impl fmt::Display for Error {
@@ -83,6 +108,18 @@ impl From<InternalPayloadError> for ValidationError {
 #[cfg(feature = "v2")]
 impl From<v2::InternalSessionError> for ValidationError {
     fn from(e: v2::InternalSessionError) -> Self { ValidationError::V2(e.into()) }
+}
+
+impl JsonError for ValidationError {
+    fn to_json(&self) -> String {
+        match self {
+            ValidationError::Payload(e) => e.to_json(),
+            #[cfg(feature = "v1")]
+            ValidationError::V1(e) => e.to_json(),
+            #[cfg(feature = "v2")]
+            ValidationError::V2(e) => e.to_json(),
+        }
+    }
 }
 
 impl fmt::Display for ValidationError {
@@ -164,65 +201,62 @@ pub(crate) enum InternalPayloadError {
     FeeTooHigh(bitcoin::FeeRate, bitcoin::FeeRate),
 }
 
+impl JsonError for PayloadError {
+    fn to_json(&self) -> String {
+        use InternalPayloadError::*;
+
+        match &self.0 {
+            Utf8(_) => serialize_json_error("original-psbt-rejected", self),
+            ParsePsbt(_) => serialize_json_error("original-psbt-rejected", self),
+            SenderParams(e) => match e {
+                super::optional_parameters::Error::UnknownVersion { supported_versions } => {
+                    let supported_versions_json =
+                        serde_json::to_string(supported_versions).unwrap_or_default();
+                    serialize_json_plus_fields(
+                        "version-unsupported",
+                        "This version of payjoin is not supported.",
+                        &format!(r#""supported": {}"#, supported_versions_json),
+                    )
+                }
+                _ => serialize_json_error("sender-params-error", self),
+            },
+            InconsistentPsbt(_) => serialize_json_error("original-psbt-rejected", self),
+            PrevTxOut(_) => serialize_json_error("original-psbt-rejected", self),
+            MissingPayment => serialize_json_error("original-psbt-rejected", self),
+            OriginalPsbtNotBroadcastable => serialize_json_error("original-psbt-rejected", self),
+            InputOwned(_) => serialize_json_error("original-psbt-rejected", self),
+            InputWeight(_) => serialize_json_error("original-psbt-rejected", self),
+            InputSeen(_) => serialize_json_error("original-psbt-rejected", self),
+            PsbtBelowFeeRate(_, _) => serialize_json_error("original-psbt-rejected", self),
+            FeeTooHigh(_, _) => serialize_json_error("original-psbt-rejected", self),
+        }
+    }
+}
+
 impl fmt::Display for PayloadError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use InternalPayloadError::*;
 
-        fn write_error(
-            f: &mut fmt::Formatter,
-            code: &str,
-            message: impl fmt::Display,
-        ) -> fmt::Result {
-            write!(f, r#"{{ "errorCode": "{}", "message": "{}" }}"#, code, message)
-        }
-
         match &self.0 {
-            Utf8(e) => write_error(f, "original-psbt-rejected", e),
-            ParsePsbt(e) => write_error(f, "original-psbt-rejected", e),
-            SenderParams(e) => match e {
-                super::optional_parameters::Error::UnknownVersion { supported_versions } => {
-                    write!(
-                        f,
-                        r#"{{
-                            "errorCode": "version-unsupported",
-                            "supported": "{}",
-                            "message": "This version of payjoin is not supported."
-                        }}"#,
-                        serde_json::to_string(supported_versions).map_err(|_| fmt::Error)?
-                    )
-                }
-                _ => write_error(f, "sender-params-error", e),
-            },
-            InconsistentPsbt(e) => write_error(f, "original-psbt-rejected", e),
-            PrevTxOut(e) =>
-                write_error(f, "original-psbt-rejected", format!("PrevTxOut Error: {}", e)),
-            MissingPayment => write_error(f, "original-psbt-rejected", "Missing payment."),
-            OriginalPsbtNotBroadcastable => write_error(
+            Utf8(e) => write!(f, "{}", e),
+            ParsePsbt(e) => write!(f, "{}", e),
+            SenderParams(e) => write!(f, "{}", e),
+            InconsistentPsbt(e) => write!(f, "{}", e),
+            PrevTxOut(e) => write!(f, "PrevTxOut Error: {}", e),
+            MissingPayment => write!(f, "Missing payment."),
+            OriginalPsbtNotBroadcastable => write!(f, "Can't broadcast. PSBT rejected by mempool."),
+            InputOwned(_) => write!(f, "The receiver rejected the original PSBT."),
+            InputWeight(e) => write!(f, "InputWeight Error: {}", e),
+            InputSeen(_) => write!(f, "The receiver rejected the original PSBT."),
+            PsbtBelowFeeRate(original_psbt_fee_rate, receiver_min_fee_rate) => write!(
                 f,
-                "original-psbt-rejected",
-                "Can't broadcast. PSBT rejected by mempool.",
+                "Original PSBT fee rate too low: {} < {}.",
+                original_psbt_fee_rate, receiver_min_fee_rate
             ),
-            InputOwned(_) =>
-                write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
-            InputWeight(e) =>
-                write_error(f, "original-psbt-rejected", format!("InputWeight Error: {}", e)),
-            InputSeen(_) =>
-                write_error(f, "original-psbt-rejected", "The receiver rejected the original PSBT."),
-            PsbtBelowFeeRate(original_psbt_fee_rate, receiver_min_fee_rate) => write_error(
+            FeeTooHigh(proposed_fee_rate, max_fee_rate) => write!(
                 f,
-                "original-psbt-rejected",
-                format!(
-                    "Original PSBT fee rate too low: {} < {}.",
-                    original_psbt_fee_rate, receiver_min_fee_rate
-                ),
-            ),
-            FeeTooHigh(proposed_fee_rate, max_fee_rate) => write_error(
-                f,
-                "original-psbt-rejected",
-                format!(
-                    "Effective receiver feerate exceeds maximum allowed feerate: {} > {}",
-                    proposed_fee_rate, max_fee_rate
-                ),
+                "Effective receiver feerate exceeds maximum allowed feerate: {} > {}",
+                proposed_fee_rate, max_fee_rate
             ),
         }
     }

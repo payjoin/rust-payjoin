@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::error::InputContributionError;
-use super::{v1, Error, InternalPayloadError, OutputSubstitutionError, SelectionError};
+use super::{v1, Error, InternalPayloadError, JsonError, OutputSubstitutionError, SelectionError};
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::psbt::PsbtExt;
@@ -615,7 +615,7 @@ mod test {
             .unwrap();
         assert_eq!(
             server_error.to_json(),
-            "{{ \"errorCode\": \"unavailable\", \"message\": \"Receiver error\" }}"
+            r#"{ "errorCode": "unavailable", "message": "Receiver error" }"#
         );
         let (_req, _ctx) = proposal.clone().extract_err_req(&server_error, &EXAMPLE_OHTTP_RELAY)?;
 

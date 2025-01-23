@@ -63,3 +63,44 @@ impl UncheckedProposal {
         Ok(UncheckedProposal { psbt, params })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use bitcoin::{Address, AddressType};
+
+    use super::*;
+    struct MockHeaders {
+        length: String,
+    }
+
+    impl MockHeaders {
+        fn new(length: u64) -> MockHeaders { MockHeaders { length: length.to_string() } }
+    }
+
+    impl Headers for MockHeaders {
+        fn get_header(&self, key: &str) -> Option<&str> {
+            match key {
+                "content-length" => Some(&self.length),
+                "content-type" => Some("text/plain"),
+                _ => None,
+            }
+        }
+    }
+
+    #[test]
+    fn test_from_request() -> Result<(), Box<dyn std::error::Error>> {
+        let body = super::test::ORIGINAL_PSBT.as_bytes();
+        let headers = MockHeaders::new(body.len() as u64);
+        let proposal = UncheckedProposal::from_request(body, super::test::QUERY_PARAMS, headers)?;
+
+        let witness_utxo =
+            proposal.psbt.inputs[0].witness_utxo.as_ref().expect("witness_utxo should be present");
+        let address =
+            Address::from_script(&witness_utxo.script_pubkey, bitcoin::params::Params::MAINNET)?;
+        assert_eq!(address.address_type(), Some(AddressType::P2sh));
+
+        assert_eq!(proposal.params.v, 1);
+        assert_eq!(proposal.params.additional_fee_contribution, Some((Amount::from_sat(182), 0)));
+        Ok(())
+    }
+}

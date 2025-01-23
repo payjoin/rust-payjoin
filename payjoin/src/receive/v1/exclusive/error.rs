@@ -48,11 +48,11 @@ impl JsonError for RequestError {
 
         use crate::receive::error::serialize_json_error;
         match &self.0 {
-            Io(_) => serialize_json_error("io-error", self),
-            MissingHeader(_) => serialize_json_error("missing-header", self),
-            InvalidContentType(_) => serialize_json_error("invalid-content-type", self),
-            InvalidContentLength(_) => serialize_json_error("invalid-content-length", self),
-            ContentLengthTooLarge(_) => serialize_json_error("content-length-too-large", self),
+            Io(_) => serialize_json_error("original-psbt-rejected", self),
+            MissingHeader(_) => serialize_json_error("original-psbt-rejected", self),
+            InvalidContentType(_) => serialize_json_error("original-psbt-rejected", self),
+            InvalidContentLength(_) => serialize_json_error("original-psbt-rejected", self),
+            ContentLengthTooLarge(_) => serialize_json_error("original-psbt-rejected", self),
         }
     }
 }

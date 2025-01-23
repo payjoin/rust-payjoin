@@ -146,11 +146,6 @@ impl PsbtContext {
                         SenderTxinSequenceChanged
                     );
                     ensure!(
-                        proposed.psbtin.non_witness_utxo.is_none(),
-                        SenderTxinContainsNonWitnessUtxo
-                    );
-                    ensure!(proposed.psbtin.witness_utxo.is_none(), SenderTxinContainsWitnessUtxo);
-                    ensure!(
                         proposed.psbtin.final_script_sig.is_none(),
                         SenderTxinContainsFinalScriptSig
                     );

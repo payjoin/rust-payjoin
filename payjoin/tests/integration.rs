@@ -82,10 +82,10 @@ mod integration {
             // Inside the Sender:
             // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let uri = Uri::from_str(&pj_uri.to_string())
-                .unwrap()
+                .map_err(|e| e.to_string())?
                 .assume_checked()
                 .check_pj_supported()
-                .unwrap();
+                .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
             debug!("Original psbt: {:#?}", psbt);
             let (req, ctx) = SenderBuilder::new(psbt, uri)
@@ -146,10 +146,10 @@ mod integration {
             // Inside the Sender:
             // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let uri = Uri::from_str(&pj_uri.to_string())
-                .unwrap()
+                .map_err(|e| e.to_string())?
                 .assume_checked()
                 .check_pj_supported()
-                .unwrap();
+                .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
             debug!("Original psbt: {:#?}", psbt);
             let (req, _ctx) = SenderBuilder::new(psbt, uri)
@@ -287,7 +287,6 @@ mod integration {
                 let mut session =
                     Receiver::new(address.clone(), directory.clone(), ohttp_keys.clone(), None);
                 println!("session: {:#?}", &session);
-                let pj_uri_string = session.pj_uri().to_string();
                 // Poll receive request
                 let mock_ohttp_relay = directory.clone();
                 let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
@@ -301,11 +300,11 @@ mod integration {
                 // **********************
                 // Inside the Sender:
                 // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-                let pj_uri = Uri::from_str(&pj_uri_string)
-                    .unwrap()
+                let pj_uri = Uri::from_str(&session.pj_uri().to_string())
+                    .map_err(|e| e.to_string())?
                     .assume_checked()
                     .check_pj_supported()
-                    .unwrap();
+                    .map_err(|e| e.to_string())?;
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
                 let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
@@ -390,10 +389,10 @@ mod integration {
             // Inside the Sender:
             // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let pj_uri = Uri::from_str(&pj_uri.to_string())
-                .unwrap()
+                .map_err(|e| e.to_string())?
                 .assume_checked()
                 .check_pj_supported()
-                .unwrap();
+                .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
                 .build_recommended(FeeRate::BROADCAST_MIN)?;
@@ -446,16 +445,14 @@ mod integration {
                 let mut session =
                     Receiver::new(address, directory.clone(), ohttp_keys.clone(), None);
 
-                let pj_uri_string = session.pj_uri().to_string();
-
                 // **********************
                 // Inside the V1 Sender:
                 // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-                let pj_uri = Uri::from_str(&pj_uri_string)
-                    .unwrap()
+                let pj_uri = Uri::from_str(&session.pj_uri().to_string())
+                    .map_err(|e| e.to_string())?
                     .assume_checked()
                     .check_pj_supported()
-                    .unwrap();
+                    .map_err(|e| e.to_string())?;
                 let psbt = build_original_psbt(&sender, &pj_uri)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
                     SenderBuilder::new(psbt, pj_uri)
@@ -691,10 +688,10 @@ mod integration {
             // Inside the Sender:
             // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let uri = Uri::from_str(&pj_uri.to_string())
-                .unwrap()
+                .map_err(|e| e.to_string())?
                 .assume_checked()
                 .check_pj_supported()
-                .unwrap();
+                .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
             log::debug!("Original psbt: {:#?}", psbt);
             let max_additional_fee = Amount::from_sat(1000);
@@ -768,10 +765,10 @@ mod integration {
             // Inside the Sender:
             // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let uri = Uri::from_str(&pj_uri.to_string())
-                .unwrap()
+                .map_err(|e| e.to_string())?
                 .assume_checked()
                 .check_pj_supported()
-                .unwrap();
+                .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
             log::debug!("Original psbt: {:#?}", psbt);
             let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)

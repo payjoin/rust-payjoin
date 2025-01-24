@@ -216,12 +216,12 @@ impl fmt::Display for PayloadError {
                     original_psbt_fee_rate, receiver_min_fee_rate
                 ),
             ),
-            FeeTooHigh(proposed_feerate, max_feerate) => write_error(
+            FeeTooHigh(proposed_fee_rate, max_fee_rate) => write_error(
                 f,
                 "original-psbt-rejected",
                 format!(
                     "Effective receiver feerate exceeds maximum allowed feerate: {} > {}",
-                    proposed_feerate, max_feerate
+                    proposed_fee_rate, max_fee_rate
                 ),
             ),
         }

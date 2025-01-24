@@ -197,14 +197,14 @@ fn serialize_v2_body(
     psbt: &Psbt,
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
-    min_feerate: FeeRate,
+    min_fee_rate: FeeRate,
 ) -> Result<Vec<u8>, CreateRequestError> {
     // Grug say localhost base be discarded anyway. no big brain needed.
     let placeholder_url = serialize_url(
         Url::parse("http://localhost").unwrap(),
         disable_output_substitution,
         fee_contribution,
-        min_feerate,
+        min_fee_rate,
         "2", // payjoin version
     )
     .map_err(InternalCreateRequestError::Url)?;

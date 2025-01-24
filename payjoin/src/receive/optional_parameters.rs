@@ -13,7 +13,7 @@ pub(crate) struct Params {
     // maxadditionalfeecontribution, additionalfeeoutputindex
     pub additional_fee_contribution: Option<(bitcoin::Amount, usize)>,
     // minfeerate
-    pub min_feerate: FeeRate,
+    pub min_fee_rate: FeeRate,
 }
 
 impl Default for Params {
@@ -22,7 +22,7 @@ impl Default for Params {
             v: 1,
             disable_output_substitution: false,
             additional_fee_contribution: None,
-            min_feerate: FeeRate::BROADCAST_MIN,
+            min_fee_rate: FeeRate::BROADCAST_MIN,
         }
     }
 }
@@ -72,8 +72,8 @@ impl Params {
                                 None
                             }
                         },
-                ("minfeerate", feerate) =>
-                    params.min_feerate = match feerate.parse::<f32>() {
+                ("minfeerate", fee_rate) =>
+                    params.min_fee_rate = match fee_rate.parse::<f32>() {
                         Ok(fee_rate_sat_per_vb) => {
                             // TODO Parse with serde when rust-bitcoin supports it
                             let fee_rate_sat_per_kwu = fee_rate_sat_per_vb * 250.0_f32;

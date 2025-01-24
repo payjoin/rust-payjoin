@@ -455,11 +455,11 @@ impl ProvisionalProposal {
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, Error>,
-        min_feerate: Option<FeeRate>,
-        max_effective_feerate: Option<FeeRate>,
+        min_fee_rate: Option<FeeRate>,
+        max_effective_fee_rate: Option<FeeRate>,
     ) -> Result<PayjoinProposal, Error> {
         let inner =
-            self.v1.finalize_proposal(wallet_process_psbt, min_feerate, max_effective_feerate)?;
+            self.v1.finalize_proposal(wallet_process_psbt, min_fee_rate, max_effective_fee_rate)?;
         Ok(PayjoinProposal { v1: inner, context: self.context })
     }
 }

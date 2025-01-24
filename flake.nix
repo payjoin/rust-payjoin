@@ -29,7 +29,7 @@
         rustVersions = with pkgs.rust-bin;
           builtins.mapAttrs (_name: rust-bin:
             rust-bin.override {
-              extensions = ["rust-src" "rustfmt"];
+              extensions = ["rust-src" "rustfmt" "llvm-tools-preview"];
             })
           {
             msrv = stable.${msrv}.default;
@@ -100,6 +100,8 @@
               cargo-nextest
               cargo-watch
               rust-analyzer
+            ] ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [
+              cargo-llvm-cov
             ];
           })
         craneLibVersions;

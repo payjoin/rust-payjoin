@@ -137,7 +137,7 @@ mod e2e {
 
     #[cfg(feature = "v2")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn send_receive_payjoin() {
+    async fn send_receive_payjoin() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use std::path::PathBuf;
 
         use payjoin_test_utils::{init_tracing, BoxError, TestServices};
@@ -146,7 +146,7 @@ mod e2e {
         type Result<T> = std::result::Result<T, BoxError>;
 
         init_tracing();
-        let mut services = TestServices::initialize().await.unwrap();
+        let mut services = TestServices::initialize().await?;
         let temp_dir = env::temp_dir();
         let receiver_db_path = temp_dir.join("receiver_db");
         let sender_db_path = temp_dir.join("sender_db");
@@ -382,6 +382,8 @@ mod e2e {
             assert!(payjoin_sent.unwrap_or(false), "Payjoin send was not detected");
             Ok(())
         }
+
+        Ok(())
     }
 
     async fn cleanup_temp_file(path: &std::path::Path) {

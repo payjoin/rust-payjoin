@@ -175,17 +175,17 @@ mod integration {
         use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
         use payjoin::send::v2::SenderBuilder;
         use payjoin::{OhttpKeys, PjUri, UriExt};
-        use payjoin_test_utils::TestServices;
+        use payjoin_test_utils::{BoxSendSyncError, TestServices};
         use reqwest::{Client, Error, Response};
 
         use super::*;
 
         #[tokio::test]
-        async fn test_bad_ohttp_keys() {
+        async fn test_bad_ohttp_keys() -> Result<(), BoxSendSyncError> {
             let bad_ohttp_keys =
                 OhttpKeys::from_str("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
                     .expect("Invalid OhttpKeys");
-            let mut services = TestServices::initialize().await.unwrap();
+            let mut services = TestServices::initialize().await?;
             tokio::select!(
             err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
                 res = try_request_with_bad_keys(&services, bad_ohttp_keys) => {
@@ -214,12 +214,14 @@ mod integration {
                     .expect("Failed to extract request");
                 agent.post(req.url).body(req.body).send().await
             }
+
+            Ok(())
         }
 
         #[tokio::test]
-        async fn test_session_expiration() {
+        async fn test_session_expiration() -> Result<(), BoxSendSyncError> {
             init_tracing();
-            let mut services = TestServices::initialize().await.unwrap();
+            let mut services = TestServices::initialize().await?;
             tokio::select!(
             err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
             err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
@@ -261,12 +263,14 @@ mod integration {
                 };
                 Ok(())
             }
+
+            Ok(())
         }
 
         #[tokio::test]
-        async fn v2_to_v2() {
+        async fn v2_to_v2() -> Result<(), BoxSendSyncError> {
             init_tracing();
-            let mut services = TestServices::initialize().await.unwrap();
+            let mut services = TestServices::initialize().await?;
             tokio::select!(
             err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
             err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
@@ -374,6 +378,8 @@ mod integration {
                 assert_eq!(sender.get_balances()?.mine.untrusted_pending, Amount::from_btc(0.0)?);
                 Ok(())
             }
+
+            Ok(())
         }
 
         #[test]
@@ -425,9 +431,9 @@ mod integration {
         }
 
         #[tokio::test]
-        async fn v1_to_v2() {
+        async fn v1_to_v2() -> Result<(), BoxSendSyncError> {
             init_tracing();
-            let mut services = TestServices::initialize().await.unwrap();
+            let mut services = TestServices::initialize().await?;
             tokio::select!(
             err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
             err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
@@ -543,6 +549,8 @@ mod integration {
                 );
                 Ok(())
             }
+
+            Ok(())
         }
 
         fn handle_directory_proposal(

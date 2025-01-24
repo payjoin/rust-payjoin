@@ -1615,8 +1615,6 @@ dependencies = [
  "rustls 0.22.4",
  "serde",
  "serde_json",
- "testcontainers",
- "testcontainers-modules",
  "tokio",
  "tracing",
  "url",
@@ -1645,8 +1643,6 @@ dependencies = [
  "rustls 0.22.4",
  "serde",
  "sled",
- "testcontainers",
- "testcontainers-modules",
  "tokio",
  "tokio-rustls",
  "url",
@@ -2567,9 +2563,9 @@ dependencies = [
 
 [[package]]
 name = "testcontainers-modules"
-version = "0.1.4"
+version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47c405c3757803e54818eaaf6b5b2af485dff4ab89a7130b72f62fd19b8bb6cd"
+checksum = "8debb5e215d9e89ea93255fffff00bf037ea44075d7a2669a21a8a988d6b52fd"
 dependencies = [
  "testcontainers",
 ]

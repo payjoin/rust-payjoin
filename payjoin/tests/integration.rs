@@ -177,8 +177,6 @@ mod integration {
         use payjoin::{OhttpKeys, PjUri, UriExt};
         use payjoin_test_utils::TestServices;
         use reqwest::{Client, Error, Response};
-        use testcontainers_modules::redis::Redis;
-        use testcontainers_modules::testcontainers::clients::Cli;
 
         use super::*;
 
@@ -187,12 +185,7 @@ mod integration {
             let bad_ohttp_keys =
                 OhttpKeys::from_str("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
                     .expect("Invalid OhttpKeys");
-
-            let docker: Cli = Cli::default();
-            let db = docker.run(Redis);
-            let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
-
-            let mut services = TestServices::initialize(db_host).await.unwrap();
+            let mut services = TestServices::initialize().await.unwrap();
             tokio::select!(
             err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
                 res = try_request_with_bad_keys(&services, bad_ohttp_keys) => {
@@ -226,12 +219,7 @@ mod integration {
         #[tokio::test]
         async fn test_session_expiration() {
             init_tracing();
-            let docker: Cli = Cli::default();
-            let db = docker.run(Redis);
-            let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
-
-            let mut services = TestServices::initialize(db_host).await.unwrap();
-
+            let mut services = TestServices::initialize().await.unwrap();
             tokio::select!(
             err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
             err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
@@ -278,11 +266,7 @@ mod integration {
         #[tokio::test]
         async fn v2_to_v2() {
             init_tracing();
-            let docker: Cli = Cli::default();
-            let db = docker.run(Redis);
-            let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
-
-            let mut services = TestServices::initialize(db_host).await.unwrap();
+            let mut services = TestServices::initialize().await.unwrap();
             tokio::select!(
             err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
             err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
@@ -444,10 +428,7 @@ mod integration {
         #[tokio::test]
         async fn v1_to_v2() {
             init_tracing();
-            let docker: Cli = Cli::default();
-            let db = docker.run(Redis);
-            let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
-            let mut services = TestServices::initialize(db_host).await.unwrap();
+            let mut services = TestServices::initialize().await.unwrap();
             tokio::select!(
             err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
             err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),

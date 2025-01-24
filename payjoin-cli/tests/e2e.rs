@@ -141,17 +141,12 @@ mod e2e {
         use std::path::PathBuf;
 
         use payjoin_test_utils::{init_tracing, BoxError, TestServices};
-        use testcontainers::clients::Cli;
-        use testcontainers_modules::redis::Redis;
         use tokio::process::Child;
 
         type Result<T> = std::result::Result<T, BoxError>;
 
         init_tracing();
-        let docker: Cli = Cli::default();
-        let db = docker.run(Redis);
-        let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
-        let mut services = TestServices::initialize(db_host).await.unwrap();
+        let mut services = TestServices::initialize().await.unwrap();
         let temp_dir = env::temp_dir();
         let receiver_db_path = temp_dir.join("receiver_db");
         let sender_db_path = temp_dir.join("sender_db");

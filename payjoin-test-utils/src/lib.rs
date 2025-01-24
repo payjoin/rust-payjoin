@@ -13,6 +13,8 @@ use once_cell::sync::OnceCell;
 use payjoin::io::{fetch_ohttp_keys_with_cert, Error as IOError};
 use payjoin::OhttpKeys;
 use reqwest::{Client, ClientBuilder};
+use testcontainers::{clients, Container};
+use testcontainers_modules::redis::{Redis, REDIS_PORT};
 use tokio::task::JoinHandle;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 use url::Url;
@@ -36,14 +38,18 @@ pub fn init_tracing() {
 
 pub struct TestServices {
     cert_key: (Vec<u8>, Vec<u8>),
+    #[allow(dead_code)]
+    redis: (u16, Container<'static, Redis>),
     directory: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
     ohttp_relay: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
     http_agent: Arc<Client>,
 }
 
 impl TestServices {
-    pub async fn initialize(db_host: String) -> Result<Self, BoxSendSyncError> {
+    pub async fn initialize() -> Result<Self, BoxSendSyncError> {
         let cert_key = local_cert_key();
+        let redis = init_redis();
+        let db_host = format!("127.0.0.1:{}", redis.0);
         let directory = init_directory(db_host, cert_key.clone()).await?;
         let gateway_origin =
             http::Uri::from_str(&format!("https://localhost:{}", directory.0)).unwrap();
@@ -51,6 +57,7 @@ impl TestServices {
         let http_agent: Arc<Client> = Arc::new(http_agent(cert_key.0.clone()).unwrap());
         Ok(Self {
             cert_key,
+            redis,
             directory: (directory.0, Some(directory.1)),
             ohttp_relay: (ohttp_relay.0, Some(ohttp_relay.1)),
             http_agent,
@@ -88,6 +95,13 @@ impl TestServices {
     }
 }
 
+pub fn init_redis() -> (u16, Container<'static, Redis>) {
+    let docker = Box::leak(Box::new(clients::Cli::default()));
+    let redis_instance = docker.run(Redis);
+    let host_port = redis_instance.get_host_port_ipv4(REDIS_PORT);
+    (host_port, redis_instance)
+}
+
 pub async fn init_directory(
     db_host: String,
     local_cert_key: (Vec<u8>, Vec<u8>),
@@ -100,7 +114,7 @@ pub async fn init_directory(
     payjoin_directory::listen_tcp_with_tls_on_free_port(db_host, timeout, local_cert_key).await
 }
 
-// generates or gets a DER encoded localhost cert and key.
+/// generates or gets a DER encoded localhost cert and key.
 pub fn local_cert_key() -> (Vec<u8>, Vec<u8>) {
     let cert =
         rcgen::generate_simple_self_signed(vec!["0.0.0.0".to_string(), "localhost".to_string()])

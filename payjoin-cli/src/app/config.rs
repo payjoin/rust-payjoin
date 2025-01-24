@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::ArgMatches;
 use config::{Config, ConfigError, File, FileFormat};
+use payjoin::bitcoin::FeeRate;
 use serde::Deserialize;
 use url::Url;
 
@@ -16,7 +17,7 @@ pub struct AppConfig {
     pub bitcoind_rpcpassword: String,
     pub db_path: PathBuf,
     // receive-only
-    pub max_fee_rate: Option<u64>,
+    pub max_fee_rate: Option<FeeRate>,
 
     // v2 only
     #[cfg(feature = "v2")]
@@ -107,14 +108,8 @@ impl AppConfig {
                         )?
                 };
 
-                let max_fee_rate = matches
-                    .get_one::<String>("max_fee_rate")
-                    .map(|max_fee_rate| max_fee_rate.parse::<u64>())
-                    .transpose()
-                    .map_err(|_| {
-                        ConfigError::Message("\"max_fee_rate\" must be a valid amount".to_string())
-                    })?;
-                builder.set_override_option("max_fee_rate", max_fee_rate)?
+                let max_fee_rate = matches.get_one::<FeeRate>("max_fee_rate");
+                builder.set_override_option("max_fee_rate", max_fee_rate.map(|f| f.to_string()))?
             }
             #[cfg(feature = "v2")]
             Some(("resume", _)) => builder,

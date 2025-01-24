@@ -101,7 +101,7 @@ fn cli() -> ArgMatches {
                     .long("fee-rate")
                     .value_name("FEE_SAT_PER_VB")
                     .help("Fee rate in sat/vB")
-                    .value_parser(parse_feerate_in_sat_per_vb),
+                    .value_parser(parse_fee_rate_in_sat_per_vb),
             ),
     );
 
@@ -118,7 +118,8 @@ fn cli() -> ArgMatches {
         Arg::new("max_fee_rate")
             .long("max-fee-rate")
             .num_args(1)
-            .help("The maximum effective fee rate the receiver is willing to pay (in sat/vB)"),
+            .help("The maximum effective fee rate the receiver is willing to pay (in sat/vB)")
+            .value_parser(parse_fee_rate_in_sat_per_vb),
     );
     #[cfg(not(feature = "v2"))]
     {
@@ -160,7 +161,7 @@ fn parse_amount_in_sat(s: &str) -> Result<Amount, ParseAmountError> {
     Amount::from_str_in(s, payjoin::bitcoin::Denomination::Satoshi)
 }
 
-fn parse_feerate_in_sat_per_vb(s: &str) -> Result<FeeRate, std::num::ParseFloatError> {
+fn parse_fee_rate_in_sat_per_vb(s: &str) -> Result<FeeRate, std::num::ParseFloatError> {
     let fee_rate_sat_per_vb: f32 = s.parse()?;
     let fee_rate_sat_per_kwu = fee_rate_sat_per_vb * 250.0_f32;
     Ok(FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64))

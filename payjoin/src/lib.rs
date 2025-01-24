@@ -55,3 +55,6 @@ pub use bitcoin::base64;
 pub use uri::{PjParseError, PjUri, Uri, UriExt};
 #[cfg(feature = "_core")]
 pub use url::{ParseError, Url};
+
+#[cfg(feature = "_core")]
+pub(crate) mod error_codes;

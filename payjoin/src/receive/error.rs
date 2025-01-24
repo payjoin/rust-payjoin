@@ -1,6 +1,8 @@
 use std::{error, fmt};
 
-use crate::error_codes::{ORIGINAL_PSBT_REJECTED, UNAVAILABLE, VERSION_UNSUPPORTED};
+use crate::error_codes::{
+    NOT_ENOUGH_MONEY, ORIGINAL_PSBT_REJECTED, UNAVAILABLE, VERSION_UNSUPPORTED,
+};
 #[cfg(feature = "v1")]
 use crate::receive::v1;
 #[cfg(feature = "v2")]
@@ -229,7 +231,7 @@ impl JsonError for PayloadError {
             InputWeight(_) => serialize_json_error(ORIGINAL_PSBT_REJECTED, self),
             InputSeen(_) => serialize_json_error(ORIGINAL_PSBT_REJECTED, self),
             PsbtBelowFeeRate(_, _) => serialize_json_error(ORIGINAL_PSBT_REJECTED, self),
-            FeeTooHigh(_, _) => serialize_json_error(ORIGINAL_PSBT_REJECTED, self),
+            FeeTooHigh(_, _) => serialize_json_error(NOT_ENOUGH_MONEY, self),
         }
     }
 }

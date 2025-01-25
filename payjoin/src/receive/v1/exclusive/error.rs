@@ -1,7 +1,7 @@
 use core::fmt;
 use std::error;
 
-use crate::receive::error::ValidationError;
+use crate::receive::error::{JsonError, ValidationError};
 
 /// Error that occurs during validation of an incoming v1 payjoin request.
 ///
@@ -42,32 +42,31 @@ impl From<InternalRequestError> for ValidationError {
     fn from(e: InternalRequestError) -> Self { ValidationError::V1(e.into()) }
 }
 
+impl JsonError for RequestError {
+    fn to_json(&self) -> String {
+        use InternalRequestError::*;
+
+        use crate::receive::error::serialize_json_error;
+        match &self.0 {
+            Io(_) => serialize_json_error("original-psbt-rejected", self),
+            MissingHeader(_) => serialize_json_error("original-psbt-rejected", self),
+            InvalidContentType(_) => serialize_json_error("original-psbt-rejected", self),
+            InvalidContentLength(_) => serialize_json_error("original-psbt-rejected", self),
+            ContentLengthTooLarge(_) => serialize_json_error("original-psbt-rejected", self),
+        }
+    }
+}
+
 impl fmt::Display for RequestError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fn write_error(
-            f: &mut fmt::Formatter,
-            code: &str,
-            message: impl fmt::Display,
-        ) -> fmt::Result {
-            write!(f, r#"{{ "errorCode": "{}", "message": "{}" }}"#, code, message)
-        }
-
         match &self.0 {
-            InternalRequestError::Io(e) => write_error(f, "io-error", e),
-            InternalRequestError::MissingHeader(header) =>
-                write_error(f, "missing-header", format!("Missing header: {}", header)),
-            InternalRequestError::InvalidContentType(content_type) => write_error(
-                f,
-                "invalid-content-type",
-                format!("Invalid content type: {}", content_type),
-            ),
-            InternalRequestError::InvalidContentLength(e) =>
-                write_error(f, "invalid-content-length", e),
-            InternalRequestError::ContentLengthTooLarge(length) => write_error(
-                f,
-                "content-length-too-large",
-                format!("Content length too large: {}.", length),
-            ),
+            InternalRequestError::Io(e) => write!(f, "{}", e),
+            InternalRequestError::MissingHeader(header) => write!(f, "Missing header: {}", header),
+            InternalRequestError::InvalidContentType(content_type) =>
+                write!(f, "Invalid content type: {}", content_type),
+            InternalRequestError::InvalidContentLength(e) => write!(f, "{}", e),
+            InternalRequestError::ContentLengthTooLarge(length) =>
+                write!(f, "Content length too large: {}.", length),
         }
     }
 }

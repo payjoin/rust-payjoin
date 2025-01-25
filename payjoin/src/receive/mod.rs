@@ -1,6 +1,6 @@
 use bitcoin::{psbt, AddressType, TxIn, TxOut};
 pub(crate) use error::InternalPayloadError;
-pub use error::{Error, OutputSubstitutionError, PayloadError, SelectionError};
+pub use error::{Error, JsonError, OutputSubstitutionError, PayloadError, SelectionError};
 
 pub use crate::psbt::PsbtInputError;
 use crate::psbt::{InternalInputPair, InternalPsbtInputError};

@@ -4,6 +4,7 @@ use std::error;
 use super::Error;
 use crate::hpke::HpkeError;
 use crate::ohttp::OhttpEncapsulationError;
+use crate::receive::JsonError;
 
 /// Error that may occur during a v2 session typestate change
 ///
@@ -46,6 +47,21 @@ impl From<OhttpEncapsulationError> for Error {
 
 impl From<HpkeError> for Error {
     fn from(e: HpkeError) -> Self { InternalSessionError::Hpke(e).into() }
+}
+
+impl JsonError for SessionError {
+    fn to_json(&self) -> String {
+        use InternalSessionError::*;
+
+        use crate::receive::error::serialize_json_error;
+        match &self.0 {
+            Expired(_) => serialize_json_error("session-expired", self),
+            OhttpEncapsulation(_) => serialize_json_error("ohttp-encapsulation-error", self),
+            Hpke(_) => serialize_json_error("hpke-error", self),
+            UnexpectedResponseSize(_) => serialize_json_error("unexpected-response-size", self),
+            UnexpectedStatusCode(_) => serialize_json_error("unexpected-status-code", self),
+        }
+    }
 }
 
 impl fmt::Display for SessionError {

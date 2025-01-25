@@ -176,7 +176,7 @@ mod integration {
         use payjoin::send::v2::SenderBuilder;
         use payjoin::{OhttpKeys, PjUri, UriExt};
         use payjoin_test_utils::{BoxSendSyncError, TestServices};
-        use reqwest::{Client, Error, Response};
+        use reqwest::{Client, Response};
 
         use super::*;
 
@@ -199,20 +199,17 @@ mod integration {
             async fn try_request_with_bad_keys(
                 services: &TestServices,
                 bad_ohttp_keys: OhttpKeys,
-            ) -> Result<Response, Error> {
+            ) -> Result<Response, BoxError> {
                 let agent = services.http_agent();
-                services.wait_for_services_ready().await.unwrap();
+                services.wait_for_services_ready().await?;
                 let directory = services.directory_url();
                 let mock_ohttp_relay = directory.clone(); // pass through to directory
-                let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
-                    .unwrap()
+                let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")?
                     .assume_checked();
                 let mut bad_initializer =
                     Receiver::new(mock_address, directory, bad_ohttp_keys, None);
-                let (req, _ctx) = bad_initializer
-                    .extract_req(&mock_ohttp_relay)
-                    .expect("Failed to extract request");
-                agent.post(req.url).body(req.body).send().await
+                let (req, _ctx) = bad_initializer.extract_req(&mock_ohttp_relay)?;
+                agent.post(req.url).body(req.body).send().await.map_err(|e| e.into())
             }
 
             Ok(())

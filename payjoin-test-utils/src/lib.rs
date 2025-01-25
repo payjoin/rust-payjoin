@@ -38,6 +38,7 @@ pub fn init_tracing() {
 
 pub struct TestServices {
     cert_key: (Vec<u8>, Vec<u8>),
+    /// redis is an implicit dependency of the directory service
     #[allow(dead_code)]
     redis: (u16, Container<'static, Redis>),
     directory: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
@@ -114,7 +115,7 @@ pub async fn init_directory(
     payjoin_directory::listen_tcp_with_tls_on_free_port(db_host, timeout, local_cert_key).await
 }
 
-/// generates or gets a DER encoded localhost cert and key.
+/// generate or get a DER encoded localhost cert and key.
 pub fn local_cert_key() -> (Vec<u8>, Vec<u8>) {
     let cert =
         rcgen::generate_simple_self_signed(vec!["0.0.0.0".to_string(), "localhost".to_string()])

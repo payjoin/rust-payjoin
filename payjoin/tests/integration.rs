@@ -190,7 +190,7 @@ mod integration {
             err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
                 res = try_request_with_bad_keys(&services, bad_ohttp_keys) => {
                     assert_eq!(
-                        res.unwrap().headers().get("content-type").unwrap(),
+                        res?.headers().get("content-type").expect("content type should be present"),
                         "application/problem+json"
                     );
                 }
@@ -199,7 +199,7 @@ mod integration {
             async fn try_request_with_bad_keys(
                 services: &TestServices,
                 bad_ohttp_keys: OhttpKeys,
-            ) -> Result<Response, BoxError> {
+            ) -> Result<Response, BoxSendSyncError> {
                 let agent = services.http_agent();
                 services.wait_for_services_ready().await?;
                 let directory = services.directory_url();
@@ -294,7 +294,7 @@ mod integration {
                 let response = agent.post(req.url).body(req.body).send().await?;
                 assert!(response.status().is_success());
                 let response_body =
-                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx).unwrap();
+                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?;
                 // No proposal yet since sender has not responded
                 assert!(response_body.is_none());
 
@@ -316,8 +316,7 @@ mod integration {
                     .header("Content-Type", content_type)
                     .body(body.clone())
                     .send()
-                    .await
-                    .unwrap();
+                    .await?;
                 log::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success());
                 let send_ctx = send_ctx.process_response(&response.bytes().await?)?;
@@ -330,8 +329,9 @@ mod integration {
                 let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 // POST payjoin
-                let proposal =
-                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?.unwrap();
+                let proposal = session
+                    .process_res(response.bytes().await?.to_vec().as_slice(), ctx)?
+                    .expect("proposal should exist");
                 let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None);
                 assert!(!payjoin_proposal.is_output_substitution_disabled());
                 let (req, ctx) = payjoin_proposal.extract_v2_req(&mock_ohttp_relay)?;
@@ -354,11 +354,11 @@ mod integration {
                     .header("Content-Type", content_type)
                     .body(body.clone())
                     .send()
-                    .await
-                    .unwrap();
+                    .await?;
                 log::info!("Response: {:#?}", &response);
-                let checked_payjoin_proposal_psbt =
-                    send_ctx.process_response(&response.bytes().await?, ohttp_ctx)?.unwrap();
+                let checked_payjoin_proposal_psbt = send_ctx
+                    .process_response(&response.bytes().await?, ohttp_ctx)?
+                    .expect("psbt should exist");
                 let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
                 log::info!("sent");
@@ -473,7 +473,7 @@ mod integration {
                     .body(body.clone())
                     .send()
                     .await;
-                assert!(res.as_ref().unwrap().status() == StatusCode::SERVICE_UNAVAILABLE);
+                assert!(res?.status() == StatusCode::SERVICE_UNAVAILABLE);
 
                 // **********************
                 // Inside the Receiver:
@@ -484,7 +484,7 @@ mod integration {
                 let receiver_loop = tokio::task::spawn(async move {
                     let agent_clone = agent_clone.clone();
                     let (response, ctx) = loop {
-                        let (req, ctx) = session.extract_req(&mock_ohttp_relay).unwrap();
+                        let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
                         let response = agent_clone.post(req.url).body(req.body).send().await?;
 
                         if response.status() == 200 {
@@ -499,13 +499,15 @@ mod integration {
                             panic!("Unexpected response status: {}", response.status())
                         }
                     };
-                    let proposal = session.process_res(response.as_slice(), ctx).unwrap().unwrap();
+                    let proposal = session
+                        .process_res(response.as_slice(), ctx)?
+                        .expect("proposal should exist");
                     let mut payjoin_proposal =
                         handle_directory_proposal(&receiver_clone, proposal, None);
                     assert!(payjoin_proposal.is_output_substitution_disabled());
                     // Respond with payjoin psbt within the time window the sender is willing to wait
                     // this response would be returned as http response to the sender
-                    let (req, ctx) = payjoin_proposal.extract_v2_req(&mock_ohttp_relay).unwrap();
+                    let (req, ctx) = payjoin_proposal.extract_v2_req(&mock_ohttp_relay)?;
                     let response = agent_clone.post(req.url).body(req.body).send().await?;
                     payjoin_proposal
                         .process_res(&response.bytes().await?, ctx)
@@ -676,7 +678,7 @@ mod integration {
             let receiver_address =
                 receiver.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
             bitcoind.client.generate_to_address(199, &receiver_address)?;
-            let receiver_utxos = receiver.list_unspent(None, None, None, None, None).unwrap();
+            let receiver_utxos = receiver.list_unspent(None, None, None, None, None)?;
             assert_eq!(100, receiver_utxos.len(), "receiver doesn't have enough UTXOs");
             assert_eq!(
                 Amount::from_btc(3700.0)?, // 48*50.0 + 52*25.0 (halving occurs every 150 blocks)
@@ -975,7 +977,8 @@ mod integration {
         psbt: Psbt,
     ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
         let payjoin_psbt = sender.wallet_process_psbt(&psbt.to_string(), None, None, None)?.psbt;
-        let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.unwrap();
+        let payjoin_psbt =
+            sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.expect("should contain a PSBT");
         let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
         tracing::debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
 

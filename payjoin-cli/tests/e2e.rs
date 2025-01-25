@@ -151,8 +151,8 @@ mod e2e {
         let receiver_db_path = temp_dir.join("receiver_db");
         let sender_db_path = temp_dir.join("sender_db");
         let result: Result<()> = tokio::select! {
-            res = services.take_ohttp_relay_handle().unwrap() => Err(format!("Ohttp relay is long running: {:?}", res).into()),
-            res = services.take_directory_handle().unwrap() => Err(format!("Directory server is long running: {:?}", res).into()),
+            res = services.take_ohttp_relay_handle() => Err(format!("Ohttp relay is long running: {:?}", res).into()),
+            res = services.take_directory_handle() => Err(format!("Directory server is long running: {:?}", res).into()),
             res = send_receive_cli_async(&services, receiver_db_path.clone(), sender_db_path.clone()) => res.map_err(|e| format!("send_receive failed: {:?}", e).into()),
         };
 

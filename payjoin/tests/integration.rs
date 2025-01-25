@@ -187,7 +187,7 @@ mod integration {
                     .expect("Invalid OhttpKeys");
             let mut services = TestServices::initialize().await?;
             tokio::select!(
-            err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
+            err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
                 res = try_request_with_bad_keys(&services, bad_ohttp_keys) => {
                     assert_eq!(
                         res.unwrap().headers().get("content-type").unwrap(),
@@ -223,8 +223,8 @@ mod integration {
             init_tracing();
             let mut services = TestServices::initialize().await?;
             tokio::select!(
-            err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
-            err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
+            err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
+            err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
             res = do_expiration_tests(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
@@ -272,8 +272,8 @@ mod integration {
             init_tracing();
             let mut services = TestServices::initialize().await?;
             tokio::select!(
-            err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
-            err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
+            err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
+            err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
             res = do_v2_send_receive(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
@@ -435,8 +435,8 @@ mod integration {
             init_tracing();
             let mut services = TestServices::initialize().await?;
             tokio::select!(
-            err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
-            err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
+            err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
+            err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
             res = do_v1_to_v2(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 

@@ -7,7 +7,7 @@ use std::time::Duration;
 use bitcoin::Amount;
 use bitcoind::bitcoincore_rpc::json::AddressType;
 use bitcoind::bitcoincore_rpc::{self, RpcApi};
-use http::StatusCode;
+use http::{StatusCode, Uri};
 use log::{log_enabled, Level};
 use once_cell::sync::OnceCell;
 use payjoin::io::{fetch_ohttp_keys_with_cert, Error as IOError};
@@ -52,8 +52,7 @@ impl TestServices {
         let redis = init_redis();
         let db_host = format!("127.0.0.1:{}", redis.0);
         let directory = init_directory(db_host, cert_key.clone()).await?;
-        let gateway_origin =
-            http::Uri::from_str(&format!("https://localhost:{}", directory.0)).unwrap();
+        let gateway_origin = Uri::from_str(&format!("https://localhost:{}", directory.0)).unwrap();
         let ohttp_relay = ohttp_relay::listen_tcp_on_free_port(gateway_origin).await?;
         let http_agent: Arc<Client> = Arc::new(http_agent(cert_key.0.clone()).unwrap());
         Ok(Self {
@@ -71,16 +70,16 @@ impl TestServices {
         Url::parse(&format!("https://localhost:{}", self.directory.0)).unwrap()
     }
 
-    pub fn take_directory_handle(&mut self) -> Option<JoinHandle<Result<(), BoxSendSyncError>>> {
-        self.directory.1.take()
+    pub fn take_directory_handle(&mut self) -> JoinHandle<Result<(), BoxSendSyncError>> {
+        self.directory.1.take().expect("directory handle not found")
     }
 
     pub fn ohttp_relay_url(&self) -> Url {
         Url::parse(&format!("http://localhost:{}", self.ohttp_relay.0)).unwrap()
     }
 
-    pub fn take_ohttp_relay_handle(&mut self) -> Option<JoinHandle<Result<(), BoxSendSyncError>>> {
-        self.ohttp_relay.1.take()
+    pub fn take_ohttp_relay_handle(&mut self) -> JoinHandle<Result<(), BoxSendSyncError>> {
+        self.ohttp_relay.1.take().expect("ohttp relay handle not found")
     }
 
     pub fn http_agent(&self) -> Arc<Client> { self.http_agent.clone() }

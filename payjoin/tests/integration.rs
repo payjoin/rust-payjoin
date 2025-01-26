@@ -11,6 +11,7 @@ mod integration {
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use once_cell::sync::Lazy;
     use payjoin::receive::v1::build_v1_pj_uri;
+    use payjoin::receive::Error::Implementation;
     use payjoin::receive::InputPair;
     use payjoin::{PjUri, Request, Uri};
     use payjoin_test_utils::{init_bitcoind_sender_receiver, init_tracing, BoxError};
@@ -332,7 +333,7 @@ mod integration {
                 let proposal = session
                     .process_res(response.bytes().await?.to_vec().as_slice(), ctx)?
                     .expect("proposal should exist");
-                let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None);
+                let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None)?;
                 assert!(!payjoin_proposal.is_output_substitution_disabled());
                 let (req, ctx) = payjoin_proposal.extract_v2_req(&mock_ohttp_relay)?;
                 let response = agent
@@ -503,7 +504,8 @@ mod integration {
                         .process_res(response.as_slice(), ctx)?
                         .expect("proposal should exist");
                     let mut payjoin_proposal =
-                        handle_directory_proposal(&receiver_clone, proposal, None);
+                        handle_directory_proposal(&receiver_clone, proposal, None)
+                            .map_err(|e| e.to_string())?;
                     assert!(payjoin_proposal.is_output_substitution_disabled());
                     // Respond with payjoin psbt within the time window the sender is willing to wait
                     // this response would be returned as http response to the sender
@@ -512,7 +514,7 @@ mod integration {
                     payjoin_proposal
                         .process_res(&response.bytes().await?, ctx)
                         .map_err(|e| e.to_string())?;
-                    Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+                    Ok::<_, BoxSendSyncError>(())
                 });
 
                 // **********************
@@ -556,42 +558,42 @@ mod integration {
             receiver: &bitcoincore_rpc::Client,
             proposal: UncheckedProposal,
             custom_inputs: Option<Vec<InputPair>>,
-        ) -> PayjoinProposal {
+        ) -> Result<PayjoinProposal, BoxError> {
             // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
             let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
             // Receive Check 1: Can Broadcast
-            let proposal = proposal
-                .check_broadcast_suitability(None, |tx| {
-                    Ok(receiver
-                        .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
-                        .unwrap()
-                        .first()
-                        .unwrap()
-                        .allowed)
-                })
-                .expect("Payjoin proposal should be broadcastable");
+            let proposal = proposal.check_broadcast_suitability(None, |tx| {
+                Ok(receiver
+                    .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
+                    .map_err(|e| Implementation(e.into()))?
+                    .first()
+                    .ok_or(Implementation("testmempoolaccept should return a result".into()))?
+                    .allowed)
+            })?;
 
             // Receive Check 2: receiver can't sign for proposal inputs
-            let proposal = proposal
-                .check_inputs_not_owned(|input| {
-                    let address =
-                        bitcoin::Address::from_script(input, bitcoin::Network::Regtest).unwrap();
-                    Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
-                })
-                .expect("Receiver should not own any of the inputs");
+            let proposal = proposal.check_inputs_not_owned(|input| {
+                let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
+                    .map_err(|e| Implementation(e.into()))?;
+                receiver
+                    .get_address_info(&address)
+                    .map(|info| info.is_mine.unwrap_or(false))
+                    .map_err(|e| Implementation(e.into()))
+            })?;
 
             // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
             let payjoin = proposal
-                .check_no_inputs_seen_before(|_| Ok(false))
-                .unwrap()
+                .check_no_inputs_seen_before(|_| Ok(false))?
                 .identify_receiver_outputs(|output_script| {
                     let address =
                         bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
-                            .unwrap();
-                    Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
-                })
-                .expect("Receiver should have at least one output");
+                            .map_err(|e| Implementation(e.into()))?;
+                    receiver
+                        .get_address_info(&address)
+                        .map(|info| info.is_mine.unwrap_or(false))
+                        .map_err(|e| Implementation(e.into()))
+                })?;
 
             let payjoin = payjoin.commit_outputs();
 
@@ -600,38 +602,40 @@ mod integration {
                 None => {
                     let candidate_inputs = receiver
                         .list_unspent(None, None, None, None, None)
-                        .unwrap()
+                        .map_err(|e| Implementation(e.into()))?
                         .into_iter()
                         .map(input_pair_from_list_unspent);
-                    let selected_input = payjoin
-                        .try_preserving_privacy(candidate_inputs)
-                        .map_err(|e| {
+                    let selected_input =
+                        payjoin.try_preserving_privacy(candidate_inputs).map_err(|e| {
                             format!("Failed to make privacy preserving selection: {:?}", e)
-                        })
-                        .unwrap();
+                        })?;
                     vec![selected_input]
                 }
             };
-            let payjoin = payjoin.contribute_inputs(inputs).unwrap().commit_inputs();
+            let payjoin = payjoin
+                .contribute_inputs(inputs)
+                .map_err(|e| format!("Failed to contribute inputs: {:?}", e))?
+                .commit_inputs();
 
             // Sign and finalize the proposal PSBT
-            payjoin
-                .finalize_proposal(
-                    |psbt: &Psbt| {
-                        Ok(receiver
-                            .wallet_process_psbt(
-                                &psbt.to_string(),
-                                None,
-                                None,
-                                Some(true), // check that the receiver properly clears keypaths
-                            )
-                            .map(|res: WalletProcessPsbtResult| Psbt::from_str(&res.psbt).unwrap())
-                            .unwrap())
-                    },
-                    Some(FeeRate::BROADCAST_MIN),
-                    Some(FeeRate::from_sat_per_vb_unchecked(2)),
-                )
-                .unwrap()
+            let payjoin = payjoin.finalize_proposal(
+                |psbt: &Psbt| {
+                    receiver
+                        .wallet_process_psbt(
+                            &psbt.to_string(),
+                            None,
+                            None,
+                            Some(true), // check that the receiver properly clears keypaths
+                        )
+                        .map(|res: WalletProcessPsbtResult| {
+                            Psbt::from_str(&res.psbt).expect("psbt should be valid")
+                        })
+                        .map_err(|e| Implementation(e.into()))
+                },
+                Some(FeeRate::BROADCAST_MIN),
+                Some(FeeRate::from_sat_per_vb_unchecked(2)),
+            )?;
+            Ok(payjoin)
         }
 
         fn build_sweep_psbt(
@@ -906,16 +910,20 @@ mod integration {
         let proposal = proposal.check_broadcast_suitability(None, |tx| {
             Ok(receiver
                 .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
-                .unwrap()
+                .map_err(|e| Implementation(e.into()))?
                 .first()
-                .unwrap()
+                .ok_or(Implementation("testmempoolaccept should return a result".into()))?
                 .allowed)
         })?;
 
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal.check_inputs_not_owned(|input| {
-            let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest).unwrap();
-            Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
+            let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
+                .map_err(|e| Implementation(e.into()))?;
+            receiver
+                .get_address_info(&address)
+                .map(|info| info.is_mine.unwrap_or(false))
+                .map_err(|e| Implementation(e.into()))
         })?;
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
@@ -924,12 +932,18 @@ mod integration {
             .identify_receiver_outputs(|output_script| {
                 let address =
                     bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
-                        .unwrap();
-                Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
+                        .map_err(|e| Implementation(e.into()))?;
+                receiver
+                    .get_address_info(&address)
+                    .map(|info| info.is_mine.unwrap_or(false))
+                    .map_err(|e| Implementation(e.into()))
             })?;
 
         let payjoin = match custom_outputs {
-            Some(txos) => payjoin.replace_receiver_outputs(txos, drain_script.unwrap())?,
+            Some(txos) => payjoin.replace_receiver_outputs(
+                txos,
+                drain_script.expect("drain_script should be provided with custom_outputs"),
+            )?,
             None => payjoin.substitute_receiver_script(
                 &receiver.get_new_address(None, None)?.assume_checked().script_pubkey(),
             )?,
@@ -956,15 +970,17 @@ mod integration {
 
         let payjoin_proposal = payjoin.finalize_proposal(
             |psbt: &Psbt| {
-                Ok(receiver
+                receiver
                     .wallet_process_psbt(
                         &psbt.to_string(),
                         None,
                         None,
                         Some(true), // check that the receiver properly clears keypaths
                     )
-                    .map(|res: WalletProcessPsbtResult| Psbt::from_str(&res.psbt).unwrap())
-                    .unwrap())
+                    .map(|res: WalletProcessPsbtResult| {
+                        Psbt::from_str(&res.psbt).expect("psbt should be valid")
+                    })
+                    .map_err(|e| Implementation(e.into()))
             },
             Some(FeeRate::BROADCAST_MIN),
             Some(FeeRate::from_sat_per_vb_unchecked(2)),

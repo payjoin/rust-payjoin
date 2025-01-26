@@ -52,9 +52,9 @@ impl TestServices {
         let redis = init_redis();
         let db_host = format!("127.0.0.1:{}", redis.0);
         let directory = init_directory(db_host, cert_key.clone()).await?;
-        let gateway_origin = Uri::from_str(&format!("https://localhost:{}", directory.0)).unwrap();
+        let gateway_origin = Uri::from_str(&format!("https://localhost:{}", directory.0))?;
         let ohttp_relay = ohttp_relay::listen_tcp_on_free_port(gateway_origin).await?;
-        let http_agent: Arc<Client> = Arc::new(http_agent(cert_key.0.clone()).unwrap());
+        let http_agent: Arc<Client> = Arc::new(http_agent(cert_key.0.clone())?);
         Ok(Self {
             cert_key,
             redis,
@@ -67,7 +67,7 @@ impl TestServices {
     pub fn cert(&self) -> Vec<u8> { self.cert_key.0.clone() }
 
     pub fn directory_url(&self) -> Url {
-        Url::parse(&format!("https://localhost:{}", self.directory.0)).unwrap()
+        Url::parse(&format!("https://localhost:{}", self.directory.0)).expect("invalid URL")
     }
 
     pub fn take_directory_handle(&mut self) -> JoinHandle<Result<(), BoxSendSyncError>> {
@@ -75,7 +75,7 @@ impl TestServices {
     }
 
     pub fn ohttp_relay_url(&self) -> Url {
-        Url::parse(&format!("http://localhost:{}", self.ohttp_relay.0)).unwrap()
+        Url::parse(&format!("http://localhost:{}", self.ohttp_relay.0)).expect("invalid URL")
     }
 
     pub fn take_ohttp_relay_handle(&mut self) -> JoinHandle<Result<(), BoxSendSyncError>> {
@@ -128,8 +128,10 @@ pub fn init_bitcoind_sender_receiver(
     sender_address_type: Option<AddressType>,
     receiver_address_type: Option<AddressType>,
 ) -> Result<(bitcoind::BitcoinD, bitcoincore_rpc::Client, bitcoincore_rpc::Client), BoxError> {
-    let bitcoind_exe =
-        env::var("BITCOIND_EXE").ok().or_else(|| bitcoind::downloaded_exe_path().ok()).unwrap();
+    let bitcoind_exe = env::var("BITCOIND_EXE")
+        .ok()
+        .or_else(|| bitcoind::downloaded_exe_path().ok())
+        .expect("bitcoind not found");
     let mut conf = bitcoind::Conf::default();
     conf.view_stdout = log_enabled!(Level::Debug);
     let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &conf)?;
@@ -154,15 +156,15 @@ pub fn init_bitcoind_sender_receiver(
     Ok((bitcoind, sender, receiver))
 }
 
-pub fn http_agent(cert_der: Vec<u8>) -> Result<Client, BoxError> {
-    Ok(http_agent_builder(cert_der)?.build()?)
+pub fn http_agent(cert_der: Vec<u8>) -> Result<Client, BoxSendSyncError> {
+    Ok(http_agent_builder(cert_der).build()?)
 }
 
-fn http_agent_builder(cert_der: Vec<u8>) -> Result<ClientBuilder, BoxError> {
-    Ok(ClientBuilder::new()
-        .danger_accept_invalid_certs(true)
-        .use_rustls_tls()
-        .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der.as_slice()).unwrap()))
+fn http_agent_builder(cert_der: Vec<u8>) -> ClientBuilder {
+    ClientBuilder::new().danger_accept_invalid_certs(true).use_rustls_tls().add_root_certificate(
+        reqwest::tls::Certificate::from_der(cert_der.as_slice())
+            .expect("cert_der should be a valid DER-encoded certificate"),
+    )
 }
 
 const TESTS_TIMEOUT: Duration = Duration::from_secs(20);

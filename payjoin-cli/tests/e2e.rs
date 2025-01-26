@@ -5,7 +5,7 @@ mod e2e {
 
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
-    use payjoin_test_utils::init_bitcoind_sender_receiver;
+    use payjoin_test_utils::{init_bitcoind_sender_receiver, BoxError};
     use tokio::fs;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::process::Command;
@@ -19,19 +19,19 @@ mod e2e {
 
     #[cfg(not(feature = "v2"))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn send_receive_payjoin() {
-        let (bitcoind, _sender, _receiver) = init_bitcoind_sender_receiver(None, None).unwrap();
+    async fn send_receive_payjoin() -> Result<(), BoxError> {
+        let (bitcoind, _sender, _receiver) = init_bitcoind_sender_receiver(None, None)?;
         let temp_dir = env::temp_dir();
         let receiver_db_path = temp_dir.join("receiver_db");
         let sender_db_path = temp_dir.join("sender_db");
         let receiver_db_path_clone = receiver_db_path.clone();
         let sender_db_path_clone = sender_db_path.clone();
+        let port = find_free_port()?;
 
         let payjoin_sent = tokio::spawn(async move {
             let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
             let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
             let cookie_file = &bitcoind.params.cookie_file;
-            let port = find_free_port();
             let pj_endpoint = format!("https://localhost:{}", port);
             let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
 
@@ -114,25 +114,27 @@ mod e2e {
             });
 
             let timeout = tokio::time::Duration::from_secs(10);
-            let payjoin_sent = tokio::time::timeout(timeout, rx.recv()).await;
+            let payjoin_sent = tokio::time::timeout(timeout, rx.recv())
+                .await
+                .unwrap_or(Some(false)) // timed out
+                .expect("rx channel closed prematurely"); // recv() returned None
 
             sigint(&cli_receiver).expect("Failed to kill payjoin-cli");
             sigint(&cli_sender).expect("Failed to kill payjoin-cli");
             payjoin_sent
         })
-        .await;
+        .await?;
 
         cleanup_temp_file(&receiver_db_path).await;
         cleanup_temp_file(&sender_db_path).await;
-        assert!(
-            payjoin_sent.unwrap().unwrap_or(Some(false)).unwrap(),
-            "Payjoin send was not detected"
-        );
+        assert!(payjoin_sent, "Payjoin send was not detected");
 
-        fn find_free_port() -> u16 {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            listener.local_addr().unwrap().port()
+        fn find_free_port() -> Result<u16, BoxError> {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+            Ok(listener.local_addr()?.port())
         }
+
+        Ok(())
     }
 
     #[cfg(feature = "v2")]
@@ -140,7 +142,7 @@ mod e2e {
     async fn send_receive_payjoin() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use std::path::PathBuf;
 
-        use payjoin_test_utils::{init_tracing, BoxError, TestServices};
+        use payjoin_test_utils::{init_tracing, TestServices};
         use tokio::process::Child;
 
         type Result<T> = std::result::Result<T, BoxError>;

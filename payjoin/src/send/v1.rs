@@ -183,7 +183,7 @@ impl<'a> SenderBuilder<'a> {
     fn build(self) -> Result<Sender, BuildSenderError> {
         let mut psbt =
             self.psbt.validate().map_err(InternalBuildSenderError::InconsistentOriginalPsbt)?;
-        psbt.validate_input_utxos(true).map_err(InternalBuildSenderError::InvalidOriginalInput)?;
+        psbt.validate_input_utxos().map_err(InternalBuildSenderError::InvalidOriginalInput)?;
         let endpoint = self.uri.extras.endpoint.clone();
         let disable_output_substitution =
             self.uri.extras.disable_output_substitution || self.disable_output_substitution;

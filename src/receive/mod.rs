@@ -49,8 +49,8 @@ impl Receiver {
         ohttp_keys: OhttpKeys,
         expire_after: Option<u64>,
     ) -> Result<Self, PayjoinError> {
-        let address =
-            payjoin::bitcoin::Address::from_str(address.as_str())?.require_network(network)?;
+        let address = payjoin::bitcoin::Address::from_str(address.as_str())?
+            .require_network(network.into())?;
         payjoin::receive::v2::Receiver::new(
             address,
             directory,
@@ -191,7 +191,7 @@ impl MaybeInputsSeen {
     ) -> Result<OutputsUnknown, PayjoinError> {
         self.0
             .clone()
-            .check_no_inputs_seen_before(|outpoint| Ok(is_known(outpoint)?))
+            .check_no_inputs_seen_before(|outpoint| Ok(is_known(&(*outpoint).into())?))
             .map_err(Into::into)
             .map(Into::into)
     }
@@ -387,11 +387,11 @@ impl From<payjoin::receive::v2::PayjoinProposal> for PayjoinProposal {
 impl PayjoinProposal {
     pub fn utxos_to_be_locked(&self) -> Vec<OutPoint> {
         let mut outpoints: Vec<OutPoint> = Vec::new();
-        for e in
+        for o in
             <PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
                 .utxos_to_be_locked()
         {
-            outpoints.push(e.to_owned());
+            outpoints.push((*o).into());
         }
         outpoints
     }

@@ -187,14 +187,14 @@ mod integration {
                 OhttpKeys::from_str("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
                     .expect("Invalid OhttpKeys");
             let mut services = TestServices::initialize().await?;
-            tokio::select!(
+            let result = tokio::select!(
             err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
-                res = try_request_with_bad_keys(&services, bad_ohttp_keys) => {
-                    assert_eq!(
-                        res?.headers().get("content-type").expect("content type should be present"),
-                        "application/problem+json"
-                    );
-                }
+            res = try_request_with_bad_keys(&services, bad_ohttp_keys) => res
+            );
+
+            assert_eq!(
+                result?.headers().get("content-type").expect("content type should be present"),
+                "application/problem+json"
             );
 
             async fn try_request_with_bad_keys(
@@ -220,11 +220,13 @@ mod integration {
         async fn test_session_expiration() -> Result<(), BoxSendSyncError> {
             init_tracing();
             let mut services = TestServices::initialize().await?;
-            tokio::select!(
+            let result = tokio::select!(
             err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
             err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
-            res = do_expiration_tests(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
+            res = do_expiration_tests(&services) => res
             );
+
+            assert!(result.is_ok(), "v2 send receive failed: {:#?}", result.unwrap_err());
 
             async fn do_expiration_tests(services: &TestServices) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
@@ -269,11 +271,13 @@ mod integration {
         async fn v2_to_v2() -> Result<(), BoxSendSyncError> {
             init_tracing();
             let mut services = TestServices::initialize().await?;
-            tokio::select!(
+            let result = tokio::select!(
             err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
             err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
-            res = do_v2_send_receive(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
+            res = do_v2_send_receive(&services) => res
             );
+
+            assert!(result.is_ok(), "v2 send receive failed: {:#?}", result.unwrap_err());
 
             async fn do_v2_send_receive(services: &TestServices) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
@@ -432,11 +436,13 @@ mod integration {
         async fn v1_to_v2() -> Result<(), BoxSendSyncError> {
             init_tracing();
             let mut services = TestServices::initialize().await?;
-            tokio::select!(
+            let result = tokio::select!(
             err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
             err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
-            res = do_v1_to_v2(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
+            res = do_v1_to_v2(&services) => res
             );
+
+            assert!(result.is_ok(), "v2 send receive failed: {:#?}", result.unwrap_err());
 
             async fn do_v1_to_v2(services: &TestServices) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;

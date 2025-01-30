@@ -1,3 +1,4 @@
+//! Receive BIP 77 Payjoin v2
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 

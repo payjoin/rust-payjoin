@@ -1,4 +1,4 @@
-//! Send Payjoin
+//! Send BIP 78 Payjoin v1
 //!
 //! This module contains types and methods used to implement sending via [BIP78
 //! Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki).

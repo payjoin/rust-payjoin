@@ -53,8 +53,6 @@ pub use request::*;
 #[cfg(feature = "_core")]
 mod uri;
 
-#[cfg(feature = "base64")]
-pub use bitcoin::base64;
 #[cfg(feature = "_core")]
 pub use uri::{PjParseError, PjUri, Uri, UriExt};
 #[cfg(feature = "_core")]

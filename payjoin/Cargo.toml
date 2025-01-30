@@ -17,7 +17,6 @@ exclude = ["tests"]
 
 [features]
 default = ["v2"]
-base64 = ["bitcoin/base64"]
 #[doc = "Core features for payjoin state machines"]
 _core = ["bitcoin/rand", "serde_json", "url", "bitcoin_uri"]
 directory = []

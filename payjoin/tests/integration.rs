@@ -11,6 +11,7 @@ mod integration {
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use once_cell::sync::Lazy;
     use payjoin::receive::v1::build_v1_pj_uri;
+    use payjoin::receive::Error::Implementation;
     use payjoin::receive::InputPair;
     use payjoin::{PjUri, Request, Uri};
     use payjoin_test_utils::{init_bitcoind_sender_receiver, init_tracing, BoxError};
@@ -82,10 +83,10 @@ mod integration {
             // Inside the Sender:
             // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let uri = Uri::from_str(&pj_uri.to_string())
-                .unwrap()
+                .map_err(|e| e.to_string())?
                 .assume_checked()
                 .check_pj_supported()
-                .unwrap();
+                .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
             debug!("Original psbt: {:#?}", psbt);
             let (req, ctx) = SenderBuilder::new(psbt, uri)
@@ -146,10 +147,10 @@ mod integration {
             // Inside the Sender:
             // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let uri = Uri::from_str(&pj_uri.to_string())
-                .unwrap()
+                .map_err(|e| e.to_string())?
                 .assume_checked()
                 .check_pj_supported()
-                .unwrap();
+                .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
             debug!("Original psbt: {:#?}", psbt);
             let (req, _ctx) = SenderBuilder::new(psbt, uri)
@@ -175,22 +176,22 @@ mod integration {
         use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
         use payjoin::send::v2::SenderBuilder;
         use payjoin::{OhttpKeys, PjUri, UriExt};
-        use payjoin_test_utils::TestServices;
-        use reqwest::{Client, Error, Response};
+        use payjoin_test_utils::{BoxSendSyncError, TestServices};
+        use reqwest::{Client, Response};
 
         use super::*;
 
         #[tokio::test]
-        async fn test_bad_ohttp_keys() {
+        async fn test_bad_ohttp_keys() -> Result<(), BoxSendSyncError> {
             let bad_ohttp_keys =
                 OhttpKeys::from_str("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
                     .expect("Invalid OhttpKeys");
-            let mut services = TestServices::initialize().await.unwrap();
+            let mut services = TestServices::initialize().await?;
             tokio::select!(
-            err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
+            err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
                 res = try_request_with_bad_keys(&services, bad_ohttp_keys) => {
                     assert_eq!(
-                        res.unwrap().headers().get("content-type").unwrap(),
+                        res?.headers().get("content-type").expect("content type should be present"),
                         "application/problem+json"
                     );
                 }
@@ -199,30 +200,29 @@ mod integration {
             async fn try_request_with_bad_keys(
                 services: &TestServices,
                 bad_ohttp_keys: OhttpKeys,
-            ) -> Result<Response, Error> {
+            ) -> Result<Response, BoxSendSyncError> {
                 let agent = services.http_agent();
-                services.wait_for_services_ready().await.unwrap();
+                services.wait_for_services_ready().await?;
                 let directory = services.directory_url();
                 let mock_ohttp_relay = directory.clone(); // pass through to directory
-                let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
-                    .unwrap()
+                let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")?
                     .assume_checked();
                 let mut bad_initializer =
                     Receiver::new(mock_address, directory, bad_ohttp_keys, None);
-                let (req, _ctx) = bad_initializer
-                    .extract_req(&mock_ohttp_relay)
-                    .expect("Failed to extract request");
-                agent.post(req.url).body(req.body).send().await
+                let (req, _ctx) = bad_initializer.extract_req(&mock_ohttp_relay)?;
+                agent.post(req.url).body(req.body).send().await.map_err(|e| e.into())
             }
+
+            Ok(())
         }
 
         #[tokio::test]
-        async fn test_session_expiration() {
+        async fn test_session_expiration() -> Result<(), BoxSendSyncError> {
             init_tracing();
-            let mut services = TestServices::initialize().await.unwrap();
+            let mut services = TestServices::initialize().await?;
             tokio::select!(
-            err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
-            err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
+            err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
+            err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
             res = do_expiration_tests(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
@@ -261,15 +261,17 @@ mod integration {
                 };
                 Ok(())
             }
+
+            Ok(())
         }
 
         #[tokio::test]
-        async fn v2_to_v2() {
+        async fn v2_to_v2() -> Result<(), BoxSendSyncError> {
             init_tracing();
-            let mut services = TestServices::initialize().await.unwrap();
+            let mut services = TestServices::initialize().await?;
             tokio::select!(
-            err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
-            err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
+            err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
+            err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
             res = do_v2_send_receive(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
@@ -287,25 +289,24 @@ mod integration {
                 let mut session =
                     Receiver::new(address.clone(), directory.clone(), ohttp_keys.clone(), None);
                 println!("session: {:#?}", &session);
-                let pj_uri_string = session.pj_uri().to_string();
                 // Poll receive request
                 let mock_ohttp_relay = directory.clone();
                 let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 assert!(response.status().is_success());
                 let response_body =
-                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx).unwrap();
+                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?;
                 // No proposal yet since sender has not responded
                 assert!(response_body.is_none());
 
                 // **********************
                 // Inside the Sender:
                 // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-                let pj_uri = Uri::from_str(&pj_uri_string)
-                    .unwrap()
+                let pj_uri = Uri::from_str(&session.pj_uri().to_string())
+                    .map_err(|e| e.to_string())?
                     .assume_checked()
                     .check_pj_supported()
-                    .unwrap();
+                    .map_err(|e| e.to_string())?;
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
                 let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
@@ -316,8 +317,7 @@ mod integration {
                     .header("Content-Type", content_type)
                     .body(body.clone())
                     .send()
-                    .await
-                    .unwrap();
+                    .await?;
                 log::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success());
                 let send_ctx = send_ctx.process_response(&response.bytes().await?)?;
@@ -330,9 +330,10 @@ mod integration {
                 let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
                 let response = agent.post(req.url).body(req.body).send().await?;
                 // POST payjoin
-                let proposal =
-                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?.unwrap();
-                let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None);
+                let proposal = session
+                    .process_res(response.bytes().await?.to_vec().as_slice(), ctx)?
+                    .expect("proposal should exist");
+                let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None)?;
                 assert!(!payjoin_proposal.is_output_substitution_disabled());
                 let (req, ctx) = payjoin_proposal.extract_v2_req(&mock_ohttp_relay)?;
                 let response = agent
@@ -354,11 +355,11 @@ mod integration {
                     .header("Content-Type", content_type)
                     .body(body.clone())
                     .send()
-                    .await
-                    .unwrap();
+                    .await?;
                 log::info!("Response: {:#?}", &response);
-                let checked_payjoin_proposal_psbt =
-                    send_ctx.process_response(&response.bytes().await?, ohttp_ctx)?.unwrap();
+                let checked_payjoin_proposal_psbt = send_ctx
+                    .process_response(&response.bytes().await?, ohttp_ctx)?
+                    .expect("psbt should exist");
                 let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
                 log::info!("sent");
@@ -375,6 +376,8 @@ mod integration {
                 assert_eq!(sender.get_balances()?.mine.untrusted_pending, Amount::from_btc(0.0)?);
                 Ok(())
             }
+
+            Ok(())
         }
 
         #[test]
@@ -390,10 +393,10 @@ mod integration {
             // Inside the Sender:
             // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let pj_uri = Uri::from_str(&pj_uri.to_string())
-                .unwrap()
+                .map_err(|e| e.to_string())?
                 .assume_checked()
                 .check_pj_supported()
-                .unwrap();
+                .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
                 .build_recommended(FeeRate::BROADCAST_MIN)?;
@@ -426,12 +429,12 @@ mod integration {
         }
 
         #[tokio::test]
-        async fn v1_to_v2() {
+        async fn v1_to_v2() -> Result<(), BoxSendSyncError> {
             init_tracing();
-            let mut services = TestServices::initialize().await.unwrap();
+            let mut services = TestServices::initialize().await?;
             tokio::select!(
-            err = services.take_ohttp_relay_handle().unwrap() => panic!("Ohttp relay exited early: {:?}", err),
-            err = services.take_directory_handle().unwrap() => panic!("Directory server exited early: {:?}", err),
+            err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
+            err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
             res = do_v1_to_v2(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
             );
 
@@ -446,16 +449,14 @@ mod integration {
                 let mut session =
                     Receiver::new(address, directory.clone(), ohttp_keys.clone(), None);
 
-                let pj_uri_string = session.pj_uri().to_string();
-
                 // **********************
                 // Inside the V1 Sender:
                 // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-                let pj_uri = Uri::from_str(&pj_uri_string)
-                    .unwrap()
+                let pj_uri = Uri::from_str(&session.pj_uri().to_string())
+                    .map_err(|e| e.to_string())?
                     .assume_checked()
                     .check_pj_supported()
-                    .unwrap();
+                    .map_err(|e| e.to_string())?;
                 let psbt = build_original_psbt(&sender, &pj_uri)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
                     SenderBuilder::new(psbt, pj_uri)
@@ -473,7 +474,7 @@ mod integration {
                     .body(body.clone())
                     .send()
                     .await;
-                assert!(res.as_ref().unwrap().status() == StatusCode::SERVICE_UNAVAILABLE);
+                assert!(res?.status() == StatusCode::SERVICE_UNAVAILABLE);
 
                 // **********************
                 // Inside the Receiver:
@@ -484,7 +485,7 @@ mod integration {
                 let receiver_loop = tokio::task::spawn(async move {
                     let agent_clone = agent_clone.clone();
                     let (response, ctx) = loop {
-                        let (req, ctx) = session.extract_req(&mock_ohttp_relay).unwrap();
+                        let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
                         let response = agent_clone.post(req.url).body(req.body).send().await?;
 
                         if response.status() == 200 {
@@ -499,18 +500,21 @@ mod integration {
                             panic!("Unexpected response status: {}", response.status())
                         }
                     };
-                    let proposal = session.process_res(response.as_slice(), ctx).unwrap().unwrap();
+                    let proposal = session
+                        .process_res(response.as_slice(), ctx)?
+                        .expect("proposal should exist");
                     let mut payjoin_proposal =
-                        handle_directory_proposal(&receiver_clone, proposal, None);
+                        handle_directory_proposal(&receiver_clone, proposal, None)
+                            .map_err(|e| e.to_string())?;
                     assert!(payjoin_proposal.is_output_substitution_disabled());
                     // Respond with payjoin psbt within the time window the sender is willing to wait
                     // this response would be returned as http response to the sender
-                    let (req, ctx) = payjoin_proposal.extract_v2_req(&mock_ohttp_relay).unwrap();
+                    let (req, ctx) = payjoin_proposal.extract_v2_req(&mock_ohttp_relay)?;
                     let response = agent_clone.post(req.url).body(req.body).send().await?;
                     payjoin_proposal
                         .process_res(&response.bytes().await?, ctx)
                         .map_err(|e| e.to_string())?;
-                    Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+                    Ok::<_, BoxSendSyncError>(())
                 });
 
                 // **********************
@@ -546,48 +550,50 @@ mod integration {
                 );
                 Ok(())
             }
+
+            Ok(())
         }
 
         fn handle_directory_proposal(
             receiver: &bitcoincore_rpc::Client,
             proposal: UncheckedProposal,
             custom_inputs: Option<Vec<InputPair>>,
-        ) -> PayjoinProposal {
+        ) -> Result<PayjoinProposal, BoxError> {
             // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
             let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
             // Receive Check 1: Can Broadcast
-            let proposal = proposal
-                .check_broadcast_suitability(None, |tx| {
-                    Ok(receiver
-                        .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
-                        .unwrap()
-                        .first()
-                        .unwrap()
-                        .allowed)
-                })
-                .expect("Payjoin proposal should be broadcastable");
+            let proposal = proposal.check_broadcast_suitability(None, |tx| {
+                Ok(receiver
+                    .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
+                    .map_err(|e| Implementation(e.into()))?
+                    .first()
+                    .ok_or(Implementation("testmempoolaccept should return a result".into()))?
+                    .allowed)
+            })?;
 
             // Receive Check 2: receiver can't sign for proposal inputs
-            let proposal = proposal
-                .check_inputs_not_owned(|input| {
-                    let address =
-                        bitcoin::Address::from_script(input, bitcoin::Network::Regtest).unwrap();
-                    Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
-                })
-                .expect("Receiver should not own any of the inputs");
+            let proposal = proposal.check_inputs_not_owned(|input| {
+                let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
+                    .map_err(|e| Implementation(e.into()))?;
+                receiver
+                    .get_address_info(&address)
+                    .map(|info| info.is_mine.unwrap_or(false))
+                    .map_err(|e| Implementation(e.into()))
+            })?;
 
             // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
             let payjoin = proposal
-                .check_no_inputs_seen_before(|_| Ok(false))
-                .unwrap()
+                .check_no_inputs_seen_before(|_| Ok(false))?
                 .identify_receiver_outputs(|output_script| {
                     let address =
                         bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
-                            .unwrap();
-                    Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
-                })
-                .expect("Receiver should have at least one output");
+                            .map_err(|e| Implementation(e.into()))?;
+                    receiver
+                        .get_address_info(&address)
+                        .map(|info| info.is_mine.unwrap_or(false))
+                        .map_err(|e| Implementation(e.into()))
+                })?;
 
             let payjoin = payjoin.commit_outputs();
 
@@ -596,38 +602,40 @@ mod integration {
                 None => {
                     let candidate_inputs = receiver
                         .list_unspent(None, None, None, None, None)
-                        .unwrap()
+                        .map_err(|e| Implementation(e.into()))?
                         .into_iter()
                         .map(input_pair_from_list_unspent);
-                    let selected_input = payjoin
-                        .try_preserving_privacy(candidate_inputs)
-                        .map_err(|e| {
+                    let selected_input =
+                        payjoin.try_preserving_privacy(candidate_inputs).map_err(|e| {
                             format!("Failed to make privacy preserving selection: {:?}", e)
-                        })
-                        .unwrap();
+                        })?;
                     vec![selected_input]
                 }
             };
-            let payjoin = payjoin.contribute_inputs(inputs).unwrap().commit_inputs();
+            let payjoin = payjoin
+                .contribute_inputs(inputs)
+                .map_err(|e| format!("Failed to contribute inputs: {:?}", e))?
+                .commit_inputs();
 
             // Sign and finalize the proposal PSBT
-            payjoin
-                .finalize_proposal(
-                    |psbt: &Psbt| {
-                        Ok(receiver
-                            .wallet_process_psbt(
-                                &psbt.to_string(),
-                                None,
-                                None,
-                                Some(true), // check that the receiver properly clears keypaths
-                            )
-                            .map(|res: WalletProcessPsbtResult| Psbt::from_str(&res.psbt).unwrap())
-                            .unwrap())
-                    },
-                    Some(FeeRate::BROADCAST_MIN),
-                    Some(FeeRate::from_sat_per_vb_unchecked(2)),
-                )
-                .unwrap()
+            let payjoin = payjoin.finalize_proposal(
+                |psbt: &Psbt| {
+                    receiver
+                        .wallet_process_psbt(
+                            &psbt.to_string(),
+                            None,
+                            None,
+                            Some(true), // check that the receiver properly clears keypaths
+                        )
+                        .map(|res: WalletProcessPsbtResult| {
+                            Psbt::from_str(&res.psbt).expect("psbt should be valid")
+                        })
+                        .map_err(|e| Implementation(e.into()))
+                },
+                Some(FeeRate::BROADCAST_MIN),
+                Some(FeeRate::from_sat_per_vb_unchecked(2)),
+            )?;
+            Ok(payjoin)
         }
 
         fn build_sweep_psbt(
@@ -674,7 +682,7 @@ mod integration {
             let receiver_address =
                 receiver.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
             bitcoind.client.generate_to_address(199, &receiver_address)?;
-            let receiver_utxos = receiver.list_unspent(None, None, None, None, None).unwrap();
+            let receiver_utxos = receiver.list_unspent(None, None, None, None, None)?;
             assert_eq!(100, receiver_utxos.len(), "receiver doesn't have enough UTXOs");
             assert_eq!(
                 Amount::from_btc(3700.0)?, // 48*50.0 + 52*25.0 (halving occurs every 150 blocks)
@@ -691,10 +699,10 @@ mod integration {
             // Inside the Sender:
             // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let uri = Uri::from_str(&pj_uri.to_string())
-                .unwrap()
+                .map_err(|e| e.to_string())?
                 .assume_checked()
                 .check_pj_supported()
-                .unwrap();
+                .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
             log::debug!("Original psbt: {:#?}", psbt);
             let max_additional_fee = Amount::from_sat(1000);
@@ -768,10 +776,10 @@ mod integration {
             // Inside the Sender:
             // Sender create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             let uri = Uri::from_str(&pj_uri.to_string())
-                .unwrap()
+                .map_err(|e| e.to_string())?
                 .assume_checked()
                 .check_pj_supported()
-                .unwrap();
+                .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
             log::debug!("Original psbt: {:#?}", psbt);
             let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)
@@ -902,16 +910,20 @@ mod integration {
         let proposal = proposal.check_broadcast_suitability(None, |tx| {
             Ok(receiver
                 .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
-                .unwrap()
+                .map_err(|e| Implementation(e.into()))?
                 .first()
-                .unwrap()
+                .ok_or(Implementation("testmempoolaccept should return a result".into()))?
                 .allowed)
         })?;
 
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal.check_inputs_not_owned(|input| {
-            let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest).unwrap();
-            Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
+            let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
+                .map_err(|e| Implementation(e.into()))?;
+            receiver
+                .get_address_info(&address)
+                .map(|info| info.is_mine.unwrap_or(false))
+                .map_err(|e| Implementation(e.into()))
         })?;
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
@@ -920,12 +932,18 @@ mod integration {
             .identify_receiver_outputs(|output_script| {
                 let address =
                     bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
-                        .unwrap();
-                Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
+                        .map_err(|e| Implementation(e.into()))?;
+                receiver
+                    .get_address_info(&address)
+                    .map(|info| info.is_mine.unwrap_or(false))
+                    .map_err(|e| Implementation(e.into()))
             })?;
 
         let payjoin = match custom_outputs {
-            Some(txos) => payjoin.replace_receiver_outputs(txos, drain_script.unwrap())?,
+            Some(txos) => payjoin.replace_receiver_outputs(
+                txos,
+                drain_script.expect("drain_script should be provided with custom_outputs"),
+            )?,
             None => payjoin.substitute_receiver_script(
                 &receiver.get_new_address(None, None)?.assume_checked().script_pubkey(),
             )?,
@@ -952,15 +970,17 @@ mod integration {
 
         let payjoin_proposal = payjoin.finalize_proposal(
             |psbt: &Psbt| {
-                Ok(receiver
+                receiver
                     .wallet_process_psbt(
                         &psbt.to_string(),
                         None,
                         None,
                         Some(true), // check that the receiver properly clears keypaths
                     )
-                    .map(|res: WalletProcessPsbtResult| Psbt::from_str(&res.psbt).unwrap())
-                    .unwrap())
+                    .map(|res: WalletProcessPsbtResult| {
+                        Psbt::from_str(&res.psbt).expect("psbt should be valid")
+                    })
+                    .map_err(|e| Implementation(e.into()))
             },
             Some(FeeRate::BROADCAST_MIN),
             Some(FeeRate::from_sat_per_vb_unchecked(2)),
@@ -973,7 +993,8 @@ mod integration {
         psbt: Psbt,
     ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
         let payjoin_psbt = sender.wallet_process_psbt(&psbt.to_string(), None, None, None)?.psbt;
-        let payjoin_psbt = sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.unwrap();
+        let payjoin_psbt =
+            sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.expect("should contain a PSBT");
         let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
         tracing::debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
 

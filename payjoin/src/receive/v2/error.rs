@@ -23,6 +23,8 @@ impl From<InternalSessionError> for Error {
 
 #[derive(Debug)]
 pub(crate) enum InternalSessionError {
+    /// Url parsing failed
+    ParseUrl(crate::into_url::Error),
     /// The session has expired
     Expired(std::time::SystemTime),
     /// OHTTP Encapsulation failed
@@ -33,6 +35,10 @@ pub(crate) enum InternalSessionError {
     UnexpectedResponseSize(usize),
     /// Unexpected status code
     UnexpectedStatusCode(http::StatusCode),
+}
+
+impl From<crate::into_url::Error> for SessionError {
+    fn from(e: crate::into_url::Error) -> Self { InternalSessionError::ParseUrl(e).into() }
 }
 
 impl From<std::time::SystemTime> for Error {
@@ -52,6 +58,7 @@ impl From<HpkeError> for Error {
 impl fmt::Display for SessionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
+            InternalSessionError::ParseUrl(e) => write!(f, "URL parsing failed: {}", e),
             InternalSessionError::Expired(expiry) => write!(f, "Session expired at {:?}", expiry),
             InternalSessionError::OhttpEncapsulation(e) =>
                 write!(f, "OHTTP Encapsulation Error: {}", e),
@@ -71,6 +78,7 @@ impl fmt::Display for SessionError {
 impl error::Error for SessionError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self.0 {
+            InternalSessionError::ParseUrl(e) => Some(e),
             InternalSessionError::Expired(_) => None,
             InternalSessionError::OhttpEncapsulation(e) => Some(e),
             InternalSessionError::Hpke(e) => Some(e),

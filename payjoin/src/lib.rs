@@ -1,21 +1,19 @@
 //! # Payjoin implementation in Rust
 //!
-//! **Important: this crate is WIP!**
+//! Supercharge payment batching to save you fees and preserve your privacy.
 //!
-//! While I don't think there's a huge risk running it, don't rely on its security for now!
-//! Please at least review the code that verifies there's no overpayment and let me know you did.
+//! This library implements both [BIP 78 Payjoin V1](https://github.com/shesek/bips/blob/master/bip-0078.mediawiki) and [BIP 77 Payjoin V2](https://github.com/bitcoin/bips/pull/1483).
 //!
-//! This is a library and an example binary implementing BIP78 Payjoin.
-//! The library is perfectly IO-agnostic - in fact, it does no IO.
-//! The primary goal of such design is to make it easy to unit test.
-//! While we're not there yet, it already has infinitely more tests than the Payjoin PR against Electrum. :P
+//! Only the latest BIP 77 Payjoin V2 is enabled by default. To use BIP 78 Payjoin V1, enable the `v1` feature.
 //!
-//! Additional advantage is it doesn't care whether you use `async`, blocking, `tokio`, `sync-std` `hyper`, `actix` or whatever.
-//! There are already too many frameworks in Rust so it's best avoiding directly introducing them into library code.
+//! The library is perfectly IO-agnostic — in fact, it does no IO by default without the `io` feature.
 //!
-//! To use this library as a sender (client, payer), you need to enable `send` Cargo feature.
+//! Types relevant to a Payjoin Directory as defined in BIP 77 are available in the [`directory`] module enabled by
+//!  the `directory` feature.
 //!
-//! To use this library as a receiver (server, payee), you need to enable `receive` Cargo feature.
+//! ## Disclaimer ⚠️ WIP
+//!
+//! **Use at your own risk. This crate has not yet been reviewed by independent Rust and Bitcoin security professionals.**
 
 #[cfg(feature = "_core")]
 pub extern crate bitcoin;

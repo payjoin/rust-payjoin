@@ -293,7 +293,7 @@ mod integration {
                 let mock_ohttp_relay = directory.clone();
                 let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
                 let response = agent.post(req.url).body(req.body).send().await?;
-                assert!(response.status().is_success());
+                assert!(response.status().is_success(), "error response: {}", response.status());
                 let response_body =
                     session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?;
                 // No proposal yet since sender has not responded
@@ -319,7 +319,7 @@ mod integration {
                     .send()
                     .await?;
                 log::info!("Response: {:#?}", &response);
-                assert!(response.status().is_success());
+                assert!(response.status().is_success(), "error response: {}", response.status());
                 let send_ctx = send_ctx.process_response(&response.bytes().await?)?;
                 // POST Original PSBT
 
@@ -523,7 +523,7 @@ mod integration {
                 let response =
                     agent.post(url).header("Content-Type", content_type).body(body).send().await?;
                 log::info!("Response: {:#?}", &response);
-                assert!(response.status().is_success());
+                assert!(response.status().is_success(), "error response: {}", response.status());
 
                 let res = response.bytes().await?.to_vec();
                 let checked_payjoin_proposal_psbt =

@@ -9,11 +9,13 @@ mod error;
 pub(crate) mod optional_parameters;
 
 #[cfg(feature = "v1")]
+#[cfg_attr(docsrs, doc(cfg(feature = "v1")))]
 pub mod v1;
 #[cfg(not(feature = "v1"))]
 pub(crate) mod v1;
 
 #[cfg(feature = "v2")]
+#[cfg_attr(docsrs, doc(cfg(feature = "v2")))]
 pub mod v2;
 
 /// Helper to construct a pair of (txin, psbtin) with some built-in validation

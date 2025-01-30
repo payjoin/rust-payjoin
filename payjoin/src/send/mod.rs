@@ -26,11 +26,13 @@ compile_error!("This crate currently only supports 32 bit and 64 bit architectur
 mod error;
 
 #[cfg(feature = "v1")]
+#[cfg_attr(docsrs, doc(cfg(feature = "v1")))]
 pub mod v1;
 #[cfg(not(feature = "v1"))]
 pub(crate) mod v1;
 
 #[cfg(feature = "v2")]
+#[cfg_attr(docsrs, doc(cfg(feature = "v2")))]
 pub mod v2;
 
 type InternalResult<T> = Result<T, InternalProposalError>;

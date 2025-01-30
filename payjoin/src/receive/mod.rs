@@ -1,3 +1,14 @@
+//! Receive Payjoin
+//!
+//! This module contains types and methods used to implement receiving via Payjoin.
+//!
+//! For most use cases, we recommended enabling the `v2` feature, as it is
+//! backwards compatible and provides the most convenient experience for users and implementors.
+//! To use version 2, refer to `receive::v2` module documentation.
+//!
+//! If you specifically need to use
+//! version 1, refer to the `receive::v1` module documentation after enabling the `v1` feature.
+
 use bitcoin::{psbt, AddressType, TxIn, TxOut};
 pub(crate) use error::InternalPayloadError;
 pub use error::{Error, JsonError, OutputSubstitutionError, PayloadError, SelectionError};
@@ -9,11 +20,13 @@ mod error;
 pub(crate) mod optional_parameters;
 
 #[cfg(feature = "v1")]
+#[cfg_attr(docsrs, doc(cfg(feature = "v1")))]
 pub mod v1;
 #[cfg(not(feature = "v1"))]
 pub(crate) mod v1;
 
 #[cfg(feature = "v2")]
+#[cfg_attr(docsrs, doc(cfg(feature = "v2")))]
 pub mod v2;
 
 /// Helper to construct a pair of (txin, psbtin) with some built-in validation

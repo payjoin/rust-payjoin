@@ -1,9 +1,9 @@
 use url::Url;
 
-pub const V1_REQ_CONTENT_TYPE: &str = "text/plain";
+const V1_REQ_CONTENT_TYPE: &str = "text/plain";
 
 #[cfg(feature = "v2")]
-pub const V2_REQ_CONTENT_TYPE: &str = "message/ohttp-req";
+const V2_REQ_CONTENT_TYPE: &str = "message/ohttp-req";
 
 /// Represents data that needs to be transmitted to the receiver or payjoin directory.
 /// Ensure the `Content-Length` is set to the length of `body`. (most libraries do this automatically)

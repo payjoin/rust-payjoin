@@ -1,3 +1,5 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 //! # Payjoin implementation in Rust
 //!
 //! Supercharge payment batching to save you fees and preserve your privacy.
@@ -34,9 +36,11 @@ pub use crate::ohttp::OhttpKeys;
 #[cfg(any(feature = "v2", feature = "directory"))]
 pub(crate) mod bech32;
 #[cfg(feature = "directory")]
+#[cfg_attr(docsrs, doc(cfg(feature = "directory")))]
 pub mod directory;
 
 #[cfg(feature = "io")]
+#[cfg_attr(docsrs, doc(cfg(feature = "io")))]
 pub mod io;
 #[cfg(feature = "_core")]
 pub(crate) mod psbt;
@@ -47,8 +51,6 @@ pub use request::*;
 #[cfg(feature = "_core")]
 mod uri;
 
-#[cfg(feature = "base64")]
-pub use bitcoin::base64;
 #[cfg(feature = "_core")]
 pub use uri::{PjParseError, PjUri, Uri, UriExt};
 #[cfg(feature = "_core")]

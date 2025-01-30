@@ -1,3 +1,5 @@
+//! IO-related types and functions. Specifically, fetching OHTTP keys from a payjoin directory.
+
 use reqwest::{Client, Proxy};
 
 use crate::{OhttpKeys, Url};

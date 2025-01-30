@@ -17,7 +17,6 @@ exclude = ["tests"]
 
 [features]
 default = ["v2"]
-base64 = ["bitcoin/base64"]
 #[doc = "Core features for payjoin state machines"]
 _core = ["bitcoin/rand", "serde_json", "url", "bitcoin_uri"]
 directory = []
@@ -49,4 +48,5 @@ tokio = { version = "1.12.0", features = ["full"] }
 tracing = "0.1.40"
 
 [package.metadata.docs.rs]
-features = ["base64", "v2", "io"]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

@@ -1,4 +1,4 @@
-//! Receive Payjoin v1
+//! Receive BIP 78 Payjoin v1
 //!
 //! This module contains types and methods used to receive payjoin via BIP78.
 //! Usage is pretty simple:

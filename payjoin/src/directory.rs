@@ -1,3 +1,5 @@
+//! Types relevant to the Payjoin Directory as defined in BIP 77.
+
 pub const ENCAPSULATED_MESSAGE_BYTES: usize = 8192;
 
 /// A 64-bit identifier used to identify Payjoin Directory entries.

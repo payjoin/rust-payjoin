@@ -196,7 +196,7 @@ impl Sender {
 fn serialize_v2_body(
     psbt: &Psbt,
     disable_output_substitution: bool,
-    fee_contribution: Option<(bitcoin::Amount, usize)>,
+    fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
 ) -> Result<Vec<u8>, CreateRequestError> {
     // Grug say localhost base be discarded anyway. no big brain needed.

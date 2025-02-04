@@ -237,7 +237,7 @@ impl Sender {
         )?;
         let body = self.psbt.to_string().as_bytes().to_vec();
         Ok((
-            Request::new_v1(url, body),
+            Request::new_v1(&url, &body),
             V1Context {
                 psbt_context: PsbtContext {
                     original_psbt: self.psbt.clone(),

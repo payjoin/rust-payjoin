@@ -15,9 +15,8 @@ use super::error::InputContributionError;
 use super::{v1, Error, InternalPayloadError, JsonError, OutputSubstitutionError, SelectionError};
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
-use crate::psbt::PsbtExt;
-use crate::receive::optional_parameters::Params;
-use crate::receive::InputPair;
+use crate::receive::error::ValidationError;
+use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
 use crate::Request;
 
@@ -158,14 +157,9 @@ impl Receiver {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
         log::trace!("Received query: {}, base64: {}", query, base64); // my guess is no \n so default is wrong
-        let unchecked_psbt = Psbt::from_str(base64).map_err(InternalPayloadError::ParsePsbt)?;
-        let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
-        log::debug!("Received original psbt: {:?}", psbt);
-        let mut params = Params::from_query_pairs(
-            url::form_urlencoded::parse(query.as_bytes()),
-            SUPPORTED_VERSIONS,
-        )
-        .map_err(InternalPayloadError::SenderParams)?;
+
+        let (psbt, mut params) = parse_payload(base64.to_string(), query, SUPPORTED_VERSIONS)
+            .map_err(|e| Error::Validation(ValidationError::Payload(e)))?;
 
         // Output substitution must be disabled for V1 sessions in V2 contexts.
         //
@@ -179,7 +173,6 @@ impl Receiver {
             params.disable_output_substitution = true;
         }
 
-        log::debug!("Received request with params: {:?}", params);
         let inner = v1::UncheckedProposal { psbt, params };
         Ok(UncheckedProposal { v1: inner, context: self.context.clone() })
     }

@@ -27,7 +27,7 @@ pub(crate) enum InternalRequestError {
     /// The Content-Length header could not be parsed as a number
     InvalidContentLength(std::num::ParseIntError),
     /// The Content-Length value exceeds the maximum allowed size
-    ContentLengthTooLarge(u64),
+    ContentLengthTooLarge(usize),
 }
 
 impl From<InternalRequestError> for RequestError {

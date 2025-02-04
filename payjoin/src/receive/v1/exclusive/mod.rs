@@ -1,11 +1,12 @@
-use std::str::FromStr;
 mod error;
 pub(crate) use error::InternalRequestError;
 pub use error::RequestError;
 
 use super::*;
-use crate::receive::optional_parameters::Params;
+use crate::receive::error::ValidationError;
 
+/// 4_000_000 * 4 / 3 fits in u32
+const MAX_CONTENT_LENGTH: usize = 4_000_000 * 4 / 3;
 const SUPPORTED_VERSIONS: &[usize] = &[1];
 
 pub trait Headers {
@@ -24,44 +25,48 @@ pub fn build_v1_pj_uri<'a>(
 
 impl UncheckedProposal {
     pub fn from_request(
-        mut body: impl std::io::Read,
+        body: impl std::io::Read,
         query: &str,
         headers: impl Headers,
     ) -> Result<Self, Error> {
-        let content_type = headers
-            .get_header("content-type")
-            .ok_or(InternalRequestError::MissingHeader("Content-Type"))?;
-        if !content_type.starts_with("text/plain") {
-            return Err(InternalRequestError::InvalidContentType(content_type.to_owned()).into());
-        }
-        let content_length = headers
-            .get_header("content-length")
-            .ok_or(InternalRequestError::MissingHeader("Content-Length"))?
-            .parse::<u64>()
-            .map_err(InternalRequestError::InvalidContentLength)?;
-        // 4M block size limit with base64 encoding overhead => maximum reasonable size of content-length
-        if content_length > 4_000_000 * 4 / 3 {
-            return Err(InternalRequestError::ContentLengthTooLarge(content_length).into());
-        }
+        let parsed_body =
+            parse_body(headers, body).map_err(|e| Error::Validation(ValidationError::V1(e)))?;
 
-        // enforce the limit
-        let mut buf = vec![0; content_length as usize]; // 4_000_000 * 4 / 3 fits in u32
-        body.read_exact(&mut buf).map_err(InternalRequestError::Io)?;
-        let base64 = String::from_utf8(buf).map_err(InternalPayloadError::Utf8)?;
-        let unchecked_psbt = Psbt::from_str(&base64).map_err(InternalPayloadError::ParsePsbt)?;
+        let base64 = String::from_utf8(parsed_body).map_err(InternalPayloadError::Utf8)?;
 
-        let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
-        log::debug!("Received original psbt: {:?}", psbt);
-
-        let pairs = url::form_urlencoded::parse(query.as_bytes());
-        let params = Params::from_query_pairs(pairs, SUPPORTED_VERSIONS)
-            .map_err(InternalPayloadError::SenderParams)?;
-        log::debug!("Received request with params: {:?}", params);
-
-        // TODO check that params are valid for the request's Original PSBT
+        let (psbt, params) = crate::receive::parse_payload(base64, query, SUPPORTED_VERSIONS)
+            .map_err(|e| Error::Validation(ValidationError::Payload(e)))?;
 
         Ok(UncheckedProposal { psbt, params })
     }
+}
+
+/// Validate the request headers for a Payjoin request
+///
+/// [`RequestError`] should only be produced here.
+fn parse_body(
+    headers: impl Headers,
+    mut body: impl std::io::Read,
+) -> Result<Vec<u8>, RequestError> {
+    let content_type = headers
+        .get_header("content-type")
+        .ok_or(InternalRequestError::MissingHeader("Content-Type"))?;
+    if !content_type.starts_with("text/plain") {
+        return Err(InternalRequestError::InvalidContentType(content_type.to_owned()).into());
+    }
+
+    let content_length = headers
+        .get_header("content-length")
+        .ok_or(InternalRequestError::MissingHeader("Content-Length"))?
+        .parse::<usize>()
+        .map_err(InternalRequestError::InvalidContentLength)?;
+    if content_length > MAX_CONTENT_LENGTH {
+        return Err(InternalRequestError::ContentLengthTooLarge(content_length).into());
+    }
+
+    let mut buf = vec![0; content_length];
+    body.read_exact(&mut buf).map_err(InternalRequestError::Io)?;
+    Ok(buf)
 }
 
 #[cfg(test)]

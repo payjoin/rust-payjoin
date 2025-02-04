@@ -9,12 +9,15 @@
 //! If you specifically need to use
 //! version 1, refer to the `receive::v1` module documentation after enabling the `v1` feature.
 
-use bitcoin::{psbt, AddressType, TxIn, TxOut};
+use std::str::FromStr;
+
+use bitcoin::{psbt, AddressType, Psbt, TxIn, TxOut};
 pub(crate) use error::InternalPayloadError;
 pub use error::{Error, JsonError, OutputSubstitutionError, PayloadError, SelectionError};
+use optional_parameters::Params;
 
 pub use crate::psbt::PsbtInputError;
-use crate::psbt::{InternalInputPair, InternalPsbtInputError};
+use crate::psbt::{InternalInputPair, InternalPsbtInputError, PsbtExt};
 
 mod error;
 pub(crate) mod optional_parameters;
@@ -59,4 +62,23 @@ impl InputPair {
 
 impl<'a> From<&'a InputPair> for InternalInputPair<'a> {
     fn from(pair: &'a InputPair) -> Self { Self { psbtin: &pair.psbtin, txin: &pair.txin } }
+}
+
+/// Validate the payload of a Payjoin request for PSBT and Params sanity
+pub(crate) fn parse_payload(
+    base64: String,
+    query: &str,
+    supported_versions: &'static [usize],
+) -> Result<(Psbt, Params), PayloadError> {
+    let unchecked_psbt = Psbt::from_str(&base64).map_err(InternalPayloadError::ParsePsbt)?;
+
+    let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
+    log::debug!("Received original psbt: {:?}", psbt);
+
+    let pairs = url::form_urlencoded::parse(query.as_bytes());
+    let params = Params::from_query_pairs(pairs, supported_versions)
+        .map_err(InternalPayloadError::SenderParams)?;
+    log::debug!("Received request with params: {:?}", params);
+
+    Ok((psbt, params))
 }

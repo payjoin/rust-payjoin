@@ -3,25 +3,57 @@ use std::{error, fmt};
 use crate::error_codes::{
     NOT_ENOUGH_MONEY, ORIGINAL_PSBT_REJECTED, UNAVAILABLE, VERSION_UNSUPPORTED,
 };
-#[cfg(feature = "v1")]
-use crate::receive::v1;
-#[cfg(feature = "v2")]
-use crate::receive::v2;
 
-/// The top-level error type for the payjoin receiver, representing all possible failures that can occur
-/// during the processing of a payjoin request.
+/// The top-level error type for the payjoin receiver
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Error {
+    /// Errors that can be replied to the sender
+    ReplyToSender(ReplyableError),
+    #[cfg(feature = "v2")]
+    /// V2-specific errors that are infeasable to reply to the sender
+    V2(crate::receive::v2::SessionError),
+}
+
+impl From<ReplyableError> for Error {
+    fn from(e: ReplyableError) -> Self { Error::ReplyToSender(e) }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Error::ReplyToSender(e) => write!(f, "replyable error: {}", e),
+            #[cfg(feature = "v2")]
+            Error::V2(e) => write!(f, "unreplyable error: {}", e),
+        }
+    }
+}
+
+impl error::Error for Error {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            Error::ReplyToSender(e) => e.source(),
+            #[cfg(feature = "v2")]
+            Error::V2(e) => e.source(),
+        }
+    }
+}
+
+/// The replyable error type for the payjoin receiver, representing failures need to be
+/// returned to the sender.
 ///
 /// The error handling is designed to:
 /// 1. Provide structured error responses for protocol-level failures
 /// 2. Hide implementation details of external errors for security
 /// 3. Support proper error propagation through the receiver stack
-/// 4. Provide errors according to BIP-78 JSON error specifications for return using [`Error::to_json`]
+/// 4. Provide errors according to BIP-78 JSON error specifications for return using [`JsonError::to_json`]
 #[derive(Debug)]
-pub enum Error {
-    /// Error arising from the payjoin state machine
-    ///
-    /// e.g. PSBT validation, HTTP request validation, protocol version checks
-    Validation(ValidationError),
+pub enum ReplyableError {
+    /// Error arising from validation of the original PSBT payload
+    Payload(PayloadError),
+    /// Protocol-specific errors for BIP-78 v1 requests (e.g. HTTP request validation, parameter checks)
+    #[cfg(feature = "v1")]
+    V1(crate::receive::v1::RequestError),
     /// Error arising due to the specific receiver implementation
     ///
     /// e.g. database errors, network failures, wallet errors
@@ -42,10 +74,12 @@ pub trait JsonError {
     fn to_json(&self) -> String;
 }
 
-impl JsonError for Error {
+impl JsonError for ReplyableError {
     fn to_json(&self) -> String {
         match self {
-            Self::Validation(e) => e.to_json(),
+            Self::Payload(e) => e.to_json(),
+            #[cfg(feature = "v1")]
+            Self::V1(e) => e.to_json(),
             Self::Implementation(_) => serialize_json_error(UNAVAILABLE, "Receiver error"),
         }
     }
@@ -63,90 +97,30 @@ pub(crate) fn serialize_json_plus_fields(
     format!(r#"{{ "errorCode": "{}", "message": "{}", {} }}"#, code, message, additional_fields)
 }
 
-impl fmt::Display for Error {
+impl fmt::Display for ReplyableError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
-            Self::Validation(e) => e.fmt(f),
+            Self::Payload(e) => e.fmt(f),
+            #[cfg(feature = "v1")]
+            Self::V1(e) => e.fmt(f),
             Self::Implementation(e) => write!(f, "Internal Server Error: {}", e),
         }
     }
 }
 
-impl error::Error for Error {
+impl error::Error for ReplyableError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
-            Self::Validation(e) => e.source(),
+            Self::Payload(e) => e.source(),
+            #[cfg(feature = "v1")]
+            Self::V1(e) => e.source(),
             Self::Implementation(e) => Some(e.as_ref()),
         }
     }
 }
 
-impl From<InternalPayloadError> for Error {
-    fn from(e: InternalPayloadError) -> Self {
-        Error::Validation(ValidationError::Payload(e.into()))
-    }
-}
-
-/// An error that occurs during validation of a payjoin request, encompassing all possible validation
-/// failures across different protocol versions and stages.
-///
-/// This abstraction serves as the primary error type for the validation phase of request processing,
-/// allowing uniform error handling while maintaining protocol version specifics internally.
-#[derive(Debug)]
-pub enum ValidationError {
-    /// Error arising from validation of the original PSBT payload
-    Payload(PayloadError),
-    /// Protocol-specific errors for BIP-78 v1 requests (e.g. HTTP request validation, parameter checks)
-    #[cfg(feature = "v1")]
-    V1(v1::RequestError),
-    /// Protocol-specific errors for BIP-77 v2 sessions (e.g. session management, OHTTP, HPKE encryption)
-    #[cfg(feature = "v2")]
-    V2(v2::SessionError),
-}
-
-impl From<InternalPayloadError> for ValidationError {
-    fn from(e: InternalPayloadError) -> Self { ValidationError::Payload(e.into()) }
-}
-
-#[cfg(feature = "v2")]
-impl From<v2::InternalSessionError> for ValidationError {
-    fn from(e: v2::InternalSessionError) -> Self { ValidationError::V2(e.into()) }
-}
-
-impl JsonError for ValidationError {
-    fn to_json(&self) -> String {
-        match self {
-            ValidationError::Payload(e) => e.to_json(),
-            #[cfg(feature = "v1")]
-            ValidationError::V1(e) => e.to_json(),
-            #[cfg(feature = "v2")]
-            ValidationError::V2(e) => e.to_json(),
-        }
-    }
-}
-
-impl fmt::Display for ValidationError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ValidationError::Payload(e) => write!(f, "{}", e),
-            #[cfg(feature = "v1")]
-            ValidationError::V1(e) => write!(f, "{}", e),
-            #[cfg(feature = "v2")]
-            ValidationError::V2(e) => write!(f, "{}", e),
-        }
-    }
-}
-
-impl std::error::Error for ValidationError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ValidationError::Payload(e) => Some(e),
-            #[cfg(feature = "v1")]
-            ValidationError::V1(e) => Some(e),
-            #[cfg(feature = "v2")]
-            ValidationError::V2(e) => Some(e),
-        }
-    }
+impl From<InternalPayloadError> for ReplyableError {
+    fn from(e: InternalPayloadError) -> Self { ReplyableError::Payload(e.into()) }
 }
 
 /// An error that occurs during validation of the original PSBT payload sent by the sender.

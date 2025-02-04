@@ -11,8 +11,8 @@ mod integration {
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use once_cell::sync::Lazy;
     use payjoin::receive::v1::build_v1_pj_uri;
-    use payjoin::receive::Error::Implementation;
     use payjoin::receive::InputPair;
+    use payjoin::receive::ReplyableError::Implementation;
     use payjoin::{PjUri, Request, Uri};
     use payjoin_test_utils::{init_bitcoind_sender_receiver, init_tracing, BoxError};
     use url::Url;

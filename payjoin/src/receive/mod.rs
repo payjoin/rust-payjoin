@@ -13,7 +13,9 @@ use std::str::FromStr;
 
 use bitcoin::{psbt, AddressType, Psbt, TxIn, TxOut};
 pub(crate) use error::InternalPayloadError;
-pub use error::{Error, JsonError, OutputSubstitutionError, PayloadError, SelectionError};
+pub use error::{
+    Error, JsonError, OutputSubstitutionError, PayloadError, ReplyableError, SelectionError,
+};
 use optional_parameters::Params;
 
 pub use crate::psbt::PsbtInputError;

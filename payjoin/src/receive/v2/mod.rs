@@ -11,11 +11,12 @@ use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use super::error::InputContributionError;
-use super::{v1, Error, InternalPayloadError, JsonError, OutputSubstitutionError, SelectionError};
+use super::error::{Error, InputContributionError};
+use super::{
+    v1, InternalPayloadError, JsonError, OutputSubstitutionError, ReplyableError, SelectionError,
+};
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
-use crate::receive::error::ValidationError;
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
 use crate::Request;
@@ -115,11 +116,11 @@ impl Receiver {
         context: ohttp::ClientResponse,
     ) -> Result<Option<UncheckedProposal>, Error> {
         let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
-            body.try_into().map_err(|_| {
-                Error::Validation(InternalSessionError::UnexpectedResponseSize(body.len()).into())
-            })?;
+            body.try_into()
+                .map_err(|_| InternalSessionError::UnexpectedResponseSize(body.len()))?;
         log::trace!("decapsulating directory response");
-        let response = ohttp_decapsulate(context, response_array)?;
+        let response = ohttp_decapsulate(context, response_array)
+            .map_err(InternalSessionError::OhttpEncapsulation)?;
         if response.body().is_empty() {
             log::debug!("response is empty");
             return Ok(None);
@@ -142,24 +143,30 @@ impl Receiver {
         ohttp_encapsulate(&mut self.context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
 
-    fn extract_proposal_from_v1(&mut self, response: String) -> Result<UncheckedProposal, Error> {
+    fn extract_proposal_from_v1(
+        &mut self,
+        response: String,
+    ) -> Result<UncheckedProposal, ReplyableError> {
         self.unchecked_from_payload(response)
     }
 
     fn extract_proposal_from_v2(&mut self, response: Vec<u8>) -> Result<UncheckedProposal, Error> {
         let (payload_bytes, e) = decrypt_message_a(&response, self.context.s.secret_key().clone())?;
         self.context.e = Some(e);
-        let payload = String::from_utf8(payload_bytes).map_err(InternalPayloadError::Utf8)?;
-        self.unchecked_from_payload(payload)
+        let payload = String::from_utf8(payload_bytes)
+            .map_err(|e| Error::ReplyToSender(InternalPayloadError::Utf8(e).into()))?;
+        self.unchecked_from_payload(payload).map_err(Error::ReplyToSender)
     }
 
-    fn unchecked_from_payload(&mut self, payload: String) -> Result<UncheckedProposal, Error> {
+    fn unchecked_from_payload(
+        &mut self,
+        payload: String,
+    ) -> Result<UncheckedProposal, ReplyableError> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
         log::trace!("Received query: {}, base64: {}", query, base64); // my guess is no \n so default is wrong
-
         let (psbt, mut params) = parse_payload(base64.to_string(), query, SUPPORTED_VERSIONS)
-            .map_err(|e| Error::Validation(ValidationError::Payload(e)))?;
+            .map_err(ReplyableError::Payload)?;
 
         // Output substitution must be disabled for V1 sessions in V2 contexts.
         //
@@ -228,8 +235,8 @@ impl UncheckedProposal {
     pub fn check_broadcast_suitability(
         self,
         min_fee_rate: Option<FeeRate>,
-        can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, Error>,
-    ) -> Result<MaybeInputsOwned, Error> {
+        can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ReplyableError>,
+    ) -> Result<MaybeInputsOwned, ReplyableError> {
         let inner = self.v1.check_broadcast_suitability(min_fee_rate, can_broadcast)?;
         Ok(MaybeInputsOwned { v1: inner, context: self.context })
     }
@@ -248,7 +255,7 @@ impl UncheckedProposal {
     /// a Receiver Error Response
     pub fn extract_err_req(
         &mut self,
-        err: &Error,
+        err: &ReplyableError,
         ohttp_relay: &Url,
     ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
         let subdir = subdir(&self.context.directory, &id(&self.context.s));
@@ -300,8 +307,8 @@ impl MaybeInputsOwned {
     /// An attacker could try to spend receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         self,
-        is_owned: impl Fn(&Script) -> Result<bool, Error>,
-    ) -> Result<MaybeInputsSeen, Error> {
+        is_owned: impl Fn(&Script) -> Result<bool, ReplyableError>,
+    ) -> Result<MaybeInputsSeen, ReplyableError> {
         let inner = self.v1.check_inputs_not_owned(is_owned)?;
         Ok(MaybeInputsSeen { v1: inner, context: self.context })
     }
@@ -322,8 +329,8 @@ impl MaybeInputsSeen {
     /// proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
     pub fn check_no_inputs_seen_before(
         self,
-        is_known: impl Fn(&OutPoint) -> Result<bool, Error>,
-    ) -> Result<OutputsUnknown, Error> {
+        is_known: impl Fn(&OutPoint) -> Result<bool, ReplyableError>,
+    ) -> Result<OutputsUnknown, ReplyableError> {
         let inner = self.v1.check_no_inputs_seen_before(is_known)?;
         Ok(OutputsUnknown { inner, context: self.context })
     }
@@ -343,8 +350,8 @@ impl OutputsUnknown {
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
         self,
-        is_receiver_output: impl Fn(&Script) -> Result<bool, Error>,
-    ) -> Result<WantsOutputs, Error> {
+        is_receiver_output: impl Fn(&Script) -> Result<bool, ReplyableError>,
+    ) -> Result<WantsOutputs, ReplyableError> {
         let inner = self.inner.identify_receiver_outputs(is_receiver_output)?;
         Ok(WantsOutputs { v1: inner, context: self.context })
     }
@@ -448,10 +455,10 @@ pub struct ProvisionalProposal {
 impl ProvisionalProposal {
     pub fn finalize_proposal(
         self,
-        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, Error>,
+        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ReplyableError>,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
-    ) -> Result<PayjoinProposal, Error> {
+    ) -> Result<PayjoinProposal, ReplyableError> {
         let inner =
             self.v1.finalize_proposal(wallet_process_psbt, min_fee_rate, max_effective_fee_rate)?;
         Ok(PayjoinProposal { v1: inner, context: self.context })
@@ -493,7 +500,7 @@ impl PayjoinProposal {
                 .context
                 .directory
                 .join(&sender_subdir.to_string())
-                .map_err(|e| Error::Implementation(e.into()))?;
+                .map_err(|e| ReplyableError::Implementation(e.into()))?;
             body = encrypt_message_b(payjoin_bytes, &self.context.s, e)?;
             method = "POST";
         } else {
@@ -504,7 +511,7 @@ impl PayjoinProposal {
                 .context
                 .directory
                 .join(&receiver_subdir.to_string())
-                .map_err(|e| Error::Implementation(e.into()))?;
+                .map_err(|e| ReplyableError::Implementation(e.into()))?;
             method = "PUT";
         }
         log::debug!("Payjoin PSBT target: {}", target_resource.as_str());
@@ -532,17 +539,13 @@ impl PayjoinProposal {
         ohttp_context: ohttp::ClientResponse,
     ) -> Result<(), Error> {
         let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
-            res.try_into().map_err(|_| {
-                Error::Validation(InternalSessionError::UnexpectedResponseSize(res.len()).into())
-            })?;
-        let res = ohttp_decapsulate(ohttp_context, response_array)?;
+            res.try_into().map_err(|_| InternalSessionError::UnexpectedResponseSize(res.len()))?;
+        let res = ohttp_decapsulate(ohttp_context, response_array)
+            .map_err(InternalSessionError::OhttpEncapsulation)?;
         if res.status().is_success() {
             Ok(())
         } else {
-            Err(Error::Implementation(
-                format!("Payjoin Post failed, expected Success status, got {}", res.status())
-                    .into(),
-            ))
+            Err(InternalSessionError::UnexpectedStatusCode(res.status()).into())
         }
     }
 }
@@ -604,7 +607,9 @@ mod test {
 
         let server_error = proposal
             .clone()
-            .check_broadcast_suitability(None, |_| Err(Error::Implementation("mock error".into())))
+            .check_broadcast_suitability(None, |_| {
+                Err(ReplyableError::Implementation("mock error".into()))
+            })
             .err()
             .unwrap();
         assert_eq!(
@@ -613,7 +618,7 @@ mod test {
         );
         let (_req, _ctx) = proposal.clone().extract_err_req(&server_error, &EXAMPLE_OHTTP_RELAY)?;
 
-        let internal_error = Error::Validation(InternalPayloadError::MissingPayment.into());
+        let internal_error = InternalPayloadError::MissingPayment.into();
         let (_req, _ctx) = proposal.extract_err_req(&internal_error, &EXAMPLE_OHTTP_RELAY)?;
         Ok(())
     }

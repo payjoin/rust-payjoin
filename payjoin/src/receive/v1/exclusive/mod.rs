@@ -3,7 +3,6 @@ pub(crate) use error::InternalRequestError;
 pub use error::RequestError;
 
 use super::*;
-use crate::receive::error::ValidationError;
 
 /// 4_000_000 * 4 / 3 fits in u32
 const MAX_CONTENT_LENGTH: usize = 4_000_000 * 4 / 3;
@@ -28,14 +27,13 @@ impl UncheckedProposal {
         body: impl std::io::Read,
         query: &str,
         headers: impl Headers,
-    ) -> Result<Self, Error> {
-        let parsed_body =
-            parse_body(headers, body).map_err(|e| Error::Validation(ValidationError::V1(e)))?;
+    ) -> Result<Self, ReplyableError> {
+        let parsed_body = parse_body(headers, body).map_err(ReplyableError::V1)?;
 
         let base64 = String::from_utf8(parsed_body).map_err(InternalPayloadError::Utf8)?;
 
         let (psbt, params) = crate::receive::parse_payload(base64, query, SUPPORTED_VERSIONS)
-            .map_err(|e| Error::Validation(ValidationError::Payload(e)))?;
+            .map_err(ReplyableError::Payload)?;
 
         Ok(UncheckedProposal { psbt, params })
     }

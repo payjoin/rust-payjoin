@@ -168,7 +168,7 @@ impl Sender {
             .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
         log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
         Ok((
-            Request::new_v2(ohttp_relay, body),
+            Request::new_v2(&ohttp_relay, &body),
             V2PostContext {
                 endpoint: self.v1.endpoint.clone(),
                 psbt_ctx: PsbtContext {
@@ -273,7 +273,7 @@ impl V2GetContext {
         let (body, ohttp_ctx) = ohttp_encapsulate(&mut ohttp, "GET", url.as_str(), Some(&body))
             .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
 
-        Ok((Request::new_v2(ohttp_relay, body), ohttp_ctx))
+        Ok((Request::new_v2(&ohttp_relay, &body), ohttp_ctx))
     }
 
     pub fn process_response(

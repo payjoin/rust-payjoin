@@ -104,7 +104,7 @@ impl Receiver {
         let (body, ohttp_ctx) =
             self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulation)?;
         let url = ohttp_relay.clone();
-        let req = Request::new_v2(url, body);
+        let req = Request::new_v2(&url, &body);
         Ok((req, ohttp_ctx))
     }
 
@@ -267,7 +267,7 @@ impl UncheckedProposal {
         )
         .map_err(InternalSessionError::OhttpEncapsulation)?;
 
-        let req = Request::new_v2(ohttp_relay.clone(), body);
+        let req = Request::new_v2(ohttp_relay, &body);
         Ok((req, ohttp_ctx))
     }
 
@@ -521,7 +521,7 @@ impl PayjoinProposal {
             target_resource.as_str(),
             Some(&body),
         )?;
-        let req = Request::new_v2(ohttp_relay.clone(), body);
+        let req = Request::new_v2(ohttp_relay, &body);
         Ok((req, ctx))
     }
 

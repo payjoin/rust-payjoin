@@ -10,6 +10,8 @@ use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 use payjoin::receive::InputPair;
 use payjoin::{bitcoin, PjUri};
+use tokio::signal;
+use tokio::sync::watch;
 
 pub mod config;
 use crate::app::config::AppConfig;
@@ -135,4 +137,11 @@ pub fn input_pair_from_list_unspent(
         ..Default::default()
     };
     InputPair::new(txin, psbtin).expect("Input pair should be valid")
+}
+
+async fn handle_interrupt(tx: watch::Sender<()>) {
+    if let Err(e) = signal::ctrl_c().await {
+        eprintln!("Error setting up Ctrl-C handler: {}", e);
+    }
+    let _ = tx.send(());
 }

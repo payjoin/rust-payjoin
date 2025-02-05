@@ -408,9 +408,9 @@ impl WantsInputs {
     ///
     /// UIH "Unnecessary input heuristic" is avoided for multi-output transactions.
     /// A simple consolidation is otherwise chosen if available.
-    pub fn try_preserving_privacy(
+    pub fn try_preserving_privacy<'a>(
         &self,
-        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        candidate_inputs: impl IntoIterator<Item = &'a InputPair>,
     ) -> Result<InputPair, SelectionError> {
         let mut candidate_inputs = candidate_inputs.into_iter().peekable();
         if candidate_inputs.peek().is_none() {
@@ -435,9 +435,9 @@ impl WantsInputs {
     /// BlockSci UIH1 and UIH2:
     /// if min(in) > min(out) then UIH1 else UIH2
     /// <https://eprint.iacr.org/2022/589.pdf>
-    fn avoid_uih(
+    fn avoid_uih<'a>(
         &self,
-        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        candidate_inputs: impl IntoIterator<Item = &'a InputPair>,
     ) -> Result<InputPair, SelectionError> {
         let min_out_sats = self
             .payjoin_psbt
@@ -465,7 +465,7 @@ impl WantsInputs {
             if candidate_min_in > candidate_min_out {
                 // The candidate avoids UIH2 but conforms to UIH1: Optimal change heuristic.
                 // It implies the smallest output is the sender's change address.
-                return Ok(input_pair);
+                return Ok(input_pair.clone());
             }
         }
 
@@ -473,11 +473,11 @@ impl WantsInputs {
         Err(InternalSelectionError::NotFound.into())
     }
 
-    fn select_first_candidate(
+    fn select_first_candidate<'a>(
         &self,
-        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        candidate_inputs: impl IntoIterator<Item = &'a InputPair>,
     ) -> Result<InputPair, SelectionError> {
-        candidate_inputs.into_iter().next().ok_or(InternalSelectionError::NotFound.into())
+        candidate_inputs.into_iter().next().cloned().ok_or(InternalSelectionError::NotFound.into())
     }
 
     /// Add the provided list of inputs to the transaction.
@@ -485,7 +485,7 @@ impl WantsInputs {
     pub fn contribute_inputs(
         self,
         inputs: impl IntoIterator<Item = InputPair>,
-    ) -> Result<WantsInputs, InputContributionError> {
+    ) -> Result<Self, InputContributionError> {
         let mut payjoin_psbt = self.payjoin_psbt.clone();
         // The payjoin proposal must not introduce mixed input sequence numbers
         let original_sequence = self
@@ -518,7 +518,7 @@ impl WantsInputs {
             return Err(InternalInputContributionError::ValueTooLow.into());
         }
 
-        Ok(WantsInputs {
+        Ok(Self {
             original_psbt: self.original_psbt,
             payjoin_psbt,
             params: self.params,

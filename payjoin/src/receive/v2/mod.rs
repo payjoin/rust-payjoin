@@ -419,9 +419,9 @@ impl WantsInputs {
     /// BlockSci UIH1 and UIH2:
     /// if min(in) > min(out) then UIH1 else UIH2
     /// <https://eprint.iacr.org/2022/589.pdf>
-    pub fn try_preserving_privacy(
+    pub fn try_preserving_privacy<'a>(
         &self,
-        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        candidate_inputs: impl IntoIterator<Item = &'a InputPair>,
     ) -> Result<InputPair, SelectionError> {
         self.v1.try_preserving_privacy(candidate_inputs)
     }

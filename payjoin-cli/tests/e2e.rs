@@ -296,24 +296,21 @@ mod e2e {
         async fn send_until_request_timeout(mut cli_sender: Child) -> Result<()> {
             let stdout = cli_sender.stdout.take().expect("Failed to take stdout of child process");
             let reader = BufReader::new(stdout);
+            let mut stdout = tokio::io::stdout();
             let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
             let mut lines = reader.lines();
-            tokio::spawn(async move {
-                let mut stdout = tokio::io::stdout();
-                while let Some(line) =
-                    lines.next_line().await.expect("Failed to read line from stdout")
-                {
-                    stdout
-                        .write_all(format!("{}\n", line).as_bytes())
-                        .await
-                        .expect("Failed to write to stdout");
-                    if line.contains("No response yet.") {
-                        let _ = tx.send(true).await;
-                        break;
-                    }
+            while let Some(line) = lines.next_line().await.expect("Failed to read line from stdout")
+            {
+                stdout
+                    .write_all(format!("{}\n", line).as_bytes())
+                    .await
+                    .expect("Failed to write to stdout");
+                if line.contains("No response yet.") {
+                    let _ = tx.send(true).await;
+                    break;
                 }
-            });
+            }
 
             let timeout = tokio::time::Duration::from_secs(35);
             let fallback_sent = tokio::time::timeout(timeout, rx.recv()).await?;
@@ -328,24 +325,21 @@ mod e2e {
             let stdout =
                 cli_receive_resumer.stdout.take().expect("Failed to take stdout of child process");
             let reader = BufReader::new(stdout);
+            let mut stdout = tokio::io::stdout();
             let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
             let mut lines = reader.lines();
-            tokio::spawn(async move {
-                let mut stdout = tokio::io::stdout();
-                while let Some(line) =
-                    lines.next_line().await.expect("Failed to read line from stdout")
-                {
-                    stdout
-                        .write_all(format!("{}\n", line).as_bytes())
-                        .await
-                        .expect("Failed to write to stdout");
-                    if line.contains("Response successful") {
-                        let _ = tx.send(true).await;
-                        break;
-                    }
+            while let Some(line) = lines.next_line().await.expect("Failed to read line from stdout")
+            {
+                stdout
+                    .write_all(format!("{}\n", line).as_bytes())
+                    .await
+                    .expect("Failed to write to stdout");
+                if line.contains("Response successful") {
+                    let _ = tx.send(true).await;
+                    break;
                 }
-            });
+            }
 
             let timeout = tokio::time::Duration::from_secs(10);
             let response_successful = tokio::time::timeout(timeout, rx.recv()).await?;
@@ -360,24 +354,21 @@ mod e2e {
             let stdout =
                 cli_send_resumer.stdout.take().expect("Failed to take stdout of child process");
             let reader = BufReader::new(stdout);
+            let mut stdout = tokio::io::stdout();
             let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
             let mut lines = reader.lines();
-            tokio::spawn(async move {
-                let mut stdout = tokio::io::stdout();
-                while let Some(line) =
-                    lines.next_line().await.expect("Failed to read line from stdout")
-                {
-                    stdout
-                        .write_all(format!("{}\n", line).as_bytes())
-                        .await
-                        .expect("Failed to write to stdout");
-                    if line.contains("Payjoin sent") {
-                        let _ = tx.send(true).await;
-                        break;
-                    }
+            while let Some(line) = lines.next_line().await.expect("Failed to read line from stdout")
+            {
+                stdout
+                    .write_all(format!("{}\n", line).as_bytes())
+                    .await
+                    .expect("Failed to write to stdout");
+                if line.contains("Payjoin sent") {
+                    let _ = tx.send(true).await;
+                    break;
                 }
-            });
+            }
 
             let timeout = tokio::time::Duration::from_secs(10);
             let payjoin_sent = tokio::time::timeout(timeout, rx.recv()).await?;

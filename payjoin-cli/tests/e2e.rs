@@ -1,7 +1,7 @@
 #[cfg(feature = "_danger-local-https")]
 mod e2e {
     use std::env;
-    use std::process::Stdio;
+    use std::process::{ExitStatus, Stdio};
 
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
@@ -10,9 +10,11 @@ mod e2e {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::process::Command;
 
-    fn sigint(child: &tokio::process::Child) -> nix::Result<()> {
+    async fn sigint(mut child: tokio::process::Child) -> tokio::io::Result<ExitStatus> {
         let pid = child.id().expect("Failed to get child PID");
-        kill(Pid::from_raw(pid as i32), Signal::SIGINT)
+        kill(Pid::from_raw(pid as i32), Signal::SIGINT)?;
+        // wait for child process to exit completely
+        child.wait().await
     }
 
     const RECEIVE_SATS: &str = "54321";
@@ -119,8 +121,9 @@ mod e2e {
                 .unwrap_or(Some(false)) // timed out
                 .expect("rx channel closed prematurely"); // recv() returned None
 
-            sigint(&cli_receiver).expect("Failed to kill payjoin-cli");
-            sigint(&cli_sender).expect("Failed to kill payjoin-cli");
+            sigint(cli_receiver).await.expect("Failed to kill payjoin-cli");
+            sigint(cli_sender).await.expect("Failed to kill payjoin-cli");
+
             payjoin_sent
         })
         .await?;
@@ -286,7 +289,7 @@ mod e2e {
             }
             log::debug!("Got bip21 {}", &bip21);
 
-            sigint(&cli_receiver).expect("Failed to kill payjoin-cli");
+            sigint(cli_receiver).await.expect("Failed to kill payjoin-cli");
             bip21
         }
 
@@ -315,7 +318,7 @@ mod e2e {
             let timeout = tokio::time::Duration::from_secs(35);
             let fallback_sent = tokio::time::timeout(timeout, rx.recv()).await?;
 
-            sigint(&cli_sender).expect("Failed to kill payjoin-cli initial sender");
+            sigint(cli_sender).await.expect("Failed to kill payjoin-cli initial sender");
 
             assert!(fallback_sent.unwrap_or(false), "Fallback send was not detected");
             Ok(())
@@ -347,7 +350,7 @@ mod e2e {
             let timeout = tokio::time::Duration::from_secs(10);
             let response_successful = tokio::time::timeout(timeout, rx.recv()).await?;
 
-            sigint(&cli_receive_resumer).expect("Failed to kill payjoin-cli");
+            sigint(cli_receive_resumer).await.expect("Failed to kill payjoin-cli");
 
             assert!(response_successful.unwrap_or(false), "Did not respond with Payjoin PSBT");
             Ok(())
@@ -379,7 +382,7 @@ mod e2e {
             let timeout = tokio::time::Duration::from_secs(10);
             let payjoin_sent = tokio::time::timeout(timeout, rx.recv()).await?;
 
-            sigint(&cli_send_resumer).expect("Failed to kill payjoin-cli");
+            sigint(cli_send_resumer).await.expect("Failed to kill payjoin-cli");
 
             assert!(payjoin_sent.unwrap_or(false), "Payjoin send was not detected");
             Ok(())

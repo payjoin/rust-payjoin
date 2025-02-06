@@ -8,10 +8,6 @@ use bitcoin::Psbt;
 /// Note: this method does not merge non inputs or outputs
 /// Note: if there are duplicate inputs, the first input will be kept
 /// Note: if there are duplicate outputs, both outputs will be kept
-/// ```no_run
-/// let psbts = vec![psbt_1.clone(), psbt_2.clone(), ..., psbt_n.clone()];
-/// let merged_psbt = psbts.into_iter().reduce(merge_unsigned_tx).unwrap();
-/// ```
 pub(crate) fn merge_unsigned_tx(acc: Psbt, psbt: Psbt) -> Psbt {
     let mut unsigned_tx = acc.unsigned_tx;
     unsigned_tx.input.extend(psbt.unsigned_tx.input);

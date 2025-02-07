@@ -10,7 +10,7 @@ mod e2e {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::process::Command;
 
-    async fn sigint(mut child: tokio::process::Child) -> tokio::io::Result<ExitStatus> {
+    async fn terminate(mut child: tokio::process::Child) -> tokio::io::Result<ExitStatus> {
         let pid = child.id().expect("Failed to get child PID");
         kill(Pid::from_raw(pid as i32), Signal::SIGINT)?;
         // wait for child process to exit completely
@@ -121,8 +121,8 @@ mod e2e {
                 .unwrap_or(Some(false)) // timed out
                 .expect("rx channel closed prematurely"); // recv() returned None
 
-            sigint(cli_receiver).await.expect("Failed to kill payjoin-cli");
-            sigint(cli_sender).await.expect("Failed to kill payjoin-cli");
+            terminate(cli_receiver).await.expect("Failed to kill payjoin-cli");
+            terminate(cli_sender).await.expect("Failed to kill payjoin-cli");
 
             payjoin_sent
         })
@@ -275,7 +275,7 @@ mod e2e {
             .expect("payjoin-cli receiver should output a bitcoin URI");
             log::debug!("Got bip21 {}", &bip21);
 
-            sigint(cli_receiver).await.expect("Failed to kill payjoin-cli");
+            terminate(cli_receiver).await.expect("Failed to kill payjoin-cli");
             bip21
         }
 
@@ -289,7 +289,7 @@ mod e2e {
             )
             .await?;
 
-            sigint(cli_sender).await.expect("Failed to kill payjoin-cli initial sender");
+            terminate(cli_sender).await.expect("Failed to kill payjoin-cli initial sender");
             assert!(res.is_some(), "Fallback send was not detected");
             Ok(())
         }
@@ -304,7 +304,7 @@ mod e2e {
             )
             .await?;
 
-            sigint(cli_receive_resumer).await.expect("Failed to kill payjoin-cli");
+            terminate(cli_receive_resumer).await.expect("Failed to kill payjoin-cli");
             assert!(res.is_some(), "Did not respond with Payjoin PSBT");
             Ok(())
         }
@@ -319,7 +319,7 @@ mod e2e {
             )
             .await?;
 
-            sigint(cli_send_resumer).await.expect("Failed to kill payjoin-cli");
+            terminate(cli_send_resumer).await.expect("Failed to kill payjoin-cli");
             assert!(res.is_some(), "Payjoin send was not detected");
             Ok(())
         }

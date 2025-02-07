@@ -13,7 +13,8 @@ use url::Url;
 
 use super::error::{Error, InputContributionError};
 use super::{
-    v1, InternalPayloadError, JsonError, OutputSubstitutionError, ReplyableError, SelectionError,
+    v1, ImplementationError, InternalPayloadError, JsonError, OutputSubstitutionError,
+    ReplyableError, SelectionError,
 };
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
@@ -235,7 +236,7 @@ impl UncheckedProposal {
     pub fn check_broadcast_suitability(
         self,
         min_fee_rate: Option<FeeRate>,
-        can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ReplyableError>,
+        can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
     ) -> Result<MaybeInputsOwned, ReplyableError> {
         let inner = self.v1.check_broadcast_suitability(min_fee_rate, can_broadcast)?;
         Ok(MaybeInputsOwned { v1: inner, context: self.context })
@@ -307,7 +308,7 @@ impl MaybeInputsOwned {
     /// An attacker could try to spend receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         self,
-        is_owned: impl Fn(&Script) -> Result<bool, ReplyableError>,
+        is_owned: impl Fn(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<MaybeInputsSeen, ReplyableError> {
         let inner = self.v1.check_inputs_not_owned(is_owned)?;
         Ok(MaybeInputsSeen { v1: inner, context: self.context })
@@ -329,7 +330,7 @@ impl MaybeInputsSeen {
     /// proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
     pub fn check_no_inputs_seen_before(
         self,
-        is_known: impl Fn(&OutPoint) -> Result<bool, ReplyableError>,
+        is_known: impl Fn(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<OutputsUnknown, ReplyableError> {
         let inner = self.v1.check_no_inputs_seen_before(is_known)?;
         Ok(OutputsUnknown { inner, context: self.context })
@@ -350,7 +351,7 @@ impl OutputsUnknown {
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
         self,
-        is_receiver_output: impl Fn(&Script) -> Result<bool, ReplyableError>,
+        is_receiver_output: impl Fn(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<WantsOutputs, ReplyableError> {
         let inner = self.inner.identify_receiver_outputs(is_receiver_output)?;
         Ok(WantsOutputs { v1: inner, context: self.context })
@@ -455,7 +456,7 @@ pub struct ProvisionalProposal {
 impl ProvisionalProposal {
     pub fn finalize_proposal(
         self,
-        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ReplyableError>,
+        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
     ) -> Result<PayjoinProposal, ReplyableError> {
@@ -607,9 +608,7 @@ mod test {
 
         let server_error = proposal
             .clone()
-            .check_broadcast_suitability(None, |_| {
-                Err(ReplyableError::Implementation("mock error".into()))
-            })
+            .check_broadcast_suitability(None, |_| Err("mock error".into()))
             .err()
             .unwrap();
         assert_eq!(

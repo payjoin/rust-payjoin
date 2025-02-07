@@ -16,6 +16,7 @@ use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{self, FeeRate};
 use payjoin::receive::v1::{PayjoinProposal, UncheckedProposal};
+use payjoin::receive::ImplementationError;
 use payjoin::receive::ReplyableError::{self, Implementation, V1};
 use payjoin::send::v1::SenderBuilder;
 use payjoin::{Uri, UriExt};
@@ -303,17 +304,19 @@ impl App {
         let network = bitcoind.get_blockchain_info().map_err(|e| Implementation(e.into()))?.chain;
 
         // Receive Check 1: Can Broadcast
-        let proposal = proposal.check_broadcast_suitability(None, |tx| {
-            let raw_tx = bitcoin::consensus::encode::serialize_hex(&tx);
-            let mempool_results =
-                bitcoind.test_mempool_accept(&[raw_tx]).map_err(|e| Implementation(e.into()))?;
-            match mempool_results.first() {
-                Some(result) => Ok(result.allowed),
-                None => Err(Implementation(
-                    anyhow!("No mempool results returned on broadcast check").into(),
-                )),
-            }
-        })?;
+        let proposal =
+            proposal.check_broadcast_suitability(None, |tx| {
+                let raw_tx = bitcoin::consensus::encode::serialize_hex(&tx);
+                let mempool_results = bitcoind
+                    .test_mempool_accept(&[raw_tx])
+                    .map_err(|e| Implementation(e.into()))?;
+                match mempool_results.first() {
+                    Some(result) => Ok(result.allowed),
+                    None => Err(ImplementationError::from(
+                        "No mempool results returned on broadcast check",
+                    )),
+                }
+            })?;
         log::trace!("check1");
 
         // Receive Check 2: receiver can't sign for proposal inputs
@@ -322,7 +325,7 @@ impl App {
                 bitcoind
                     .get_address_info(&address)
                     .map(|info| info.is_mine.unwrap_or(false))
-                    .map_err(|e| Implementation(e.into()))
+                    .map_err(ImplementationError::from)
             } else {
                 Ok(false)
             }
@@ -331,7 +334,7 @@ impl App {
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let payjoin = proposal.check_no_inputs_seen_before(|input| {
-            self.db.insert_input_seen_before(*input).map_err(|e| Implementation(e.into()))
+            self.db.insert_input_seen_before(*input).map_err(ImplementationError::from)
         })?;
         log::trace!("check3");
 
@@ -340,7 +343,7 @@ impl App {
                 bitcoind
                     .get_address_info(&address)
                     .map(|info| info.is_mine.unwrap_or(false))
-                    .map_err(|e| Implementation(e.into()))
+                    .map_err(ImplementationError::from)
             } else {
                 Ok(false)
             }
@@ -366,10 +369,10 @@ impl App {
 
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &Psbt| {
-                bitcoind
+                let res = bitcoind
                     .wallet_process_psbt(&psbt.to_string(), None, None, Some(false))
-                    .map(|res| Psbt::from_str(&res.psbt).map_err(|e| Implementation(e.into())))
-                    .map_err(|e| Implementation(e.into()))?
+                    .map_err(ImplementationError::from)?;
+                Psbt::from_str(&res.psbt).map_err(ImplementationError::from)
             },
             None,
             self.config.max_fee_rate,

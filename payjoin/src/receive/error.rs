@@ -4,6 +4,8 @@ use crate::error_codes::{
     NOT_ENOUGH_MONEY, ORIGINAL_PSBT_REJECTED, UNAVAILABLE, VERSION_UNSUPPORTED,
 };
 
+pub type ImplementationError = Box<dyn error::Error + Send + Sync>;
+
 /// The top-level error type for the payjoin receiver
 #[derive(Debug)]
 #[non_exhaustive]
@@ -57,7 +59,7 @@ pub enum ReplyableError {
     /// Error arising due to the specific receiver implementation
     ///
     /// e.g. database errors, network failures, wallet errors
-    Implementation(Box<dyn error::Error + Send + Sync>),
+    Implementation(ImplementationError),
 }
 
 /// A trait for errors that can be serialized to JSON in a standardized format.

@@ -20,10 +20,11 @@ use payjoin::receive::Error;
 use payjoin::send::v1::SenderBuilder;
 use payjoin::{Uri, UriExt};
 use tokio::net::TcpListener;
+use tokio::sync::watch;
 
 use super::config::AppConfig;
 use super::App as AppTrait;
-use crate::app::{http_agent, input_pair_from_list_unspent};
+use crate::app::{handle_interrupt, http_agent, input_pair_from_list_unspent};
 use crate::db::Database;
 #[cfg(feature = "_danger-local-https")]
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
@@ -39,13 +40,16 @@ impl payjoin::receive::v1::Headers for Headers<'_> {
 pub(crate) struct App {
     config: AppConfig,
     db: Arc<Database>,
+    interrupt: watch::Receiver<()>,
 }
 
 #[async_trait::async_trait]
 impl AppTrait for App {
     fn new(config: AppConfig) -> Result<Self> {
         let db = Arc::new(Database::create(&config.db_path)?);
-        let app = Self { config, db };
+        let (interrupt_tx, interrupt_rx) = watch::channel(());
+        tokio::spawn(handle_interrupt(interrupt_tx));
+        let app = Self { config, db, interrupt: interrupt_rx };
         app.bitcoind()?
             .get_blockchain_info()
             .context("Failed to connect to bitcoind. Check config RPC connection.")?;
@@ -116,7 +120,13 @@ impl AppTrait for App {
         );
         println!("{}", pj_uri_string);
 
-        self.start_http_server().await?;
+        let mut interrupt = self.interrupt.clone();
+        tokio::select! {
+            res = self.start_http_server() => { res?; }
+            _ = interrupt.changed() => {
+                println!("Interrupted.");
+            }
+        }
         Ok(())
     }
 }

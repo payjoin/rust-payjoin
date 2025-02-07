@@ -10,12 +10,11 @@ use payjoin::receive::v2::{Receiver, UncheckedProposal};
 use payjoin::receive::Error;
 use payjoin::send::v2::{Sender, SenderBuilder};
 use payjoin::{bitcoin, Uri};
-use tokio::signal;
 use tokio::sync::watch;
 
 use super::config::AppConfig;
 use super::App as AppTrait;
-use crate::app::{http_agent, input_pair_from_list_unspent};
+use crate::app::{handle_interrupt, http_agent, input_pair_from_list_unspent};
 use crate::db::Database;
 
 #[derive(Clone)]
@@ -397,13 +396,6 @@ async fn unwrap_ohttp_keys_or_else_fetch(config: &AppConfig) -> Result<payjoin::
         let ohttp_keys = payjoin::io::fetch_ohttp_keys(ohttp_relay, payjoin_directory).await?;
         Ok(ohttp_keys)
     }
-}
-
-async fn handle_interrupt(tx: watch::Sender<()>) {
-    if let Err(e) = signal::ctrl_c().await {
-        eprintln!("Error setting up Ctrl-C handler: {}", e);
-    }
-    let _ = tx.send(());
 }
 
 async fn post_request(req: payjoin::Request) -> Result<reqwest::Response> {

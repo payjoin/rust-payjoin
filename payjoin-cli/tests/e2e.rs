@@ -1,7 +1,7 @@
 #[cfg(feature = "_danger-local-https")]
 mod e2e {
     use std::env;
-    use std::process::Stdio;
+    use std::process::{ExitStatus, Stdio};
 
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
@@ -10,9 +10,11 @@ mod e2e {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::process::Command;
 
-    fn sigint(child: &tokio::process::Child) -> nix::Result<()> {
+    async fn terminate(mut child: tokio::process::Child) -> tokio::io::Result<ExitStatus> {
         let pid = child.id().expect("Failed to get child PID");
-        kill(Pid::from_raw(pid as i32), Signal::SIGINT)
+        kill(Pid::from_raw(pid as i32), Signal::SIGINT)?;
+        // wait for child process to exit completely
+        child.wait().await
     }
 
     const RECEIVE_SATS: &str = "54321";
@@ -119,8 +121,9 @@ mod e2e {
                 .unwrap_or(Some(false)) // timed out
                 .expect("rx channel closed prematurely"); // recv() returned None
 
-            sigint(&cli_receiver).expect("Failed to kill payjoin-cli");
-            sigint(&cli_sender).expect("Failed to kill payjoin-cli");
+            terminate(cli_receiver).await.expect("Failed to kill payjoin-cli");
+            terminate(cli_sender).await.expect("Failed to kill payjoin-cli");
+
             payjoin_sent
         })
         .await?;
@@ -143,7 +146,7 @@ mod e2e {
         use std::path::PathBuf;
 
         use payjoin_test_utils::{init_tracing, TestServices};
-        use tokio::process::Child;
+        use tokio::process::{Child, ChildStdout};
 
         type Result<T> = std::result::Result<T, BoxError>;
 
@@ -263,126 +266,94 @@ mod e2e {
         }
 
         async fn get_bip21_from_receiver(mut cli_receiver: Child) -> String {
-            let stdout =
-                cli_receiver.stdout.take().expect("Failed to take stdout of child process");
-            let reader = BufReader::new(stdout);
-            let mut stdout = tokio::io::stdout();
-            let mut bip21 = String::new();
+            let mut stdout =
+                cli_receiver.stdout.take().expect("failed to take stdout of child process");
+            let bip21 = wait_for_stdout_match(&mut stdout, |line| {
+                line.to_ascii_uppercase().starts_with("BITCOIN")
+            })
+            .await
+            .expect("payjoin-cli receiver should output a bitcoin URI");
+            log::debug!("Got bip21 {}", &bip21);
 
+            terminate(cli_receiver).await.expect("Failed to kill payjoin-cli");
+            bip21
+        }
+
+        async fn send_until_request_timeout(mut cli_sender: Child) -> Result<()> {
+            let mut stdout =
+                cli_sender.stdout.take().expect("failed to take stdout of child process");
+            let timeout = tokio::time::Duration::from_secs(35);
+            let res = tokio::time::timeout(
+                timeout,
+                wait_for_stdout_match(&mut stdout, |line| line.contains("No response yet.")),
+            )
+            .await?;
+
+            terminate(cli_sender).await.expect("Failed to kill payjoin-cli initial sender");
+            assert!(res.is_some(), "Fallback send was not detected");
+            Ok(())
+        }
+
+        async fn respond_with_payjoin(mut cli_receive_resumer: Child) -> Result<()> {
+            let mut stdout =
+                cli_receive_resumer.stdout.take().expect("Failed to take stdout of child process");
+            let timeout = tokio::time::Duration::from_secs(10);
+            let res = tokio::time::timeout(
+                timeout,
+                wait_for_stdout_match(&mut stdout, |line| line.contains("Response successful")),
+            )
+            .await?;
+
+            terminate(cli_receive_resumer).await.expect("Failed to kill payjoin-cli");
+            assert!(res.is_some(), "Did not respond with Payjoin PSBT");
+            Ok(())
+        }
+
+        async fn check_payjoin_sent(mut cli_send_resumer: Child) -> Result<()> {
+            let mut stdout =
+                cli_send_resumer.stdout.take().expect("Failed to take stdout of child process");
+            let timeout = tokio::time::Duration::from_secs(10);
+            let res = tokio::time::timeout(
+                timeout,
+                wait_for_stdout_match(&mut stdout, |line| line.contains("Payjoin sent")),
+            )
+            .await?;
+
+            terminate(cli_send_resumer).await.expect("Failed to kill payjoin-cli");
+            assert!(res.is_some(), "Payjoin send was not detected");
+            Ok(())
+        }
+
+        /// Read lines from `child_stdout` until `match_pattern` is found and the corresponding
+        /// line is returned.
+        /// Also writes every read line to tokio::io::stdout();
+        async fn wait_for_stdout_match<F>(
+            child_stdout: &mut ChildStdout,
+            match_pattern: F,
+        ) -> Option<String>
+        where
+            F: Fn(&str) -> bool,
+        {
+            let reader = BufReader::new(child_stdout);
             let mut lines = reader.lines();
+            let mut res = None;
 
+            let mut stdout = tokio::io::stdout();
             while let Some(line) = lines.next_line().await.expect("Failed to read line from stdout")
             {
-                // Write to stdout regardless
+                // Write all output to tests stdout
                 stdout
                     .write_all(format!("{}\n", line).as_bytes())
                     .await
                     .expect("Failed to write to stdout");
 
-                if line.to_ascii_uppercase().starts_with("BITCOIN") {
-                    bip21 = line;
+                if match_pattern(&line) {
+                    res = Some(line);
                     break;
                 }
             }
-            log::debug!("Got bip21 {}", &bip21);
 
-            sigint(&cli_receiver).expect("Failed to kill payjoin-cli");
-            bip21
-        }
-
-        async fn send_until_request_timeout(mut cli_sender: Child) -> Result<()> {
-            let stdout = cli_sender.stdout.take().expect("Failed to take stdout of child process");
-            let reader = BufReader::new(stdout);
-            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-
-            let mut lines = reader.lines();
-            tokio::spawn(async move {
-                let mut stdout = tokio::io::stdout();
-                while let Some(line) =
-                    lines.next_line().await.expect("Failed to read line from stdout")
-                {
-                    stdout
-                        .write_all(format!("{}\n", line).as_bytes())
-                        .await
-                        .expect("Failed to write to stdout");
-                    if line.contains("No response yet.") {
-                        let _ = tx.send(true).await;
-                        break;
-                    }
-                }
-            });
-
-            let timeout = tokio::time::Duration::from_secs(35);
-            let fallback_sent = tokio::time::timeout(timeout, rx.recv()).await?;
-
-            sigint(&cli_sender).expect("Failed to kill payjoin-cli initial sender");
-
-            assert!(fallback_sent.unwrap_or(false), "Fallback send was not detected");
-            Ok(())
-        }
-
-        async fn respond_with_payjoin(mut cli_receive_resumer: Child) -> Result<()> {
-            let stdout =
-                cli_receive_resumer.stdout.take().expect("Failed to take stdout of child process");
-            let reader = BufReader::new(stdout);
-            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-
-            let mut lines = reader.lines();
-            tokio::spawn(async move {
-                let mut stdout = tokio::io::stdout();
-                while let Some(line) =
-                    lines.next_line().await.expect("Failed to read line from stdout")
-                {
-                    stdout
-                        .write_all(format!("{}\n", line).as_bytes())
-                        .await
-                        .expect("Failed to write to stdout");
-                    if line.contains("Response successful") {
-                        let _ = tx.send(true).await;
-                        break;
-                    }
-                }
-            });
-
-            let timeout = tokio::time::Duration::from_secs(10);
-            let response_successful = tokio::time::timeout(timeout, rx.recv()).await?;
-
-            sigint(&cli_receive_resumer).expect("Failed to kill payjoin-cli");
-
-            assert!(response_successful.unwrap_or(false), "Did not respond with Payjoin PSBT");
-            Ok(())
-        }
-
-        async fn check_payjoin_sent(mut cli_send_resumer: Child) -> Result<()> {
-            let stdout =
-                cli_send_resumer.stdout.take().expect("Failed to take stdout of child process");
-            let reader = BufReader::new(stdout);
-            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-
-            let mut lines = reader.lines();
-            tokio::spawn(async move {
-                let mut stdout = tokio::io::stdout();
-                while let Some(line) =
-                    lines.next_line().await.expect("Failed to read line from stdout")
-                {
-                    stdout
-                        .write_all(format!("{}\n", line).as_bytes())
-                        .await
-                        .expect("Failed to write to stdout");
-                    if line.contains("Payjoin sent") {
-                        let _ = tx.send(true).await;
-                        break;
-                    }
-                }
-            });
-
-            let timeout = tokio::time::Duration::from_secs(10);
-            let payjoin_sent = tokio::time::timeout(timeout, rx.recv()).await?;
-
-            sigint(&cli_send_resumer).expect("Failed to kill payjoin-cli");
-
-            assert!(payjoin_sent.unwrap_or(false), "Payjoin send was not detected");
-            Ok(())
+            res
         }
 
         Ok(())

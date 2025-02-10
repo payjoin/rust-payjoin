@@ -1,7 +1,7 @@
 use core::fmt;
 use std::error;
 
-use crate::receive::error::{JsonError, ValidationError};
+use crate::receive::error::JsonError;
 
 /// Error that occurs during validation of an incoming v1 payjoin request.
 ///
@@ -27,19 +27,15 @@ pub(crate) enum InternalRequestError {
     /// The Content-Length header could not be parsed as a number
     InvalidContentLength(std::num::ParseIntError),
     /// The Content-Length value exceeds the maximum allowed size
-    ContentLengthTooLarge(u64),
+    ContentLengthTooLarge(usize),
 }
 
 impl From<InternalRequestError> for RequestError {
     fn from(value: InternalRequestError) -> Self { RequestError(value) }
 }
 
-impl From<InternalRequestError> for super::Error {
-    fn from(e: InternalRequestError) -> Self { super::Error::Validation(e.into()) }
-}
-
-impl From<InternalRequestError> for ValidationError {
-    fn from(e: InternalRequestError) -> Self { ValidationError::V1(e.into()) }
+impl From<InternalRequestError> for super::ReplyableError {
+    fn from(e: InternalRequestError) -> Self { super::ReplyableError::V1(e.into()) }
 }
 
 impl JsonError for RequestError {

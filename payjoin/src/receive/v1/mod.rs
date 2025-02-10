@@ -36,7 +36,9 @@ use super::error::{
     InternalSelectionError,
 };
 use super::optional_parameters::Params;
-use super::{Error, InputPair, OutputSubstitutionError, SelectionError};
+use super::{
+    ImplementationError, InputPair, OutputSubstitutionError, ReplyableError, SelectionError,
+};
 use crate::psbt::PsbtExt;
 use crate::receive::InternalPayloadError;
 
@@ -91,8 +93,8 @@ impl UncheckedProposal {
     pub fn check_broadcast_suitability(
         self,
         min_fee_rate: Option<FeeRate>,
-        can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, Error>,
-    ) -> Result<MaybeInputsOwned, Error> {
+        can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
+    ) -> Result<MaybeInputsOwned, ReplyableError> {
         let original_psbt_fee_rate = self.psbt_fee_rate()?;
         if let Some(min_fee_rate) = min_fee_rate {
             if original_psbt_fee_rate < min_fee_rate {
@@ -103,7 +105,9 @@ impl UncheckedProposal {
                 .into());
             }
         }
-        if can_broadcast(&self.psbt.clone().extract_tx_unchecked_fee_rate())? {
+        if can_broadcast(&self.psbt.clone().extract_tx_unchecked_fee_rate())
+            .map_err(ReplyableError::Implementation)?
+        {
             Ok(MaybeInputsOwned { psbt: self.psbt, params: self.params })
         } else {
             Err(InternalPayloadError::OriginalPsbtNotBroadcastable.into())
@@ -136,24 +140,23 @@ impl MaybeInputsOwned {
     /// An attacker could try to spend receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         self,
-        is_owned: impl Fn(&Script) -> Result<bool, Error>,
-    ) -> Result<MaybeInputsSeen, Error> {
-        let mut err = Ok(());
+        is_owned: impl Fn(&Script) -> Result<bool, ImplementationError>,
+    ) -> Result<MaybeInputsSeen, ReplyableError> {
+        let mut err: Result<(), ReplyableError> = Ok(());
         if let Some(e) = self
             .psbt
             .input_pairs()
             .scan(&mut err, |err, input| match input.previous_txout() {
                 Ok(txout) => Some(txout.script_pubkey.to_owned()),
                 Err(e) => {
-                    **err = Err(Error::Validation(InternalPayloadError::PrevTxOut(e).into()));
+                    **err = Err(InternalPayloadError::PrevTxOut(e).into());
                     None
                 }
             })
             .find_map(|script| match is_owned(&script) {
                 Ok(false) => None,
-                Ok(true) =>
-                    Some(Error::Validation(InternalPayloadError::InputOwned(script).into())),
-                Err(e) => Some(Error::Implementation(e.into())),
+                Ok(true) => Some(InternalPayloadError::InputOwned(script).into()),
+                Err(e) => Some(ReplyableError::Implementation(e)),
             })
         {
             return Err(e);
@@ -178,18 +181,16 @@ impl MaybeInputsSeen {
     /// proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
     pub fn check_no_inputs_seen_before(
         self,
-        is_known: impl Fn(&OutPoint) -> Result<bool, Error>,
-    ) -> Result<OutputsUnknown, Error> {
+        is_known: impl Fn(&OutPoint) -> Result<bool, ImplementationError>,
+    ) -> Result<OutputsUnknown, ReplyableError> {
         self.psbt.input_pairs().try_for_each(|input| {
             match is_known(&input.txin.previous_output) {
-                Ok(false) => Ok::<(), Error>(()),
+                Ok(false) => Ok::<(), ReplyableError>(()),
                 Ok(true) =>  {
                     log::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
-                    Err(Error::Validation(
-                        InternalPayloadError::InputSeen(input.txin.previous_output).into(),
-                    ))?
+                    Err(InternalPayloadError::InputSeen(input.txin.previous_output))?
                 },
-                Err(e) => Err(Error::Implementation(e.into()))?,
+                Err(e) => Err(ReplyableError::Implementation(e))?,
             }
         })?;
 
@@ -211,8 +212,8 @@ impl OutputsUnknown {
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
         self,
-        is_receiver_output: impl Fn(&Script) -> Result<bool, Error>,
-    ) -> Result<WantsOutputs, Error> {
+        is_receiver_output: impl Fn(&Script) -> Result<bool, ImplementationError>,
+    ) -> Result<WantsOutputs, ReplyableError> {
         let owned_vouts: Vec<usize> = self
             .psbt
             .unsigned_tx
@@ -224,10 +225,11 @@ impl OutputsUnknown {
                 Ok(false) => None,
                 Err(e) => Some(Err(e)),
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(ReplyableError::Implementation)?;
 
         if owned_vouts.is_empty() {
-            return Err(Error::Validation(InternalPayloadError::MissingPayment.into()));
+            return Err(InternalPayloadError::MissingPayment.into());
         }
 
         let mut params = self.params.clone();
@@ -745,10 +747,10 @@ impl ProvisionalProposal {
     /// wallet_process_psbt should sign and finalize receiver inputs
     pub fn finalize_proposal(
         mut self,
-        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, Error>,
+        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
-    ) -> Result<PayjoinProposal, Error> {
+    ) -> Result<PayjoinProposal, ReplyableError> {
         let mut psbt = self.apply_fee(min_fee_rate, max_effective_fee_rate)?.clone();
         // Remove now-invalid sender signatures before applying the receiver signatures
         for i in self.sender_input_indexes() {
@@ -757,7 +759,7 @@ impl ProvisionalProposal {
             psbt.inputs[i].final_script_witness = None;
             psbt.inputs[i].tap_key_sig = None;
         }
-        let psbt = wallet_process_psbt(&psbt)?;
+        let psbt = wallet_process_psbt(&psbt).map_err(ReplyableError::Implementation)?;
         let payjoin_proposal = self.prepare_psbt(psbt);
         Ok(payjoin_proposal)
     }

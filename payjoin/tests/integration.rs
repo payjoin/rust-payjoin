@@ -11,8 +11,8 @@ mod integration {
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use once_cell::sync::Lazy;
     use payjoin::receive::v1::build_v1_pj_uri;
-    use payjoin::receive::Error::Implementation;
-    use payjoin::receive::InputPair;
+    use payjoin::receive::ReplyableError::Implementation;
+    use payjoin::receive::{ImplementationError, InputPair};
     use payjoin::{PjUri, Request, Uri};
     use payjoin_test_utils::{init_bitcoind_sender_receiver, init_tracing, BoxError};
     use url::Url;
@@ -572,20 +572,20 @@ mod integration {
             let proposal = proposal.check_broadcast_suitability(None, |tx| {
                 Ok(receiver
                     .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
-                    .map_err(|e| Implementation(e.into()))?
+                    .map_err(ImplementationError::from)?
                     .first()
-                    .ok_or(Implementation("testmempoolaccept should return a result".into()))?
+                    .ok_or(ImplementationError::from("testmempoolaccept should return a result"))?
                     .allowed)
             })?;
 
             // Receive Check 2: receiver can't sign for proposal inputs
             let proposal = proposal.check_inputs_not_owned(|input| {
                 let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
-                    .map_err(|e| Implementation(e.into()))?;
+                    .map_err(ImplementationError::from)?;
                 receiver
                     .get_address_info(&address)
                     .map(|info| info.is_mine.unwrap_or(false))
-                    .map_err(|e| Implementation(e.into()))
+                    .map_err(ImplementationError::from)
             })?;
 
             // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
@@ -594,11 +594,11 @@ mod integration {
                 .identify_receiver_outputs(|output_script| {
                     let address =
                         bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
-                            .map_err(|e| Implementation(e.into()))?;
+                            .map_err(ImplementationError::from)?;
                     receiver
                         .get_address_info(&address)
                         .map(|info| info.is_mine.unwrap_or(false))
-                        .map_err(|e| Implementation(e.into()))
+                        .map_err(ImplementationError::from)
                 })?;
 
             let payjoin = payjoin.commit_outputs();
@@ -636,7 +636,7 @@ mod integration {
                         .map(|res: WalletProcessPsbtResult| {
                             Psbt::from_str(&res.psbt).expect("psbt should be valid")
                         })
-                        .map_err(|e| Implementation(e.into()))
+                        .map_err(ImplementationError::from)
                 },
                 Some(FeeRate::BROADCAST_MIN),
                 Some(FeeRate::from_sat_per_vb_unchecked(2)),
@@ -916,20 +916,20 @@ mod integration {
         let proposal = proposal.check_broadcast_suitability(None, |tx| {
             Ok(receiver
                 .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
-                .map_err(|e| Implementation(e.into()))?
+                .map_err(ImplementationError::from)?
                 .first()
-                .ok_or(Implementation("testmempoolaccept should return a result".into()))?
+                .ok_or(ImplementationError::from("testmempoolaccept should return a result"))?
                 .allowed)
         })?;
 
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal.check_inputs_not_owned(|input| {
             let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
-                .map_err(|e| Implementation(e.into()))?;
+                .map_err(ImplementationError::from)?;
             receiver
                 .get_address_info(&address)
                 .map(|info| info.is_mine.unwrap_or(false))
-                .map_err(|e| Implementation(e.into()))
+                .map_err(ImplementationError::from)
         })?;
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
@@ -938,11 +938,11 @@ mod integration {
             .identify_receiver_outputs(|output_script| {
                 let address =
                     bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
-                        .map_err(|e| Implementation(e.into()))?;
+                        .map_err(ImplementationError::from)?;
                 receiver
                     .get_address_info(&address)
                     .map(|info| info.is_mine.unwrap_or(false))
-                    .map_err(|e| Implementation(e.into()))
+                    .map_err(ImplementationError::from)
             })?;
 
         let payjoin = match custom_outputs {
@@ -986,7 +986,7 @@ mod integration {
                     .map(|res: WalletProcessPsbtResult| {
                         Psbt::from_str(&res.psbt).expect("psbt should be valid")
                     })
-                    .map_err(|e| Implementation(e.into()))
+                    .map_err(ImplementationError::from)
             },
             Some(FeeRate::BROADCAST_MIN),
             Some(FeeRate::from_sat_per_vb_unchecked(2)),

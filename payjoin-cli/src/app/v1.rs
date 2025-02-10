@@ -16,7 +16,8 @@ use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{self, FeeRate};
 use payjoin::receive::v1::{PayjoinProposal, UncheckedProposal};
-use payjoin::receive::Error;
+use payjoin::receive::ImplementationError;
+use payjoin::receive::ReplyableError::{self, Implementation, V1};
 use payjoin::send::v1::SenderBuilder;
 use payjoin::{Uri, UriExt};
 use tokio::net::TcpListener;
@@ -235,7 +236,7 @@ impl App {
                 .handle_payjoin_post(req)
                 .await
                 .map_err(|e| match e {
-                    Error::Validation(e) => {
+                    V1(e) => {
                         log::error!("Error handling request: {}", e);
                         Response::builder().status(400).body(full(e.to_string())).unwrap()
                     }
@@ -256,12 +257,12 @@ impl App {
     fn handle_get_bip21(
         &self,
         amount: Option<Amount>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error> {
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, ReplyableError> {
         let address = self
             .bitcoind()
-            .map_err(|e| Error::Implementation(e.into()))?
+            .map_err(|e| Implementation(e.into()))?
             .get_new_address(None, None)
-            .map_err(|e| Error::Implementation(e.into()))?
+            .map_err(|e| Implementation(e.into()))?
             .assume_checked();
         let uri_string = if let Some(amount) = amount {
             format!(
@@ -273,9 +274,8 @@ impl App {
         } else {
             format!("{}?pj={}", address.to_qr_uri(), self.config.pj_endpoint)
         };
-        let uri = Uri::try_from(uri_string.clone()).map_err(|_| {
-            Error::Implementation(anyhow!("Could not parse payjoin URI string.").into())
-        })?;
+        let uri = Uri::try_from(uri_string.clone())
+            .map_err(|_| Implementation(anyhow!("Could not parse payjoin URI string.").into()))?;
         let _ = uri.assume_checked(); // we just got it from bitcoind above
 
         Ok(Response::new(full(uri_string)))
@@ -284,12 +284,11 @@ impl App {
     async fn handle_payjoin_post(
         &self,
         req: Request<Incoming>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error> {
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, ReplyableError> {
         let (parts, body) = req.into_parts();
         let headers = Headers(&parts.headers);
         let query_string = parts.uri.query().unwrap_or("");
-        let body =
-            body.collect().await.map_err(|e| Error::Implementation(e.into()))?.aggregate().reader();
+        let body = body.collect().await.map_err(|e| Implementation(e.into()))?.aggregate().reader();
         let proposal = UncheckedProposal::from_request(body, query_string, headers)?;
 
         let payjoin_proposal = self.process_v1_proposal(proposal)?;
@@ -302,29 +301,32 @@ impl App {
         Ok(Response::new(full(body)))
     }
 
-    fn process_v1_proposal(&self, proposal: UncheckedProposal) -> Result<PayjoinProposal, Error> {
-        let bitcoind = self.bitcoind().map_err(|e| Error::Implementation(e.into()))?;
+    fn process_v1_proposal(
+        &self,
+        proposal: UncheckedProposal,
+    ) -> Result<PayjoinProposal, ReplyableError> {
+        let bitcoind = self.bitcoind().map_err(|e| Implementation(e.into()))?;
 
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // The network is used for checks later
-        let network =
-            bitcoind.get_blockchain_info().map_err(|e| Error::Implementation(e.into()))?.chain;
+        let network = bitcoind.get_blockchain_info().map_err(|e| Implementation(e.into()))?.chain;
 
         // Receive Check 1: Can Broadcast
-        let proposal = proposal.check_broadcast_suitability(None, |tx| {
-            let raw_tx = bitcoin::consensus::encode::serialize_hex(&tx);
-            let mempool_results = bitcoind
-                .test_mempool_accept(&[raw_tx])
-                .map_err(|e| Error::Implementation(e.into()))?;
-            match mempool_results.first() {
-                Some(result) => Ok(result.allowed),
-                None => Err(Error::Implementation(
-                    anyhow!("No mempool results returned on broadcast check").into(),
-                )),
-            }
-        })?;
+        let proposal =
+            proposal.check_broadcast_suitability(None, |tx| {
+                let raw_tx = bitcoin::consensus::encode::serialize_hex(&tx);
+                let mempool_results = bitcoind
+                    .test_mempool_accept(&[raw_tx])
+                    .map_err(|e| Implementation(e.into()))?;
+                match mempool_results.first() {
+                    Some(result) => Ok(result.allowed),
+                    None => Err(ImplementationError::from(
+                        "No mempool results returned on broadcast check",
+                    )),
+                }
+            })?;
         log::trace!("check1");
 
         // Receive Check 2: receiver can't sign for proposal inputs
@@ -333,7 +335,7 @@ impl App {
                 bitcoind
                     .get_address_info(&address)
                     .map(|info| info.is_mine.unwrap_or(false))
-                    .map_err(|e| Error::Implementation(e.into()))
+                    .map_err(ImplementationError::from)
             } else {
                 Ok(false)
             }
@@ -342,7 +344,7 @@ impl App {
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let payjoin = proposal.check_no_inputs_seen_before(|input| {
-            self.db.insert_input_seen_before(*input).map_err(|e| Error::Implementation(e.into()))
+            self.db.insert_input_seen_before(*input).map_err(ImplementationError::from)
         })?;
         log::trace!("check3");
 
@@ -351,7 +353,7 @@ impl App {
                 bitcoind
                     .get_address_info(&address)
                     .map(|info| info.is_mine.unwrap_or(false))
-                    .map_err(|e| Error::Implementation(e.into()))
+                    .map_err(ImplementationError::from)
             } else {
                 Ok(false)
             }
@@ -361,12 +363,12 @@ impl App {
             .substitute_receiver_script(
                 &bitcoind
                     .get_new_address(None, None)
-                    .map_err(|e| Error::Implementation(e.into()))?
+                    .map_err(|e| Implementation(e.into()))?
                     .require_network(network)
-                    .map_err(|e| Error::Implementation(e.into()))?
+                    .map_err(|e| Implementation(e.into()))?
                     .script_pubkey(),
             )
-            .map_err(|e| Error::Implementation(e.into()))?
+            .map_err(|e| Implementation(e.into()))?
             .commit_outputs();
 
         let provisional_payjoin = try_contributing_inputs(payjoin.clone(), &bitcoind)
@@ -377,12 +379,10 @@ impl App {
 
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &Psbt| {
-                bitcoind
+                let res = bitcoind
                     .wallet_process_psbt(&psbt.to_string(), None, None, Some(false))
-                    .map(|res| {
-                        Psbt::from_str(&res.psbt).map_err(|e| Error::Implementation(e.into()))
-                    })
-                    .map_err(|e| Error::Implementation(e.into()))?
+                    .map_err(ImplementationError::from)?;
+                Psbt::from_str(&res.psbt).map_err(ImplementationError::from)
             },
             None,
             self.config.max_fee_rate,

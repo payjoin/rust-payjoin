@@ -106,7 +106,6 @@ fn http_agent_builder() -> Result<reqwest::ClientBuilder> {
     let mut root_cert_store = RootCertStore::empty();
     root_cert_store.add(CertificateDer::from(cert_der.as_slice()))?;
     Ok(reqwest::ClientBuilder::new()
-        .danger_accept_invalid_certs(true)
         .use_rustls_tls()
         .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der.as_slice())?))
 }

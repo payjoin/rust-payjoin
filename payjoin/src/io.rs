@@ -44,7 +44,6 @@ pub async fn fetch_ohttp_keys_with_cert(
     let ohttp_keys_url = payjoin_directory.into_url()?.join("/ohttp-keys")?;
     let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
     let client = Client::builder()
-        .danger_accept_invalid_certs(true)
         .use_rustls_tls()
         .add_root_certificate(reqwest::tls::Certificate::from_der(&cert_der)?)
         .proxy(proxy)

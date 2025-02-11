@@ -161,7 +161,7 @@ pub fn http_agent(cert_der: Vec<u8>) -> Result<Client, BoxSendSyncError> {
 }
 
 fn http_agent_builder(cert_der: Vec<u8>) -> ClientBuilder {
-    ClientBuilder::new().danger_accept_invalid_certs(true).use_rustls_tls().add_root_certificate(
+    ClientBuilder::new().use_rustls_tls().add_root_certificate(
         reqwest::tls::Certificate::from_der(cert_der.as_slice())
             .expect("cert_der should be a valid DER-encoded certificate"),
     )

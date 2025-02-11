@@ -436,7 +436,7 @@ impl WantsInputs {
         candidate_inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<InputPair, SelectionError> {
         if self.payjoin_psbt.outputs.len() != 2 {
-            return Err(InternalSelectionError::TooManyOutputs.into());
+            return Err(InternalSelectionError::UnsupportedOutputLength.into());
         }
 
         let min_out_sats = self

@@ -408,7 +408,7 @@ impl WantsInputs {
     /// Proper coin selection allows payjoin to resemble ordinary transactions.
     /// To ensure the resemblance, a number of heuristics must be avoided.
     ///
-    /// UIH "Unnecessary input heuristic" is avoided for multi-output transactions.
+    /// Attempt to avoid UIH (Unnecessary input heuristic) for 2-output transactions.
     /// A simple consolidation is otherwise chosen if available.
     pub fn try_preserving_privacy(
         &self,
@@ -419,17 +419,8 @@ impl WantsInputs {
             return Err(InternalSelectionError::Empty.into());
         }
 
-        if self.payjoin_psbt.outputs.len() > 2 {
-            // This UIH avoidance function supports only
-            // many-input, n-output transactions such that n <= 2 for now
-            return Err(InternalSelectionError::TooManyOutputs.into());
-        }
-
-        if self.payjoin_psbt.outputs.len() == 2 {
-            self.avoid_uih(candidate_inputs)
-        } else {
-            self.select_first_candidate(candidate_inputs)
-        }
+        self.avoid_uih(&mut candidate_inputs)
+            .or_else(|_| self.select_first_candidate(&mut candidate_inputs))
     }
 
     /// UIH "Unnecessary input heuristic" is one class of heuristics to avoid. We define
@@ -437,10 +428,17 @@ impl WantsInputs {
     /// BlockSci UIH1 and UIH2:
     /// if min(in) > min(out) then UIH1 else UIH2
     /// <https://eprint.iacr.org/2022/589.pdf>
+    ///
+    /// This UIH avoidance function supports only
+    /// many-input, 2-output transactions for now
     fn avoid_uih(
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<InputPair, SelectionError> {
+        if self.payjoin_psbt.outputs.len() != 2 {
+            return Err(InternalSelectionError::UnsupportedOutputLength.into());
+        }
+
         let min_out_sats = self
             .payjoin_psbt
             .unsigned_tx

@@ -318,7 +318,7 @@ pub(crate) enum InternalSelectionError {
     /// No candidates available for selection
     Empty,
     /// Current privacy selection implementation only supports 2-output transactions
-    TooManyOutputs,
+    UnsupportedOutputLength,
     /// No selection candidates improve privacy
     NotFound,
 }
@@ -327,7 +327,7 @@ impl fmt::Display for SelectionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
             InternalSelectionError::Empty => write!(f, "No candidates available for selection"),
-            InternalSelectionError::TooManyOutputs => write!(
+            InternalSelectionError::UnsupportedOutputLength => write!(
                 f,
                 "Current privacy selection implementation only supports 2-output transactions"
             ),

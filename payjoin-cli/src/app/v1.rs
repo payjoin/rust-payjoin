@@ -332,10 +332,7 @@ impl App {
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal.check_inputs_not_owned(|input| {
             if let Ok(address) = bitcoin::Address::from_script(input, network) {
-                bitcoind
-                    .get_address_info(&address)
-                    .map(|info| info.is_mine.unwrap_or(false))
-                    .map_err(ImplementationError::from)
+                Ok(bitcoind.get_address_info(&address).map(|info| info.is_mine.unwrap_or(false))?)
             } else {
                 Ok(false)
             }
@@ -343,17 +340,13 @@ impl App {
         log::trace!("check2");
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
-        let payjoin = proposal.check_no_inputs_seen_before(|input| {
-            self.db.insert_input_seen_before(*input).map_err(ImplementationError::from)
-        })?;
+        let payjoin = proposal
+            .check_no_inputs_seen_before(|input| Ok(self.db.insert_input_seen_before(*input)?))?;
         log::trace!("check3");
 
         let payjoin = payjoin.identify_receiver_outputs(|output_script| {
             if let Ok(address) = bitcoin::Address::from_script(output_script, network) {
-                bitcoind
-                    .get_address_info(&address)
-                    .map(|info| info.is_mine.unwrap_or(false))
-                    .map_err(ImplementationError::from)
+                Ok(bitcoind.get_address_info(&address).map(|info| info.is_mine.unwrap_or(false))?)
             } else {
                 Ok(false)
             }
@@ -379,10 +372,9 @@ impl App {
 
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &Psbt| {
-                let res = bitcoind
-                    .wallet_process_psbt(&psbt.to_string(), None, None, Some(false))
-                    .map_err(ImplementationError::from)?;
-                Psbt::from_str(&res.psbt).map_err(ImplementationError::from)
+                let res =
+                    bitcoind.wallet_process_psbt(&psbt.to_string(), None, None, Some(false))?;
+                Ok(Psbt::from_str(&res.psbt)?)
             },
             None,
             self.config.max_fee_rate,

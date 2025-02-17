@@ -319,6 +319,7 @@ impl HpkeContext {
     }
 }
 
+#[cfg(test)]
 mod test {
     #[test]
     fn req_ctx_ser_de_roundtrip() {

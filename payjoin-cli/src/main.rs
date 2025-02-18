@@ -9,6 +9,9 @@ use url::Url;
 mod app;
 mod db;
 
+#[cfg(not(any(feature = "v1", feature = "v2")))]
+compile_error!("At least one of the features ['v1', 'v2'] must be enabled");
+
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();

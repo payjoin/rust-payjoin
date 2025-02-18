@@ -415,9 +415,6 @@ impl WantsInputs {
         candidate_inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<InputPair, SelectionError> {
         let mut candidate_inputs = candidate_inputs.into_iter().peekable();
-        if candidate_inputs.peek().is_none() {
-            return Err(InternalSelectionError::Empty.into());
-        }
 
         self.avoid_uih(&mut candidate_inputs)
             .or_else(|_| self.select_first_candidate(&mut candidate_inputs))
@@ -477,7 +474,7 @@ impl WantsInputs {
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<InputPair, SelectionError> {
-        candidate_inputs.into_iter().next().ok_or(InternalSelectionError::NotFound.into())
+        candidate_inputs.into_iter().next().ok_or(InternalSelectionError::Empty.into())
     }
 
     /// Add the provided list of inputs to the transaction.
@@ -839,6 +836,43 @@ pub(crate) mod test {
             let mut payjoin = payjoin.clone();
             let psbt = payjoin.apply_fee(None, Some(FeeRate::ZERO));
             assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
+        }
+    }
+
+    #[test]
+    fn empty_candidates_inputs() {
+        let proposal = proposal_from_test_vector().unwrap();
+        let wants_inputs = proposal
+            .assume_interactive_receiver()
+            .check_inputs_not_owned(|_| Ok(false))
+            .expect("No inputs should be owned")
+            .check_no_inputs_seen_before(|_| Ok(false))
+            .expect("No inputs should be seen before")
+            .identify_receiver_outputs(|script| {
+                let network = Network::Bitcoin;
+                let target_address = Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+                    .map_err(|e| e.to_string())?
+                    .require_network(network)
+                    .map_err(|e| e.to_string())?;
+
+                let script_address =
+                    Address::from_script(script, network).map_err(|e| e.to_string())?;
+                Ok(script_address == target_address)
+            })
+            .expect("Receiver output should be identified")
+            .commit_outputs();
+        let empty_candidate_inputs: Vec<InputPair> = vec![];
+        let result = wants_inputs.try_preserving_privacy(empty_candidate_inputs);
+        match result {
+            Err(err) => {
+                let debug_str = format!("{:?}", err);
+                assert!(
+                    debug_str.contains("Empty"),
+                    "Error should indicate 'Empty' but was: {}",
+                    debug_str
+                );
+            }
+            Ok(_) => panic!("try_preserving_privacy should fail with empty candidate inputs"),
         }
     }
 

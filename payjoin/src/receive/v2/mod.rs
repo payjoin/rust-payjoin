@@ -583,17 +583,15 @@ mod test {
     const KEM: Kem = Kem::K256Sha256;
     const SYMMETRIC: &[SymmetricSuite] =
         &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
-    static EXAMPLE_DIRECTORY_URL: Lazy<Url> =
-        Lazy::new(|| Url::parse("https://directory.com").expect("invalid URL"));
 
-    static EXAMPLE_OHTTP_RELAY: Lazy<Url> =
+    static EXAMPLE_URL: Lazy<Url> =
         Lazy::new(|| Url::parse("https://relay.com").expect("invalid URL"));
 
     static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
         address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
             .expect("valid address")
             .assume_checked(),
-        directory: EXAMPLE_DIRECTORY_URL.clone(),
+        directory: EXAMPLE_URL.clone(),
         subdirectory: None,
         ohttp_keys: OhttpKeys(
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
@@ -619,12 +617,10 @@ mod test {
             server_error.to_json(),
             r#"{ "errorCode": "unavailable", "message": "Receiver error" }"#
         );
-        let (_req, _ctx) =
-            proposal.clone().extract_err_req(&server_error, EXAMPLE_OHTTP_RELAY.to_owned())?;
+        let (_req, _ctx) = proposal.clone().extract_err_req(&server_error, &*EXAMPLE_URL)?;
 
         let internal_error = InternalPayloadError::MissingPayment.into();
-        let (_req, _ctx) =
-            proposal.extract_err_req(&internal_error, EXAMPLE_OHTTP_RELAY.to_owned())?;
+        let (_req, _ctx) = proposal.extract_err_req(&internal_error, &*EXAMPLE_URL)?;
         Ok(())
     }
 
@@ -640,7 +636,7 @@ mod test {
     #[test]
     fn test_v2_pj_uri() {
         let uri = Receiver { context: SHARED_CONTEXT.clone() }.pj_uri();
-        assert_ne!(uri.extras.endpoint, EXAMPLE_DIRECTORY_URL.clone());
+        assert_ne!(uri.extras.endpoint, EXAMPLE_URL.clone());
         assert!(!uri.extras.disable_output_substitution);
     }
 }

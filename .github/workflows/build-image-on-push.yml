@@ -1,0 +1,60 @@
+name: "Test build of image when Dockerfile is changed"
+
+on:
+  push:
+    paths:
+    - 'Dockerfile'
+    branches-ignore:
+    - main
+  pull_request:
+    paths:
+    - 'Dockerfile'
+  workflow_dispatch:
+
+env:
+  GHCR_REPO: ghcr.io/${{ github.repository_owner }}/ohttp-relay
+
+jobs:
+  rebuild-container:
+    name: "Build image with cache"
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Prepare platform matrix for arm64
+        if: runner.arch == 'ARM64'
+        run: |
+          echo "PLATFORM=linux/arm64" >> $GITHUB_ENV
+          echo "DIGEST_NAME=arm64" >> $GITHUB_ENV
+      - name: Prepare platform matrix for amd64
+        if: runner.arch == 'X64'
+        run: |
+          echo "PLATFORM=linux/amd64" >> $GITHUB_ENV
+          echo "DIGEST_NAME=amd64" >> $GITHUB_ENV
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3.9.0
+      -
+        name: Checkout repository
+        uses: actions/checkout@v4
+      -
+        name: Test build of image
+        id: build
+        uses: docker/build-push-action@v6.13.0
+        with:
+          push: false
+          load: true
+          platforms: ${{ env.PLATFORM }}
+          tags: ohttp-relay:testing
+          cache-from: type=registry,ref=${{ env.GHCR_REPO }}:latest
+      - 
+        name: Test-run image
+        run: |
+          docker run --rm -e GATEWAY_ORIGIN=https://payjo.in ohttp-relay:testing &
+          PID=$!
+          sleep 30
+          kill -SIGINT $PID # this will return a non-zero exit code if the container dies early on

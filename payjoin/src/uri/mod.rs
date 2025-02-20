@@ -128,7 +128,7 @@ impl bitcoin_uri::SerializeParams for &PayjoinExtras {
             .replacen(host, &host.to_uppercase(), 1);
 
         vec![
-            ("pjos", if self.disable_output_substitution { "1" } else { "0" }.to_string()),
+            ("pjos", if self.disable_output_substitution { "0" } else { "1" }.to_string()),
             ("pj", endpoint_str),
         ]
         .into_iter()
@@ -191,7 +191,7 @@ impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
                 {
                     Ok(MaybePayjoinExtras::Supported(PayjoinExtras {
                         endpoint,
-                        disable_output_substitution: pjos.unwrap_or(false),
+                        disable_output_substitution: !pjos.unwrap_or(false),
                     }))
                 } else {
                     Err(InternalPjParseError::UnsecureEndpoint.into())
@@ -271,5 +271,52 @@ mod tests {
             .unwrap()
             .extras
             .pj_is_supported());
+    }
+
+    #[test]
+    fn test_serialize_pjos() {
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=HTTPS://EXAMPLE.COM/%23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
+        let expected_is_disabled = "pjos=0";
+        let expected_is_enabled = "pjos=1";
+        let mut pjuri = Uri::try_from(uri)
+            .expect("Invalid uri")
+            .assume_checked()
+            .check_pj_supported()
+            .expect("Could not parse pj extras");
+
+        pjuri.extras.disable_output_substitution = true;
+        assert!(
+            pjuri.to_string().contains(expected_is_disabled),
+            "Pj uri should contain param: {}, but it did not",
+            expected_is_disabled
+        );
+
+        pjuri.extras.disable_output_substitution = false;
+        assert!(
+            pjuri.to_string().contains(expected_is_enabled),
+            "Pj uri should contain param: {}, but it did not",
+            expected_is_enabled
+        );
+    }
+
+    #[test]
+    fn test_deserialize_pjos() {
+        // pjos=0 should disable output substitution
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://example.com&pjos=0";
+        let parsed = Uri::try_from(uri).unwrap();
+        match parsed.extras {
+            MaybePayjoinExtras::Supported(extras) =>
+                assert!(extras.is_output_substitution_disabled()),
+            _ => panic!("Expected Supported PayjoinExtras"),
+        }
+
+        // pjos=1 should allow output substitution
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://example.com&pjos=1";
+        let parsed = Uri::try_from(uri).unwrap();
+        match parsed.extras {
+            MaybePayjoinExtras::Supported(extras) =>
+                assert!(!extras.is_output_substitution_disabled()),
+            _ => panic!("Expected Supported PayjoinExtras"),
+        }
     }
 }

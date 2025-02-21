@@ -110,6 +110,11 @@ cargo update -p zstd-sys --precise 2.0.8+zstd.1.5.5
 
 ## Contributing
 
+### Commit Messages
+
+The git repository is our source of truth for development history. Therefore the commit history is the most important communication
+artifact we produce. Commit messages must follow [the seven rules in this guide by cbeams](https://cbea.ms/git-commit/#seven-rules).
+
 ### Nix Development Shells
 
 Where nix is available (NixOS or

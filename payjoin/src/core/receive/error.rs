@@ -3,6 +3,7 @@ use std::{error, fmt};
 use crate::error_codes::ErrorCode::{
     self, NotEnoughMoney, OriginalPsbtRejected, Unavailable, VersionUnsupported,
 };
+// use crate::hpke::HpkeError::PayloadTooLarge;
 
 /// The top-level error type for the payjoin receiver
 #[derive(Debug)]
@@ -14,6 +15,10 @@ pub enum Error {
     ///
     /// e.g. database errors, network failures, wallet errors
     Implementation(crate::ImplementationError),
+    PayloadTooLarge {
+        actual: usize,
+        max: usize,
+    },
 }
 
 impl From<&Error> for JsonReply {
@@ -21,6 +26,7 @@ impl From<&Error> for JsonReply {
         match e {
             Error::Protocol(e) => e.into(),
             Error::Implementation(_) => JsonReply::new(Unavailable, "Receiver error"),
+            Error::PayloadTooLarge { actual: _, max: _ } => todo!("unimplemented"),
         }
     }
 }
@@ -34,6 +40,12 @@ impl fmt::Display for Error {
         match self {
             Error::Protocol(e) => write!(f, "Protocol error: {e}"),
             Error::Implementation(e) => write!(f, "Implementation error: {e}"),
+            Error::PayloadTooLarge { actual, max } => {
+                write!(
+                    f,
+                    "Plaintext length incorrect, expected size is {max} bytes, actual size is {actual} bytes"
+                )
+            }
         }
     }
 }
@@ -43,6 +55,7 @@ impl error::Error for Error {
         match self {
             Error::Protocol(e) => e.source(),
             Error::Implementation(e) => e.source(),
+            Error::PayloadTooLarge { .. } => None,
         }
     }
 }

@@ -187,7 +187,8 @@ async fn serve_payjoin_directory(
     let mut response = match (parts.method, path_segments.as_slice()) {
         (Method::POST, ["", ".well-known", "ohttp-gateway"]) =>
             handle_ohttp_gateway(body, pool, ohttp).await,
-        (Method::GET, ["", ".well-known", "ohttp-gateway"]) => get_ohttp_keys(&ohttp).await,
+        (Method::GET, ["", ".well-known", "ohttp-gateway"]) =>
+            handle_ohttp_gateway_get(&ohttp, &query).await,
         (Method::POST, ["", ""]) => handle_ohttp_gateway(body, pool, ohttp).await,
         (Method::GET, ["", "ohttp-keys"]) => get_ohttp_keys(&ohttp).await,
         (Method::POST, ["", id]) => post_fallback_v1(id, query, body, pool).await,
@@ -426,6 +427,16 @@ fn not_found() -> Response<BoxBody<Bytes, hyper::Error>> {
     res
 }
 
+async fn handle_ohttp_gateway_get(
+    ohttp: &Arc<Mutex<ohttp::Server>>,
+    query: &str,
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
+    match query {
+        "allowed_purposes" => Ok(get_ohttp_allowed_purposes().await),
+        _ => get_ohttp_keys(ohttp).await,
+    }
+}
+
 async fn get_ohttp_keys(
     ohttp: &Arc<Mutex<ohttp::Server>>,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
@@ -438,6 +449,23 @@ async fn get_ohttp_keys(
     let mut res = Response::new(full(ohttp_keys));
     res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/ohttp-keys"));
     Ok(res)
+}
+
+async fn get_ohttp_allowed_purposes() -> Response<BoxBody<Bytes, hyper::Error>> {
+    // Encode the magic string in the same format as a TLS ALPN protocol list (a
+    // U16BE length encoded list of U8 length encoded strings).
+    //
+    // The string is just "BIP77" followed by a UUID, that signals to relays
+    // that this OHTTP gateway will accept any requests associated with this
+    // purpose.
+    let mut res = Response::new(full(Bytes::from_static(
+        b"\x00\x01\x2aBIP77 454403bb-9f7b-4385-b31f-acd2dae20b7e",
+    )));
+
+    res.headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/x-ohttp-allowed-purposes"));
+
+    res
 }
 
 fn empty() -> BoxBody<Bytes, hyper::Error> {

@@ -1675,6 +1675,7 @@ name = "payjoin-test-utils"
 version = "0.1.0"
 dependencies = [
  "bitcoin",
+ "bitcoin-ohttp",
  "bitcoincore-rpc",
  "bitcoind",
  "http",

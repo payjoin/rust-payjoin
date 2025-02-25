@@ -1,4 +1,5 @@
 //! Receive BIP 77 Payjoin v2
+use std::fmt::{self, Display};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
@@ -19,6 +20,7 @@ use super::{
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::output_substitution::OutputSubstitution;
+use crate::persist::{self, Persister};
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
 use crate::{IntoUrl, IntoUrlError, Request};
@@ -71,12 +73,12 @@ fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 
 /// A payjoin V2 receiver, allowing for polled requests to the
 /// payjoin directory and response processing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Receiver {
+#[derive(Debug)]
+pub struct NewReceiver {
     context: SessionContext,
 }
 
-impl Receiver {
+impl NewReceiver {
     /// Creates a new `Receiver` with the provided parameters.
     ///
     /// # Parameters
@@ -96,7 +98,7 @@ impl Receiver {
         ohttp_keys: OhttpKeys,
         expire_after: Option<Duration>,
     ) -> Result<Self, IntoUrlError> {
-        Ok(Self {
+        let receiver = Self {
             context: SessionContext {
                 address,
                 directory: directory.into_url()?,
@@ -107,9 +109,53 @@ impl Receiver {
                 s: HpkeKeyPair::gen_keypair(),
                 e: None,
             },
-        })
+        };
+        Ok(receiver)
     }
 
+    pub fn persist<P: Persister<Receiver>>(
+        &self,
+        persister: &mut P,
+    ) -> Result<P::Token, ImplementationError> {
+        let receiver = Receiver { context: self.context.clone() };
+        Ok(persister.save(receiver)?)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Receiver {
+    context: SessionContext,
+}
+
+/// Opaque key type for the receiver
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceiverToken(ShortId);
+
+impl Display for ReceiverToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.0) }
+}
+
+impl From<Receiver> for ReceiverToken {
+    fn from(receiver: Receiver) -> Self { ReceiverToken(id(&receiver.context.s)) }
+}
+
+impl AsRef<[u8]> for ReceiverToken {
+    fn as_ref(&self) -> &[u8] { self.0.as_bytes() }
+}
+
+impl persist::Value for Receiver {
+    type Key = ReceiverToken;
+
+    fn key(&self) -> Self::Key { ReceiverToken(id(&self.context.s)) }
+}
+
+impl Receiver {
+    pub fn load<P: Persister<Receiver>>(
+        token: P::Token,
+        persister: &P,
+    ) -> Result<Self, ImplementationError> {
+        persister.load(token).map_err(ImplementationError::from)
+    }
     /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
     pub fn extract_req(
         &mut self,

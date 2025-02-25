@@ -1,21 +1,38 @@
+use std::sync::Arc;
+
 use bitcoincore_rpc::jsonrpc::serde_json;
-use payjoin::receive::v2::Receiver;
+use payjoin::persist::{Persister, Value};
+use payjoin::receive::v2::{Receiver, ReceiverToken};
 use payjoin::send::v2::Sender;
-use sled::{IVec, Tree};
+use sled::Tree;
 use url::Url;
 
 use super::*;
 
-impl Database {
-    pub(crate) fn insert_recv_session(&self, session: Receiver) -> Result<()> {
-        let recv_tree = self.0.open_tree("recv_sessions")?;
-        let key = &session.id();
-        let value = serde_json::to_string(&session).map_err(Error::Serialize)?;
-        recv_tree.insert(key.as_slice(), IVec::from(value.as_str()))?;
-        recv_tree.flush()?;
-        Ok(())
-    }
+pub(crate) struct ReceiverPersister(Arc<Database>);
+impl ReceiverPersister {
+    pub fn new(db: Arc<Database>) -> Self { Self(db) }
+}
 
+impl Persister<Receiver> for ReceiverPersister {
+    type Token = ReceiverToken;
+    type Error = crate::db::error::Error;
+    fn save(&mut self, value: Receiver) -> std::result::Result<ReceiverToken, Self::Error> {
+        let recv_tree = self.0 .0.open_tree("recv_sessions")?;
+        let key = value.key();
+        let value = serde_json::to_vec(&value).map_err(Error::Serialize)?;
+        recv_tree.insert(key.clone(), value.as_slice())?;
+        recv_tree.flush()?;
+        Ok(key)
+    }
+    fn load(&self, key: ReceiverToken) -> std::result::Result<Receiver, Self::Error> {
+        let recv_tree = self.0 .0.open_tree("recv_sessions")?;
+        let value = recv_tree.get(key.as_ref())?.ok_or(Error::NotFound(key.to_string()))?;
+        serde_json::from_slice(&value).map_err(Error::Deserialize)
+    }
+}
+
+impl Database {
     pub(crate) fn get_recv_sessions(&self) -> Result<Vec<Receiver>> {
         let recv_tree = self.0.open_tree("recv_sessions")?;
         let mut sessions = Vec::new();

@@ -10,6 +10,7 @@ use tokio::sync::watch;
 
 pub mod config;
 pub mod wallet;
+
 use crate::app::config::Config;
 use crate::app::wallet::BitcoindWallet;
 

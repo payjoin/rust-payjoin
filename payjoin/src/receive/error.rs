@@ -1,5 +1,6 @@
 use std::{error, fmt};
 
+use super::v2::error::CreateReciverError;
 use crate::error_codes::{
     NOT_ENOUGH_MONEY, ORIGINAL_PSBT_REJECTED, UNAVAILABLE, VERSION_UNSUPPORTED,
 };
@@ -15,10 +16,16 @@ pub enum Error {
     #[cfg(feature = "v2")]
     /// V2-specific errors that are infeasable to reply to the sender
     V2(crate::receive::v2::SessionError),
+    /// Error arising during the creation of the receiver
+    Creation(CreateReciverError),
 }
 
 impl From<ReplyableError> for Error {
     fn from(e: ReplyableError) -> Self { Error::ReplyToSender(e) }
+}
+
+impl From<CreateReciverError> for Error {
+    fn from(e: CreateReciverError) -> Self { Error::Creation(e) }
 }
 
 impl fmt::Display for Error {
@@ -27,6 +34,7 @@ impl fmt::Display for Error {
             Error::ReplyToSender(e) => write!(f, "replyable error: {}", e),
             #[cfg(feature = "v2")]
             Error::V2(e) => write!(f, "unreplyable error: {}", e),
+            Error::Creation(e) => write!(f, "creation error: {}", e),
         }
     }
 }
@@ -37,6 +45,7 @@ impl error::Error for Error {
             Error::ReplyToSender(e) => e.source(),
             #[cfg(feature = "v2")]
             Error::V2(e) => e.source(),
+            Error::Creation(e) => e.source(),
         }
     }
 }

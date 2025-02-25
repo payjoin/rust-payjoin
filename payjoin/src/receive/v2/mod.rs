@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime};
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
+use error::CreateReciverInternalError;
 pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
 use serde::de::Deserializer;
@@ -19,8 +20,9 @@ use super::{
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::receive::{parse_payload, InputPair};
+use crate::traits::Persister;
 use crate::uri::ShortId;
-use crate::{IntoUrl, IntoUrlError, Request};
+use crate::{IntoUrl, Request};
 
 pub(crate) mod error;
 
@@ -74,24 +76,35 @@ impl Receiver {
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
-    pub fn new(
+    pub fn new<P: Persister>(
         address: Address,
         directory: impl IntoUrl,
         ohttp_keys: OhttpKeys,
         expire_after: Option<Duration>,
-    ) -> Result<Self, IntoUrlError> {
-        Ok(Self {
+        persister: P,
+    ) -> Result<Self, Error>
+    where
+        P::Key: From<ShortId>,
+    {
+        let hpke_key_pair = HpkeKeyPair::gen_keypair();
+        let receiver = Self {
             context: SessionContext {
                 address,
-                directory: directory.into_url()?,
+                directory: directory.into_url().map_err(CreateReciverInternalError::InvalidUrl)?,
                 subdirectory: None,
                 ohttp_keys,
                 expiry: SystemTime::now()
                     + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
-                s: HpkeKeyPair::gen_keypair(),
+                s: hpke_key_pair.clone(),
                 e: None,
             },
-        })
+        };
+        let key = id(&hpke_key_pair);
+        let state = PayjoinProposalState::UnInitialized(Box::new(receiver.clone()));
+        persister
+            .save(key.into(), state)
+            .map_err(|e| CreateReciverInternalError::PersisterError(Box::new(e)))?;
+        Ok(receiver)
     }
 
     /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
@@ -204,6 +217,12 @@ impl Receiver {
 
     /// The per-session identifier
     pub fn id(&self) -> ShortId { id(&self.context.s) }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "state", content = "data")]
+pub enum PayjoinProposalState {
+    UnInitialized(Box<Receiver>),
 }
 
 /// The sender's original PSBT and optional parameters
@@ -578,6 +597,26 @@ fn subdir(directory: &Url, id: &ShortId) -> Url {
 /// The per-session identifier
 fn id(s: &HpkeKeyPair) -> ShortId {
     sha256::Hash::hash(&s.public_key().to_compressed_bytes()).into()
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NoopPersister;
+
+#[derive(Debug)]
+pub struct NoopPersisterError;
+
+impl std::error::Error for NoopPersisterError {}
+
+impl std::fmt::Display for NoopPersisterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NoopPersisterError")
+    }
+}
+
+impl Persister for NoopPersister {
+    type Key = ShortId;
+    type Error = NoopPersisterError;
+    fn save<T: Serialize>(&self, _key: Self::Key, _value: T) -> Result<(), Self::Error> { Ok(()) }
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::receive::v2::{Receiver, UncheckedProposal};
+use payjoin::receive::v2::{PayjoinProposalState, Receiver, UncheckedProposal};
 use payjoin::receive::{Error, ImplementationError, ReplyableError};
 use payjoin::send::v2::{Sender, SenderBuilder};
 use payjoin::Uri;
@@ -14,7 +14,7 @@ use super::config::Config;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::{handle_interrupt, http_agent};
-use crate::db::Database;
+use crate::db::{Database, ReciverPersister};
 
 #[derive(Clone)]
 pub(crate) struct App {
@@ -65,13 +65,14 @@ impl AppTrait for App {
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
+        let persister = ReciverPersister(self.db.clone());
         let session = Receiver::new(
             address,
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys.clone(),
             None,
+            persister,
         )?;
-        self.db.insert_recv_session(session.clone())?;
         self.spawn_payjoin_receiver(session, Some(amount)).await
     }
 
@@ -90,7 +91,10 @@ impl AppTrait for App {
         for session in recv_sessions {
             let self_clone = self.clone();
             tasks.push(tokio::spawn(async move {
-                self_clone.spawn_payjoin_receiver(session, None).await
+                match session {
+                    PayjoinProposalState::UnInitialized(receiver) =>
+                        self_clone.spawn_payjoin_receiver(*receiver, None).await,
+                }
             }));
         }
 

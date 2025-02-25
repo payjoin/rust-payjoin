@@ -5,6 +5,37 @@ use super::Error::V2;
 use crate::hpke::HpkeError;
 use crate::ohttp::OhttpEncapsulationError;
 use crate::receive::error::Error;
+use crate::IntoUrlError;
+
+#[derive(Debug)]
+pub struct CreateReciverError(CreateReciverInternalError);
+
+impl std::error::Error for CreateReciverError {}
+
+impl std::fmt::Display for CreateReciverError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use CreateReciverInternalError::*;
+
+        match &self.0 {
+            InvalidUrl(e) => write!(f, "Invalid URL: {}", e),
+            PersisterError(e) => write!(f, "Persister error: {}", e),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum CreateReciverInternalError {
+    InvalidUrl(IntoUrlError),
+    PersisterError(Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl From<CreateReciverInternalError> for CreateReciverError {
+    fn from(value: CreateReciverInternalError) -> Self { CreateReciverError(value) }
+}
+
+impl From<CreateReciverInternalError> for Error {
+    fn from(value: CreateReciverInternalError) -> Self { CreateReciverError(value).into() }
+}
 
 /// Error that may occur during a v2 session typestate change
 ///

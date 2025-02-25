@@ -9,7 +9,7 @@ use bitcoind::bitcoincore_rpc::json::AddressType;
 use bitcoind::bitcoincore_rpc::{self, RpcApi};
 use http::{StatusCode, Uri};
 use log::{log_enabled, Level};
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use payjoin::io::{fetch_ohttp_keys_with_cert, Error as IOError};
 use payjoin::OhttpKeys;
 use reqwest::{Client, ClientBuilder};
@@ -189,3 +189,6 @@ pub async fn wait_for_service_ready(
 
     Err("Timeout waiting for service to be ready")
 }
+
+pub static EXAMPLE_URL: Lazy<Url> =
+    Lazy::new(|| Url::parse("https://relay.com").expect("invalid URL"));

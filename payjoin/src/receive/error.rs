@@ -15,6 +15,9 @@ pub enum Error {
     #[cfg(feature = "v2")]
     /// V2-specific errors that are infeasable to reply to the sender
     V2(crate::receive::v2::SessionError),
+    #[cfg(feature = "v2")]
+    /// Error arising during the creation of the receiver
+    Creation(crate::receive::v2::error::CreateRecieverError),
 }
 
 impl From<ReplyableError> for Error {
@@ -27,6 +30,8 @@ impl fmt::Display for Error {
             Error::ReplyToSender(e) => write!(f, "replyable error: {}", e),
             #[cfg(feature = "v2")]
             Error::V2(e) => write!(f, "unreplyable error: {}", e),
+            #[cfg(feature = "v2")]
+            Error::Creation(e) => write!(f, "creation error: {}", e),
         }
     }
 }
@@ -37,6 +42,8 @@ impl error::Error for Error {
             Error::ReplyToSender(e) => e.source(),
             #[cfg(feature = "v2")]
             Error::V2(e) => e.source(),
+            #[cfg(feature = "v2")]
+            Error::Creation(e) => e.source(),
         }
     }
 }

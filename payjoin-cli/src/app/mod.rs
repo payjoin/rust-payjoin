@@ -10,6 +10,8 @@ use tokio::sync::watch;
 
 pub mod config;
 pub mod wallet;
+#[cfg(feature = "v2")]
+use payjoin::receive::v2::PayjoinProposalState;
 use crate::app::config::Config;
 use crate::app::wallet::BitcoindWallet;
 
@@ -31,6 +33,8 @@ pub trait App: Send + Sync {
     async fn receive_payjoin(&self, amount: Amount) -> Result<()>;
     #[cfg(feature = "v2")]
     async fn resume_payjoins(&self) -> Result<()>;
+    #[cfg(feature = "v2")]
+    async fn resume_from_state(&self, historical_state: PayjoinProposalState) -> Result<()>;
 
     fn create_original_psbt(&self, uri: &PjUri, fee_rate: FeeRate) -> Result<Psbt> {
         let amount = uri.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;

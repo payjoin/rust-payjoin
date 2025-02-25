@@ -19,6 +19,7 @@ use super::{
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::receive::{parse_payload, InputPair};
+use crate::traits::Persister;
 use crate::uri::ShortId;
 use crate::{IntoUrl, IntoUrlError, Request};
 
@@ -74,13 +75,18 @@ impl Receiver {
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
-    pub fn new(
+    pub fn new<P: Persister>(
         address: Address,
         directory: impl IntoUrl,
         ohttp_keys: OhttpKeys,
         expire_after: Option<Duration>,
-    ) -> Result<Self, IntoUrlError> {
-        Ok(Self {
+        persister: P,
+    ) -> Result<Self, IntoUrlError>
+    where
+        P::Key: From<ShortId>,
+    {
+        let hpke_key_pair = HpkeKeyPair::gen_keypair();
+        let reciver = Self {
             context: SessionContext {
                 address,
                 directory: directory.into_url()?,
@@ -88,10 +94,15 @@ impl Receiver {
                 ohttp_keys,
                 expiry: SystemTime::now()
                     + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
-                s: HpkeKeyPair::gen_keypair(),
+                s: hpke_key_pair.clone(),
                 e: None,
             },
-        })
+        };
+        let key = id(&hpke_key_pair);
+        let state = PayjoinProposalState::UnInitialized(Box::new(reciver.clone()));
+        // TODO: remove unwrap
+        persister.save(key.into(), state).unwrap();
+        Ok(reciver)
     }
 
     /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
@@ -200,6 +211,13 @@ impl Receiver {
     pub fn id(&self) -> ShortId { id(&self.context.s) }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "state", content = "data")]
+pub enum PayjoinProposalState {
+    UnInitialized(Box<Receiver>),
+    Unchecked(UncheckedProposal),
+}
+
 /// The sender's original PSBT and optional parameters
 ///
 /// This type is used to process the request. It is returned by
@@ -209,7 +227,7 @@ impl Receiver {
 /// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
 /// that the transaction can be broadcast with check_broadcast_suitability. Otherwise it is safe to
 /// call assume_interactive_receive to proceed with validation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UncheckedProposal {
     v1: v1::UncheckedProposal,
     context: SessionContext,
@@ -233,12 +251,21 @@ impl UncheckedProposal {
     /// Broadcasting the Original PSBT after some time in the failure case makes incurs sender cost and prevents probing.
     ///
     /// Call this after checking downstream.
-    pub fn check_broadcast_suitability(
+    pub fn check_broadcast_suitability<P: Persister>(
         self,
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
-    ) -> Result<MaybeInputsOwned, ReplyableError> {
+        persister: P,
+    ) -> Result<MaybeInputsOwned, ReplyableError>
+    where
+        P::Key: From<ShortId>,
+    {
+        let state = PayjoinProposalState::Unchecked(self.clone());
+        let key = id(&self.context.s);
         let inner = self.v1.check_broadcast_suitability(min_fee_rate, can_broadcast)?;
+        persister
+            .save(key.into(), state)
+            .map_err(|e| ReplyableError::Implementation(Box::new(e)))?;
         Ok(MaybeInputsOwned { v1: inner, context: self.context })
     }
 
@@ -568,6 +595,26 @@ fn id(s: &HpkeKeyPair) -> ShortId {
     sha256::Hash::hash(&s.public_key().to_compressed_bytes()).into()
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NoopPersister;
+
+#[derive(Debug)]
+pub struct NoopPersisterError;
+
+impl std::error::Error for NoopPersisterError {}
+
+impl std::fmt::Display for NoopPersisterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NoopPersisterError")
+    }
+}
+
+impl Persister for NoopPersister {
+    type Key = ShortId;
+    type Error = NoopPersisterError;
+    fn save<T: Serialize>(&self, _key: Self::Key, _value: T) -> Result<(), Self::Error> { Ok(()) }
+}
+
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
@@ -608,9 +655,10 @@ mod test {
             context: SHARED_CONTEXT.clone(),
         };
 
+        let noop_persister = NoopPersister;
         let server_error = proposal
             .clone()
-            .check_broadcast_suitability(None, |_| Err("mock error".into()))
+            .check_broadcast_suitability(None, |_| Err("mock error".into()), noop_persister)
             .err()
             .ok_or("expected error but got success")?;
         assert_eq!(

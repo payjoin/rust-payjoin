@@ -9,7 +9,9 @@ use bitcoind::bitcoincore_rpc::json::AddressType;
 use bitcoind::bitcoincore_rpc::{self, RpcApi};
 use http::{StatusCode, Uri};
 use log::{log_enabled, Level};
-use once_cell::sync::OnceCell;
+use ohttp::hpke::{Aead, Kdf, Kem};
+use ohttp::{KeyId, SymmetricSuite};
+use once_cell::sync::{Lazy, OnceCell};
 use payjoin::io::{fetch_ohttp_keys_with_cert, Error as IOError};
 use payjoin::OhttpKeys;
 use reqwest::{Client, ClientBuilder};
@@ -189,3 +191,11 @@ pub async fn wait_for_service_ready(
 
     Err("Timeout waiting for service to be ready")
 }
+
+pub static EXAMPLE_URL: Lazy<Url> =
+    Lazy::new(|| Url::parse("https://relay.com").expect("invalid URL"));
+
+pub const KEY_ID: KeyId = 1;
+pub const KEM: Kem = Kem::K256Sha256;
+pub const SYMMETRIC: &[SymmetricSuite] =
+    &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];

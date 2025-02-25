@@ -326,14 +326,19 @@ impl HpkeContext {
 
 #[cfg(test)]
 mod test {
-    #[test]
-    fn req_ctx_ser_de_roundtrip() -> Result<(), payjoin_test_utils::BoxError> {
-        use super::*;
-        use crate::send::test::ORIGINAL_PSBT;
+    use bitcoin::hex::FromHex;
+    use payjoin_test_utils::BoxError;
 
+    use super::*;
+    use crate::receive::v1::test::ORIGINAL_PSBT;
+    use crate::OhttpKeys;
+
+    const SERIALIZED_BODY: &str = "63484e696450384241484d43414141414159386e757447674a647959475857694245623435486f65396c5747626b78682f36624e694f4a6443447544414141414141442b2f2f2f2f41747956754155414141414146366b554865684a38476e536442554f4f7636756a584c72576d734a5244434867495165414141414141415871525233514a62627a30686e513849765130667074476e2b766f746e656f66544141414141414542494b6762317755414141414146366b55336b34656b47484b57524e6241317256357452356b455644564e4348415163584667415578347046636c4e56676f31575741644e3153594e583874706854414243477343527a424541694238512b41366465702b527a393276687932366c5430416a5a6e3450524c6938426639716f422f434d6b30774967502f526a3250575a3367456a556b546c6844524e415130675877544f3774396e2b563134705a366f6c6a554249514d566d7341616f4e5748564d5330324c6654536530653338384c4e697450613155515a794f6968592b464667414241425941464562324769753663344b4f35595730706677336c4770396a4d55554141413d0a763d32";
+
+    fn create_request_context() -> Result<super::Sender, BoxError> {
         let psbt = Psbt::from_str(ORIGINAL_PSBT)?;
         let endpoint = Url::parse("http://localhost:1234")?;
-        let req_ctx = Sender {
+        Ok(super::Sender {
             v1: v1::Sender {
                 psbt,
                 endpoint,
@@ -343,10 +348,74 @@ mod test {
                 payee: ScriptBuf::from(vec![0x00]),
             },
             reply_key: HpkeKeyPair::gen_keypair().0,
-        };
+        })
+    }
+
+    #[test]
+    fn req_ctx_ser_de_roundtrip() -> Result<(), BoxError> {
+        let req_ctx = create_request_context()?;
         let serialized = serde_json::to_string(&req_ctx)?;
         let deserialized = serde_json::from_str(&serialized)?;
         assert!(req_ctx == deserialized);
+        Ok(())
+    }
+
+    #[test]
+    fn test_serialize_v2() -> Result<(), Box<dyn std::error::Error>> {
+        let req_ctx = create_request_context()?;
+        let body = serialize_v2_body(
+            &req_ctx.v1.psbt,
+            req_ctx.v1.disable_output_substitution,
+            req_ctx.v1.fee_contribution,
+            req_ctx.v1.min_fee_rate,
+        );
+        assert_eq!(body.as_ref().unwrap(), &<Vec<u8> as FromHex>::from_hex(SERIALIZED_BODY)?,);
+        Ok(())
+    }
+
+    //TODO: create test for process_response
+    #[test]
+    fn test_process_response() {}
+
+    #[test]
+    fn test_extract_v2_success() -> Result<(), BoxError> {
+        let mut req_ctx = create_request_context()?;
+        let exp_time = std::time::SystemTime::now() + std::time::Duration::from_secs(10000);
+        req_ctx.v1.endpoint.set_exp(exp_time);
+
+        let reciever_pubkey = HpkeKeyPair::gen_keypair().1;
+        req_ctx.v1.endpoint.set_receiver_pubkey(reciever_pubkey.clone());
+
+        let ohttp_relay = Url::parse("https://relay.example.com")?;
+        let serialized = "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
+        let ohttp_keys = OhttpKeys::from_str(serialized)?;
+        req_ctx.v1.endpoint.set_ohttp(ohttp_keys);
+
+        let result = req_ctx.extract_v2(ohttp_relay);
+        assert!(result.is_ok(), "Expected Ok result, got: {:#?}", result.err());
+        let (request, context) = result?;
+
+        assert!(!request.body.is_empty(), "Request body should not be empty");
+        assert_eq!(request.url, Url::parse("https://relay.example.com")?);
+        assert_eq!(context.endpoint, req_ctx.v1.endpoint);
+        assert_eq!(context.psbt_ctx.original_psbt, req_ctx.v1.psbt);
+        Ok(())
+    }
+
+    #[test]
+    fn test_extract_v2_fails_when_expired() -> Result<(), BoxError> {
+        let mut req_ctx = create_request_context()?;
+        let exp_time = std::time::SystemTime::now();
+        req_ctx.v1.endpoint.set_exp(exp_time);
+        let reciever_pubkey = HpkeKeyPair::gen_keypair().1;
+        req_ctx.v1.endpoint.set_receiver_pubkey(reciever_pubkey.clone());
+        let ohttp_relay = Url::parse("https://relay.example.com")?;
+        let serialized = "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
+        let ohttp_keys = OhttpKeys::from_str(serialized)?;
+        req_ctx.v1.endpoint.set_ohttp(ohttp_keys.clone());
+        //Expiry time will fail when it is equal to system time
+        let result = req_ctx.extract_v2(ohttp_relay);
+        assert!(result.is_err(), "URL expiry has passed");
         Ok(())
     }
 }

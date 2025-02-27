@@ -4,12 +4,12 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bitcoin::Amount;
+use bitcoin::{Amount, Psbt};
 use bitcoind::bitcoincore_rpc::json::AddressType;
 use bitcoind::bitcoincore_rpc::{self, RpcApi};
 use http::{StatusCode, Uri};
 use log::{log_enabled, Level};
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use payjoin::io::{fetch_ohttp_keys_with_cert, Error as IOError};
 use payjoin::OhttpKeys;
 use reqwest::{Client, ClientBuilder};
@@ -235,3 +235,19 @@ pub async fn wait_for_service_ready(
 
     Err("Timeout waiting for service to be ready")
 }
+
+// OriginalPSBT Test Vector from BIP 78
+// https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-span_idtestvectorsspanTest_vectors
+// | InputScriptType | Original PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
+// |-----------------|-----------------------|------------------------------|-------------------------|
+// | P2SH-P2WPKH     |  2 sat/vbyte          | 0.00000182                   | 0                       |
+
+pub const ORIGINAL_PSBT: &str = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+
+pub const PAYJOIN_PROPOSAL: &str = "cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAQEgqBvXBQAAAAAXqRTeTh6QYcpZE1sDWtXm1HmQRUNU0IcBBBYAFMeKRXJTVYKNVlgHTdUmDV/LaYUwIgYDFZrAGqDVh1TEtNi300ntHt/PCzYrT2tVEGcjooWPhRYYSFzWUDEAAIABAACAAAAAgAEAAAAAAAAAAAEBIICEHgAAAAAAF6kUyPLL+cphRyyI5GTUazV0hF2R2NWHAQcXFgAUX4BmVeWSTJIEwtUb5TlPS/ntohABCGsCRzBEAiBnu3tA3yWlT0WBClsXXS9j69Bt+waCs9JcjWtNjtv7VgIge2VYAaBeLPDB6HGFlpqOENXMldsJezF9Gs5amvDQRDQBIQJl1jz1tBt8hNx2owTm+4Du4isx0pmdKNMNIjjaMHFfrQABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUIgICygvBWB5prpfx61y1HDAwo37kYP3YRJBvAjtunBAur3wYSFzWUDEAAIABAACAAAAAgAEAAAABAAAAAAA=";
+
+pub static PARSED_ORIGINAL_PSBT: Lazy<Psbt> =
+    Lazy::new(|| Psbt::from_str(ORIGINAL_PSBT).expect("known psbt should parse"));
+
+pub static PARSED_PAYJOIN_PROPOSAL: Lazy<Psbt> =
+    Lazy::new(|| Psbt::from_str(PAYJOIN_PROPOSAL).expect("known psbt should parse"));

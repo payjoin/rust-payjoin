@@ -209,7 +209,7 @@ impl<'a> SenderBuilder<'a> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "v2", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sender {
     /// The original PSBT.
@@ -281,10 +281,35 @@ impl V1Context {
 
 #[cfg(test)]
 mod test {
+    use bitcoin::FeeRate;
+    use payjoin_test_utils::{BoxError, PARSED_ORIGINAL_PSBT};
+
+    use super::SenderBuilder;
     use crate::send::error::{ResponseError, WellKnownError};
+    use crate::send::test::create_psbt_context;
+    use crate::{Uri, UriExt};
+
+    const PJ_URI: &str =
+        "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/";
 
     fn create_v1_context() -> super::V1Context {
-        super::V1Context { psbt_context: crate::send::test::create_psbt_context() }
+        let psbt_context = create_psbt_context().expect("failed to create context");
+        super::V1Context { psbt_context }
+    }
+
+    #[test]
+    fn test_build_recommended() -> Result<(), BoxError> {
+        let sender = SenderBuilder::new(
+            PARSED_ORIGINAL_PSBT.clone(),
+            Uri::try_from(PJ_URI)
+                .map_err(|e| format!("{}", e))?
+                .assume_checked()
+                .check_pj_supported()
+                .map_err(|e| format!("{}", e))?,
+        )
+        .build_recommended(FeeRate::MIN);
+        assert!(sender.is_ok(), "{:#?}", sender.err());
+        Ok(())
     }
 
     #[test]

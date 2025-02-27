@@ -438,26 +438,24 @@ fn serialize_url(
 }
 
 #[cfg(test)]
-pub(crate) mod test {
+mod test {
     use std::str::FromStr;
 
-    use bitcoin::psbt::Psbt;
-    use bitcoin::FeeRate;
+    use bitcoin::hex::FromHex;
+    use bitcoin::{Amount, FeeRate, Script, XOnlyPublicKey};
+    use payjoin_test_utils::{BoxError, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL};
     use url::Url;
 
-    use super::serialize_url;
+    use super::{
+        check_single_payee, clear_unneeded_fields, determine_fee_contribution, serialize_url,
+    };
     use crate::psbt::PsbtExt;
-    use crate::send::AdditionalFeeContribution;
+    use crate::send::{AdditionalFeeContribution, InternalBuildSenderError, InternalProposalError};
 
-    pub(crate) const ORIGINAL_PSBT: &str = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
-    const PAYJOIN_PROPOSAL: &str = "cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAQEgqBvXBQAAAAAXqRTeTh6QYcpZE1sDWtXm1HmQRUNU0IcBBBYAFMeKRXJTVYKNVlgHTdUmDV/LaYUwIgYDFZrAGqDVh1TEtNi300ntHt/PCzYrT2tVEGcjooWPhRYYSFzWUDEAAIABAACAAAAAgAEAAAAAAAAAAAEBIICEHgAAAAAAF6kUyPLL+cphRyyI5GTUazV0hF2R2NWHAQcXFgAUX4BmVeWSTJIEwtUb5TlPS/ntohABCGsCRzBEAiBnu3tA3yWlT0WBClsXXS9j69Bt+waCs9JcjWtNjtv7VgIge2VYAaBeLPDB6HGFlpqOENXMldsJezF9Gs5amvDQRDQBIQJl1jz1tBt8hNx2owTm+4Du4isx0pmdKNMNIjjaMHFfrQABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUIgICygvBWB5prpfx61y1HDAwo37kYP3YRJBvAjtunBAur3wYSFzWUDEAAIABAACAAAAAgAEAAAABAAAAAAA=";
-
-    pub(crate) fn create_psbt_context() -> super::PsbtContext {
-        let original_psbt = Psbt::from_str(ORIGINAL_PSBT).unwrap();
-        eprintln!("original: {:#?}", original_psbt);
-        let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
-        super::PsbtContext {
-            original_psbt,
+    pub(crate) fn create_psbt_context() -> Result<super::PsbtContext, BoxError> {
+        let payee = PARSED_ORIGINAL_PSBT.unsigned_tx.output[1].script_pubkey.clone();
+        Ok(super::PsbtContext {
+            original_psbt: PARSED_ORIGINAL_PSBT.clone(),
             disable_output_substitution: false,
             fee_contribution: Some(AdditionalFeeContribution {
                 max_amount: bitcoin::Amount::from_sat(182),
@@ -465,16 +463,136 @@ pub(crate) mod test {
             }),
             min_fee_rate: FeeRate::ZERO,
             payee,
-        }
+        })
     }
 
     #[test]
-    fn official_vectors() {
-        let original_psbt = Psbt::from_str(ORIGINAL_PSBT).unwrap();
-        eprintln!("original: {:#?}", original_psbt);
-        let ctx = create_psbt_context();
-        let mut proposal = Psbt::from_str(PAYJOIN_PROPOSAL).unwrap();
-        eprintln!("proposal: {:#?}", proposal);
+    fn test_determine_fees() -> Result<(), BoxError> {
+        let fee_contribution = determine_fee_contribution(
+            &PARSED_ORIGINAL_PSBT,
+            Script::from_bytes(&<Vec<u8> as FromHex>::from_hex(
+                "0014b60943f60c3ee848828bdace7474a92e81f3fcdd",
+            )?),
+            Some((Amount::from_sat(1000), Some(1))),
+            false,
+        );
+        assert_eq!((*fee_contribution.as_ref().expect("Failed to retrieve fees")).unwrap().vout, 1);
+        assert_eq!(
+            (*fee_contribution.as_ref().expect("Failed to retrieve fees")).unwrap().max_amount,
+            Amount::from_sat(1000)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_self_pay_change_index() -> Result<(), BoxError> {
+        let script_bytes =
+            <Vec<u8> as FromHex>::from_hex("a914774096dbcf486743c22f4347e9b469febe8b677a87")?;
+        let payee_script = Script::from_bytes(&script_bytes);
+        let fee_contribution = determine_fee_contribution(
+            &PARSED_ORIGINAL_PSBT,
+            payee_script,
+            Some((Amount::from_sat(1000), Some(1))),
+            false,
+        );
+        assert_eq!(
+            *payee_script,
+            PARSED_ORIGINAL_PSBT
+                .unsigned_tx
+                .output
+                .get(1)
+                .ok_or(InternalBuildSenderError::ChangeIndexOutOfBounds)
+                .unwrap()
+                .script_pubkey
+        );
+        assert!(fee_contribution.as_ref().is_err(), "determine fee contribution expected Change output points at payee error, but it succeeded");
+        match fee_contribution.as_ref() {
+            Ok(_) => panic!("Expected error, got success"),
+            Err(error) => {
+                assert_eq!(*error, InternalBuildSenderError::ChangeIndexPointsAtPayee);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_find_change_index() -> Result<(), BoxError> {
+        let script_bytes =
+            <Vec<u8> as FromHex>::from_hex("0014b60943f60c3ee848828bdace7474a92e81f3fcdd")?;
+        let payee_script = Script::from_bytes(&script_bytes);
+        let fee_contribution = determine_fee_contribution(
+            &PARSED_ORIGINAL_PSBT,
+            payee_script,
+            Some((Amount::from_sat(1000), None)),
+            true,
+        );
+        assert!(
+            fee_contribution.as_ref().is_ok(),
+            "Expected an Ok result got: {:#?}",
+            fee_contribution.as_ref().err()
+        );
+        assert_eq!((*fee_contribution.as_ref().expect("Failed to retrieve fees")).unwrap().vout, 0);
+        assert_eq!(
+            (*fee_contribution.as_ref().expect("Failed to retrieve fees")).unwrap().max_amount,
+            Amount::from_sat(1000)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_single_payee_amount_mismatch() -> Result<(), BoxError> {
+        let script_bytes =
+            <Vec<u8> as FromHex>::from_hex("a914774096dbcf486743c22f4347e9b469febe8b677a87")?;
+        let payee_script = Script::from_bytes(&script_bytes);
+        let single_payee =
+            check_single_payee(&PARSED_ORIGINAL_PSBT, payee_script, Some(Amount::from_sat(1)));
+        assert!(
+            PARSED_ORIGINAL_PSBT
+                .unsigned_tx
+                .output
+                .get(1)
+                .ok_or(InternalBuildSenderError::ChangeIndexOutOfBounds)
+                .unwrap()
+                .script_pubkey
+                == *payee_script
+        );
+        assert!(
+            single_payee.is_err(),
+            "Check single payee expected payee value not equal error, but it succeeded"
+        );
+        match single_payee {
+            Ok(_) => panic!("Expected error, got success"),
+            Err(error) => {
+                assert_eq!(error, InternalBuildSenderError::PayeeValueNotEqual);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_clear_unneeded_fields() -> Result<(), BoxError> {
+        let mut proposal = PARSED_PAYJOIN_PROPOSAL.clone();
+        let x_only_key = XOnlyPublicKey::from_str(
+            "4f65949efe60e5be80cf171c06144641e832815de4f6ab3fe0257351aeb22a84",
+        )?;
+        let _ = proposal.inputs[0].tap_internal_key.insert(x_only_key);
+        let _ = proposal.outputs[0].tap_internal_key.insert(x_only_key);
+        assert!(proposal.inputs[0].tap_internal_key.is_some());
+        assert!(!proposal.inputs[0].bip32_derivation.is_empty());
+        assert!(proposal.outputs[0].tap_internal_key.is_some());
+        assert!(!proposal.outputs[0].bip32_derivation.is_empty());
+        clear_unneeded_fields(&mut proposal);
+        assert!(proposal.inputs[0].tap_internal_key.is_none());
+        assert!(proposal.inputs[0].bip32_derivation.is_empty());
+        assert!(proposal.outputs[0].tap_internal_key.is_none());
+        assert!(proposal.outputs[0].bip32_derivation.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_official_vectors() -> Result<(), BoxError> {
+        let ctx = create_psbt_context()?;
+        let mut proposal = PARSED_PAYJOIN_PROPOSAL.clone();
         for output in proposal.outputs_mut() {
             output.bip32_derivation.clear();
         }
@@ -482,17 +600,19 @@ pub(crate) mod test {
             input.bip32_derivation.clear();
         }
         proposal.inputs_mut()[0].witness_utxo = None;
-        ctx.process_proposal(proposal).unwrap();
+        let result = ctx.process_proposal(proposal.clone());
+        assert!(result.is_ok(), "Expected an Ok result got: {:#?}", result.err());
+        assert_eq!(
+            result.unwrap().inputs_mut()[0].witness_utxo,
+            PARSED_ORIGINAL_PSBT.inputs[0].witness_utxo,
+        );
+        Ok(())
     }
 
     #[test]
-    #[should_panic]
-    fn test_receiver_steals_sender_change() {
-        let original_psbt = Psbt::from_str(ORIGINAL_PSBT).unwrap();
-        eprintln!("original: {:#?}", original_psbt);
-        let ctx = create_psbt_context();
-        let mut proposal = Psbt::from_str(PAYJOIN_PROPOSAL).unwrap();
-        eprintln!("proposal: {:#?}", proposal);
+    fn test_receiver_steals_sender_change() -> Result<(), BoxError> {
+        let ctx = create_psbt_context()?;
+        let mut proposal = PARSED_PAYJOIN_PROPOSAL.clone();
         for output in proposal.outputs_mut() {
             output.bip32_derivation.clear();
         }
@@ -501,21 +621,33 @@ pub(crate) mod test {
         }
         proposal.inputs_mut()[0].witness_utxo = None;
         // Steal 0.5 BTC from the sender output and add it to the receiver output
-        proposal.unsigned_tx.output[0].value -= bitcoin::Amount::from_btc(0.5).unwrap();
-        proposal.unsigned_tx.output[1].value += bitcoin::Amount::from_btc(0.5).unwrap();
-        ctx.process_proposal(proposal).unwrap();
+        proposal.unsigned_tx.output[0].value -= bitcoin::Amount::from_btc(0.5)?;
+        proposal.unsigned_tx.output[1].value += bitcoin::Amount::from_btc(0.5)?;
+        let result = ctx.clone().process_proposal(proposal.clone());
+        assert!(
+            result.is_err(),
+            "Process response expected fee contribution exceeds maximum error, but it succeeded"
+        );
+
+        match result {
+            Ok(_) => panic!("Expected error, got success"),
+            Err(error) => assert_eq!(
+                format!("{}", error),
+                InternalProposalError::FeeContributionExceedsMaximum.to_string()
+            ),
+        }
+        Ok(())
     }
 
     #[test]
-    fn test_disable_output_substitution_query_param() {
-        let url =
-            serialize_url(Url::parse("http://localhost").unwrap(), true, None, FeeRate::ZERO, "2")
-                .unwrap();
-        assert_eq!(url, Url::parse("http://localhost?v=2&disableoutputsubstitution=true").unwrap());
+    fn test_disable_output_substitution_query_param() -> Result<(), BoxError> {
+        let url = serialize_url(Url::parse("http://localhost")?, true, None, FeeRate::ZERO, "2")
+            .expect("Failed to serialize url");
+        assert_eq!(url, Url::parse("http://localhost?v=2&disableoutputsubstitution=true")?);
 
-        let url =
-            serialize_url(Url::parse("http://localhost").unwrap(), false, None, FeeRate::ZERO, "2")
-                .unwrap();
-        assert_eq!(url, Url::parse("http://localhost?v=2").unwrap());
+        let url = serialize_url(Url::parse("http://localhost")?, false, None, FeeRate::ZERO, "2")
+            .expect("Failed to serialize url");
+        assert_eq!(url, Url::parse("http://localhost?v=2")?);
+        Ok(())
     }
 }

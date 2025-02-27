@@ -328,8 +328,9 @@ impl HpkeContext {
 mod test {
     #[test]
     fn req_ctx_ser_de_roundtrip() -> Result<(), payjoin_test_utils::BoxError> {
+        use payjoin_test_utils::ORIGINAL_PSBT;
+
         use super::*;
-        use crate::send::test::ORIGINAL_PSBT;
 
         let psbt = Psbt::from_str(ORIGINAL_PSBT)?;
         let endpoint = Url::parse("http://localhost:1234")?;

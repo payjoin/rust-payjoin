@@ -209,7 +209,7 @@ impl<'a> SenderBuilder<'a> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "v2", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sender {
     /// The original PSBT.
@@ -281,10 +281,32 @@ impl V1Context {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
+    use bitcoin::{FeeRate, Psbt};
+
+    use super::SenderBuilder;
     use crate::send::error::{ResponseError, WellKnownError};
+    use crate::{Uri, UriExt};
 
     fn create_v1_context() -> super::V1Context {
-        super::V1Context { psbt_context: crate::send::test::create_psbt_context() }
+        super::V1Context {
+            psbt_context: crate::send::test::create_psbt_context()
+                .expect("failed to create context"),
+        }
+    }
+
+    const ORIGINAL_PSBT: &str = "cHNidP8BAHECAAAAASKKepZoJh7+JdOWMMgNI2qZL9+M8Txr1doLnzCdUJPXAAAAAAD+////AnMQECQBAAAAFgAUcYSXdmxY2VuZu/pwHer1uQUnvrsA4fUFAAAAABYAFLYJQ/YMPuhIgovaznR0qS6B8/zdAAAAAAABAIQCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wNSAQH/////AgDyBSoBAAAAFgAU9DtZfzIO6ug62YzGF0mabEJsyTUAAAAAAAAAACZqJKohqe3i9hw/cdHe/T+pmd+jaVN1XGkGiXmZYrSL69g2l06M+QAAAAABAR8A8gUqAQAAABYAFPQ7WX8yDuroOtmMxhdJmmxCbMk1AQhrAkcwRAIgdCYIi/MfdzDFo/HJoCIgIVZIpa0mDQksAu0lwMYi5jMCIBTvv3Ytk95GpVX2jnbM1VKnpST7d9gc17z3QYSN6fS3ASED9jnLXCHO2NdTewvoPebTgZbzCrVw3it47EToNvO3ElAAIgICcgy4HUNmzk/1v1fBKfcIApb/wyKAGED1KlP7+spxNvEQhscBHQAAAIABAACAAQAAgAAA";
+    const PJ_URI: &str = "bitcoin:bcrt1qkcy58asv8m5y3q5tmt88ga9f96ql8lxa69ygxa?amount=1&pjos=0&pj=HTTPS://EXAMPLE.COM/";
+
+    #[test]
+    fn test_build_recommended() {
+        let sender = SenderBuilder::new(
+            Psbt::from_str(ORIGINAL_PSBT).unwrap(),
+            Uri::try_from(PJ_URI).unwrap().assume_checked().check_pj_supported().unwrap(),
+        )
+        .build_recommended(FeeRate::MIN);
+        assert!(sender.is_ok(), "{:#?}", sender.err());
     }
 
     #[test]

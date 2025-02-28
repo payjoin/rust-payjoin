@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::receive::v2::{Receiver, UncheckedProposal};
+use payjoin::receive::v2::{PayjoinProposalState, Receiver, UncheckedProposal};
 use payjoin::receive::{Error, ImplementationError, ReplyableError};
 use payjoin::send::v2::{Sender, SenderBuilder};
 use payjoin::Uri;
@@ -14,7 +14,7 @@ use super::config::Config;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::{handle_interrupt, http_agent};
-use crate::db::Database;
+use crate::db::{Database, ReciverPersister};
 
 #[derive(Clone)]
 pub(crate) struct App {
@@ -65,14 +65,27 @@ impl AppTrait for App {
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
+        let persister = ReciverPersister(self.db.clone());
         let session = Receiver::new(
             address,
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys.clone(),
             None,
+            persister,
         )?;
-        self.db.insert_recv_session(session.clone())?;
         self.spawn_payjoin_receiver(session, Some(amount)).await
+    }
+
+    async fn resume_from_state(&self, historical_state: PayjoinProposalState) -> Result<()> {
+        match historical_state {
+            PayjoinProposalState::UnInitialized(receiver) => {
+                self.spawn_payjoin_receiver(*receiver, None).await?;
+            }
+            PayjoinProposalState::Unchecked(unchecked) => {
+                self.process_v2_proposal(unchecked)?;
+            }
+        }
+        Ok(())
     }
 
     #[allow(clippy::incompatible_msrv)]
@@ -89,9 +102,7 @@ impl AppTrait for App {
 
         for session in recv_sessions {
             let self_clone = self.clone();
-            tasks.push(tokio::spawn(async move {
-                self_clone.spawn_payjoin_receiver(session, None).await
-            }));
+            tasks.push(tokio::spawn(async move { self_clone.resume_from_state(session).await }));
         }
 
         for session in send_sessions {
@@ -245,13 +256,17 @@ impl App {
         proposal: payjoin::receive::v2::UncheckedProposal,
     ) -> Result<payjoin::receive::v2::PayjoinProposal, Error> {
         let wallet = self.wallet();
+        let recv_persister = ReciverPersister(self.db.clone());
 
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // Receive Check 1: Can Broadcast
-        let proposal =
-            proposal.check_broadcast_suitability(None, |tx| Ok(wallet.can_broadcast(tx)?))?;
+        let proposal = proposal.check_broadcast_suitability(
+            None,
+            |tx| Ok(wallet.can_broadcast(tx)?),
+            recv_persister,
+        )?;
         log::trace!("check1");
 
         // Receive Check 2: receiver can't sign for proposal inputs

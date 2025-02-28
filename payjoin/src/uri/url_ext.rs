@@ -213,6 +213,8 @@ impl std::error::Error for ParseReceiverPubkeyParamError {
 
 #[cfg(test)]
 mod tests {
+    use payjoin_test_utils::BoxError;
+
     use super::*;
     use crate::{Uri, UriExt};
 
@@ -296,5 +298,18 @@ mod tests {
             Uri::try_from(reordered).unwrap().assume_checked().check_pj_supported().unwrap();
         assert!(pjuri.extras.endpoint().ohttp().is_ok());
         assert_eq!(format!("{}", pjuri), uri);
+    }
+
+    #[test]
+    fn test_failed_url_fragment() -> Result<(), BoxError> {
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
+                   &pjos=0&pj=HTTPS://EXAMPLE.COM/\
+                   %23oh1qypm5jxyns754y4r45qwe336qfx6zr8dqgvqculvztv20tfveydmfqc";
+        assert!(Uri::try_from(uri).is_err(), "{:?}", Uri::try_from(uri).err());
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
+                   &pjos=0&pj=HTTPS://EXAMPLE.COM/\
+                   %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQc";
+        assert!(Uri::try_from(uri).is_err(), "{:?}", Uri::try_from(uri).err());
+        Ok(())
     }
 }

@@ -5,6 +5,7 @@ use bitcoin::consensus::encode::Decodable;
 use bitcoin::consensus::Encodable;
 use url::Url;
 
+use super::error::BadEndpointError;
 use crate::hpke::HpkePublicKey;
 use crate::ohttp::OhttpKeys;
 
@@ -95,6 +96,17 @@ impl UrlExt for Url {
 
         set_param(self, "EX1", &exp_str)
     }
+}
+
+pub fn parse_with_fragment(endpoint: &str) -> Result<Url, BadEndpointError> {
+    let url = Url::parse(endpoint).map_err(BadEndpointError::UrlParse)?;
+
+    if let Some(fragment) = url.fragment() {
+        if fragment.chars().any(|c| c.is_lowercase()) {
+            return Err(BadEndpointError::LowercaseFragment);
+        }
+    };
+    Ok(url)
 }
 
 fn get_param<F, T>(url: &Url, prefix: &str, parse: F) -> Option<T>
@@ -213,6 +225,8 @@ impl std::error::Error for ParseReceiverPubkeyParamError {
 
 #[cfg(test)]
 mod tests {
+    use payjoin_test_utils::BoxError;
+
     use super::*;
     use crate::{Uri, UriExt};
 
@@ -296,5 +310,35 @@ mod tests {
             Uri::try_from(reordered).unwrap().assume_checked().check_pj_supported().unwrap();
         assert!(pjuri.extras.endpoint().ohttp().is_ok());
         assert_eq!(format!("{}", pjuri), uri);
+    }
+
+    #[test]
+    fn test_failed_url_fragment() -> Result<(), BoxError> {
+        let expected_error = "LowercaseFragment";
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
+                   &pjos=0&pj=HTTPS://EXAMPLE.COM/\
+                   %23oh1qypm5jxyns754y4r45qwe336qfx6zr8dqgvqculvztv20tfveydmfqc";
+        assert!(Uri::try_from(uri).is_err(), "Expected url fragment failure, but it succeeded");
+        if let Err(bitcoin_uri::de::Error::Extras(error)) = Uri::try_from(uri) {
+            assert!(
+                error.to_string().contains(expected_error),
+                "Error should indicate '{}' but was: {}",
+                expected_error,
+                error
+            );
+        }
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
+                   &pjos=0&pj=HTTPS://EXAMPLE.COM/\
+                   %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQc";
+        assert!(Uri::try_from(uri).is_err(), "Expected url fragment failure, but it succeeded");
+        if let Err(bitcoin_uri::de::Error::Extras(error)) = Uri::try_from(uri) {
+            assert!(
+                error.to_string().contains(expected_error),
+                "Error should indicate '{}' but was: {}",
+                expected_error,
+                error
+            );
+        }
+        Ok(())
     }
 }

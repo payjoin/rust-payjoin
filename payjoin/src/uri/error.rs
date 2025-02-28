@@ -1,3 +1,5 @@
+use url::ParseError;
+
 #[derive(Debug)]
 pub struct PjParseError(InternalPjParseError);
 
@@ -7,8 +9,26 @@ pub(crate) enum InternalPjParseError {
     DuplicateParams(&'static str),
     MissingEndpoint,
     NotUtf8,
-    BadEndpoint,
+    BadEndpoint(BadEndpointError),
     UnsecureEndpoint,
+}
+
+#[derive(Debug)]
+pub enum BadEndpointError {
+    UrlParse(ParseError),
+    #[cfg(feature = "v2")]
+    LowercaseFragment,
+}
+
+impl std::fmt::Display for BadEndpointError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BadEndpointError::UrlParse(e) => write!(f, "Invalid URL: {:?}", e),
+            #[cfg(feature = "v2")]
+            BadEndpointError::LowercaseFragment =>
+                write!(f, "Some or all of the fragment is lowercase"),
+        }
+    }
 }
 
 impl From<InternalPjParseError> for PjParseError {
@@ -25,7 +45,7 @@ impl std::fmt::Display for PjParseError {
             }
             MissingEndpoint => write!(f, "Missing payjoin endpoint"),
             NotUtf8 => write!(f, "Endpoint is not valid UTF-8"),
-            BadEndpoint => write!(f, "Endpoint is not valid"),
+            BadEndpoint(e) => write!(f, "Endpoint is not valid: {:?}", e),
             UnsecureEndpoint => {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }

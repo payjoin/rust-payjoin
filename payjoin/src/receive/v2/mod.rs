@@ -28,6 +28,12 @@ const SUPPORTED_VERSIONS: &[usize] = &[1, 2];
 
 static TWENTY_FOUR_HOURS_DEFAULT_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
 
+#[derive(Debug, Clone)]
+pub enum SelectionStrategy {
+    PreservePrivacy,
+    Consolidate,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct SessionContext {
     #[serde(deserialize_with = "deserialize_address_assume_checked")]
@@ -409,6 +415,25 @@ pub struct WantsInputs {
 }
 
 impl WantsInputs {
+    /// Select receiver input using the specified selection strategy
+    pub fn select_inputs(
+        &self,
+        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        strategy: SelectionStrategy,
+        max_consolidation_fee_rate: Option<FeeRate>,
+    ) -> Result<InputPair, SelectionError> {
+        match strategy {
+            SelectionStrategy::PreservePrivacy => {
+                self.try_preserving_privacy(candidate_inputs)
+            }
+            SelectionStrategy::Consolidate => {
+                self.select_for_consolidation(
+                    candidate_inputs,
+                    max_consolidation_fee_rate
+                )
+            }
+        }
+    }
     /// Select receiver input such that the payjoin avoids surveillance.
     /// Return the input chosen that has been applied to the Proposal.
     ///
@@ -425,6 +450,14 @@ impl WantsInputs {
         candidate_inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<InputPair, SelectionError> {
         self.v1.try_preserving_privacy(candidate_inputs)
+    }
+
+    pub fn select_for_consolidation(
+        &self,
+        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        max_fee_rate: Option<FeeRate>,
+    ) -> Result<InputPair, SelectionError> {
+        self.v1.select_for_consolidation(candidate_inputs, max_fee_rate)
     }
 
     /// Add the provided list of inputs to the transaction.

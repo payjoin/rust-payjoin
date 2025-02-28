@@ -9,6 +9,7 @@ pub(crate) enum InternalPjParseError {
     NotUtf8,
     BadEndpoint,
     UnsecureEndpoint,
+    LowercaseEndpointFragment,
 }
 
 impl From<InternalPjParseError> for PjParseError {
@@ -29,6 +30,8 @@ impl std::fmt::Display for PjParseError {
             UnsecureEndpoint => {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }
+            LowercaseEndpointFragment =>
+                write!(f, "Some or all of the endpoint fragment is lowercase"),
         }
     }
 }

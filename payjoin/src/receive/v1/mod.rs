@@ -415,9 +415,6 @@ impl WantsInputs {
         candidate_inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<InputPair, SelectionError> {
         let mut candidate_inputs = candidate_inputs.into_iter().peekable();
-        if candidate_inputs.peek().is_none() {
-            return Err(InternalSelectionError::Empty.into());
-        }
 
         self.avoid_uih(&mut candidate_inputs)
             .or_else(|_| self.select_first_candidate(&mut candidate_inputs))
@@ -845,6 +842,33 @@ pub(crate) mod test {
             let psbt = payjoin.apply_fee(None, Some(FeeRate::ZERO));
             assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
         }
+    }
+
+    #[test]
+    fn empty_candidates_inputs() {
+        let proposal = proposal_from_test_vector().unwrap();
+        let wants_inputs = proposal
+            .assume_interactive_receiver()
+            .check_inputs_not_owned(|_| Ok(false))
+            .expect("No inputs should be owned")
+            .check_no_inputs_seen_before(|_| Ok(false))
+            .expect("No inputs should be seen before")
+            .identify_receiver_outputs(|script| {
+                let network = Network::Bitcoin;
+                Ok(Address::from_script(script, network).unwrap()
+                    == Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+                        .unwrap()
+                        .require_network(network)
+                        .unwrap())
+            })
+            .expect("Receiver output should be identified")
+            .commit_outputs();
+        let empty_candidate_inputs: Vec<InputPair> = vec![];
+        let result = wants_inputs.try_preserving_privacy(empty_candidate_inputs);
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        let err_string = format!("{:?}", err);
+        assert!(err_string.contains("Empty"), "Expected error with 'Empty', got: {}", err_string);
     }
 
     #[test]

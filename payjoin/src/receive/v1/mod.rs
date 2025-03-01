@@ -845,8 +845,8 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn empty_candidates_inputs() {
-        let proposal = proposal_from_test_vector().unwrap();
+    fn empty_candidates_inputs() -> Result<(), Box<dyn std::error::Error>> {
+        let proposal = proposal_from_test_vector()?;
         let wants_inputs = proposal
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| Ok(false))
@@ -855,20 +855,29 @@ pub(crate) mod test {
             .expect("No inputs should be seen before")
             .identify_receiver_outputs(|script| {
                 let network = Network::Bitcoin;
-                Ok(Address::from_script(script, network).unwrap()
-                    == Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
-                        .unwrap()
-                        .require_network(network)
-                        .unwrap())
+                let target_address = Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+                    .map_err(|e| e.to_string())?
+                    .require_network(network)
+                    .map_err(|e| e.to_string())?;
+
+                let script_address =
+                    Address::from_script(script, network).map_err(|e| e.to_string())?;
+                Ok(script_address == target_address)
             })
             .expect("Receiver output should be identified")
             .commit_outputs();
         let empty_candidate_inputs: Vec<InputPair> = vec![];
         let result = wants_inputs.try_preserving_privacy(empty_candidate_inputs);
         assert!(result.is_err());
-        let err = result.err().unwrap();
-        let err_string = format!("{:?}", err);
-        assert!(err_string.contains("Empty"), "Expected error with 'Empty', got: {}", err_string);
+        if let Err(err) = result {
+            let debug_str = format!("{:?}", err);
+            assert!(
+                debug_str.contains("Empty"),
+                "Error should indicate 'Empty' but was: {}",
+                debug_str
+            );
+        }
+        Ok(())
     }
 
     #[test]

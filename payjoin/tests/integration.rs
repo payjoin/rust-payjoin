@@ -169,13 +169,15 @@ mod integration {
 
         use bitcoin::Address;
         use http::StatusCode;
-        use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
+        use payjoin::receive::v2::{NoopPersister, PayjoinProposal, Receiver, UncheckedProposal};
         use payjoin::send::v2::SenderBuilder;
         use payjoin::{OhttpKeys, PjUri, UriExt};
         use payjoin_test_utils::{BoxSendSyncError, TestServices};
         use reqwest::{Client, Response};
 
         use super::*;
+
+        const NOOP_PERSISTER: NoopPersister = NoopPersister;
 
         #[tokio::test]
         async fn test_bad_ohttp_keys() -> Result<(), BoxSendSyncError> {
@@ -204,7 +206,7 @@ mod integration {
                 let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")?
                     .assume_checked();
                 let mut bad_initializer =
-                    Receiver::new(mock_address, directory, bad_ohttp_keys, None)?;
+                    Receiver::new(mock_address, directory, bad_ohttp_keys, None, NOOP_PERSISTER)?;
                 let (req, _ctx) = bad_initializer.extract_req(&mock_ohttp_relay)?;
                 agent.post(req.url).body(req.body).send().await.map_err(|e| e.into())
             }
@@ -239,6 +241,7 @@ mod integration {
                     directory.clone(),
                     ohttp_keys.clone(),
                     Some(Duration::from_secs(0)),
+                    NOOP_PERSISTER,
                 )?;
                 match expired_receiver.extract_req(&ohttp_relay) {
                     // Internal error types are private, so check against a string
@@ -286,8 +289,13 @@ mod integration {
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
                 // test session with expiry in the future
-                let mut session =
-                    Receiver::new(address.clone(), directory.clone(), ohttp_keys.clone(), None)?;
+                let mut session = Receiver::new(
+                    address.clone(),
+                    directory.clone(),
+                    ohttp_keys.clone(),
+                    None,
+                    NOOP_PERSISTER,
+                )?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
                 let mock_ohttp_relay = directory.clone();
@@ -447,9 +455,13 @@ mod integration {
                 let directory = services.directory_url();
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let address = receiver.get_new_address(None, None)?.assume_checked();
-
-                let mut session =
-                    Receiver::new(address, directory.clone(), ohttp_keys.clone(), None)?;
+                let mut session = Receiver::new(
+                    address,
+                    directory.clone(),
+                    ohttp_keys.clone(),
+                    None,
+                    NOOP_PERSISTER,
+                )?;
 
                 // **********************
                 // Inside the V1 Sender:
@@ -565,13 +577,19 @@ mod integration {
             let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
             // Receive Check 1: Can Broadcast
-            let proposal = proposal.check_broadcast_suitability(None, |tx| {
-                Ok(receiver
-                    .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])?
-                    .first()
-                    .ok_or(ImplementationError::from("testmempoolaccept should return a result"))?
-                    .allowed)
-            })?;
+            let proposal = proposal.check_broadcast_suitability(
+                None,
+                |tx| {
+                    Ok(receiver
+                        .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])?
+                        .first()
+                        .ok_or(ImplementationError::from(
+                            "testmempoolaccept should return a result",
+                        ))?
+                        .allowed)
+                },
+                NOOP_PERSISTER,
+            )?;
 
             // Receive Check 2: receiver can't sign for proposal inputs
             let proposal = proposal.check_inputs_not_owned(|input| {

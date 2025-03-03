@@ -15,6 +15,8 @@ use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 use payjoin::receive::v1::{PayjoinProposal, UncheckedProposal};
+#[cfg(feature = "v2")]
+use payjoin::receive::v2::PayjoinProposalState;
 use payjoin::receive::ImplementationError;
 use payjoin::receive::ReplyableError::{self, Implementation, V1};
 use payjoin::send::v1::SenderBuilder;
@@ -27,6 +29,7 @@ use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::{handle_interrupt, http_agent};
 use crate::db::Database;
+
 #[cfg(feature = "_danger-local-https")]
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
 
@@ -122,6 +125,11 @@ impl AppTrait for App {
     #[cfg(feature = "v2")]
     async fn resume_payjoins(&self) -> Result<()> {
         unimplemented!("resume_payjoins not implemented for v1");
+    }
+
+    #[cfg(feature = "v2")]
+    async fn resume_from_state(&self, _historical_state: PayjoinProposalState) -> Result<()> {
+        unimplemented!("resume_from_state not implemented for v1");
     }
 }
 

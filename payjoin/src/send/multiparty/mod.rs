@@ -220,7 +220,7 @@ impl PsbtContext {
         // TODO(armins) add multiparty check fees modeled after crate::send::PsbtContext::check_fees
         // The problem with this is that some of the inputs will be missing witness_utxo or non_witness_utxo field in the psbt so the default psbt.fee() will fail
         // Similarly we need to implement a check for the inputs. It would be useful to have all the checks as crate::send::PsbtContext::check_inputs
-        // However that method expects the reciver to have provided witness for their inputs. In a ns1r the reciever will not sign any inputs of the optimistic merged psbt
+        // However that method expects the receiver to have provided witness for their inputs. In a ns1r the receiver will not sign any inputs of the optimistic merged psbt
         self.inner.basic_checks(&proposal)?;
         self.inner.check_outputs(&proposal)?;
         self.inner.restore_original_utxos(&mut proposal)?;

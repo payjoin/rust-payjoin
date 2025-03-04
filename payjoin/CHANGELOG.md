@@ -133,7 +133,7 @@ This release attempts to stabilize the Payjoin V2 Bitcoin URI format. That inclu
 - Derive `Debug, Clone` from `send::Request`, `receive::UncheckedProposal`, `optional_parameters::Params`
 - Don't derive `Debug, Clone` from `uri::{Payjoin, PayjoinParams}`
 - Derive `Serialize, Deserialize` for `RequestContext` and `Enrolled` in `v2` to enable persistent state for asynchronous requests
-- `UncheckedProposal::check_can_broadcast` became `::check_broadcast_suitability` allowing receiver to specify minnimum acceptable feerate
+- `UncheckedProposal::check_can_broadcast` became `::check_broadcast_suitability` allowing receiver to specify minimum acceptable feerate
 
 ## 0.11.0
 
@@ -144,7 +144,7 @@ This release attempts to stabilize the Payjoin V2 Bitcoin URI format. That inclu
 - Export `base64` with feature by @jbesraa in #102
 - Improve `receive` api with `ProvisionalProposal`by @jbesraa in #90
 - Document `create_pj_request` by @jbesraa in #87
-- Add BIP 78 reccommended fee `Configuration` by @DanGould in #86
+- Add BIP 78 recommended fee `Configuration` by @DanGould in #86
 
 ## 0.9.0
 

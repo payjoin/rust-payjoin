@@ -216,7 +216,7 @@ pub struct Sender {
     pub(crate) psbt: Psbt,
     /// The payjoin directory subdirectory to send the request to.
     pub(crate) endpoint: Url,
-    /// Disallow reciever to substitute original outputs.
+    /// Disallow receiver to substitute original outputs.
     pub(crate) disable_output_substitution: bool,
     /// (maxadditionalfeecontribution, additionalfeeoutputindex)
     pub(crate) fee_contribution: Option<AdditionalFeeContribution>,

@@ -481,7 +481,7 @@ pub struct PayjoinProposal {
 
 impl PayjoinProposal {
     #[cfg(feature = "_multiparty")]
-    // TODO hack to get multi party working. A better solution would be to allow extract_v2_req to be seperate from the rest of the v2 context
+    // TODO hack to get multi party working. A better solution would be to allow extract_v2_req to be separate from the rest of the v2 context
     pub(crate) fn new(v1: v1::PayjoinProposal, context: SessionContext) -> Self {
         Self { v1, context }
     }

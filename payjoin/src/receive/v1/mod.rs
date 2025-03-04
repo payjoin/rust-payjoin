@@ -80,7 +80,7 @@ impl UncheckedProposal {
     /// Receiver MUST check that the Original PSBT from the sender
     /// can be broadcast, i.e. `testmempoolaccept` bitcoind rpc returns { "allowed": true,.. }.
     ///
-    /// Receiver can optionaly set a minimum feerate that will be enforced on the Original PSBT.
+    /// Receiver can optionally set a minimum feerate that will be enforced on the Original PSBT.
     /// This can be used to prevent probing attacks and make it easier to deal with
     /// high feerate environments.
     ///
@@ -794,7 +794,7 @@ pub(crate) mod test {
     use super::*;
 
     // OriginalPSBT Test Vector from BIP
-    // | InputScriptType | Orginal PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
+    // | InputScriptType | Original PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
     // |-----------------|-----------------------|------------------------------|-------------------------|
     // | P2SH-P2WPKH     |  2 sat/vbyte          | 0.00000182                   | 0                       |
     pub const ORIGINAL_PSBT: &str = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";

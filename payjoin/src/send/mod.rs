@@ -3,7 +3,7 @@
 //! This module contains types and methods used to implement sending via Payjoin.
 //!
 //! For most use cases, we recommended enabling the `v2` feature, as it is
-//! backwards compatible and provides the most convenient experience for users and implementors.
+//! backwards compatible and provides the most convenient experience for users and implementers.
 //! To use version 2, refer to `send::v2` module documentation.
 //!
 //! If you specifically need to use

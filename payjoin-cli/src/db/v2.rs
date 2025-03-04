@@ -7,11 +7,10 @@ use url::Url;
 use super::*;
 
 impl Database {
-    pub(crate) fn insert_recv_session(&self, session: Receiver) -> Result<()> {
+    pub(crate) fn insert_recv_session(&self, key: &[u8], session: Receiver) -> Result<()> {
         let recv_tree = self.0.open_tree("recv_sessions")?;
-        let key = &session.id();
         let value = serde_json::to_string(&session).map_err(Error::Serialize)?;
-        recv_tree.insert(key.as_slice(), IVec::from(value.as_str()))?;
+        recv_tree.insert(key, IVec::from(value.as_str()))?;
         recv_tree.flush()?;
         Ok(())
     }

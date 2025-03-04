@@ -18,6 +18,7 @@ use super::{
 };
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
+use crate::receive::error::PersistanceError;
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
 use crate::{IntoUrl, IntoUrlError, Request};
@@ -60,6 +61,36 @@ pub struct Receiver {
     context: SessionContext,
 }
 
+/// A wrapper around the receiver session. The receiver session is accessible only after it has been persisted via `persist`.
+pub struct EphemeralReceiver {
+    inner: Receiver,
+}
+
+impl EphemeralReceiver {
+    pub fn new(
+        address: Address,
+        directory: impl IntoUrl,
+        ohttp_keys: OhttpKeys,
+        expire_after: Option<Duration>,
+    ) -> Result<EphemeralReceiver, IntoUrlError> {
+        let receiver = Receiver::new(address, directory, ohttp_keys, expire_after)?;
+        Ok(EphemeralReceiver { inner: receiver })
+    }
+
+    /// Persist the receiver session to the database. Implementation details are left to the caller.
+    /// The closure given should accept a slice to be used a key in a key-value store. and the reciever which is deserializable.    
+    pub fn persist(
+        &self,
+        persist: impl Fn(&[u8], &Receiver) -> Result<(), ImplementationError>,
+    ) -> Result<Receiver, PersistanceError> {
+        let receiver = self.inner.clone();
+        let short_id = id(&receiver.context.s);
+        let id = short_id.0.as_slice();
+        persist(id, &receiver).map_err(PersistanceError::PersistError)?;
+        Ok(receiver)
+    }
+}
+
 impl Receiver {
     /// Creates a new `Receiver` with the provided parameters.
     ///
@@ -74,7 +105,7 @@ impl Receiver {
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
-    pub fn new(
+    pub(crate) fn new(
         address: Address,
         directory: impl IntoUrl,
         ohttp_keys: OhttpKeys,

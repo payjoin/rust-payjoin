@@ -41,6 +41,21 @@ impl error::Error for Error {
     }
 }
 
+#[derive(Debug)]
+/// Error arising during the persistence of the receiver
+pub enum PersistanceError {
+    PersistError(ImplementationError),
+}
+impl std::fmt::Display for PersistanceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PersistanceError::PersistError(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl std::error::Error for PersistanceError {}
+
 /// The replyable error type for the payjoin receiver, representing failures need to be
 /// returned to the sender.
 ///

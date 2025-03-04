@@ -200,7 +200,7 @@ pub fn init_bitcoind_multi_sender_single_reciever(
     let wallets_to_create =
         (0..number_of_senders + 1).map(|i| (format!("sender_{}", i), None)).collect::<Vec<_>>();
     let mut wallets = create_and_fund_wallets(&bitcoind, wallets_to_create)?;
-    let receiver = wallets.pop().expect("reciever to exist");
+    let receiver = wallets.pop().expect("receiver to exist");
     let senders = wallets;
 
     Ok((bitcoind, senders, receiver))

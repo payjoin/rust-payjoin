@@ -82,7 +82,7 @@ impl Params {
                         Ok(fee_rate_sat_per_vb) => {
                             // TODO Parse with serde when rust-bitcoin supports it
                             let fee_rate_sat_per_kwu = fee_rate_sat_per_vb * 250.0_f32;
-                            // since it's a minnimum, we want to round up
+                            // since it's a minimum, we want to round up
                             FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64)
                         }
                         Err(_) => return Err(Error::FeeRate),

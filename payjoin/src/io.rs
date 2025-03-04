@@ -7,7 +7,7 @@ use crate::OhttpKeys;
 
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
 ///
-/// * `ohttp_relay`: The http CONNNECT method proxy to request the ohttp keys from a payjoin
+/// * `ohttp_relay`: The http CONNECT method proxy to request the ohttp keys from a payjoin
 ///   directory.  Proxying requests for ohttp keys ensures a client IP address is never revealed to
 ///   the payjoin directory.
 ///
@@ -27,7 +27,7 @@ pub async fn fetch_ohttp_keys(
 
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
 ///
-/// * `ohttp_relay`: The http CONNNECT method proxy to request the ohttp keys from a payjoin
+/// * `ohttp_relay`: The http CONNECT method proxy to request the ohttp keys from a payjoin
 ///   directory.  Proxying requests for ohttp keys ensures a client IP address is never revealed to
 ///   the payjoin directory.
 ///

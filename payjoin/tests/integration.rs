@@ -706,8 +706,8 @@ mod integration {
 
                 // **********************
                 // Inside the Senders + Receiver:
-                // G enerate N different addresses and set up the reciever sessions
-                // Senders will generate a sweep psbt and send PSBT to reciever subdir
+                // G enerate N different addresses and set up the receiver sessions
+                // Senders will generate a sweep psbt and send PSBT to receiver subdir
                 for sender in senders.iter() {
                     let address = receiver.get_new_address(None, None)?.assume_checked();
                     let receiver_session = Receiver::new(
@@ -756,7 +756,7 @@ mod integration {
                     multiparty_proposal.add(proposal)?;
                 }
                 let multiparty_proposal = multiparty_proposal.build()?;
-                // Merge and finalize all the reciever inputs
+                // Merge and finalize all the receiver inputs
                 let multi_sender_payjoin_proposal =
                     handle_multiparty_proposal(&receiver, multiparty_proposal)?;
 
@@ -810,7 +810,7 @@ mod integration {
 
                 //**********************
                 // Inside the Receiver:
-                // Reciever should pull the final psbts from all sub dirs
+                // Receiver should pull the final psbts from all sub dirs
                 let mut finalized_proposals =
                     payjoin::receive::multiparty::FinalizedProposal::new();
                 for sender_sesssion in inner_sender_test_sessions.iter() {
@@ -833,12 +833,12 @@ mod integration {
 
                 println!("Ns1r tx sent");
                 println!("tx: {:#?}", &tx);
-                // Final tx should pay to all of the recivers addresses
+                // Final tx should pay to all of the receivers addresses
                 for sender_sesssion in inner_sender_test_sessions.iter() {
                     let script_pubkey = sender_sesssion.script_pubkey.clone();
                     assert!(tx.output.iter().any(|output| output.script_pubkey == script_pubkey));
                 }
-                // Since we did a sweep, all senders should have a blance of 0 BTC
+                // Since we did a sweep, all senders should have a balance of 0 BTC
                 for sender in senders.iter() {
                     assert_eq!(
                         sender.get_balances()?.mine.untrusted_pending,
@@ -886,7 +886,7 @@ mod integration {
                     // Lets just pick the first one for now
                     // In the future we will need to implement a privacy preserving selection
                     let selected_input =
-                        candidate_inputs.next().expect("should have one atleast input");
+                        candidate_inputs.next().expect("should have one at least input");
                     vec![selected_input]
                 };
                 let payjoin = payjoin.contribute_inputs(selected_inputs)?.commit_inputs();
@@ -944,7 +944,7 @@ mod integration {
             let receiver_utxos = receiver.list_unspent(None, None, None, None, None)?;
             assert_eq!(100, receiver_utxos.len(), "receiver doesn't have enough UTXOs");
             assert_eq!(
-                Amount::from_btc(3650.0)?, // 50 (starting reciever blance) + 46*50.0 + 52*25.0 (halving occurs every 150 blocks)
+                Amount::from_btc(3650.0)?, // 50 (starting receiver balance) + 46*50.0 + 52*25.0 (halving occurs every 150 blocks)
                 receiver.get_balances()?.mine.trusted,
                 "receiver doesn't have enough bitcoin"
             );

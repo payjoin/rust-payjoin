@@ -2,7 +2,7 @@
 
 ## Payjoin v2 Directory Server
 
-Payjoin v2 peers store and forward HTTP client messages via a directory server in order to cordinate an asynchronous Payjoin transaction. Version 1 Requires the receiver to host a public HTTP server and to set up security using either HTTPS or Onion Services above and beyond typical HTTP client operation.
+Payjoin v2 peers store and forward HTTP client messages via a directory server in order to coordinate an asynchronous Payjoin transaction. Version 1 Requires the receiver to host a public HTTP server and to set up security using either HTTPS or Onion Services above and beyond typical HTTP client operation.
 
 V2 clients use Hybrid Pubkey Encryption established in the bitcoin URI payment request for security instead, allowing lightweight clients secure communication without the burden of setup, which is done by the operator of this third-party directory server. This directory only sees OHTTP encapsulated, encrypted requests to prevent it from collecting metadata to break the privacy benefits of payjoin for messages who follow the spec.
 

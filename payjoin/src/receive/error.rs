@@ -174,7 +174,7 @@ pub(crate) enum InternalPayloadError {
     ///
     /// First argument is the calculated fee rate of the original PSBT.
     ///
-    /// Second argument is the minimum fee rate optionaly set by the receiver.
+    /// Second argument is the minimum fee rate optionally set by the receiver.
     PsbtBelowFeeRate(bitcoin::FeeRate, bitcoin::FeeRate),
     /// Effective receiver feerate exceeds maximum allowed feerate
     FeeTooHigh(bitcoin::FeeRate, bitcoin::FeeRate),

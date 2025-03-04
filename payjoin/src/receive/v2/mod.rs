@@ -584,20 +584,10 @@ fn id(s: &HpkeKeyPair) -> ShortId {
 mod test {
     use std::str::FromStr;
 
-    use ohttp::hpke::{Aead, Kdf, Kem};
-    use ohttp::{KeyId, SymmetricSuite};
     use once_cell::sync::Lazy;
-    use payjoin_test_utils::BoxError;
+    use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, SYMMETRIC};
 
     use super::*;
-
-    const KEY_ID: KeyId = 1;
-    const KEM: Kem = Kem::K256Sha256;
-    const SYMMETRIC: &[SymmetricSuite] =
-        &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
-
-    static EXAMPLE_URL: Lazy<Url> =
-        Lazy::new(|| Url::parse("https://relay.com").expect("invalid URL"));
 
     static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
         address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")

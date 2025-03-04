@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::receive::v2::{Receiver, UncheckedProposal};
+use payjoin::receive::v2::{EphemeralReceiver, Receiver, UncheckedProposal};
 use payjoin::receive::{Error, ImplementationError, ReplyableError};
 use payjoin::send::v2::{Sender, SenderBuilder};
 use payjoin::Uri;
@@ -65,13 +65,18 @@ impl AppTrait for App {
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
-        let session = Receiver::new(
+        let ephemeral_receiver = EphemeralReceiver::new(
             address,
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys.clone(),
             None,
         )?;
-        self.db.insert_recv_session(session.clone())?;
+        let session = ephemeral_receiver.persist(|key, r| {
+            self.db
+                .insert_recv_session(key, r.clone())
+                .map_err(|e| ReplyableError::Implementation(Box::new(e)))?;
+            Ok(())
+        })?;
         self.spawn_payjoin_receiver(session, Some(amount)).await
     }
 

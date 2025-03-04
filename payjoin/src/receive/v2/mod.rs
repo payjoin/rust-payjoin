@@ -60,6 +60,37 @@ pub struct Receiver {
     context: SessionContext,
 }
 
+/// A wrapper around the receiver session. The receiver session is accessible only after it has been persisted via [`EphemeralReceiver::persist`]
+pub struct EphemeralReceiver {
+    inner: Receiver,
+}
+
+impl EphemeralReceiver {
+    pub fn new(
+        address: Address,
+        directory: impl IntoUrl,
+        ohttp_keys: OhttpKeys,
+        expire_after: Option<Duration>,
+    ) -> Result<EphemeralReceiver, IntoUrlError> {
+        Ok(EphemeralReceiver {
+            inner: Receiver::new(address, directory, ohttp_keys, expire_after)?,
+        })
+    }
+
+    /// Persist the receiver session to the database. Implementation details are left to the caller.
+    /// The closure given should accept a slice to be used a key in a key-value store and the receiver which is deserializable.
+    pub fn persist(
+        &self,
+        persist: impl Fn(&[u8], &Receiver) -> Result<(), ImplementationError>,
+    ) -> Result<Receiver, ReplyableError> {
+        let receiver = self.inner.clone();
+        let short_id = id(&receiver.context.s);
+        let id = short_id.0.as_slice();
+        persist(id, &receiver).map_err(ReplyableError::Implementation)?;
+        Ok(receiver)
+    }
+}
+
 impl Receiver {
     /// Creates a new `Receiver` with the provided parameters.
     ///
@@ -74,7 +105,7 @@ impl Receiver {
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
-    pub fn new(
+    pub(crate) fn new(
         address: Address,
         directory: impl IntoUrl,
         ohttp_keys: OhttpKeys,

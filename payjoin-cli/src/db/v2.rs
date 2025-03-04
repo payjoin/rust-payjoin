@@ -33,10 +33,10 @@ impl Database {
         Ok(())
     }
 
-    pub(crate) fn insert_send_session(&self, session: &mut Sender, pj_url: &Url) -> Result<()> {
+    pub(crate) fn insert_send_session(&self, session: &mut Sender, key: &[u8]) -> Result<()> {
         let send_tree: Tree = self.0.open_tree("send_sessions")?;
         let value = serde_json::to_string(session).map_err(Error::Serialize)?;
-        send_tree.insert(pj_url.to_string(), IVec::from(value.as_str()))?;
+        send_tree.insert(key, IVec::from(value.as_str()))?;
         send_tree.flush()?;
         Ok(())
     }

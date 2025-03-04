@@ -52,10 +52,14 @@ impl AppTrait for App {
             Some(send_session) => send_session,
             None => {
                 let psbt = self.create_original_psbt(&uri, fee_rate)?;
-                let mut req_ctx = SenderBuilder::new(psbt, uri.clone())
+                let req_ctx = SenderBuilder::new(psbt, uri.clone())
                     .build_recommended(fee_rate)
-                    .with_context(|| "Failed to build payjoin request")?;
-                self.db.insert_send_session(&mut req_ctx, url)?;
+                    .with_context(|| "Failed to build payjoin request")?
+                    .persist(|key, sender| {
+                        let mut sender = sender.clone();
+                        self.db.insert_send_session(&mut sender, key)?;
+                        Ok(())
+                    })?;
                 req_ctx
             }
         };

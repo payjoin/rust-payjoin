@@ -64,11 +64,14 @@ impl<'a> SenderBuilder<'a> {
     // The minfeerate parameter is set if the contribution is available in change.
     //
     // This method fails if no recommendation can be made or if the PSBT is malformed.
-    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, BuildSenderError> {
-        Ok(Sender {
+    pub fn build_recommended(
+        self,
+        min_fee_rate: FeeRate,
+    ) -> Result<EphemeralSender, BuildSenderError> {
+        Ok(EphemeralSender(Sender {
             v1: self.0.build_recommended(min_fee_rate)?,
             reply_key: HpkeKeyPair::gen_keypair().0,
-        })
+        }))
     }
 
     /// Offer the receiver contribution to pay for his input.
@@ -90,8 +93,8 @@ impl<'a> SenderBuilder<'a> {
         change_index: Option<usize>,
         min_fee_rate: FeeRate,
         clamp_fee_contribution: bool,
-    ) -> Result<Sender, BuildSenderError> {
-        Ok(Sender {
+    ) -> Result<EphemeralSender, BuildSenderError> {
+        Ok(EphemeralSender(Sender {
             v1: self.0.build_with_additional_fee(
                 max_fee_contribution,
                 change_index,
@@ -99,7 +102,7 @@ impl<'a> SenderBuilder<'a> {
                 clamp_fee_contribution,
             )?,
             reply_key: HpkeKeyPair::gen_keypair().0,
-        })
+        }))
     }
 
     /// Perform Payjoin without incentivizing the payee to cooperate.
@@ -109,11 +112,29 @@ impl<'a> SenderBuilder<'a> {
     pub fn build_non_incentivizing(
         self,
         min_fee_rate: FeeRate,
-    ) -> Result<Sender, BuildSenderError> {
-        Ok(Sender {
+    ) -> Result<EphemeralSender, BuildSenderError> {
+        Ok(EphemeralSender(Sender {
             v1: self.0.build_non_incentivizing(min_fee_rate)?,
             reply_key: HpkeKeyPair::gen_keypair().0,
-        })
+        }))
+    }
+}
+
+pub struct EphemeralSender(Sender);
+
+impl EphemeralSender {
+    pub fn new(sender: Sender) -> EphemeralSender { EphemeralSender(sender) }
+
+    pub fn persist(
+        &self,
+        persist: impl Fn(&[u8], &Sender) -> Result<(), Box<dyn std::error::Error>>,
+    ) -> Result<Sender, BuildSenderError> {
+        let sender = self.0.clone();
+        let pj_uri = sender.endpoint().to_string();
+        let id = pj_uri.as_bytes();
+        // TODO(armins): handle unwrap
+        persist(id, &sender).unwrap();
+        Ok(sender)
     }
 }
 

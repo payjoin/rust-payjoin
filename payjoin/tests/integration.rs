@@ -253,7 +253,8 @@ mod integration {
                 let psbt = build_original_psbt(&sender, &expired_receiver.pj_uri())?;
                 // Test that an expired pj_url errors
                 let expired_req_ctx = SenderBuilder::new(psbt, expired_receiver.pj_uri())
-                    .build_non_incentivizing(FeeRate::BROADCAST_MIN)?;
+                    .build_non_incentivizing(FeeRate::BROADCAST_MIN)?
+                    .persist(|_key, _sender| Ok(()))?;
                 match expired_req_ctx.extract_v2(directory.to_owned()) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
@@ -316,7 +317,8 @@ mod integration {
                     .map_err(|e| e.to_string())?;
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
                 let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
-                    .build_recommended(FeeRate::BROADCAST_MIN)?;
+                    .build_recommended(FeeRate::BROADCAST_MIN)?
+                    .persist(|_key, _sender| Ok(()))?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
                     req_ctx.extract_v2(mock_ohttp_relay.to_owned())?;
                 let response = agent
@@ -406,7 +408,8 @@ mod integration {
                 .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
-                .build_recommended(FeeRate::BROADCAST_MIN)?;
+                .build_recommended(FeeRate::BROADCAST_MIN)?
+                .persist(|_key, _sender| Ok(()))?;
             let (req, ctx) = req_ctx.extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);
 
@@ -476,6 +479,7 @@ mod integration {
                             FeeRate::ZERO,
                             false,
                         )?
+                        .persist(|_key, _sender| Ok(()))?
                         .extract_v1()?;
                 log::info!("send fallback v1 to offline receiver fail");
                 let res = agent

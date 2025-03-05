@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-/// Trait for types that can save and load types to and from a persistance layer.
+/// Trait for types that can save and load types to and from a persistence layer.
 pub trait Persister: Sized {
     type Key;
     type Error: std::error::Error + Send + Sync + 'static;

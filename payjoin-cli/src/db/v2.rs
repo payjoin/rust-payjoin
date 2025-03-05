@@ -1,7 +1,7 @@
 use bitcoincore_rpc::jsonrpc::serde_json;
 use payjoin::receive::v2::PayjoinProposalState;
 use payjoin::send::v2::Sender;
-use sled::{IVec, Tree};
+use sled::Tree;
 use url::Url;
 
 use super::*;
@@ -23,14 +23,6 @@ impl Database {
         let recv_tree: Tree = self.0.open_tree("recv_sessions")?;
         recv_tree.clear()?;
         recv_tree.flush()?;
-        Ok(())
-    }
-
-    pub(crate) fn insert_send_session(&self, session: &mut Sender, pj_url: &Url) -> Result<()> {
-        let send_tree: Tree = self.0.open_tree("send_sessions")?;
-        let value = serde_json::to_string(session).map_err(Error::Serialize)?;
-        send_tree.insert(pj_url.to_string(), IVec::from(value.as_str()))?;
-        send_tree.flush()?;
         Ok(())
     }
 

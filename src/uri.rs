@@ -34,6 +34,12 @@ impl Uri {
     pub fn amount_sats(&self) -> Option<u64> {
         self.0.amount.map(|x| x.to_sat())
     }
+    pub fn label(&self) -> Option<String> {
+        self.0.label.clone().and_then(|x| String::try_from(x).ok())
+    }
+    pub fn message(&self) -> Option<String> {
+        self.0.message.clone().and_then(|x| String::try_from(x).ok())
+    }
     #[cfg(not(feature = "uniffi"))]
     pub fn check_pj_supported(&self) -> Result<PjUri, PayjoinError> {
         match self.0.clone().check_pj_supported() {

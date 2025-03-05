@@ -11,20 +11,22 @@ use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, Internal
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::ohttp_decapsulate;
 use crate::receive::ImplementationError;
-use crate::send::v2::V2PostContext;
+use crate::send::v2::{NoopPersister, V2PostContext};
 use crate::uri::UrlExt;
 use crate::{PjUri, Request};
 
 mod error;
 
 #[derive(Clone)]
-pub struct SenderBuilder<'a>(v2::SenderBuilder<'a>);
+pub struct SenderBuilder<'a>(pub crate::send::v2::SenderBuilder<'a, NoopPersister>);
 
 impl<'a> SenderBuilder<'a> {
-    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v2::SenderBuilder::new(psbt, uri)) }
+    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self {
+        Self(crate::send::v2::SenderBuilder::new(psbt, uri, NoopPersister))
+    }
+
     pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, BuildSenderError> {
-        let v2 = v2::SenderBuilder::new(self.0 .0.psbt, self.0 .0.uri)
-            .build_recommended(min_fee_rate)?;
+        let v2 = self.0.build_recommended(min_fee_rate)?;
         Ok(Sender(v2))
     }
 }

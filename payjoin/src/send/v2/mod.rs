@@ -28,10 +28,11 @@ use ohttp::ClientResponse;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use super::error::BuildSenderError;
+use super::error::{BuildSenderError, ErrorBox};
 use super::*;
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
+use crate::persist::Persister;
 use crate::send::v1;
 use crate::uri::{ShortId, UrlExt};
 use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
@@ -39,14 +40,22 @@ use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
 mod error;
 
 #[derive(Clone)]
-pub struct SenderBuilder<'a>(pub(crate) v1::SenderBuilder<'a>);
+pub struct SenderBuilder<'a, P: Persister> {
+    pub(crate) v1: v1::SenderBuilder<'a>,
+    persister: P,
+}
 
-impl<'a> SenderBuilder<'a> {
+impl<'a, P: Persister> SenderBuilder<'a, P>
+where
+    P::Key: From<Url>,
+{
     /// Prepare the context from which to make Sender requests
     ///
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
     /// to create a [`Sender`]
-    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v1::SenderBuilder::new(psbt, uri)) }
+    pub fn new(psbt: Psbt, uri: PjUri<'a>, persister: P) -> Self {
+        Self { v1: v1::SenderBuilder::new(psbt, uri), persister }
+    }
 
     /// Disable output substitution even if the receiver didn't.
     ///
@@ -55,7 +64,7 @@ impl<'a> SenderBuilder<'a> {
     /// doing advanced operations such as opening LN channels and it also guarantees the
     /// receiver will **not** reward the sender with a discount.
     pub fn always_disable_output_substitution(self, disable: bool) -> Self {
-        Self(self.0.always_disable_output_substitution(disable))
+        Self { v1: self.v1.always_disable_output_substitution(disable), persister: self.persister }
     }
 
     // Calculate the recommended fee contribution for an Original PSBT.
@@ -65,10 +74,15 @@ impl<'a> SenderBuilder<'a> {
     //
     // This method fails if no recommendation can be made or if the PSBT is malformed.
     pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, BuildSenderError> {
-        Ok(Sender {
-            v1: self.0.build_recommended(min_fee_rate)?,
+        let pj_url = self.v1.uri.extras.endpoint.clone();
+        let sender = Sender {
+            v1: self.v1.build_recommended(min_fee_rate)?,
             reply_key: HpkeKeyPair::gen_keypair().0,
-        })
+        };
+        self.persister
+            .save(pj_url.into(), sender.clone())
+            .map_err(|e| InternalBuildSenderError::FailedToPersistSender(ErrorBox::new(e)))?;
+        Ok(sender)
     }
 
     /// Offer the receiver contribution to pay for his input.
@@ -91,15 +105,20 @@ impl<'a> SenderBuilder<'a> {
         min_fee_rate: FeeRate,
         clamp_fee_contribution: bool,
     ) -> Result<Sender, BuildSenderError> {
-        Ok(Sender {
-            v1: self.0.build_with_additional_fee(
+        let pj_url = self.v1.uri.extras.endpoint.clone();
+        let sender = Sender {
+            v1: self.v1.build_with_additional_fee(
                 max_fee_contribution,
                 change_index,
                 min_fee_rate,
                 clamp_fee_contribution,
             )?,
             reply_key: HpkeKeyPair::gen_keypair().0,
-        })
+        };
+        self.persister
+            .save(pj_url.into(), sender.clone())
+            .map_err(|e| InternalBuildSenderError::FailedToPersistSender(ErrorBox::new(e)))?;
+        Ok(sender)
     }
 
     /// Perform Payjoin without incentivizing the payee to cooperate.
@@ -110,10 +129,35 @@ impl<'a> SenderBuilder<'a> {
         self,
         min_fee_rate: FeeRate,
     ) -> Result<Sender, BuildSenderError> {
-        Ok(Sender {
-            v1: self.0.build_non_incentivizing(min_fee_rate)?,
+        let pj_url = self.v1.uri.extras.endpoint.clone();
+        let sender = Sender {
+            v1: self.v1.build_non_incentivizing(min_fee_rate)?,
             reply_key: HpkeKeyPair::gen_keypair().0,
-        })
+        };
+        self.persister
+            .save(pj_url.into(), sender.clone())
+            .map_err(|e| InternalBuildSenderError::FailedToPersistSender(ErrorBox::new(e)))?;
+        Ok(sender)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct NoopPersister;
+
+#[derive(Debug)]
+pub struct NoopPersisterError;
+
+impl Persister for NoopPersister {
+    type Key = Url;
+    type Error = NoopPersisterError;
+    fn save<T: Serialize>(&self, _key: Self::Key, _value: T) -> Result<(), Self::Error> { Ok(()) }
+}
+
+impl std::error::Error for NoopPersisterError {}
+
+impl std::fmt::Display for NoopPersisterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Sender NoopPersisterError")
     }
 }
 

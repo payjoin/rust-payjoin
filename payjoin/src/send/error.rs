@@ -7,6 +7,21 @@ use bitcoin::Sequence;
 use crate::error_codes::{
     NOT_ENOUGH_MONEY, ORIGINAL_PSBT_REJECTED, UNAVAILABLE, VERSION_UNSUPPORTED,
 };
+#[cfg(feature = "v2")]
+#[derive(Debug)]
+pub(crate) struct ErrorBox(Box<dyn std::error::Error + Send + Sync>);
+
+#[cfg(feature = "v2")]
+impl ErrorBox {
+    pub fn new(error: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self(Box::new(error))
+    }
+}
+
+#[cfg(feature = "v2")]
+impl PartialEq for ErrorBox {
+    fn eq(&self, other: &Self) -> bool { self.0.to_string() == other.0.to_string() }
+}
 
 /// Error building a Sender from a SenderBuilder.
 ///
@@ -29,6 +44,8 @@ pub(crate) enum InternalBuildSenderError {
     ChangeIndexPointsAtPayee,
     InputWeight(crate::psbt::InputWeightError),
     AddressType(crate::psbt::AddressTypeError),
+    #[cfg(feature = "v2")]
+    FailedToPersistSender(ErrorBox),
 }
 
 impl From<InternalBuildSenderError> for BuildSenderError {
@@ -59,6 +76,8 @@ impl fmt::Display for BuildSenderError {
             ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
             AddressType(e) => write!(f, "can not determine input address type: {}", e),
             InputWeight(e) => write!(f, "can not determine expected input weight: {}", e),
+            #[cfg(feature = "v2")]
+            FailedToPersistSender(e) => write!(f, "failed to persist sender: {:#?}", e),
         }
     }
 }
@@ -81,6 +100,8 @@ impl std::error::Error for BuildSenderError {
             ChangeIndexPointsAtPayee => None,
             AddressType(error) => Some(error),
             InputWeight(error) => Some(error),
+            #[cfg(feature = "v2")]
+            FailedToPersistSender(e) => e.0.source(),
         }
     }
 }

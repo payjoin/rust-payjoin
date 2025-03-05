@@ -11,6 +11,7 @@ use sled::IVec;
 
 pub(crate) mod error;
 use error::*;
+use url::Url;
 
 pub(crate) const DB_PATH: &str = "payjoin.sled";
 
@@ -28,6 +29,23 @@ impl Database {
         let was_seen_before = self.0.insert(key.as_slice(), IVec::from(vec![]))?.is_some();
         self.0.flush()?;
         Ok(was_seen_before)
+    }
+}
+
+#[cfg(feature = "v2")]
+#[derive(Clone)]
+pub(crate) struct SenderPersister(pub(crate) Arc<Database>);
+
+#[cfg(feature = "v2")]
+impl Persister for SenderPersister {
+    type Key = Url;
+    type Error = crate::db::error::Error;
+    fn save<T: Serialize>(&self, key: Self::Key, value: T) -> std::result::Result<(), Self::Error> {
+        let send_tree = self.0 .0.open_tree("send_sessions")?;
+        let value = serde_json::to_string(&value).map_err(Error::Serialize)?;
+        send_tree.insert(key.to_string(), IVec::from(value.as_str()))?;
+        send_tree.flush()?;
+        Ok(())
     }
 }
 

@@ -173,7 +173,7 @@ mod integration {
         use http::StatusCode;
         use payjoin::persist::NoopPersister;
         use payjoin::receive::v2::{NewReceiver, PayjoinProposal, Receiver, UncheckedProposal};
-        use payjoin::send::v2::SenderBuilder;
+        use payjoin::send::v2::{Sender, SenderBuilder};
         use payjoin::{OhttpKeys, PjUri, UriExt};
         use payjoin_test_utils::{BoxSendSyncError, TestServices};
         use reqwest::{Client, Response};
@@ -264,8 +264,13 @@ mod integration {
                 // Inside the Sender:
                 let psbt = build_original_psbt(&sender, &expired_receiver.pj_uri())?;
                 // Test that an expired pj_url errors
-                let expired_req_ctx = SenderBuilder::new(psbt, expired_receiver.pj_uri())
+                let new_sender = SenderBuilder::new(psbt, expired_receiver.pj_uri())
                     .build_non_incentivizing(FeeRate::BROADCAST_MIN)?;
+                let storage_token =
+                    new_sender.persist(&mut NoopPersister).map_err(|e| e.to_string())?;
+                let expired_req_ctx =
+                    Sender::load(storage_token, &NoopPersister).map_err(|e| e.to_string())?;
+
                 match expired_req_ctx.extract_v2(ohttp_relay) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
@@ -331,8 +336,12 @@ mod integration {
                     .check_pj_supported()
                     .map_err(|e| e.to_string())?;
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
-                let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
-                    .build_recommended(FeeRate::BROADCAST_MIN)?;
+                let new_sender =
+                    SenderBuilder::new(psbt, pj_uri).build_recommended(FeeRate::BROADCAST_MIN)?;
+                let storage_token =
+                    new_sender.persist(&mut NoopPersister).map_err(|e| e.to_string())?;
+                let req_ctx =
+                    Sender::load(storage_token, &NoopPersister).map_err(|e| e.to_string())?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
                     req_ctx.extract_v2(ohttp_relay.to_owned())?;
                 let response = agent
@@ -426,8 +435,11 @@ mod integration {
                 .check_pj_supported()
                 .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &pj_uri)?;
-            let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
-                .build_recommended(FeeRate::BROADCAST_MIN)?;
+            let new_sender =
+                SenderBuilder::new(psbt, pj_uri).build_recommended(FeeRate::BROADCAST_MIN)?;
+            let storage_token =
+                new_sender.persist(&mut NoopPersister).map_err(|e| e.to_string())?;
+            let req_ctx = Sender::load(storage_token, &NoopPersister).map_err(|e| e.to_string())?;
             let (req, ctx) = req_ctx.extract_v1();
             let headers = HeaderMock::new(&req.body, req.content_type);
 
@@ -491,15 +503,17 @@ mod integration {
                     .check_pj_supported()
                     .map_err(|e| e.to_string())?;
                 let psbt = build_original_psbt(&sender, &pj_uri)?;
-                let (Request { url, body, content_type, .. }, send_ctx) =
-                    SenderBuilder::new(psbt, pj_uri)
-                        .build_with_additional_fee(
-                            Amount::from_sat(10000),
-                            None,
-                            FeeRate::ZERO,
-                            false,
-                        )?
-                        .extract_v1();
+                let new_sender = SenderBuilder::new(psbt, pj_uri).build_with_additional_fee(
+                    Amount::from_sat(10000),
+                    None,
+                    FeeRate::ZERO,
+                    false,
+                )?;
+                let storage_token =
+                    new_sender.persist(&mut NoopPersister).map_err(|e| e.to_string())?;
+                let req_ctx =
+                    Sender::load(storage_token, &NoopPersister).map_err(|e| e.to_string())?;
+                let (Request { url, body, content_type, .. }, send_ctx) = req_ctx.extract_v1();
                 log::info!("send fallback v1 to offline receiver fail");
                 let res = agent
                     .post(url.clone())
@@ -706,7 +720,7 @@ mod integration {
         use payjoin::persist::NoopPersister;
         use payjoin::receive::v2::{NewReceiver, Receiver};
         use payjoin::send::multiparty::{
-            GetContext as MultiPartyGetContext, SenderBuilder as MultiPartySenderBuilder,
+            GetContext as MultiPartyGetContext, Sender, SenderBuilder as MultiPartySenderBuilder,
         };
         use payjoin_test_utils::{
             init_bitcoind_multi_sender_single_reciever, BoxSendSyncError, TestServices,
@@ -766,8 +780,12 @@ mod integration {
                     let psbt = build_sweep_psbt(sender, &pj_uri)?;
                     let sender_ctx = MultiPartySenderBuilder::new(psbt.clone(), pj_uri.clone())
                         .build_recommended(FeeRate::BROADCAST_MIN)?;
+                    let storage_token =
+                        sender_ctx.persist(&mut NoopPersister).map_err(|e| e.to_string())?;
+                    let req_ctx =
+                        Sender::load(storage_token, &NoopPersister).map_err(|e| e.to_string())?;
                     let (Request { url, body, content_type, .. }, send_post_ctx) =
-                        sender_ctx.extract_v2(ohttp_relay.to_owned())?;
+                        req_ctx.extract_v2(ohttp_relay.to_owned())?;
                     let response = agent
                         .post(url.clone())
                         .header("Content-Type", content_type)

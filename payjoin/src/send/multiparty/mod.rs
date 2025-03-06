@@ -24,7 +24,8 @@ impl<'a> SenderBuilder<'a> {
     pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v2::SenderBuilder::new(psbt, uri)) }
     pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, BuildSenderError> {
         let v2 = v2::SenderBuilder::new(self.0 .0.psbt, self.0 .0.uri)
-            .build_recommended(min_fee_rate)?;
+            .build_recommended(min_fee_rate)?
+            .persist(|_id, _sender| Ok(()))?;
         Ok(Sender(v2))
     }
 }

@@ -169,7 +169,7 @@ mod integration {
 
         use bitcoin::Address;
         use http::StatusCode;
-        use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
+        use payjoin::receive::v2::{EphemeralReceiver, PayjoinProposal, UncheckedProposal};
         use payjoin::send::v2::SenderBuilder;
         use payjoin::{OhttpKeys, PjUri, UriExt};
         use payjoin_test_utils::{BoxSendSyncError, TestServices};
@@ -204,7 +204,8 @@ mod integration {
                 let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")?
                     .assume_checked();
                 let mut bad_initializer =
-                    Receiver::new(mock_address, directory, bad_ohttp_keys, None)?;
+                    EphemeralReceiver::new(mock_address, directory, bad_ohttp_keys, None)?
+                        .persist(|_, _| Ok(()))?;
                 let (req, _ctx) = bad_initializer.extract_req(&mock_ohttp_relay)?;
                 agent.post(req.url).body(req.body).send().await.map_err(|e| e.into())
             }
@@ -234,12 +235,13 @@ mod integration {
                 // Inside the Receiver:
                 let address = receiver.get_new_address(None, None)?.assume_checked();
                 // test session with expiry in the past
-                let mut expired_receiver = Receiver::new(
+                let mut expired_receiver = EphemeralReceiver::new(
                     address.clone(),
                     directory.clone(),
                     ohttp_keys.clone(),
                     Some(Duration::from_secs(0)),
-                )?;
+                )?
+                .persist(|_key, _receiver| Ok(()))?;
                 match expired_receiver.extract_req(&ohttp_relay) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
@@ -251,7 +253,8 @@ mod integration {
                 let psbt = build_original_psbt(&sender, &expired_receiver.pj_uri())?;
                 // Test that an expired pj_url errors
                 let expired_req_ctx = SenderBuilder::new(psbt, expired_receiver.pj_uri())
-                    .build_non_incentivizing(FeeRate::BROADCAST_MIN)?;
+                    .build_non_incentivizing(FeeRate::BROADCAST_MIN)?
+                    .persist(|_key, _sender| Ok(()))?;
                 match expired_req_ctx.extract_v2(directory.to_owned()) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
@@ -286,8 +289,13 @@ mod integration {
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
                 // test session with expiry in the future
-                let mut session =
-                    Receiver::new(address.clone(), directory.clone(), ohttp_keys.clone(), None)?;
+                let mut session = EphemeralReceiver::new(
+                    address.clone(),
+                    directory.clone(),
+                    ohttp_keys.clone(),
+                    None,
+                )?
+                .persist(|_key, _receiver| Ok(()))?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
                 let mock_ohttp_relay = directory.clone();
@@ -309,7 +317,8 @@ mod integration {
                     .map_err(|e| e.to_string())?;
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
                 let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
-                    .build_recommended(FeeRate::BROADCAST_MIN)?;
+                    .build_recommended(FeeRate::BROADCAST_MIN)?
+                    .persist(|_key, _sender| Ok(()))?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
                     req_ctx.extract_v2(mock_ohttp_relay.to_owned())?;
                 let response = agent
@@ -399,7 +408,8 @@ mod integration {
                 .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
-                .build_recommended(FeeRate::BROADCAST_MIN)?;
+                .build_recommended(FeeRate::BROADCAST_MIN)?
+                .persist(|_key, _sender| Ok(()))?;
             let (req, ctx) = req_ctx.extract_v1()?;
             let headers = HeaderMock::new(&req.body, req.content_type);
 
@@ -449,7 +459,8 @@ mod integration {
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
                 let mut session =
-                    Receiver::new(address, directory.clone(), ohttp_keys.clone(), None)?;
+                    EphemeralReceiver::new(address, directory.clone(), ohttp_keys.clone(), None)?
+                        .persist(|_key, _receiver| Ok(()))?;
 
                 // **********************
                 // Inside the V1 Sender:
@@ -468,6 +479,7 @@ mod integration {
                             FeeRate::ZERO,
                             false,
                         )?
+                        .persist(|_key, _sender| Ok(()))?
                         .extract_v1()?;
                 log::info!("send fallback v1 to offline receiver fail");
                 let res = agent
@@ -663,7 +675,7 @@ mod integration {
     #[cfg(feature = "_multiparty")]
     mod multiparty {
         use bitcoin::ScriptBuf;
-        use payjoin::receive::v2::Receiver;
+        use payjoin::receive::v2::{EphemeralReceiver, Receiver};
         use payjoin::send::multiparty::{
             GetContext as MultiPartyGetContext, SenderBuilder as MultiPartySenderBuilder,
         };
@@ -710,12 +722,13 @@ mod integration {
                 // Senders will generate a sweep psbt and send PSBT to receiver subdir
                 for sender in senders.iter() {
                     let address = receiver.get_new_address(None, None)?.assume_checked();
-                    let receiver_session = Receiver::new(
+                    let receiver_session = EphemeralReceiver::new(
                         address.clone(),
                         directory.clone(),
                         ohttp_keys.clone(),
                         None,
-                    )?;
+                    )?
+                    .persist(|_key, _receiver| Ok(()))?;
                     let pj_uri = receiver_session.pj_uri();
                     let psbt = build_sweep_psbt(sender, &pj_uri)?;
                     let sender_ctx = MultiPartySenderBuilder::new(psbt.clone(), pj_uri.clone())

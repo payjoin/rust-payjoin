@@ -1,12 +1,12 @@
 #[cfg(feature = "_danger-local-https")]
 mod e2e {
     use std::env;
+    use std::path::PathBuf;
     use std::process::{ExitStatus, Stdio};
 
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
     use payjoin_test_utils::{init_bitcoind_sender_receiver, BoxError};
-    use tokio::fs;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::process::Command;
 
@@ -15,6 +15,18 @@ mod e2e {
         kill(Pid::from_raw(pid as i32), Signal::SIGINT)?;
         // wait for child process to exit completely
         child.wait().await
+    }
+
+    struct CleanupGuard {
+        paths: Vec<PathBuf>,
+    }
+
+    impl Drop for CleanupGuard {
+        fn drop(&mut self) {
+            for path in &self.paths {
+                cleanup_temp_file(path);
+            }
+        }
     }
 
     const RECEIVE_SATS: &str = "54321";
@@ -26,6 +38,8 @@ mod e2e {
         let temp_dir = env::temp_dir();
         let receiver_db_path = temp_dir.join("receiver_db");
         let sender_db_path = temp_dir.join("sender_db");
+        let _cleanup_guard =
+            CleanupGuard { paths: vec![receiver_db_path.clone(), sender_db_path.clone()] };
         let receiver_db_path_clone = receiver_db_path.clone();
         let sender_db_path_clone = sender_db_path.clone();
         let port = find_free_port()?;
@@ -130,8 +144,6 @@ mod e2e {
         })
         .await?;
 
-        cleanup_temp_file(&receiver_db_path).await;
-        cleanup_temp_file(&sender_db_path).await;
         assert!(payjoin_sent, "Payjoin send was not detected");
 
         fn find_free_port() -> Result<u16, BoxError> {
@@ -157,14 +169,15 @@ mod e2e {
         let temp_dir = env::temp_dir();
         let receiver_db_path = temp_dir.join("receiver_db");
         let sender_db_path = temp_dir.join("sender_db");
+        let _cleanup_guard =
+            CleanupGuard { paths: vec![receiver_db_path.clone(), sender_db_path.clone()] };
+
         let result = tokio::select! {
             res = services.take_ohttp_relay_handle() => Err(format!("Ohttp relay is long running: {:?}", res).into()),
             res = services.take_directory_handle() => Err(format!("Directory server is long running: {:?}", res).into()),
             res = send_receive_cli_async(&services, receiver_db_path.clone(), sender_db_path.clone()) => res,
         };
 
-        cleanup_temp_file(&receiver_db_path).await;
-        cleanup_temp_file(&sender_db_path).await;
         assert!(result.is_ok(), "send_receive failed: {:#?}", result.unwrap_err());
 
         async fn send_receive_cli_async(
@@ -361,8 +374,8 @@ mod e2e {
         Ok(())
     }
 
-    async fn cleanup_temp_file(path: &std::path::Path) {
-        if let Err(e) = fs::remove_dir_all(path).await {
+    fn cleanup_temp_file(path: &std::path::Path) {
+        if let Err(e) = std::fs::remove_dir_all(path) {
             eprintln!("Failed to remove {:?}: {}", path, e);
         }
     }

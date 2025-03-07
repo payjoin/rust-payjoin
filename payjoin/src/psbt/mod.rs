@@ -11,7 +11,7 @@ use bitcoin::psbt::Psbt;
 use bitcoin::transaction::InputWeightPrediction;
 use bitcoin::{bip32, psbt, Address, AddressType, Network, TxIn, TxOut, Weight};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum InconsistentPsbt {
     UnequalInputCounts { tx_ins: usize, psbt_ins: usize },
     UnequalOutputCounts { tx_outs: usize, psbt_outs: usize },
@@ -217,7 +217,7 @@ impl InternalInputPair<'_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum PrevTxOutError {
     MissingUtxoInformation,
     IndexOutOfBounds { output_count: usize, index: u32 },
@@ -236,7 +236,7 @@ impl fmt::Display for PrevTxOutError {
 
 impl std::error::Error for PrevTxOutError {}
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum InternalPsbtInputError {
     PrevTxOut(PrevTxOutError),
     UnequalTxid,
@@ -293,7 +293,7 @@ impl std::error::Error for PsbtInputError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { Some(&self.0) }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct PsbtInputsError {
     index: usize,
     error: InternalPsbtInputError,
@@ -309,7 +309,7 @@ impl std::error::Error for PsbtInputsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { Some(&self.error) }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum AddressTypeError {
     PrevTxOut(PrevTxOutError),
     InvalidScript(FromScriptError),
@@ -344,7 +344,7 @@ impl From<FromScriptError> for AddressTypeError {
     fn from(value: FromScriptError) -> Self { Self::InvalidScript(value) }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum InputWeightError {
     AddressType(AddressTypeError),
     NoRedeemScript,

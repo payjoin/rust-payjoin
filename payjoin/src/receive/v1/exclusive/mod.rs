@@ -71,6 +71,7 @@ fn parse_body(
 #[cfg(test)]
 mod tests {
     use bitcoin::{Address, AddressType};
+    use payjoin_test_utils::ORIGINAL_PSBT;
 
     use super::*;
     struct MockHeaders {
@@ -93,7 +94,7 @@ mod tests {
 
     #[test]
     fn test_from_request() -> Result<(), Box<dyn std::error::Error>> {
-        let body = super::test::ORIGINAL_PSBT.as_bytes();
+        let body = ORIGINAL_PSBT.as_bytes();
         let headers = MockHeaders::new(body.len() as u64);
         let proposal = UncheckedProposal::from_request(body, super::test::QUERY_PARAMS, headers)?;
 

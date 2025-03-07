@@ -14,7 +14,7 @@ use crate::error_codes::{
 #[derive(Debug)]
 pub struct BuildSenderError(InternalBuildSenderError);
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum InternalBuildSenderError {
     InvalidOriginalInput(crate::psbt::PsbtInputsError),
     InconsistentOriginalPsbt(crate::psbt::InconsistentPsbt),

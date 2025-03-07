@@ -151,7 +151,14 @@ impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
         match key {
             "pj" if self.pj.is_none() => {
                 let endpoint = Cow::try_from(value).map_err(|_| InternalPjParseError::NotUtf8)?;
-                let url = Url::parse(&endpoint).map_err(|_| InternalPjParseError::BadEndpoint)?;
+                #[cfg(not(feature = "v2"))]
+                let url = Url::parse(&endpoint).map_err(|e| {
+                    InternalPjParseError::BadEndpoint(error::BadEndpointError::UrlParse(e))
+                })?;
+                #[cfg(feature = "v2")]
+                let url = url_ext::parse_with_fragment(&endpoint)
+                    .map_err(InternalPjParseError::BadEndpoint)?;
+
                 self.pj = Some(url);
 
                 Ok(bitcoin_uri::de::ParamKind::Known)

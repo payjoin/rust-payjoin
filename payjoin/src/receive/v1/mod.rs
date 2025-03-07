@@ -272,10 +272,10 @@ impl WantsOutputs {
     pub fn substitute_receiver_script(
         self,
         output_script: &Script,
-    ) -> Result<WantsOutputs, OutputSubstitutionError> {
+    ) -> Result<Self, OutputSubstitutionError> {
         let output_value = self.original_psbt.unsigned_tx.output[self.change_vout].value;
-        let outputs = vec![TxOut { value: output_value, script_pubkey: output_script.into() }];
-        self.replace_receiver_outputs(outputs, output_script)
+        let outputs = [TxOut { value: output_value, script_pubkey: output_script.into() }];
+        self.replace_receiver_outputs(outputs.iter(), output_script)
     }
 
     /// Replace **all** receiver outputs with one or more provided outputs.
@@ -283,29 +283,30 @@ impl WantsOutputs {
     /// that address must be included in `replacement_outputs`. The value of that output may be
     /// increased or decreased depending on the receiver's input contributions and whether the
     /// receiver needs to pay for additional miner fees (e.g. in the case of adding many outputs).
-    pub fn replace_receiver_outputs(
+    pub fn replace_receiver_outputs<'a>(
         self,
-        replacement_outputs: Vec<TxOut>,
+        replacement_outputs: impl IntoIterator<Item = &'a TxOut>,
         drain_script: &Script,
-    ) -> Result<WantsOutputs, OutputSubstitutionError> {
+    ) -> Result<Self, OutputSubstitutionError> {
         let mut payjoin_psbt = self.original_psbt.clone();
         let mut outputs = vec![];
-        let mut replacement_outputs = replacement_outputs.clone();
+        let mut replacement_outputs_vec: Vec<TxOut> =
+            replacement_outputs.into_iter().cloned().collect();
         let mut rng = rand::thread_rng();
         // Substitute the existing receiver outputs, keeping the sender/receiver output ordering
         for (i, original_output) in self.original_psbt.unsigned_tx.output.iter().enumerate() {
             if self.owned_vouts.contains(&i) {
                 // Receiver output: substitute in-place a provided replacement output
-                if replacement_outputs.is_empty() {
+                if replacement_outputs_vec.is_empty() {
                     return Err(InternalOutputSubstitutionError::NotEnoughOutputs.into());
                 }
-                match replacement_outputs
+                let maybe_replacement = replacement_outputs_vec
                     .iter()
-                    .position(|txo| txo.script_pubkey == original_output.script_pubkey)
-                {
+                    .position(|txo| txo.script_pubkey == original_output.script_pubkey);
+                match maybe_replacement {
                     // Select an output with the same address if one was provided
                     Some(pos) => {
-                        let txo = replacement_outputs.swap_remove(pos);
+                        let txo = replacement_outputs_vec.swap_remove(pos);
                         if self.params.disable_output_substitution
                             && txo.value < original_output.value
                         {
@@ -328,8 +329,8 @@ impl WantsOutputs {
                                 .into(),
                             );
                         }
-                        let index = rng.gen_range(0..replacement_outputs.len());
-                        let txo = replacement_outputs.swap_remove(index);
+                        let index = rng.gen_range(0..replacement_outputs_vec.len());
+                        let txo = replacement_outputs_vec.swap_remove(index);
                         outputs.push(txo);
                     }
                 }
@@ -339,13 +340,13 @@ impl WantsOutputs {
             }
         }
         // Insert all remaining outputs at random indices for privacy
-        interleave_shuffle(&mut outputs, &mut replacement_outputs, &mut rng);
+        interleave_shuffle(&mut outputs, replacement_outputs_vec.iter(), &mut rng);
         // Identify the receiver output that will be used for change and fees
         let change_vout = outputs.iter().position(|txo| txo.script_pubkey == *drain_script);
         // Update the payjoin PSBT outputs
         payjoin_psbt.outputs = vec![Default::default(); outputs.len()];
         payjoin_psbt.unsigned_tx.output = outputs;
-        Ok(WantsOutputs {
+        Ok(Self {
             original_psbt: self.original_psbt,
             payjoin_psbt,
             params: self.params,
@@ -366,18 +367,23 @@ impl WantsOutputs {
     }
 }
 
-/// Shuffles `new` vector, then interleaves its elements with those from `original`,
+/// Shuffles `new` Iterator, then interleaves its elements with those from `original`,
 /// maintaining the relative order in `original` but randomly inserting elements from `new`.
 /// The combined result replaces the contents of `original`.
-fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [T], rng: &mut R) {
-    // Shuffle the substitute_outputs
+fn interleave_shuffle<'a, T, R, I>(original: &mut Vec<T>, replacement_outputs: I, rng: &mut R)
+where
+    T: Clone + 'a,
+    R: rand::Rng,
+    I: IntoIterator<Item = &'a T>,
+{
+    let mut new: Vec<T> = replacement_outputs.into_iter().cloned().collect();
     new.shuffle(rng);
-    // Create a new vector to store the combined result
+
     let mut combined = Vec::with_capacity(original.len() + new.len());
-    // Initialize indices
+
     let mut original_index = 0;
     let mut new_index = 0;
-    // Interleave elements
+
     while original_index < original.len() || new_index < new.len() {
         if original_index < original.len() && (new_index >= new.len() || rng.gen_bool(0.5)) {
             combined.push(original[original_index].clone());
@@ -945,16 +951,16 @@ pub(crate) mod test {
         let mut original1 = vec![1, 2, 3];
         let mut original2 = original1.clone();
         let mut original3 = original1.clone();
-        let mut new1 = vec![4, 5, 6];
-        let mut new2 = new1.clone();
-        let mut new3 = new1.clone();
+        let new1 = vec![4, 5, 6];
+        let new2 = new1.clone();
+        let new3 = new1.clone();
         let mut rng1 = StdRng::seed_from_u64(123);
         let mut rng2 = StdRng::seed_from_u64(234);
         let mut rng3 = StdRng::seed_from_u64(345);
         // Operate on the same data multiple times with different RNG seeds.
-        interleave_shuffle(&mut original1, &mut new1, &mut rng1);
-        interleave_shuffle(&mut original2, &mut new2, &mut rng2);
-        interleave_shuffle(&mut original3, &mut new3, &mut rng3);
+        interleave_shuffle(&mut original1, &new1, &mut rng1);
+        interleave_shuffle(&mut original2, &new2, &mut rng2);
+        interleave_shuffle(&mut original3, &new3, &mut rng3);
         // The result should be different for each seed
         // and the relative ordering from `original` always preserved/
         assert_eq!(original1, vec![1, 6, 2, 5, 4, 3]);

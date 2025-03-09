@@ -12,11 +12,11 @@ The `payjoin` crate is compatible with many wallets like LND in [nolooking](http
 
 ### `payjoin-cli`
 
-The [`payjoin-cli`](https://github.com/payjoin/rust-payjoin/tree/main/payjoin-cli) crate performs no-frills Payjoin as a reference implementation using Bitcoin Core wallet.
+The [`payjoin-cli`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli) crate performs no-frills Payjoin as a reference implementation using Bitcoin Core wallet.
 
 ### `payjoin-directory`
 
-The [`payjoin-directory`](https://github.com/payjoin/rust-payjoin/tree/main/payjoin-directory) crate implements the Payjoin Directory store-and-forward server required for Payjoin V2's asynchronous operation.
+The [`payjoin-directory`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-directory) crate implements the Payjoin Directory store-and-forward server required for Payjoin V2's asynchronous operation.
 
 ### Disclaimer ⚠️ WIP
 

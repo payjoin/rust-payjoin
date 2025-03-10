@@ -553,6 +553,33 @@ impl WantsInputs {
             change_vout: self.change_vout,
         }
     }
+
+    /// Select input optimizing for consolidation when fees are low
+    pub(crate) fn select_for_consolidation(
+        &self,
+        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        max_fee_rate: Option<FeeRate>,
+    ) -> Result<InputPair, SelectionError> {
+        // Check current fee rate
+        let current_fee = self.payjoin_psbt.fee().expect("fee exists");
+        let current_fee_rate = FeeRate::from_sat_per_vb(
+            current_fee.to_sat() / self.payjoin_psbt.unsigned_tx.weight().to_wu() as u64
+        );
+
+        if current_fee_rate > max_fee_rate {
+            return Err(InternalSelectionError::FeeTooHighForConsolidation.into());
+        }
+
+
+        // Sort candidates by value and select largest one
+        let mut candidates: Vec<InputPair> = candidate_inputs.into_iter().collect();
+        if candidates.is_empty() {
+            return Err(InternalSelectionError::Empty.into());
+        }
+
+        candidates.sort_by_key(|input| input.previous_txout().value);
+        Ok(candidates.pop().unwrap())
+    }
 }
 
 /// A checked proposal that the receiver may sign and finalize to make a proposal PSBT that the

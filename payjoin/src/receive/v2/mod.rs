@@ -383,9 +383,9 @@ impl WantsOutputs {
     /// that address must be included in `replacement_outputs`. The value of that output may be
     /// increased or decreased depending on the receiver's input contributions and whether the
     /// receiver needs to pay for additional miner fees (e.g. in the case of adding many outputs).
-    pub fn replace_receiver_outputs<'a>(
+    pub fn replace_receiver_outputs(
         self,
-        replacement_outputs: impl Iterator<Item = &'a TxOut>,
+        replacement_outputs: impl Iterator<Item = TxOut>,
         drain_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
         let inner = self.v1.replace_receiver_outputs(replacement_outputs, drain_script)?;

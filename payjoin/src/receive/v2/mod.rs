@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
-use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut};
 pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
 use serde::de::Deserializer;
@@ -27,6 +27,12 @@ pub(crate) mod error;
 const SUPPORTED_VERSIONS: &[usize] = &[1, 2];
 
 static TWENTY_FOUR_HOURS_DEFAULT_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
+
+#[derive(Debug, Clone)]
+pub enum SelectionStrategy {
+    PreservePrivacy,
+    Consolidate,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct SessionContext {
@@ -409,6 +415,28 @@ pub struct WantsInputs {
 }
 
 impl WantsInputs {
+    /// Select receiver inputs using the specified selection strategy
+    pub fn select_inputs(
+        &self,
+        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        strategy: SelectionStrategy,
+        dust_limit: Option<Amount>,
+        max_inputs: Option<usize>,
+        target_value: Option<Amount>,
+        max_consolidation_fee_rate: Option<FeeRate>,
+    ) -> Result<Vec<InputPair>, SelectionError> {
+        match strategy {
+            SelectionStrategy::PreservePrivacy =>
+                self.try_preserving_privacy(candidate_inputs).map(|input| vec![input]),
+            SelectionStrategy::Consolidate => self.try_consolidate(
+                candidate_inputs,
+                dust_limit,
+                max_inputs,
+                target_value,
+                max_consolidation_fee_rate,
+            ),
+        }
+    }
     /// Select receiver input such that the payjoin avoids surveillance.
     /// Return the input chosen that has been applied to the Proposal.
     ///
@@ -425,6 +453,29 @@ impl WantsInputs {
         candidate_inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<InputPair, SelectionError> {
         self.v1.try_preserving_privacy(candidate_inputs)
+    }
+
+    /// Select multiple inputs for consolidation when fees are low.
+    ///
+    /// Selects up to `max_inputs` inputs above `dust_limit`, prioritizing larger values,
+    /// as long as the transaction fee rate stays below `max_fee_rate`.
+    ///
+    /// Returns error if fee rate exceeds threshold or no valid inputs are found.
+    pub fn try_consolidate(
+        &self,
+        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        dust_limit: Option<Amount>,
+        max_inputs: Option<usize>,
+        target_value: Option<Amount>,
+        max_fee_rate: Option<FeeRate>,
+    ) -> Result<Vec<InputPair>, SelectionError> {
+        self.v1.try_consolidate(
+            candidate_inputs,
+            dust_limit,
+            max_inputs,
+            target_value,
+            max_fee_rate,
+        )
     }
 
     /// Add the provided list of inputs to the transaction.

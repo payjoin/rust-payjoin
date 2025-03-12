@@ -486,25 +486,25 @@ mod integration {
                 let mock_ohttp_relay = services.ohttp_gateway_url();
                 let receiver_loop = tokio::task::spawn(async move {
                     let agent_clone = agent_clone.clone();
-                    let (response, ctx) = loop {
+                    let proposal = loop {
                         let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
                         let response = agent_clone.post(req.url).body(req.body).send().await?;
 
                         if response.status() == 200 {
-                            break (response.bytes().await?.to_vec(), ctx);
-                        } else if response.status() == 202 {
-                            log::info!(
-                                "No response yet for POST payjoin request, retrying some seconds"
-                            );
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            if let Some(proposal) = session
+                                .process_res(response.bytes().await?.to_vec().as_slice(), ctx)?
+                            {
+                                break proposal;
+                            } else {
+                                log::info!(
+                                    "No response yet for POST payjoin request, retrying some seconds"
+                                );
+                            }
                         } else {
                             log::error!("Unexpected response status: {}", response.status());
                             panic!("Unexpected response status: {}", response.status())
                         }
                     };
-                    let proposal = session
-                        .process_res(response.as_slice(), ctx)?
-                        .expect("proposal should exist");
                     let mut payjoin_proposal =
                         handle_directory_proposal(&receiver_clone, proposal, None)
                             .map_err(|e| e.to_string())?;

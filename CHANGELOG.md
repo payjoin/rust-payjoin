@@ -1,3 +1,6 @@
+## [0.22.1]
+- Expose label and messge params on Uri. ([#44](https://github.com/LtbLightning/payjoin-ffi/pull/44))
+
 ## [0.22.0]
 - Update `payjoin` to `0.22.0`. (Serialize reply_key with Sender [#41](https://github.com/LtbLightning/payjoin-ffi/pull/41))
 

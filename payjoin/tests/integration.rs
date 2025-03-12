@@ -206,7 +206,13 @@ mod integration {
                 let mut bad_initializer =
                     Receiver::new(mock_address, directory, bad_ohttp_keys, None)?;
                 let (req, _ctx) = bad_initializer.extract_req(&mock_ohttp_relay)?;
-                agent.post(req.url).body(req.body).send().await.map_err(|e| e.into())
+                agent
+                    .post(req.url)
+                    .header("Content-Type", req.content_type)
+                    .body(req.body)
+                    .send()
+                    .await
+                    .map_err(|e| e.into())
             }
 
             Ok(())
@@ -292,7 +298,12 @@ mod integration {
                 // Poll receive request
                 let mock_ohttp_relay = services.ohttp_gateway_url();
                 let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
-                let response = agent.post(req.url).body(req.body).send().await?;
+                let response = agent
+                    .post(req.url)
+                    .header("Content-Type", req.content_type)
+                    .body(req.body)
+                    .send()
+                    .await?;
                 assert!(response.status().is_success(), "error response: {}", response.status());
                 let response_body =
                     session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?;
@@ -328,7 +339,12 @@ mod integration {
 
                 // GET fallback psbt
                 let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
-                let response = agent.post(req.url).body(req.body).send().await?;
+                let response = agent
+                    .post(req.url)
+                    .header("Content-Type", req.content_type)
+                    .body(req.body)
+                    .send()
+                    .await?;
                 // POST payjoin
                 let proposal = session
                     .process_res(response.bytes().await?.to_vec().as_slice(), ctx)?
@@ -488,7 +504,12 @@ mod integration {
                     let agent_clone = agent_clone.clone();
                     let proposal = loop {
                         let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
-                        let response = agent_clone.post(req.url).body(req.body).send().await?;
+                        let response = agent_clone
+                            .post(req.url)
+                            .header("Content-Type", req.content_type)
+                            .body(req.body)
+                            .send()
+                            .await?;
 
                         if response.status() == 200 {
                             if let Some(proposal) = session
@@ -512,7 +533,12 @@ mod integration {
                     // Respond with payjoin psbt within the time window the sender is willing to wait
                     // this response would be returned as http response to the sender
                     let (req, ctx) = payjoin_proposal.extract_v2_req(&mock_ohttp_relay)?;
-                    let response = agent_clone.post(req.url).body(req.body).send().await?;
+                    let response = agent_clone
+                        .post(req.url)
+                        .header("Content-Type", req.content_type)
+                        .body(req.body)
+                        .send()
+                        .await?;
                     payjoin_proposal
                         .process_res(&response.bytes().await?, ctx)
                         .map_err(|e| e.to_string())?;
@@ -747,7 +773,12 @@ mod integration {
                 for sender_sesssion in inner_sender_test_sessions.iter() {
                     let mut receiver_session = sender_sesssion.receiver_session.clone();
                     let (req, reciever_ctx) = receiver_session.extract_req(&directory)?;
-                    let response = agent.post(req.url).body(req.body).send().await?;
+                    let response = agent
+                        .post(req.url)
+                        .header("Content-Type", req.content_type)
+                        .body(req.body)
+                        .send()
+                        .await?;
                     assert!(response.status().is_success());
                     let res = response.bytes().await?.to_vec();
                     let proposal = receiver_session
@@ -816,7 +847,12 @@ mod integration {
                 for sender_sesssion in inner_sender_test_sessions.iter() {
                     let mut receiver_session = sender_sesssion.receiver_session.clone();
                     let (req, reciever_ctx) = receiver_session.extract_req(&directory)?;
-                    let response = agent.post(req.url).body(req.body).send().await?;
+                    let response = agent
+                        .post(req.url)
+                        .header("Content-Type", req.content_type)
+                        .body(req.body)
+                        .send()
+                        .await?;
                     assert!(response.status().is_success());
 
                     let finalized_response = receiver_session

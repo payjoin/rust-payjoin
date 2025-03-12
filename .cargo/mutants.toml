@@ -1,0 +1,15 @@
+additional_cargo_args = ["--all-features"]
+examine_globs = ["payjoin/src/uri/*.rs"]
+exclude_globs = []
+exclude_re = [
+	"impl Debug",
+	"impl Display",
+	"deserialize",
+	"Iterator",
+	".*Error",
+
+	# ---------------------Crate-specific exculsions---------------------
+	# Receive
+	# src/receive/v1/mod.rs
+        "interleave_shuffle", # Replacing index += 1 with index *= 1 in a loop causes a timeout due to an infinite loop
+]

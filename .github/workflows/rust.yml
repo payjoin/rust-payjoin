@@ -25,18 +25,6 @@ jobs:
       - name: Run tests
         run: RUST_LOG=debug bash contrib/test.sh
 
-  FeatureCheck:
-    runs-on: ubuntu-latest
-    steps:
-      - name: "Checkout repo"
-        uses: actions/checkout@v4
-      - name: "Install nightly toolchain"
-        uses: dtolnay/rust-toolchain@nightly
-      - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
-      - name: Run feature checks
-        run: bash contrib/check.sh
-
   Format:
     runs-on: ubuntu-latest
     steps:

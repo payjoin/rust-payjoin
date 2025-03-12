@@ -201,8 +201,7 @@ mod e2e {
             let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
 
             let directory = &services.directory_url().to_string();
-            // Mock ohttp_relay since the ohttp_relay's http client doesn't have the certificate for the directory
-            let mock_ohttp_relay = &services.ohttp_gateway_url().to_string();
+            let ohttp_relay = &services.ohttp_relay_url().to_string();
 
             let cli_receive_initiator = Command::new(payjoin_cli)
                 .arg("--rpchost")
@@ -212,7 +211,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&receiver_db_path)
                 .arg("--ohttp-relay")
-                .arg(mock_ohttp_relay)
+                .arg(ohttp_relay)
                 .arg("receive")
                 .arg(RECEIVE_SATS)
                 .arg("--pj-directory")
@@ -232,7 +231,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&sender_db_path)
                 .arg("--ohttp-relay")
-                .arg(mock_ohttp_relay)
+                .arg(ohttp_relay)
                 .arg("send")
                 .arg(&bip21)
                 .arg("--fee-rate")
@@ -251,7 +250,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&receiver_db_path)
                 .arg("--ohttp-relay")
-                .arg(mock_ohttp_relay)
+                .arg(ohttp_relay)
                 .arg("resume")
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
@@ -267,7 +266,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&sender_db_path)
                 .arg("--ohttp-relay")
-                .arg(mock_ohttp_relay)
+                .arg(ohttp_relay)
                 .arg("send")
                 .arg(&bip21)
                 .arg("--fee-rate")

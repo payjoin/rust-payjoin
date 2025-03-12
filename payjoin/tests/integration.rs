@@ -200,12 +200,12 @@ mod integration {
                 let agent = services.http_agent();
                 services.wait_for_services_ready().await?;
                 let directory = services.directory_url();
-                let mock_ohttp_relay = services.ohttp_gateway_url();
+                let ohttp_relay = services.ohttp_relay_url();
                 let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")?
                     .assume_checked();
                 let mut bad_initializer =
                     Receiver::new(mock_address, directory, bad_ohttp_keys, None)?;
-                let (req, _ctx) = bad_initializer.extract_req(&mock_ohttp_relay)?;
+                let (req, _ctx) = bad_initializer.extract_req(&ohttp_relay)?;
                 agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -234,7 +234,7 @@ mod integration {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
                 services.wait_for_services_ready().await?;
                 let directory = services.directory_url();
-                let ohttp_relay = services.ohttp_gateway_url();
+                let ohttp_relay = services.ohttp_relay_url();
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 // **********************
                 // Inside the Receiver:
@@ -296,8 +296,8 @@ mod integration {
                     Receiver::new(address.clone(), directory.clone(), ohttp_keys.clone(), None)?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
-                let mock_ohttp_relay = services.ohttp_gateway_url();
-                let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
+                let ohttp_relay = services.ohttp_relay_url();
+                let (req, ctx) = session.extract_req(&ohttp_relay)?;
                 let response = agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -322,7 +322,7 @@ mod integration {
                 let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
-                    req_ctx.extract_v2(mock_ohttp_relay.to_owned())?;
+                    req_ctx.extract_v2(ohttp_relay.to_owned())?;
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -338,7 +338,7 @@ mod integration {
                 // Inside the Receiver:
 
                 // GET fallback psbt
-                let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
+                let (req, ctx) = session.extract_req(&ohttp_relay)?;
                 let response = agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -351,7 +351,7 @@ mod integration {
                     .expect("proposal should exist");
                 let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None)?;
                 assert!(!payjoin_proposal.is_output_substitution_disabled());
-                let (req, ctx) = payjoin_proposal.extract_v2_req(&mock_ohttp_relay)?;
+                let (req, ctx) = payjoin_proposal.extract_v2_req(&ohttp_relay)?;
                 let response = agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -365,7 +365,7 @@ mod integration {
                 // Sender checks, signs, finalizes, extracts, and broadcasts
                 // Replay post fallback to get the response
                 let (Request { url, body, content_type, .. }, ohttp_ctx) =
-                    send_ctx.extract_req(mock_ohttp_relay.to_owned())?;
+                    send_ctx.extract_req(ohttp_relay.to_owned())?;
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -499,11 +499,11 @@ mod integration {
                 let agent_clone: Arc<Client> = agent.clone();
                 let receiver: Arc<bitcoincore_rpc::Client> = Arc::new(receiver);
                 let receiver_clone = receiver.clone();
-                let mock_ohttp_relay = services.ohttp_gateway_url();
+                let ohttp_relay = services.ohttp_relay_url();
                 let receiver_loop = tokio::task::spawn(async move {
                     let agent_clone = agent_clone.clone();
                     let proposal = loop {
-                        let (req, ctx) = session.extract_req(&mock_ohttp_relay)?;
+                        let (req, ctx) = session.extract_req(&ohttp_relay)?;
                         let response = agent_clone
                             .post(req.url)
                             .header("Content-Type", req.content_type)
@@ -532,7 +532,7 @@ mod integration {
                     assert!(payjoin_proposal.is_output_substitution_disabled());
                     // Respond with payjoin psbt within the time window the sender is willing to wait
                     // this response would be returned as http response to the sender
-                    let (req, ctx) = payjoin_proposal.extract_v2_req(&mock_ohttp_relay)?;
+                    let (req, ctx) = payjoin_proposal.extract_v2_req(&ohttp_relay)?;
                     let response = agent_clone
                         .post(req.url)
                         .header("Content-Type", req.content_type)

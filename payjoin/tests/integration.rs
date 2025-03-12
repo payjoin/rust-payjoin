@@ -499,7 +499,6 @@ mod integration {
                                 log::info!(
                                     "No response yet for POST payjoin request, retrying some seconds"
                                 );
-                                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                             }
                         } else {
                             log::error!("Unexpected response status: {}", response.status());

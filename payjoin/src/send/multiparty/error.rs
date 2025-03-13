@@ -17,7 +17,6 @@ pub(crate) enum InternalCreateRequestError {
     Expired(std::time::SystemTime),
     MissingOhttpConfig,
     ParseReceiverPubkeyParam(ParseReceiverPubkeyParamError),
-    Url(url::ParseError),
     V2CreateRequest(crate::send::v2::CreateRequestError),
 }
 
@@ -35,7 +34,6 @@ impl std::error::Error for CreateRequestError {
             InternalCreateRequestError::Expired(_) => None,
             InternalCreateRequestError::MissingOhttpConfig => None,
             InternalCreateRequestError::ParseReceiverPubkeyParam(e) => Some(e),
-            InternalCreateRequestError::Url(e) => Some(e),
             InternalCreateRequestError::V2CreateRequest(e) => Some(e),
         }
     }

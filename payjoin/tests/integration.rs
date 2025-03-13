@@ -87,7 +87,7 @@ mod integration {
             debug!("Original psbt: {:#?}", psbt);
             let (req, ctx) = SenderBuilder::new(psbt, uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
-                .extract_v1()?;
+                .extract_v1();
             let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************
@@ -151,7 +151,7 @@ mod integration {
             debug!("Original psbt: {:#?}", psbt);
             let (req, _ctx) = SenderBuilder::new(psbt, uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
-                .extract_v1()?;
+                .extract_v1();
             let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************
@@ -400,7 +400,7 @@ mod integration {
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
                 .build_recommended(FeeRate::BROADCAST_MIN)?;
-            let (req, ctx) = req_ctx.extract_v1()?;
+            let (req, ctx) = req_ctx.extract_v1();
             let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************
@@ -468,7 +468,7 @@ mod integration {
                             FeeRate::ZERO,
                             false,
                         )?
-                        .extract_v1()?;
+                        .extract_v1();
                 log::info!("send fallback v1 to offline receiver fail");
                 let res = agent
                     .post(url.clone())
@@ -967,7 +967,7 @@ mod integration {
             let max_additional_fee = Amount::from_sat(1000);
             let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)
                 .build_with_additional_fee(max_additional_fee, None, FeeRate::ZERO, false)?
-                .extract_v1()?;
+                .extract_v1();
             let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************
@@ -1043,7 +1043,7 @@ mod integration {
             log::debug!("Original psbt: {:#?}", psbt);
             let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
-                .extract_v1()?;
+                .extract_v1();
             let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************

@@ -225,26 +225,30 @@ impl std::error::Error for ParseReceiverPubkeyParamError {
 
 #[cfg(test)]
 mod tests {
-    use payjoin_test_utils::BoxError;
+    use payjoin_test_utils::{BoxError, EXAMPLE_URL};
 
     use super::*;
     use crate::{Uri, UriExt};
 
     #[test]
     fn test_ohttp_get_set() {
-        let mut url = Url::parse("https://example.com").unwrap();
+        let mut url = EXAMPLE_URL.clone();
 
         let serialized = "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
-        let ohttp_keys = OhttpKeys::from_str(serialized).unwrap();
+        let ohttp_keys =
+            OhttpKeys::from_str(serialized).expect("Could not parse ohttp keys from str");
         url.set_ohttp(ohttp_keys.clone());
 
         assert_eq!(url.fragment(), Some(serialized));
-        assert_eq!(url.ohttp().unwrap(), ohttp_keys);
+        assert_eq!(
+            url.ohttp().expect("Ohttp keys have been set but are missing on get"),
+            ohttp_keys
+        );
     }
 
     #[test]
     fn test_errors_when_parsing_ohttp() {
-        let missing_ohttp_url = Url::parse("https://example.com").unwrap();
+        let missing_ohttp_url = EXAMPLE_URL.clone();
         assert!(matches!(
             missing_ohttp_url.ohttp(),
             Err(ParseOhttpKeysParamError::MissingOhttpKeys)
@@ -252,7 +256,7 @@ mod tests {
 
         let invalid_ohttp_url =
             Url::parse("https://example.com?pj=https://test-payjoin-url#OH1invalid_bech_32")
-                .unwrap();
+                .expect("Invalid URL");
         assert!(matches!(
             invalid_ohttp_url.ohttp(),
             Err(ParseOhttpKeysParamError::InvalidOhttpKeys(_))
@@ -261,36 +265,72 @@ mod tests {
 
     #[test]
     fn test_exp_get_set() {
-        let mut url = Url::parse("https://example.com").unwrap();
+        let mut url = EXAMPLE_URL.clone();
 
         let exp_time =
             std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1720547781);
         url.set_exp(exp_time);
         assert_eq!(url.fragment(), Some("EX1C4UC6ES"));
 
-        assert_eq!(url.exp().unwrap(), exp_time);
+        assert_eq!(url.exp().expect("Expiry has been set but are missing on get"), exp_time);
     }
 
     #[test]
     fn test_errors_when_parsing_exp() {
-        let missing_exp_url = Url::parse("http://example.com").unwrap();
+        let missing_exp_url = EXAMPLE_URL.clone();
         assert!(matches!(missing_exp_url.exp(), Err(ParseExpParamError::MissingExp)));
 
         let invalid_bech32_exp_url =
             Url::parse("http://example.com?pj=https://test-payjoin-url#EX1invalid_bech_32")
-                .unwrap();
+                .expect("Invalid URL");
         assert!(matches!(invalid_bech32_exp_url.exp(), Err(ParseExpParamError::DecodeBech32(_))));
 
         // Since the HRP is everything to the left of the right-most separator, the invalid url in
         // this test would have it's HRP being parsed as EX101 instead of the expected EX1
         let invalid_hrp_exp_url =
-            Url::parse("http://example.com?pj=https://test-payjoin-url#EX1010").unwrap();
+            Url::parse("http://example.com?pj=https://test-payjoin-url#EX1010")
+                .expect("Invalid URL");
         assert!(matches!(invalid_hrp_exp_url.exp(), Err(ParseExpParamError::InvalidHrp(_))));
 
         // Not enough data to decode into a u32
         let invalid_timestamp_exp_url =
-            Url::parse("http://example.com?pj=https://test-payjoin-url#EX10").unwrap();
-        assert!(matches!(invalid_timestamp_exp_url.exp(), Err(ParseExpParamError::InvalidExp(_))))
+            Url::parse("http://example.com?pj=https://test-payjoin-url#EX10").expect("Invalid URL");
+        assert!(matches!(invalid_timestamp_exp_url.exp(), Err(ParseExpParamError::InvalidExp(_))));
+    }
+
+    #[test]
+    fn test_errors_when_parsing_receiver_pubkey() {
+        let missing_receiver_pubkey_url = EXAMPLE_URL.clone();
+        assert!(matches!(
+            missing_receiver_pubkey_url.receiver_pubkey(),
+            Err(ParseReceiverPubkeyParamError::MissingPubkey)
+        ));
+
+        let invalid_bech32_receiver_pubkey_url =
+            Url::parse("http://example.com?pj=https://test-payjoin-url#RK1invalid_bech_32")
+                .expect("Invalid URL");
+        assert!(matches!(
+            invalid_bech32_receiver_pubkey_url.receiver_pubkey(),
+            Err(ParseReceiverPubkeyParamError::DecodeBech32(_))
+        ));
+
+        // Since the HRP is everything to the left of the right-most separator, the invalid url in
+        // this test would have it's HRP being parsed as RK101 instead of the expected RK1
+        let invalid_hrp_receiver_pubkey_url =
+            Url::parse("http://example.com?pj=https://test-payjoin-url#RK101")
+                .expect("Invalid URL");
+        assert!(matches!(
+            invalid_hrp_receiver_pubkey_url.receiver_pubkey(),
+            Err(ParseReceiverPubkeyParamError::InvalidHrp(_))
+        ));
+
+        // Not enough data to decode into a u32
+        let invalid_receiver_pubkey_url =
+            Url::parse("http://example.com?pj=https://test-payjoin-url#RK10").expect("Invalid URL");
+        assert!(matches!(
+            invalid_receiver_pubkey_url.receiver_pubkey(),
+            Err(ParseReceiverPubkeyParamError::InvalidPubkey(_))
+        ));
     }
 
     #[test]
@@ -298,7 +338,11 @@ mod tests {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
                    &pjos=0&pj=HTTPS://EXAMPLE.COM/\
                    %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
-        let pjuri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
+        let pjuri = Uri::try_from(uri)
+            .expect("Invalid uri")
+            .assume_checked()
+            .check_pj_supported()
+            .expect("Could not parse pj extras");
         assert!(pjuri.extras.endpoint().ohttp().is_ok());
         assert_eq!(format!("{}", pjuri), uri);
 
@@ -306,8 +350,11 @@ mod tests {
                    &pj=HTTPS://EXAMPLE.COM/\
                    %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC\
                    &pjos=0";
-        let pjuri =
-            Uri::try_from(reordered).unwrap().assume_checked().check_pj_supported().unwrap();
+        let pjuri = Uri::try_from(reordered)
+            .expect("Invalid uri")
+            .assume_checked()
+            .check_pj_supported()
+            .expect("Could not parse pj extras");
         assert!(pjuri.extras.endpoint().ohttp().is_ok());
         assert_eq!(format!("{}", pjuri), uri);
     }

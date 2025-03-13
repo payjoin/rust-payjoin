@@ -231,8 +231,7 @@ pub(crate) fn serialize_v2_body(
         fee_contribution,
         min_fee_rate,
         "2", // payjoin version
-    )
-    .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
+    );
     let query_params = placeholder_url.query().unwrap_or_default();
     let base64 = psbt.to_string();
     Ok(format!("{}\n{}", base64, query_params).into_bytes())

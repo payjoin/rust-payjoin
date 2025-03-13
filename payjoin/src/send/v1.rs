@@ -234,7 +234,7 @@ impl Sender {
             self.fee_contribution,
             self.min_fee_rate,
             "1", // payjoin version
-        )?;
+        );
         let body = self.psbt.to_string().as_bytes().to_vec();
         Ok((
             Request::new_v1(&url, &body),

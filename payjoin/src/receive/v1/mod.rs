@@ -788,16 +788,11 @@ pub(crate) mod test {
     use std::str::FromStr;
 
     use bitcoin::{Address, Network};
+    use payjoin_test_utils::ORIGINAL_PSBT;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
     use super::*;
-
-    // OriginalPSBT Test Vector from BIP
-    // | InputScriptType | Original PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
-    // |-----------------|-----------------------|------------------------------|-------------------------|
-    // | P2SH-P2WPKH     |  2 sat/vbyte          | 0.00000182                   | 0                       |
-    pub const ORIGINAL_PSBT: &str = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
     pub const QUERY_PARAMS: &str = "maxadditionalfeecontribution=182&additionalfeeoutputindex=0";
 
     pub(crate) fn proposal_from_test_vector(

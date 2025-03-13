@@ -22,8 +22,7 @@ pub async fn fetch_ohttp_keys(
     let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
     let client = Client::builder().proxy(proxy).build()?;
     let res = client.get(ohttp_keys_url).header(ACCEPT, "application/ohttp-keys").send().await?;
-    let body = res.bytes().await?.to_vec();
-    OhttpKeys::decode(&body).map_err(|e| Error(InternalError::InvalidOhttpKeys(e.to_string())))
+    parse_ohttp_keys_response(res).await
 }
 
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
@@ -50,6 +49,14 @@ pub async fn fetch_ohttp_keys_with_cert(
         .proxy(proxy)
         .build()?;
     let res = client.get(ohttp_keys_url).header(ACCEPT, "application/ohttp-keys").send().await?;
+    parse_ohttp_keys_response(res).await
+}
+
+async fn parse_ohttp_keys_response(res: reqwest::Response) -> Result<OhttpKeys, Error> {
+    if !res.status().is_success() {
+        return Err(Error(InternalError::UnexpectedStatusCode(res.status())));
+    }
+
     let body = res.bytes().await?.to_vec();
     OhttpKeys::decode(&body).map_err(|e| Error(InternalError::InvalidOhttpKeys(e.to_string())))
 }
@@ -65,6 +72,7 @@ enum InternalError {
     #[cfg(feature = "_danger-local-https")]
     Rustls(rustls::Error),
     InvalidOhttpKeys(String),
+    UnexpectedStatusCode(http::StatusCode),
 }
 
 impl From<url::ParseError> for Error {
@@ -96,6 +104,9 @@ impl std::fmt::Display for Error {
             InvalidOhttpKeys(e) => {
                 write!(f, "Invalid ohttp keys returned from payjoin directory: {}", e)
             }
+            UnexpectedStatusCode(code) => {
+                write!(f, "Unexpected status code from payjoin directory: {}", code)
+            }
             #[cfg(feature = "_danger-local-https")]
             Rustls(e) => e.fmt(f),
         }
@@ -111,6 +122,7 @@ impl std::error::Error for Error {
             ParseUrl(e) => Some(e),
             Io(e) => Some(e),
             InvalidOhttpKeys(_) => None,
+            UnexpectedStatusCode(_) => None,
             #[cfg(feature = "_danger-local-https")]
             Rustls(e) => Some(e),
         }
@@ -119,4 +131,67 @@ impl std::error::Error for Error {
 
 impl From<InternalError> for Error {
     fn from(value: InternalError) -> Self { Self(value) }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use http::StatusCode;
+    use reqwest::Response;
+
+    use super::*;
+
+    fn mock_response(status: StatusCode, body: Vec<u8>) -> Response {
+        Response::from(http::response::Response::builder().status(status).body(body).unwrap())
+    }
+
+    #[tokio::test]
+    async fn test_parse_success_response() {
+        let valid_keys =
+            OhttpKeys::from_str("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
+                .expect("valid keys")
+                .encode()
+                .expect("encodevalid keys");
+
+        let response = mock_response(StatusCode::OK, valid_keys);
+        assert!(parse_ohttp_keys_response(response).await.is_ok(), "expected valid keys response");
+    }
+
+    #[tokio::test]
+    async fn test_parse_error_status_codes() {
+        let error_codes = [
+            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ];
+
+        for status in error_codes {
+            let response = mock_response(status, vec![]);
+            match parse_ohttp_keys_response(response).await {
+                Err(Error(InternalError::UnexpectedStatusCode(code))) => assert_eq!(code, status),
+                result => panic!(
+                    "Expected UnexpectedStatusCode error for status code: {}, got: {:?}",
+                    status, result
+                ),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_parse_invalid_keys() {
+        // Invalid OHTTP keys (not properly encoded)
+        let invalid_keys = vec![1, 2, 3, 4];
+
+        let response = mock_response(StatusCode::OK, invalid_keys);
+
+        assert!(
+            matches!(
+                parse_ohttp_keys_response(response).await,
+                Err(Error(InternalError::InvalidOhttpKeys(_)))
+            ),
+            "expected InvalidOhttpKeys error"
+        );
+    }
 }

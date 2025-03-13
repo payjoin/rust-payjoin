@@ -207,6 +207,8 @@ impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
 mod tests {
     use std::convert::TryFrom;
 
+    use bitcoin_uri::SerializeParams;
+
     use super::*;
 
     #[test]
@@ -269,10 +271,48 @@ mod tests {
 
     #[test]
     fn test_unsupported() {
-        assert!(!Uri::try_from("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX")
+        assert!(
+            !Uri::try_from("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX")
+                .unwrap()
+                .extras
+                .pj_is_supported(),
+            "Uri expected a failure with missing pj extras, but it succeeded"
+        );
+    }
+
+    #[test]
+    fn test_supported() {
+        assert!(
+            Uri::try_from(
+                "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
+                   &pjos=0&pj=HTTPS://EXAMPLE.COM/\
+                   %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC"
+            )
             .unwrap()
             .extras
-            .pj_is_supported());
+            .pj_is_supported(),
+            "Uri expected a success with a well formatted pj extras, but it failed"
+        );
+    }
+
+    #[test]
+    fn test_pj_param_unknown() {
+        use bitcoin_uri::de::DeserializationState as _;
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pjos=1&pj=HTTPS://EXAMPLE.COM/\
+                   %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
+        let pjuri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
+        let serialized_params = pjuri.extras.serialize_params();
+        let pjos_key = serialized_params.clone().next().expect("Missing pjos key").0;
+        let pj_key = serialized_params.clone().next().expect("Missing pj key").0;
+
+        let state = DeserializationState::default();
+
+        assert!(state.is_param_known(pjos_key), "The pjos key should match 'pjos', but it failed");
+        assert!(state.is_param_known(pj_key), "The pj key should match 'pj', but it failed");
+        assert!(
+            !state.is_param_known("unknown_param"),
+            "An unknown_param should not match 'pj' or 'pjos'"
+        );
     }
 
     #[test]

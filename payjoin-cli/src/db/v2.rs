@@ -1,44 +1,28 @@
 use bitcoincore_rpc::jsonrpc::serde_json;
-use payjoin::receive::v2::Receiver;
+use payjoin::receive::v2::PayjoinProposalState;
 use payjoin::send::v2::Sender;
-use sled::{IVec, Tree};
+use sled::Tree;
 use url::Url;
 
 use super::*;
 
 impl Database {
-    pub(crate) fn insert_recv_session(&self, session: Receiver) -> Result<()> {
+    pub(crate) fn get_recv_sessions(&self) -> Result<Vec<PayjoinProposalState>> {
         let recv_tree = self.0.open_tree("recv_sessions")?;
-        let key = &session.id();
-        let value = serde_json::to_string(&session).map_err(Error::Serialize)?;
-        recv_tree.insert(key.as_slice(), IVec::from(value.as_str()))?;
-        recv_tree.flush()?;
-        Ok(())
-    }
-
-    pub(crate) fn get_recv_sessions(&self) -> Result<Vec<Receiver>> {
-        let recv_tree = self.0.open_tree("recv_sessions")?;
-        let mut sessions = Vec::new();
+        let mut history = Vec::new();
         for item in recv_tree.iter() {
-            let (_, value) = item?;
-            let session: Receiver = serde_json::from_slice(&value).map_err(Error::Deserialize)?;
-            sessions.push(session);
+            let (_key, value) = item?;
+            let session: PayjoinProposalState =
+                serde_json::from_slice(&value).map_err(Error::Deserialize)?;
+            history.push(session);
         }
-        Ok(sessions)
+        Ok(history)
     }
 
     pub(crate) fn clear_recv_session(&self) -> Result<()> {
         let recv_tree: Tree = self.0.open_tree("recv_sessions")?;
         recv_tree.clear()?;
         recv_tree.flush()?;
-        Ok(())
-    }
-
-    pub(crate) fn insert_send_session(&self, session: &mut Sender, pj_url: &Url) -> Result<()> {
-        let send_tree: Tree = self.0.open_tree("send_sessions")?;
-        let value = serde_json::to_string(session).map_err(Error::Serialize)?;
-        send_tree.insert(pj_url.to_string(), IVec::from(value.as_str()))?;
-        send_tree.flush()?;
         Ok(())
     }
 

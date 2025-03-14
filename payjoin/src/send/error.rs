@@ -29,6 +29,7 @@ pub(crate) enum InternalBuildSenderError {
     ChangeIndexPointsAtPayee,
     InputWeight(crate::psbt::InputWeightError),
     AddressType(crate::psbt::AddressTypeError),
+    FailedToPersistSender,
 }
 
 impl From<InternalBuildSenderError> for BuildSenderError {
@@ -59,6 +60,7 @@ impl fmt::Display for BuildSenderError {
             ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
             AddressType(e) => write!(f, "can not determine input address type: {}", e),
             InputWeight(e) => write!(f, "can not determine expected input weight: {}", e),
+            FailedToPersistSender => write!(f, "failed to persist sender"),
         }
     }
 }
@@ -81,6 +83,7 @@ impl std::error::Error for BuildSenderError {
             ChangeIndexPointsAtPayee => None,
             AddressType(error) => Some(error),
             InputWeight(error) => Some(error),
+            FailedToPersistSender => None,
         }
     }
 }

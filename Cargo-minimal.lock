@@ -408,9 +408,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.7.1"
+version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8318a53db07bb3f8dca91a600466bdb3f2eaadeedfdbcf02e1accbad9271ba50"
+checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
 name = "bzip2"
@@ -1473,8 +1473,7 @@ dependencies = [
 [[package]]
 name = "ohttp-relay"
 version = "0.0.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f8e8aef13b8327b680aaaca807aa11ba5979fc5858203e7b77c68128ede61a2"
+source = "git+https://github.com/payjoin/ohttp-relay.git?rev=b8153e5c290560be58e1395a8e50ea610e146f6d#b8153e5c290560be58e1395a8e50ea610e146f6d"
 dependencies = [
  "futures",
  "http",
@@ -1483,7 +1482,6 @@ dependencies = [
  "hyper-rustls",
  "hyper-tungstenite",
  "hyper-util",
- "once_cell",
  "rustls 0.22.4",
  "tokio",
  "tokio-tungstenite",
@@ -1686,6 +1684,7 @@ dependencies = [
  "payjoin-directory",
  "rcgen",
  "reqwest",
+ "rustls 0.22.4",
  "testcontainers",
  "testcontainers-modules",
  "tokio",

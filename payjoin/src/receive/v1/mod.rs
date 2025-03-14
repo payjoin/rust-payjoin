@@ -272,9 +272,9 @@ impl WantsOutputs {
     pub fn substitute_receiver_script(
         self,
         output_script: &Script,
-    ) -> Result<WantsOutputs, OutputSubstitutionError> {
+    ) -> Result<Self, OutputSubstitutionError> {
         let output_value = self.original_psbt.unsigned_tx.output[self.change_vout].value;
-        let outputs = vec![TxOut { value: output_value, script_pubkey: output_script.into() }];
+        let outputs = [TxOut { value: output_value, script_pubkey: output_script.into() }];
         self.replace_receiver_outputs(outputs, output_script)
     }
 
@@ -285,27 +285,27 @@ impl WantsOutputs {
     /// receiver needs to pay for additional miner fees (e.g. in the case of adding many outputs).
     pub fn replace_receiver_outputs(
         self,
-        replacement_outputs: Vec<TxOut>,
+        replacement_outputs: impl IntoIterator<Item = TxOut>,
         drain_script: &Script,
-    ) -> Result<WantsOutputs, OutputSubstitutionError> {
+    ) -> Result<Self, OutputSubstitutionError> {
         let mut payjoin_psbt = self.original_psbt.clone();
         let mut outputs = vec![];
-        let mut replacement_outputs = replacement_outputs.clone();
+        let mut replacement_outputs_vec: Vec<TxOut> = replacement_outputs.into_iter().collect();
         let mut rng = rand::thread_rng();
         // Substitute the existing receiver outputs, keeping the sender/receiver output ordering
         for (i, original_output) in self.original_psbt.unsigned_tx.output.iter().enumerate() {
             if self.owned_vouts.contains(&i) {
                 // Receiver output: substitute in-place a provided replacement output
-                if replacement_outputs.is_empty() {
+                if replacement_outputs_vec.is_empty() {
                     return Err(InternalOutputSubstitutionError::NotEnoughOutputs.into());
                 }
-                match replacement_outputs
+                let maybe_replacement = replacement_outputs_vec
                     .iter()
-                    .position(|txo| txo.script_pubkey == original_output.script_pubkey)
-                {
+                    .position(|txo| txo.script_pubkey == original_output.script_pubkey);
+                match maybe_replacement {
                     // Select an output with the same address if one was provided
                     Some(pos) => {
-                        let txo = replacement_outputs.swap_remove(pos);
+                        let txo = replacement_outputs_vec.swap_remove(pos);
                         if self.params.disable_output_substitution
                             && txo.value < original_output.value
                         {
@@ -328,8 +328,8 @@ impl WantsOutputs {
                                 .into(),
                             );
                         }
-                        let index = rng.gen_range(0..replacement_outputs.len());
-                        let txo = replacement_outputs.swap_remove(index);
+                        let index = rng.gen_range(0..replacement_outputs_vec.len());
+                        let txo = replacement_outputs_vec.swap_remove(index);
                         outputs.push(txo);
                     }
                 }
@@ -339,13 +339,13 @@ impl WantsOutputs {
             }
         }
         // Insert all remaining outputs at random indices for privacy
-        interleave_shuffle(&mut outputs, &mut replacement_outputs, &mut rng);
+        interleave_shuffle(&mut outputs, &mut replacement_outputs_vec, &mut rng);
         // Identify the receiver output that will be used for change and fees
         let change_vout = outputs.iter().position(|txo| txo.script_pubkey == *drain_script);
         // Update the payjoin PSBT outputs
         payjoin_psbt.outputs = vec![Default::default(); outputs.len()];
         payjoin_psbt.unsigned_tx.output = outputs;
-        Ok(WantsOutputs {
+        Ok(Self {
             original_psbt: self.original_psbt,
             payjoin_psbt,
             params: self.params,
@@ -370,7 +370,6 @@ impl WantsOutputs {
 /// maintaining the relative order in `original` but randomly inserting elements from `new`.
 /// The combined result replaces the contents of `original`.
 fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [T], rng: &mut R) {
-    // Shuffle the substitute_outputs
     new.shuffle(rng);
     // Create a new vector to store the combined result
     let mut combined = Vec::with_capacity(original.len() + new.len());

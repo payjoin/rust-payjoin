@@ -7,14 +7,17 @@ use std::time::Duration;
 use bitcoin::{Amount, Psbt};
 use bitcoind::bitcoincore_rpc::json::AddressType;
 use bitcoind::bitcoincore_rpc::{self, RpcApi};
-use http::{StatusCode, Uri};
+use http::StatusCode;
 use log::{log_enabled, Level};
 use ohttp::hpke::{Aead, Kdf, Kem};
 use ohttp::{KeyId, SymmetricSuite};
 use once_cell::sync::{Lazy, OnceCell};
 use payjoin::io::{fetch_ohttp_keys_with_cert, Error as IOError};
 use payjoin::OhttpKeys;
+use rcgen::Certificate;
 use reqwest::{Client, ClientBuilder};
+use rustls::pki_types::CertificateDer;
+use rustls::RootCertStore;
 use testcontainers::{clients, Container};
 use testcontainers_modules::redis::{Redis, REDIS_PORT};
 use tokio::task::JoinHandle;
@@ -39,7 +42,7 @@ pub fn init_tracing() {
 }
 
 pub struct TestServices {
-    cert_key: (Vec<u8>, Vec<u8>),
+    cert: Certificate,
     /// redis is an implicit dependency of the directory service
     #[allow(dead_code)]
     redis: (u16, Container<'static, Redis>),
@@ -50,15 +53,25 @@ pub struct TestServices {
 
 impl TestServices {
     pub async fn initialize() -> Result<Self, BoxSendSyncError> {
-        let cert_key = local_cert_key();
+        // TODO add a UUID, and cleanup guard to delete after on successful run
+        let cert = local_cert_key();
+        let cert_der = cert.serialize_der().expect("Failed to serialize cert");
+        let key_der = cert.serialize_private_key_der();
+        let cert_key = (cert_der.clone(), key_der);
+
+        let mut root_store = RootCertStore::empty();
+        root_store.add(CertificateDer::from(cert.serialize_der().unwrap())).unwrap();
+
         let redis = init_redis();
         let db_host = format!("127.0.0.1:{}", redis.0);
         let directory = init_directory(db_host, cert_key.clone()).await?;
-        let gateway_origin = Uri::from_str(&format!("https://localhost:{}", directory.0))?;
-        let ohttp_relay = ohttp_relay::listen_tcp_on_free_port(gateway_origin).await?;
-        let http_agent: Arc<Client> = Arc::new(http_agent(cert_key.0.clone())?);
+        let gateway_origin =
+            ohttp_relay::GatewayUri::from_str(&format!("https://localhost:{}", directory.0))?;
+        let ohttp_relay = ohttp_relay::listen_tcp_on_free_port(gateway_origin, root_store).await?;
+        let http_agent: Arc<Client> = Arc::new(http_agent(cert_der)?);
+
         Ok(Self {
-            cert_key,
+            cert,
             redis,
             directory: (directory.0, Some(directory.1)),
             ohttp_relay: (ohttp_relay.0, Some(ohttp_relay.1)),
@@ -66,7 +79,7 @@ impl TestServices {
         })
     }
 
-    pub fn cert(&self) -> Vec<u8> { self.cert_key.0.clone() }
+    pub fn cert(&self) -> Vec<u8> { self.cert.serialize_der().expect("Failed to serialize cert") }
 
     pub fn directory_url(&self) -> Url {
         Url::parse(&format!("https://localhost:{}", self.directory.0)).expect("invalid URL")
@@ -122,13 +135,9 @@ pub async fn init_directory(
 }
 
 /// generate or get a DER encoded localhost cert and key.
-pub fn local_cert_key() -> (Vec<u8>, Vec<u8>) {
-    let cert =
-        rcgen::generate_simple_self_signed(vec!["0.0.0.0".to_string(), "localhost".to_string()])
-            .expect("Failed to generate cert");
-    let cert_der = cert.serialize_der().expect("Failed to serialize cert");
-    let key_der = cert.serialize_private_key_der();
-    (cert_der, key_der)
+pub fn local_cert_key() -> rcgen::Certificate {
+    rcgen::generate_simple_self_signed(vec!["0.0.0.0".to_string(), "localhost".to_string()])
+        .expect("Failed to generate cert")
 }
 
 pub fn init_bitcoind() -> Result<bitcoind::BitcoinD, BoxError> {

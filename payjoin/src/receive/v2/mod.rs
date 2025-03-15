@@ -533,7 +533,11 @@ impl PayjoinProposal {
             target_resource.as_str(),
             Some(&body),
         )?;
-        let url = ohttp_relay.into_url().map_err(InternalSessionError::ParseUrl)?;
+
+        let relay_base = ohttp_relay.into_url().map_err(InternalSessionError::ParseUrl)?;
+        let url = relay_base
+            .join(self.context.directory.as_str())
+            .map_err(|e| InternalSessionError::ParseUrl(crate::into_url::Error::ParseError(e)))?;
         let req = Request::new_v2(&url, &body);
         Ok((req, ctx))
     }

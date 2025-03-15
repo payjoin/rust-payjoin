@@ -189,8 +189,6 @@ async fn serve_payjoin_directory(
             handle_ohttp_gateway(body, pool, ohttp).await,
         (Method::GET, ["", ".well-known", "ohttp-gateway"]) =>
             handle_ohttp_gateway_get(&ohttp, &query).await,
-        (Method::POST, ["", ""]) => handle_ohttp_gateway(body, pool, ohttp).await,
-        (Method::GET, ["", "ohttp-keys"]) => get_ohttp_keys(&ohttp).await,
         (Method::POST, ["", id]) => post_fallback_v1(id, query, body, pool).await,
         (Method::GET, ["", "health"]) => health_check().await,
         _ => Ok(not_found()),

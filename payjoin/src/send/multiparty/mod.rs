@@ -89,8 +89,7 @@ fn serialize_v2_body(
         fee_contribution,
         min_fee_rate,
         "2",
-    )
-    .map_err(InternalCreateRequestError::Url)?;
+    );
     append_optimisitic_merge_query_param(&mut url);
     let base64 = psbt.to_string();
     Ok(format!("{}\n{}", base64, url.query().unwrap_or_default()).into_bytes())
@@ -244,11 +243,11 @@ mod test {
     #[test]
     fn test_optimistic_merge_query_param() -> Result<(), BoxError> {
         let mut url =
-            serialize_url(Url::parse("http://localhost")?, false, None, FeeRate::ZERO, "2")?;
+            serialize_url(Url::parse("http://localhost")?, false, None, FeeRate::ZERO, "2");
         append_optimisitic_merge_query_param(&mut url);
         assert_eq!(url, Url::parse("http://localhost?v=2&optimisticmerge=true")?);
 
-        let url = serialize_url(Url::parse("http://localhost")?, false, None, FeeRate::ZERO, "2")?;
+        let url = serialize_url(Url::parse("http://localhost")?, false, None, FeeRate::ZERO, "2");
         assert_eq!(url, Url::parse("http://localhost?v=2")?);
 
         Ok(())

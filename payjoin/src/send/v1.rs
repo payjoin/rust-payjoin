@@ -227,16 +227,16 @@ pub struct Sender {
 
 impl Sender {
     /// Extract serialized V1 Request and Context from a Payjoin Proposal
-    pub fn extract_v1(&self) -> Result<(Request, V1Context), url::ParseError> {
+    pub fn extract_v1(&self) -> (Request, V1Context) {
         let url = serialize_url(
             self.endpoint.clone(),
             self.disable_output_substitution,
             self.fee_contribution,
             self.min_fee_rate,
             "1", // payjoin version
-        )?;
+        );
         let body = self.psbt.to_string().as_bytes().to_vec();
-        Ok((
+        (
             Request::new_v1(&url, &body),
             V1Context {
                 psbt_context: PsbtContext {
@@ -247,7 +247,7 @@ impl Sender {
                     min_fee_rate: self.min_fee_rate,
                 },
             },
-        ))
+        )
     }
 
     pub fn endpoint(&self) -> &Url { &self.endpoint }

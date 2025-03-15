@@ -206,7 +206,7 @@ impl App {
                 }
             }
             Err(_) => {
-                let (req, v1_ctx) = req_ctx.extract_v1()?;
+                let (req, v1_ctx) = req_ctx.extract_v1();
                 println!("Posting Original PSBT Payload request...");
                 let response = post_request(req).await?;
                 println!("Sent fallback transaction");

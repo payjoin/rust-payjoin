@@ -418,7 +418,7 @@ fn serialize_url(
     fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
     version: &str,
-) -> Result<Url, url::ParseError> {
+) -> Url {
     let mut url = endpoint;
     url.query_pairs_mut().append_pair("v", version);
     if disable_output_substitution {
@@ -434,7 +434,7 @@ fn serialize_url(
         let float_fee_rate = min_fee_rate.to_sat_per_kwu() as f32 / 250.0_f32;
         url.query_pairs_mut().append_pair("minfeerate", &float_fee_rate.to_string());
     }
-    Ok(url)
+    url
 }
 
 #[cfg(test)]
@@ -641,12 +641,10 @@ mod test {
 
     #[test]
     fn test_disable_output_substitution_query_param() -> Result<(), BoxError> {
-        let url = serialize_url(Url::parse("http://localhost")?, true, None, FeeRate::ZERO, "2")
-            .expect("Failed to serialize url");
+        let url = serialize_url(Url::parse("http://localhost")?, true, None, FeeRate::ZERO, "2");
         assert_eq!(url, Url::parse("http://localhost?v=2&disableoutputsubstitution=true")?);
 
-        let url = serialize_url(Url::parse("http://localhost")?, false, None, FeeRate::ZERO, "2")
-            .expect("Failed to serialize url");
+        let url = serialize_url(Url::parse("http://localhost")?, false, None, FeeRate::ZERO, "2");
         assert_eq!(url, Url::parse("http://localhost?v=2")?);
         Ok(())
     }

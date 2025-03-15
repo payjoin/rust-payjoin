@@ -1473,8 +1473,10 @@ dependencies = [
 [[package]]
 name = "ohttp-relay"
 version = "0.0.9"
-source = "git+https://github.com/payjoin/ohttp-relay.git?rev=b8153e5c290560be58e1395a8e50ea610e146f6d#b8153e5c290560be58e1395a8e50ea610e146f6d"
+source = "git+https://github.com/payjoin/ohttp-relay.git?rev=refs/pull/58/head#93ed4281d14fba6b7c219af01876dfde363fe292"
 dependencies = [
+ "byteorder",
+ "bytes",
  "futures",
  "http",
  "http-body-util",

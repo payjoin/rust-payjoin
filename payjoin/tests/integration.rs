@@ -258,7 +258,7 @@ mod integration {
                 // Test that an expired pj_url errors
                 let expired_req_ctx = SenderBuilder::new(psbt, expired_receiver.pj_uri())
                     .build_non_incentivizing(FeeRate::BROADCAST_MIN)?;
-                match expired_req_ctx.extract_v2(directory.to_owned()) {
+                match expired_req_ctx.extract_v2(ohttp_relay) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
                     _ => panic!("Expired send session should error"),
@@ -727,6 +727,7 @@ mod integration {
 
                 services.wait_for_services_ready().await?;
                 let directory = services.directory_url();
+                let ohttp_relay = services.ohttp_relay_url();
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let agent = services.http_agent();
 
@@ -747,7 +748,7 @@ mod integration {
                     let sender_ctx = MultiPartySenderBuilder::new(psbt.clone(), pj_uri.clone())
                         .build_recommended(FeeRate::BROADCAST_MIN)?;
                     let (Request { url, body, content_type, .. }, send_post_ctx) =
-                        sender_ctx.extract_v2(directory.to_owned())?;
+                        sender_ctx.extract_v2(ohttp_relay.to_owned())?;
                     let response = agent
                         .post(url.clone())
                         .header("Content-Type", content_type)
@@ -772,7 +773,7 @@ mod integration {
                     payjoin::receive::multiparty::UncheckedProposalBuilder::new();
                 for sender_sesssion in inner_sender_test_sessions.iter() {
                     let mut receiver_session = sender_sesssion.receiver_session.clone();
-                    let (req, reciever_ctx) = receiver_session.extract_req(&directory)?;
+                    let (req, reciever_ctx) = receiver_session.extract_req(&ohttp_relay)?;
                     let response = agent
                         .post(req.url)
                         .header("Content-Type", req.content_type)
@@ -793,7 +794,7 @@ mod integration {
 
                 // Send the payjoin proposals to the senders
                 for mut proposal in multi_sender_payjoin_proposal.sender_iter() {
-                    let (req, ctx) = proposal.extract_v2_req(&directory)?;
+                    let (req, ctx) = proposal.extract_v2_req(&ohttp_relay)?;
                     let response = agent
                         .post(req.url)
                         .header("Content-Type", req.content_type)
@@ -811,7 +812,7 @@ mod integration {
                 for (i, sender_sesssion) in inner_sender_test_sessions.iter().enumerate() {
                     let sender_get_ctx = &sender_sesssion.sender_get_ctx;
                     let (Request { url, body, content_type, .. }, ohttp_response_ctx) =
-                        sender_get_ctx.extract_req(directory.to_owned())?;
+                        sender_get_ctx.extract_req(ohttp_relay.to_owned())?;
                     let response = agent
                         .post(url.clone())
                         .header("Content-Type", content_type)
@@ -824,7 +825,7 @@ mod integration {
                         |psbt| finalize_psbt(&senders[i], psbt),
                     )?;
                     let (Request { url, body, content_type, .. }, ohttp_response_ctx) =
-                        finalize_ctx.extract_req(directory.to_owned())?;
+                        finalize_ctx.extract_req(ohttp_relay.to_owned())?;
                     let response = agent
                         .post(url.clone())
                         .header("Content-Type", content_type)
@@ -846,7 +847,7 @@ mod integration {
                     payjoin::receive::multiparty::FinalizedProposal::new();
                 for sender_sesssion in inner_sender_test_sessions.iter() {
                     let mut receiver_session = sender_sesssion.receiver_session.clone();
-                    let (req, reciever_ctx) = receiver_session.extract_req(&directory)?;
+                    let (req, reciever_ctx) = receiver_session.extract_req(&ohttp_relay)?;
                     let response = agent
                         .post(req.url)
                         .header("Content-Type", req.content_type)

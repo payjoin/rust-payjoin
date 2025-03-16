@@ -67,3 +67,7 @@ pub use uri::{PjParseError, PjUri, Uri, UriExt};
 pub use url::{ParseError, Url};
 #[cfg(feature = "_core")]
 pub(crate) mod error_codes;
+
+/// 4M block size limit with base64 encoding overhead => maximum reasonable size of content-length
+/// 4_000_000 * 4 / 3 fits in u32
+pub const MAX_CONTENT_LENGTH: usize = 4_000_000 * 4 / 3;

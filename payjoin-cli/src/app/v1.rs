@@ -18,7 +18,7 @@ use payjoin::receive::v1::{PayjoinProposal, UncheckedProposal};
 use payjoin::receive::ImplementationError;
 use payjoin::receive::ReplyableError::{self, Implementation, V1};
 use payjoin::send::v1::SenderBuilder;
-use payjoin::{Uri, UriExt};
+use payjoin::{Uri, UriExt, MAX_CONTENT_LENGTH};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
@@ -89,12 +89,15 @@ impl AppTrait for App {
             "Sent fallback transaction hex: {:#}",
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
         );
-        let psbt = ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()).map_err(
-            |e| {
-                log::debug!("Error processing response: {:?}", e);
-                anyhow!("Failed to process response {}", e)
-            },
-        )?;
+        let response_bytes = response.bytes().await?;
+        if response_bytes.len() > MAX_CONTENT_LENGTH {
+            return Err(anyhow!("Response bytes exceeded the limit of {MAX_CONTENT_LENGTH} bytes"));
+        }
+
+        let psbt = ctx.process_response(&mut response_bytes.to_vec().as_slice()).map_err(|e| {
+            log::debug!("Error processing response: {:?}", e);
+            anyhow!("Failed to process response {}", e)
+        })?;
 
         self.process_pj_response(psbt)?;
         Ok(())

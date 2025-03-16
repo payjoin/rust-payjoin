@@ -21,6 +21,8 @@
 //! [`bitmask-core`](https://github.com/diba-io/bitmask-core) BDK integration. Bring your own
 //! wallet and http client.
 
+use std::io::{BufRead, BufReader};
+
 use bitcoin::psbt::Psbt;
 use bitcoin::{FeeRate, ScriptBuf, Weight};
 use error::{BuildSenderError, InternalBuildSenderError};
@@ -30,7 +32,7 @@ use super::*;
 pub use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
 use crate::request::Request;
-pub use crate::PjUri;
+use crate::{PjUri, MAX_CONTENT_LENGTH};
 
 /// A builder to construct the properties of a `Sender`.
 #[derive(Clone)]
@@ -277,9 +279,15 @@ impl V1Context {
         self,
         response: &mut impl std::io::Read,
     ) -> Result<Psbt, ResponseError> {
-        let mut res_str = String::new();
-        response.read_to_string(&mut res_str).map_err(InternalValidationError::Io)?;
-        let proposal = Psbt::from_str(&res_str).map_err(|_| ResponseError::parse(&res_str))?;
+        let mut buf_reader = BufReader::with_capacity(MAX_CONTENT_LENGTH + 1, response);
+        let buffer = buf_reader.fill_buf().map_err(InternalValidationError::Io)?;
+
+        if buffer.len() > MAX_CONTENT_LENGTH {
+            return Err(ResponseError::from(InternalValidationError::ContentTooLarge));
+        }
+
+        let res_str = std::str::from_utf8(buffer).map_err(|_| InternalValidationError::Parse)?;
+        let proposal = Psbt::from_str(res_str).map_err(|_| ResponseError::parse(res_str))?;
         self.psbt_context.process_proposal(proposal).map_err(Into::into)
     }
 }
@@ -289,7 +297,7 @@ mod test {
     use bitcoin::FeeRate;
     use payjoin_test_utils::{BoxError, PARSED_ORIGINAL_PSBT};
 
-    use super::SenderBuilder;
+    use super::*;
     use crate::error_codes::ErrorCode;
     use crate::send::error::{ResponseError, WellKnownError};
     use crate::send::test::create_psbt_context;
@@ -297,6 +305,12 @@ mod test {
 
     const PJ_URI: &str =
         "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/";
+
+    /// From the BIP-174 test vector
+    const INVALID_PSBT: &str = "AgAAAAEmgXE3Ht/yhek3re6ks3t4AAwFZsuzrWRkFxPKQhcb9gAAAABqRzBEAiBwsiRRI+a/R01gxbUMBD1MaRpdJDXwmjSnZiqdwlF5CgIgATKcqdrPKAvfMHQOwDkEIkIsgctFg5RXrrdvwS7dlbMBIQJlfRGNM1e44PTCzUbbezn22cONmnCry5st5dyNv+TOMf7///8C09/1BQAAAAAZdqkU0MWZA8W6woaHYOkP1SGkZlqnZSCIrADh9QUAAAAAF6kUNUXm4zuDLEcFDyTT7rk8nAOUi8eHsy4TAA&#61;&#61;";
+
+    /// From the BIP-78 test vector
+    const PJ_PROPOSAL_PSBT: &str = "cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAQEgqBvXBQAAAAAXqRTeTh6QYcpZE1sDWtXm1HmQRUNU0IcAAQEggIQeAAAAAAAXqRTI8sv5ymFHLIjkZNRrNXSEXZHY1YcBBxcWABRfgGZV5ZJMkgTC1RvlOU9L+e2iEAEIawJHMEQCIGe7e0DfJaVPRYEKWxddL2Pr0G37BoKz0lyNa02O2/tWAiB7ZVgBoF4s8MHocYWWmo4Q1cyV2wl7MX0azlqa8NBENAEhAmXWPPW0G3yE3HajBOb7gO7iKzHSmZ0o0w0iONowcV+tAAAA";
 
     fn create_v1_context() -> super::V1Context {
         let psbt_context = create_psbt_context().expect("failed to create context");
@@ -343,6 +357,57 @@ mod test {
         match ctx.process_response(&mut invalid_json_error.as_bytes()) {
             Err(ResponseError::Validation(_)) => (),
             _ => panic!("Expected unrecognized JSON error"),
+        }
+    }
+
+    #[test]
+    fn process_response_valid() {
+        let mut cursor = std::io::Cursor::new(PJ_PROPOSAL_PSBT.as_bytes());
+
+        let ctx = create_v1_context();
+        let response = ctx.process_response(&mut cursor);
+        assert!(response.is_ok())
+    }
+
+    #[test]
+    fn process_response_invalid_psbt() {
+        let mut cursor = std::io::Cursor::new(INVALID_PSBT.as_bytes());
+
+        let ctx = create_v1_context();
+        let response = ctx.process_response(&mut cursor);
+        match response {
+            Ok(_) => panic!("Invalid PSBT should have caused an error"),
+            Err(error) => match error {
+                ResponseError::Validation(e) => {
+                    assert_eq!(
+                        e.to_string(),
+                        ValidationError::from(InternalValidationError::Parse).to_string()
+                    );
+                }
+                _ => panic!("Unexpected error type"),
+            },
+        }
+    }
+
+    #[test]
+    fn process_response_invalid_utf8() {
+        // In UTF-8, 0xF0 represents the start of a 4-byte sequence, so 0xF0 by itself is invalid
+        let invalid_utf8 = [0xF0];
+        let mut cursor = std::io::Cursor::new(invalid_utf8);
+
+        let ctx = create_v1_context();
+        let response = ctx.process_response(&mut cursor);
+        match response {
+            Ok(_) => panic!("Invalid UTF-8 should have caused an error"),
+            Err(error) => match error {
+                ResponseError::Validation(e) => {
+                    assert_eq!(
+                        e.to_string(),
+                        ValidationError::from(InternalValidationError::Parse).to_string()
+                    );
+                }
+                _ => panic!("Unexpected error type"),
+            },
         }
     }
 }

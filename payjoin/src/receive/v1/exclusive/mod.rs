@@ -4,10 +4,8 @@ pub use error::RequestError;
 
 use super::*;
 use crate::into_url::IntoUrl;
-use crate::Version;
+use crate::{Version, MAX_CONTENT_LENGTH};
 
-/// 4_000_000 * 4 / 3 fits in u32
-const MAX_CONTENT_LENGTH: usize = 4_000_000 * 4 / 3;
 const SUPPORTED_VERSIONS: &[Version] = &[Version::One];
 
 pub trait Headers {

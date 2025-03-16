@@ -1689,6 +1689,7 @@ dependencies = [
  "testcontainers-modules",
  "tokio",
  "tracing",
+ "tracing-log",
  "tracing-subscriber",
  "url",
 ]

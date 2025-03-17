@@ -37,10 +37,6 @@ pub(crate) enum InternalSessionError {
     UnexpectedStatusCode(http::StatusCode),
 }
 
-impl From<crate::into_url::Error> for SessionError {
-    fn from(e: crate::into_url::Error) -> Self { InternalSessionError::ParseUrl(e).into() }
-}
-
 impl From<OhttpEncapsulationError> for Error {
     fn from(e: OhttpEncapsulationError) -> Self {
         InternalSessionError::OhttpEncapsulation(e).into()

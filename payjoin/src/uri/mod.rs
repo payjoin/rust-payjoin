@@ -127,11 +127,12 @@ impl bitcoin_uri::SerializeParams for &PayjoinExtras {
             .replacen(scheme, &scheme.to_uppercase(), 1)
             .replacen(host, &host.to_uppercase(), 1);
 
-        vec![
-            ("pjos", if self.disable_output_substitution { "0" } else { "1" }.to_string()),
-            ("pj", endpoint_str),
-        ]
-        .into_iter()
+        let mut params = Vec::with_capacity(2);
+        if self.disable_output_substitution {
+            params.push(("pjos", String::from("0")));
+        }
+        params.push(("pj", endpoint_str));
+        params.into_iter()
     }
 }
 
@@ -293,8 +294,8 @@ mod tests {
 
         pjuri.extras.disable_output_substitution = false;
         assert!(
-            pjuri.to_string().contains(expected_is_enabled),
-            "Pj uri should contain param: {}, but it did not",
+            !pjuri.to_string().contains(expected_is_enabled),
+            "Pj uri should elide param: {}, but it did not",
             expected_is_enabled
         );
     }

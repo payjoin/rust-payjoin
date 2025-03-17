@@ -40,6 +40,21 @@ pub(crate) struct SessionContext {
     e: Option<HpkePublicKey>,
 }
 
+impl SessionContext {
+    fn full_relay_url(&self, ohttp_relay: impl IntoUrl) -> Result<Url, InternalSessionError> {
+        let relay_base = ohttp_relay.into_url().map_err(InternalSessionError::ParseUrl)?;
+
+        // Only reveal scheme and authority to the relay
+        let directory_base =
+            self.directory.join("/").map_err(|e| InternalSessionError::ParseUrl(e.into()))?;
+
+        // Append that information as a path to the relay URL
+        relay_base
+            .join(&format!("/{}", directory_base))
+            .map_err(|e| InternalSessionError::ParseUrl(e.into()))
+    }
+}
+
 fn deserialize_address_assume_checked<'de, D>(deserializer: D) -> Result<Address, D::Error>
 where
     D: Deserializer<'de>,
@@ -104,8 +119,7 @@ impl Receiver {
         }
         let (body, ohttp_ctx) =
             self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulation)?;
-        let url = ohttp_relay.into_url().map_err(InternalSessionError::ParseUrl)?;
-        let req = Request::new_v2(&url, &body);
+        let req = Request::new_v2(&self.context.full_relay_url(ohttp_relay)?, &body);
         Ok((req, ohttp_ctx))
     }
 
@@ -273,8 +287,7 @@ impl UncheckedProposal {
             Some(err.to_json().as_bytes()),
         )
         .map_err(InternalSessionError::OhttpEncapsulation)?;
-        let url = ohttp_relay.into_url().map_err(InternalSessionError::ParseUrl)?;
-        let req = Request::new_v2(&url, &body);
+        let req = Request::new_v2(&self.context.full_relay_url(ohttp_relay)?, &body);
         Ok((req, ohttp_ctx))
     }
 
@@ -533,8 +546,8 @@ impl PayjoinProposal {
             target_resource.as_str(),
             Some(&body),
         )?;
-        let url = ohttp_relay.into_url().map_err(InternalSessionError::ParseUrl)?;
-        let req = Request::new_v2(&url, &body);
+
+        let req = Request::new_v2(&self.context.full_relay_url(ohttp_relay)?, &body);
         Ok((req, ctx))
     }
 

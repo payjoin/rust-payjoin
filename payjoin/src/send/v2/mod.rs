@@ -210,7 +210,11 @@ pub(crate) fn extract_request(
     let (body, ohttp_ctx) = ohttp_encapsulate(ohttp_keys, "POST", url.as_str(), Some(&body))
         .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
     log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
-    let request = Request::new_v2(&ohttp_relay, &body);
+    let directory_base = url.join("/").map_err(|e| InternalCreateRequestError::Url(e.into()))?;
+    let full_ohttp_relay = ohttp_relay
+        .join(&format!("/{}", directory_base))
+        .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
+    let request = Request::new_v2(&full_ohttp_relay, &body);
     Ok((request, ohttp_ctx))
 }
 
@@ -407,7 +411,10 @@ mod test {
         let result = sender.extract_v2(ohttp_relay);
         let (request, context) = result.expect("Result should be ok");
         assert!(!request.body.is_empty(), "Request body should not be empty");
-        assert_eq!(request.url, EXAMPLE_URL.clone());
+        assert_eq!(
+            request.url.to_string(),
+            format!("{}{}", EXAMPLE_URL.clone(), sender.v1.endpoint.join("/")?)
+        );
         assert_eq!(context.endpoint, sender.v1.endpoint);
         assert_eq!(context.psbt_ctx.original_psbt, sender.v1.psbt);
         Ok(())

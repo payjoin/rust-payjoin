@@ -4,8 +4,8 @@ FROM nixos/nix:2.20.5 AS builder
 # Set ohttp-relay branch or tag to build from
 ARG BRANCH=v0.0.9
 
-# Clone our source and switch to cloned directory
-RUN git clone --branch ${BRANCH} https://github.com/payjoin/ohttp-relay.git /tmp/build
+# Copy our source and setup our working directory
+COPY . /tmp/build
 WORKDIR /tmp/build
 
 # Build our Nix environment

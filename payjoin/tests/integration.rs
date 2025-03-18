@@ -12,7 +12,7 @@ mod integration {
     use payjoin::receive::v1::build_v1_pj_uri;
     use payjoin::receive::ReplyableError::Implementation;
     use payjoin::receive::{ImplementationError, InputPair};
-    use payjoin::{PjUri, Request, Uri};
+    use payjoin::{OutputSubstitution, PjUri, Request, Uri};
     use payjoin_test_utils::{init_bitcoind_sender_receiver, init_tracing, BoxError};
 
     const EXAMPLE_URL: &str = "https://example.com";
@@ -72,7 +72,8 @@ mod integration {
         ) -> Result<(), BoxError> {
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let mut pj_uri = build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, false)?;
+            let mut pj_uri =
+                build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
             pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************
@@ -136,7 +137,8 @@ mod integration {
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let mut pj_uri = build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, false)?;
+            let mut pj_uri =
+                build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
             pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************
@@ -350,7 +352,6 @@ mod integration {
                     .process_res(response.bytes().await?.to_vec().as_slice(), ctx)?
                     .expect("proposal should exist");
                 let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None)?;
-                assert!(!payjoin_proposal.is_output_substitution_disabled());
                 let (req, ctx) = payjoin_proposal.extract_v2_req(&ohttp_relay)?;
                 let response = agent
                     .post(req.url)
@@ -402,7 +403,8 @@ mod integration {
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let mut pj_uri = build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, false)?;
+            let mut pj_uri =
+                build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
             pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************
@@ -529,7 +531,6 @@ mod integration {
                     let mut payjoin_proposal =
                         handle_directory_proposal(&receiver_clone, proposal, None)
                             .map_err(|e| e.to_string())?;
-                    assert!(payjoin_proposal.is_output_substitution_disabled());
                     // Respond with payjoin psbt within the time window the sender is willing to wait
                     // this response would be returned as http response to the sender
                     let (req, ctx) = payjoin_proposal.extract_v2_req(&ohttp_relay)?;
@@ -988,7 +989,8 @@ mod integration {
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let mut pj_uri = build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, false)?;
+            let mut pj_uri =
+                build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
             pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************
@@ -1065,7 +1067,8 @@ mod integration {
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let mut pj_uri = build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, false)?;
+            let mut pj_uri =
+                build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
             pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************
@@ -1186,7 +1189,6 @@ mod integration {
         )?;
         let proposal =
             handle_proposal(proposal, receiver, custom_outputs, drain_script, custom_inputs)?;
-        assert!(!proposal.is_output_substitution_disabled());
         let psbt = proposal.psbt();
         tracing::debug!("Receiver's Payjoin proposal PSBT: {:#?}", &psbt);
         Ok(psbt.to_string())

@@ -72,8 +72,8 @@ class TestPayjoin(unittest.TestCase):
         receiver_address = self.receiver.getnewaddress()
         print(f"\nreceiver_address: {receiver_address}")
 
-        self.sender.generatetoaddress(10, str(sender_address))
-        self.receiver.generatetoaddress(10, str(receiver_address))
+        self.sender.generatetoaddress(101, str(sender_address))
+        self.receiver.generatetoaddress(101, str(receiver_address))
 
         # Fetch and print the balance of the sender address
         sender_balance = self.sender.getbalance()

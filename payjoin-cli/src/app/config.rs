@@ -266,6 +266,7 @@ fn handle_subcommands(builder: Builder, matches: &ArgMatches) -> Result<Builder,
         }
         #[cfg(feature = "v2")]
         Some(("resume", _)) => Ok(builder),
+        Some(("fetch-keys", _)) => Ok(builder),
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
 }

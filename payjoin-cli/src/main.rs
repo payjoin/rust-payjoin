@@ -17,6 +17,24 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     let matches = cli();
+    
+    // Handle fetch-keys before creating App
+    if let Some(("fetch-keys", sub_matches)) = matches.subcommand() {
+        let ohttp_relay = sub_matches
+            .get_one::<Url>("ohttp_relay")
+            .map(|u| u.as_str())
+            .unwrap_or("https://pj.bobspacebkk.com");
+        let pj_directory = sub_matches
+            .get_one::<Url>("pj_directory")
+            .map(|u| u.as_str())
+            .unwrap_or("https://payjo.in");
+
+        println!("Fetching OHTTP keys from {} via {}", pj_directory, ohttp_relay);
+        let keys = payjoin::io::fetch_ohttp_keys(ohttp_relay, pj_directory).await?;
+        println!("Successfully fetched OHTTP keys: {}", keys);
+        return Ok(());
+    }
+
     let config = Config::new(&matches)?;
 
     #[allow(clippy::if_same_then_else)]
@@ -206,6 +224,24 @@ fn cli() -> ArgMatches {
     }
 
     cmd = cmd.subcommand(receive_cmd);
+
+    cmd = cmd.subcommand(
+        Command::new("fetch-keys")
+            .about("Fetch OHTTP keys from the default payjoin directory via relay")
+            .arg(
+                Arg::new("ohttp_relay")
+                    .long("ohttp-relay")
+                    .help("The ohttp relay url (default: https://pj.bobspacebkk.com)")
+                    .value_parser(value_parser!(Url)),
+            )
+            .arg(
+                Arg::new("pj_directory")
+                    .long("pj-directory")
+                    .help("The payjoin directory (default: https://payjo.in)")
+                    .value_parser(value_parser!(Url)),
+            ),
+    );
+
     cmd.get_matches()
 }
 

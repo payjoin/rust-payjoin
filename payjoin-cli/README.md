@@ -109,3 +109,18 @@ from the sender directory:
 You should see the payjoin transaction occur and be able to verify the Partially Signed Bitcoin Transaction (PSBT), inputs, and Unspent Transaction Outputs (UTXOs).
 
 Congrats, you've payjoined!
+
+
+## Miscelaneous
+
+If you want to fetch ohttp keys for the default gateway there is a convenience method provided:
+
+```sh
+payjoin-cli fetch-keys
+```
+
+or locally from the payjoin-cli directory:
+
+```sh
+cargo run --features v2 -- fetch-keys
+```

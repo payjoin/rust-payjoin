@@ -39,7 +39,10 @@ impl PayjoinExtras {
     pub fn endpoint(&self) -> &Url { &self.endpoint }
 }
 
+/// A bip21 compliant uri type with parsing.
 pub type Uri<'a, NetworkValidation> = bitcoin_uri::Uri<'a, NetworkValidation, MaybePayjoinExtras>;
+
+/// A bip77 compliant uri type.
 pub type PjUri<'a> = bitcoin_uri::Uri<'a, NetworkChecked, PayjoinExtras>;
 
 mod sealed {

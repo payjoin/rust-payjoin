@@ -103,9 +103,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get ohttp-relay release tag
-        run: echo OHTTP_TAG="$(awk -F '=' '/BRANCH=/ {print $2}' Dockerfile)" >> $GITHUB_ENV
-
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
@@ -115,7 +112,6 @@ jobs:
           tags: |
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ env.OHTTP_TAG }}
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests

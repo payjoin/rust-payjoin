@@ -71,7 +71,7 @@ fn parse_body(
 #[cfg(test)]
 mod tests {
     use bitcoin::{Address, AddressType};
-    use payjoin_test_utils::ORIGINAL_PSBT;
+    use payjoin_test_utils::{ORIGINAL_PSBT, QUERY_PARAMS};
 
     use super::*;
     struct MockHeaders {
@@ -96,7 +96,7 @@ mod tests {
     fn test_from_request() -> Result<(), Box<dyn std::error::Error>> {
         let body = ORIGINAL_PSBT.as_bytes();
         let headers = MockHeaders::new(body.len() as u64);
-        let proposal = UncheckedProposal::from_request(body, super::test::QUERY_PARAMS, headers)?;
+        let proposal = UncheckedProposal::from_request(body, QUERY_PARAMS, headers)?;
 
         let witness_utxo =
             proposal.psbt.inputs[0].witness_utxo.as_ref().expect("witness_utxo should be present");

@@ -7,3 +7,10 @@ Cargo.lock
 mutants.out*
 *.ikm
 *payjoin.sqlite
+target
+corpus
+artifacts
+coverage
+hfuzz_target
+hfuzz_workspace
+afl_target

@@ -8,3 +8,9 @@ mutants.out*
 *.ikm
 *payjoin.sqlite
 data
+corpus
+artifacts
+coverage
+hfuzz_target
+hfuzz_workspace
+afl_target

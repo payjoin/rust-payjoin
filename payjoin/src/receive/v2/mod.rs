@@ -616,7 +616,7 @@ mod test {
     #[test]
     fn extract_err_req() -> Result<(), BoxError> {
         let mut proposal = UncheckedProposal {
-            v1: crate::receive::v1::test::proposal_from_test_vector()?,
+            v1: crate::receive::v1::test::unchecked_proposal_from_test_vector(),
             context: SHARED_CONTEXT.clone(),
         };
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::InputPair;
 use crate::bitcoin_ffi::{Network, OutPoint, Script, TxOut};
 use crate::error::PayjoinError;
-use crate::{ClientResponse, OhttpKeys, PjUriBuilder, Request, Url};
+use crate::{ClientResponse, OhttpKeys, Request};
 
 #[derive(Clone, Debug, uniffi::Object)]
 pub struct Receiver(pub super::Receiver);
@@ -41,25 +41,17 @@ impl Receiver {
     pub fn new(
         address: String,
         network: Network,
-        directory: Arc<Url>,
+        directory: String,
         ohttp_keys: Arc<OhttpKeys>,
-        ohttp_relay: Arc<Url>,
         expire_after: Option<u64>,
     ) -> Result<Self, PayjoinError> {
-        super::Receiver::new(
-            address,
-            network,
-            (*directory).clone(),
-            (*ohttp_keys).clone(),
-            (*ohttp_relay).clone(),
-            expire_after,
-        )
-        .map(Into::into)
+        super::Receiver::new(address, network, directory, (*ohttp_keys).clone(), expire_after)
+            .map(Into::into)
     }
 
-    pub fn extract_req(&self) -> Result<RequestResponse, PayjoinError> {
+    pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestResponse, PayjoinError> {
         self.0
-            .extract_req()
+            .extract_req(ohttp_relay)
             .map(|(request, ctx)| RequestResponse { request, client_response: Arc::new(ctx) })
     }
 
@@ -74,15 +66,6 @@ impl Receiver {
             .map(|e| e.map(|x| Arc::new(x.into())))
     }
 
-    pub fn pj_uri_builder(&self) -> Arc<PjUriBuilder> {
-        Arc::new(self.0.pj_uri_builder())
-    }
-    /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
-    /// This identifies a session at the payjoin directory server.
-    #[cfg(feature = "uniffi")]
-    pub fn pj_url(&self) -> Arc<Url> {
-        Arc::new(self.0.pj_url())
-    }
     ///The per-session public key to use as an identifier
     pub fn id(&self) -> String {
         self.0.id()
@@ -354,13 +337,13 @@ impl ProvisionalProposal {
         &self,
         process_psbt: Box<dyn ProcessPsbt>,
         min_feerate_sat_per_vb: Option<u64>,
-        max_fee_rate_sat_per_vb: u64,
+        max_effective_fee_rate_sat_per_vb: Option<u64>,
     ) -> Result<Arc<PayjoinProposal>, PayjoinError> {
         self.0
             .finalize_proposal(
                 |psbt| process_psbt.callback(psbt.to_string()),
                 min_feerate_sat_per_vb,
-                max_fee_rate_sat_per_vb,
+                max_effective_fee_rate_sat_per_vb,
             )
             .map(|e| Arc::new(e.into()))
     }
@@ -407,12 +390,8 @@ impl PayjoinProposal {
         self.0.psbt()
     }
 
-    pub fn extract_v1_req(&self) -> String {
-        self.0.extract_v1_req()
-    }
-
-    pub fn extract_v2_req(&self) -> Result<RequestResponse, PayjoinError> {
-        let (req, res) = self.0.extract_v2_req()?;
+    pub fn extract_v2_req(&self, ohttp_relay: String) -> Result<RequestResponse, PayjoinError> {
+        let (req, res) = self.0.extract_v2_req(ohttp_relay)?;
         Ok(RequestResponse { request: req, client_response: Arc::new(res) })
     }
 

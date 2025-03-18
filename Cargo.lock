@@ -2001,8 +2001,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 [[package]]
 name = "payjoin"
 version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68fa76c2e9808651a9179c577f5337f4223ec929457bb0c3ff744ffea884890b"
+source = "git+https://github.com/payjoin/rust-payjoin.git?rev=bb47c8469146f1a9055b7f850d86f58f2b9627c6#bb47c8469146f1a9055b7f850d86f58f2b9627c6"
 dependencies = [
  "bhttp",
  "bitcoin 0.32.5",

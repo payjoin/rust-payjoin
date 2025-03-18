@@ -106,10 +106,9 @@ impl From<Sender> for super::Sender {
 
 #[uniffi::export]
 impl Sender {
-    pub fn extract_v1(&self) -> Result<RequestV1Context, PayjoinError> {
-        self.0
-            .extract_v1()
-            .map(|(req, ctx)| RequestV1Context { request: req, context: Arc::new(ctx.into()) })
+    pub fn extract_v1(&self) -> RequestV1Context {
+        let (req, ctx) = self.0.extract_v1();
+        RequestV1Context { request: req, context: Arc::new(ctx.into()) }
     }
 
     /// Extract serialized Request and Context from a Payjoin Proposal.
@@ -204,9 +203,9 @@ impl From<super::V2GetContext> for V2GetContext {
 
 #[uniffi::export]
 impl V2GetContext {
-    pub fn extract_req(&self, ohttp_relay: Arc<Url>) -> Result<RequestOhttpContext, PayjoinError> {
+    pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestOhttpContext, PayjoinError> {
         self.0
-            .extract_req(Arc::try_unwrap(ohttp_relay).unwrap_or_else(|arc| (*arc).clone()))
+            .extract_req(ohttp_relay)
             .map(|(request, ctx)| RequestOhttpContext { request, ohttp_ctx: Arc::new(ctx) })
     }
 

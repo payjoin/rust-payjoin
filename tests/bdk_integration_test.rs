@@ -229,6 +229,7 @@ mod v2 {
     use bitcoin_ffi::Network;
     use http::StatusCode;
     use payjoin::bitcoin::Amount;
+    use payjoin::receive::v1::build_v1_pj_uri;
     use payjoin_ffi::error::PayjoinError;
     use payjoin_ffi::receive::{PayjoinProposal, Receiver, UncheckedProposal};
     use payjoin_ffi::send::SenderBuilder;
@@ -268,17 +269,27 @@ mod v2 {
             let agent = Arc::new(http_agent(cert_der.clone()).unwrap());
             wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await?;
             wait_for_service_ready(directory.clone(), agent.clone()).await?;
-            let ohttp_keys =
-                payjoin_ffi::io::fetch_ohttp_keys(ohttp_relay, directory.clone(), cert_der.clone())
-                    .await?;
+            let ohttp_keys = payjoin_ffi::io::fetch_ohttp_keys_with_cert(
+                &ohttp_relay.as_string(),
+                &directory.as_string(),
+                cert_der.clone(),
+            )
+            .await?;
             let address = receiver.get_address(AddressIndex::New);
+            let address_bitcoind =
+                bitcoincore_rpc::bitcoin::address::Address::from_str(&*address.to_string())
+                    .unwrap()
+                    .assume_checked();
             // test session with expiry in the future
             let session =
                 initialize_session(address.clone(), directory.clone(), ohttp_keys.clone(), None)?;
-            let pj_uri_string =
-                session.pj_uri_builder().amount_sats(Amount::ONE_BTC.to_sat()).build().as_string();
+            let mut pj_uri =
+                build_v1_pj_uri(&address_bitcoind, session.pj_uri().as_string(), false)?;
+            pj_uri.amount = Some(Amount::ONE_BTC);
+            let pj_uri_string = pj_uri.to_string();
+            //session.pj_uri_builder().amount_sats(Amount::ONE_BTC.to_sat()).build().as_string();
             // Poll receive request
-            let (request, client_response) = session.extract_req()?;
+            let (request, client_response) = session.extract_req(ohttp_relay.as_string())?;
             let response = agent.post(request.url.as_string()).body(request.body).send().await?;
             assert!(response.status().is_success());
             let response_body =
@@ -298,7 +309,7 @@ mod v2 {
             let (request, context) = req_ctx.extract_v2(directory.to_owned().into())?;
             let response = agent
                 .post(request.url.as_string())
-                .header("Content-Type", payjoin::V1_REQ_CONTENT_TYPE)
+                .header("Content-Type", request.content_type)
                 .body(request.body.clone())
                 .send()
                 .await
@@ -310,13 +321,14 @@ mod v2 {
             // Inside the Receiver:
 
             // GET fallback psbt
-            let (request, client_response) = session.extract_req()?;
+            let (request, client_response) = session.extract_req(ohttp_relay.as_string())?;
             let response = agent.post(request.url.as_string()).body(request.body).send().await?;
             let proposal =
                 session.process_res(&response.bytes().await?, &client_response)?.unwrap();
             let payjoin_proposal = handle_directory_proposal(receiver, proposal);
             assert!(!payjoin_proposal.is_output_substitution_disabled());
-            let (request, client_response) = payjoin_proposal.extract_v2_req()?;
+            let (request, client_response) =
+                payjoin_proposal.extract_v2_req(ohttp_relay.as_string())?;
             let response = agent.post(request.url.as_string()).body(request.body).send().await?;
             payjoin_proposal.process_res(&response.bytes().await?, &client_response)?;
 
@@ -324,7 +336,7 @@ mod v2 {
             // Inside the Sender:
             // Sender checks, signs, finalizes, extracts, and broadcasts
             // Replay post fallback to get the response
-            let (request, ohttp_ctx) = send_ctx.extract_req(directory.to_owned().into())?;
+            let (request, ohttp_ctx) = send_ctx.extract_req(ohttp_relay.as_string())?;
             let Request { url, body, content_type } = request;
             let response = agent
                 .post(url.as_string())
@@ -345,13 +357,11 @@ mod v2 {
         ohttp_keys: OhttpKeys,
         custom_expire_after: Option<u64>,
     ) -> Result<Receiver, PayjoinError> {
-        let mock_ohttp_relay = directory.clone(); // pass through to
         Receiver::new(
             address.to_string(),
             Network::Regtest,
-            directory,
+            directory.as_string(),
             ohttp_keys,
-            mock_ohttp_relay,
             custom_expire_after,
         )
     }
@@ -415,7 +425,7 @@ mod v2 {
             wants_inputs.contribute_inputs(vec![selected_outpoint]).unwrap().commit_inputs();
 
         let payjoin_proposal = provisional_proposal
-            .finalize_proposal(|psbt| process_psbt(&receiver, psbt), Some(10), 100)
+            .finalize_proposal(|psbt| process_psbt(&receiver, psbt), Some(10), Some(100))
             .unwrap();
         payjoin_proposal
     }

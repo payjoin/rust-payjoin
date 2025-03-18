@@ -14,10 +14,10 @@ pub mod uni;
 ///
 ///These parameters define how client wants to handle Payjoin.
 #[derive(Clone)]
-pub struct SenderBuilder(payjoin::send::SenderBuilder<'static>);
+pub struct SenderBuilder(payjoin::send::v2::SenderBuilder<'static>);
 
-impl From<payjoin::send::SenderBuilder<'static>> for SenderBuilder {
-    fn from(value: payjoin::send::SenderBuilder<'static>) -> Self {
+impl From<payjoin::send::v2::SenderBuilder<'static>> for SenderBuilder {
+    fn from(value: payjoin::send::v2::SenderBuilder<'static>) -> Self {
         Self(value)
     }
 }
@@ -30,9 +30,7 @@ impl SenderBuilder {
     /// to keep them separated.
     pub fn from_psbt_and_uri(psbt: String, uri: PjUri) -> Result<Self, PayjoinError> {
         let psbt = payjoin::bitcoin::psbt::Psbt::from_str(psbt.as_str())?;
-        payjoin::send::SenderBuilder::from_psbt_and_uri(psbt, uri.into())
-            .map(|e| e.into())
-            .map_err(|e| e.into())
+        Ok(payjoin::send::v2::SenderBuilder::new(psbt, uri.into()).into())
     }
 
     /// Disable output substitution even if the receiver didn't.
@@ -104,17 +102,18 @@ impl SenderBuilder {
     }
 }
 #[derive(Clone)]
-pub struct Sender(payjoin::send::Sender);
+pub struct Sender(payjoin::send::v2::Sender);
 
-impl From<payjoin::send::Sender> for Sender {
-    fn from(value: payjoin::send::Sender) -> Self {
+impl From<payjoin::send::v2::Sender> for Sender {
+    fn from(value: payjoin::send::v2::Sender) -> Self {
         Self(value)
     }
 }
 
 impl Sender {
-    pub fn extract_v1(&self) -> Result<(Request, V1Context), PayjoinError> {
-        self.0.clone().extract_v1().map(|(req, ctx)| (req.into(), ctx.into())).map_err(|e| e.into())
+    pub fn extract_v1(&self) -> (Request, V1Context) {
+        let (req, ctx) = self.0.clone().extract_v1();
+        (req.into(), ctx.into())
     }
 
     /// Extract serialized Request and Context from a Payjoin Proposal.
@@ -130,7 +129,7 @@ impl Sender {
     }
 
     pub fn from_json(json: &str) -> Result<Self, PayjoinError> {
-        let sender = serde_json::from_str::<payjoin::send::Sender>(json)
+        let sender = serde_json::from_str::<payjoin::send::v2::Sender>(json)
             .map_err(<serde_json::Error as Into<PayjoinError>>::into)?;
         Ok(sender.into())
     }
@@ -139,9 +138,9 @@ impl Sender {
 /// Data required for validation of response.
 /// This type is used to process the response. Get it from SenderBuilder's build methods. Then you only need to call .process_response() on it to continue BIP78 flow.
 #[derive(Clone)]
-pub struct V1Context(Arc<payjoin::send::V1Context>);
-impl From<payjoin::send::V1Context> for V1Context {
-    fn from(value: payjoin::send::V1Context) -> Self {
+pub struct V1Context(Arc<payjoin::send::v1::V1Context>);
+impl From<payjoin::send::v1::V1Context> for V1Context {
+    fn from(value: payjoin::send::v1::V1Context) -> Self {
         Self(Arc::new(value))
     }
 }
@@ -151,52 +150,55 @@ impl V1Context {
     /// Call this method with response from receiver to continue BIP78 flow. If the response is valid you will get appropriate PSBT that you should sign and broadcast.
     pub fn process_response(&self, response: Vec<u8>) -> Result<String, PayjoinError> {
         let mut decoder = Cursor::new(response);
-        <payjoin::send::V1Context as Clone>::clone(&self.0.clone())
+        <payjoin::send::v1::V1Context as Clone>::clone(&self.0.clone())
             .process_response(&mut decoder)
             .map(|e| e.to_string())
             .map_err(|e| e.into())
     }
 }
 
-pub struct V2PostContext(Mutex<Option<payjoin::send::V2PostContext>>);
+pub struct V2PostContext(Mutex<Option<payjoin::send::v2::V2PostContext>>);
 
 impl V2PostContext {
     /// Decodes and validates the response.
     /// Call this method with response from receiver to continue BIP-??? flow. A successful response can either be None if the relay has not response yet or Some(Psbt).
     /// If the response is some valid PSBT you should sign and broadcast.
     pub fn process_response(&self, response: &[u8]) -> Result<V2GetContext, PayjoinError> {
-        <&V2PostContext as Into<payjoin::send::V2PostContext>>::into(self)
+        <&V2PostContext as Into<payjoin::send::v2::V2PostContext>>::into(self)
             .process_response(response)
             .map(|t| t.clone().into())
             .map_err(|e| e.into())
     }
 }
 
-impl From<&V2PostContext> for payjoin::send::V2PostContext {
+impl From<&V2PostContext> for payjoin::send::v2::V2PostContext {
     fn from(value: &V2PostContext) -> Self {
         let mut data_guard = value.0.lock().unwrap();
         Option::take(&mut *data_guard).expect("ContextV2 moved out of memory")
     }
 }
 
-impl From<payjoin::send::V2PostContext> for V2PostContext {
-    fn from(value: payjoin::send::V2PostContext) -> Self {
+impl From<payjoin::send::v2::V2PostContext> for V2PostContext {
+    fn from(value: payjoin::send::v2::V2PostContext) -> Self {
         Self(Mutex::new(Some(value)))
     }
 }
 
-pub struct V2GetContext(payjoin::send::V2GetContext);
+pub struct V2GetContext(payjoin::send::v2::V2GetContext);
 
-impl From<payjoin::send::V2GetContext> for V2GetContext {
-    fn from(value: payjoin::send::V2GetContext) -> Self {
+impl From<payjoin::send::v2::V2GetContext> for V2GetContext {
+    fn from(value: payjoin::send::v2::V2GetContext) -> Self {
         Self(value)
     }
 }
 
 impl V2GetContext {
-    pub fn extract_req(&self, ohttp_relay: Url) -> Result<(Request, ClientResponse), PayjoinError> {
+    pub fn extract_req(
+        &self,
+        ohttp_relay: String,
+    ) -> Result<(Request, ClientResponse), PayjoinError> {
         self.0
-            .extract_req(ohttp_relay.into())
+            .extract_req(ohttp_relay)
             .map(|(req, ctx)| (req.into(), ctx.into()))
             .map_err(|e| e.into())
     }

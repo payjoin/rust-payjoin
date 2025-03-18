@@ -3,13 +3,11 @@ use std::time::Duration;
 
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
-use payjoin::receive as pdk;
 
 use crate::bitcoin_ffi::{Network, OutPoint, Script, TxOut};
 use crate::error::PayjoinError;
 use crate::ohttp::OhttpKeys;
-use crate::uri::PjUriBuilder;
-use crate::{ClientResponse, Request, Url};
+use crate::{ClientResponse, Request};
 
 #[cfg(feature = "uniffi")]
 pub mod uni;
@@ -47,25 +45,27 @@ impl Receiver {
     pub fn new(
         address: String,
         network: Network,
-        directory: Url,
+        directory: String,
         ohttp_keys: OhttpKeys,
-        ohttp_relay: Url,
         expire_after: Option<u64>,
     ) -> Result<Self, PayjoinError> {
         let address =
             payjoin::bitcoin::Address::from_str(address.as_str())?.require_network(network)?;
-        Ok(payjoin::receive::v2::Receiver::new(
+        payjoin::receive::v2::Receiver::new(
             address,
-            directory.into(),
+            directory,
             ohttp_keys.into(),
-            ohttp_relay.into(),
             expire_after.map(Duration::from_secs),
         )
-        .into())
+        .map(Into::into)
+        .map_err(Into::into)
     }
 
-    pub fn extract_req(&self) -> Result<(Request, ClientResponse), PayjoinError> {
-        match self.0.clone().extract_req() {
+    pub fn extract_req(
+        &self,
+        ohttp_relay: String,
+    ) -> Result<(Request, ClientResponse), PayjoinError> {
+        match self.0.clone().extract_req(ohttp_relay) {
             Ok((req, ctx)) => Ok((req.into(), ctx.into())),
             Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
         }
@@ -83,14 +83,9 @@ impl Receiver {
             .map_err(|e| e.into())
     }
 
-    pub fn pj_uri_builder(&self) -> PjUriBuilder {
-        <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone()).pj_uri_builder().into()
-    }
-
-    /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
-    /// This identifies a session at the payjoin directory server.
-    pub fn pj_url(&self) -> Url {
-        <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone()).pj_url().into()
+    /// Build a V2 Payjoin URI from the receiver's context
+    pub fn pj_uri(&self) -> crate::PjUri {
+        <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone()).pj_uri().into()
     }
 
     ///The per-session public key to use as an identifier
@@ -142,8 +137,7 @@ impl UncheckedProposal {
             .check_broadcast_suitability(
                 min_fee_rate.map(FeeRate::from_sat_per_kwu),
                 |transaction| {
-                    can_broadcast(&payjoin::bitcoin::consensus::encode::serialize(transaction))
-                        .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
+                    Ok(can_broadcast(&payjoin::bitcoin::consensus::encode::serialize(transaction))?)
                 },
             )
             .map(Into::into)
@@ -175,10 +169,7 @@ impl MaybeInputsOwned {
     ) -> Result<MaybeInputsSeen, PayjoinError> {
         self.0
             .clone()
-            .check_inputs_not_owned(|input| {
-                is_owned(&input.to_bytes())
-                    .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
-            })
+            .check_inputs_not_owned(|input| Ok(is_owned(&input.to_bytes())?))
             .map_err(Into::into)
             .map(Into::into)
     }
@@ -200,9 +191,7 @@ impl MaybeInputsSeen {
     ) -> Result<OutputsUnknown, PayjoinError> {
         self.0
             .clone()
-            .check_no_inputs_seen_before(|outpoint| {
-                is_known(outpoint).map_err(|e| pdk::Error::Server(Box::new(e)))
-            })
+            .check_no_inputs_seen_before(|outpoint| Ok(is_known(outpoint)?))
             .map_err(Into::into)
             .map(Into::into)
     }
@@ -229,10 +218,7 @@ impl OutputsUnknown {
     ) -> Result<WantsOutputs, PayjoinError> {
         self.0
             .clone()
-            .identify_receiver_outputs(|input| {
-                is_receiver_output(&input.to_bytes())
-                    .map_err(|e| payjoin::receive::Error::Server(Box::new(e)))
-            })
+            .identify_receiver_outputs(|input| Ok(is_receiver_output(&input.to_bytes())?))
             .map_err(Into::into)
             .map(Into::into)
     }
@@ -366,22 +352,17 @@ impl ProvisionalProposal {
         &self,
         process_psbt: impl Fn(String) -> Result<String, PayjoinError>,
         min_feerate_sat_per_vb: Option<u64>,
-        max_fee_rate_sat_per_vb: u64,
+        max_effective_fee_rate_sat_per_vb: Option<u64>,
     ) -> Result<PayjoinProposal, PayjoinError> {
         self.0
             .clone()
             .finalize_proposal(
                 |pre_processed| {
-                    let processed = process_psbt(pre_processed.to_string())
-                        .map(|e| Psbt::from_str(e.as_str()))
-                        .map_err(|e| pdk::Error::Server(Box::new(e)))?;
-                    match processed {
-                        Ok(e) => Ok(e),
-                        Err(e) => Err(pdk::Error::Server(Box::new(e))),
-                    }
+                    let psbt = process_psbt(pre_processed.to_string())?;
+                    Ok(Psbt::from_str(&psbt)?)
                 },
                 min_feerate_sat_per_vb.and_then(FeeRate::from_sat_per_vb),
-                FeeRate::from_sat_per_vb(max_fee_rate_sat_per_vb).expect("FIXME throw error"),
+                max_effective_fee_rate_sat_per_vb.and_then(FeeRate::from_sat_per_vb),
             )
             .map(Into::into)
             .map_err(Into::into)
@@ -427,13 +408,11 @@ impl PayjoinProposal {
             .to_string()
     }
 
-    pub fn extract_v1_req(&self) -> String {
-        <PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
-            .extract_v1_req()
-    }
-
-    pub fn extract_v2_req(&self) -> Result<(Request, ClientResponse), PayjoinError> {
-        match self.0.clone().extract_v2_req() {
+    pub fn extract_v2_req(
+        &self,
+        ohttp_relay: String,
+    ) -> Result<(Request, ClientResponse), PayjoinError> {
+        match self.0.clone().extract_v2_req(ohttp_relay) {
             Ok((req, ctx)) => Ok((req.into(), ctx.into())),
             Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
         }

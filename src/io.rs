@@ -1,6 +1,5 @@
 use crate::error::PayjoinError;
 use crate::ohttp::OhttpKeys;
-use crate::uri::Url;
 
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
 ///
@@ -10,12 +9,11 @@ use crate::uri::Url;
 ///
 /// * `payjoin_directory`: The payjoin directory from which to fetch the ohttp keys.  This
 ///   directory stores and forwards payjoin client payloads.
-#[cfg(not(feature = "_danger-local-https"))]
 pub async fn fetch_ohttp_keys(
-    ohttp_relay: Url,
-    payjoin_directory: Url,
+    ohttp_relay: &str,
+    payjoin_directory: &str,
 ) -> Result<OhttpKeys, PayjoinError> {
-    payjoin::io::fetch_ohttp_keys(ohttp_relay.into(), payjoin_directory.into())
+    payjoin::io::fetch_ohttp_keys(ohttp_relay, payjoin_directory)
         .await
         .map(|e| e.into())
         .map_err(|e| e.into())
@@ -32,12 +30,12 @@ pub async fn fetch_ohttp_keys(
 ///
 /// * `cert_der`: The DER-encoded certificate to use for local HTTPS connections.
 #[cfg(feature = "_danger-local-https")]
-pub async fn fetch_ohttp_keys(
-    ohttp_relay: Url,
-    payjoin_directory: Url,
+pub async fn fetch_ohttp_keys_with_cert(
+    ohttp_relay: &str,
+    payjoin_directory: &str,
     cert_der: Vec<u8>,
 ) -> Result<OhttpKeys, PayjoinError> {
-    payjoin::io::fetch_ohttp_keys(ohttp_relay.into(), payjoin_directory.into(), cert_der)
+    payjoin::io::fetch_ohttp_keys_with_cert(ohttp_relay, payjoin_directory, cert_der)
         .await
         .map(|e| e.into())
         .map_err(|e| e.into())

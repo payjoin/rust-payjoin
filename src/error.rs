@@ -2,9 +2,12 @@ use std::fmt::Debug;
 
 use payjoin::bitcoin::psbt::PsbtParseError;
 use payjoin::receive::{
-    InputContributionError, OutputSubstitutionError, PsbtInputError, RequestError, SelectionError,
+    ImplementationError, InputContributionError, OutputSubstitutionError, PsbtInputError,
+    ReplyableError, SelectionError,
 };
-use payjoin::send::{CreateRequestError, ResponseError as PdkResponseError, ValidationError};
+use payjoin::send::v2::{CreateRequestError, EncapsulationError};
+use payjoin::send::{BuildSenderError, ResponseError as PdkResponseError, ValidationError};
+use payjoin::IntoUrlError;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
@@ -42,6 +45,11 @@ pub enum PayjoinError {
     #[error("Error creating the request: {message}")]
     CreateRequestError { message: String },
 
+    /// Error building a Sender from a SenderBuilder.
+    /// This error is unrecoverable.
+    #[error("Error building the sender: {message}")]
+    BuildSenderError { message: String },
+
     #[error("Error parsing the Pj URL: {message}")]
     PjParseError { message: String },
 
@@ -77,6 +85,19 @@ pub enum PayjoinError {
 
     #[error("{message}")]
     SerdeJsonError { message: String },
+
+    ///Error that can be replied to the sender
+    #[error("Replyable error occurred: {message}")]
+    ReplyableError { message: String },
+
+    #[error("Error converting to URL: {message}")]
+    IntoUrlError { message: String },
+
+    #[error("Error encapsulating payload: {message}")]
+    EncapsulationError { message: String },
+
+    #[error("Implementation error: {message}")]
+    ImplementationError { message: String },
 }
 
 macro_rules! impl_from_error {
@@ -96,11 +117,8 @@ impl_from_error! {
     PsbtParseError => PsbtParseError,
     payjoin::bitcoin::consensus::encode::Error => TransactionError,
     payjoin::bitcoin::address::ParseError => InvalidAddress,
-    RequestError => RequestError,
     ValidationError => ValidationError,
-    CreateRequestError => CreateRequestError,
     OutputSubstitutionError => OutputSubstitutionError,
-    InputContributionError => InputContributionError,
     PsbtInputError => InputPairError,
     serde_json::Error => SerdeJsonError,
 }
@@ -124,11 +142,12 @@ impl From<SelectionError> for PayjoinError {
     }
 }
 
-impl From<payjoin::Error> for PayjoinError {
-    fn from(value: payjoin::Error) -> Self {
+impl From<payjoin::receive::Error> for PayjoinError {
+    fn from(value: payjoin::receive::Error) -> Self {
         match value {
-            payjoin::Error::BadRequest(e) => e.into(),
-            payjoin::Error::Server(e) => PayjoinError::ServerError { message: e.to_string() },
+            payjoin::receive::Error::ReplyToSender(e) => e.into(),
+            payjoin::receive::Error::V2(e) => PayjoinError::V2Error { message: e.to_string() },
+            _ => Self::UnexpectedError { message: "Unhandled receive error variant".to_string() },
         }
     }
 }
@@ -136,5 +155,47 @@ impl From<payjoin::Error> for PayjoinError {
 impl From<payjoin::io::Error> for PayjoinError {
     fn from(value: payjoin::io::Error) -> Self {
         PayjoinError::IoError { message: value.to_string() }
+    }
+}
+
+impl From<ReplyableError> for PayjoinError {
+    fn from(value: ReplyableError) -> Self {
+        PayjoinError::ReplyableError { message: format!("{:?}", value) }
+    }
+}
+
+impl From<IntoUrlError> for PayjoinError {
+    fn from(value: IntoUrlError) -> Self {
+        PayjoinError::IntoUrlError { message: format!("{:?}", value) }
+    }
+}
+
+impl From<InputContributionError> for PayjoinError {
+    fn from(value: InputContributionError) -> Self {
+        PayjoinError::InputContributionError { message: format!("{:?}", value) }
+    }
+}
+
+impl From<ImplementationError> for PayjoinError {
+    fn from(value: ImplementationError) -> Self {
+        PayjoinError::ImplementationError { message: format!("{:?}", value) }
+    }
+}
+
+impl From<CreateRequestError> for PayjoinError {
+    fn from(value: CreateRequestError) -> Self {
+        PayjoinError::CreateRequestError { message: format!("{:?}", value) }
+    }
+}
+
+impl From<BuildSenderError> for PayjoinError {
+    fn from(value: BuildSenderError) -> Self {
+        PayjoinError::BuildSenderError { message: format!("{:?}", value) }
+    }
+}
+
+impl From<EncapsulationError> for PayjoinError {
+    fn from(value: EncapsulationError) -> Self {
+        PayjoinError::EncapsulationError { message: format!("{:?}", value) }
     }
 }

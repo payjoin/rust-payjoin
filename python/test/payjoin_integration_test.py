@@ -43,10 +43,10 @@ def create_and_load_wallet(rpc_connection, wallet_name):
 
 
 # Set up RPC connections
-rpc_user = "admin1"
-rpc_password = "123"
-rpc_host = "localhost"
-rpc_port = "18443"
+rpc_user = os.environ.get("RPC_USER", "admin1")
+rpc_password = os.environ.get("RPC_PASSWORD", "123")
+rpc_host = os.environ.get("RPC_HOST", "localhost")
+rpc_port = os.environ.get("RPC_PORT", "18443")
 
 
 class TestPayjoin(unittest.TestCase):

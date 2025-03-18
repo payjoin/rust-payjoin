@@ -1,5 +1,5 @@
 [workspace]
-members = ["payjoin", "payjoin-cli", "payjoin-directory", "payjoin-test-utils", "payjoin-ffi"]
+members = ["payjoin", "payjoin-cli", "payjoin-directory", "payjoin-test-utils", "payjoin-ffi", "fuzz"]
 resolver = "2"
 
 [patch.crates-io]

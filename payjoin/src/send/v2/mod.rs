@@ -54,8 +54,8 @@ impl<'a> SenderBuilder<'a> {
     /// It is generally **not** recommended to set this as it may prevent the receiver from
     /// doing advanced operations such as opening LN channels and it also guarantees the
     /// receiver will **not** reward the sender with a discount.
-    pub fn always_disable_output_substitution(self, disable: bool) -> Self {
-        Self(self.0.always_disable_output_substitution(disable))
+    pub fn always_disable_output_substitution(self) -> Self {
+        Self(self.0.always_disable_output_substitution())
     }
 
     // Calculate the recommended fee contribution for an Original PSBT.
@@ -150,7 +150,7 @@ impl Sender {
             .map_err(|_| InternalCreateRequestError::MissingOhttpConfig)?;
         let body = serialize_v2_body(
             &self.v1.psbt,
-            self.v1.disable_output_substitution,
+            self.v1.output_substitution,
             self.v1.fee_contribution,
             self.v1.min_fee_rate,
         )?;
@@ -169,7 +169,7 @@ impl Sender {
                 endpoint: self.v1.endpoint.clone(),
                 psbt_ctx: PsbtContext {
                     original_psbt: self.v1.psbt.clone(),
-                    disable_output_substitution: self.v1.disable_output_substitution,
+                    output_substitution: self.v1.output_substitution,
                     fee_contribution: self.v1.fee_contribution,
                     payee: self.v1.payee.clone(),
                     min_fee_rate: self.v1.min_fee_rate,
@@ -220,7 +220,7 @@ pub(crate) fn extract_request(
 
 pub(crate) fn serialize_v2_body(
     psbt: &Psbt,
-    disable_output_substitution: bool,
+    output_substitution: OutputSubstitution,
     fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
 ) -> Result<Vec<u8>, CreateRequestError> {
@@ -229,7 +229,7 @@ pub(crate) fn serialize_v2_body(
 
     let placeholder_url = serialize_url(
         base_url,
-        disable_output_substitution,
+        output_substitution,
         fee_contribution,
         min_fee_rate,
         "2", // payjoin version
@@ -365,7 +365,7 @@ mod test {
             v1: v1::Sender {
                 psbt: PARSED_ORIGINAL_PSBT.clone(),
                 endpoint,
-                disable_output_substitution: false,
+                output_substitution: OutputSubstitution::Enabled,
                 fee_contribution: None,
                 min_fee_rate: FeeRate::ZERO,
                 payee: ScriptBuf::from(vec![0x00]),
@@ -395,7 +395,7 @@ mod test {
         let sender = create_sender_context()?;
         let body = serialize_v2_body(
             &sender.v1.psbt,
-            sender.v1.disable_output_substitution,
+            sender.v1.output_substitution,
             sender.v1.fee_contribution,
             sender.v1.min_fee_rate,
         );

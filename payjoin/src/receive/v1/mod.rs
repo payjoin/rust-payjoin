@@ -39,6 +39,7 @@ use super::optional_parameters::Params;
 use super::{
     ImplementationError, InputPair, OutputSubstitutionError, ReplyableError, SelectionError,
 };
+use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
 use crate::receive::InternalPayloadError;
 
@@ -264,9 +265,8 @@ pub struct WantsOutputs {
 }
 
 impl WantsOutputs {
-    pub fn is_output_substitution_disabled(&self) -> bool {
-        self.params.disable_output_substitution
-    }
+    /// Whether the receiver is allowed to substitute original outputs or not.
+    pub fn output_substitution(&self) -> OutputSubstitution { self.params.output_substitution }
 
     /// Substitute the receiver output script with the provided script.
     pub fn substitute_receiver_script(
@@ -306,7 +306,7 @@ impl WantsOutputs {
                     // Select an output with the same address if one was provided
                     Some(pos) => {
                         let txo = replacement_outputs.swap_remove(pos);
-                        if self.params.disable_output_substitution
+                        if self.output_substitution() == OutputSubstitution::Disabled
                             && txo.value < original_output.value
                         {
                             return Err(
@@ -317,7 +317,7 @@ impl WantsOutputs {
                     }
                     // Otherwise randomly select one of the replacement outputs
                     None => {
-                        if self.params.disable_output_substitution {
+                        if self.output_substitution() == OutputSubstitution::Disabled {
                             return Err(
                                 InternalOutputSubstitutionError::ScriptPubKeyChangedWhenDisabled
                                     .into(),
@@ -708,7 +708,7 @@ impl ProvisionalProposal {
             self.payjoin_psbt.inputs[i].tap_key_sig = None;
         }
 
-        PayjoinProposal { payjoin_psbt: self.payjoin_psbt, params: self.params }
+        PayjoinProposal { payjoin_psbt: self.payjoin_psbt }
     }
 
     /// Return the indexes of the sender inputs
@@ -763,16 +763,11 @@ impl ProvisionalProposal {
 #[derive(Debug, Clone)]
 pub struct PayjoinProposal {
     payjoin_psbt: Psbt,
-    params: Params,
 }
 
 impl PayjoinProposal {
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
         self.payjoin_psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
-    }
-
-    pub fn is_output_substitution_disabled(&self) -> bool {
-        self.params.disable_output_substitution
     }
 
     pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
@@ -949,8 +944,7 @@ pub(crate) mod test {
     #[test]
     fn test_pjos_disabled() {
         let mut proposal = proposal_from_test_vector().unwrap();
-        // Specify outputsubstitution is disabled
-        proposal.params.disable_output_substitution = true;
+        proposal.params.output_substitution = OutputSubstitution::Disabled;
         let wants_outputs = wants_outputs_from_test_vector(proposal).unwrap();
 
         let output_value =

@@ -4,12 +4,14 @@ use std::fmt;
 use bitcoin::FeeRate;
 use log::warn;
 
+use crate::output_substitution::OutputSubstitution;
+
 #[derive(Debug, Clone)]
 pub(crate) struct Params {
     // version
     pub v: usize,
     // disableoutputsubstitution
-    pub disable_output_substitution: bool,
+    pub output_substitution: OutputSubstitution,
     // maxadditionalfeecontribution, additionalfeeoutputindex
     pub additional_fee_contribution: Option<(bitcoin::Amount, usize)>,
     // minfeerate
@@ -23,7 +25,7 @@ impl Default for Params {
     fn default() -> Self {
         Params {
             v: 1,
-            disable_output_substitution: false,
+            output_substitution: OutputSubstitution::Enabled,
             additional_fee_contribution: None,
             min_fee_rate: FeeRate::BROADCAST_MIN,
             #[cfg(feature = "_multiparty")]
@@ -88,7 +90,11 @@ impl Params {
                         Err(_) => return Err(Error::FeeRate),
                     },
                 ("disableoutputsubstitution", v) =>
-                    params.disable_output_substitution = v == "true",
+                    params.output_substitution = if v == "true" {
+                        OutputSubstitution::Disabled
+                    } else {
+                        OutputSubstitution::Enabled
+                    },
                 #[cfg(feature = "_multiparty")]
                 ("optimisticmerge", v) => params.optimistic_merge = v == "true",
                 _ => (),

@@ -7,7 +7,7 @@ LIBNAME=libpayjoin_ffi.dylib
 
 echo "Generating payjoin_ffi.py..."
 cd ../
-cargo run --bin uniffi-bindgen generate src/payjoin_ffi.udl --language python --out-dir python/src/payjoin/
+cargo run --features uniffi --bin uniffi-bindgen generate src/payjoin_ffi.udl --language python --out-dir python/src/payjoin/
 
 
 echo "Generating native binaries..."

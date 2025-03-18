@@ -43,10 +43,10 @@ def create_and_load_wallet(rpc_connection, wallet_name):
 
 
 # Set up RPC connections
-rpc_user = "admin1"
-rpc_password = "123"
-rpc_host = "localhost"
-rpc_port = "18443"
+rpc_user = os.environ.get("RPC_USER", "admin1")
+rpc_password = os.environ.get("RPC_PASSWORD", "123")
+rpc_host = os.environ.get("RPC_HOST", "localhost")
+rpc_port = os.environ.get("RPC_PORT", "18443")
 
 
 class TestPayjoin(unittest.TestCase):
@@ -72,8 +72,8 @@ class TestPayjoin(unittest.TestCase):
         receiver_address = self.receiver.getnewaddress()
         print(f"\nreceiver_address: {receiver_address}")
 
-        self.sender.generatetoaddress(10, str(sender_address))
-        self.receiver.generatetoaddress(10, str(receiver_address))
+        self.sender.generatetoaddress(101, str(sender_address))
+        self.receiver.generatetoaddress(101, str(receiver_address))
 
         # Fetch and print the balance of the sender address
         sender_balance = self.sender.getbalance()

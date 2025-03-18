@@ -1,0 +1,31 @@
+[package]
+name = "payjoin-fuzz"
+version = "0.0.1"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[features]
+default = []
+
+[dependencies]
+bitcoin = { version = "0.32.7", features = ["base64"] }
+bitcoin_uri = { version = "0.1.0" }
+home = "=0.5.11"
+libfuzzer-sys = { version = "0.4.10" }
+payjoin = { path = "../payjoin", default-features = false, features = [
+  "_core",
+  "v1",
+  "v2",
+] }
+
+[package.metadata.cargo-machete]
+ignored = ["home"]
+
+[[bin]]
+name = "uri_deserialize_pjuri"
+path = "fuzz_targets/uri/deserialize_pjuri.rs"
+doc = false
+bench = false

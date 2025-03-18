@@ -1,9 +1,6 @@
 # Stage 1: Building the binary
 FROM nixos/nix:2.20.5 AS builder
 
-# Set ohttp-relay branch or tag to build from
-ARG BRANCH=v0.0.9
-
 # Copy our source and setup our working directory
 COPY . /tmp/build
 WORKDIR /tmp/build

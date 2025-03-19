@@ -1,0 +1,35 @@
+# Target directory (compiled binaries)
+target/
+
+# Rust's incremental compilation and debug info
+**/incremental/
+**/debug/
+**/release/
+**/deps/
+**/examples/
+**/bench/
+
+# Hidden system files
+.DS_Store
+Thumbs.db
+
+# IDE & Editor settings
+.idea/
+.vscode/
+*.iml
+
+# Logs and temporary files
+logs/
+*.log
+*.tmp
+*.swp
+*.swo
+*.swn
+
+# Git files
+.git/
+.gitignore
+
+# Docker files (optional)
+.dockerignore
+Dockerfile

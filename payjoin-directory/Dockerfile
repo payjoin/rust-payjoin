@@ -20,12 +20,11 @@ ENV AR_x86_64_unknown_linux_musl=ar
 # Add the x86_64-unknown-linux-musl target
 RUN rustup target add x86_64-unknown-linux-musl
 
-# Copy the manifest and source code
-COPY payjoin-directory/Cargo.toml ./
-COPY payjoin-directory/src/ ./src/
+# Copy the workspace manifest and source code
+COPY . .
 
 # Build the binary
-RUN cargo build --release --target x86_64-unknown-linux-musl
+RUN cargo build --bin payjoin-directory --release --target x86_64-unknown-linux-musl
 
 # Create final minimal image
 FROM --platform=linux/amd64 alpine:latest

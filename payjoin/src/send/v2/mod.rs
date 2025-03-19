@@ -281,7 +281,6 @@ impl V2GetContext {
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
-        use crate::uri::UrlExt;
         let base_url = self.endpoint.clone();
 
         // TODO unify with receiver's fn subdir_path_from_pubkey

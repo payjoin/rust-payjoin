@@ -553,6 +553,61 @@ impl WantsInputs {
             change_vout: self.change_vout,
         }
     }
+
+    /// Select inputs optimizing for consolidation when fees are low
+    pub(crate) fn try_consolidate(
+        &self,
+        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        dust_limit: Option<Amount>,
+        max_inputs: Option<usize>,
+        target_value: Option<Amount>,
+        max_fee_rate: Option<FeeRate>,
+    ) -> Result<Vec<InputPair>, SelectionError> {
+        // Check current fee rate
+        let current_fee = self.payjoin_psbt.fee().expect("fee exists");
+        let current_fee_rate = current_fee / self.payjoin_psbt.unsigned_tx.weight();
+
+        // If fee rate is above threshold, return error
+        if let Some(threshold) = max_fee_rate {
+            if current_fee_rate > threshold {
+                return Err(InternalSelectionError::FeeRateTooHighForConsolidation.into());
+            }
+        }
+
+        // Filter and collect valid inputs above dust limit
+        let dust = dust_limit.unwrap_or(DEFAULT_DUST_LIMIT);
+        let mut valid_inputs: Vec<InputPair> = candidate_inputs
+            .into_iter()
+            .filter(|input| input.previous_txout().value >= dust)
+            .collect();
+
+        if valid_inputs.is_empty() {
+            return Err(InternalSelectionError::Empty.into());
+        }
+
+        valid_inputs.sort_by_key(|input| input.previous_txout().value);
+        
+        // Select inputs until reaching max_inputs or target_value
+        let max = max_inputs.unwrap_or(DEFAULT_MAX_INPUTS);
+        let mut selected = Vec::new();
+        let mut total = Amount::from_sat(0);
+
+        for input in valid_inputs {
+            if selected.len() >= max {
+                break;
+            }                
+            total += input.previous_txout().value;
+            selected.push(input);
+
+            if let Some(target) = target_value {
+                if total >= target {
+                    break;
+                }
+            }
+        }
+
+        Ok(selected)
+    }
 }
 
 /// A checked proposal that the receiver may sign and finalize to make a proposal PSBT that the
@@ -782,6 +837,9 @@ impl PayjoinProposal {
 
     pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
 }
+
+const DEFAULT_DUST_LIMIT: Amount = Amount::from_sat(546);
+const DEFAULT_MAX_INPUTS: usize = 3;
 
 #[cfg(test)]
 pub(crate) mod test {

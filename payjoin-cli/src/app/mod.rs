@@ -21,6 +21,11 @@ pub(crate) mod v2;
 #[cfg(feature = "_danger-local-https")]
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
 
+/// 4M block size limit with base64 encoding overhead => maximum reasonable size of content-length
+/// 4_000_000 * 4 / 3 fits in u32
+#[cfg(feature = "v1")]
+pub(crate) const MAX_CONTENT_LENGTH: usize = 4_000_000 * 4 / 3;
+
 #[async_trait::async_trait]
 pub trait App: Send + Sync {
     fn new(config: Config) -> Result<Self>

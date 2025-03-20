@@ -14,7 +14,7 @@ pub struct CreateRequestError(InternalCreateRequestError);
 #[derive(Debug)]
 pub(crate) enum InternalCreateRequestError {
     #[allow(dead_code)]
-    Expired(std::time::SystemTime),
+    Expired(web_time::SystemTime),
     MissingOhttpConfig,
     ParseReceiverPubkeyParam(ParseReceiverPubkeyParamError),
     V2CreateRequest(crate::send::v2::CreateRequestError),

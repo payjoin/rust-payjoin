@@ -1,7 +1,7 @@
 //! Receive BIP 77 Payjoin v2
 use std::str::FromStr;
-use std::time::{Duration, SystemTime};
-
+use web_time::{SystemTime, Duration};
+    
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};

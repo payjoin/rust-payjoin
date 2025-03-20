@@ -138,7 +138,7 @@ impl Sender {
         ohttp_relay: Url,
     ) -> Result<(Request, V2PostContext), CreateRequestError> {
         if let Ok(expiry) = self.v1.endpoint.exp() {
-            if std::time::SystemTime::now() > expiry {
+            if web_time::SystemTime::now() > expiry {
                 return Err(InternalCreateRequestError::Expired(expiry).into());
             }
         }
@@ -350,7 +350,7 @@ impl HpkeContext {
 
 #[cfg(test)]
 mod test {
-    use std::time::{Duration, SystemTime};
+    use web_time::{SystemTime, Duration};
 
     use bitcoin::hex::FromHex;
     use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, PARSED_ORIGINAL_PSBT, SYMMETRIC};
@@ -462,7 +462,7 @@ mod test {
     fn test_extract_v2_fails_when_expired() -> Result<(), BoxError> {
         let expected_error = "session expired at SystemTime";
         let mut sender = create_sender_context()?;
-        let exp_time = std::time::SystemTime::now();
+        let exp_time = web_time::SystemTime::now();
         sender.v1.endpoint.set_exp(exp_time);
         let ohttp_relay = EXAMPLE_URL.clone();
         let result = sender.extract_v2(ohttp_relay);

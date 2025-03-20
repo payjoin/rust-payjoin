@@ -17,7 +17,7 @@ pub(crate) enum InternalCreateRequestError {
     OhttpEncapsulation(crate::ohttp::OhttpEncapsulationError),
     ParseReceiverPubkey(ParseReceiverPubkeyParamError),
     MissingOhttpConfig,
-    Expired(std::time::SystemTime),
+    Expired(web_time::SystemTime),
 }
 
 impl fmt::Display for CreateRequestError {

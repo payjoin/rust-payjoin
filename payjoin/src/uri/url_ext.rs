@@ -15,8 +15,8 @@ pub(crate) trait UrlExt {
     fn set_receiver_pubkey(&mut self, exp: HpkePublicKey);
     fn ohttp(&self) -> Result<OhttpKeys, ParseOhttpKeysParamError>;
     fn set_ohttp(&mut self, ohttp: OhttpKeys);
-    fn exp(&self) -> Result<std::time::SystemTime, ParseExpParamError>;
-    fn set_exp(&mut self, exp: std::time::SystemTime);
+    fn exp(&self) -> Result<web_time::SystemTime, ParseExpParamError>;
+    fn set_exp(&mut self, exp: web_time::SystemTime);
 }
 
 impl UrlExt for Url {
@@ -60,7 +60,7 @@ impl UrlExt for Url {
     fn set_ohttp(&mut self, ohttp: OhttpKeys) { set_param(self, "OH1", &ohttp.to_string()) }
 
     /// Retrieve the exp parameter from the URL fragment
-    fn exp(&self) -> Result<std::time::SystemTime, ParseExpParamError> {
+    fn exp(&self) -> Result<web_time::SystemTime, ParseExpParamError> {
         let value =
             get_param(self, "EX1", |v| Some(v.to_owned())).ok_or(ParseExpParamError::MissingExp)?;
 
@@ -74,14 +74,14 @@ impl UrlExt for Url {
 
         u32::consensus_decode(&mut &bytes[..])
             .map(|timestamp| {
-                std::time::UNIX_EPOCH + std::time::Duration::from_secs(timestamp as u64)
+                web_time::UNIX_EPOCH + web_time::Duration::from_secs(timestamp as u64)
             })
             .map_err(ParseExpParamError::InvalidExp)
     }
 
     /// Set the exp parameter in the URL fragment
-    fn set_exp(&mut self, exp: std::time::SystemTime) {
-        let t = match exp.duration_since(std::time::UNIX_EPOCH) {
+    fn set_exp(&mut self, exp: web_time::SystemTime) {
+        let t = match exp.duration_since(web_time::UNIX_EPOCH) {
             Ok(duration) => duration.as_secs().try_into().unwrap(), // TODO Result type instead of Option & unwrap
             Err(_) => 0u32,
         };
@@ -264,7 +264,7 @@ mod tests {
         let mut url = Url::parse("https://example.com").unwrap();
 
         let exp_time =
-            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1720547781);
+            web_time::SystemTime::UNIX_EPOCH + web_time::Duration::from_secs(1720547781);
         url.set_exp(exp_time);
         assert_eq!(url.fragment(), Some("EX1C4UC6ES"));
 

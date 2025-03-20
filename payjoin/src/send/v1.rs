@@ -295,7 +295,7 @@ impl V1Context {
 #[cfg(test)]
 mod test {
     use bitcoin::FeeRate;
-    use payjoin_test_utils::{BoxError, PARSED_ORIGINAL_PSBT};
+    use payjoin_test_utils::{BoxError, INVALID_PSBT, PARSED_ORIGINAL_PSBT, PAYJOIN_PROPOSAL};
 
     use super::*;
     use crate::error_codes::ErrorCode;
@@ -305,12 +305,6 @@ mod test {
 
     const PJ_URI: &str =
         "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/";
-
-    /// From the BIP-174 test vector
-    const INVALID_PSBT: &str = "AgAAAAEmgXE3Ht/yhek3re6ks3t4AAwFZsuzrWRkFxPKQhcb9gAAAABqRzBEAiBwsiRRI+a/R01gxbUMBD1MaRpdJDXwmjSnZiqdwlF5CgIgATKcqdrPKAvfMHQOwDkEIkIsgctFg5RXrrdvwS7dlbMBIQJlfRGNM1e44PTCzUbbezn22cONmnCry5st5dyNv+TOMf7///8C09/1BQAAAAAZdqkU0MWZA8W6woaHYOkP1SGkZlqnZSCIrADh9QUAAAAAF6kUNUXm4zuDLEcFDyTT7rk8nAOUi8eHsy4TAA&#61;&#61;";
-
-    /// From the BIP-78 test vector
-    const PJ_PROPOSAL_PSBT: &str = "cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAQEgqBvXBQAAAAAXqRTeTh6QYcpZE1sDWtXm1HmQRUNU0IcAAQEggIQeAAAAAAAXqRTI8sv5ymFHLIjkZNRrNXSEXZHY1YcBBxcWABRfgGZV5ZJMkgTC1RvlOU9L+e2iEAEIawJHMEQCIGe7e0DfJaVPRYEKWxddL2Pr0G37BoKz0lyNa02O2/tWAiB7ZVgBoF4s8MHocYWWmo4Q1cyV2wl7MX0azlqa8NBENAEhAmXWPPW0G3yE3HajBOb7gO7iKzHSmZ0o0w0iONowcV+tAAAA";
 
     fn create_v1_context() -> super::V1Context {
         let psbt_context = create_psbt_context().expect("failed to create context");
@@ -362,7 +356,7 @@ mod test {
 
     #[test]
     fn process_response_valid() {
-        let mut cursor = std::io::Cursor::new(PJ_PROPOSAL_PSBT.as_bytes());
+        let mut cursor = std::io::Cursor::new(PAYJOIN_PROPOSAL.as_bytes());
 
         let ctx = create_v1_context();
         let response = ctx.process_response(&mut cursor);

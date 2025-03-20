@@ -267,7 +267,6 @@ pub const KEM: Kem = Kem::K256Sha256;
 pub const SYMMETRIC: &[SymmetricSuite] =
     &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
 
-// OriginalPSBT Test Vector from BIP 78
 // https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-span_idtestvectorsspanTest_vectors
 // | InputScriptType | Original PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
 // |-----------------|-----------------------|------------------------------|-------------------------|

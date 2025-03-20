@@ -302,7 +302,7 @@ mod v2 {
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             println!("\nOriginal sender psbt: {:#?}", psbt.to_string());
 
-            let req_ctx = SenderBuilder::from_psbt_and_uri(psbt.to_string(), pj_uri)?
+            let req_ctx = SenderBuilder::new(psbt.to_string(), pj_uri)?
                 .build_recommended(payjoin::bitcoin::FeeRate::BROADCAST_MIN.to_sat_per_kwu())?;
             let (request, context) = req_ctx.extract_v2(directory.to_owned().into())?;
             let response = agent

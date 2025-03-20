@@ -22,14 +22,11 @@ impl From<SenderBuilder> for super::SenderBuilder {
 impl SenderBuilder {
     /// Prepare an HTTP request and request context to process the response
     ///
-    /// An HTTP client will own the Request data while Context sticks around so
-    /// a `(Request, Context)` tuple is returned from `SenderBuilder::build()`
-    /// to keep them separated.
+    /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
+    /// to create a [`Sender`]
     #[uniffi::constructor]
-    pub fn from_psbt_and_uri(psbt: String, uri: Arc<PjUri>) -> Result<Self, PayjoinError> {
-        super::SenderBuilder::from_psbt_and_uri(psbt, (*uri).clone())
-            .map(Into::into)
-            .map_err(Into::into)
+    pub fn new(psbt: String, uri: Arc<PjUri>) -> Result<Self, PayjoinError> {
+        super::SenderBuilder::new(psbt, (*uri).clone()).map(Into::into).map_err(Into::into)
     }
 
     /// Disable output substitution even if the receiver didn't.

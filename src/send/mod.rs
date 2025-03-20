@@ -25,10 +25,9 @@ impl From<payjoin::send::v2::SenderBuilder<'static>> for SenderBuilder {
 impl SenderBuilder {
     /// Prepare an HTTP request and request context to process the response
     ///
-    /// An HTTP client will own the Request data while Context sticks around so
-    /// a `(Request, Context)` tuple is returned from `SenderBuilder::build()`
-    /// to keep them separated.
-    pub fn from_psbt_and_uri(psbt: String, uri: PjUri) -> Result<Self, PayjoinError> {
+    /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
+    /// to create a [`Sender`]
+    pub fn new(psbt: String, uri: PjUri) -> Result<Self, PayjoinError> {
         let psbt = payjoin::bitcoin::psbt::Psbt::from_str(psbt.as_str())?;
         Ok(payjoin::send::v2::SenderBuilder::new(psbt, uri.into()).into())
     }

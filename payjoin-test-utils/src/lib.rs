@@ -253,7 +253,7 @@ pub async fn wait_for_service_ready(
 }
 
 pub static EXAMPLE_URL: Lazy<Url> =
-    Lazy::new(|| Url::parse("https://relay.com").expect("invalid URL"));
+    Lazy::new(|| Url::parse("https://example.com").expect("invalid URL"));
 
 pub const KEY_ID: KeyId = 1;
 pub const KEM: Kem = Kem::K256Sha256;

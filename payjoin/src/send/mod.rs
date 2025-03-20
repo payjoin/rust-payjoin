@@ -443,7 +443,9 @@ mod test {
 
     use bitcoin::hex::FromHex;
     use bitcoin::{Amount, FeeRate, Script, XOnlyPublicKey};
-    use payjoin_test_utils::{BoxError, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL};
+    use payjoin_test_utils::{
+        BoxError, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO,
+    };
     use url::Url;
 
     use super::{
@@ -571,7 +573,7 @@ mod test {
 
     #[test]
     fn test_clear_unneeded_fields() -> Result<(), BoxError> {
-        let mut proposal = PARSED_PAYJOIN_PROPOSAL.clone();
+        let mut proposal = PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO.clone();
         let x_only_key = XOnlyPublicKey::from_str(
             "4f65949efe60e5be80cf171c06144641e832815de4f6ab3fe0257351aeb22a84",
         )?;
@@ -592,7 +594,7 @@ mod test {
     #[test]
     fn test_official_vectors() -> Result<(), BoxError> {
         let ctx = create_psbt_context()?;
-        let mut proposal = PARSED_PAYJOIN_PROPOSAL.clone();
+        let mut proposal = PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO.clone();
         for output in proposal.outputs_mut() {
             output.bip32_derivation.clear();
         }
@@ -612,7 +614,7 @@ mod test {
     #[test]
     fn test_receiver_steals_sender_change() -> Result<(), BoxError> {
         let ctx = create_psbt_context()?;
-        let mut proposal = PARSED_PAYJOIN_PROPOSAL.clone();
+        let mut proposal = PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO.clone();
         for output in proposal.outputs_mut() {
             output.bip32_derivation.clear();
         }

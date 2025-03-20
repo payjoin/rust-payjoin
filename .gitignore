@@ -4,3 +4,4 @@ target
 *payjoin.sled
 Cargo.lock
 .vscode
+mutants.out

@@ -3,6 +3,10 @@ use std::sync::Arc;
 use super::InputPair;
 use crate::bitcoin_ffi::{Network, OutPoint, Script, TxOut};
 use crate::error::PayjoinError;
+pub use crate::receive::{
+    Error, ImplementationError, InputContributionError, OutputSubstitutionError, ReplyableError,
+    SelectionError,
+};
 use crate::{ClientResponse, OhttpKeys, Request};
 
 #[derive(Clone, Debug, uniffi::Object)]
@@ -44,7 +48,7 @@ impl Receiver {
         directory: String,
         ohttp_keys: Arc<OhttpKeys>,
         expire_after: Option<u64>,
-    ) -> Result<Self, PayjoinError> {
+    ) -> Result<Self, Error> {
         super::Receiver::new(address, network, directory, (*ohttp_keys).clone(), expire_after)
             .map(Into::into)
     }
@@ -55,7 +59,7 @@ impl Receiver {
         self.0.pj_uri()
     }
 
-    pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestResponse, PayjoinError> {
+    pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestResponse, Error> {
         self.0
             .extract_req(ohttp_relay)
             .map(|(request, ctx)| RequestResponse { request, client_response: Arc::new(ctx) })
@@ -66,7 +70,7 @@ impl Receiver {
         &self,
         body: &[u8],
         context: Arc<ClientResponse>,
-    ) -> Result<Option<Arc<UncheckedProposal>>, PayjoinError> {
+    ) -> Result<Option<Arc<UncheckedProposal>>, Error> {
         <Self as Into<super::Receiver>>::into(self.clone())
             .process_res(body, context.as_ref())
             .map(|e| e.map(|x| Arc::new(x.into())))
@@ -93,9 +97,9 @@ pub struct RequestResponse {
     pub client_response: Arc<ClientResponse>,
 }
 
-#[uniffi::export(callback_interface)]
-pub trait CanBroadcast {
-    fn callback(&self, tx: Vec<u8>) -> Result<bool, PayjoinError>;
+#[uniffi::export]
+pub trait CanBroadcast: Send + Sync {
+    fn callback(&self, tx: Vec<u8>) -> Result<bool, ImplementationError>;
 }
 
 /// The sender’s original PSBT and optional parameters
@@ -129,8 +133,8 @@ impl UncheckedProposal {
     pub fn check_broadcast_suitability(
         &self,
         min_fee_rate: Option<u64>,
-        can_broadcast: Box<dyn CanBroadcast>,
-    ) -> Result<Arc<MaybeInputsOwned>, PayjoinError> {
+        can_broadcast: Arc<dyn CanBroadcast>,
+    ) -> Result<Arc<MaybeInputsOwned>, ReplyableError> {
         self.0
             .clone()
             .check_broadcast_suitability(min_fee_rate, |transaction| {
@@ -160,9 +164,9 @@ impl From<super::MaybeInputsOwned> for MaybeInputsOwned {
     }
 }
 
-#[uniffi::export(callback_interface)]
-pub trait IsScriptOwned {
-    fn callback(&self, script: Vec<u8>) -> Result<bool, PayjoinError>;
+#[uniffi::export]
+pub trait IsScriptOwned: Send + Sync {
+    fn callback(&self, script: Vec<u8>) -> Result<bool, ImplementationError>;
 }
 
 #[uniffi::export]
@@ -171,17 +175,17 @@ impl MaybeInputsOwned {
     /// An attacker could try to spend receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         &self,
-        is_owned: Box<dyn IsScriptOwned>,
-    ) -> Result<Arc<MaybeInputsSeen>, PayjoinError> {
+        is_owned: Arc<dyn IsScriptOwned>,
+    ) -> Result<Arc<MaybeInputsSeen>, ReplyableError> {
         self.0
             .check_inputs_not_owned(|input| is_owned.callback(input.to_vec()))
             .map(|t| Arc::new(t.into()))
     }
 }
 
-#[uniffi::export(callback_interface)]
-pub trait IsOutputKnown {
-    fn callback(&self, outpoint: OutPoint) -> Result<bool, PayjoinError>;
+#[uniffi::export]
+pub trait IsOutputKnown: Send + Sync {
+    fn callback(&self, outpoint: OutPoint) -> Result<bool, ImplementationError>;
 }
 
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
@@ -201,8 +205,8 @@ impl MaybeInputsSeen {
     /// Make sure that the original transaction inputs have never been seen before. This prevents probing attacks. This prevents reentrant Payjoin, where a sender proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
     pub fn check_no_inputs_seen_before(
         &self,
-        is_known: Box<dyn IsOutputKnown>,
-    ) -> Result<Arc<OutputsUnknown>, PayjoinError> {
+        is_known: Arc<dyn IsOutputKnown>,
+    ) -> Result<Arc<OutputsUnknown>, ReplyableError> {
         self.0
             .clone()
             .check_no_inputs_seen_before(|outpoint| is_known.callback(outpoint.clone()))
@@ -227,8 +231,8 @@ impl OutputsUnknown {
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
         &self,
-        is_receiver_output: Box<dyn IsScriptOwned>,
-    ) -> Result<Arc<WantsOutputs>, PayjoinError> {
+        is_receiver_output: Arc<dyn IsScriptOwned>,
+    ) -> Result<Arc<WantsOutputs>, ReplyableError> {
         self.0
             .clone()
             .identify_receiver_outputs(|output_script| {
@@ -256,7 +260,7 @@ impl WantsOutputs {
         &self,
         replacement_outputs: Vec<TxOut>,
         drain_script: Arc<Script>,
-    ) -> Result<Arc<WantsOutputs>, PayjoinError> {
+    ) -> Result<Arc<WantsOutputs>, OutputSubstitutionError> {
         self.0
             .replace_receiver_outputs(replacement_outputs, &drain_script)
             .map(|t| Arc::new(t.into()))
@@ -269,7 +273,7 @@ impl WantsOutputs {
     pub fn substitute_receiver_script(
         &self,
         output_script: Arc<Script>,
-    ) -> Result<Arc<WantsOutputs>, PayjoinError> {
+    ) -> Result<Arc<WantsOutputs>, OutputSubstitutionError> {
         self.0
             .substitute_receiver_script(&output_script)
             .map(|t| Arc::new(t.into()))
@@ -302,7 +306,7 @@ impl WantsInputs {
     pub fn try_preserving_privacy(
         &self,
         candidate_inputs: Vec<Arc<InputPair>>,
-    ) -> Result<Arc<InputPair>, PayjoinError> {
+    ) -> Result<Arc<InputPair>, SelectionError> {
         let candidate_inputs: Vec<InputPair> = candidate_inputs
             .into_iter()
             .map(|pair| Arc::try_unwrap(pair).unwrap_or_else(|arc| (*arc).clone()))
@@ -314,7 +318,7 @@ impl WantsInputs {
     pub fn contribute_inputs(
         &self,
         replacement_inputs: Vec<Arc<InputPair>>,
-    ) -> Result<Arc<WantsInputs>, PayjoinError> {
+    ) -> Result<Arc<WantsInputs>, InputContributionError> {
         let replacement_inputs: Vec<InputPair> = replacement_inputs
             .into_iter()
             .map(|pair| Arc::try_unwrap(pair).unwrap_or_else(|arc| (*arc).clone()))
@@ -341,10 +345,10 @@ impl From<super::ProvisionalProposal> for ProvisionalProposal {
 impl ProvisionalProposal {
     pub fn finalize_proposal(
         &self,
-        process_psbt: Box<dyn ProcessPsbt>,
+        process_psbt: Arc<dyn ProcessPsbt>,
         min_feerate_sat_per_vb: Option<u64>,
         max_effective_fee_rate_sat_per_vb: Option<u64>,
-    ) -> Result<Arc<PayjoinProposal>, PayjoinError> {
+    ) -> Result<Arc<PayjoinProposal>, ReplyableError> {
         self.0
             .finalize_proposal(
                 |psbt| process_psbt.callback(psbt.to_string()),
@@ -355,9 +359,9 @@ impl ProvisionalProposal {
     }
 }
 
-#[uniffi::export(callback_interface)]
-pub trait ProcessPsbt {
-    fn callback(&self, psbt: String) -> Result<String, PayjoinError>;
+#[uniffi::export]
+pub trait ProcessPsbt: Send + Sync {
+    fn callback(&self, psbt: String) -> Result<String, ImplementationError>;
 }
 
 #[derive(Clone, uniffi::Object)]
@@ -396,7 +400,7 @@ impl PayjoinProposal {
         self.0.psbt()
     }
 
-    pub fn extract_v2_req(&self, ohttp_relay: String) -> Result<RequestResponse, PayjoinError> {
+    pub fn extract_v2_req(&self, ohttp_relay: String) -> Result<RequestResponse, Error> {
         let (req, res) = self.0.extract_v2_req(ohttp_relay)?;
         Ok(RequestResponse { request: req, client_response: Arc::new(res) })
     }
@@ -406,7 +410,7 @@ impl PayjoinProposal {
     /// This function decapsulates the response using the provided OHTTP context. If the response status is successful, it indicates that the Payjoin proposal has been accepted. Otherwise, it returns an error with the status code.
     ///
     /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or choose to broadcast the original PSBT.
-    pub fn process_res(&self, body: &[u8], ctx: Arc<ClientResponse>) -> Result<(), PayjoinError> {
+    pub fn process_res(&self, body: &[u8], ctx: Arc<ClientResponse>) -> Result<(), Error> {
         self.0.process_res(body, ctx.as_ref())
     }
 }

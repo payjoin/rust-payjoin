@@ -19,8 +19,7 @@ use bdk::descriptor::IntoWalletDescriptor;
 use bdk::wallet::AddressIndex;
 use bdk::{FeeRate, LocalUtxo, SignOptions, Wallet as BdkWallet};
 use bitcoincore_rpc::RpcApi;
-use payjoin_ffi::error::PayjoinError;
-use payjoin_ffi::receive::InputPair;
+use payjoin_ffi::receive::{Error, ImplementationError, InputPair};
 use payjoin_ffi::uri::PjUri;
 
 type BoxError = Box<dyn std::error::Error + 'static>;
@@ -230,7 +229,6 @@ mod v2 {
     use http::StatusCode;
     use payjoin::bitcoin::Amount;
     use payjoin::receive::v1::build_v1_pj_uri;
-    use payjoin_ffi::error::PayjoinError;
     use payjoin_ffi::receive::{PayjoinProposal, Receiver, UncheckedProposal};
     use payjoin_ffi::send::SenderBuilder;
     use payjoin_ffi::uri::{Uri, Url};
@@ -356,7 +354,7 @@ mod v2 {
         directory: Url,
         ohttp_keys: OhttpKeys,
         custom_expire_after: Option<u64>,
-    ) -> Result<Receiver, PayjoinError> {
+    ) -> Result<Receiver, Error> {
         Receiver::new(
             address.to_string(),
             Network::Regtest,
@@ -489,19 +487,17 @@ fn input_pair_from_local_utxo(utxo: LocalUtxo) -> Result<InputPair, BoxError> {
         .map_err(|e| format!("Failed to create input pair: {:?}", e).into())
 }
 
-fn is_script_owned(wallet: &Wallet, script: Vec<u8>) -> Result<bool, PayjoinError> {
-    wallet
-        .is_mine(Script::from_bytes(script.as_slice()))
-        .map_err(|x| PayjoinError::UnexpectedError { msg: x.to_string() })
+fn is_script_owned(wallet: &Wallet, script: Vec<u8>) -> Result<bool, ImplementationError> {
+    wallet.is_mine(Script::from_bytes(script.as_slice())).map_err(|e| e.to_string().into())
 }
 
-fn mock_is_output_known(_: bitcoin_ffi::OutPoint) -> Result<bool, PayjoinError> {
+fn mock_is_output_known(_: bitcoin_ffi::OutPoint) -> Result<bool, ImplementationError> {
     Ok(false)
 }
 
-fn process_psbt(wallet: &Wallet, psbt: String) -> Result<String, PayjoinError> {
-    match wallet.sign(&mut PartiallySignedTransaction::from_str(&psbt).unwrap(), true) {
-        Ok(e) => Ok(e.to_string()),
-        Err(e) => Err(PayjoinError::UnexpectedError { msg: e.to_string() }),
-    }
+fn process_psbt(wallet: &Wallet, psbt: String) -> Result<String, ImplementationError> {
+    wallet
+        .sign(&mut PartiallySignedTransaction::from_str(&psbt).unwrap(), true)
+        .map(|e| e.to_string())
+        .map_err(|e| e.to_string().into())
 }

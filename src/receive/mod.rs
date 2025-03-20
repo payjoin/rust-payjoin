@@ -1,6 +1,10 @@
 use std::str::FromStr;
 use std::time::Duration;
 
+pub use error::{
+    Error, ImplementationError, InputContributionError, OutputSubstitutionError, PsbtInputError,
+    ReplyableError, SelectionError,
+};
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 
@@ -9,6 +13,7 @@ use crate::error::PayjoinError;
 use crate::ohttp::OhttpKeys;
 use crate::{ClientResponse, Request};
 
+pub mod error;
 #[cfg(feature = "uniffi")]
 pub mod uni;
 
@@ -48,7 +53,7 @@ impl Receiver {
         directory: String,
         ohttp_keys: OhttpKeys,
         expire_after: Option<u64>,
-    ) -> Result<Self, PayjoinError> {
+    ) -> Result<Self, Error> {
         let address = payjoin::bitcoin::Address::from_str(address.as_str())?
             .require_network(network.into())?;
         payjoin::receive::v2::Receiver::new(
@@ -61,14 +66,12 @@ impl Receiver {
         .map_err(Into::into)
     }
 
-    pub fn extract_req(
-        &self,
-        ohttp_relay: String,
-    ) -> Result<(Request, ClientResponse), PayjoinError> {
-        match self.0.clone().extract_req(ohttp_relay) {
-            Ok((req, ctx)) => Ok((req.into(), ctx.into())),
-            Err(e) => Err(PayjoinError::V2Error { msg: e.to_string() }),
-        }
+    pub fn extract_req(&self, ohttp_relay: String) -> Result<(Request, ClientResponse), Error> {
+        self.0
+            .clone()
+            .extract_req(ohttp_relay)
+            .map(|(req, ctx)| (req.into(), ctx.into()))
+            .map_err(Into::into)
     }
 
     ///The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
@@ -76,11 +79,11 @@ impl Receiver {
         &self,
         body: &[u8],
         ctx: &ClientResponse,
-    ) -> Result<Option<UncheckedProposal>, PayjoinError> {
+    ) -> Result<Option<UncheckedProposal>, Error> {
         <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone())
             .process_res(body, ctx.into())
             .map(|e| e.map(|o| o.into()))
-            .map_err(|e| e.into())
+            .map_err(Into::into)
     }
 
     /// Build a V2 Payjoin URI from the receiver's context
@@ -130,8 +133,8 @@ impl UncheckedProposal {
     pub fn check_broadcast_suitability(
         &self,
         min_fee_rate: Option<u64>,
-        can_broadcast: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
-    ) -> Result<MaybeInputsOwned, PayjoinError> {
+        can_broadcast: impl Fn(&Vec<u8>) -> Result<bool, ImplementationError>,
+    ) -> Result<MaybeInputsOwned, ReplyableError> {
         self.0
             .clone()
             .check_broadcast_suitability(
@@ -165,8 +168,8 @@ impl From<payjoin::receive::v2::MaybeInputsOwned> for MaybeInputsOwned {
 impl MaybeInputsOwned {
     pub fn check_inputs_not_owned(
         &self,
-        is_owned: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
-    ) -> Result<MaybeInputsSeen, PayjoinError> {
+        is_owned: impl Fn(&Vec<u8>) -> Result<bool, ImplementationError>,
+    ) -> Result<MaybeInputsSeen, ReplyableError> {
         self.0
             .clone()
             .check_inputs_not_owned(|input| Ok(is_owned(&input.to_bytes())?))
@@ -187,8 +190,8 @@ impl From<payjoin::receive::v2::MaybeInputsSeen> for MaybeInputsSeen {
 impl MaybeInputsSeen {
     pub fn check_no_inputs_seen_before(
         &self,
-        is_known: impl Fn(&OutPoint) -> Result<bool, PayjoinError>,
-    ) -> Result<OutputsUnknown, PayjoinError> {
+        is_known: impl Fn(&OutPoint) -> Result<bool, ImplementationError>,
+    ) -> Result<OutputsUnknown, ReplyableError> {
         self.0
             .clone()
             .check_no_inputs_seen_before(|outpoint| Ok(is_known(&(*outpoint).into())?))
@@ -214,8 +217,8 @@ impl OutputsUnknown {
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
         &self,
-        is_receiver_output: impl Fn(&Vec<u8>) -> Result<bool, PayjoinError>,
-    ) -> Result<WantsOutputs, PayjoinError> {
+        is_receiver_output: impl Fn(&Vec<u8>) -> Result<bool, ImplementationError>,
+    ) -> Result<WantsOutputs, ReplyableError> {
         self.0
             .clone()
             .identify_receiver_outputs(|input| Ok(is_receiver_output(&input.to_bytes())?))
@@ -241,7 +244,7 @@ impl WantsOutputs {
         &self,
         replacement_outputs: Vec<TxOut>,
         drain_script: &Script,
-    ) -> Result<WantsOutputs, PayjoinError> {
+    ) -> Result<WantsOutputs, OutputSubstitutionError> {
         let replacement_outputs: Vec<payjoin::bitcoin::TxOut> =
             replacement_outputs.iter().map(|o| o.clone().into()).collect();
         self.0
@@ -254,7 +257,7 @@ impl WantsOutputs {
     pub fn substitute_receiver_script(
         &self,
         output_script: &Script,
-    ) -> Result<WantsOutputs, PayjoinError> {
+    ) -> Result<WantsOutputs, OutputSubstitutionError> {
         self.0
             .clone()
             .substitute_receiver_script(&output_script.0)
@@ -289,7 +292,7 @@ impl WantsInputs {
     pub fn try_preserving_privacy(
         &self,
         candidate_inputs: Vec<InputPair>,
-    ) -> Result<InputPair, PayjoinError> {
+    ) -> Result<InputPair, SelectionError> {
         match self.0.clone().try_preserving_privacy(candidate_inputs.into_iter().map(Into::into)) {
             Ok(t) => Ok(t.into()),
             Err(e) => Err(e.into()),
@@ -299,7 +302,7 @@ impl WantsInputs {
     pub fn contribute_inputs(
         &self,
         replacement_inputs: Vec<InputPair>,
-    ) -> Result<WantsInputs, PayjoinError> {
+    ) -> Result<WantsInputs, InputContributionError> {
         self.0
             .clone()
             .contribute_inputs(replacement_inputs.into_iter().map(Into::into))
@@ -322,7 +325,7 @@ impl InputPair {
     pub fn new(
         txin: bitcoin_ffi::TxIn,
         psbtin: crate::bitcoin_ffi::PsbtInput,
-    ) -> Result<Self, PayjoinError> {
+    ) -> Result<Self, PsbtInputError> {
         Ok(Self(payjoin::receive::InputPair::new(txin.into(), psbtin.into())?))
     }
 }
@@ -350,10 +353,10 @@ impl From<payjoin::receive::v2::ProvisionalProposal> for ProvisionalProposal {
 impl ProvisionalProposal {
     pub fn finalize_proposal(
         &self,
-        process_psbt: impl Fn(String) -> Result<String, PayjoinError>,
+        process_psbt: impl Fn(String) -> Result<String, ImplementationError>,
         min_feerate_sat_per_vb: Option<u64>,
         max_effective_fee_rate_sat_per_vb: Option<u64>,
-    ) -> Result<PayjoinProposal, PayjoinError> {
+    ) -> Result<PayjoinProposal, ReplyableError> {
         self.0
             .clone()
             .finalize_proposal(
@@ -408,14 +411,12 @@ impl PayjoinProposal {
             .to_string()
     }
 
-    pub fn extract_v2_req(
-        &self,
-        ohttp_relay: String,
-    ) -> Result<(Request, ClientResponse), PayjoinError> {
-        match self.0.clone().extract_v2_req(ohttp_relay) {
-            Ok((req, ctx)) => Ok((req.into(), ctx.into())),
-            Err(e) => Err(PayjoinError::V2Error { msg: e.to_string() }),
-        }
+    pub fn extract_v2_req(&self, ohttp_relay: String) -> Result<(Request, ClientResponse), Error> {
+        self.0
+            .clone()
+            .extract_v2_req(ohttp_relay)
+            .map_err(Into::into)
+            .map(|(req, ctx)| (req.into(), ctx.into()))
     }
 
     ///Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
@@ -423,11 +424,7 @@ impl PayjoinProposal {
     /// This function decapsulates the response using the provided OHTTP context. If the response status is successful, it indicates that the Payjoin proposal has been accepted. Otherwise, it returns an error with the status code.
     ///
     /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or choose to broadcast the original PSBT.
-    pub fn process_res(
-        &self,
-        body: &[u8],
-        ohttp_context: &ClientResponse,
-    ) -> Result<(), PayjoinError> {
+    pub fn process_res(&self, body: &[u8], ohttp_context: &ClientResponse) -> Result<(), Error> {
         <PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
             .process_res(body, ohttp_context.into())
             .map_err(|e| e.into())
@@ -441,7 +438,7 @@ impl PayjoinProposal {
 
 //     use super::*;
 
-//     fn get_proposal_from_test_vector() -> Result<UncheckedProposal, PayjoinError> {
+//     fn get_proposal_from_test_vector() -> Result<UncheckedProposal, Error> {
 //         // OriginalPSBT Test Vector from BIP
 //         // | InputScriptType | Orginal PSBT Fee rate | maxadditionalfeecontribution | additionalfeeoutputindex|
 //         // |-----------------|-----------------------|------------------------------|-------------------------|

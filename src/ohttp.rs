@@ -1,4 +1,14 @@
-use crate::error::PayjoinError;
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[error("OHTTP error: {message}")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+pub struct OhttpError {
+    message: String,
+}
+impl From<ohttp::Error> for OhttpError {
+    fn from(value: ohttp::Error) -> Self {
+        OhttpError { message: format!("{:?}", value) }
+    }
+}
 
 impl From<payjoin::OhttpKeys> for OhttpKeys {
     fn from(value: payjoin::OhttpKeys) -> Self {
@@ -18,8 +28,8 @@ pub struct OhttpKeys(pub payjoin::OhttpKeys);
 impl OhttpKeys {
     /// Decode an OHTTP KeyConfig
     #[cfg_attr(feature = "uniffi", uniffi::constructor)]
-    pub fn decode(bytes: Vec<u8>) -> Result<Self, PayjoinError> {
-        payjoin::OhttpKeys::decode(bytes.as_slice()).map(|e| e.into()).map_err(|e| e.into())
+    pub fn decode(bytes: Vec<u8>) -> Result<Self, OhttpError> {
+        payjoin::OhttpKeys::decode(bytes.as_slice()).map(Into::into).map_err(Into::into)
     }
 }
 

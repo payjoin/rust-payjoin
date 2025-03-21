@@ -13,7 +13,7 @@ use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
-pub use error::{BuildSenderError, ResponseError, ValidationError};
+pub use error::{BuildSenderError, ResponseError, ValidationError, WellKnownError};
 pub(crate) use error::{InternalBuildSenderError, InternalProposalError, InternalValidationError};
 use url::Url;
 

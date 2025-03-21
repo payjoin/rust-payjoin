@@ -364,6 +364,7 @@ impl fmt::Debug for ResponseError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum WellKnownError {
     Unavailable(String),
     NotEnoughMoney(String),

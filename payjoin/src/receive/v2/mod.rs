@@ -405,7 +405,7 @@ impl WantsOutputs {
     /// receiver needs to pay for additional miner fees (e.g. in the case of adding many outputs).
     pub fn replace_receiver_outputs(
         self,
-        replacement_outputs: impl Iterator<Item = TxOut>,
+        replacement_outputs: impl IntoIterator<Item = TxOut>,
         drain_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
         let inner = self.v1.replace_receiver_outputs(replacement_outputs, drain_script)?;

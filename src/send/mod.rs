@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 pub use error::{BuildSenderError, CreateRequestError, EncapsulationError, ResponseError};
 
-use crate::error::PayjoinError;
+pub use crate::error::SerdeJsonError;
 use crate::ohttp::ClientResponse;
 use crate::request::Request;
 use crate::uri::{PjUri, Url};
@@ -129,14 +129,12 @@ impl Sender {
         }
     }
 
-    pub fn to_json(&self) -> Result<String, PayjoinError> {
-        serde_json::to_string(&self.0).map_err(|e| e.into())
+    pub fn to_json(&self) -> Result<String, SerdeJsonError> {
+        serde_json::to_string(&self.0).map_err(Into::into)
     }
 
-    pub fn from_json(json: &str) -> Result<Self, PayjoinError> {
-        let sender = serde_json::from_str::<payjoin::send::v2::Sender>(json)
-            .map_err(<serde_json::Error as Into<PayjoinError>>::into)?;
-        Ok(sender.into())
+    pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
+        serde_json::from_str::<payjoin::send::v2::Sender>(json).map_err(Into::into).map(Into::into)
     }
 }
 

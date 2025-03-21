@@ -9,7 +9,7 @@ use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 
 use crate::bitcoin_ffi::{Network, OutPoint, Script, TxOut};
-use crate::error::PayjoinError;
+pub use crate::error::SerdeJsonError;
 use crate::ohttp::OhttpKeys;
 use crate::{ClientResponse, Request};
 
@@ -96,14 +96,14 @@ impl Receiver {
         <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone()).id().to_string()
     }
 
-    pub fn to_json(&self) -> Result<String, PayjoinError> {
-        serde_json::to_string(&self.0).map_err(|e| e.into())
+    pub fn to_json(&self) -> Result<String, SerdeJsonError> {
+        serde_json::to_string(&self.0).map_err(Into::into)
     }
 
-    pub fn from_json(json: &str) -> Result<Self, PayjoinError> {
-        let receiver = serde_json::from_str::<payjoin::receive::v2::Receiver>(json)
-            .map_err(<serde_json::Error as Into<PayjoinError>>::into)?;
-        Ok(receiver.into())
+    pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
+        serde_json::from_str::<payjoin::receive::v2::Receiver>(json)
+            .map_err(Into::into)
+            .map(Into::into)
     }
 }
 

@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use super::InputPair;
 use crate::bitcoin_ffi::{Network, OutPoint, Script, TxOut};
-use crate::error::PayjoinError;
 pub use crate::receive::{
     Error, ImplementationError, InputContributionError, OutputSubstitutionError, ReplyableError,
-    SelectionError,
+    SelectionError, SerdeJsonError,
 };
 use crate::{ClientResponse, OhttpKeys, Request};
 
@@ -81,12 +80,12 @@ impl Receiver {
         self.0.id()
     }
 
-    pub fn to_json(&self) -> Result<String, PayjoinError> {
+    pub fn to_json(&self) -> Result<String, SerdeJsonError> {
         self.0.to_json()
     }
 
     #[uniffi::constructor]
-    pub fn from_json(json: &str) -> Result<Self, PayjoinError> {
+    pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
         super::Receiver::from_json(json).map(Into::into)
     }
 }

@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use crate::error::PayjoinError;
-pub use crate::send::{BuildSenderError, CreateRequestError, EncapsulationError, ResponseError};
+pub use crate::send::{
+    BuildSenderError, CreateRequestError, EncapsulationError, ResponseError, SerdeJsonError,
+};
 use crate::{ClientResponse, PjUri, Request, Url};
 
 #[derive(uniffi::Object)]
@@ -126,12 +127,12 @@ impl Sender {
         }
     }
 
-    pub fn to_json(&self) -> Result<String, PayjoinError> {
+    pub fn to_json(&self) -> Result<String, SerdeJsonError> {
         self.0.to_json()
     }
 
     #[uniffi::constructor]
-    pub fn from_json(json: &str) -> Result<Self, PayjoinError> {
+    pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
         super::Sender::from_json(json).map(Into::into)
     }
 }

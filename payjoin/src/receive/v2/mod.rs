@@ -95,14 +95,30 @@ impl Receiver {
         ohttp_keys: OhttpKeys,
         expire_after: Option<Duration>,
     ) -> Result<Self, IntoUrlError> {
+        Self::new_with_time(
+            address,
+            directory,
+            ohttp_keys,
+            SystemTime::now(),
+            expire_after,
+        )
+    }
+
+    // for wasm bindings we need to be able to pass in current time from js
+    pub fn new_with_time(
+        address: Address,
+        directory: impl IntoUrl,
+        ohttp_keys: OhttpKeys,
+        current_time: SystemTime,
+        expire_after: Option<Duration>,
+    ) -> Result<Self, IntoUrlError> {
         Ok(Self {
             context: SessionContext {
                 address,
                 directory: directory.into_url()?,
                 subdirectory: None,
                 ohttp_keys,
-                expiry: SystemTime::now()
-                    + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
+                expiry: current_time + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
                 s: HpkeKeyPair::gen_keypair(),
                 e: None,
             },

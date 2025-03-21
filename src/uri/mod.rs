@@ -2,10 +2,11 @@ use std::str::FromStr;
 #[cfg(feature = "uniffi")]
 use std::sync::Arc;
 
+pub use error::{PjNotSupported, PjParseError, UrlParseError};
 use payjoin::bitcoin::address::NetworkChecked;
 use payjoin::UriExt;
 
-use crate::error::PayjoinError;
+pub mod error;
 #[derive(Clone)]
 pub struct Uri(payjoin::Uri<'static, NetworkChecked>);
 impl From<Uri> for payjoin::Uri<'static, NetworkChecked> {
@@ -21,10 +22,10 @@ impl From<payjoin::Uri<'static, NetworkChecked>> for Uri {
 }
 
 impl Uri {
-    pub fn parse(uri: String) -> Result<Self, PayjoinError> {
+    pub fn parse(uri: String) -> Result<Self, PjParseError> {
         match payjoin::Uri::from_str(uri.as_str()) {
             Ok(e) => Ok(e.assume_checked().into()),
-            Err(e) => Err(PayjoinError::PjParseError { msg: e.to_string() }),
+            Err(e) => Err(e.to_string().into()),
         }
     }
     pub fn address(&self) -> String {
@@ -41,25 +42,17 @@ impl Uri {
         self.0.message.clone().and_then(|x| String::try_from(x).ok())
     }
     #[cfg(not(feature = "uniffi"))]
-    pub fn check_pj_supported(&self) -> Result<PjUri, PayjoinError> {
+    pub fn check_pj_supported(&self) -> Result<PjUri, PjNotSupported> {
         match self.0.clone().check_pj_supported() {
             Ok(e) => Ok(e.into()),
-            Err(_) => {
-                Err(PayjoinError::PjNotSupported {
-                    msg: "Uri doesn't support payjoin".to_string(),
-                })
-            }
+            Err(uri) => Err(uri.to_string().into()),
         }
     }
     #[cfg(feature = "uniffi")]
-    pub fn check_pj_supported(&self) -> Result<Arc<PjUri>, PayjoinError> {
+    pub fn check_pj_supported(&self) -> Result<Arc<PjUri>, PjNotSupported> {
         match self.0.clone().check_pj_supported() {
             Ok(e) => Ok(Arc::new(e.into())),
-            Err(_) => {
-                Err(PayjoinError::PjNotSupported {
-                    msg: "Uri doesn't support payjoin".to_string(),
-                })
-            }
+            Err(uri) => Err(uri.to_string().into()),
         }
     }
     pub fn as_string(&self) -> String {
@@ -121,11 +114,8 @@ pub struct Url(payjoin::Url);
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 impl Url {
     #[cfg_attr(feature = "uniffi", uniffi::constructor)]
-    pub fn parse(input: String) -> Result<Url, PayjoinError> {
-        match payjoin::Url::parse(input.as_str()) {
-            Ok(e) => Ok(Self(e)),
-            Err(e) => Err(PayjoinError::UnexpectedError { msg: e.to_string() }),
-        }
+    pub fn parse(input: String) -> Result<Url, UrlParseError> {
+        payjoin::Url::parse(input.as_str()).map_err(Into::into).map(Self)
     }
     pub fn query(&self) -> Option<String> {
         self.0.query().map(|x| x.to_string())

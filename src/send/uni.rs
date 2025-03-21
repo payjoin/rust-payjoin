@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::error::PayjoinError;
+pub use crate::send::{BuildSenderError, CreateRequestError, EncapsulationError, ResponseError};
 use crate::{ClientResponse, PjUri, Request, Url};
 
 #[derive(uniffi::Object)]
@@ -25,7 +26,7 @@ impl SenderBuilder {
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
     /// to create a [`Sender`]
     #[uniffi::constructor]
-    pub fn new(psbt: String, uri: Arc<PjUri>) -> Result<Self, PayjoinError> {
+    pub fn new(psbt: String, uri: Arc<PjUri>) -> Result<Self, BuildSenderError> {
         super::SenderBuilder::new(psbt, (*uri).clone()).map(Into::into).map_err(Into::into)
     }
 
@@ -44,7 +45,7 @@ impl SenderBuilder {
     // The minfeerate parameter is set if the contribution is available in change.
     //
     // This method fails if no recommendation can be made or if the PSBT is malformed.
-    pub fn build_recommended(&self, min_fee_rate: u64) -> Result<Arc<Sender>, PayjoinError> {
+    pub fn build_recommended(&self, min_fee_rate: u64) -> Result<Arc<Sender>, BuildSenderError> {
         self.0.build_recommended(min_fee_rate).map(|e| Arc::new(e.into()))
     }
 
@@ -67,7 +68,7 @@ impl SenderBuilder {
         change_index: Option<u8>,
         min_fee_rate: u64,
         clamp_fee_contribution: bool,
-    ) -> Result<Arc<Sender>, PayjoinError> {
+    ) -> Result<Arc<Sender>, BuildSenderError> {
         self.0
             .build_with_additional_fee(
                 max_fee_contribution,
@@ -81,7 +82,10 @@ impl SenderBuilder {
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
-    pub fn build_non_incentivizing(&self, min_fee_rate: u64) -> Result<Arc<Sender>, PayjoinError> {
+    pub fn build_non_incentivizing(
+        &self,
+        min_fee_rate: u64,
+    ) -> Result<Arc<Sender>, BuildSenderError> {
         self.0.build_non_incentivizing(min_fee_rate).map(|e| Arc::new(e.into()))
     }
 }
@@ -115,7 +119,7 @@ impl Sender {
     pub fn extract_v2(
         &self,
         ohttp_proxy_url: Arc<Url>,
-    ) -> Result<RequestV2PostContext, PayjoinError> {
+    ) -> Result<RequestV2PostContext, CreateRequestError> {
         match self.0.extract_v2((*ohttp_proxy_url).clone()) {
             Ok((req, ctx)) => Ok(RequestV2PostContext { request: req, context: Arc::new(ctx) }),
             Err(e) => Err(e),
@@ -159,7 +163,7 @@ impl From<super::V1Context> for V1Context {
 impl V1Context {
     /// Decodes and validates the response.
     /// Call this method with response from receiver to continue BIP78 flow. If the response is valid you will get appropriate PSBT that you should sign and broadcast.
-    pub fn process_response(&self, response: Vec<u8>) -> Result<String, PayjoinError> {
+    pub fn process_response(&self, response: Vec<u8>) -> Result<String, ResponseError> {
         self.0.process_response(response)
     }
 }
@@ -172,7 +176,10 @@ impl V2PostContext {
     /// Decodes and validates the response.
     /// Call this method with response from receiver to continue BIP-??? flow. A successful response can either be None if the relay has not response yet or Some(Psbt).
     /// If the response is some valid PSBT you should sign and broadcast.
-    pub fn process_response(&self, response: &[u8]) -> Result<Arc<V2GetContext>, PayjoinError> {
+    pub fn process_response(
+        &self,
+        response: &[u8],
+    ) -> Result<Arc<V2GetContext>, EncapsulationError> {
         self.0.process_response(response).map(|t| Arc::new(t.into()))
     }
 }
@@ -200,7 +207,10 @@ impl From<super::V2GetContext> for V2GetContext {
 
 #[uniffi::export]
 impl V2GetContext {
-    pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestOhttpContext, PayjoinError> {
+    pub fn extract_req(
+        &self,
+        ohttp_relay: String,
+    ) -> Result<RequestOhttpContext, CreateRequestError> {
         self.0
             .extract_req(ohttp_relay)
             .map(|(request, ctx)| RequestOhttpContext { request, ohttp_ctx: Arc::new(ctx) })
@@ -213,7 +223,7 @@ impl V2GetContext {
         &self,
         response: &[u8],
         ohttp_ctx: Arc<ClientResponse>,
-    ) -> Result<Option<String>, PayjoinError> {
+    ) -> Result<Option<String>, ResponseError> {
         self.0.process_response(response, ohttp_ctx.as_ref())
     }
 }

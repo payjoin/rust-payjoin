@@ -2,11 +2,14 @@ use std::io::Cursor;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
+pub use error::{BuildSenderError, CreateRequestError, EncapsulationError, ResponseError};
+
 use crate::error::PayjoinError;
 use crate::ohttp::ClientResponse;
 use crate::request::Request;
 use crate::uri::{PjUri, Url};
 
+pub mod error;
 #[cfg(feature = "uniffi")]
 pub mod uni;
 
@@ -27,7 +30,7 @@ impl SenderBuilder {
     ///
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
     /// to create a [`Sender`]
-    pub fn new(psbt: String, uri: PjUri) -> Result<Self, PayjoinError> {
+    pub fn new(psbt: String, uri: PjUri) -> Result<Self, BuildSenderError> {
         let psbt = payjoin::bitcoin::psbt::Psbt::from_str(psbt.as_str())?;
         Ok(payjoin::send::v2::SenderBuilder::new(psbt, uri.into()).into())
     }
@@ -47,7 +50,7 @@ impl SenderBuilder {
     // The minfeerate parameter is set if the contribution is available in change.
     //
     // This method fails if no recommendation can be made or if the PSBT is malformed.
-    pub fn build_recommended(&self, min_fee_rate: u64) -> Result<Sender, PayjoinError> {
+    pub fn build_recommended(&self, min_fee_rate: u64) -> Result<Sender, BuildSenderError> {
         self.0
             .clone()
             .build_recommended(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate))
@@ -73,7 +76,7 @@ impl SenderBuilder {
         change_index: Option<u8>,
         min_fee_rate: u64,
         clamp_fee_contribution: bool,
-    ) -> Result<Sender, PayjoinError> {
+    ) -> Result<Sender, BuildSenderError> {
         self.0
             .clone()
             .build_with_additional_fee(
@@ -89,7 +92,7 @@ impl SenderBuilder {
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
-    pub fn build_non_incentivizing(&self, min_fee_rate: u64) -> Result<Sender, PayjoinError> {
+    pub fn build_non_incentivizing(&self, min_fee_rate: u64) -> Result<Sender, BuildSenderError> {
         match self
             .0
             .clone()
@@ -116,7 +119,10 @@ impl Sender {
     }
 
     /// Extract serialized Request and Context from a Payjoin Proposal.
-    pub fn extract_v2(&self, ohttp_relay: Url) -> Result<(Request, V2PostContext), PayjoinError> {
+    pub fn extract_v2(
+        &self,
+        ohttp_relay: Url,
+    ) -> Result<(Request, V2PostContext), CreateRequestError> {
         match self.0.extract_v2(ohttp_relay.into()) {
             Ok((req, ctx)) => Ok((req.into(), ctx.into())),
             Err(e) => Err(e.into()),
@@ -147,12 +153,12 @@ impl From<payjoin::send::v1::V1Context> for V1Context {
 impl V1Context {
     ///Decodes and validates the response.
     /// Call this method with response from receiver to continue BIP78 flow. If the response is valid you will get appropriate PSBT that you should sign and broadcast.
-    pub fn process_response(&self, response: Vec<u8>) -> Result<String, PayjoinError> {
+    pub fn process_response(&self, response: Vec<u8>) -> Result<String, ResponseError> {
         let mut decoder = Cursor::new(response);
         <payjoin::send::v1::V1Context as Clone>::clone(&self.0.clone())
             .process_response(&mut decoder)
             .map(|e| e.to_string())
-            .map_err(|e| e.into())
+            .map_err(Into::into)
     }
 }
 
@@ -162,11 +168,11 @@ impl V2PostContext {
     /// Decodes and validates the response.
     /// Call this method with response from receiver to continue BIP-??? flow. A successful response can either be None if the relay has not response yet or Some(Psbt).
     /// If the response is some valid PSBT you should sign and broadcast.
-    pub fn process_response(&self, response: &[u8]) -> Result<V2GetContext, PayjoinError> {
+    pub fn process_response(&self, response: &[u8]) -> Result<V2GetContext, EncapsulationError> {
         <&V2PostContext as Into<payjoin::send::v2::V2PostContext>>::into(self)
             .process_response(response)
-            .map(|t| t.clone().into())
-            .map_err(|e| e.into())
+            .map(Into::into)
+            .map_err(Into::into)
     }
 }
 
@@ -195,7 +201,7 @@ impl V2GetContext {
     pub fn extract_req(
         &self,
         ohttp_relay: String,
-    ) -> Result<(Request, ClientResponse), PayjoinError> {
+    ) -> Result<(Request, ClientResponse), CreateRequestError> {
         self.0
             .extract_req(ohttp_relay)
             .map(|(req, ctx)| (req.into(), ctx.into()))
@@ -209,7 +215,7 @@ impl V2GetContext {
         &self,
         response: &[u8],
         ohttp_ctx: &ClientResponse,
-    ) -> Result<Option<String>, PayjoinError> {
+    ) -> Result<Option<String>, ResponseError> {
         match self.0.process_response(response, ohttp_ctx.into()) {
             Ok(Some(psbt)) => Ok(Some(psbt.to_string())),
             Ok(None) => Ok(None),

@@ -79,8 +79,8 @@ impl DbPool {
     ) -> Result<()> {
         let mut conn = self.client.get_async_connection().await?;
         let key = channel_name(subdirectory_id, channel_type);
-        () = conn.set(&key, data.clone()).await?;
-        () = conn.publish(&key, "updated").await?;
+        conn.set(&key, data.clone()).await?;
+        conn.publish(&key, "updated").await?;
         Ok(())
     }
 

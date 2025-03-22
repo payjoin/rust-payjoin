@@ -18,6 +18,7 @@ use super::{
 };
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
+use crate::output_substitution::OutputSubstitution;
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
 use crate::{IntoUrl, IntoUrlError, Request};
@@ -192,7 +193,7 @@ impl Receiver {
         //
         // see: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#unsecured-payjoin-server
         if params.v == 1 {
-            params.disable_output_substitution = true;
+            params.output_substitution = OutputSubstitution::Disabled;
 
             // Additionally V1 sessions never have an optimistic merge opportunity
             #[cfg(feature = "_multiparty")]
@@ -212,7 +213,8 @@ impl Receiver {
         pj.set_receiver_pubkey(self.context.s.public_key().clone());
         pj.set_ohttp(self.context.ohttp_keys.clone());
         pj.set_exp(self.context.expiry);
-        let extras = PayjoinExtras { endpoint: pj, disable_output_substitution: false };
+        let extras =
+            PayjoinExtras { endpoint: pj, output_substitution: OutputSubstitution::Enabled };
         bitcoin_uri::Uri::with_extras(self.context.address.clone(), extras)
     }
 
@@ -385,9 +387,8 @@ pub struct WantsOutputs {
 }
 
 impl WantsOutputs {
-    pub fn is_output_substitution_disabled(&self) -> bool {
-        self.v1.is_output_substitution_disabled()
-    }
+    /// Whether the receiver is allowed to substitute original outputs or not.
+    pub fn output_substitution(&self) -> OutputSubstitution { self.v1.output_substitution() }
 
     /// Substitute the receiver output script with the provided script.
     pub fn substitute_receiver_script(
@@ -501,10 +502,6 @@ impl PayjoinProposal {
 
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
         self.v1.utxos_to_be_locked()
-    }
-
-    pub fn is_output_substitution_disabled(&self) -> bool {
-        self.v1.is_output_substitution_disabled()
     }
 
     pub fn psbt(&self) -> &Psbt { self.v1.psbt() }
@@ -652,6 +649,6 @@ mod test {
     fn test_v2_pj_uri() {
         let uri = Receiver { context: SHARED_CONTEXT.clone() }.pj_uri();
         assert_ne!(uri.extras.endpoint, EXAMPLE_URL.clone());
-        assert!(!uri.extras.disable_output_substitution);
+        assert_eq!(uri.extras.output_substitution, OutputSubstitution::Enabled);
     }
 }

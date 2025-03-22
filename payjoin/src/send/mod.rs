@@ -17,6 +17,7 @@ pub use error::{BuildSenderError, ResponseError, ValidationError, WellKnownError
 pub(crate) use error::{InternalBuildSenderError, InternalProposalError, InternalValidationError};
 use url::Url;
 
+use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
 
 // See usize casts
@@ -51,7 +52,7 @@ pub(crate) struct AdditionalFeeContribution {
 #[derive(Debug, Clone)]
 pub struct PsbtContext {
     original_psbt: Psbt,
-    disable_output_substitution: bool,
+    output_substitution: OutputSubstitution,
     fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
     payee: ScriptBuf,
@@ -253,7 +254,7 @@ impl PsbtContext {
                     if original_output.script_pubkey == self.payee =>
                 {
                     ensure!(
-                        !self.disable_output_substitution
+                        self.output_substitution == OutputSubstitution::Enabled
                             || (proposed_txout.script_pubkey == original_output.script_pubkey
                                 && proposed_txout.value >= original_output.value),
                         DisallowedOutputSubstitution
@@ -414,14 +415,14 @@ fn determine_fee_contribution(
 
 fn serialize_url(
     endpoint: Url,
-    disable_output_substitution: bool,
+    output_substitution: OutputSubstitution,
     fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
     version: &str,
 ) -> Url {
     let mut url = endpoint;
     url.query_pairs_mut().append_pair("v", version);
-    if disable_output_substitution {
+    if output_substitution == OutputSubstitution::Disabled {
         url.query_pairs_mut().append_pair("disableoutputsubstitution", "true");
     }
     if let Some(AdditionalFeeContribution { max_amount, vout }) = fee_contribution {
@@ -449,6 +450,7 @@ mod test {
     use super::{
         check_single_payee, clear_unneeded_fields, determine_fee_contribution, serialize_url,
     };
+    use crate::output_substitution::OutputSubstitution;
     use crate::psbt::PsbtExt;
     use crate::send::{AdditionalFeeContribution, InternalBuildSenderError, InternalProposalError};
 
@@ -456,7 +458,7 @@ mod test {
         let payee = PARSED_ORIGINAL_PSBT.unsigned_tx.output[1].script_pubkey.clone();
         Ok(super::PsbtContext {
             original_psbt: PARSED_ORIGINAL_PSBT.clone(),
-            disable_output_substitution: false,
+            output_substitution: OutputSubstitution::Enabled,
             fee_contribution: Some(AdditionalFeeContribution {
                 max_amount: bitcoin::Amount::from_sat(182),
                 vout: 0,
@@ -641,10 +643,22 @@ mod test {
 
     #[test]
     fn test_disable_output_substitution_query_param() -> Result<(), BoxError> {
-        let url = serialize_url(Url::parse("http://localhost")?, true, None, FeeRate::ZERO, "2");
+        let url = serialize_url(
+            Url::parse("http://localhost")?,
+            OutputSubstitution::Disabled,
+            None,
+            FeeRate::ZERO,
+            "2",
+        );
         assert_eq!(url, Url::parse("http://localhost?v=2&disableoutputsubstitution=true")?);
 
-        let url = serialize_url(Url::parse("http://localhost")?, false, None, FeeRate::ZERO, "2");
+        let url = serialize_url(
+            Url::parse("http://localhost")?,
+            OutputSubstitution::Enabled,
+            None,
+            FeeRate::ZERO,
+            "2",
+        );
         assert_eq!(url, Url::parse("http://localhost?v=2")?);
         Ok(())
     }

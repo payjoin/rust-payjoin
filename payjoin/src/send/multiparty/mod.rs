@@ -10,6 +10,7 @@ use super::v2::{self, extract_request, EncapsulationError, HpkeContext};
 use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, InternalResult};
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::ohttp_decapsulate;
+use crate::output_substitution::OutputSubstitution;
 use crate::receive::ImplementationError;
 use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
@@ -48,7 +49,7 @@ impl Sender {
             .map_err(|_| InternalCreateRequestError::MissingOhttpConfig)?;
         let body = serialize_v2_body(
             &self.0.v1.psbt,
-            self.0.v1.disable_output_substitution,
+            self.0.v1.output_substitution,
             self.0.v1.fee_contribution,
             self.0.v1.min_fee_rate,
         )?;
@@ -65,7 +66,7 @@ impl Sender {
             endpoint: self.0.endpoint().clone(),
             psbt_ctx: crate::send::PsbtContext {
                 original_psbt: self.0.v1.psbt.clone(),
-                disable_output_substitution: self.0.v1.disable_output_substitution,
+                output_substitution: self.0.v1.output_substitution,
                 fee_contribution: self.0.v1.fee_contribution,
                 payee: self.0.v1.payee.clone(),
                 min_fee_rate: self.0.v1.min_fee_rate,
@@ -79,13 +80,13 @@ impl Sender {
 
 fn serialize_v2_body(
     psbt: &Psbt,
-    disable_output_substitution: bool,
+    output_substitution: OutputSubstitution,
     fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
 ) -> Result<Vec<u8>, CreateRequestError> {
     let mut url = serialize_url(
         Url::parse("http://localhost").unwrap(),
-        disable_output_substitution,
+        output_substitution,
         fee_contribution,
         min_fee_rate,
         "2",
@@ -175,7 +176,12 @@ impl FinalizeContext {
         ohttp_relay: Url,
     ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
         let reply_key = self.hpke_ctx.reply_pair.secret_key();
-        let body = serialize_v2_body(&self.psbt, false, None, FeeRate::BROADCAST_MIN)?;
+        let body = serialize_v2_body(
+            &self.psbt,
+            OutputSubstitution::Disabled,
+            None,
+            FeeRate::BROADCAST_MIN,
+        )?;
         let mut ohttp_keys = self
             .directory_url
             .ohttp()
@@ -237,17 +243,29 @@ mod test {
     use payjoin_test_utils::BoxError;
     use url::Url;
 
+    use crate::output_substitution::OutputSubstitution;
     use crate::send::multiparty::append_optimisitic_merge_query_param;
     use crate::send::serialize_url;
 
     #[test]
     fn test_optimistic_merge_query_param() -> Result<(), BoxError> {
-        let mut url =
-            serialize_url(Url::parse("http://localhost")?, false, None, FeeRate::ZERO, "2");
+        let mut url = serialize_url(
+            Url::parse("http://localhost")?,
+            OutputSubstitution::Enabled,
+            None,
+            FeeRate::ZERO,
+            "2",
+        );
         append_optimisitic_merge_query_param(&mut url);
         assert_eq!(url, Url::parse("http://localhost?v=2&optimisticmerge=true")?);
 
-        let url = serialize_url(Url::parse("http://localhost")?, false, None, FeeRate::ZERO, "2");
+        let url = serialize_url(
+            Url::parse("http://localhost")?,
+            OutputSubstitution::Enabled,
+            None,
+            FeeRate::ZERO,
+            "2",
+        );
         assert_eq!(url, Url::parse("http://localhost?v=2")?);
 
         Ok(())

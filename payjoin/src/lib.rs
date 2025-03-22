@@ -54,8 +54,11 @@ mod request;
 #[cfg(feature = "_core")]
 pub use request::*;
 #[cfg(feature = "_core")]
+pub(crate) mod output_substitution;
+#[cfg(feature = "v1")]
+pub use output_substitution::OutputSubstitution;
+#[cfg(feature = "_core")]
 mod uri;
-
 #[cfg(feature = "_core")]
 pub use into_url::{Error as IntoUrlError, IntoUrl};
 #[cfg(feature = "_core")]

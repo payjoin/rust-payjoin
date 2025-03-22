@@ -14,6 +14,7 @@ use super::config::Config;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::{handle_interrupt, http_agent};
+use crate::db::v2::{RecieverPersister, SenderPersister};
 use crate::db::Database;
 
 #[derive(Clone)]
@@ -52,10 +53,10 @@ impl AppTrait for App {
             Some(send_session) => send_session,
             None => {
                 let psbt = self.create_original_psbt(&uri, fee_rate)?;
-                let mut req_ctx = SenderBuilder::new(psbt, uri.clone())
+                let persister = SenderPersister(self.db.clone());
+                let req_ctx = SenderBuilder::new(psbt, uri.clone(), persister)
                     .build_recommended(fee_rate)
                     .with_context(|| "Failed to build payjoin request")?;
-                self.db.insert_send_session(&mut req_ctx, url)?;
                 req_ctx
             }
         };
@@ -65,13 +66,14 @@ impl AppTrait for App {
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
+        let persister = RecieverPersister(self.db.clone());
         let session = Receiver::new(
             address,
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys.clone(),
             None,
+            persister,
         )?;
-        self.db.insert_recv_session(session.clone())?;
         self.spawn_payjoin_receiver(session, Some(amount)).await
     }
 

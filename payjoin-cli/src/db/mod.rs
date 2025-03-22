@@ -27,4 +27,4 @@ impl Database {
 }
 
 #[cfg(feature = "v2")]
-mod v2;
+pub(crate) mod v2;

@@ -21,7 +21,7 @@ jobs:
         run: cargo build --color always --all-targets --features _danger-local-https
       - name: Check formatting (nightly only)
         if: matrix.rust == 'nightly'
-        run: rustup component add rustfmt && cargo fmt --all -- --check\
+        run: rustup component add rustfmt && cargo fmt --all -- --check
 
   Lint:
     runs-on: ubuntu-latest

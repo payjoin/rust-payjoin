@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-python3 --version
-pip install --user -r requirements.txt
+${PYBIN}/python --version
+${PYBIN}/pip install -r requirements.txt -r requirements-dev.txt
 LIBNAME=libpayjoin_ffi.so
 LINUX_TARGET=x86_64-unknown-linux-gnu
 

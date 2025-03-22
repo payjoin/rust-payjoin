@@ -9,3 +9,11 @@ __pycache__/
 *.whl
 build/
 venv
+
+# Auto-generated shared libraries
+*.dylib
+*.so
+*.dll
+
+# Auto-generated bindings python file
+src/payjoin/payjoin_ffi.py

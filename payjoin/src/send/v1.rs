@@ -27,15 +27,16 @@ use error::{BuildSenderError, InternalBuildSenderError};
 use url::Url;
 
 use super::*;
+pub use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
 use crate::request::Request;
-use crate::PjUri;
+pub use crate::PjUri;
 
 #[derive(Clone)]
 pub struct SenderBuilder<'a> {
     pub(crate) psbt: Psbt,
     pub(crate) uri: PjUri<'a>,
-    pub(crate) disable_output_substitution: bool,
+    pub(crate) output_substitution: OutputSubstitution,
     pub(crate) fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
     /// Decreases the fee contribution instead of erroring.
     ///
@@ -56,7 +57,7 @@ impl<'a> SenderBuilder<'a> {
             psbt,
             uri,
             // Sender's optional parameters
-            disable_output_substitution: false,
+            output_substitution: OutputSubstitution::Enabled,
             fee_contribution: None,
             clamp_fee_contribution: false,
             min_fee_rate: FeeRate::ZERO,
@@ -69,8 +70,8 @@ impl<'a> SenderBuilder<'a> {
     /// It is generally **not** recommended to set this as it may prevent the receiver from
     /// doing advanced operations such as opening LN channels and it also guarantees the
     /// receiver will **not** reward the sender with a discount.
-    pub fn always_disable_output_substitution(mut self, disable: bool) -> Self {
-        self.disable_output_substitution = disable;
+    pub fn always_disable_output_substitution(mut self) -> Self {
+        self.output_substitution = OutputSubstitution::Disabled;
         self
     }
 
@@ -185,8 +186,8 @@ impl<'a> SenderBuilder<'a> {
             self.psbt.validate().map_err(InternalBuildSenderError::InconsistentOriginalPsbt)?;
         psbt.validate_input_utxos().map_err(InternalBuildSenderError::InvalidOriginalInput)?;
         let endpoint = self.uri.extras.endpoint.clone();
-        let disable_output_substitution =
-            self.uri.extras.disable_output_substitution || self.disable_output_substitution;
+        let output_substitution =
+            self.uri.extras.output_substitution.combine(self.output_substitution);
         let payee = self.uri.address.script_pubkey();
 
         check_single_payee(&psbt, &payee, self.uri.amount)?;
@@ -201,7 +202,7 @@ impl<'a> SenderBuilder<'a> {
         Ok(Sender {
             psbt,
             endpoint,
-            disable_output_substitution,
+            output_substitution,
             fee_contribution,
             payee,
             min_fee_rate: self.min_fee_rate,
@@ -216,8 +217,8 @@ pub struct Sender {
     pub(crate) psbt: Psbt,
     /// The payjoin directory subdirectory to send the request to.
     pub(crate) endpoint: Url,
-    /// Disallow receiver to substitute original outputs.
-    pub(crate) disable_output_substitution: bool,
+    /// Whether the receiver is allowed to substitute original outputs.
+    pub(crate) output_substitution: OutputSubstitution,
     /// (maxadditionalfeecontribution, additionalfeeoutputindex)
     pub(crate) fee_contribution: Option<AdditionalFeeContribution>,
     pub(crate) min_fee_rate: FeeRate,
@@ -230,7 +231,7 @@ impl Sender {
     pub fn extract_v1(&self) -> (Request, V1Context) {
         let url = serialize_url(
             self.endpoint.clone(),
-            self.disable_output_substitution,
+            self.output_substitution,
             self.fee_contribution,
             self.min_fee_rate,
             "1", // payjoin version
@@ -241,7 +242,7 @@ impl Sender {
             V1Context {
                 psbt_context: PsbtContext {
                     original_psbt: self.psbt.clone(),
-                    disable_output_substitution: self.disable_output_substitution,
+                    output_substitution: self.output_substitution,
                     fee_contribution: self.fee_contribution,
                     payee: self.payee.clone(),
                     min_fee_rate: self.min_fee_rate,

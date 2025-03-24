@@ -310,10 +310,7 @@ impl WantsOutputs {
                             && txo.value < original_output.value
                         {
                             return Err(
-                                InternalOutputSubstitutionError::OutputSubstitutionDisabled(
-                                    "Decreasing the receiver output value is not allowed",
-                                )
-                                .into(),
+                                InternalOutputSubstitutionError::DecreasedValueWhenDisabled.into(),
                             );
                         }
                         outputs.push(txo);
@@ -322,10 +319,8 @@ impl WantsOutputs {
                     None => {
                         if self.params.disable_output_substitution {
                             return Err(
-                                InternalOutputSubstitutionError::OutputSubstitutionDisabled(
-                                    "Changing the receiver output script pubkey is not allowed",
-                                )
-                                .into(),
+                                InternalOutputSubstitutionError::ScriptPubKeyChangedWhenDisabled
+                                    .into(),
                             );
                         }
                         let index = rng.gen_range(0..replacement_outputs.len());
@@ -788,18 +783,34 @@ pub(crate) mod test {
     use std::str::FromStr;
 
     use bitcoin::{Address, Network};
-    use payjoin_test_utils::ORIGINAL_PSBT;
+    use payjoin_test_utils::{BoxError, ORIGINAL_PSBT, QUERY_PARAMS};
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
     use super::*;
-    pub const QUERY_PARAMS: &str = "maxadditionalfeecontribution=182&additionalfeeoutputindex=0";
-
-    pub(crate) fn proposal_from_test_vector(
-    ) -> Result<UncheckedProposal, Box<dyn std::error::Error>> {
+    pub(crate) fn proposal_from_test_vector() -> Result<UncheckedProposal, BoxError> {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[1])?;
         Ok(UncheckedProposal { psbt: bitcoin::Psbt::from_str(ORIGINAL_PSBT)?, params })
+    }
+
+    fn wants_outputs_from_test_vector(
+        proposal: UncheckedProposal,
+    ) -> Result<WantsOutputs, BoxError> {
+        Ok(proposal
+            .assume_interactive_receiver()
+            .check_inputs_not_owned(|_| Ok(false))
+            .expect("No inputs should be owned")
+            .check_no_inputs_seen_before(|_| Ok(false))
+            .expect("No inputs should be seen before")
+            .identify_receiver_outputs(|script| {
+                let network = Network::Bitcoin;
+                Ok(Address::from_script(script, network).unwrap()
+                    == Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+                        .unwrap()
+                        .require_network(network)
+                        .unwrap())
+            })?)
     }
 
     #[test]
@@ -933,6 +944,75 @@ pub(crate) mod test {
             p2tr_proposal.additional_input_weight().expect("should calculate input weight"),
             Weight::from_wu(230)
         );
+    }
+
+    #[test]
+    fn test_pjos_disabled() {
+        let mut proposal = proposal_from_test_vector().unwrap();
+        // Specify outputsubstitution is disabled
+        proposal.params.disable_output_substitution = true;
+        let wants_outputs = wants_outputs_from_test_vector(proposal).unwrap();
+
+        let output_value =
+            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value
+                + Amount::ONE_SAT;
+        let outputs = vec![TxOut {
+            value: output_value,
+            script_pubkey: wants_outputs.original_psbt.unsigned_tx.output
+                [wants_outputs.change_vout]
+                .script_pubkey
+                .clone(),
+        }];
+        let increased_amount = wants_outputs.clone().replace_receiver_outputs(
+            outputs,
+            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout]
+                .script_pubkey
+                .as_script(),
+        );
+        assert!(increased_amount.is_ok(), "Replacement Outputs should be a valid WantsOutput");
+        assert_ne!(wants_outputs.payjoin_psbt, increased_amount.unwrap().payjoin_psbt);
+
+        let output_value =
+            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value
+                - Amount::ONE_SAT;
+        let outputs = vec![TxOut {
+            value: output_value,
+            script_pubkey: wants_outputs.original_psbt.unsigned_tx.output
+                [wants_outputs.change_vout]
+                .script_pubkey
+                .clone(),
+        }];
+        let decreased_amount = wants_outputs.clone().replace_receiver_outputs(
+            outputs,
+            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout]
+                .script_pubkey
+                .as_script(),
+        );
+        match decreased_amount {
+            Ok(_) => panic!("Expected error, got success"),
+            Err(error) => {
+                assert_eq!(
+                    error,
+                    OutputSubstitutionError::from(
+                        InternalOutputSubstitutionError::DecreasedValueWhenDisabled
+                    )
+                );
+            }
+        };
+
+        let script = Script::new();
+        let replace_receiver_script_pubkey = wants_outputs.substitute_receiver_script(script);
+        match replace_receiver_script_pubkey {
+            Ok(_) => panic!("Expected error, got success"),
+            Err(error) => {
+                assert_eq!(
+                    error,
+                    OutputSubstitutionError::from(
+                        InternalOutputSubstitutionError::ScriptPubKeyChangedWhenDisabled
+                    )
+                );
+            }
+        };
     }
 
     #[test]

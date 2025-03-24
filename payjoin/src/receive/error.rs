@@ -265,13 +265,15 @@ impl std::error::Error for PayloadError {
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
 /// You can only display it.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct OutputSubstitutionError(InternalOutputSubstitutionError);
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum InternalOutputSubstitutionError {
-    /// Output substitution is disabled
-    OutputSubstitutionDisabled(&'static str),
+    /// Output substitution is disabled and output value was decreased
+    DecreasedValueWhenDisabled,
+    /// Output substitution is disabled and script pubkey was changed
+    ScriptPubKeyChangedWhenDisabled,
     /// Current output substitution implementation doesn't support reducing the number of outputs
     NotEnoughOutputs,
     /// The provided drain script could not be identified in the provided replacement outputs
@@ -281,7 +283,8 @@ pub(crate) enum InternalOutputSubstitutionError {
 impl fmt::Display for OutputSubstitutionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
-            InternalOutputSubstitutionError::OutputSubstitutionDisabled(reason) => write!(f, "{}", &format!("Output substitution is disabled: {}", reason)),
+            InternalOutputSubstitutionError::DecreasedValueWhenDisabled => write!(f, "Decreasing the receiver output value is not allowed when output substitution is disabled"),
+            InternalOutputSubstitutionError::ScriptPubKeyChangedWhenDisabled => write!(f, "Changing the receiver output script pubkey is not allowed when output substitution is disabled"),
             InternalOutputSubstitutionError::NotEnoughOutputs => write!(
                 f,
                 "Current output substitution implementation doesn't support reducing the number of outputs"
@@ -299,7 +302,8 @@ impl From<InternalOutputSubstitutionError> for OutputSubstitutionError {
 impl std::error::Error for OutputSubstitutionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.0 {
-            InternalOutputSubstitutionError::OutputSubstitutionDisabled(_) => None,
+            InternalOutputSubstitutionError::DecreasedValueWhenDisabled => None,
+            InternalOutputSubstitutionError::ScriptPubKeyChangedWhenDisabled => None,
             InternalOutputSubstitutionError::NotEnoughOutputs => None,
             InternalOutputSubstitutionError::InvalidDrainScript => None,
         }

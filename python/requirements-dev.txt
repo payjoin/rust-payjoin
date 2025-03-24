@@ -1,1 +1,2 @@
 python-bitcoinlib==0.12.2
+toml==0.10.2

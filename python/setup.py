@@ -1,6 +1,13 @@
 #!/usr/bin/env python
 
+import os
 from setuptools import setup, find_packages
+import toml
+
+# Read version from Cargo.toml
+cargo_toml_path = os.path.join(os.path.dirname(__file__), '..', 'Cargo.toml')
+cargo_toml = toml.load(cargo_toml_path)
+version = cargo_toml['package']['version']
 
 LONG_DESCRIPTION = """# payjoin
 This repository creates libraries for various programming languages, all using the Rust-based [Payjoin](https://github.com/payjoin/rust-payjoin) 
@@ -25,7 +32,7 @@ setup(
     zip_safe=False,
     packages=["payjoin"],
     package_dir={"payjoin": "./src/payjoin"},
-    version="0.20.0",
+    version=version,
     license="MIT or Apache 2.0",
     has_ext_modules=lambda: True,
 )

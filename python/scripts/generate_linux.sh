@@ -7,8 +7,8 @@ LINUX_TARGET=x86_64-unknown-linux-gnu
 
 echo "Generating payjoin_ffi.py..."
 cd ../
-cargo run --features uniffi --bin uniffi-bindgen generate src/payjoin_ffi.udl --language python --out-dir python/src/payjoin/
-
+cargo build --profile release --features uniffi
+cargo run --profile release --features uniffi --bin uniffi-bindgen generate --library target/release/$LIBNAME --language python --out-dir python/src/payjoin/
 
 echo "Generating native binaries..."
 rustup target add $LINUX_TARGET

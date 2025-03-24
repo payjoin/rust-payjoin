@@ -19,8 +19,7 @@ git clone https://github.com/LtbLightning/payjoin-ffi.git
 cd python
 
 # Install dependencies
-pip install --requirement requirements.txt
-pip install python-bitcoinlib
+pip install --requirement requirements.txt --requirement requirements-dev.txt
 
 # Build the wheel
 python setup.py bdist_wheel --verbose
@@ -45,8 +44,7 @@ git clone https://github.com/LtbLightning/payjoin-ffi.git
 cd python
 
 # Install dependencies
-pip install --requirement requirements.txt
-pip install python-bitcoinlib
+pip install --requirement requirements.txt --requirement requirements-dev.txt
 
 # Build the wheel
 python setup.py bdist_wheel --verbose

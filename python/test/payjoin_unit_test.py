@@ -45,7 +45,7 @@ class OutputOwnershipCallback(payjoin.IsOutputKnown):
     def __init__(self, value):
         self.value = value
 
-    def callback(self, outpoint: payjoin.OutPoint):
+    def callback(self, outpoint: payjoin.bitcoin.OutPoint):
         return False
 
 

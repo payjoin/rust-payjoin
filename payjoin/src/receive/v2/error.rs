@@ -26,7 +26,7 @@ pub(crate) enum InternalSessionError {
     /// Url parsing failed
     ParseUrl(crate::into_url::Error),
     /// The session has expired
-    Expired(std::time::SystemTime),
+    Expired(web_time::SystemTime),
     /// OHTTP Encapsulation failed
     OhttpEncapsulation(OhttpEncapsulationError),
     /// Hybrid Public Key Encryption failed
@@ -41,8 +41,8 @@ impl From<crate::into_url::Error> for SessionError {
     fn from(e: crate::into_url::Error) -> Self { InternalSessionError::ParseUrl(e).into() }
 }
 
-impl From<std::time::SystemTime> for Error {
-    fn from(e: std::time::SystemTime) -> Self { InternalSessionError::Expired(e).into() }
+impl From<web_time::SystemTime> for Error {
+    fn from(e: web_time::SystemTime) -> Self { InternalSessionError::Expired(e).into() }
 }
 
 impl From<OhttpEncapsulationError> for Error {

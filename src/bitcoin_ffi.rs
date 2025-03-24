@@ -7,12 +7,6 @@ use payjoin::bitcoin;
 #[cfg(feature = "uniffi")]
 mod uni {
     pub use bitcoin_ffi::*;
-
-    uniffi::use_udl_object!(bitcoin_ffi, Script);
-    uniffi::use_udl_record!(bitcoin_ffi, TxOut);
-    uniffi::use_udl_record!(bitcoin_ffi, TxIn);
-    uniffi::use_udl_enum!(bitcoin_ffi, Network);
-    uniffi::use_udl_record!(bitcoin_ffi, OutPoint);
 }
 
 #[cfg(feature = "uniffi")]

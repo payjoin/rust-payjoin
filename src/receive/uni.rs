@@ -199,7 +199,7 @@ impl MaybeInputsSeen {
     ) -> Result<Arc<OutputsUnknown>, PayjoinError> {
         self.0
             .clone()
-            .check_no_inputs_seen_before(|outpoint| is_known.callback(*outpoint))
+            .check_no_inputs_seen_before(|outpoint| is_known.callback(outpoint.clone()))
             .map(|t| Arc::new(t.into()))
     }
 }

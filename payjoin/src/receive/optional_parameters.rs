@@ -133,3 +133,25 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
 }
+
+#[cfg(test)]
+pub(crate) mod test {
+    use bitcoin::Amount;
+
+    use super::*;
+
+    #[test]
+    fn test_parse_params() {
+        use bitcoin::FeeRate;
+
+        let pairs = url::form_urlencoded::parse(b"maxadditionalfeecontribution=182&additionalfeeoutputindex=0&minfeerate=1&disableoutputsubstitution=true&optimisticmerge=true");
+        let params =
+            Params::from_query_pairs(pairs, &[1]).expect("Could not parse params from query pairs");
+        assert_eq!(params.v, 1);
+        assert_eq!(params.output_substitution, OutputSubstitution::Disabled);
+        assert_eq!(params.additional_fee_contribution, Some((Amount::from_sat(182), 0)));
+        assert_eq!(params.min_fee_rate, FeeRate::BROADCAST_MIN);
+        #[cfg(feature = "_multiparty")]
+        assert!(params.optimistic_merge)
+    }
+}

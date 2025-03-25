@@ -49,6 +49,12 @@ impl Receiver {
             .map(Into::into)
     }
 
+    /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
+    /// This identifies a session at the payjoin directory server.
+    pub fn pj_uri(&self) -> crate::PjUri {
+        self.0.pj_uri()
+    }
+
     pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestResponse, PayjoinError> {
         self.0
             .extract_req(ohttp_relay)

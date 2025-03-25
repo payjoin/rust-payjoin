@@ -248,3 +248,68 @@ impl FinalizedProposal {
 
     pub fn v2(&self) -> &[v2::UncheckedProposal] { &self.v2_proposals }
 }
+
+#[cfg(test)]
+mod test {
+
+    use std::any::{Any, TypeId};
+
+    use payjoin_test_utils::{BoxError, PARSED_ORIGINAL_PSBT};
+
+    use super::{v1, v2, FinalizedProposal, UncheckedProposalBuilder};
+    use crate::receive::optional_parameters::Params;
+    use crate::receive::v2::test::SHARED_CONTEXT;
+
+    fn multiparty_proposal_from_test_vector() -> v1::UncheckedProposal {
+        let pairs = url::form_urlencoded::parse("v=2&optimisticmerge=true".as_bytes());
+        let params =
+            Params::from_query_pairs(pairs, &[2]).expect("Could not parse from query pairs");
+        v1::UncheckedProposal { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
+    }
+
+    #[test]
+    fn test_build_multiparty() -> Result<(), BoxError> {
+        let proposal_one = v2::UncheckedProposal {
+            v1: multiparty_proposal_from_test_vector(),
+            context: SHARED_CONTEXT.clone(),
+        };
+        let proposal_two = v2::UncheckedProposal {
+            v1: multiparty_proposal_from_test_vector(),
+            context: SHARED_CONTEXT.clone(),
+        };
+        let mut multiparty = UncheckedProposalBuilder::new();
+        multiparty.add(proposal_one).expect("Could not add proposal to multiparty");
+        multiparty.add(proposal_two).expect("Could not add proposal to multiparty");
+        let unchecked_proposal = multiparty.build();
+        assert!(
+            unchecked_proposal.expect("Could not build multiparty proposal").contexts.len() == 2
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn finalize_multiparty() -> Result<(), BoxError> {
+        use crate::psbt::PsbtExt;
+        let proposal_one = v2::UncheckedProposal {
+            v1: multiparty_proposal_from_test_vector(),
+            context: SHARED_CONTEXT.clone(),
+        };
+        let proposal_two = v2::UncheckedProposal {
+            v1: multiparty_proposal_from_test_vector(),
+            context: SHARED_CONTEXT.clone(),
+        };
+        let mut finalized_multiparty = FinalizedProposal::new();
+        finalized_multiparty
+            .add(proposal_one.clone())
+            .expect("Could not add propsal to multiparty");
+
+        finalized_multiparty.add(proposal_two).expect("Could not add propsal to multiparty");
+        assert_eq!(finalized_multiparty.v2()[0].type_id(), TypeId::of::<v2::UncheckedProposal>());
+
+        let multiparty_psbt =
+            finalized_multiparty.combine().expect("could not create PSBT from finalized proposal");
+        assert!(multiparty_psbt.validate_input_utxos().is_ok());
+
+        Ok(())
+    }
+}

@@ -16,7 +16,7 @@ rustup target add aarch64-apple-darwin x86_64-apple-darwin
 cargo build --profile release-smaller --target aarch64-apple-darwin --features uniffi
 echo "Done building aarch64-apple-darwin"
 
-cargo build --profile release-smaller --target x86_64-apple-darwin
+cargo build --profile release-smaller --target x86_64-apple-darwin --features uniffi
 echo "Done building x86_64-apple-darwin"
 
 echo "Building macos fat library"

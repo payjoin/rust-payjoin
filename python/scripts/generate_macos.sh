@@ -2,7 +2,7 @@
 
 set -euo pipefail
 python3 --version
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 LIBNAME=libpayjoin_ffi.dylib
 
 echo "Generating payjoin_ffi.py..."

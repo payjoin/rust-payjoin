@@ -120,7 +120,9 @@ impl Sender {
         ohttp_proxy_url: Arc<Url>,
     ) -> Result<RequestV2PostContext, PayjoinError> {
         match self.0.extract_v2((*ohttp_proxy_url).clone()) {
-            Ok((req, ctx)) => Ok(RequestV2PostContext { request: req, context: Arc::new(ctx) }),
+            Ok((req, ctx)) => {
+                Ok(RequestV2PostContext { request: req, context: Arc::new(ctx.into()) })
+            }
             Err(e) => Err(e),
         }
     }
@@ -135,10 +137,10 @@ impl Sender {
     }
 }
 
-#[derive(uniffi::Object)]
+#[derive(uniffi::Record)]
 pub struct RequestV2PostContext {
     pub request: Request,
-    pub context: Arc<super::V2PostContext>,
+    pub context: Arc<V2PostContext>,
 }
 
 #[derive(uniffi::Record)]

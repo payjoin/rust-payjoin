@@ -12,92 +12,92 @@ use payjoin::IntoUrlError;
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
 pub enum PayjoinError {
-    #[error("Error while parsing the string: {message} ")]
-    InvalidAddress { message: String },
-    #[error("Error while parsing the script: {message}")]
-    InvalidScript { message: String },
-    #[error("{message}")]
-    NetworkValidation { message: String },
-    #[error("Error encountered while decoding PSBT: {message} ")]
-    PsbtParseError { message: String },
+    #[error("Error while parsing the string: {msg} ")]
+    InvalidAddress { msg: String },
+    #[error("Error while parsing the script: {msg}")]
+    InvalidScript { msg: String },
+    #[error("{msg}")]
+    NetworkValidation { msg: String },
+    #[error("Error encountered while decoding PSBT: {msg} ")]
+    PsbtParseError { msg: String },
 
-    #[error("Response error: {message:?}")]
-    ResponseError { message: String },
+    #[error("Response error: {msg:?}")]
+    ResponseError { msg: String },
 
     ///Error that may occur when the request from sender is malformed.
     ///This is currently opaque type because we aren’t sure which variants will stay. You can only display it.
-    #[error("Error encountered while processing the sender's request : {message}")]
-    RequestError { message: String },
+    #[error("Error encountered while processing the sender's request : {msg}")]
+    RequestError { msg: String },
 
     ///Error that may occur when the request from sender is malformed.
-    #[error("Error encountered while decoding transaction data : {message}")]
-    TransactionError { message: String },
+    #[error("Error encountered while decoding transaction data : {msg}")]
+    TransactionError { msg: String },
     // To be returned as HTTP 500
-    #[error("HTTP 500 : {message}")]
-    ServerError { message: String },
+    #[error("HTTP 500 : {msg}")]
+    ServerError { msg: String },
 
     ///Error that may occur when coin selection fails.
-    #[error("Error occurred during coin selection: {message}")]
-    SelectionError { message: String },
+    #[error("Error occurred during coin selection: {msg}")]
+    SelectionError { msg: String },
 
     ///Error returned when request could not be created.
     ///This error can currently only happen due to programmer mistake.
-    #[error("Error creating the request: {message}")]
-    CreateRequestError { message: String },
+    #[error("Error creating the request: {msg}")]
+    CreateRequestError { msg: String },
 
     /// Error building a Sender from a SenderBuilder.
     /// This error is unrecoverable.
-    #[error("Error building the sender: {message}")]
-    BuildSenderError { message: String },
+    #[error("Error building the sender: {msg}")]
+    BuildSenderError { msg: String },
 
-    #[error("Error parsing the Pj URL: {message}")]
-    PjParseError { message: String },
+    #[error("Error parsing the Pj URL: {msg}")]
+    PjParseError { msg: String },
 
-    #[error("{message}")]
-    PjNotSupported { message: String },
+    #[error("{msg}")]
+    PjNotSupported { msg: String },
 
-    #[error("Malformed response from receiver: {message}")]
-    ValidationError { message: String },
+    #[error("Malformed response from receiver: {msg}")]
+    ValidationError { msg: String },
 
-    #[error("V2Error: {message}")]
-    V2Error { message: String },
+    #[error("V2Error: {msg}")]
+    V2Error { msg: String },
 
-    #[error("Unexpected error occurred: {message}")]
-    UnexpectedError { message: String },
+    #[error("Unexpected error occurred: {msg}")]
+    UnexpectedError { msg: String },
 
-    #[error("{message}")]
-    OhttpError { message: String },
+    #[error("{msg}")]
+    OhttpError { msg: String },
 
-    #[error("{message}")]
-    UrlError { message: String },
+    #[error("{msg}")]
+    UrlError { msg: String },
 
-    #[error("{message}")]
-    IoError { message: String },
+    #[error("{msg}")]
+    IoError { msg: String },
 
-    #[error("{message}")]
-    OutputSubstitutionError { message: String },
+    #[error("{msg}")]
+    OutputSubstitutionError { msg: String },
 
-    #[error("{message}")]
-    InputContributionError { message: String },
+    #[error("{msg}")]
+    InputContributionError { msg: String },
 
-    #[error("{message}")]
-    InputPairError { message: String },
+    #[error("{msg}")]
+    InputPairError { msg: String },
 
-    #[error("{message}")]
-    SerdeJsonError { message: String },
+    #[error("{msg}")]
+    SerdeJsonError { msg: String },
 
     ///Error that can be replied to the sender
-    #[error("Replyable error occurred: {message}")]
-    ReplyableError { message: String },
+    #[error("Replyable error occurred: {msg}")]
+    ReplyableError { msg: String },
 
-    #[error("Error converting to URL: {message}")]
-    IntoUrlError { message: String },
+    #[error("Error converting to URL: {msg}")]
+    IntoUrlError { msg: String },
 
-    #[error("Error encapsulating payload: {message}")]
-    EncapsulationError { message: String },
+    #[error("Error encapsulating payload: {msg}")]
+    EncapsulationError { msg: String },
 
-    #[error("Implementation error: {message}")]
-    ImplementationError { message: String },
+    #[error("Implementation error: {msg}")]
+    ImplementationError { msg: String },
 }
 
 macro_rules! impl_from_error {
@@ -105,7 +105,7 @@ macro_rules! impl_from_error {
         $(
             impl From<$src> for PayjoinError {
                 fn from(value: $src) -> Self {
-                    PayjoinError::$variant { message: value.to_string() }
+                    PayjoinError::$variant { msg: value.to_string() }
                 }
             }
         )*
@@ -126,19 +126,19 @@ impl_from_error! {
 #[cfg(feature = "uniffi")]
 impl From<uniffi::UnexpectedUniFFICallbackError> for PayjoinError {
     fn from(value: uniffi::UnexpectedUniFFICallbackError) -> Self {
-        PayjoinError::UnexpectedError { message: value.to_string() }
+        PayjoinError::UnexpectedError { msg: value.to_string() }
     }
 }
 
 impl From<PdkResponseError> for PayjoinError {
     fn from(value: PdkResponseError) -> Self {
-        PayjoinError::ResponseError { message: format!("{:?}", value) }
+        PayjoinError::ResponseError { msg: format!("{:?}", value) }
     }
 }
 
 impl From<SelectionError> for PayjoinError {
     fn from(value: SelectionError) -> Self {
-        PayjoinError::SelectionError { message: format!("{:?}", value) }
+        PayjoinError::SelectionError { msg: format!("{:?}", value) }
     }
 }
 
@@ -146,56 +146,56 @@ impl From<payjoin::receive::Error> for PayjoinError {
     fn from(value: payjoin::receive::Error) -> Self {
         match value {
             payjoin::receive::Error::ReplyToSender(e) => e.into(),
-            payjoin::receive::Error::V2(e) => PayjoinError::V2Error { message: e.to_string() },
-            _ => Self::UnexpectedError { message: "Unhandled receive error variant".to_string() },
+            payjoin::receive::Error::V2(e) => PayjoinError::V2Error { msg: e.to_string() },
+            _ => Self::UnexpectedError { msg: "Unhandled receive error variant".to_string() },
         }
     }
 }
 
 impl From<payjoin::io::Error> for PayjoinError {
     fn from(value: payjoin::io::Error) -> Self {
-        PayjoinError::IoError { message: value.to_string() }
+        PayjoinError::IoError { msg: value.to_string() }
     }
 }
 
 impl From<ReplyableError> for PayjoinError {
     fn from(value: ReplyableError) -> Self {
-        PayjoinError::ReplyableError { message: format!("{:?}", value) }
+        PayjoinError::ReplyableError { msg: format!("{:?}", value) }
     }
 }
 
 impl From<IntoUrlError> for PayjoinError {
     fn from(value: IntoUrlError) -> Self {
-        PayjoinError::IntoUrlError { message: format!("{:?}", value) }
+        PayjoinError::IntoUrlError { msg: format!("{:?}", value) }
     }
 }
 
 impl From<InputContributionError> for PayjoinError {
     fn from(value: InputContributionError) -> Self {
-        PayjoinError::InputContributionError { message: format!("{:?}", value) }
+        PayjoinError::InputContributionError { msg: format!("{:?}", value) }
     }
 }
 
 impl From<ImplementationError> for PayjoinError {
     fn from(value: ImplementationError) -> Self {
-        PayjoinError::ImplementationError { message: format!("{:?}", value) }
+        PayjoinError::ImplementationError { msg: format!("{:?}", value) }
     }
 }
 
 impl From<CreateRequestError> for PayjoinError {
     fn from(value: CreateRequestError) -> Self {
-        PayjoinError::CreateRequestError { message: format!("{:?}", value) }
+        PayjoinError::CreateRequestError { msg: format!("{:?}", value) }
     }
 }
 
 impl From<BuildSenderError> for PayjoinError {
     fn from(value: BuildSenderError) -> Self {
-        PayjoinError::BuildSenderError { message: format!("{:?}", value) }
+        PayjoinError::BuildSenderError { msg: format!("{:?}", value) }
     }
 }
 
 impl From<EncapsulationError> for PayjoinError {
     fn from(value: EncapsulationError) -> Self {
-        PayjoinError::EncapsulationError { message: format!("{:?}", value) }
+        PayjoinError::EncapsulationError { msg: format!("{:?}", value) }
     }
 }

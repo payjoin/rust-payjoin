@@ -67,7 +67,7 @@ impl Receiver {
     ) -> Result<(Request, ClientResponse), PayjoinError> {
         match self.0.clone().extract_req(ohttp_relay) {
             Ok((req, ctx)) => Ok((req.into(), ctx.into())),
-            Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
+            Err(e) => Err(PayjoinError::V2Error { msg: e.to_string() }),
         }
     }
 
@@ -414,7 +414,7 @@ impl PayjoinProposal {
     ) -> Result<(Request, ClientResponse), PayjoinError> {
         match self.0.clone().extract_v2_req(ohttp_relay) {
             Ok((req, ctx)) => Ok((req.into(), ctx.into())),
-            Err(e) => Err(PayjoinError::V2Error { message: e.to_string() }),
+            Err(e) => Err(PayjoinError::V2Error { msg: e.to_string() }),
         }
     }
 

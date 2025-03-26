@@ -24,7 +24,7 @@ impl Uri {
     pub fn parse(uri: String) -> Result<Self, PayjoinError> {
         match payjoin::Uri::from_str(uri.as_str()) {
             Ok(e) => Ok(e.assume_checked().into()),
-            Err(e) => Err(PayjoinError::PjParseError { message: e.to_string() }),
+            Err(e) => Err(PayjoinError::PjParseError { msg: e.to_string() }),
         }
     }
     pub fn address(&self) -> String {
@@ -46,7 +46,7 @@ impl Uri {
             Ok(e) => Ok(e.into()),
             Err(_) => {
                 Err(PayjoinError::PjNotSupported {
-                    message: "Uri doesn't support payjoin".to_string(),
+                    msg: "Uri doesn't support payjoin".to_string(),
                 })
             }
         }
@@ -57,7 +57,7 @@ impl Uri {
             Ok(e) => Ok(Arc::new(e.into())),
             Err(_) => {
                 Err(PayjoinError::PjNotSupported {
-                    message: "Uri doesn't support payjoin".to_string(),
+                    msg: "Uri doesn't support payjoin".to_string(),
                 })
             }
         }
@@ -124,7 +124,7 @@ impl Url {
     pub fn parse(input: String) -> Result<Url, PayjoinError> {
         match payjoin::Url::parse(input.as_str()) {
             Ok(e) => Ok(Self(e)),
-            Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
+            Err(e) => Err(PayjoinError::UnexpectedError { msg: e.to_string() }),
         }
     }
     pub fn query(&self) -> Option<String> {

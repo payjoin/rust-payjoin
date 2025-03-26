@@ -1,0 +1,104 @@
+# Copied from [bdk-ffi](https://github.com/bitcoindevkit/bdk-ffi/blob/master/.github/workflows/test-python.yaml)
+name: Build and Test Python
+on: [push, pull_request]
+
+jobs:
+  build-manylinux_2_28-x86_64-wheels:
+    name: "Build and test Manylinux 2.28 x86_64 wheels"
+    runs-on: ubuntu-20.04
+    defaults:
+      run:
+        working-directory: python
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64
+      env:
+        PLAT: manylinux_2_28_x86_64
+        PYBIN: "/opt/python/${{ matrix.python_dir }}/bin"
+    strategy:
+      matrix:
+        include:
+          - python: "3.8"
+            python_dir: "cp38-cp38"
+          - python: "3.9"
+            python_dir: "cp39-cp39"
+          - python: "3.10"
+            python_dir: "cp310-cp310"
+          - python: "3.11"
+            python_dir: "cp311-cp311"
+          - python: "3.12"
+            python_dir: "cp312-cp312"
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v4
+
+      - name: "Install Rust 1.78.0"
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.78.0
+
+      - name: "Install Python"
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: "Generate payjoin-ffi.py and binaries"
+        run: PYBIN="/opt/python/${{ matrix.python_dir }}/bin" bash ./scripts/generate_linux.sh
+
+      - name: "Build wheel"
+        # Specifying the plat-name argument is necessary to build a wheel with the correct name,
+        # see issue BDK#350 for more information
+        run: ${PYBIN}/python setup.py bdist_wheel --plat-name $PLAT --verbose
+
+      - name: "Install wheel"
+        run: ${PYBIN}/pip install ./dist/*.whl
+
+      - name: "Run tests"
+        run: ${PYBIN}/python -m unittest --verbose test/payjoin_unit_test.py
+
+  build-macos:
+    name: "Build and test macOS"
+    runs-on: macos-13
+    defaults:
+      run:
+        working-directory: python
+    strategy:
+      matrix:
+        python:
+          - "3.8"
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: "Install Rust 1.78.0"
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.78.0
+
+      - name: "Install Python"
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: "Generate payjoin-ffi.py and binaries"
+        run: bash ./scripts/generate_macos.sh
+
+      - name: "Build wheel"
+        # Specifying the plat-name argument is necessary to build a wheel with the correct name,
+        # see issue BDK#350 for more information
+        run: python3 setup.py bdist_wheel --plat-name macosx_11_0_x86_64 --verbose
+
+      - name: "Install wheel"
+        run: pip3 install ./dist/*.whl
+
+      - name: "Run tests"
+        run: python3 -m unittest --verbose test/payjoin_unit_test.py
+
+      - name: "Build arm64 wheel"
+        run: python3 setup.py bdist_wheel --plat-name macosx_11_0_arm64 --verbose
+      # Note: You can't install the arm64 wheel on the CI, so we skip these steps and simply test that the wheel builds

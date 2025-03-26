@@ -17,7 +17,7 @@ The directories below include instructions for using, building, and publishing t
 
 | Language | Platform              | Published Package | Building Documentation             | API Docs |
 |----------|-----------------------|-------------------|------------------------------------|----------|
-| Python   | linux, macOS, Windows | payjoin           | [Readme payjoin](python/README.md) |          |
+| Python   | linux, macOS | payjoin           | [Readme payjoin](python/README.md) |          |
 
 ## Minimum Supported Rust Version (MSRV)
 

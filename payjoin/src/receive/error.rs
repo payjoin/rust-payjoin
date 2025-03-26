@@ -1,7 +1,7 @@
 use std::{error, fmt};
 
-use crate::error_codes::{
-    NOT_ENOUGH_MONEY, ORIGINAL_PSBT_REJECTED, UNAVAILABLE, VERSION_UNSUPPORTED,
+use crate::error_codes::ErrorCode::{
+    self, NotEnoughMoney, OriginalPsbtRejected, Unavailable, VersionUnsupported,
 };
 
 pub type ImplementationError = Box<dyn error::Error + Send + Sync>;
@@ -82,17 +82,17 @@ impl JsonError for ReplyableError {
             Self::Payload(e) => e.to_json(),
             #[cfg(feature = "v1")]
             Self::V1(e) => e.to_json(),
-            Self::Implementation(_) => serialize_json_error(UNAVAILABLE, "Receiver error"),
+            Self::Implementation(_) => serialize_json_error(Unavailable, "Receiver error"),
         }
     }
 }
 
-pub(crate) fn serialize_json_error(code: &str, message: impl fmt::Display) -> String {
+pub(crate) fn serialize_json_error(code: ErrorCode, message: impl fmt::Display) -> String {
     format!(r#"{{ "errorCode": "{}", "message": "{}" }}"#, code, message)
 }
 
 pub(crate) fn serialize_json_plus_fields(
-    code: &str,
+    code: ErrorCode,
     message: impl fmt::Display,
     additional_fields: &str,
 ) -> String {
@@ -185,29 +185,29 @@ impl JsonError for PayloadError {
         use InternalPayloadError::*;
 
         match &self.0 {
-            Utf8(_) => serialize_json_error(ORIGINAL_PSBT_REJECTED, self),
-            ParsePsbt(_) => serialize_json_error(ORIGINAL_PSBT_REJECTED, self),
+            Utf8(_) => serialize_json_error(OriginalPsbtRejected, self),
+            ParsePsbt(_) => serialize_json_error(OriginalPsbtRejected, self),
             SenderParams(e) => match e {
                 super::optional_parameters::Error::UnknownVersion { supported_versions } => {
                     let supported_versions_json =
                         serde_json::to_string(supported_versions).unwrap_or_default();
                     serialize_json_plus_fields(
-                        VERSION_UNSUPPORTED,
+                        VersionUnsupported,
                         "This version of payjoin is not supported.",
                         &format!(r#""supported": {}"#, supported_versions_json),
                     )
                 }
-                _ => serialize_json_error("sender-params-error", self),
+                _ => serialize_json_error(OriginalPsbtRejected, self),
             },
-            InconsistentPsbt(_) => serialize_json_error(ORIGINAL_PSBT_REJECTED, self),
-            PrevTxOut(_) => serialize_json_error(ORIGINAL_PSBT_REJECTED, self),
-            MissingPayment => serialize_json_error(ORIGINAL_PSBT_REJECTED, self),
-            OriginalPsbtNotBroadcastable => serialize_json_error(ORIGINAL_PSBT_REJECTED, self),
-            InputOwned(_) => serialize_json_error(ORIGINAL_PSBT_REJECTED, self),
-            InputWeight(_) => serialize_json_error(ORIGINAL_PSBT_REJECTED, self),
-            InputSeen(_) => serialize_json_error(ORIGINAL_PSBT_REJECTED, self),
-            PsbtBelowFeeRate(_, _) => serialize_json_error(ORIGINAL_PSBT_REJECTED, self),
-            FeeTooHigh(_, _) => serialize_json_error(NOT_ENOUGH_MONEY, self),
+            InconsistentPsbt(_) => serialize_json_error(OriginalPsbtRejected, self),
+            PrevTxOut(_) => serialize_json_error(OriginalPsbtRejected, self),
+            MissingPayment => serialize_json_error(OriginalPsbtRejected, self),
+            OriginalPsbtNotBroadcastable => serialize_json_error(OriginalPsbtRejected, self),
+            InputOwned(_) => serialize_json_error(OriginalPsbtRejected, self),
+            InputWeight(_) => serialize_json_error(OriginalPsbtRejected, self),
+            InputSeen(_) => serialize_json_error(OriginalPsbtRejected, self),
+            PsbtBelowFeeRate(_, _) => serialize_json_error(OriginalPsbtRejected, self),
+            FeeTooHigh(_, _) => serialize_json_error(NotEnoughMoney, self),
         }
     }
 }

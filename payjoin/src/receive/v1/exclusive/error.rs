@@ -42,13 +42,14 @@ impl JsonError for RequestError {
     fn to_json(&self) -> String {
         use InternalRequestError::*;
 
+        use crate::error_codes::ErrorCode::OriginalPsbtRejected;
         use crate::receive::error::serialize_json_error;
         match &self.0 {
-            Io(_) => serialize_json_error("original-psbt-rejected", self),
-            MissingHeader(_) => serialize_json_error("original-psbt-rejected", self),
-            InvalidContentType(_) => serialize_json_error("original-psbt-rejected", self),
-            InvalidContentLength(_) => serialize_json_error("original-psbt-rejected", self),
-            ContentLengthTooLarge(_) => serialize_json_error("original-psbt-rejected", self),
+            Io(_) => serialize_json_error(OriginalPsbtRejected, self),
+            MissingHeader(_) => serialize_json_error(OriginalPsbtRejected, self),
+            InvalidContentType(_) => serialize_json_error(OriginalPsbtRejected, self),
+            InvalidContentLength(_) => serialize_json_error(OriginalPsbtRejected, self),
+            ContentLengthTooLarge(_) => serialize_json_error(OriginalPsbtRejected, self),
         }
     }
 }

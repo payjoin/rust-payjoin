@@ -1,12 +1,11 @@
 use std::fmt::{self, Display};
+use std::str::FromStr;
 
 use bitcoin::locktime::absolute::LockTime;
 use bitcoin::transaction::Version;
 use bitcoin::Sequence;
 
-use crate::error_codes::{
-    NOT_ENOUGH_MONEY, ORIGINAL_PSBT_REJECTED, UNAVAILABLE, VERSION_UNSUPPORTED,
-};
+use crate::error_codes::ErrorCode;
 
 /// Error building a Sender from a SenderBuilder.
 ///
@@ -282,8 +281,8 @@ impl ResponseError {
         if let Some(error_code) =
             json.as_object().and_then(|v| v.get("errorCode")).and_then(|v| v.as_str())
         {
-            match error_code {
-                code if code == VERSION_UNSUPPORTED => {
+            match ErrorCode::from_str(error_code) {
+                Ok(ErrorCode::VersionUnsupported) => {
                     let supported = json
                         .as_object()
                         .and_then(|v| v.get("supported"))
@@ -292,9 +291,9 @@ impl ResponseError {
                         .unwrap_or_default();
                     WellKnownError::VersionUnsupported { message, supported }.into()
                 }
-                code if code == UNAVAILABLE => WellKnownError::Unavailable(message).into(),
-                code if code == NOT_ENOUGH_MONEY => WellKnownError::NotEnoughMoney(message).into(),
-                code if code == ORIGINAL_PSBT_REJECTED =>
+                Ok(ErrorCode::Unavailable) => WellKnownError::Unavailable(message).into(),
+                Ok(ErrorCode::NotEnoughMoney) => WellKnownError::NotEnoughMoney(message).into(),
+                Ok(ErrorCode::OriginalPsbtRejected) =>
                     WellKnownError::OriginalPsbtRejected(message).into(),
                 _ => Self::Unrecognized { error_code: error_code.to_string(), message },
             }
@@ -373,12 +372,12 @@ pub enum WellKnownError {
 }
 
 impl WellKnownError {
-    pub fn error_code(&self) -> &str {
+    pub fn error_code(&self) -> ErrorCode {
         match self {
-            WellKnownError::Unavailable(_) => UNAVAILABLE,
-            WellKnownError::NotEnoughMoney(_) => NOT_ENOUGH_MONEY,
-            WellKnownError::VersionUnsupported { .. } => VERSION_UNSUPPORTED,
-            WellKnownError::OriginalPsbtRejected(_) => ORIGINAL_PSBT_REJECTED,
+            WellKnownError::Unavailable(_) => ErrorCode::Unavailable,
+            WellKnownError::NotEnoughMoney(_) => ErrorCode::NotEnoughMoney,
+            WellKnownError::VersionUnsupported { .. } => ErrorCode::VersionUnsupported,
+            WellKnownError::OriginalPsbtRejected(_) => ErrorCode::OriginalPsbtRejected,
         }
     }
     pub fn message(&self) -> &str {
@@ -413,7 +412,7 @@ mod tests {
         let known_str_error = r#"{"errorCode":"version-unsupported", "message":"custom message here", "supported": [1, 2]}"#;
         match ResponseError::parse(known_str_error) {
             ResponseError::WellKnown(e) => {
-                assert_eq!(e.error_code(), "version-unsupported");
+                assert_eq!(e.error_code(), ErrorCode::VersionUnsupported);
                 assert_eq!(e.message(), "custom message here");
                 assert_eq!(
                     e.to_string(),

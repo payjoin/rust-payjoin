@@ -48,7 +48,8 @@ impl error::Error for Error {
 /// 1. Provide structured error responses for protocol-level failures
 /// 2. Hide implementation details of external errors for security
 /// 3. Support proper error propagation through the receiver stack
-/// 4. Provide errors according to BIP-78 JSON error specifications for return using [`JsonError::to_json`]
+/// 4. Provide errors according to BIP-78 JSON error specifications for return
+///    after conversion into [`JsonReply`]
 #[derive(Debug)]
 pub enum ReplyableError {
     /// Error arising from validation of the original PSBT payload
@@ -62,41 +63,54 @@ pub enum ReplyableError {
     Implementation(ImplementationError),
 }
 
-/// A trait for errors that can be serialized to JSON in a standardized format.
+/// The standard format for errors that can be replied as JSON.
 ///
-/// The JSON output follows the structure:
+/// The JSON output includes the following fields:
 /// ```json
 /// {
 ///     "errorCode": "specific-error-code",
 ///     "message": "Human readable error message"
 /// }
 /// ```
-pub trait JsonError {
-    /// Converts the error into a JSON string representation.
-    fn to_json(&self) -> String;
+pub struct JsonReply {
+    /// The error code
+    error_code: ErrorCode,
+    /// The error message to be displayed only in debug logs
+    message: String,
+    /// Additional fields to be added to the JSON
+    additional_fields: Vec<String>,
 }
 
-impl JsonError for ReplyableError {
-    fn to_json(&self) -> String {
-        match self {
-            Self::Payload(e) => e.to_json(),
-            #[cfg(feature = "v1")]
-            Self::V1(e) => e.to_json(),
-            Self::Implementation(_) => serialize_json_error(Unavailable, "Receiver error"),
+impl JsonReply {
+    /// Create a new Reply
+    pub fn new(error_code: ErrorCode, message: impl fmt::Display) -> Self {
+        Self { error_code, message: message.to_string(), additional_fields: vec![] }
+    }
+
+    /// Serialize the Reply to a JSON string
+    pub fn to_json(&self) -> String {
+        if self.additional_fields.is_empty() {
+            format!(r#"{{ "errorCode": "{}", "message": "{}" }}"#, self.error_code, self.message)
+        } else {
+            format!(
+                r#"{{ "errorCode": "{}", "message": "{}", {} }}"#,
+                self.error_code,
+                self.message,
+                self.additional_fields.join(", ")
+            )
         }
     }
 }
 
-pub(crate) fn serialize_json_error(code: ErrorCode, message: impl fmt::Display) -> String {
-    format!(r#"{{ "errorCode": "{}", "message": "{}" }}"#, code, message)
-}
-
-pub(crate) fn serialize_json_plus_fields(
-    code: ErrorCode,
-    message: impl fmt::Display,
-    additional_fields: &str,
-) -> String {
-    format!(r#"{{ "errorCode": "{}", "message": "{}", {} }}"#, code, message, additional_fields)
+impl From<&ReplyableError> for JsonReply {
+    fn from(e: &ReplyableError) -> Self {
+        match e {
+            ReplyableError::Payload(e) => e.into(),
+            #[cfg(feature = "v1")]
+            ReplyableError::V1(e) => e.into(),
+            ReplyableError::Implementation(_) => JsonReply::new(Unavailable, "Receiver error"),
+        }
+    }
 }
 
 impl fmt::Display for ReplyableError {
@@ -180,34 +194,37 @@ pub(crate) enum InternalPayloadError {
     FeeTooHigh(bitcoin::FeeRate, bitcoin::FeeRate),
 }
 
-impl JsonError for PayloadError {
-    fn to_json(&self) -> String {
+impl From<&PayloadError> for JsonReply {
+    fn from(e: &PayloadError) -> Self {
         use InternalPayloadError::*;
 
-        match &self.0 {
-            Utf8(_) => serialize_json_error(OriginalPsbtRejected, self),
-            ParsePsbt(_) => serialize_json_error(OriginalPsbtRejected, self),
+        match &e.0 {
+            Utf8(_) => JsonReply::new(OriginalPsbtRejected, e),
+            ParsePsbt(_) => JsonReply::new(OriginalPsbtRejected, e),
             SenderParams(e) => match e {
                 super::optional_parameters::Error::UnknownVersion { supported_versions } => {
                     let supported_versions_json =
                         serde_json::to_string(supported_versions).unwrap_or_default();
-                    serialize_json_plus_fields(
-                        VersionUnsupported,
-                        "This version of payjoin is not supported.",
-                        &format!(r#""supported": {}"#, supported_versions_json),
-                    )
+                    JsonReply {
+                        error_code: VersionUnsupported,
+                        message: "This version of payjoin is not supported.".to_string(),
+                        additional_fields: vec![format!(
+                            r#""supported": {}"#,
+                            supported_versions_json
+                        )],
+                    }
                 }
-                _ => serialize_json_error(OriginalPsbtRejected, self),
+                _ => JsonReply::new(OriginalPsbtRejected, e),
             },
-            InconsistentPsbt(_) => serialize_json_error(OriginalPsbtRejected, self),
-            PrevTxOut(_) => serialize_json_error(OriginalPsbtRejected, self),
-            MissingPayment => serialize_json_error(OriginalPsbtRejected, self),
-            OriginalPsbtNotBroadcastable => serialize_json_error(OriginalPsbtRejected, self),
-            InputOwned(_) => serialize_json_error(OriginalPsbtRejected, self),
-            InputWeight(_) => serialize_json_error(OriginalPsbtRejected, self),
-            InputSeen(_) => serialize_json_error(OriginalPsbtRejected, self),
-            PsbtBelowFeeRate(_, _) => serialize_json_error(OriginalPsbtRejected, self),
-            FeeTooHigh(_, _) => serialize_json_error(NotEnoughMoney, self),
+            InconsistentPsbt(_) => JsonReply::new(OriginalPsbtRejected, e),
+            PrevTxOut(_) => JsonReply::new(OriginalPsbtRejected, e),
+            MissingPayment => JsonReply::new(OriginalPsbtRejected, e),
+            OriginalPsbtNotBroadcastable => JsonReply::new(OriginalPsbtRejected, e),
+            InputOwned(_) => JsonReply::new(OriginalPsbtRejected, e),
+            InputWeight(_) => JsonReply::new(OriginalPsbtRejected, e),
+            InputSeen(_) => JsonReply::new(OriginalPsbtRejected, e),
+            PsbtBelowFeeRate(_, _) => JsonReply::new(OriginalPsbtRejected, e),
+            FeeTooHigh(_, _) => JsonReply::new(NotEnoughMoney, e),
         }
     }
 }

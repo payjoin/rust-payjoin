@@ -13,7 +13,7 @@ use url::Url;
 
 use super::error::{Error, InputContributionError};
 use super::{
-    v1, ImplementationError, InternalPayloadError, JsonError, OutputSubstitutionError,
+    v1, ImplementationError, InternalPayloadError, JsonReply, OutputSubstitutionError,
     ReplyableError, SelectionError,
 };
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
@@ -286,7 +286,7 @@ impl UncheckedProposal {
             &mut self.context.ohttp_keys,
             "POST",
             subdir.as_str(),
-            Some(err.to_json().as_bytes()),
+            Some(JsonReply::from(err).to_json().as_bytes()),
         )
         .map_err(InternalSessionError::OhttpEncapsulation)?;
         let req = Request::new_v2(&self.context.full_relay_url(ohttp_relay)?, &body);
@@ -626,7 +626,7 @@ mod test {
             .err()
             .ok_or("expected error but got success")?;
         assert_eq!(
-            server_error.to_json(),
+            JsonReply::from(&server_error).to_json(),
             r#"{ "errorCode": "unavailable", "message": "Receiver error" }"#
         );
         let (_req, _ctx) = proposal.clone().extract_err_req(&server_error, &*EXAMPLE_URL)?;

@@ -492,7 +492,7 @@ fn input_pair_from_local_utxo(utxo: LocalUtxo) -> Result<InputPair, BoxError> {
 fn is_script_owned(wallet: &Wallet, script: Vec<u8>) -> Result<bool, PayjoinError> {
     wallet
         .is_mine(Script::from_bytes(script.as_slice()))
-        .map_err(|x| PayjoinError::UnexpectedError { message: x.to_string() })
+        .map_err(|x| PayjoinError::UnexpectedError { msg: x.to_string() })
 }
 
 fn mock_is_output_known(_: bitcoin_ffi::OutPoint) -> Result<bool, PayjoinError> {
@@ -502,6 +502,6 @@ fn mock_is_output_known(_: bitcoin_ffi::OutPoint) -> Result<bool, PayjoinError> 
 fn process_psbt(wallet: &Wallet, psbt: String) -> Result<String, PayjoinError> {
     match wallet.sign(&mut PartiallySignedTransaction::from_str(&psbt).unwrap(), true) {
         Ok(e) => Ok(e.to_string()),
-        Err(e) => Err(PayjoinError::UnexpectedError { message: e.to_string() }),
+        Err(e) => Err(PayjoinError::UnexpectedError { msg: e.to_string() }),
     }
 }

@@ -24,7 +24,7 @@ use tokio::sync::watch;
 
 use super::config::Config;
 use super::wallet::BitcoindWallet;
-use super::App as AppTrait;
+use super::{App as AppTrait, MAX_CONTENT_LENGTH};
 use crate::app::{handle_interrupt, http_agent};
 use crate::db::Database;
 #[cfg(feature = "_danger-local-https")]
@@ -89,12 +89,15 @@ impl AppTrait for App {
             "Sent fallback transaction hex: {:#}",
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
         );
-        let psbt = ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()).map_err(
-            |e| {
-                log::debug!("Error processing response: {:?}", e);
-                anyhow!("Failed to process response {}", e)
-            },
-        )?;
+        let response_bytes = response.bytes().await?;
+        if response_bytes.len() > MAX_CONTENT_LENGTH {
+            return Err(anyhow!("Response bytes exceeded the limit of {MAX_CONTENT_LENGTH} bytes"));
+        }
+
+        let psbt = ctx.process_response(&mut response_bytes.to_vec().as_slice()).map_err(|e| {
+            log::debug!("Error processing response: {:?}", e);
+            anyhow!("Failed to process response {}", e)
+        })?;
 
         self.process_pj_response(psbt)?;
         Ok(())

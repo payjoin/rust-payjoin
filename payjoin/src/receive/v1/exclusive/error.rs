@@ -38,8 +38,8 @@ impl From<InternalRequestError> for super::ReplyableError {
     fn from(e: InternalRequestError) -> Self { super::ReplyableError::V1(e.into()) }
 }
 
-impl From<&RequestError> for JsonReply {
-    fn from(e: &RequestError) -> Self {
+impl From<RequestError> for JsonReply {
+    fn from(e: RequestError) -> Self {
         use InternalRequestError::*;
 
         match &e.0 {

@@ -104,13 +104,14 @@ impl JsonReply {
     }
 }
 
-impl From<&ReplyableError> for JsonReply {
-    fn from(e: &ReplyableError) -> Self {
+impl From<ReplyableError> for JsonReply {
+    fn from(e: ReplyableError) -> Self {
+        use ReplyableError::*;
         match e {
-            ReplyableError::Payload(e) => e.into(),
+            Payload(e) => e.into(),
             #[cfg(feature = "v1")]
-            ReplyableError::V1(e) => e.into(),
-            ReplyableError::Implementation(_) => JsonReply::new(Unavailable, "Receiver error"),
+            V1(e) => e.into(),
+            Implementation(_) => JsonReply::new(Unavailable, "Receiver error"),
         }
     }
 }
@@ -196,8 +197,8 @@ pub(crate) enum InternalPayloadError {
     FeeTooHigh(bitcoin::FeeRate, bitcoin::FeeRate),
 }
 
-impl From<&PayloadError> for JsonReply {
-    fn from(e: &PayloadError) -> Self {
+impl From<PayloadError> for JsonReply {
+    fn from(e: PayloadError) -> Self {
         use InternalPayloadError::*;
 
         match &e.0 {

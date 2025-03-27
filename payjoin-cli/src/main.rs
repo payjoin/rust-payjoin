@@ -136,7 +136,7 @@ fn cli() -> ArgMatches {
     #[cfg(feature = "v2")]
     {
         cmd = cmd.arg(
-            Arg::new("ohttp_relay")
+            Arg::new("ohttp_relays")
                 .long("ohttp-relay")
                 .help("The ohttp relay url")
                 .value_parser(value_parser!(Url)),

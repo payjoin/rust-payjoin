@@ -62,10 +62,10 @@ async fn parse_ohttp_keys_response(res: reqwest::Response) -> Result<OhttpKeys, 
 }
 
 #[derive(Debug)]
-pub struct Error(InternalError);
+pub struct Error(pub InternalError);
 
 #[derive(Debug)]
-enum InternalError {
+pub enum InternalError {
     ParseUrl(crate::into_url::Error),
     Reqwest(reqwest::Error),
     Io(std::io::Error),

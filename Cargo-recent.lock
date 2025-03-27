@@ -1639,6 +1639,7 @@ dependencies = [
  "nix",
  "payjoin",
  "payjoin-test-utils",
+ "rand",
  "rcgen",
  "reqwest",
  "rustls 0.22.4",

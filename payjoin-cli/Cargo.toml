@@ -26,6 +26,7 @@ v1 = ["payjoin/v1","hyper", "hyper-util", "http-body-util"]
 v2 = ["payjoin/v2", "payjoin/io"]
 
 [dependencies]
+rand = "0.8"
 anyhow = "1.0.70"
 async-trait = "0.1"
 bitcoincore-rpc = "0.19.0"

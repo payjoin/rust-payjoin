@@ -286,6 +286,7 @@ mod test {
     use payjoin_test_utils::{BoxError, PARSED_ORIGINAL_PSBT};
 
     use super::SenderBuilder;
+    use crate::error_codes::ErrorCode;
     use crate::send::error::{ResponseError, WellKnownError};
     use crate::send::test::create_psbt_context;
     use crate::{Uri, UriExt};
@@ -322,7 +323,10 @@ mod test {
         })
         .to_string();
         match ctx.process_response(&mut known_json_error.as_bytes()) {
-            Err(ResponseError::WellKnown(WellKnownError::VersionUnsupported { .. })) => (),
+            Err(ResponseError::WellKnown(WellKnownError {
+                code: ErrorCode::VersionUnsupported,
+                ..
+            })) => (),
             _ => panic!("Expected WellKnownError"),
         }
 

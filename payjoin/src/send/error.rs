@@ -266,22 +266,18 @@ pub enum ResponseError {
 }
 
 impl ResponseError {
-    fn from_json(json: serde_json::Value) -> Self {
-        // we try to find the errorCode field and
-        // if it exists we try to parse it as a well known error
-        // if its an unknown error we return the error code and message
-        // from original response
-        // if errorCode field doesn't exist we return parse error
+    pub(crate) fn from_json(json: serde_json::Value) -> Self {
         let message = json
             .as_object()
             .and_then(|v| v.get("message"))
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
-        if let Some(error_code) =
-            json.as_object().and_then(|v| v.get("errorCode")).and_then(|v| v.as_str())
-        {
-            match ErrorCode::from_str(error_code) {
+
+        let error_code = json.as_object().and_then(|v| v.get("errorCode")).and_then(|v| v.as_str());
+
+        match error_code {
+            Some(code) => match ErrorCode::from_str(code) {
                 Ok(ErrorCode::VersionUnsupported) => {
                     let supported = json
                         .as_object()
@@ -289,23 +285,19 @@ impl ResponseError {
                         .and_then(|v| v.as_array())
                         .map(|array| array.iter().filter_map(|v| v.as_u64()).collect::<Vec<u64>>())
                         .unwrap_or_default();
-                    WellKnownError::VersionUnsupported { message, supported }.into()
+                    WellKnownError::version_unsupported(message, supported).into()
                 }
-                Ok(ErrorCode::Unavailable) => WellKnownError::Unavailable(message).into(),
-                Ok(ErrorCode::NotEnoughMoney) => WellKnownError::NotEnoughMoney(message).into(),
-                Ok(ErrorCode::OriginalPsbtRejected) =>
-                    WellKnownError::OriginalPsbtRejected(message).into(),
-                _ => Self::Unrecognized { error_code: error_code.to_string(), message },
-            }
-        } else {
-            InternalValidationError::Parse.into()
+                Ok(code) => WellKnownError::new(code, message).into(),
+                Err(_) => Self::Unrecognized { error_code: code.to_string(), message },
+            },
+            None => InternalValidationError::Parse.into(),
         }
     }
 
     /// Parse a response from the receiver.
     ///
     /// response must be valid JSON string.
-    pub fn parse(response: &str) -> Self {
+    pub(crate) fn parse(response: &str) -> Self {
         match serde_json::from_str(response) {
             Ok(json) => Self::from_json(json),
             Err(_) => InternalValidationError::Parse.into(),
@@ -346,8 +338,8 @@ impl fmt::Debug for ResponseError {
         match self {
             Self::WellKnown(e) => {
                 let json = serde_json::json!({
-                    "errorCode": e.error_code().to_string(),
-                    "message": e.message()
+                    "errorCode": e.code.to_string(),
+                    "message": e.message
                 });
                 write!(f, "Well known error: {}", json)
             }
@@ -364,41 +356,39 @@ impl fmt::Debug for ResponseError {
     }
 }
 
+/// A well-known error that can be safely displayed to end users.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum WellKnownError {
-    Unavailable(String),
-    NotEnoughMoney(String),
-    VersionUnsupported { message: String, supported: Vec<u64> },
-    OriginalPsbtRejected(String),
+pub struct WellKnownError {
+    pub(crate) code: ErrorCode,
+    pub(crate) message: String,
+    pub(crate) supported_versions: Option<Vec<u64>>,
 }
 
 impl WellKnownError {
-    pub fn error_code(&self) -> ErrorCode {
-        match self {
-            WellKnownError::Unavailable(_) => ErrorCode::Unavailable,
-            WellKnownError::NotEnoughMoney(_) => ErrorCode::NotEnoughMoney,
-            WellKnownError::VersionUnsupported { .. } => ErrorCode::VersionUnsupported,
-            WellKnownError::OriginalPsbtRejected(_) => ErrorCode::OriginalPsbtRejected,
-        }
+    /// Create a new well-known error with the given code and message.
+    pub(crate) fn new(code: ErrorCode, message: String) -> Self {
+        Self { code, message, supported_versions: None }
     }
-    pub fn message(&self) -> &str {
-        match self {
-            WellKnownError::Unavailable(m) => m,
-            WellKnownError::NotEnoughMoney(m) => m,
-            WellKnownError::VersionUnsupported { message: m, .. } => m,
-            WellKnownError::OriginalPsbtRejected(m) => m,
-        }
+
+    /// Create a version unsupported error with the given message and supported versions.
+    pub(crate) fn version_unsupported(message: String, supported: Vec<u64>) -> Self {
+        Self { code: ErrorCode::VersionUnsupported, message, supported_versions: Some(supported) }
     }
 }
 
-impl Display for WellKnownError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Unavailable(_) => write!(f, "The payjoin endpoint is not available for now."),
-            Self::NotEnoughMoney(_) => write!(f, "The receiver added some inputs but could not bump the fee of the payjoin proposal."),
-            Self::VersionUnsupported { supported: v, .. }=> write!(f, "This version of payjoin is not supported. Use version {:?}.", v),
-            Self::OriginalPsbtRejected(_) => write!(f, "The receiver rejected the original PSBT."),
+impl core::fmt::Display for WellKnownError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.code {
+            ErrorCode::Unavailable => write!(f, "The payjoin endpoint is not available for now."),
+            ErrorCode::NotEnoughMoney => write!(f, "The receiver added some inputs but could not bump the fee of the payjoin proposal."),
+            ErrorCode::VersionUnsupported => {
+                if let Some(supported) = &self.supported_versions {
+                    write!(f, "This version of payjoin is not supported. Use version {:?}.", supported)
+                } else {
+                    write!(f, "This version of payjoin is not supported.")
+                }
+            }
+            ErrorCode::OriginalPsbtRejected => write!(f, "The receiver rejected the original PSBT."),
         }
     }
 }
@@ -414,8 +404,8 @@ mod tests {
         let known_str_error = r#"{"errorCode":"version-unsupported", "message":"custom message here", "supported": [1, 2]}"#;
         match ResponseError::parse(known_str_error) {
             ResponseError::WellKnown(e) => {
-                assert_eq!(e.error_code(), ErrorCode::VersionUnsupported);
-                assert_eq!(e.message(), "custom message here");
+                assert_eq!(e.code, ErrorCode::VersionUnsupported);
+                assert_eq!(e.message, "custom message here");
                 assert_eq!(
                     e.to_string(),
                     "This version of payjoin is not supported. Use version [1, 2]."

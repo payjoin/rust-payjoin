@@ -1822,6 +1822,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "ohttp-relay"
+version = "0.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e766a4a358e64f0ea35b79eae3333052b8164ffc20f538ffb7c6861250bbb101"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "futures",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls 0.26.0",
+ "hyper-tungstenite",
+ "hyper-util",
+ "rustls 0.22.4",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1932,7 +1955,7 @@ dependencies = [
 [[package]]
 name = "payjoin-directory"
 version = "0.0.1"
-source = "git+https://github.com/payjoin/rust-payjoin?rev=f202098#f202098de40abfbcc1768ba3b6f4a16adda37c3e"
+source = "git+https://github.com/payjoin/rust-payjoin.git?branch=bindings-0.23#59f2a34149f5b7d652ee3920aa8b1461279d4f82"
 dependencies = [
  "anyhow",
  "bhttp",
@@ -1943,12 +1966,39 @@ dependencies = [
  "hyper",
  "hyper-rustls 0.26.0",
  "hyper-util",
+ "payjoin",
  "redis",
  "rustls 0.22.4",
  "tokio",
  "tokio-rustls 0.25.0",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "payjoin-test-utils"
+version = "0.1.0"
+source = "git+https://github.com/payjoin/rust-payjoin.git?branch=bindings-0.23#59f2a34149f5b7d652ee3920aa8b1461279d4f82"
+dependencies = [
+ "bitcoin 0.32.5",
+ "bitcoin-ohttp",
+ "bitcoincore-rpc",
+ "bitcoind",
+ "http",
+ "log",
+ "ohttp-relay 0.0.10",
+ "once_cell",
+ "payjoin",
+ "payjoin-directory",
+ "rcgen",
+ "reqwest",
+ "rustls 0.22.4",
+ "testcontainers",
+ "testcontainers-modules 0.3.7",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -1963,15 +2013,15 @@ dependencies = [
  "bitcoind",
  "hex",
  "http",
- "ohttp-relay",
+ "ohttp-relay 0.0.8",
  "payjoin",
- "payjoin-directory",
+ "payjoin-test-utils",
  "rcgen",
  "reqwest",
  "rustls 0.22.4",
  "serde_json",
  "testcontainers",
- "testcontainers-modules",
+ "testcontainers-modules 0.1.4",
  "thiserror 1.0.69",
  "tokio",
  "uniffi",
@@ -3031,6 +3081,15 @@ name = "testcontainers-modules"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47c405c3757803e54818eaaf6b5b2af485dff4ab89a7130b72f62fd19b8bb6cd"
+dependencies = [
+ "testcontainers",
+]
+
+[[package]]
+name = "testcontainers-modules"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8debb5e215d9e89ea93255fffff00bf037ea44075d7a2669a21a8a988d6b52fd"
 dependencies = [
  "testcontainers",
 ]

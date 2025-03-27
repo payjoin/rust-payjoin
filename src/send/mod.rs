@@ -41,8 +41,8 @@ impl SenderBuilder {
     /// It is generally **not** recommended to set this as it may prevent the receiver from
     /// doing advanced operations such as opening LN channels and it also guarantees the
     /// receiver will **not** reward the sender with a discount.
-    pub fn always_disable_output_substitution(&self, disable: bool) -> Self {
-        self.0.clone().always_disable_output_substitution(disable).into()
+    pub fn always_disable_output_substitution(&self) -> Self {
+        self.0.clone().always_disable_output_substitution().into()
     }
     // Calculate the recommended fee contribution for an Original PSBT.
     //

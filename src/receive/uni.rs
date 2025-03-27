@@ -251,8 +251,8 @@ impl From<super::WantsOutputs> for WantsOutputs {
 }
 #[uniffi::export]
 impl WantsOutputs {
-    pub fn is_output_substitution_disabled(&self) -> bool {
-        self.0.is_output_substitution_disabled()
+    pub fn output_substitution(&self) -> bool {
+        self.0.output_substitution()
     }
 
     pub fn replace_receiver_outputs(
@@ -388,11 +388,6 @@ impl PayjoinProposal {
             outpoints.push(e.to_owned());
         }
         outpoints
-    }
-
-    pub fn is_output_substitution_disabled(&self) -> bool {
-        <PayjoinProposal as Into<super::PayjoinProposal>>::into(self.clone())
-            .is_output_substitution_disabled()
     }
 
     pub fn psbt(&self) -> String {

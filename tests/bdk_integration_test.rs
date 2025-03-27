@@ -227,8 +227,6 @@ mod v2 {
     use bdk::wallet::AddressIndex;
     use bitcoin_ffi::Network;
     use http::StatusCode;
-    use payjoin::bitcoin::Amount;
-    use payjoin::receive::v1::build_v1_pj_uri;
     use payjoin_ffi::receive::{PayjoinProposal, Receiver, UncheckedProposal};
     use payjoin_ffi::send::SenderBuilder;
     use payjoin_ffi::uri::{Uri, Url};
@@ -274,18 +272,9 @@ mod v2 {
             )
             .await?;
             let address = receiver.get_address(AddressIndex::New);
-            let address_bitcoind =
-                bitcoincore_rpc::bitcoin::address::Address::from_str(&*address.to_string())
-                    .unwrap()
-                    .assume_checked();
             // test session with expiry in the future
             let session =
                 initialize_session(address.clone(), directory.clone(), ohttp_keys.clone(), None)?;
-            let mut pj_uri =
-                build_v1_pj_uri(&address_bitcoind, session.pj_uri().as_string(), false)?;
-            pj_uri.amount = Some(Amount::ONE_BTC);
-            let pj_uri_string = pj_uri.to_string();
-            //session.pj_uri_builder().amount_sats(Amount::ONE_BTC.to_sat()).build().as_string();
             // Poll receive request
             let (request, client_response) = session.extract_req(ohttp_relay.as_string())?;
             let response = agent.post(request.url.as_string()).body(request.body).send().await?;
@@ -298,7 +287,8 @@ mod v2 {
             // **********************
             // Inside the Sender:
             // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-            let pj_uri = Uri::parse(pj_uri_string).unwrap().check_pj_supported().unwrap();
+            let pj_uri =
+                Uri::parse(session.pj_uri().as_string()).unwrap().check_pj_supported().unwrap();
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             println!("\nOriginal sender psbt: {:#?}", psbt.to_string());
 
@@ -324,7 +314,6 @@ mod v2 {
             let proposal =
                 session.process_res(&response.bytes().await?, &client_response)?.unwrap();
             let payjoin_proposal = handle_directory_proposal(receiver, proposal);
-            assert!(!payjoin_proposal.is_output_substitution_disabled());
             let (request, client_response) =
                 payjoin_proposal.extract_v2_req(ohttp_relay.as_string())?;
             let response = agent.post(request.url.as_string()).body(request.body).send().await?;

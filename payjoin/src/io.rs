@@ -104,9 +104,7 @@ impl std::fmt::Display for Error {
             InvalidOhttpKeys(e) => {
                 write!(f, "Invalid ohttp keys returned from payjoin directory: {}", e)
             }
-            UnexpectedStatusCode(code) => {
-                write!(f, "Unexpected status code from payjoin directory: {}", code)
-            }
+            UnexpectedStatusCode(code) => code.as_u16().fmt(f),
             #[cfg(feature = "_danger-local-https")]
             Rustls(e) => e.fmt(f),
         }

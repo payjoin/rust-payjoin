@@ -10,7 +10,6 @@ pub mod send;
 pub mod uri;
 
 pub use crate::bitcoin_ffi::*;
-pub use crate::error::PayjoinError;
 pub use crate::ohttp::*;
 #[cfg(feature = "uniffi")]
 pub use crate::receive::uni::*;

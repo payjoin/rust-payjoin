@@ -1,5 +1,16 @@
-use crate::error::PayjoinError;
 use crate::ohttp::OhttpKeys;
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[error("IO error: {message}")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+pub struct IoError {
+    message: String,
+}
+impl From<payjoin::io::Error> for IoError {
+    fn from(value: payjoin::io::Error) -> Self {
+        IoError { message: format!("{:?}", value) }
+    }
+}
 
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
 ///
@@ -12,7 +23,7 @@ use crate::ohttp::OhttpKeys;
 pub async fn fetch_ohttp_keys(
     ohttp_relay: &str,
     payjoin_directory: &str,
-) -> Result<OhttpKeys, PayjoinError> {
+) -> Result<OhttpKeys, IoError> {
     payjoin::io::fetch_ohttp_keys(ohttp_relay, payjoin_directory)
         .await
         .map(|e| e.into())
@@ -34,7 +45,7 @@ pub async fn fetch_ohttp_keys_with_cert(
     ohttp_relay: &str,
     payjoin_directory: &str,
     cert_der: Vec<u8>,
-) -> Result<OhttpKeys, PayjoinError> {
+) -> Result<OhttpKeys, IoError> {
     payjoin::io::fetch_ohttp_keys_with_cert(ohttp_relay, payjoin_directory, cert_der)
         .await
         .map(|e| e.into())

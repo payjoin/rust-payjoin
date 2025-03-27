@@ -42,13 +42,13 @@ impl From<&RequestError> for JsonReply {
     fn from(e: &RequestError) -> Self {
         use InternalRequestError::*;
 
-        use crate::error_codes::ErrorCode::OriginalPsbtRejected;
         match &e.0 {
-            Io(_) => JsonReply::new(OriginalPsbtRejected, e),
-            MissingHeader(_) => JsonReply::new(OriginalPsbtRejected, e),
-            InvalidContentType(_) => JsonReply::new(OriginalPsbtRejected, e),
-            InvalidContentLength(_) => JsonReply::new(OriginalPsbtRejected, e),
-            ContentLengthTooLarge(_) => JsonReply::new(OriginalPsbtRejected, e),
+            Io(_)
+            | MissingHeader(_)
+            | InvalidContentType(_)
+            | InvalidContentLength(_)
+            | ContentLengthTooLarge(_) =>
+                JsonReply::new(crate::error_codes::ErrorCode::OriginalPsbtRejected, e),
         }
     }
 }

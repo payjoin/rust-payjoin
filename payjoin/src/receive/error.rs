@@ -201,8 +201,19 @@ impl From<&PayloadError> for JsonReply {
         use InternalPayloadError::*;
 
         match &e.0 {
-            Utf8(_) => JsonReply::new(OriginalPsbtRejected, e),
-            ParsePsbt(_) => JsonReply::new(OriginalPsbtRejected, e),
+            Utf8(_)
+            | ParsePsbt(_)
+            | InconsistentPsbt(_)
+            | PrevTxOut(_)
+            | MissingPayment
+            | OriginalPsbtNotBroadcastable
+            | InputOwned(_)
+            | InputWeight(_)
+            | InputSeen(_)
+            | PsbtBelowFeeRate(_, _) => JsonReply::new(OriginalPsbtRejected, e),
+
+            FeeTooHigh(_, _) => JsonReply::new(NotEnoughMoney, e),
+
             SenderParams(e) => match e {
                 super::optional_parameters::Error::UnknownVersion { supported_versions } => {
                     let supported_versions_json =
@@ -210,17 +221,9 @@ impl From<&PayloadError> for JsonReply {
                     JsonReply::new(VersionUnsupported, "This version of payjoin is not supported.")
                         .with_extra("supported", supported_versions_json)
                 }
-                _ => JsonReply::new(OriginalPsbtRejected, e),
+                super::optional_parameters::Error::FeeRate =>
+                    JsonReply::new(OriginalPsbtRejected, e),
             },
-            InconsistentPsbt(_) => JsonReply::new(OriginalPsbtRejected, e),
-            PrevTxOut(_) => JsonReply::new(OriginalPsbtRejected, e),
-            MissingPayment => JsonReply::new(OriginalPsbtRejected, e),
-            OriginalPsbtNotBroadcastable => JsonReply::new(OriginalPsbtRejected, e),
-            InputOwned(_) => JsonReply::new(OriginalPsbtRejected, e),
-            InputWeight(_) => JsonReply::new(OriginalPsbtRejected, e),
-            InputSeen(_) => JsonReply::new(OriginalPsbtRejected, e),
-            PsbtBelowFeeRate(_, _) => JsonReply::new(OriginalPsbtRejected, e),
-            FeeTooHigh(_, _) => JsonReply::new(NotEnoughMoney, e),
         }
     }
 }

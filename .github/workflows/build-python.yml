@@ -41,6 +41,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+
       - name: "Generate payjoin-ffi.py and binaries"
         run: PYBIN="/opt/python/${{ matrix.python_dir }}/bin" bash ./scripts/generate_linux.sh
 
@@ -84,6 +87,9 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python }}
+
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
 
       - name: "Generate payjoin-ffi.py and binaries"
         run: bash ./scripts/generate_macos.sh

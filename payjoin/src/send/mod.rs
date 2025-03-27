@@ -35,6 +35,8 @@ pub(crate) mod v1;
 #[cfg(feature = "v2")]
 #[cfg_attr(docsrs, doc(cfg(feature = "v2")))]
 pub mod v2;
+#[cfg(all(feature = "v2", not(feature = "v1")))]
+pub use v1::V1Context;
 
 #[cfg(feature = "_multiparty")]
 pub mod multiparty;

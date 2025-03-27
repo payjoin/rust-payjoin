@@ -286,7 +286,7 @@ impl UncheckedProposal {
             &mut self.context.ohttp_keys,
             "POST",
             subdir.as_str(),
-            Some(JsonReply::from(err).to_json().as_bytes()),
+            Some(JsonReply::from(err).to_json().to_string().as_bytes()),
         )
         .map_err(InternalSessionError::OhttpEncapsulation)?;
         let req = Request::new_v2(&self.context.full_relay_url(ohttp_relay)?, &body);
@@ -625,10 +625,12 @@ mod test {
             .check_broadcast_suitability(None, |_| Err("mock error".into()))
             .err()
             .ok_or("expected error but got success")?;
-        assert_eq!(
-            JsonReply::from(&server_error).to_json(),
-            r#"{ "errorCode": "unavailable", "message": "Receiver error" }"#
-        );
+        let expected_json = serde_json::json!({
+            "errorCode": "unavailable",
+            "message": "Receiver error"
+        });
+        let actual_json = JsonReply::from(&server_error).to_json();
+        assert_eq!(actual_json, expected_json);
         let (_req, _ctx) = proposal.clone().extract_err_req(&server_error, &*EXAMPLE_URL)?;
 
         let internal_error = InternalPayloadError::MissingPayment.into();

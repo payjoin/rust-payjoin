@@ -77,28 +77,30 @@ pub struct JsonReply {
     error_code: ErrorCode,
     /// The error message to be displayed only in debug logs
     message: String,
-    /// Additional fields to be added to the JSON
-    additional_fields: Vec<String>,
+    /// Additional fields to be included in the JSON response
+    extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl JsonReply {
     /// Create a new Reply
     pub fn new(error_code: ErrorCode, message: impl fmt::Display) -> Self {
-        Self { error_code, message: message.to_string(), additional_fields: vec![] }
+        Self { error_code, message: message.to_string(), extra: serde_json::Map::new() }
+    }
+
+    /// Add an additional field to the JSON response
+    pub fn with_extra(mut self, key: &str, value: impl Into<serde_json::Value>) -> Self {
+        self.extra.insert(key.to_string(), value.into());
+        self
     }
 
     /// Serialize the Reply to a JSON string
-    pub fn to_json(&self) -> String {
-        if self.additional_fields.is_empty() {
-            format!(r#"{{ "errorCode": "{}", "message": "{}" }}"#, self.error_code, self.message)
-        } else {
-            format!(
-                r#"{{ "errorCode": "{}", "message": "{}", {} }}"#,
-                self.error_code,
-                self.message,
-                self.additional_fields.join(", ")
-            )
-        }
+    pub fn to_json(&self) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+        map.insert("errorCode".to_string(), self.error_code.to_string().into());
+        map.insert("message".to_string(), self.message.clone().into());
+        map.extend(self.extra.clone());
+
+        serde_json::Value::Object(map)
     }
 }
 
@@ -205,14 +207,8 @@ impl From<&PayloadError> for JsonReply {
                 super::optional_parameters::Error::UnknownVersion { supported_versions } => {
                     let supported_versions_json =
                         serde_json::to_string(supported_versions).unwrap_or_default();
-                    JsonReply {
-                        error_code: VersionUnsupported,
-                        message: "This version of payjoin is not supported.".to_string(),
-                        additional_fields: vec![format!(
-                            r#""supported": {}"#,
-                            supported_versions_json
-                        )],
-                    }
+                    JsonReply::new(VersionUnsupported, "This version of payjoin is not supported.")
+                        .with_extra("supported", supported_versions_json)
                 }
                 _ => JsonReply::new(OriginalPsbtRejected, e),
             },

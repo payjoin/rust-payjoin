@@ -344,20 +344,22 @@ impl Display for ResponseError {
 impl fmt::Debug for ResponseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::WellKnown(e) => write!(
-                f,
-                r#"Well known error: {{ "errorCode": "{}",
-                "message": "{}" }}"#,
-                e.error_code(),
-                e.message()
-            ),
+            Self::WellKnown(e) => {
+                let json = serde_json::json!({
+                    "errorCode": e.error_code().to_string(),
+                    "message": e.message()
+                });
+                write!(f, "Well known error: {}", json)
+            }
             Self::Validation(e) => write!(f, "Validation({:?})", e),
 
-            Self::Unrecognized { error_code, message } => write!(
-                f,
-                r#"Unrecognized error: {{ "errorCode": "{}", "message": "{}" }}"#,
-                error_code, message
-            ),
+            Self::Unrecognized { error_code, message } => {
+                let json = serde_json::json!({
+                    "errorCode": error_code,
+                    "message": message
+                });
+                write!(f, "Unrecognized error: {}", json)
+            }
         }
     }
 }
@@ -403,7 +405,7 @@ impl Display for WellKnownError {
 
 #[cfg(test)]
 mod tests {
-    use bitcoind::bitcoincore_rpc::jsonrpc::serde_json::json;
+    use serde_json::json;
 
     use super::*;
 

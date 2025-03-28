@@ -19,7 +19,7 @@ use bdk::descriptor::IntoWalletDescriptor;
 use bdk::wallet::AddressIndex;
 use bdk::{FeeRate, LocalUtxo, SignOptions, Wallet as BdkWallet};
 use bitcoincore_rpc::RpcApi;
-use payjoin_ffi::receive::{Error, ImplementationError, InputPair};
+use payjoin_ffi::receive::{ImplementationError, InputPair};
 use payjoin_ffi::uri::PjUri;
 
 type BoxError = Box<dyn std::error::Error + 'static>;
@@ -200,7 +200,7 @@ fn build_original_psbt(
     dbg!("adding recipient");
     builder
         .fee_rate(FeeRate::from_sat_per_kwu(2000.0))
-        .add_recipient(script, pj_uri.amount_sats().unwrap())
+        .add_recipient(script, pj_uri.amount_sats().unwrap_or(100_000_000))
         .fee_rate(FeeRate::from_sat_per_vb(5.0))
         .only_witness_utxo();
     dbg!("finishing");
@@ -219,76 +219,56 @@ fn build_original_psbt(
 
 #[cfg(feature = "_danger-local-https")]
 mod v2 {
-    use std::str::FromStr;
     use std::sync::Arc;
-    use std::time::Duration;
 
-    use bdk::bitcoin::Address;
     use bdk::wallet::AddressIndex;
     use bitcoin_ffi::Network;
-    use http::StatusCode;
-    use payjoin::bitcoin::Amount;
-    use payjoin::receive::v1::build_v1_pj_uri;
     use payjoin_ffi::receive::{PayjoinProposal, Receiver, UncheckedProposal};
     use payjoin_ffi::send::SenderBuilder;
-    use payjoin_ffi::uri::{Uri, Url};
+    use payjoin_ffi::uri::Uri;
     use payjoin_ffi::{OhttpKeys, Request};
-    use reqwest::{Client, ClientBuilder};
-    use testcontainers::clients::Cli;
-    use testcontainers_modules::redis::Redis;
+    use payjoin_test_utils::TestServices;
 
     use super::*;
     use crate::{
         build_original_psbt, extract_pj_tx, get_sender_descriptor, init_sender_receiver_wallet,
         input_pair_from_local_utxo, restore_rpc_client, BoxError, Wallet,
     };
-    #[tokio::test]
 
+    #[tokio::test]
     async fn v2_to_v2_full_cycle() {
-        let (cert, key) = local_cert_key();
-        let ohttp_relay_port = find_free_port();
-        let ohttp_relay = Url::parse(format!("http://localhost:{}", ohttp_relay_port)).unwrap();
-        let directory_port = find_free_port();
-        let directory = Url::parse(format!("https://localhost:{}", directory_port)).unwrap();
-        let gateway_origin = http::Uri::from_str(directory.as_string().as_str()).unwrap();
+        let mut services = TestServices::initialize().await.unwrap();
         tokio::select!(
-        _ = ohttp_relay::listen_tcp(ohttp_relay_port, gateway_origin) => assert!(false, "Ohttp relay is long running"),
-        _ = init_directory(directory_port, (cert.clone(), key)) => assert!(false, "Directory server is long running"),
-        res = do_v2_send_receive(ohttp_relay, directory, cert) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
+        _ = services.take_ohttp_relay_handle()  => assert!(false, "Ohttp relay is long running"),
+        _ = services.take_directory_handle()  => assert!(false, "Directory server is long running"),
+        res = do_v2_send_receive(&services) => assert!(res.is_ok(), "v2 send receive failed: {:#?}", res)
         );
 
-        async fn do_v2_send_receive(
-            ohttp_relay: Url,
-            directory: Url,
-            cert_der: Vec<u8>,
-        ) -> Result<(), BoxError> {
+        async fn do_v2_send_receive(services: &TestServices) -> Result<(), BoxError> {
             let (sender, receiver, bitcoind) = init_sender_receiver_wallet();
             let blockchain_client = restore_rpc_client(&bitcoind, &get_sender_descriptor());
-            let agent = Arc::new(http_agent(cert_der.clone()).unwrap());
-            wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await?;
-            wait_for_service_ready(directory.clone(), agent.clone()).await?;
-            let ohttp_keys = payjoin_ffi::io::fetch_ohttp_keys_with_cert(
-                &ohttp_relay.as_string(),
-                &directory.as_string(),
-                cert_der.clone(),
-            )
-            .await?;
+            let agent = services.http_agent();
+            let directory = services.directory_url();
+            services.wait_for_services_ready().await?;
+            let ohttp_keys = services.fetch_ohttp_keys().await?;
+
             let address = receiver.get_address(AddressIndex::New);
-            let address_bitcoind =
-                bitcoincore_rpc::bitcoin::address::Address::from_str(&*address.to_string())
-                    .unwrap()
-                    .assume_checked();
-            // test session with expiry in the future
-            let session =
-                initialize_session(address.clone(), directory.clone(), ohttp_keys.clone(), None)?;
-            let mut pj_uri =
-                build_v1_pj_uri(&address_bitcoind, session.pj_uri().as_string(), false)?;
-            pj_uri.amount = Some(Amount::ONE_BTC);
-            let pj_uri_string = pj_uri.to_string();
-            //session.pj_uri_builder().amount_sats(Amount::ONE_BTC.to_sat()).build().as_string();
+            let session = Receiver::new(
+                address.to_string(),
+                Network::Regtest,
+                directory.to_string(),
+                OhttpKeys(ohttp_keys),
+                None,
+            )?;
+            let ohttp_relay = services.ohttp_relay_url();
             // Poll receive request
-            let (request, client_response) = session.extract_req(ohttp_relay.as_string())?;
-            let response = agent.post(request.url.as_string()).body(request.body).send().await?;
+            let (request, client_response) = session.extract_req(ohttp_relay.to_string())?;
+            let response = agent
+                .post(request.url.as_string())
+                .header("Content-Type", request.content_type)
+                .body(request.body)
+                .send()
+                .await?;
             assert!(response.status().is_success());
             let response_body =
                 session.process_res(&response.bytes().await?, &client_response).unwrap();
@@ -298,13 +278,14 @@ mod v2 {
             // **********************
             // Inside the Sender:
             // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
-            let pj_uri = Uri::parse(pj_uri_string).unwrap().check_pj_supported().unwrap();
+            let pj_uri =
+                Uri::parse(session.pj_uri().as_string()).unwrap().check_pj_supported().unwrap();
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             println!("\nOriginal sender psbt: {:#?}", psbt.to_string());
 
             let req_ctx = SenderBuilder::new(psbt.to_string(), pj_uri)?
                 .build_recommended(payjoin::bitcoin::FeeRate::BROADCAST_MIN.to_sat_per_kwu())?;
-            let (request, context) = req_ctx.extract_v2(directory.to_owned().into())?;
+            let (request, context) = req_ctx.extract_v2(ohttp_relay.to_owned().into())?;
             let response = agent
                 .post(request.url.as_string())
                 .header("Content-Type", request.content_type)
@@ -319,23 +300,33 @@ mod v2 {
             // Inside the Receiver:
 
             // GET fallback psbt
-            let (request, client_response) = session.extract_req(ohttp_relay.as_string())?;
-            let response = agent.post(request.url.as_string()).body(request.body).send().await?;
-            let proposal =
-                session.process_res(&response.bytes().await?, &client_response)?.unwrap();
+            let (request, client_response) = session.extract_req(ohttp_relay.to_string())?;
+            let response = agent
+                .post(request.url.as_string())
+                .header("Content-Type", request.content_type)
+                .body(request.body)
+                .send()
+                .await?;
+            let proposal = session
+                .process_res(&response.bytes().await?, &client_response)?
+                .expect("proposal should exist");
             let payjoin_proposal = handle_directory_proposal(receiver, proposal);
-            assert!(!payjoin_proposal.is_output_substitution_disabled());
             let (request, client_response) =
-                payjoin_proposal.extract_v2_req(ohttp_relay.as_string())?;
-            let response = agent.post(request.url.as_string()).body(request.body).send().await?;
+                payjoin_proposal.extract_v2_req(ohttp_relay.to_string())?;
+            let response = agent
+                .post(request.url.as_string())
+                .header("Content-Type", request.content_type)
+                .body(request.body)
+                .send()
+                .await?;
             payjoin_proposal.process_res(&response.bytes().await?, &client_response)?;
 
             // **********************
             // Inside the Sender:
             // Sender checks, signs, finalizes, extracts, and broadcasts
             // Replay post fallback to get the response
-            let (request, ohttp_ctx) = send_ctx.extract_req(ohttp_relay.as_string())?;
-            let Request { url, body, content_type } = request;
+            let (Request { url, body, content_type, .. }, ohttp_ctx) =
+                send_ctx.extract_req(ohttp_relay.to_string())?;
             let response = agent
                 .post(url.as_string())
                 .header("Content-Type", content_type)
@@ -349,42 +340,7 @@ mod v2 {
             Ok(())
         }
     }
-    fn initialize_session(
-        address: Address,
-        directory: Url,
-        ohttp_keys: OhttpKeys,
-        custom_expire_after: Option<u64>,
-    ) -> Result<Receiver, Error> {
-        Receiver::new(
-            address.to_string(),
-            Network::Regtest,
-            directory.as_string(),
-            ohttp_keys,
-            custom_expire_after,
-        )
-    }
-    async fn wait_for_service_ready(
-        service_url: Url,
-        agent: Arc<Client>,
-    ) -> Result<(), &'static str> {
-        let health_url = <Url as Into<url::Url>>::into(service_url)
-            .join("/health")
-            .map_err(|_| "Invalid URL")?;
-        let start = std::time::Instant::now();
 
-        while start.elapsed() < Duration::from_secs(20) {
-            let request_result =
-                agent.get(health_url.as_str()).send().await.map_err(|_| "Bad request")?;
-
-            match request_result.status() {
-                StatusCode::OK => return Ok(()),
-                StatusCode::NOT_FOUND => return Err("Endpoint not found"),
-                _ => std::thread::sleep(Duration::from_secs(3)),
-            }
-        }
-
-        Err("Timeout waiting for service to be ready")
-    }
     fn handle_directory_proposal(receiver: Wallet, proposal: UncheckedProposal) -> PayjoinProposal {
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
@@ -426,41 +382,6 @@ mod v2 {
             .finalize_proposal(|psbt| process_psbt(&receiver, psbt), Some(10), Some(100))
             .unwrap();
         payjoin_proposal
-    }
-    async fn init_directory(port: u16, local_cert_key: (Vec<u8>, Vec<u8>)) -> Result<(), BoxError> {
-        let docker: Cli = Cli::default();
-        let timeout = Duration::from_secs(2);
-        let db = docker.run(Redis::default());
-        let db_host = format!("127.0.0.1:{}", db.get_host_port_ipv4(6379));
-        println!("Database running on {}", db.get_host_port_ipv4(6379));
-        payjoin_directory::listen_tcp_with_tls(port, db_host, timeout, local_cert_key).await
-    }
-    // generates or gets a DER encoded localhost cert and key.
-    fn local_cert_key() -> (Vec<u8>, Vec<u8>) {
-        let cert = rcgen::generate_simple_self_signed(vec![
-            "0.0.0.0".to_string(),
-            "localhost".to_string(),
-        ])
-        .expect("Failed to generate cert");
-        let cert_der = cert.serialize_der().expect("Failed to serialize cert");
-        let key_der = cert.serialize_private_key_der();
-        (cert_der, key_der)
-    }
-    fn find_free_port() -> u16 {
-        let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
-        listener.local_addr().unwrap().port()
-    }
-    fn http_agent(cert_der: Vec<u8>) -> Result<Client, BoxError> {
-        Ok(http_agent_builder(cert_der)?.build()?)
-    }
-
-    fn http_agent_builder(cert_der: Vec<u8>) -> Result<ClientBuilder, BoxError> {
-        Ok(ClientBuilder::new()
-            .danger_accept_invalid_certs(true)
-            .use_rustls_tls()
-            .add_root_certificate(
-                reqwest::tls::Certificate::from_der(cert_der.as_slice()).unwrap(),
-            ))
     }
 }
 

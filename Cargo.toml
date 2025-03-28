@@ -37,7 +37,7 @@ bitcoind = { version = "0.36.0", features = ["0_21_2"] }
 bitcoincore-rpc = "0.19.0"
 http = "1"
 ohttp-relay = "0.0.8"
-payjoin-directory = { git = "https://github.com/payjoin/rust-payjoin", rev = "f202098", features = ["_danger-local-https"] }
+payjoin-test-utils = { git = "https://github.com/payjoin/rust-payjoin.git", branch = "bindings-0.23"  }
 rcgen = { version = "0.11" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rustls = "0.22.2"

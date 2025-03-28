@@ -3,26 +3,41 @@ name: CI Checks
 on: [push, pull_request]
 
 jobs:
-  build:
+  Test:
+    name: Build and Test
     strategy:
       matrix:
         toolchain: [stable, nightly]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Install Rust ${{ matrix.toolchain }} toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ matrix.toolchain }}
           override: true
           profile: minimal
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
       - name: Build on Rust ${{ matrix.toolchain }}
         run: cargo build --color always --all-targets --features _danger-local-https
-      - name: Check formatting (nightly only)
-        if: matrix.rust == 'nightly'
-        run: rustup component add rustfmt && cargo fmt --all -- --check
+      - name: Run tests
+        run: cargo test --features=_danger-local-https
 
+  Format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repo"
+        uses: actions/checkout@v4
+      - name: "Install nightly toolchain"
+        uses: dtolnay/rust-toolchain@nightly
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+      - run: rustup component add rustfmt --toolchain nightly-x86_64-unknown-linux-gnu
+      - name: "Run formatting check"
+        run: cargo fmt --all -- --check
+        
   Lint:
     runs-on: ubuntu-latest
     steps:

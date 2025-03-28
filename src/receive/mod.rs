@@ -236,8 +236,8 @@ impl From<payjoin::receive::v2::WantsOutputs> for WantsOutputs {
 }
 
 impl WantsOutputs {
-    pub fn is_output_substitution_disabled(&self) -> bool {
-        self.0.is_output_substitution_disabled()
+    pub fn output_substitution(&self) -> bool {
+        self.0.output_substitution() == payjoin::OutputSubstitution::Enabled
     }
 
     pub fn replace_receiver_outputs(
@@ -397,11 +397,6 @@ impl PayjoinProposal {
             outpoints.push((*o).into());
         }
         outpoints
-    }
-
-    pub fn is_output_substitution_disabled(&self) -> bool {
-        <PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
-            .is_output_substitution_disabled()
     }
 
     pub fn psbt(&self) -> String {

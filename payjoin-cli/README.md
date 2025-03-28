@@ -13,7 +13,7 @@ Independent audit is welcome.
 cargo install payjoin-cli --version $VERSION
 ```
 
-where `$VERSION` is the [latest version](https://crates.io/crates/payjoin-cli) of the payjoin-cli you wish to install.
+where `$VERSION` is the [latest version](https://crates.io/crates/payjoin-cli) of the `payjoin-cli` you wish to install.
 
 Get a list of commands and options:
 
@@ -21,7 +21,7 @@ Get a list of commands and options:
 payjoin-cli --help
 ```
 
-Either pass config options from cli, or manually edit a `config.toml` file within directory you run payjoin-cli from.
+Either pass config options from cli, or manually edit a `config.toml` file within directory you run `payjoin-cli` from.
 Configure it like so:
 
 ```toml
@@ -35,7 +35,7 @@ Your configuration details will vary, but you may use this as a template.
 
 ## Test Payjoin 2
 
-### Install payjoin-cli with the V2 feature
+### Install `payjoin-cli` with the V2 feature
 
 ```console
 cargo install payjoin-cli --version $VERSION --features v2
@@ -57,7 +57,7 @@ ohttp_relay="https://pj.bobspacebkk.com"
 
 ### Asynchronous Operation
 
-Send and receiver state is saved to a database in the directory from which payjoin-cli is run. Once a send or receive session is started, it may resume using the `resume` argument if prior payjoin sessions have not yet complete.
+Send and receiver state is saved to a database in the directory from which `payjoin-cli` is run. Once a send or receive session is started, it may resume using the `resume` argument if prior payjoin sessions have not yet complete.
 
 ```console
 payjoin-cli resume
@@ -76,7 +76,7 @@ file. 18443 is the default. This can be set like so:
 rpcport = 18443
 ```
 
-From the directory you'll run payjoin-cli, assuming "boom" is the name of the receiving wallet, 18443 is the rpc port, and you wish to request 10,000 sats run:
+From the directory you'll run `payjoin-cli`, assuming "boom" is the name of the receiving wallet, 18443 is the rpc port, and you wish to request 10,000 sats run:
 
 ```console
 RUST_LOG=debug cargo run --features=_danger-local-https -- -r "http://localhost:18443/wallet/boom" receive 10000
@@ -93,7 +93,7 @@ BITCOIN:BCRT1QCJ4X75DUNY4X5NAWLM3CR8MALM9YAUYWWEWKWL?amount=0.00010&pj=https://l
 
 ### Test Send
 
-Create a "sender" directory within payjoin-cli. Open a new terminal window and navigate to this directory.
+Create a "sender" directory within `payjoin-cli`. Open a new terminal window and navigate to this directory.
 
 Note: A wallet cannot payjoin with itself, one needs separate wallets.
 

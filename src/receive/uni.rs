@@ -6,6 +6,7 @@ pub use crate::receive::{
     Error, ImplementationError, InputContributionError, OutputSubstitutionError, ReplyableError,
     SelectionError, SerdeJsonError,
 };
+use crate::uri::error::IntoUrlError;
 use crate::{ClientResponse, OhttpKeys, Request};
 
 #[derive(Clone, Debug, uniffi::Object)]
@@ -45,7 +46,7 @@ impl Receiver {
         directory: String,
         ohttp_keys: Arc<OhttpKeys>,
         expire_after: Option<u64>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, IntoUrlError> {
         super::Receiver::new((*address).clone(), directory, (*ohttp_keys).clone(), expire_after)
             .map(Into::into)
     }

@@ -36,3 +36,16 @@ impl From<payjoin::ParseError> for UrlParseError {
         UrlParseError { msg: format!("{:?}", value) }
     }
 }
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[error("Error converting to URL: {msg}")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+pub struct IntoUrlError {
+    msg: String,
+}
+
+impl From<payjoin::IntoUrlError> for IntoUrlError {
+    fn from(value: payjoin::IntoUrlError) -> Self {
+        IntoUrlError { msg: format!("{:?}", value) }
+    }
+}

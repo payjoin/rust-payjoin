@@ -11,6 +11,7 @@ use payjoin::bitcoin::FeeRate;
 use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 pub use crate::error::SerdeJsonError;
 use crate::ohttp::OhttpKeys;
+use crate::uri::error::IntoUrlError;
 use crate::{ClientResponse, Request};
 
 pub mod error;
@@ -51,7 +52,7 @@ impl Receiver {
         directory: String,
         ohttp_keys: OhttpKeys,
         expire_after: Option<u64>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, IntoUrlError> {
         payjoin::receive::v2::Receiver::new(
             address.into(),
             directory,

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use payjoin::{receive, IntoUrlError};
+use payjoin::receive;
 
 /// The top-level error type for the payjoin receiver
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -64,12 +64,6 @@ impl From<receive::ReplyableError> for ReplyableError {
                 }))
             }
         }
-    }
-}
-
-impl From<IntoUrlError> for Error {
-    fn from(value: IntoUrlError) -> Self {
-        Error::V2 { msg: value.to_string() }
     }
 }
 

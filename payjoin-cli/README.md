@@ -1,19 +1,19 @@
-# payjoin-cli
+# `payjoin-cli`
 
-## A command-line payjoin client for bitcoind in rust
+## A command-line payjoin client for bitcoind in Rust
 
 The `payjoin-cli` client enables sending and receiving of [BIP 78 Payjoin V1](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) and [Draft BIP Payjoin V2](https://github.com/bitcoin/bips/pull/1483) transactions. By default it supports Payjoin V1, and the `v2` feature sends and receives both since the protocol is backwards compatible. The implementation is built on [Payjoin Dev Kit](https://payjoindevkit.org).
 
 While this code and design has had significant testing, it is still alpha-quality experimental software. Use at your own risk.
 Independent audit is welcome.
 
-## Install payjoin-cli
+## Install `payjoin-cli`
 
 ```console
 cargo install payjoin-cli --version $VERSION
 ```
 
-where `$VERSION` is the latest version of the payjoin-cli you wish to install.
+where `$VERSION` is the [latest version](https://crates.io/crates/payjoin-cli) of the payjoin-cli you wish to install.
 
 Get a list of commands and options:
 

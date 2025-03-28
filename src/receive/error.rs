@@ -67,12 +67,6 @@ impl From<receive::ReplyableError> for ReplyableError {
     }
 }
 
-impl From<payjoin::bitcoin::address::ParseError> for Error {
-    fn from(value: payjoin::bitcoin::address::ParseError) -> Self {
-        Error::V2 { msg: value.to_string() }
-    }
-}
-
 impl From<IntoUrlError> for Error {
     fn from(value: IntoUrlError) -> Self {
         Error::V2 { msg: value.to_string() }

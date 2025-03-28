@@ -8,7 +8,7 @@ pub use error::{
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 
-use crate::bitcoin_ffi::{Network, OutPoint, Script, TxOut};
+use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 pub use crate::error::SerdeJsonError;
 use crate::ohttp::OhttpKeys;
 use crate::{ClientResponse, Request};
@@ -36,7 +36,6 @@ impl Receiver {
     ///
     /// # Parameters
     /// - `address`: The Bitcoin address for the payjoin session.
-    /// - `network`: The network to use for address verification.
     /// - `directory`: The URL of the store-and-forward payjoin directory.
     /// - `ohttp_keys`: The OHTTP keys used for encrypting and decrypting HTTP requests and responses.
     /// - `ohttp_relay`: The URL of the OHTTP relay, used to keep client IP address confidential.
@@ -48,16 +47,13 @@ impl Receiver {
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
     pub fn new(
-        address: String,
-        network: Network,
+        address: Address,
         directory: String,
         ohttp_keys: OhttpKeys,
         expire_after: Option<u64>,
     ) -> Result<Self, Error> {
-        let address = payjoin::bitcoin::Address::from_str(address.as_str())?
-            .require_network(network.into())?;
         payjoin::receive::v2::Receiver::new(
-            address,
+            address.into(),
             directory,
             ohttp_keys.into(),
             expire_after.map(Duration::from_secs),

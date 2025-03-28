@@ -1846,9 +1846,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.21.2"
+version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2806eaa3524762875e21c3dcd057bc4b7bfa01ce4da8d46be1cd43649e1cc6b"
+checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "opaque-debug"
@@ -1936,7 +1936,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 [[package]]
 name = "payjoin"
 version = "0.22.0"
-source = "git+https://github.com/payjoin/rust-payjoin.git?branch=bindings-0.23#59f2a34149f5b7d652ee3920aa8b1461279d4f82"
+source = "git+https://github.com/payjoin/rust-payjoin.git?branch=bindings-0.23#53a3187887e82925fc3f999fb73ab08caf8d1832"
 dependencies = [
  "bhttp",
  "bitcoin 0.32.5",
@@ -1955,7 +1955,7 @@ dependencies = [
 [[package]]
 name = "payjoin-directory"
 version = "0.0.1"
-source = "git+https://github.com/payjoin/rust-payjoin.git?branch=bindings-0.23#59f2a34149f5b7d652ee3920aa8b1461279d4f82"
+source = "git+https://github.com/payjoin/rust-payjoin.git?branch=bindings-0.23#53a3187887e82925fc3f999fb73ab08caf8d1832"
 dependencies = [
  "anyhow",
  "bhttp",
@@ -1978,7 +1978,7 @@ dependencies = [
 [[package]]
 name = "payjoin-test-utils"
 version = "0.1.0"
-source = "git+https://github.com/payjoin/rust-payjoin.git?branch=bindings-0.23#59f2a34149f5b7d652ee3920aa8b1461279d4f82"
+source = "git+https://github.com/payjoin/rust-payjoin.git?branch=bindings-0.23#53a3187887e82925fc3f999fb73ab08caf8d1832"
 dependencies = [
  "bitcoin 0.32.5",
  "bitcoin-ohttp",

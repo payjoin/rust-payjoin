@@ -75,7 +75,7 @@ pub enum ResponseError {
     ///
     /// [`BIP78::ReceiverWellKnownError`]: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-Receivers_well_known_errors
     #[error("A receiver error occurred: ")]
-    WellKnown(WellKnownError),
+    WellKnown(Arc<WellKnownError>),
 
     /// Errors caused by malformed responses.
     #[error("An error occurred due to a malformed response: ")]
@@ -94,7 +94,9 @@ pub enum ResponseError {
 impl From<send::ResponseError> for ResponseError {
     fn from(value: send::ResponseError) -> Self {
         match value {
-            send::ResponseError::WellKnown(e) => ResponseError::WellKnown(e.into()),
+            send::ResponseError::WellKnown(e) => {
+                ResponseError::WellKnown(Arc::new(WellKnownError { msg: e.to_string() }))
+            }
             send::ResponseError::Validation(e) => {
                 ResponseError::Validation(Arc::new(ValidationError { msg: e.to_string() }))
             }
@@ -105,34 +107,10 @@ impl From<send::ResponseError> for ResponseError {
     }
 }
 
+/// A well-known error that can be safely displayed to end users.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
-pub enum WellKnownError {
-    #[error("The payjoin endpoint is not available for now.")]
-    Unavailable { msg: String },
-    #[error("The receiver added some inputs but could not bump the fee of the payjoin proposal.")]
-    NotEnoughMoney { msg: String },
-    #[error("This version of payjoin is not supported. Use version {supported:?}.")]
-    VersionUnsupported { msg: String, supported: Vec<u64> },
-    #[error("The receiver rejected the original PSBT.")]
-    OriginalPsbtRejected { msg: String },
-    #[error("An unexpected error occurred")]
-    Unexpected,
-}
-
-impl From<send::WellKnownError> for WellKnownError {
-    fn from(value: send::WellKnownError) -> Self {
-        match value {
-            send::WellKnownError::Unavailable(m) => WellKnownError::Unavailable { msg: m },
-            send::WellKnownError::NotEnoughMoney(m) => WellKnownError::NotEnoughMoney { msg: m },
-            send::WellKnownError::VersionUnsupported { message, supported } => {
-                WellKnownError::VersionUnsupported { msg: message, supported }
-            }
-            send::WellKnownError::OriginalPsbtRejected(m) => {
-                WellKnownError::OriginalPsbtRejected { msg: m }
-            }
-            _ => WellKnownError::Unexpected,
-        }
-    }
+#[error("Well known error occured: {msg}")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+pub struct WellKnownError {
+    msg: String,
 }

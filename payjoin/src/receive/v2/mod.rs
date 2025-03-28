@@ -13,7 +13,7 @@ use url::Url;
 
 use super::error::{Error, InputContributionError};
 use super::{
-    v1, ImplementationError, InternalPayloadError, JsonError, OutputSubstitutionError,
+    v1, ImplementationError, InternalPayloadError, JsonReply, OutputSubstitutionError,
     ReplyableError, SelectionError,
 };
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
@@ -278,7 +278,7 @@ impl UncheckedProposal {
     /// a Receiver Error Response
     pub fn extract_err_req(
         &mut self,
-        err: &ReplyableError,
+        err: &JsonReply,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
         let subdir = subdir(&self.context.directory, &id(&self.context.s));
@@ -286,7 +286,7 @@ impl UncheckedProposal {
             &mut self.context.ohttp_keys,
             "POST",
             subdir.as_str(),
-            Some(err.to_json().as_bytes()),
+            Some(err.to_json().to_string().as_bytes()),
         )
         .map_err(InternalSessionError::OhttpEncapsulation)?;
         let req = Request::new_v2(&self.context.full_relay_url(ohttp_relay)?, &body);
@@ -620,19 +620,26 @@ mod test {
             context: SHARED_CONTEXT.clone(),
         };
 
-        let server_error = proposal
-            .clone()
-            .check_broadcast_suitability(None, |_| Err("mock error".into()))
-            .err()
-            .ok_or("expected error but got success")?;
-        assert_eq!(
-            server_error.to_json(),
-            r#"{ "errorCode": "unavailable", "message": "Receiver error" }"#
-        );
-        let (_req, _ctx) = proposal.clone().extract_err_req(&server_error, &*EXAMPLE_URL)?;
+        let server_error = || {
+            proposal
+                .clone()
+                .check_broadcast_suitability(None, |_| Err("mock error".into()))
+                .expect_err("expected broadcast suitability check to fail")
+        };
 
-        let internal_error = InternalPayloadError::MissingPayment.into();
-        let (_req, _ctx) = proposal.extract_err_req(&internal_error, &*EXAMPLE_URL)?;
+        let expected_json = serde_json::json!({
+            "errorCode": "unavailable",
+            "message": "Receiver error"
+        });
+
+        let actual_json = JsonReply::from(server_error()).to_json().clone();
+        assert_eq!(actual_json, expected_json);
+
+        let (_req, _ctx) =
+            proposal.clone().extract_err_req(&server_error().into(), &*EXAMPLE_URL)?;
+
+        let internal_error: ReplyableError = InternalPayloadError::MissingPayment.into();
+        let (_req, _ctx) = proposal.extract_err_req(&internal_error.into(), &*EXAMPLE_URL)?;
         Ok(())
     }
 

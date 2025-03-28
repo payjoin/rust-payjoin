@@ -1,7 +1,7 @@
 use core::fmt;
 use std::error;
 
-use crate::receive::error::JsonError;
+use crate::receive::JsonReply;
 
 /// Error that occurs during validation of an incoming v1 payjoin request.
 ///
@@ -38,17 +38,17 @@ impl From<InternalRequestError> for super::ReplyableError {
     fn from(e: InternalRequestError) -> Self { super::ReplyableError::V1(e.into()) }
 }
 
-impl JsonError for RequestError {
-    fn to_json(&self) -> String {
+impl From<RequestError> for JsonReply {
+    fn from(e: RequestError) -> Self {
         use InternalRequestError::*;
 
-        use crate::receive::error::serialize_json_error;
-        match &self.0 {
-            Io(_) => serialize_json_error("original-psbt-rejected", self),
-            MissingHeader(_) => serialize_json_error("original-psbt-rejected", self),
-            InvalidContentType(_) => serialize_json_error("original-psbt-rejected", self),
-            InvalidContentLength(_) => serialize_json_error("original-psbt-rejected", self),
-            ContentLengthTooLarge(_) => serialize_json_error("original-psbt-rejected", self),
+        match &e.0 {
+            Io(_)
+            | MissingHeader(_)
+            | InvalidContentType(_)
+            | InvalidContentLength(_)
+            | ContentLengthTooLarge(_) =>
+                JsonReply::new(crate::error_codes::ErrorCode::OriginalPsbtRejected, e),
         }
     }
 }

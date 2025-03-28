@@ -1,14 +1,45 @@
 //! Well-known error codes as defined in BIP-78
 //! See: <https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#receivers-well-known-errors>
 
-/// The payjoin endpoint is not available for now.
-pub const UNAVAILABLE: &str = "unavailable";
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorCode {
+    /// The payjoin endpoint is not available for now.
+    Unavailable,
+    /// The receiver added some inputs but could not bump the fee of the payjoin proposal.
+    NotEnoughMoney,
+    /// This version of payjoin is not supported.
+    VersionUnsupported,
+    /// The receiver rejected the original PSBT.
+    OriginalPsbtRejected,
+}
 
-/// The receiver added some inputs but could not bump the fee of the payjoin proposal.
-pub const NOT_ENOUGH_MONEY: &str = "not-enough-money";
+impl ErrorCode {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unavailable => "unavailable",
+            Self::NotEnoughMoney => "not-enough-money",
+            Self::VersionUnsupported => "version-unsupported",
+            Self::OriginalPsbtRejected => "original-psbt-rejected",
+        }
+    }
+}
 
-/// This version of payjoin is not supported.
-pub const VERSION_UNSUPPORTED: &str = "version-unsupported";
+impl core::str::FromStr for ErrorCode {
+    type Err = ();
 
-/// The receiver rejected the original PSBT.
-pub const ORIGINAL_PSBT_REJECTED: &str = "original-psbt-rejected";
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "unavailable" => Ok(Self::Unavailable),
+            "not-enough-money" => Ok(Self::NotEnoughMoney),
+            "version-unsupported" => Ok(Self::VersionUnsupported),
+            "original-psbt-rejected" => Ok(Self::OriginalPsbtRejected),
+            _ => Err(()),
+        }
+    }
+}
+
+impl core::fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}

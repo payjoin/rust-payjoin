@@ -287,7 +287,8 @@ async fn handle_recoverable_error(
     mut receiver: UncheckedProposal,
     ohttp_relay: &payjoin::Url,
 ) -> anyhow::Error {
-    let (err_req, err_ctx) = match receiver.extract_err_req(&e, ohttp_relay) {
+    let to_return = anyhow!("Replied with error: {}", e);
+    let (err_req, err_ctx) = match receiver.extract_err_req(&e.into(), ohttp_relay) {
         Ok(req_ctx) => req_ctx,
         Err(e) => return anyhow!("Failed to extract error request: {}", e),
     };
@@ -306,7 +307,7 @@ async fn handle_recoverable_error(
         return anyhow!("Failed to process error response: {}", e);
     }
 
-    e.into()
+    to_return
 }
 
 fn try_contributing_inputs(

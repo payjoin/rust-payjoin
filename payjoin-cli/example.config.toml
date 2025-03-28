@@ -6,7 +6,7 @@
 # --------------
 
 # The path to the database file
-db_path = "payjoin.db"
+db_path = "payjoin.sled"
 
 # The maximum fee rate that the receiver is willing to pay (in sat/vB)
 max_fee_rate = 2.0
@@ -29,7 +29,7 @@ rpchost = "http://localhost:18443/wallet/sender"
 # 	MacOS: ~/Library/Application Support/Bitcoin/<NETWORK>/.cookie
 # 	Windows Vista and later: C:\Users\YourUserName\AppData\Roaming\Bitcoin\<NETWORK>\.cookie
 # 	Windows XP: C:\Documents and Settings\YourUserName\Application Data\Bitcoin\<NETWORK>\.cookie
-cookie = ""
+# cookie = ""
 
 # The rpcuser to connect to (specified in bitcoin.conf).
 rpcuser = "user"

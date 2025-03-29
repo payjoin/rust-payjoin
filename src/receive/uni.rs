@@ -3,8 +3,8 @@ use std::sync::Arc;
 use super::InputPair;
 use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 pub use crate::receive::{
-    Error, ImplementationError, InputContributionError, OutputSubstitutionError, ReplyableError,
-    SelectionError, SerdeJsonError,
+    Error, ImplementationError, InputContributionError, JsonReply, OutputSubstitutionError,
+    ReplyableError, SelectionError, SerdeJsonError, SessionError,
 };
 use crate::uri::error::IntoUrlError;
 use crate::{ClientResponse, OhttpKeys, Request};
@@ -148,6 +148,28 @@ impl UncheckedProposal {
     /// Those receivers call `extract_tx_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
     pub fn assume_interactive_receiver(&self) -> Arc<MaybeInputsOwned> {
         Arc::new(self.0.assume_interactive_receiver().into())
+    }
+
+    /// Extract an OHTTP Encapsulated HTTP POST request to return
+    /// a Receiver Error Response
+    pub fn extract_err_req(
+        &self,
+        err: Arc<JsonReply>,
+        ohttp_relay: String,
+    ) -> Result<RequestResponse, SessionError> {
+        self.0
+            .extract_err_req(&err, ohttp_relay)
+            .map(|(req, ctx)| RequestResponse { request: req, client_response: Arc::new(ctx) })
+    }
+
+    /// Process an OHTTP Encapsulated HTTP POST Error response
+    /// to ensure it has been posted properly
+    pub fn process_err_res(
+        &self,
+        body: &[u8],
+        context: Arc<ClientResponse>,
+    ) -> Result<(), SessionError> {
+        self.0.clone().process_err_res(body, &context)
     }
 }
 

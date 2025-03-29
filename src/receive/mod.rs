@@ -2,8 +2,8 @@ use std::str::FromStr;
 use std::time::Duration;
 
 pub use error::{
-    Error, ImplementationError, InputContributionError, OutputSubstitutionError, PsbtInputError,
-    ReplyableError, SelectionError,
+    Error, ImplementationError, InputContributionError, JsonReply, OutputSubstitutionError,
+    PsbtInputError, ReplyableError, SelectionError, SessionError,
 };
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
@@ -151,6 +151,30 @@ impl UncheckedProposal {
     /// Those receivers call `extract_tx_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
     pub fn assume_interactive_receiver(&self) -> MaybeInputsOwned {
         self.0.clone().assume_interactive_receiver().into()
+    }
+
+    /// Extract an OHTTP Encapsulated HTTP POST request to return
+    /// a Receiver Error Response
+    pub fn extract_err_req(
+        &self,
+        err: &JsonReply,
+        ohttp_relay: String,
+    ) -> Result<(Request, ClientResponse), SessionError> {
+        self.0
+            .clone()
+            .extract_err_req(&err.clone().into(), ohttp_relay)
+            .map(|(req, ctx)| (req.into(), ctx.into()))
+            .map_err(Into::into)
+    }
+
+    /// Process an OHTTP Encapsulated HTTP POST Error response
+    /// to ensure it has been posted properly
+    pub fn process_err_res(
+        &self,
+        body: &[u8],
+        context: &ClientResponse,
+    ) -> Result<(), SessionError> {
+        self.0.clone().process_err_res(body, context.into()).map_err(Into::into)
     }
 }
 #[derive(Clone)]

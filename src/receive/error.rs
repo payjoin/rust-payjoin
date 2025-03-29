@@ -42,6 +42,31 @@ impl From<receive::Error> for Error {
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct ReplyableError(#[from] receive::ReplyableError);
 
+/// The standard format for errors that can be replied as JSON.
+///
+/// The JSON output includes the following fields:
+/// ```json
+/// {
+///     "errorCode": "specific-error-code",
+///     "message": "Human readable error message"
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+pub struct JsonReply(receive::JsonReply);
+
+impl From<JsonReply> for receive::JsonReply {
+    fn from(value: JsonReply) -> Self {
+        value.0
+    }
+}
+
+impl From<ReplyableError> for JsonReply {
+    fn from(value: ReplyableError) -> Self {
+        Self(value.0.into())
+    }
+}
+
 /// Error arising due to the specific receiver implementation
 ///
 /// e.g. database errors, network failures, wallet errors

@@ -376,6 +376,8 @@ impl WellKnownError {
     }
 }
 
+impl std::error::Error for WellKnownError {}
+
 impl core::fmt::Display for WellKnownError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self.code {

@@ -73,6 +73,8 @@ mod tests {
     use payjoin_test_utils::{ORIGINAL_PSBT, QUERY_PARAMS};
 
     use super::*;
+
+    #[derive(Debug, Clone)]
     struct MockHeaders {
         length: String,
     }
@@ -92,9 +94,35 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_body() {
+        let mut padded_body = ORIGINAL_PSBT.as_bytes().to_vec();
+        assert_eq!(MAX_CONTENT_LENGTH, 5333333_usize);
+        padded_body.resize(MAX_CONTENT_LENGTH + 1, 0);
+        let headers = MockHeaders::new(padded_body.len() as u64);
+
+        let parsed_request = parse_body(headers.clone(), padded_body.as_slice());
+        assert!(parsed_request.is_err());
+        match parsed_request {
+            Ok(_) => panic!("Expected error, got success"),
+            Err(error) => {
+                assert_eq!(
+                    error.to_string(),
+                    RequestError::from(InternalRequestError::ContentLengthTooLarge(
+                        padded_body.len()
+                    ))
+                    .to_string()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_from_request() -> Result<(), Box<dyn std::error::Error>> {
         let body = ORIGINAL_PSBT.as_bytes();
         let headers = MockHeaders::new(body.len() as u64);
+        let parsed_request = parse_body(headers.clone(), body);
+        assert!(parsed_request.is_ok());
+
         let proposal = UncheckedProposal::from_request(body, QUERY_PARAMS, headers)?;
 
         let witness_utxo =

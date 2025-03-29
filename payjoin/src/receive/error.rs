@@ -342,6 +342,8 @@ pub(crate) enum InternalSelectionError {
     UnsupportedOutputLength,
     /// No selection candidates improve privacy
     NotFound,
+    /// Fee rate too high for consolidation
+    FeeRateTooHighForConsolidation,
 }
 
 impl fmt::Display for SelectionError {
@@ -354,6 +356,8 @@ impl fmt::Display for SelectionError {
             ),
             InternalSelectionError::NotFound =>
                 write!(f, "No selection candidates improve privacy"),
+            InternalSelectionError::FeeRateTooHighForConsolidation =>
+                write!(f, "Fee rate too high for consolidation strategy"),
         }
     }
 }
@@ -366,6 +370,7 @@ impl error::Error for SelectionError {
             Empty => None,
             UnsupportedOutputLength => None,
             NotFound => None,
+            FeeRateTooHighForConsolidation => None,
         }
     }
 }

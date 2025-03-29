@@ -30,43 +30,25 @@ impl From<send::BuildSenderError> for BuildSenderError {
 /// This error can currently only happen due to programmer mistake.
 /// `unwrap()`ing it is thus considered OK in Rust but you may achieve nicer message by displaying
 /// it.
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[error("Error creating the request: {msg}")]
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
-pub struct CreateRequestError {
-    msg: String,
-}
-
-impl From<send::v2::CreateRequestError> for CreateRequestError {
-    fn from(value: send::v2::CreateRequestError) -> Self {
-        CreateRequestError { msg: value.to_string() }
-    }
-}
+pub struct CreateRequestError(#[from] send::v2::CreateRequestError);
 
 /// Error returned for v2-specific payload encapsulation errors.
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[error("Error encapsulating the request: {msg}")]
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
-pub struct EncapsulationError {
-    msg: String,
-}
-
-impl From<send::v2::EncapsulationError> for EncapsulationError {
-    fn from(value: send::v2::EncapsulationError) -> Self {
-        EncapsulationError { msg: value.to_string() }
-    }
-}
+pub struct EncapsulationError(#[from] send::v2::EncapsulationError);
 
 /// Error that may occur when the response from receiver is malformed.
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[error("Error validating the receiver response: {msg}")]
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
-pub struct ValidationError {
-    msg: String,
-}
+pub struct ValidationError(#[from] send::ValidationError);
 
 /// Represent an error returned by Payjoin receiver.
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
 pub enum ResponseError {
     /// `WellKnown` Errors are defined in the [`BIP78::ReceiverWellKnownError`] spec.
@@ -74,11 +56,11 @@ pub enum ResponseError {
     /// It is safe to display `WellKnown` errors to end users.
     ///
     /// [`BIP78::ReceiverWellKnownError`]: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-Receivers_well_known_errors
-    #[error("A receiver error occurred: ")]
+    #[error("A receiver error occurred: {0}")]
     WellKnown(Arc<WellKnownError>),
 
     /// Errors caused by malformed responses.
-    #[error("An error occurred due to a malformed response: ")]
+    #[error("An error occurred due to a malformed response: {0}")]
     Validation(Arc<ValidationError>),
 
     /// `Unrecognized` Errors are NOT defined in the [`BIP78::ReceiverWellKnownError`] spec.
@@ -94,12 +76,8 @@ pub enum ResponseError {
 impl From<send::ResponseError> for ResponseError {
     fn from(value: send::ResponseError) -> Self {
         match value {
-            send::ResponseError::WellKnown(e) => {
-                ResponseError::WellKnown(Arc::new(WellKnownError { msg: e.to_string() }))
-            }
-            send::ResponseError::Validation(e) => {
-                ResponseError::Validation(Arc::new(ValidationError { msg: e.to_string() }))
-            }
+            send::ResponseError::WellKnown(e) => ResponseError::WellKnown(Arc::new(e.into())),
+            send::ResponseError::Validation(e) => ResponseError::Validation(Arc::new(e.into())),
             send::ResponseError::Unrecognized { error_code, message } => {
                 ResponseError::Unrecognized { error_code, msg: message }
             }
@@ -108,9 +86,7 @@ impl From<send::ResponseError> for ResponseError {
 }
 
 /// A well-known error that can be safely displayed to end users.
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[error("Well known error occured: {msg}")]
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
-pub struct WellKnownError {
-    msg: String,
-}
+pub struct WellKnownError(#[from] send::WellKnownError);

@@ -24,28 +24,12 @@ impl From<String> for PjNotSupported {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[error("Error parsing URL: {msg}")]
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
-pub struct UrlParseError {
-    msg: String,
-}
+pub struct UrlParseError(#[from] payjoin::ParseError);
 
-impl From<payjoin::ParseError> for UrlParseError {
-    fn from(value: payjoin::ParseError) -> Self {
-        UrlParseError { msg: format!("{:?}", value) }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[error("Error converting to URL: {msg}")]
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
-pub struct IntoUrlError {
-    msg: String,
-}
-
-impl From<payjoin::IntoUrlError> for IntoUrlError {
-    fn from(value: payjoin::IntoUrlError) -> Self {
-        IntoUrlError { msg: format!("{:?}", value) }
-    }
-}
+pub struct IntoUrlError(#[from] payjoin::IntoUrlError);

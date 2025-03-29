@@ -2,6 +2,7 @@ use core::fmt;
 
 use crate::uri::url_ext::ParseReceiverPubkeyParamError;
 
+pub type ImplementationError = Box<dyn std::error::Error + Send + Sync>;
 /// Error returned when request could not be created.
 ///
 /// This error can currently only happen due to programmer mistake.

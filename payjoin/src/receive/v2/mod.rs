@@ -19,6 +19,7 @@ use super::{
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::output_substitution::OutputSubstitution;
+use crate::persist::{PersistableValue, Persister};
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
 use crate::{IntoUrl, IntoUrlError, Request};
@@ -54,6 +55,8 @@ impl SessionContext {
             .join(&format!("/{}", directory_base))
             .map_err(|e| InternalSessionError::ParseUrl(e.into()))
     }
+
+    fn id(&self) -> ShortId { id(&self.s) }
 }
 
 fn deserialize_address_assume_checked<'de, D>(deserializer: D) -> Result<Address, D::Error>
@@ -71,12 +74,12 @@ fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 
 /// A payjoin V2 receiver, allowing for polled requests to the
 /// payjoin directory and response processing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Receiver {
+#[derive(Debug)]
+pub struct NewReceiver {
     context: SessionContext,
 }
 
-impl Receiver {
+impl NewReceiver {
     /// Creates a new `Receiver` with the provided parameters.
     ///
     /// # Parameters
@@ -96,7 +99,7 @@ impl Receiver {
         ohttp_keys: OhttpKeys,
         expire_after: Option<Duration>,
     ) -> Result<Self, IntoUrlError> {
-        Ok(Self {
+        let receiver = Self {
             context: SessionContext {
                 address,
                 directory: directory.into_url()?,
@@ -107,9 +110,35 @@ impl Receiver {
                 s: HpkeKeyPair::gen_keypair(),
                 e: None,
             },
-        })
+        };
+        Ok(receiver)
     }
 
+    pub fn persist<P: Persister<Receiver>>(
+        &self,
+        persister: &mut P,
+    ) -> Result<String, ImplementationError> {
+        let receiver = Receiver { context: self.context.clone() };
+        Ok(persister.save(receiver)?)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Receiver {
+    context: SessionContext,
+}
+
+impl PersistableValue for Receiver {
+    fn key(&self) -> String { self.context.id().to_string() }
+}
+
+impl Receiver {
+    pub fn load<P: Persister<Receiver>>(
+        token: &str,
+        persister: &P,
+    ) -> Result<Self, ImplementationError> {
+        persister.load(token).map_err(ImplementationError::from)
+    }
     /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
     pub fn extract_req(
         &mut self,

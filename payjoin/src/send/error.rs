@@ -305,7 +305,17 @@ impl ResponseError {
     }
 }
 
-impl std::error::Error for ResponseError {}
+impl std::error::Error for ResponseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use ResponseError::*;
+
+        match self {
+            WellKnown(error) => Some(error),
+            Validation(error) => Some(error),
+            Unrecognized { .. } => None,
+        }
+    }
+}
 
 impl From<WellKnownError> for ResponseError {
     fn from(value: WellKnownError) -> Self { Self::WellKnown(value) }

@@ -21,8 +21,10 @@
 //! [`bitmask-core`](https://github.com/diba-io/bitmask-core) BDK integration. Bring your own
 //! wallet and http client.
 
+use std::fmt::{self, Display};
+
 use bitcoin::hashes::{sha256, Hash};
-pub use error::{CreateRequestError, EncapsulationError};
+pub use error::{CreateRequestError, EncapsulationError, ImplementationError};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
 use serde::{Deserialize, Serialize};
@@ -32,6 +34,7 @@ use super::error::BuildSenderError;
 use super::*;
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
+use crate::persist::{Persister, Value};
 use crate::send::v1;
 use crate::uri::{ShortId, UrlExt};
 use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
@@ -64,11 +67,12 @@ impl<'a> SenderBuilder<'a> {
     // The minfeerate parameter is set if the contribution is available in change.
     //
     // This method fails if no recommendation can be made or if the PSBT is malformed.
-    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, BuildSenderError> {
-        Ok(Sender {
+    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<NewSender, BuildSenderError> {
+        let sender = NewSender {
             v1: self.0.build_recommended(min_fee_rate)?,
             reply_key: HpkeKeyPair::gen_keypair().0,
-        })
+        };
+        Ok(sender)
     }
 
     /// Offer the receiver contribution to pay for his input.
@@ -90,8 +94,8 @@ impl<'a> SenderBuilder<'a> {
         change_index: Option<usize>,
         min_fee_rate: FeeRate,
         clamp_fee_contribution: bool,
-    ) -> Result<Sender, BuildSenderError> {
-        Ok(Sender {
+    ) -> Result<NewSender, BuildSenderError> {
+        let sender = NewSender {
             v1: self.0.build_with_additional_fee(
                 max_fee_contribution,
                 change_index,
@@ -99,7 +103,8 @@ impl<'a> SenderBuilder<'a> {
                 clamp_fee_contribution,
             )?,
             reply_key: HpkeKeyPair::gen_keypair().0,
-        })
+        };
+        Ok(sender)
     }
 
     /// Perform Payjoin without incentivizing the payee to cooperate.
@@ -109,11 +114,28 @@ impl<'a> SenderBuilder<'a> {
     pub fn build_non_incentivizing(
         self,
         min_fee_rate: FeeRate,
-    ) -> Result<Sender, BuildSenderError> {
-        Ok(Sender {
+    ) -> Result<NewSender, BuildSenderError> {
+        let sender = NewSender {
             v1: self.0.build_non_incentivizing(min_fee_rate)?,
             reply_key: HpkeKeyPair::gen_keypair().0,
-        })
+        };
+        Ok(sender)
+    }
+}
+
+#[derive(Debug)]
+pub struct NewSender {
+    pub(crate) v1: v1::Sender,
+    pub(crate) reply_key: HpkeSecretKey,
+}
+
+impl NewSender {
+    pub fn persist<P: Persister<Sender>>(
+        &self,
+        persister: &mut P,
+    ) -> Result<P::Token, ImplementationError> {
+        let sender = Sender { v1: self.v1.clone(), reply_key: self.reply_key.clone() };
+        Ok(persister.save(sender)?)
     }
 }
 
@@ -125,7 +147,35 @@ pub struct Sender {
     pub(crate) reply_key: HpkeSecretKey,
 }
 
+/// Opaque key type for the sender
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SenderToken(Url);
+
+impl Display for SenderToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.0) }
+}
+
+impl From<Sender> for SenderToken {
+    fn from(sender: Sender) -> Self { SenderToken(sender.endpoint().clone()) }
+}
+
+impl AsRef<[u8]> for SenderToken {
+    fn as_ref(&self) -> &[u8] { self.0.as_str().as_bytes() }
+}
+
+impl Value for Sender {
+    type Key = SenderToken;
+
+    fn key(&self) -> Self::Key { SenderToken(self.endpoint().clone()) }
+}
+
 impl Sender {
+    pub fn load<P: Persister<Sender>>(
+        token: P::Token,
+        persister: &P,
+    ) -> Result<Self, ImplementationError> {
+        persister.load(token).map_err(ImplementationError::from)
+    }
     /// Extract serialized V1 Request and Context from a Payjoin Proposal
     pub fn extract_v1(&self) -> (Request, v1::V1Context) { self.v1.extract_v1() }
 

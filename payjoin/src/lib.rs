@@ -29,6 +29,9 @@ pub mod receive;
 pub mod send;
 
 #[cfg(feature = "v2")]
+pub mod persist;
+
+#[cfg(feature = "v2")]
 pub(crate) mod hpke;
 #[cfg(feature = "v2")]
 pub use crate::hpke::{HpkeKeyPair, HpkePublicKey};

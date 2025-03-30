@@ -332,10 +332,10 @@ impl std::error::Error for OutputSubstitutionError {
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
 /// You can only display it.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct SelectionError(InternalSelectionError);
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum InternalSelectionError {
     /// No candidates available for selection
     Empty,

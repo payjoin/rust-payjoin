@@ -305,7 +305,17 @@ impl ResponseError {
     }
 }
 
-impl std::error::Error for ResponseError {}
+impl std::error::Error for ResponseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use ResponseError::*;
+
+        match self {
+            WellKnown(error) => Some(error),
+            Validation(error) => Some(error),
+            Unrecognized { .. } => None,
+        }
+    }
+}
 
 impl From<WellKnownError> for ResponseError {
     fn from(value: WellKnownError) -> Self { Self::WellKnown(value) }
@@ -375,6 +385,8 @@ impl WellKnownError {
         Self { code: ErrorCode::VersionUnsupported, message, supported_versions: Some(supported) }
     }
 }
+
+impl std::error::Error for WellKnownError {}
 
 impl core::fmt::Display for WellKnownError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

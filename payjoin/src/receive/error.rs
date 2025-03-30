@@ -72,6 +72,7 @@ pub enum ReplyableError {
 ///     "message": "Human readable error message"
 /// }
 /// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonReply {
     /// The error code
     error_code: ErrorCode,

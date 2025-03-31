@@ -30,6 +30,7 @@ impl From<DirectoryResponseError> for SessionError {
                 InternalSessionError::OhttpEncapsulation(e),
             DirectoryResponseError::UnexpectedStatusCode(e) =>
                 InternalSessionError::UnexpectedStatusCode(e),
+            DirectoryResponseError::OhttpKeyRejected => todo!(),
         }
         .into()
     }

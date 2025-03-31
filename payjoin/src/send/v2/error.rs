@@ -131,6 +131,7 @@ impl From<DirectoryResponseError> for EncapsulationError {
             DirectoryResponseError::OhttpDecapsulation(e) => InternalEncapsulationError::Ohttp(e),
             DirectoryResponseError::UnexpectedStatusCode(e) =>
                 InternalEncapsulationError::UnexpectedStatusCode(e),
+            DirectoryResponseError::OhttpKeyRejected => todo!(),
         }
         .into()
     }

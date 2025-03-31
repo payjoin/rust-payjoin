@@ -3,6 +3,7 @@ use std::{error, fmt};
 
 use bitcoin::bech32::{self, EncodeError};
 use bitcoin::key::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE;
+use http::HeaderValue;
 
 use crate::directory::ENCAPSULATED_MESSAGE_BYTES;
 
@@ -53,6 +54,7 @@ pub fn ohttp_encapsulate(
 pub enum DirectoryResponseError {
     InvalidSize(usize),
     OhttpDecapsulation(OhttpEncapsulationError),
+    OhttpKeyRejected,
     UnexpectedStatusCode(http::StatusCode),
 }
 
@@ -64,6 +66,11 @@ pub fn process_get_res(
     let body = match response.status() {
         http::StatusCode::OK => response.body().to_vec(),
         http::StatusCode::ACCEPTED => return Ok(None),
+        http::StatusCode::BAD_REQUEST => match response.headers().get("content-type") {
+            Some(t) if t == HeaderValue::from_static("application/problem+json") =>
+                return Err(DirectoryResponseError::OhttpKeyRejected),
+            _ => return Err(DirectoryResponseError::UnexpectedStatusCode(response.status())),
+        },
         _ => return Err(DirectoryResponseError::UnexpectedStatusCode(response.status())),
     };
     Ok(Some(body))
@@ -76,6 +83,11 @@ pub fn process_post_res(
     let response = process_ohttp_res(res, ohttp_context)?;
     match response.status() {
         http::StatusCode::OK => return Ok(()),
+        http::StatusCode::BAD_REQUEST => match response.headers().get("content-type") {
+            Some(t) if t == HeaderValue::from_static("application/problem+json") =>
+                return Err(DirectoryResponseError::OhttpKeyRejected),
+            _ => return Err(DirectoryResponseError::UnexpectedStatusCode(response.status())),
+        },
         _ => return Err(DirectoryResponseError::UnexpectedStatusCode(response.status())),
     };
 }

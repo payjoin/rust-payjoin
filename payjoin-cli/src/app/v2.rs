@@ -1,11 +1,11 @@
+#[cfg(not(feature = "_danger-local-https"))]
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
-#[cfg(not(feature = "_danger-local-https"))]
-use payjoin::io::InternalError;
 use payjoin::receive::v2::{NewReceiver, Receiver, UncheckedProposal};
 use payjoin::receive::{Error, ImplementationError, ReplyableError};
 use payjoin::send::v2::{Sender, SenderBuilder};
@@ -429,16 +429,14 @@ async fn fetch_keys(
 
         match ohttp_keys {
             Ok(keys) => return Ok(Some(keys)),
-            Err(error) => match error {
-                payjoin::io::Error(InternalError::UnexpectedStatusCode(_)) => {
+            Err(error) =>
+                if http::StatusCode::from_str(&error.to_string()).is_ok() {
                     log::debug!("{:?}", error);
                     return Err(error.into());
-                }
-                _ => {
+                } else {
                     log::debug!("Failed to connect to relay: {}, {:?}", selected_relay, error);
                     relay_state.lock().unwrap().add_failed_relay(selected_relay);
-                }
-            },
+                },
         }
     }
 }
@@ -484,16 +482,14 @@ async fn validate_relay(
 
         match ohttp_keys {
             Ok(_) => return Ok(selected_relay),
-            Err(error) => match error {
-                payjoin::io::Error(InternalError::UnexpectedStatusCode(_)) => {
+            Err(error) =>
+                if http::StatusCode::from_str(&error.to_string()).is_ok() {
                     log::debug!("{:?}", error);
                     return Err(error.into());
-                }
-                _ => {
+                } else {
                     log::debug!("Failed to connect to relay: {}, {:?}", selected_relay, error);
                     relay_state.lock().unwrap().add_failed_relay(selected_relay);
-                }
-            },
+                },
         }
     }
 }

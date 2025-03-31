@@ -62,10 +62,10 @@ async fn parse_ohttp_keys_response(res: reqwest::Response) -> Result<OhttpKeys, 
 }
 
 #[derive(Debug)]
-pub struct Error(pub InternalError);
+pub struct Error(InternalError);
 
 #[derive(Debug)]
-pub enum InternalError {
+enum InternalError {
     ParseUrl(crate::into_url::Error),
     Reqwest(reqwest::Error),
     Io(std::io::Error),
@@ -104,9 +104,7 @@ impl std::fmt::Display for Error {
             InvalidOhttpKeys(e) => {
                 write!(f, "Invalid ohttp keys returned from payjoin directory: {}", e)
             }
-            UnexpectedStatusCode(code) => {
-                write!(f, "Unexpected status code from payjoin directory: {}", code)
-            }
+            UnexpectedStatusCode(code) => code.as_u16().fmt(f),
             #[cfg(feature = "_danger-local-https")]
             Rustls(e) => e.fmt(f),
         }

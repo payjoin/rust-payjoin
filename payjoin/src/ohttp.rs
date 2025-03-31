@@ -52,6 +52,47 @@ pub fn ohttp_encapsulate(
     Ok((buffer, ohttp_ctx))
 }
 
+pub enum DirectoryResponseError {
+    InvalidSize(usize),
+    OhttpDecapsulation(OhttpEncapsulationError),
+    UnexpectedStatusCode(http::StatusCode),
+}
+
+pub fn process_get_res(
+    res: &[u8],
+    ohttp_context: ohttp::ClientResponse,
+) -> Result<Option<Vec<u8>>, DirectoryResponseError> {
+    let response = process_ohttp_res(res, ohttp_context)?;
+    match response.status() {
+        http::StatusCode::OK => Ok(Some(response.body().to_vec())),
+        http::StatusCode::ACCEPTED => Ok(None),
+        status_code => Err(DirectoryResponseError::UnexpectedStatusCode(status_code)),
+    }
+}
+
+pub fn process_post_res(
+    res: &[u8],
+    ohttp_context: ohttp::ClientResponse,
+) -> Result<(), DirectoryResponseError> {
+    let response = process_ohttp_res(res, ohttp_context)?;
+    match response.status() {
+        http::StatusCode::OK => Ok(()),
+        status_code => Err(DirectoryResponseError::UnexpectedStatusCode(status_code)),
+    }
+}
+
+fn process_ohttp_res(
+    res: &[u8],
+    ohttp_context: ohttp::ClientResponse,
+) -> Result<http::Response<Vec<u8>>, DirectoryResponseError> {
+    let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
+        res.try_into().map_err(|_| DirectoryResponseError::InvalidSize(res.len()))?;
+    log::trace!("decapsulating directory response");
+    let res = ohttp_decapsulate(ohttp_context, response_array)
+        .map_err(DirectoryResponseError::OhttpDecapsulation)?;
+    Ok(res)
+}
+
 /// decapsulate ohttp, bhttp response and return http response body and status code
 pub fn ohttp_decapsulate(
     res_ctx: ohttp::ClientResponse,

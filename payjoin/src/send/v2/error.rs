@@ -1,5 +1,7 @@
 use core::fmt;
 
+use super::ResponseError;
+use crate::ohttp::DirectoryResponseError;
 use crate::uri::url_ext::ParseReceiverPubkeyParamError;
 
 /// Error returned when request could not be created.
@@ -116,6 +118,26 @@ impl From<InternalEncapsulationError> for EncapsulationError {
 impl From<InternalEncapsulationError> for super::ResponseError {
     fn from(value: InternalEncapsulationError) -> Self {
         super::ResponseError::Validation(
+            super::InternalValidationError::V2Encapsulation(value.into()).into(),
+        )
+    }
+}
+
+impl From<DirectoryResponseError> for EncapsulationError {
+    fn from(value: DirectoryResponseError) -> Self {
+        match value {
+            DirectoryResponseError::InvalidSize(e) => InternalEncapsulationError::InvalidSize(e),
+            DirectoryResponseError::OhttpDecapsulation(e) => InternalEncapsulationError::Ohttp(e),
+            DirectoryResponseError::UnexpectedStatusCode(e) =>
+                InternalEncapsulationError::UnexpectedStatusCode(e),
+        }
+        .into()
+    }
+}
+
+impl From<DirectoryResponseError> for ResponseError {
+    fn from(value: DirectoryResponseError) -> Self {
+        ResponseError::Validation(
             super::InternalValidationError::V2Encapsulation(value.into()).into(),
         )
     }

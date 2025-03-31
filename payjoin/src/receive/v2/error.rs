@@ -3,7 +3,7 @@ use std::error;
 
 use super::Error::V2;
 use crate::hpke::HpkeError;
-use crate::ohttp::OhttpEncapsulationError;
+use crate::ohttp::{DirectoryResponseError, OhttpEncapsulationError};
 use crate::receive::error::Error;
 
 /// Error that may occur during a v2 session typestate change
@@ -19,6 +19,24 @@ impl From<InternalSessionError> for SessionError {
 
 impl From<InternalSessionError> for Error {
     fn from(e: InternalSessionError) -> Self { V2(e.into()) }
+}
+
+impl From<DirectoryResponseError> for SessionError {
+    fn from(value: DirectoryResponseError) -> Self {
+        match value {
+            DirectoryResponseError::InvalidSize(e) =>
+                InternalSessionError::UnexpectedResponseSize(e),
+            DirectoryResponseError::OhttpDecapsulation(e) =>
+                InternalSessionError::OhttpEncapsulation(e),
+            DirectoryResponseError::UnexpectedStatusCode(e) =>
+                InternalSessionError::UnexpectedStatusCode(e),
+        }
+        .into()
+    }
+}
+
+impl From<DirectoryResponseError> for Error {
+    fn from(value: DirectoryResponseError) -> Self { V2(value.into()) }
 }
 
 #[derive(Debug)]

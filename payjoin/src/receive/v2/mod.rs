@@ -17,7 +17,9 @@ use super::{
     v1, InternalPayloadError, JsonReply, OutputSubstitutionError, ReplyableError, SelectionError,
 };
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
-use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
+use crate::ohttp::{
+    ohttp_encapsulate, process_get_res, process_post_res, OhttpEncapsulationError, OhttpKeys,
+};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::Persister;
 use crate::receive::{parse_payload, InputPair};
@@ -180,23 +182,15 @@ impl Receiver<WithContext> {
         body: &[u8],
         context: ohttp::ClientResponse,
     ) -> Result<Option<Receiver<UncheckedProposal>>, Error> {
-        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
-            body.try_into()
-                .map_err(|_| InternalSessionError::UnexpectedResponseSize(body.len()))?;
-        log::trace!("decapsulating directory response");
-        let response = ohttp_decapsulate(context, response_array)
-            .map_err(InternalSessionError::OhttpEncapsulation)?;
-        if response.body().is_empty() {
-            log::debug!("response is empty");
-            return Ok(None);
-        }
-        match String::from_utf8(response.body().to_vec()) {
+        let body = match process_get_res(body, context)? {
+            Some(body) => body,
+            None => return Ok(None),
+        };
+        match String::from_utf8(body.clone()) {
             // V1 response bodies are utf8 plaintext
             Ok(response) => Ok(Some(Receiver { state: self.extract_proposal_from_v1(response)? })),
             // V2 response bodies are encrypted binary
-            Err(_) => Ok(Some(Receiver {
-                state: self.extract_proposal_from_v2(response.body().to_vec())?,
-            })),
+            Err(_) => Ok(Some(Receiver { state: self.extract_proposal_from_v2(body)? })),
         }
     }
 
@@ -350,16 +344,7 @@ impl Receiver<UncheckedProposal> {
         body: &[u8],
         context: ohttp::ClientResponse,
     ) -> Result<(), SessionError> {
-        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
-            body.try_into()
-                .map_err(|_| InternalSessionError::UnexpectedResponseSize(body.len()))?;
-        let response = ohttp_decapsulate(context, response_array)
-            .map_err(InternalSessionError::OhttpEncapsulation)?;
-
-        match response.status() {
-            http::StatusCode::OK => Ok(()),
-            _ => Err(InternalSessionError::UnexpectedStatusCode(response.status()).into()),
-        }
+        process_post_res(body, context).map_err(Into::into)
     }
 }
 
@@ -648,15 +633,7 @@ impl Receiver<PayjoinProposal> {
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
     ) -> Result<(), Error> {
-        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
-            res.try_into().map_err(|_| InternalSessionError::UnexpectedResponseSize(res.len()))?;
-        let res = ohttp_decapsulate(ohttp_context, response_array)
-            .map_err(InternalSessionError::OhttpEncapsulation)?;
-        if res.status().is_success() {
-            Ok(())
-        } else {
-            Err(InternalSessionError::UnexpectedStatusCode(res.status()).into())
-        }
+        process_post_res(res, ohttp_context).map_err(Into::into)
     }
 }
 

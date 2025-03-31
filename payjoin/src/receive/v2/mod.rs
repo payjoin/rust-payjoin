@@ -594,7 +594,6 @@ impl PayjoinProposal {
         Ok((req, ctx))
     }
 
-    #[cfg(feature = "v2")]
     /// Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
     ///
     /// This function decapsulates the response using the provided OHTTP context. If the response status is successful,

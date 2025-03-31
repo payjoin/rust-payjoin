@@ -15,9 +15,11 @@ use hyper_util::rt::TokioIo;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 
 use crate::db::DbPool;
+mod key_config;
+use crate::key_config::init_ohttp;
 
 pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
@@ -156,21 +158,6 @@ fn init_tls_acceptor(cert_key: (Vec<u8>, Vec<u8>)) -> Result<tokio_rustls::TlsAc
         .map_err(|e| anyhow::anyhow!("TLS error: {}", e))?;
     server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
     Ok(TlsAcceptor::from(Arc::new(server_config)))
-}
-
-fn init_ohttp() -> Result<ohttp::Server> {
-    use ohttp::hpke::{Aead, Kdf, Kem};
-    use ohttp::{KeyId, SymmetricSuite};
-
-    const KEY_ID: KeyId = 1;
-    const KEM: Kem = Kem::K256Sha256;
-    const SYMMETRIC: &[SymmetricSuite] =
-        &[SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
-
-    // create or read from file
-    let server_config = ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC))?;
-    info!("Initialized a new OHTTP Key Configuration. GET /ohttp-keys to fetch it.");
-    Ok(ohttp::Server::new(server_config)?)
 }
 
 async fn serve_payjoin_directory(

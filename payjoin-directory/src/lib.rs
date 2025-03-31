@@ -18,8 +18,8 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, trace};
 
 use crate::db::DbPool;
-mod key_config;
-use crate::key_config::init_ohttp;
+pub mod key_config;
+pub use crate::key_config::*;
 
 pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
@@ -45,11 +45,13 @@ pub async fn listen_tcp_with_tls_on_free_port(
     db_host: String,
     timeout: Duration,
     cert_key: (Vec<u8>, Vec<u8>),
+    ohttp: ohttp::Server,
 ) -> Result<(u16, tokio::task::JoinHandle<Result<(), BoxError>>), BoxError> {
     let listener = tokio::net::TcpListener::bind("[::]:0").await?;
     let port = listener.local_addr()?.port();
     println!("Directory server binding to port {}", listener.local_addr()?);
-    let handle = listen_tcp_with_tls_on_listener(listener, db_host, timeout, cert_key).await?;
+    let handle =
+        listen_tcp_with_tls_on_listener(listener, db_host, timeout, cert_key, ohttp).await?;
     Ok((port, handle))
 }
 
@@ -60,9 +62,10 @@ async fn listen_tcp_with_tls_on_listener(
     db_host: String,
     timeout: Duration,
     tls_config: (Vec<u8>, Vec<u8>),
+    ohttp: ohttp::Server,
 ) -> Result<tokio::task::JoinHandle<Result<(), BoxError>>, BoxError> {
     let pool = DbPool::new(timeout, db_host).await?;
-    let ohttp = Arc::new(Mutex::new(init_ohttp()?));
+    let ohttp = Arc::new(Mutex::new(ohttp));
     let tls_acceptor = init_tls_acceptor(tls_config)?;
     // Spawn the connection handling loop in a separate task
     let handle = tokio::spawn(async move {
@@ -102,9 +105,10 @@ pub async fn listen_tcp(
     port: u16,
     db_host: String,
     timeout: Duration,
+    ohttp: ohttp::Server,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = DbPool::new(timeout, db_host).await?;
-    let ohttp = Arc::new(Mutex::new(init_ohttp()?));
+    let ohttp = Arc::new(Mutex::new(ohttp));
     let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
     let listener = TcpListener::bind(bind_addr).await?;
     while let Ok((stream, _)) = listener.accept().await {
@@ -136,10 +140,11 @@ pub async fn listen_tcp_with_tls(
     db_host: String,
     timeout: Duration,
     cert_key: (Vec<u8>, Vec<u8>),
+    ohttp: ohttp::Server,
 ) -> Result<tokio::task::JoinHandle<Result<(), BoxError>>, BoxError> {
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    listen_tcp_with_tls_on_listener(listener, db_host, timeout, cert_key).await
+    listen_tcp_with_tls_on_listener(listener, db_host, timeout, cert_key, ohttp).await
 }
 
 #[cfg(feature = "_danger-local-https")]

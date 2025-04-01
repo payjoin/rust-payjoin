@@ -1,5 +1,23 @@
 # Payjoin Changelog
 
+## 0.23.0
+
+- Make features additive [#430](https://github.com/payjoin/rust-payjoin/pull/430) [#466](https://github.com/payjoin/rust-payjoin/pull/466) [#501](https://github.com/payjoin/rust-payjoin/pull/501) [#518](https://github.com/payjoin/rust-payjoin/pull/518) 
+- Make receiver errors replyable to the sender [#474](https://github.com/payjoin/rust-payjoin/pull/474) [#506](https://github.com/payjoin/rust-payjoin/pull/506) [#526](https://github.com/payjoin/rust-payjoin/pull/526) [#606](https://github.com/payjoin/rust-payjoin/pull/606) 
+- Separate error modules [#482](https://github.com/payjoin/rust-payjoin/pull/482) 
+- Introduce "directory" feature module [#502](https://github.com/payjoin/rust-payjoin/pull/502) 
+- Expose test helpers via payjoin-test-utils crate [#484](https://github.com/payjoin/rust-payjoin/pull/484) 
+- Accommodate updated BIP78 spec [#505](https://github.com/payjoin/rust-payjoin/pull/505) 
+- Fallback to first candidate if avoid_uih fails [#533](https://github.com/payjoin/rust-payjoin/pull/533) 
+- Use IntoUrl trait instead of Url in function signatures [#520](https://github.com/payjoin/rust-payjoin/pull/520) 
+- Don't accept invalid certs even in tests [#550](https://github.com/payjoin/rust-payjoin/pull/550) 
+- Introduce experimental multiparty sender behind the "_multiparty" feature flag [#434](https://github.com/payjoin/rust-payjoin/pull/434) 
+- Add support for RFC 9540 ohttp-keys fetching and decentralized BIP 77 directory opt-in [#549](https://github.com/payjoin/rust-payjoin/pull/549) [#570](https://github.com/payjoin/rust-payjoin/pull/570) [#587](https://github.com/payjoin/rust-payjoin/pull/587) 
+- Fix the `pjos` BIP21 parameter to match the BIP78 spec [#546](https://github.com/payjoin/rust-payjoin/pull/546) 
+- Introduce mutation testing [#573](https://github.com/payjoin/rust-payjoin/pull/573) 
+- Add first-class persistence abstraction [#552](https://github.com/payjoin/rust-payjoin/pull/552) 
+- Add many more tests, reaching [82%](https://coveralls.io/builds/73029930) coverage - up from 60% when coverage reports were introduced.
+
 ## 0.22.0
 
 - Propagate Uri Fragment parameter errors to the caller

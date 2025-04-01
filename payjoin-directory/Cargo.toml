@@ -18,7 +18,7 @@ _danger-local-https = ["hyper-rustls", "rustls", "tokio-rustls"]
 
 [dependencies]
 anyhow = "1.0.71"
-bitcoin = { version = "0.32.4", features = ["base64"] }
+bitcoin = { version = "0.32.4", features = ["base64", "rand-std"] }
 bhttp = { version = "=0.5.1", features = ["http"] }
 futures = "0.3.17"
 http-body-util = "0.1.2"
@@ -33,3 +33,6 @@ tokio = { version = "1.12.0", features = ["full"] }
 tokio-rustls = { version = "0.25", features = ["ring"], default-features = false, optional = true }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3.5.0"

@@ -131,7 +131,14 @@ pub async fn init_directory(
 > {
     println!("Database running on {}", db_host);
     let timeout = Duration::from_secs(2);
-    payjoin_directory::listen_tcp_with_tls_on_free_port(db_host, timeout, local_cert_key).await
+    let ohttp_server = payjoin_directory::gen_ohttp_server_config()?;
+    payjoin_directory::listen_tcp_with_tls_on_free_port(
+        db_host,
+        timeout,
+        local_cert_key,
+        ohttp_server.into(),
+    )
+    .await
 }
 
 /// generate or get a DER encoded localhost cert and key.

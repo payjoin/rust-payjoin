@@ -4,6 +4,8 @@ use payjoin_directory::*;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
+const DEFAULT_KEY_CONFIG_DIR: &str = "ohttp_keys";
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
@@ -17,7 +19,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let db_host = env::var("PJ_DB_HOST").unwrap_or_else(|_| DEFAULT_DB_HOST.to_string());
 
-    payjoin_directory::listen_tcp(dir_port, db_host, timeout).await
+    let key_dir =
+        std::env::var("PJ_OHTTP_KEY_DIR").map(std::path::PathBuf::from).unwrap_or_else(|_| {
+            let key_dir = std::path::PathBuf::from(DEFAULT_KEY_CONFIG_DIR);
+            std::fs::create_dir_all(&key_dir).expect("Failed to create key directory");
+            key_dir
+        });
+
+    let ohttp = match key_config::read_server_config(&key_dir) {
+        Ok(config) => config,
+        Err(_) => {
+            let ohttp_config = key_config::gen_ohttp_server_config()?;
+            let path = key_config::persist_new_key_config(ohttp_config, &key_dir)?;
+            println!("Generated new key configuration at {}", path.display());
+            key_config::read_server_config(&key_dir).expect("Failed to read newly generated config")
+        }
+    };
+
+    payjoin_directory::listen_tcp(dir_port, db_host, timeout, ohttp.into()).await
 }
 
 fn init_logging() {

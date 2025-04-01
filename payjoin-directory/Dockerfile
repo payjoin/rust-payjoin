@@ -1,5 +1,5 @@
 # Use the official Rust image as the builder
-FROM --platform=linux/amd64 rust:1.75-slim as builder
+FROM --platform=linux/amd64 rust:1.81-slim as builder
 
 WORKDIR /usr/src/payjoin-directory
 

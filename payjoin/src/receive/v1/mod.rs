@@ -763,10 +763,12 @@ pub struct PayjoinProposal {
 }
 
 impl PayjoinProposal {
+    /// The UTXOs that would be spent by this Payjoin transaction
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
         self.payjoin_psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
     }
 
+    /// The Payjoin Proposal PSBT
     pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
 }
 

@@ -33,7 +33,8 @@ Change the `master` branch to the next MINOR+1 version:
 - [ ] Switch to the `master` branch.
 - [ ] Create a new PR branch called `bump-CRATE-MAJOR-MINOR+1`, eg. `bump-CRATE-0-22`.
 - [ ] Bump the `bump-CRATE-MAJOR-MINOR+1` branch to the next development MINOR+1 version.
-  - Change the `Cargo.toml` version value to `MAJOR.MINOR+1.0`.
+  - Change the `Cargo.toml` version value to `MAJOR.MINOR+1.0` for all crates in the workspace.
+  - Run `contrib/update-lock-files.sh ` to apply upgrades to the Cargo lock files.
   - Update the `CHANGELOG.md` file.
   - The commit message should be "Bump CRATE version to MAJOR.MINOR+1.0".
 - [ ] Create PR for the `bump-CRATE-MAJOR-MINOR+1` branch to `master`.

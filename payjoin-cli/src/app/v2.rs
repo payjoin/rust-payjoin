@@ -175,7 +175,7 @@ impl App {
             Err(e) => return Err(e.into()),
         };
         let (req, ohttp_ctx) = payjoin_proposal
-            .extract_v2_req(&self.config.v2()?.ohttp_relay)
+            .extract_req(&self.config.v2()?.ohttp_relay)
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         println!("Got a request from the sender. Responding with a Payjoin proposal.");
         let res = post_request(req).await?;

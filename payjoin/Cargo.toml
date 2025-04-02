@@ -1,6 +1,6 @@
 [package]
 name = "payjoin"
-version = "0.22.0"
+version = "0.23.0"
 authors = ["Dan Gould <d@ngould.dev>"]
 description = "Payjoin Library implementing BIP 78 and BIP 77 batching protocols."
 repository = "https://github.com/payjoin/rust-payjoin"

@@ -16,7 +16,7 @@ Here's a minimal payjoin example using `payjoin-cli` with the `v2` feature conne
 
 Payjoin `v2` allows for transactions to be completed asynchronously. Thus the sender and receiver do not need to be online at the same time to payjoin. To make this work, we need a payjoin directory server and OHTTP relay. Learn more about how `v2` works [here](https://payjoin.org/docs/how-it-works/payjoin-v2-bip-77).
 
-To get started, install `nigiri`. Payjoin requires the sender and receiver each to have spendable [UTXOs](https://www.unchained.com/blog/what-is-a-utxo-bitcoin), so we'll create two wallets and fund each with spendable UTXOs.
+To get started, install `nigiri`. Payjoin requires the sender and receiver each to have spendable [UTXOs](https://www.unchained.com/blog/what-is-a-utxo-bitcoin), so we'll create two wallets and fund each.
 
 ```sh
 cargo install nigiri
@@ -46,7 +46,7 @@ mkdir sender receiver
 touch sender/config.toml receiver/config.toml
 ```
 
-Edit the `config.toml` files. Note that the `v2` feature requires a payjoin directory server and OHTTP relay. Learn more about them [here](https://payjoin.org/docs/how-it-works/payjoin-v2-bip-77).
+Edit the `config.toml` files. Note that the `v2` feature requires a payjoin directory server and OHTTP relay.
 
 ```toml
 # sender/config.toml
@@ -74,7 +74,13 @@ pj_directory = "https://payjo.in"
 ohttp_relay = "https://pj.bobspacebkk.com"
 ```
 
-Now, the receiver must generate an address to receive the payment:
+Now, the receiver must generate an address to receive the payment. The format is:
+
+```sh
+payjoin-cli receive <AMOUNT_SATS>
+```
+
+For example, to receive 10000 sats from our top-level directory:
 
 ```sh
 receiver/payjoin-cli receive 10000
@@ -90,13 +96,19 @@ Note that the session can be paused by pressing `Ctrl+C`. The receiver can come 
 
 ### Send a Payjoin
 
-Now, let's send the payjoin:
+Now, let's send the payjoin. Here is an example format:
 
 ```sh
-sender/payjoin-cli send bitcoin:bcrt1qmdfqplpqy9jatyul6vtcvl26sp3u3vs89986w0?amount=0.0001&pj_directory=https://payjo.in&ohttp_relay=https://pj.bobspacebkk.com --fee-rate 10
+payjoin-cli send <BIP21> --fee-rate <FEE_SAT_PER_VB>
 ```
 
-Congratulations! You've completed a payjoin, and are on your way toward cheaper, more efficient, and more private payments. Additionally, because we're using `v2`, the sender and receiver don't need to be online at the same time to do the payjoin!
+Where `<BIP21>` is the BIP21 URL containing the receiver's address, amount, payjoin directory, and OHTTP relay. Using the example from above:
+
+```sh
+sender/payjoin-cli send bitcoin:bcrt1qmdfqplpqy9jatyul6vtcvl26sp3u3vs89986w0?amount=0.0001&pj_directory=https://payjo.in&ohttp_relay=https://pj.bobspacebkk.com --fee-rate 2
+```
+
+Congratulations! You've completed a version 2 payjoin, which can be used for cheaper, more efficient, and more private on-chain payments. Additionally, because we're using `v2`, the sender and receiver don't need to be online at the same time to do the payjoin!
 
 ## Configuration
 
@@ -167,7 +179,6 @@ payjoin-cli --help
 | `--help` | `-h` | Print help information |
 | `--version` | `-V` | Print version information |
 
-Your configuration details will vary, but you may use this as a template.
 
 #### Send Options
 

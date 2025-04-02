@@ -4,7 +4,12 @@
 
 `payjoin-cli` is the reference implementation for the payjoin protocol, written using the [Payjoin Dev Kit](https://payjoindevkit.org).
 
-It enables sending and receiving [BIP 78 Payjoin (v1)](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) and [Draft BIP 77 Async Payjoin (v2)](https://github.com/bitcoin/bips/pull/1483) transactions via `bitcoind`. By default it supports Payjoin v2, which is backwards compatible with v1. Enable the `v1` feature to disable Payjoin v2 and sends and receives only v1 transactions.
+It enables sending and receiving [BIP 78 Payjoin
+(v1)](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) and [Draft
+BIP 77 Async Payjoin (v2)](https://github.com/bitcoin/bips/pull/1483)
+transactions via `bitcoind`. By default it supports Payjoin v2, which is
+backwards compatible with v1. Enable the `v1` feature to disable Payjoin v2 to
+send and receive using only v1.
 
 While this code and design have had significant testing, it is still alpha-quality experimental software. Use at your own risk.
 
@@ -52,11 +57,13 @@ Edit the `config.toml` files. Note that the `v2` feature requires a payjoin dire
 # sender/config.toml
 
 # Nigiri uses the following RPC credentials
-bitcoind_rpcuser = "admin1"
-bitcoind_rpcpassword = "123"
-bitcoind_rpchost = "http://localhost:18443/wallet/sender"
+[bitcoind]
+rpcuser = "admin1"
+rpcpassword = "123"
+rpchost = "http://localhost:18443/wallet/sender"
 
 # For v2, our config also requires a payjoin directory server and OHTTP relay
+[v2]
 pj_directory = "https://payjo.in"
 ohttp_relay = "https://pj.bobspacebkk.com"
 ```
@@ -65,11 +72,13 @@ ohttp_relay = "https://pj.bobspacebkk.com"
 # receiver/config.toml
 
 # Nigiri uses the following RPC credentials
-bitcoind_rpcuser = "admin1"
-bitcoind_rpcpassword = "123"
-bitcoind_rpchost = "http://localhost:18443/wallet/receiver"
+[bitcoind]
+rpcuser = "admin1"
+rpcpassword = "123"
+rpchost = "http://localhost:18443/wallet/receiver"
 
 # For v2, our config also requires a payjoin directory server and OHTTP relay
+[v2]
 pj_directory = "https://payjo.in"
 ohttp_relay = "https://pj.bobspacebkk.com"
 ```
@@ -89,8 +98,7 @@ receiver/payjoin-cli receive 10000
 This will output a [BIP21](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki) URL containing the receiver's address, amount, payjoin directory, and OHTTP relay. For example:
 
 ```sh
-bitcoin:bcrt1qmdfqplpqy9jatyul6vtcvl26sp3u3vs89986w0?amount=0.0001&pj_directory=https://payjo.in&ohttp_relay=https://pj.bobspacebkk.com
-```
+bitcoin:tb1qfttmt4z68cfyn2z25t3dusp03rq6gxrucfxs5a?amount=0.0001&pj=HTTPS://PAYJO.IN/EUQKYLU92GC6U%23RK1QFWVXS2LQ2VD4T6DUMQ0F4RZQ5NL9GM0EFWVHJZ9L796L20Z7SL3J+OH1QYP87E2AVMDKXDTU6R25WCPQ5ZUF02XHNPA65JMD8ZA2W4YRQN6UUWG+EX10T57UE```
 
 Note that the session can be paused by pressing `Ctrl+C`. The receiver can come back online and resume the session by running `payjoin-cli resume` again, and the sender may do a `send` against it while the receiver is offline.
 
@@ -105,45 +113,19 @@ payjoin-cli send <BIP21> --fee-rate <FEE_SAT_PER_VB>
 Where `<BIP21>` is the BIP21 URL containing the receiver's address, amount, payjoin directory, and OHTTP relay. Using the example from above:
 
 ```sh
-sender/payjoin-cli send bitcoin:bcrt1qmdfqplpqy9jatyul6vtcvl26sp3u3vs89986w0?amount=0.0001&pj_directory=https://payjo.in&ohttp_relay=https://pj.bobspacebkk.com --fee-rate 2
+sender/payjoin-cli send "bitcoin:tb1qfttmt4z68cfyn2z25t3dusp03rq6gxrucfxs5a?amount=0.0001&pj=HTTPS://PAYJO.IN/EUQKYLU92GC6U%23RK1QFWVXS2LQ2VD4T6DUMQ0F4RZQ5NL9GM0EFWVHJZ9L796L20Z7SL3J+OH1QYP87E2AVMDKXDTU6R25WCPQ5ZUF02XHNPA65JMD8ZA2W4YRQN6UUWG+EX10T57UE" --fee-rate 1
 ```
 
-Congratulations! You've completed a version 2 payjoin, which can be used for cheaper, more efficient, and more private on-chain payments. Additionally, because we're using `v2`, the sender and receiver don't need to be online at the same time to do the payjoin!
+Congratulations! You've completed a version 2 payjoin, which can be used for cheaper, more efficient, and more private on-chain payments. Additionally, because we're using `v2`, the sender and receiver don't need to be online at the same time to do the payjoin.
 
 ## Configuration
 
 Config options can be passed from the command line, or manually edited in a `config.toml` file within the directory you run `payjoin-cli` from.
 
-Configure it like so (example for regtest):
+see the
+[example.config.toml](https://github.com/payjoin/rust-payjoin/blob/fde867b93ede767c9a50913432a73782a94ef40b/payjoin-cli/example.config.toml)
+for inspiration.
 
-```toml
-# config.toml
-
-# Bitcoin Core RPC configuration
-bitcoind_rpchost = "http://localhost:18443/wallet/sender"  # RPC endpoint with wallet name
-bitcoind_rpcuser = "admin1"      # RPC username (if not using cookie auth)
-bitcoind_rpcpassword = "123"     # RPC password (if not using cookie auth)
-
-# Cookie authentication (alternative to username/password)
-# Default locations (mainnet):
-# Linux: ~/.bitcoin/.cookie
-# MacOS: ~/Library/Application Support/Bitcoin/.cookie
-# Windows: %APPDATA%\Bitcoin\.cookie
-bitcoind_cookie = "~/.bitcoin/regtest/.cookie"  # Path to Bitcoin Core cookie file
-
-# Default ports for bitcoind:
-# Mainnet: 8332
-# Testnet: 18332
-# Signet: 38332
-# Regtest: 18443
-
-# Database configuration
-db_path = "~/.local/share/payjoin/wallet.db"  # Custom path for the database
-
-# Payjoin v2 configuration
-pj_directory = "https://payjo.in"              # Payjoin directory server
-ohttp_relay = "https://pj.bobspacebkk.com"     # OHTTP relay service
-```
 
 ### Asynchronous Operation
 
@@ -157,42 +139,8 @@ Get a list of commands and options:
 payjoin-cli --help
 ```
 
-### CLI Reference
+or with a subcommand e.g.
 
-#### Commands
-
-| Command  | Description |
-|----------|-------------|
-| `send`   | Send a payjoin transaction |
-| `receive`| Receive a payjoin transaction |
-| `help`   | Print this message or the help of the given subcommand(s) |
-
-#### Options
-
-| Option | Flag | Description |
-|--------|------|-------------|
-| `--rpchost` | `-r` | The port of the bitcoin node |
-| `--cookie-file` | `-c` | Path to the cookie file of the bitcoin node |
-| `--rpcuser` | | The username for the bitcoin node |
-| `--rpcpassword` | | The password for the bitcoin node |
-| `--db-path` | `-d` | Sets a custom database path |
-| `--help` | `-h` | Print help information |
-| `--version` | `-V` | Print version information |
-
-
-#### Send Options
-
-| Argument/Option | Description |
-|----------------|-------------|
-| `<BIP21>` | The `bitcoin:...` payjoin uri to send to |
-| `--fee-rate <FEE_SAT_PER_VB>` | Fee rate in sat/vB |
-| `-h, --help` | Print help information |
-
-#### Receive Options
-
-| Argument/Option | Description |
-|----------------|-------------|
-| `<AMOUNT>` | The amount to receive in satoshis |
-| `-p, --port <port>` | The local port to listen on |
-| `-e, --pj-endpoint <pj_endpoint>` | The `pj=` endpoint to receive the payjoin request |
-| `-h, --help` | Print help information |
+```sh
+payjoin-cli send --help
+```

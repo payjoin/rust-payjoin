@@ -399,7 +399,7 @@ async fn post_subdir(
 
     match pool.push_default(&id, req.into()).await {
         Ok(_) => Ok(none_response),
-        Err(e) => Err(HandlerError::BadRequest(e.into())),
+        Err(e) => Err(HandlerError::InternalServerError(e.into())),
     }
 }
 

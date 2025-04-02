@@ -71,15 +71,14 @@ fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
     sha256::Hash::hash(&pubkey.to_compressed_bytes()).into()
 }
 
-/// A payjoin V2 receiver, allowing for polled requests to the
-/// payjoin directory and response processing.
+/// A new payjoin receiver, which must be persisted before initiating the payjoin flow.
 #[derive(Debug)]
 pub struct NewReceiver {
     context: SessionContext,
 }
 
 impl NewReceiver {
-    /// Creates a new `Receiver` with the provided parameters.
+    /// Creates a new [`NewReceiver`] with the provided parameters.
     ///
     /// # Parameters
     /// - `address`: The Bitcoin address for the payjoin session.
@@ -88,7 +87,7 @@ impl NewReceiver {
     /// - `expire_after`: The duration after which the session expires.
     ///
     /// # Returns
-    /// A new instance of `Receiver`.
+    /// A new instance of [`NewReceiver`].
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
@@ -113,6 +112,7 @@ impl NewReceiver {
         Ok(receiver)
     }
 
+    /// Saves the new [`Receiver`] using the provided persister and returns the storage token.
     pub fn persist<P: Persister<Receiver>>(
         &self,
         persister: &mut P,
@@ -122,6 +122,8 @@ impl NewReceiver {
     }
 }
 
+/// A payjoin V2 receiver, allowing for polled requests to the
+/// payjoin directory and response processing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receiver {
     context: SessionContext,
@@ -150,6 +152,7 @@ impl persist::Value for Receiver {
 }
 
 impl Receiver {
+    /// Loads a [`Receiver`] from the provided persister using the storage token.
     pub fn load<P: Persister<Receiver>>(
         token: P::Token,
         persister: &P,
@@ -361,7 +364,7 @@ impl UncheckedProposal {
 
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
-/// Call [`check_no_receiver_owned_inputs()`](struct.UncheckedProposal.html#method.check_no_receiver_owned_inputs) to proceed.
+/// Call [`Self::check_inputs_not_owned`] to proceed.
 #[derive(Debug, Clone)]
 pub struct MaybeInputsOwned {
     v1: v1::MaybeInputsOwned,
@@ -384,7 +387,7 @@ impl MaybeInputsOwned {
 
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
-/// Call [`check_no_inputs_seen`](struct.MaybeInputsSeen.html#method.check_no_inputs_seen_before) to proceed.
+/// Call [`Self::check_no_inputs_seen_before`] to proceed.
 #[derive(Debug, Clone)]
 pub struct MaybeInputsSeen {
     v1: v1::MaybeInputsSeen,
@@ -407,7 +410,7 @@ impl MaybeInputsSeen {
 /// The receiver has not yet identified which outputs belong to the receiver.
 ///
 /// Only accept PSBTs that send us money.
-/// Identify those outputs with `identify_receiver_outputs()` to proceed
+/// Identify those outputs with [`Self::identify_receiver_outputs`] to proceed.
 #[derive(Debug, Clone)]
 pub struct OutputsUnknown {
     inner: v1::OutputsUnknown,
@@ -426,6 +429,8 @@ impl OutputsUnknown {
 }
 
 /// A checked proposal that the receiver may substitute or add outputs to
+///
+/// Call [`Self::commit_outputs`] to proceed.
 #[derive(Debug, Clone)]
 pub struct WantsOutputs {
     v1: v1::WantsOutputs,
@@ -468,6 +473,8 @@ impl WantsOutputs {
 }
 
 /// A checked proposal that the receiver may contribute inputs to to make a payjoin
+///
+/// Call [`Self::commit_inputs`] to proceed.
 #[derive(Debug, Clone)]
 pub struct WantsInputs {
     v1: v1::WantsInputs,
@@ -513,6 +520,8 @@ impl WantsInputs {
 
 /// A checked proposal that the receiver may sign and finalize to make a proposal PSBT that the
 /// sender will accept.
+///
+/// Call [`Self::finalize_proposal`] to return a finalized [`PayjoinProposal`].
 #[derive(Debug, Clone)]
 pub struct ProvisionalProposal {
     v1: v1::ProvisionalProposal,
@@ -520,6 +529,12 @@ pub struct ProvisionalProposal {
 }
 
 impl ProvisionalProposal {
+    /// Return a Payjoin Proposal PSBT that the sender will find acceptable.
+    ///
+    /// This attempts to calculate any network fee owed by the receiver, subtract it from their output,
+    /// and return a PSBT that can produce a consensus-valid transaction that the sender will accept.
+    ///
+    /// wallet_process_psbt should sign and finalize receiver inputs
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
@@ -532,7 +547,8 @@ impl ProvisionalProposal {
     }
 }
 
-/// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
+/// A finalized payjoin proposal, complete with fees and receiver signatures, that the sender
+/// should find acceptable.
 #[derive(Clone)]
 pub struct PayjoinProposal {
     v1: v1::PayjoinProposal,
@@ -541,18 +557,21 @@ pub struct PayjoinProposal {
 
 impl PayjoinProposal {
     #[cfg(feature = "_multiparty")]
-    // TODO hack to get multi party working. A better solution would be to allow extract_v2_req to be separate from the rest of the v2 context
+    // TODO hack to get multi party working. A better solution would be to allow extract_req to be separate from the rest of the v2 context
     pub(crate) fn new(v1: v1::PayjoinProposal, context: SessionContext) -> Self {
         Self { v1, context }
     }
 
+    /// The UTXOs that would be spent by this Payjoin transaction
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
         self.v1.utxos_to_be_locked()
     }
 
+    /// The Payjoin Proposal PSBT
     pub fn psbt(&self) -> &Psbt { self.v1.psbt() }
 
-    pub fn extract_v2_req(
+    /// Extract an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
+    pub fn extract_req(
         &mut self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), Error> {
@@ -594,7 +613,6 @@ impl PayjoinProposal {
         Ok((req, ctx))
     }
 
-    #[cfg(feature = "v2")]
     /// Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
     ///
     /// This function decapsulates the response using the provided OHTTP context. If the response status is successful,

@@ -32,6 +32,7 @@ use crate::psbt::PsbtExt;
 use crate::request::Request;
 pub use crate::PjUri;
 
+/// A builder to construct the properties of a `Sender`.
 #[derive(Clone)]
 pub struct SenderBuilder<'a> {
     pub(crate) psbt: Psbt,
@@ -210,12 +211,14 @@ impl<'a> SenderBuilder<'a> {
     }
 }
 
+/// A payjoin V1 sender, allowing the construction of a payjoin V1 request
+/// and the resulting `V1Context`
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "v2", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sender {
     /// The original PSBT.
     pub(crate) psbt: Psbt,
-    /// The payjoin directory subdirectory to send the request to.
+    /// The endpoint in the Payjoin URI
     pub(crate) endpoint: Url,
     /// Whether the receiver is allowed to substitute original outputs.
     pub(crate) output_substitution: OutputSubstitution,
@@ -251,13 +254,14 @@ impl Sender {
         )
     }
 
+    /// The endpoint in the Payjoin URI
     pub fn endpoint(&self) -> &Url { &self.endpoint }
 }
 
 /// Data required to validate the response.
 ///
 /// This type is used to process a BIP78 response.
-/// Then call [`Self::process_response`] on it to continue BIP78 flow.
+/// Call [`Self::process_response`] on it to continue the BIP78 flow.
 #[derive(Debug, Clone)]
 pub struct V1Context {
     psbt_context: PsbtContext,

@@ -41,6 +41,7 @@ use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
 
 mod error;
 
+/// A builder to construct the properties of a [`Sender`].
 #[derive(Clone)]
 pub struct SenderBuilder<'a>(pub(crate) v1::SenderBuilder<'a>);
 
@@ -123,6 +124,7 @@ impl<'a> SenderBuilder<'a> {
     }
 }
 
+/// A new payjoin sender, which must be persisted before initiating the payjoin flow.
 #[derive(Debug)]
 pub struct NewSender {
     pub(crate) v1: v1::Sender,
@@ -130,6 +132,7 @@ pub struct NewSender {
 }
 
 impl NewSender {
+    /// Saves the new [`Sender`] using the provided persister and returns the storage token.
     pub fn persist<P: Persister<Sender>>(
         &self,
         persister: &mut P,
@@ -139,6 +142,8 @@ impl NewSender {
     }
 }
 
+/// A payjoin V2 sender, allowing the construction of a payjoin V2 request
+/// and the resulting [`V2PostContext`].
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sender {
     /// The v1 Sender.
@@ -170,6 +175,7 @@ impl Value for Sender {
 }
 
 impl Sender {
+    /// Loads a [`Sender`] from the provided persister using the storage token.
     pub fn load<P: Persister<Sender>>(
         token: P::Token,
         persister: &P,
@@ -236,6 +242,7 @@ impl Sender {
         self.v1.endpoint.receiver_pubkey()
     }
 
+    /// The endpoint in the Payjoin URI
     pub fn endpoint(&self) -> &Url { self.v1.endpoint() }
 }
 
@@ -289,8 +296,12 @@ pub(crate) fn serialize_v2_body(
     Ok(format!("{}\n{}", base64, query_params).into_bytes())
 }
 
+/// Data required to validate the POST response.
+///
+/// This type is used to process a BIP77 POST response.
+/// Call [`Self::process_response`] on it to continue the BIP77 flow.
 pub struct V2PostContext {
-    /// The payjoin directory subdirectory to send the request to.
+    /// The endpoint in the Payjoin URI
     pub(crate) endpoint: Url,
     pub(crate) psbt_ctx: PsbtContext,
     pub(crate) hpke_ctx: HpkeContext,
@@ -298,6 +309,16 @@ pub struct V2PostContext {
 }
 
 impl V2PostContext {
+    /// Processes the response for the initial POST message from the sender
+    /// client in the v2 Payjoin protocol.
+    ///
+    /// This function decapsulates the response using the provided OHTTP
+    /// context. If the encapsulated response status is successful, it
+    /// indicates that the the Original PSBT been accepted. Otherwise, it
+    /// returns an error with the encapsulated response status code.
+    ///
+    /// After this function is called, the sender can poll for a Proposal PSBT
+    /// from the receiver using the returned [`V2GetContext`].
     pub fn process_response(self, response: &[u8]) -> Result<V2GetContext, EncapsulationError> {
         let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] = response
             .try_into()
@@ -318,15 +339,20 @@ impl V2PostContext {
     }
 }
 
+/// Data required to validate the GET response.
+///
+/// This type is used to make a BIP77 GET request and process the response.
+/// Call [`Self::process_response`] on it to continue the BIP77 flow.
 #[derive(Debug, Clone)]
 pub struct V2GetContext {
-    /// The payjoin directory subdirectory to send the request to.
+    /// The endpoint in the Payjoin URI
     pub(crate) endpoint: Url,
     pub(crate) psbt_ctx: PsbtContext,
     pub(crate) hpke_ctx: HpkeContext,
 }
 
 impl V2GetContext {
+    /// Extract an OHTTP Encapsulated HTTP GET request for the Proposal PSBT
     pub fn extract_req(
         &self,
         ohttp_relay: impl IntoUrl,
@@ -354,6 +380,16 @@ impl V2GetContext {
         Ok((Request::new_v2(&url, &body), ohttp_ctx))
     }
 
+    /// Processes the response for the final GET message from the sender client
+    /// in the v2 Payjoin protocol.
+    ///
+    /// This function decapsulates the response using the provided OHTTP
+    /// context. A successful response can either be a Proposal PSBT or an
+    /// ACCEPTED message indicating no Proposal PSBT is available yet.
+    /// Otherwise, it returns an error with the encapsulated status code.
+    ///
+    /// After this function is called, the sender can sign and finalize the
+    /// PSBT and broadcast the resulting Payjoin transaction to the network.
     pub fn process_response(
         &self,
         response: &[u8],

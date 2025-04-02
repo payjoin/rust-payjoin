@@ -68,10 +68,50 @@ impl Database {
         Ok(sessions)
     }
 
-    pub(crate) fn clear_recv_session(&self) -> Result<()> {
+    pub(crate) fn clear_recv_sessions(&self) -> Result<()> {
         let recv_tree: Tree = self.0.open_tree("recv_sessions")?;
         recv_tree.clear()?;
         recv_tree.flush()?;
+        Ok(())
+    }
+
+    pub(crate) fn get_recv_session(&self, pj_url: &Url) -> Result<Option<Receiver>> {
+        let recv_tree = self.0.open_tree("recv_sessions")?;
+
+        let result = recv_tree
+            .iter()
+            .filter_map(|entry| {
+                let (_, value) = entry.ok()?;
+                let receiver: Receiver = serde_json::from_slice(&value).ok()?;
+
+                if receiver.pj_uri().extras.endpoint() == pj_url {
+                    Some(receiver)
+                } else {
+                    None
+                }
+            })
+            .find(|_| true);
+
+        Ok(result)
+    }
+
+    pub(crate) fn clear_recv_session(&self, pj_url: &Url) -> Result<()> {
+        let recv_tree = self.0.open_tree("recv_sessions")?;
+
+        if let Some((key, _)) = recv_tree.iter().find_map(|entry| {
+            let (key, value) = entry.ok()?;
+            let receiver: Receiver = serde_json::from_slice(&value).ok()?;
+
+            if receiver.pj_uri().extras.endpoint() == pj_url {
+                Some((key, value))
+            } else {
+                None
+            }
+        }) {
+            recv_tree.remove(key)?;
+            recv_tree.flush()?;
+        }
+
         Ok(())
     }
 

@@ -63,6 +63,12 @@ Send and receiver state is saved to a database in the directory from which `payj
 payjoin-cli resume
 ```
 
+If too many sessions are going at once it can be overwhelming to keep track of the active sessions no longer wanted. Clear active sessions using the `clear` argument if some or all prior payjoin sessions are stale or no longer wanted.
+
+```console
+payjoin-cli clear <BIP21>
+```
+
 ## Manual End to End Regtest Testing
 
 ### Test Receive

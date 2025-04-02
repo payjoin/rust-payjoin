@@ -123,6 +123,11 @@ impl AppTrait for App {
     async fn resume_payjoins(&self) -> Result<()> {
         unimplemented!("resume_payjoins not implemented for v1");
     }
+
+    #[cfg(feature = "v2")]
+    async fn clear_payjoins(&self, _bip_21: Option<&str>) -> Result<()> {
+        unimplemented!("clear_payjoins not implemented for v1");
+    }
 }
 
 impl App {

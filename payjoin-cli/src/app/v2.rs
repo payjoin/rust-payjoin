@@ -124,6 +124,41 @@ impl AppTrait for App {
         }
         Ok(())
     }
+
+    async fn clear_payjoins(&self, bip_21: Option<&str>) -> Result<()> {
+        use payjoin::UriExt;
+        if let Some(bip_21) = bip_21 {
+            let uri = Uri::try_from(bip_21)
+                .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
+            let uri = uri.assume_checked();
+            let uri =
+                uri.check_pj_supported().map_err(|_| anyhow!("URI does not support Payjoin"))?;
+            let recv_session = self.db.get_recv_session(uri.extras.endpoint())?;
+            let send_session = self.db.get_send_session(uri.extras.endpoint())?;
+
+            if recv_session.is_some() || send_session.is_some() {
+                if recv_session.is_some() {
+                    println!("Removing receiver session with uri: {}", uri);
+                    self.db.clear_recv_session(uri.extras.endpoint())?;
+                }
+                if send_session.is_some() {
+                    println!("Removing sender session with uri: {}", uri);
+                    self.db.clear_send_session(uri.extras.endpoint())?;
+                }
+            } else {
+                println!("No matching session found with uri: {}", uri);
+            }
+        } else {
+            let send_sessions = self.db.get_send_sessions()?;
+            self.db.clear_recv_sessions()?;
+            for psbt in send_sessions {
+                self.db.clear_send_session(psbt.endpoint())?;
+            }
+            println!("All sessions removed.")
+        }
+
+        Ok(())
+    }
 }
 
 impl App {
@@ -187,7 +222,7 @@ impl App {
             "Response successful. Watch mempool for successful Payjoin. TXID: {}",
             payjoin_psbt.extract_tx_unchecked_fee_rate().clone().compute_txid()
         );
-        self.db.clear_recv_session()?;
+        self.db.clear_recv_sessions()?;
         Ok(())
     }
 

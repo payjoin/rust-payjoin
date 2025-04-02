@@ -78,6 +78,20 @@ async fn main() -> Result<()> {
             println!("resume");
             app.resume_payjoins().await?;
         }
+        #[cfg(feature = "v2")]
+        Some(("clear", sub_matches)) => {
+            let bip21 =
+                sub_matches.try_get_one::<String>("BIP21").context("Missing BIP21 argument")?;
+            if matches.get_flag("bip78") {
+                anyhow::bail!("Clear command is only available with BIP77 (v2)");
+            }
+            println!("clear");
+            if bip21.is_some() {
+                app.clear_payjoins(Some(bip21.unwrap())).await?;
+            } else {
+                app.clear_payjoins(None).await?;
+            }
+        }
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
 
@@ -159,11 +173,20 @@ fn cli() -> ArgMatches {
 
     let mut receive_cmd = Command::new("receive")
         .arg_required_else_help(true)
-        .arg(arg!(<AMOUNT> "The amount to receive in satoshis").value_parser(parse_amount_in_sat))
-        .arg_required_else_help(true);
+        .arg(arg!(<AMOUNT> "The amount to receive in satoshis").value_parser(parse_amount_in_sat));
 
     #[cfg(feature = "v2")]
-    let mut cmd = cmd.subcommand(Command::new("resume"));
+    {
+        cmd = cmd.subcommand(Command::new("resume"));
+    }
+
+    #[cfg(feature = "v2")]
+    {
+        cmd =
+            cmd.subcommand(Command::new("clear").arg_required_else_help(false).arg(
+                arg!([BIP21] "The `bitcoin:...` payjoin uri identifying the session to clear"),
+            ));
+    }
 
     // Conditional arguments based on features for the receive subcommand
     receive_cmd = receive_cmd.arg(

@@ -1,5 +1,18 @@
 # payjoin-cli Changelog
 
+## 0.1.0
+
+- Bump payjoin to 0.23.0 with stable wire protocol
+- Allow mixed input scripts [#367](https://github.com/payjoin/rust-payjoin/pull/367) [#505](https://github.com/payjoin/rust-payjoin/pull/505)
+- Fix bug to propagate missing config parameter or argument error [#441](https://github.com/payjoin/rust-payjoin/pull/441)
+- Don't pause between long polling requests [#463](https://github.com/payjoin/rust-payjoin/pull/463)
+- Hide danger-local-https feature with _ prefix [#423](https://github.com/payjoin/rust-payjoin/pull/423)
+- Allow specifying a max-feerate for receivers [#332](https://github.com/payjoin/rust-payjoin/pull/332)
+- Fix e2e tests and coverage reporting [#443](https://github.com/payjoin/rust-payjoin/pull/443) [#497](https://github.com/payjoin/rust-payjoin/pull/497) [#532](https://github.com/payjoin/rust-payjoin/pull/532)
+- Handle recoverable receiver errors by replying to sender with error response [#474](https://github.com/payjoin/rust-payjoin/pull/474) [#526](https://github.com/payjoin/rust-payjoin/pull/526) [#534](https://github.com/payjoin/rust-payjoin/pull/534)
+- Make config.toml hierarchical [#538](https://github.com/payjoin/rust-payjoin/pull/538)
+- Make v1/v2 features additive [#538](https://github.com/payjoin/rust-payjoin/pull/538)
+
 ## 0.0.9-alpha
 
 - Make backwards-compatible v2 to v1 sends possible

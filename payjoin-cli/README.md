@@ -39,7 +39,7 @@ Great! Our wallets are setup, now let's do an async payjoin.
 ### Install `payjoin-cli`
 
 ```sh
-cargo install payjoin-cli --version $VERSION --features v2
+cargo install payjoin-cli --version $VERSION
 ```
 
 where `$VERSION` is the [latest version](https://crates.io/crates/payjoin-cli).

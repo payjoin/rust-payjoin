@@ -1,111 +1,146 @@
 # `payjoin-cli`
 
-## A command-line payjoin client for bitcoind in Rust
+## A command-line payjoin client for [Bitcoin Core](https://github.com/bitcoin/bitcoin?tab=readme-ov-file) in Rust.
 
-The `payjoin-cli` client enables sending and receiving of [BIP 78 Payjoin V1](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) and [Draft BIP Payjoin V2](https://github.com/bitcoin/bips/pull/1483) transactions. By default it supports Payjoin V1, and the `v2` feature sends and receives both since the protocol is backwards compatible. The implementation is built on [Payjoin Dev Kit](https://payjoindevkit.org).
+`payjoin-cli` is the reference implementation for the payjoin protocol, written using the [Payjoin Dev Kit](https://payjoindevkit.org).
 
-While this code and design has had significant testing, it is still alpha-quality experimental software. Use at your own risk.
+It enables sending and receiving [BIP 78 Payjoin
+(v1)](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) and [Draft
+BIP 77 Async Payjoin (v2)](https://github.com/bitcoin/bips/pull/1483)
+transactions via `bitcoind`. By default it supports Payjoin v2, which is
+backwards compatible with v1. Enable the `v1` feature to disable Payjoin v2 to
+send and receive using only v1.
+
+While this code and design have had significant testing, it is still alpha-quality experimental software. Use at your own risk.
+
 Independent audit is welcome.
 
-## Install `payjoin-cli`
+## Quick Start
 
-```console
+Here's a minimal payjoin example using `payjoin-cli` with the `v2` feature connected to `bitcoind` on [regtest](https://developer.bitcoin.org/examples/testing.html#regtest-mode). This example uses [`nigiri`](https://github.com/vulpemventures/nigiri) to setup a regtest environment. 
+
+Payjoin `v2` allows for transactions to be completed asynchronously. Thus the sender and receiver do not need to be online at the same time to payjoin. Learn more about how `v2` works [here](https://payjoin.org/docs/how-it-works/payjoin-v2-bip-77).
+
+To get started, install `nigiri`. Payjoin requires the sender and receiver each to have spendable [UTXOs](https://www.unchained.com/blog/what-is-a-utxo-bitcoin), so we'll create two wallets and fund each.
+
+```sh
+cargo install nigiri
+
+nigiri rpc createwallet "sender"
+nigiri rpc createwallet "receiver"
+
+# We need 101 blocks for the UTXOs to be spendable due to the coinbase maturity requirement.
+nigiri rpc generatetoaddress $(nigiri rpc getnewaddress "sender") 101
+nigiri rpc generatetoaddress $(nigiri rpc getnewaddress "receiver") 101
+```
+
+Great! Our wallets are setup, now let's do an async payjoin.
+
+### Install `payjoin-cli`
+
+```sh
 cargo install payjoin-cli --version $VERSION
 ```
 
-where `$VERSION` is the [latest version](https://crates.io/crates/payjoin-cli) of the `payjoin-cli` you wish to install.
+where `$VERSION` is the [latest version](https://crates.io/crates/payjoin-cli).
 
-Get a list of commands and options:
+Next, create a directory for the sender & receiver and create a `config.toml` file for each:
 
-```console
-payjoin-cli --help
+```sh
+mkdir sender receiver
+touch sender/config.toml receiver/config.toml
 ```
 
-Either pass config options from cli, or manually edit a `config.toml` file within directory you run `payjoin-cli` from.
-Configure it like so:
+Edit the `config.toml` files. Note that the `v2` feature requires a payjoin directory server and OHTTP relay.
 
 ```toml
-# config.toml
-bitcoind_cookie = "/tmp/regtest1/bitcoind/regtest/.cookie"
-# specify your wallet via rpchost connection string
-bitcoind_rpchost = "http://localhost:18443/wallet/boom"
- ```
+# sender/config.toml
 
-Your configuration details will vary, but you may use this as a template.
+# Nigiri uses the following RPC credentials
+[bitcoind]
+rpcuser = "admin1"
+rpcpassword = "123"
+rpchost = "http://localhost:18443/wallet/sender"
 
-## Test Payjoin 2
-
-### Install `payjoin-cli` with the V2 feature
-
-```console
-cargo install payjoin-cli --version $VERSION --features v2
+# For v2, our config also requires a payjoin directory server and OHTTP relay
+[v2]
+pj_directory = "https://payjo.in"
+ohttp_relay = "https://pj.bobspacebkk.com"
 ```
-
-### V2 Configuration
-
-In addition to the rpc configuration above, specify relevant ohttp and payjoin directory configuration as follows:
 
 ```toml
-# config.toml
-...
-# a production payjoin directory server
-pj_directory="https://payjo.in"
-# payjo.in's ohttp_keys can now be fetched rather than configured ahead of time
- # an ohttp relay with ingress to payjo.in
-ohttp_relay="https://pj.bobspacebkk.com"
+# receiver/config.toml
+
+# Nigiri uses the following RPC credentials
+[bitcoind]
+rpcuser = "admin1"
+rpcpassword = "123"
+rpchost = "http://localhost:18443/wallet/receiver"
+
+# For v2, our config also requires a payjoin directory server and OHTTP relay
+[v2]
+pj_directory = "https://payjo.in"
+ohttp_relay = "https://pj.bobspacebkk.com"
 ```
+
+Now, the receiver must generate an address to receive the payment. The format is:
+
+```sh
+payjoin-cli receive <AMOUNT_SATS>
+```
+
+For example, to receive 10000 sats from our top-level directory:
+
+```sh
+receiver/payjoin-cli receive 10000
+```
+
+This will output a [bitcoin URI](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki) containing the receiver's address, amount, payjoin directory, and other session information the client needs. For example:
+
+```sh
+bitcoin:tb1qfttmt4z68cfyn2z25t3dusp03rq6gxrucfxs5a?amount=0.0001&pj=HTTPS://PAYJO.IN/EUQKYLU92GC6U%23RK1QFWVXS2LQ2VD4T6DUMQ0F4RZQ5NL9GM0EFWVHJZ9L796L20Z7SL3J+OH1QYP87E2AVMDKXDTU6R25WCPQ5ZUF02XHNPA65JMD8ZA2W4YRQN6UUWG+EX10T57UE```
+
+Note that the session can be paused by pressing `Ctrl+C`. The receiver can come back online and resume the session by running `payjoin-cli resume` again, and the sender may do a `send` against it while the receiver is offline.
+
+### Send a Payjoin
+
+Now, let's send the payjoin. Here is an example format:
+
+```sh
+payjoin-cli send <BIP21> --fee-rate <FEE_SAT_PER_VB>
+```
+
+Where `<BIP21>` is the BIP21 URL containing the receiver's address, amount, payjoin directory, and OHTTP relay. Using the example from above:
+
+```sh
+sender/payjoin-cli send "bitcoin:tb1qfttmt4z68cfyn2z25t3dusp03rq6gxrucfxs5a?amount=0.0001&pj=HTTPS://PAYJO.IN/EUQKYLU92GC6U%23RK1QFWVXS2LQ2VD4T6DUMQ0F4RZQ5NL9GM0EFWVHJZ9L796L20Z7SL3J+OH1QYP87E2AVMDKXDTU6R25WCPQ5ZUF02XHNPA65JMD8ZA2W4YRQN6UUWG+EX10T57UE" --fee-rate 1
+```
+
+Congratulations! You've completed a version 2 payjoin, which can be used for cheaper, more efficient, and more private on-chain payments. Additionally, because we're using `v2`, the sender and receiver don't need to be online at the same time to do the payjoin.
+
+## Configuration
+
+Config options can be passed from the command line, or manually edited in a `config.toml` file within the directory you run `payjoin-cli` from.
+
+see the
+[example.config.toml](https://github.com/payjoin/rust-payjoin/blob/fde867b93ede767c9a50913432a73782a94ef40b/payjoin-cli/example.config.toml)
+for inspiration.
+
 
 ### Asynchronous Operation
 
-Send and receiver state is saved to a database in the directory from which `payjoin-cli` is run. Once a send or receive session is started, it may resume using the `resume` argument if prior payjoin sessions have not yet complete.
+Sender and receiver state is saved to a database in the directory from which `payjoin-cli` is run, called `payjoin.sled`. Once a send or receive session is started, it may resume using the `resume` argument if prior payjoin sessions have not yet complete.
 
-```console
-payjoin-cli resume
+## Usage
+
+Get a list of commands and options:
+
+```sh
+payjoin-cli --help
 ```
 
-## Manual End to End Regtest Testing
+or with a subcommand e.g.
 
-### Test Receive
-
-Set up 2 local regtest wallets and fund them. This example uses "boom" and "ocean"
-
-Determine the RPC port specified in your bitcoind's `bitcoin.conf`
-file. 18443 is the default. This can be set like so:
-
-```conf
-rpcport = 18443
+```sh
+payjoin-cli send --help
 ```
-
-From the directory you'll run `payjoin-cli`, assuming "boom" is the name of the receiving wallet, 18443 is the rpc port, and you wish to request 10,000 sats run:
-
-```console
-RUST_LOG=debug cargo run --features=_danger-local-https -- -r "http://localhost:18443/wallet/boom" receive 10000
-```
-
-The default configuration listens for payjoin requests at `http://localhost:3000` and expects you to relay https requests there.
-Payjoin requires a secure endpoint, either https and .onion are valid. In order to receive payjoin in a local testing environment one may enable the  `_danger-local-https` feature which will provision a self-signed certificate and host the `https://localhost:3000` endpoint. Emphasis on HTTP**S**.
-
-This will generate a payjoin capable bip21 URI with which to accept payjoin:
-
-```console
-BITCOIN:BCRT1QCJ4X75DUNY4X5NAWLM3CR8MALM9YAUYWWEWKWL?amount=0.00010&pj=https://localhost:3000
-```
-
-### Test Send
-
-Create a "sender" directory within `payjoin-cli`. Open a new terminal window and navigate to this directory.
-
-Note: A wallet cannot payjoin with itself, one needs separate wallets.
-
-Create another `config.toml` file in the directory the sender will run from  and configure it as you did previously, except replace the receiver wallet name with the sender
-
-Using the previously generated bip21 URI, run the following command
-from the sender directory:
-
-```console
- RUST_LOG=debug cargo run --features=_danger-local-https -- send <BIP21> --fee-rate <FEE_SAT_PER_VB>
-```
-
-You should see the payjoin transaction occur and be able to verify the Partially Signed Bitcoin Transaction (PSBT), inputs, and Unspent Transaction Outputs (UTXOs).
-
-Congrats, you've payjoined!

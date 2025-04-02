@@ -95,7 +95,7 @@ For example, to receive 10000 sats from our top-level directory:
 receiver/payjoin-cli receive 10000
 ```
 
-This will output a [BIP21](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki) URL containing the receiver's address, amount, payjoin directory, and OHTTP relay. For example:
+This will output a [bitcoin URI](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki) containing the receiver's address, amount, payjoin directory, and other session information the client needs. For example:
 
 ```sh
 bitcoin:tb1qfttmt4z68cfyn2z25t3dusp03rq6gxrucfxs5a?amount=0.0001&pj=HTTPS://PAYJO.IN/EUQKYLU92GC6U%23RK1QFWVXS2LQ2VD4T6DUMQ0F4RZQ5NL9GM0EFWVHJZ9L796L20Z7SL3J+OH1QYP87E2AVMDKXDTU6R25WCPQ5ZUF02XHNPA65JMD8ZA2W4YRQN6UUWG+EX10T57UE```

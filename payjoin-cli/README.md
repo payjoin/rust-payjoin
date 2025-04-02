@@ -4,7 +4,7 @@
 
 `payjoin-cli` is the reference implementation for the payjoin protocol, written using the [Payjoin Dev Kit](https://payjoindevkit.org).
 
-It enables sending and receiving [BIP 78 Payjoin V1](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) and [Draft BIP Payjoin V2](https://github.com/bitcoin/bips/pull/1483) (also known as Async Payjoin) transactions via `bitcoind`. By default it supports Payjoin V1, and the `v2` feature sends and receives both since the protocol is backwards compatible.
+It enables sending and receiving [BIP 78 Payjoin (v1)](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) and [Draft BIP 77 Async Payjoin (v2)](https://github.com/bitcoin/bips/pull/1483) transactions via `bitcoind`. By default it supports Payjoin v2, which is backwards compatible with v1. Enable the `v1` feature to disable Payjoin v2 and sends and receives only v1 transactions.
 
 While this code and design have had significant testing, it is still alpha-quality experimental software. Use at your own risk.
 

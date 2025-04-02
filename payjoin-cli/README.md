@@ -133,6 +133,10 @@ pj_directory = "https://payjo.in"              # Payjoin directory server
 ohttp_relay = "https://pj.bobspacebkk.com"     # OHTTP relay service
 ```
 
+### Asynchronous Operation
+
+Sender and receiver state is saved to a database in the directory from which `payjoin-cli` is run, called `payjoin.sled`. Once a send or receive session is started, it may resume using the `resume` argument if prior payjoin sessions have not yet complete.
+
 ## Usage
 
 Get a list of commands and options:
@@ -181,33 +185,3 @@ Your configuration details will vary, but you may use this as a template.
 | `-p, --port <port>` | The local port to listen on |
 | `-e, --pj-endpoint <pj_endpoint>` | The `pj=` endpoint to receive the payjoin request |
 | `-h, --help` | Print help information |
-
-## Test Payjoin 2
-
-### Install `payjoin-cli` with the V2 feature
-
-
-### Asynchronous Operation
-
-Send and receiver state is saved to a database in the directory from which `payjoin-cli` is run. Once a send or receive session is started, it may resume using the `resume` argument if prior payjoin sessions have not yet complete.
-
-
-
-### Test Send
-
-Create a "sender" directory within `payjoin-cli`. Open a new terminal window and navigate to this directory.
-
-Note: A wallet cannot payjoin with itself, one needs separate wallets.
-
-Create another `config.toml` file in the directory the sender will run from  and configure it as you did previously, except replace the receiver wallet name with the sender
-
-Using the previously generated bip21 URI, run the following command
-from the sender directory:
-
-```sh
- RUST_LOG=debug cargo run --features=_danger-local-https -- send <BIP21> --fee-rate <FEE_SAT_PER_VB>
-```
-
-You should see the payjoin transaction occur and be able to verify the Partially Signed Bitcoin Transaction (PSBT), inputs, and Unspent Transaction Outputs (UTXOs).
-
-Congrats, you've payjoined!

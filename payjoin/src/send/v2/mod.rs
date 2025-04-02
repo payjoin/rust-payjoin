@@ -254,8 +254,6 @@ pub(crate) fn extract_request(
     receiver_pubkey: HpkePublicKey,
     ohttp_keys: &mut OhttpKeys,
 ) -> Result<(Request, ClientResponse), CreateRequestError> {
-    use crate::hpke::encrypt_message_a;
-    use crate::ohttp::ohttp_encapsulate;
     let hpke_ctx = HpkeContext::new(receiver_pubkey, &reply_key);
     let body = encrypt_message_a(
         body,

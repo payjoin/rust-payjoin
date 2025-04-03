@@ -44,14 +44,14 @@ cargo install payjoin-cli --version $VERSION
 
 where `$VERSION` is the [latest version](https://crates.io/crates/payjoin-cli).
 
-Next, create a directory for the sender & receiver and create a `config.toml` file for each:
+Next, create a directory for the sender & receiver and create a file called `config.toml` for each. This file provides the information required for `payjoin-cli` to connect to your node and, for `v2`, to know which Payjoin Directory and OHTTP Relay to use.
 
 ```sh
 mkdir sender receiver
 touch sender/config.toml receiver/config.toml
 ```
 
-Edit the `config.toml` files. Note that the `v2` feature requires a payjoin directory server and OHTTP relay.
+Edit the `config.toml` files.
 
 ```toml
 # sender/config.toml
@@ -98,7 +98,8 @@ receiver/payjoin-cli receive 10000
 This will output a [bitcoin URI](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki) containing the receiver's address, amount, payjoin directory, and other session information the client needs. For example:
 
 ```sh
-bitcoin:tb1qfttmt4z68cfyn2z25t3dusp03rq6gxrucfxs5a?amount=0.0001&pj=HTTPS://PAYJO.IN/EUQKYLU92GC6U%23RK1QFWVXS2LQ2VD4T6DUMQ0F4RZQ5NL9GM0EFWVHJZ9L796L20Z7SL3J+OH1QYP87E2AVMDKXDTU6R25WCPQ5ZUF02XHNPA65JMD8ZA2W4YRQN6UUWG+EX10T57UE```
+bitcoin:tb1qfttmt4z68cfyn2z25t3dusp03rq6gxrucfxs5a?amount=0.0001&pj=HTTPS://PAYJO.IN/EUQKYLU92GC6U%23RK1QFWVXS2LQ2VD4T6DUMQ0F4RZQ5NL9GM0EFWVHJZ9L796L20Z7SL3J+OH1QYP87E2AVMDKXDTU6R25WCPQ5ZUF02XHNPA65JMD8ZA2W4YRQN6UUWG+EX10T57UE
+```
 
 Note that the session can be paused by pressing `Ctrl+C`. The receiver can come back online and resume the session by running `payjoin-cli resume` again, and the sender may do a `send` against it while the receiver is offline.
 
@@ -122,7 +123,7 @@ Congratulations! You've completed a version 2 payjoin, which can be used for che
 
 Config options can be passed from the command line, or manually edited in a `config.toml` file within the directory you run `payjoin-cli` from.
 
-see the
+See the
 [example.config.toml](https://github.com/payjoin/rust-payjoin/blob/fde867b93ede767c9a50913432a73782a94ef40b/payjoin-cli/example.config.toml)
 for inspiration.
 

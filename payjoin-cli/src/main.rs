@@ -163,7 +163,10 @@ fn cli() -> ArgMatches {
         .arg_required_else_help(true);
 
     #[cfg(feature = "v2")]
-    let mut cmd = cmd.subcommand(Command::new("resume"));
+    let mut cmd = cmd.subcommand(
+        Command::new("resume")
+            .arg(Arg::new("db_path").short('d').long("db-path").help("Sets the database path")),
+    );
 
     // Conditional arguments based on features for the receive subcommand
     receive_cmd = receive_cmd.arg(

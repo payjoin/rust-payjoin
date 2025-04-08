@@ -43,7 +43,6 @@ services:
 
 networks:
   payjoin-network:
-    driver: bridge
 
 volumes:
   redis-data:

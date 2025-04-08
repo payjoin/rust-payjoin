@@ -33,7 +33,7 @@ use url::Url;
 use super::error::BuildSenderError;
 use super::*;
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
-use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
+use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
 use crate::persist::{Persister, Value};
 use crate::send::v1;
 use crate::uri::{ShortId, UrlExt};
@@ -318,22 +318,13 @@ impl V2PostContext {
     /// After this function is called, the sender can poll for a Proposal PSBT
     /// from the receiver using the returned [`V2GetContext`].
     pub fn process_response(self, response: &[u8]) -> Result<V2GetContext, EncapsulationError> {
-        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] = response
-            .try_into()
-            .map_err(|_| InternalEncapsulationError::InvalidSize(response.len()))?;
-        let response = ohttp_decapsulate(self.ohttp_ctx, response_array)
-            .map_err(InternalEncapsulationError::Ohttp)?;
-        match response.status() {
-            http::StatusCode::OK => {
-                // return OK with new Typestate
-                Ok(V2GetContext {
-                    endpoint: self.endpoint,
-                    psbt_ctx: self.psbt_ctx,
-                    hpke_ctx: self.hpke_ctx,
-                })
-            }
-            _ => Err(InternalEncapsulationError::UnexpectedStatusCode(response.status()))?,
-        }
+        process_post_res(response, self.ohttp_ctx)?;
+        // return OK with new Typestate
+        Ok(V2GetContext {
+            endpoint: self.endpoint,
+            psbt_ctx: self.psbt_ctx,
+            hpke_ctx: self.hpke_ctx,
+        })
     }
 }
 
@@ -393,16 +384,9 @@ impl V2GetContext {
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
     ) -> Result<Option<Psbt>, ResponseError> {
-        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] = response
-            .try_into()
-            .map_err(|_| InternalEncapsulationError::InvalidSize(response.len()))?;
-
-        let response = ohttp_decapsulate(ohttp_ctx, response_array)
-            .map_err(InternalEncapsulationError::Ohttp)?;
-        let body = match response.status() {
-            http::StatusCode::OK => response.body().to_vec(),
-            http::StatusCode::ACCEPTED => return Ok(None),
-            _ => return Err(InternalEncapsulationError::UnexpectedStatusCode(response.status()))?,
+        let body = match process_get_res(response, ohttp_ctx)? {
+            Some(body) => body,
+            None => return Ok(None),
         };
         let psbt = decrypt_message_b(
             &body,

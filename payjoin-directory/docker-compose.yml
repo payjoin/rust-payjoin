@@ -29,8 +29,6 @@ services:
       RUST_LOG: "trace"
       PJ_DB_HOST: "redis:6379"
       PJ_DIR_PORT: "8080"
-    ports:
-      - "8080:8080"
     depends_on:
       - redis
     networks:
@@ -38,8 +36,6 @@ services:
 
   redis:
     image: redis:latest
-    ports:
-      - "6379:6379"
     volumes:
       - redis-data:/data
     networks:
@@ -47,7 +43,6 @@ services:
 
 networks:
   payjoin-network:
-    driver: bridge
 
 volumes:
   redis-data:

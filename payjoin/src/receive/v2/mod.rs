@@ -25,7 +25,7 @@ use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
 use crate::{IntoUrl, IntoUrlError, Request};
 
-pub(crate) mod error;
+mod error;
 
 const SUPPORTED_VERSIONS: &[usize] = &[1, 2];
 

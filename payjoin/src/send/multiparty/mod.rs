@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use bitcoin::{FeeRate, Psbt};
 use error::{
     CreateRequestError, FinalizeResponseError, FinalizedError, InternalCreateRequestError,
@@ -13,12 +11,12 @@ use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, Internal
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::{self, Persister};
 use crate::send::v2::{ImplementationError, V2PostContext};
 use crate::uri::UrlExt;
 use crate::{PjUri, Request};
 
 mod error;
+mod persist;
 
 #[derive(Clone)]
 pub struct SenderBuilder<'a>(v2::SenderBuilder<'a>);
@@ -34,49 +32,10 @@ impl<'a> SenderBuilder<'a> {
 
 pub struct NewSender(v2::NewSender);
 
-impl NewSender {
-    pub fn persist<P: Persister<Sender>>(
-        &self,
-        persister: &mut P,
-    ) -> Result<P::Token, ImplementationError> {
-        let sender =
-            Sender(v2::Sender { v1: self.0.v1.clone(), reply_key: self.0.reply_key.clone() });
-        persister.save(sender).map_err(ImplementationError::from)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SenderToken(Url);
-
-impl Display for SenderToken {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.0) }
-}
-
-impl From<Sender> for SenderToken {
-    fn from(sender: Sender) -> Self { SenderToken(sender.0.endpoint().clone()) }
-}
-
-impl AsRef<[u8]> for SenderToken {
-    fn as_ref(&self) -> &[u8] { self.0.as_str().as_bytes() }
-}
-
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sender(v2::Sender);
 
-impl persist::Value for Sender {
-    type Key = SenderToken;
-
-    fn key(&self) -> Self::Key { SenderToken(self.0.endpoint().clone()) }
-}
-
 impl Sender {
-    pub fn load<P: Persister<Sender>>(
-        token: P::Token,
-        persister: &P,
-    ) -> Result<Self, ImplementationError> {
-        let sender = persister.load(token).map_err(ImplementationError::from)?;
-        Ok(sender)
-    }
     pub fn extract_v2(
         &self,
         ohttp_relay: Url,

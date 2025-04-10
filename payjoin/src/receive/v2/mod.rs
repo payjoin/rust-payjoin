@@ -1,5 +1,4 @@
 //! Receive BIP 77 Payjoin v2
-use std::fmt::{self, Display};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
@@ -8,6 +7,7 @@ use bitcoin::psbt::Psbt;
 use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
 pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
+pub use persist::ReceiverToken;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -20,12 +20,12 @@ use super::{
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::{self, Persister};
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
 use crate::{IntoUrl, IntoUrlError, Request};
 
 pub(crate) mod error;
+mod persist;
 
 const SUPPORTED_VERSIONS: &[usize] = &[1, 2];
 
@@ -111,15 +111,6 @@ impl NewReceiver {
         };
         Ok(receiver)
     }
-
-    /// Saves the new [`Receiver`] using the provided persister and returns the storage token.
-    pub fn persist<P: Persister<Receiver>>(
-        &self,
-        persister: &mut P,
-    ) -> Result<P::Token, ImplementationError> {
-        let receiver = Receiver { context: self.context.clone() };
-        Ok(persister.save(receiver)?)
-    }
 }
 
 /// A payjoin V2 receiver, allowing for polled requests to the
@@ -129,36 +120,7 @@ pub struct Receiver {
     context: SessionContext,
 }
 
-/// Opaque key type for the receiver
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReceiverToken(ShortId);
-
-impl Display for ReceiverToken {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.0) }
-}
-
-impl From<Receiver> for ReceiverToken {
-    fn from(receiver: Receiver) -> Self { ReceiverToken(id(&receiver.context.s)) }
-}
-
-impl AsRef<[u8]> for ReceiverToken {
-    fn as_ref(&self) -> &[u8] { self.0.as_bytes() }
-}
-
-impl persist::Value for Receiver {
-    type Key = ReceiverToken;
-
-    fn key(&self) -> Self::Key { ReceiverToken(id(&self.context.s)) }
-}
-
 impl Receiver {
-    /// Loads a [`Receiver`] from the provided persister using the storage token.
-    pub fn load<P: Persister<Receiver>>(
-        token: P::Token,
-        persister: &P,
-    ) -> Result<Self, ImplementationError> {
-        persister.load(token).map_err(ImplementationError::from)
-    }
     /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
     pub fn extract_req(
         &mut self,

@@ -1,10 +1,6 @@
-use std::fmt::{self, Display};
-
-use url::Url;
-
 use crate::persist::{self, Persister};
 use crate::send::multiparty::{ImplementationError, NewSender, Sender};
-use crate::send::v2;
+use crate::send::v2::{self, SenderToken};
 
 impl NewSender {
     pub fn persist<P: Persister<Sender>>(
@@ -17,21 +13,6 @@ impl NewSender {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SenderToken(Url);
-
-impl Display for SenderToken {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.0) }
-}
-
-impl From<Sender> for SenderToken {
-    fn from(sender: Sender) -> Self { SenderToken(sender.0.endpoint().clone()) }
-}
-
-impl AsRef<[u8]> for SenderToken {
-    fn as_ref(&self) -> &[u8] { self.0.as_str().as_bytes() }
-}
-
 impl persist::Value for Sender {
     type Key = SenderToken;
 
@@ -42,7 +23,7 @@ impl Sender {
     pub fn load<P: Persister<Sender>>(
         token: P::Token,
         persister: &P,
-) -> Result<Self, ImplementationError> {
+    ) -> Result<Self, ImplementationError> {
         let sender = persister.load(token).map_err(ImplementationError::from)?;
         Ok(sender)
     }

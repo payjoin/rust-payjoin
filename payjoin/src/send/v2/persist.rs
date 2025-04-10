@@ -7,7 +7,7 @@ use crate::persist::Value;
 
 /// Opaque key type for the sender
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SenderToken(Url);
+pub struct SenderToken(pub(crate) Url);
 
 impl Display for SenderToken {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.0) }

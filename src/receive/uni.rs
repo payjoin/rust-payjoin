@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use super::InputPair;
-use crate::bitcoin_ffi::{Network, OutPoint, Script, TxOut};
+use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 pub use crate::receive::{
-    Error, ImplementationError, InputContributionError, OutputSubstitutionError, ReplyableError,
-    SelectionError, SerdeJsonError,
+    Error, ImplementationError, InputContributionError, JsonReply, OutputSubstitutionError,
+    ReplyableError, SelectionError, SerdeJsonError, SessionError,
 };
+use crate::uri::error::IntoUrlError;
 use crate::{ClientResponse, OhttpKeys, Request};
 
 #[derive(Clone, Debug, uniffi::Object)]
@@ -29,7 +30,6 @@ impl Receiver {
     ///
     /// # Parameters
     /// - `address`: The Bitcoin address for the payjoin session.
-    /// - `network`: The network to use for address verification.
     /// - `directory`: The URL of the store-and-forward payjoin directory.
     /// - `ohttp_keys`: The OHTTP keys used for encrypting and decrypting HTTP requests and responses.
     /// - `ohttp_relay`: The URL of the OHTTP relay, used to keep client IP address confidential.
@@ -42,13 +42,12 @@ impl Receiver {
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
     #[uniffi::constructor]
     pub fn new(
-        address: String,
-        network: Network,
+        address: Arc<Address>,
         directory: String,
         ohttp_keys: Arc<OhttpKeys>,
         expire_after: Option<u64>,
-    ) -> Result<Self, Error> {
-        super::Receiver::new(address, network, directory, (*ohttp_keys).clone(), expire_after)
+    ) -> Result<Self, IntoUrlError> {
+        super::Receiver::new((*address).clone(), directory, (*ohttp_keys).clone(), expire_after)
             .map(Into::into)
     }
 
@@ -149,6 +148,28 @@ impl UncheckedProposal {
     /// Those receivers call `extract_tx_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
     pub fn assume_interactive_receiver(&self) -> Arc<MaybeInputsOwned> {
         Arc::new(self.0.assume_interactive_receiver().into())
+    }
+
+    /// Extract an OHTTP Encapsulated HTTP POST request to return
+    /// a Receiver Error Response
+    pub fn extract_err_req(
+        &self,
+        err: Arc<JsonReply>,
+        ohttp_relay: String,
+    ) -> Result<RequestResponse, SessionError> {
+        self.0
+            .extract_err_req(&err, ohttp_relay)
+            .map(|(req, ctx)| RequestResponse { request: req, client_response: Arc::new(ctx) })
+    }
+
+    /// Process an OHTTP Encapsulated HTTP POST Error response
+    /// to ensure it has been posted properly
+    pub fn process_err_res(
+        &self,
+        body: &[u8],
+        context: Arc<ClientResponse>,
+    ) -> Result<(), SessionError> {
+        self.0.clone().process_err_res(body, &context)
     }
 }
 

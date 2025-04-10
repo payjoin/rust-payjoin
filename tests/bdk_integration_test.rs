@@ -222,7 +222,7 @@ mod v2 {
     use std::sync::Arc;
 
     use bdk::wallet::AddressIndex;
-    use bitcoin_ffi::Network;
+    use bitcoin_ffi::{Address, Network};
     use payjoin_ffi::receive::{PayjoinProposal, Receiver, UncheckedProposal};
     use payjoin_ffi::send::SenderBuilder;
     use payjoin_ffi::uri::Uri;
@@ -254,8 +254,7 @@ mod v2 {
 
             let address = receiver.get_address(AddressIndex::New);
             let session = Receiver::new(
-                address.to_string(),
-                Network::Regtest,
+                Address::new(address.to_string(), Network::Regtest).unwrap(),
                 directory.to_string(),
                 OhttpKeys(ohttp_keys),
                 None,

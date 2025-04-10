@@ -8,6 +8,8 @@ pub struct MultipartyError(InternalMultipartyError);
 pub(crate) enum InternalMultipartyError {
     /// Not enough proposals
     NotEnoughProposals,
+    /// Identical participants
+    IdenticalProposals,
     /// Proposal version not supported
     ProposalVersionNotSupported(usize),
     /// Optimistic merge not supported
@@ -28,6 +30,8 @@ impl fmt::Display for MultipartyError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
             InternalMultipartyError::NotEnoughProposals => write!(f, "Not enough proposals"),
+            InternalMultipartyError::IdenticalProposals =>
+                write!(f, "More than one identical participant"),
             InternalMultipartyError::ProposalVersionNotSupported(v) =>
                 write!(f, "Proposal version not supported: {}", v),
             InternalMultipartyError::OptimisticMergeNotSupported =>
@@ -46,6 +50,7 @@ impl error::Error for MultipartyError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self.0 {
             InternalMultipartyError::NotEnoughProposals => None,
+            InternalMultipartyError::IdenticalProposals => None,
             InternalMultipartyError::ProposalVersionNotSupported(_) => None,
             InternalMultipartyError::OptimisticMergeNotSupported => None,
             InternalMultipartyError::BitcoinExtractTxError(e) => Some(e),

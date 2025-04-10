@@ -36,6 +36,10 @@ impl UncheckedProposalBuilder {
         if !params.optimistic_merge {
             return Err(InternalMultipartyError::OptimisticMergeNotSupported.into());
         }
+
+        if self.proposals.clone().into_iter().any(|c| c.context == proposal.context) {
+            return Err(InternalMultipartyError::IdenticalProposals.into());
+        };
         Ok(())
     }
 
@@ -256,7 +260,10 @@ mod test {
 
     use payjoin_test_utils::{BoxError, PARSED_ORIGINAL_PSBT};
 
-    use super::{v1, v2, FinalizedProposal, UncheckedProposalBuilder, SUPPORTED_VERSIONS};
+    use super::{
+        v1, v2, FinalizedProposal, InternalMultipartyError, MultipartyError,
+        UncheckedProposalBuilder, SUPPORTED_VERSIONS,
+    };
     use crate::receive::optional_parameters::Params;
     use crate::receive::v2::test::SHARED_CONTEXT;
 
@@ -268,7 +275,25 @@ mod test {
     }
 
     #[test]
-    fn test_build_multiparty() -> Result<(), BoxError> {
+    fn test_single_context_multiparty() -> Result<(), BoxError> {
+        let proposal_one = v2::UncheckedProposal {
+            v1: multiparty_proposal_from_test_vector(),
+            context: SHARED_CONTEXT.clone(),
+        };
+        let mut multiparty = UncheckedProposalBuilder::new();
+        multiparty.add(proposal_one)?;
+        match multiparty.build() {
+            Ok(_) => panic!("multiparty has two identical participants and should error"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                MultipartyError::from(InternalMultipartyError::NotEnoughProposals).to_string()
+            ),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_duplicate_context_multiparty() -> Result<(), BoxError> {
         let proposal_one = v2::UncheckedProposal {
             v1: multiparty_proposal_from_test_vector(),
             context: SHARED_CONTEXT.clone(),
@@ -277,11 +302,14 @@ mod test {
             v1: multiparty_proposal_from_test_vector(),
             context: SHARED_CONTEXT.clone(),
         };
-        let mut multiparty = UncheckedProposalBuilder::new();
-        multiparty.add(proposal_one)?;
-        multiparty.add(proposal_two)?;
-        let unchecked_proposal = multiparty.build();
-        assert!(unchecked_proposal?.contexts.len() == 2);
+        let mut multiparty = UncheckedProposalBuilder::new().add(proposal_one)?;
+        match multiparty.add(proposal_two) {
+            Ok(_) => panic!("multiparty has two identical participants and should error"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                MultipartyError::from(InternalMultipartyError::IdenticalProposals).to_string()
+            ),
+        }
         Ok(())
     }
 

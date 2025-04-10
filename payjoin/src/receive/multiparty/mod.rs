@@ -1,4 +1,5 @@
 use bitcoin::{FeeRate, Psbt};
+use error::IdenticalProposalError;
 
 use super::error::InputContributionError;
 use super::{v1, v2, Error, ImplementationError, InputPair};
@@ -35,6 +36,30 @@ impl UncheckedProposalBuilder {
 
         if !params.optimistic_merge {
             return Err(InternalMultipartyError::OptimisticMergeNotSupported.into());
+        }
+
+        if let Some(duplicate_context) =
+            self.proposals.iter().find(|c| c.context == proposal.context)
+        {
+            return Err(InternalMultipartyError::IdenticalProposals(
+                IdenticalProposalError::IdenticalContexts(
+                    Box::new(duplicate_context.id()),
+                    Box::new(proposal.id()),
+                ),
+            )
+            .into());
+        };
+
+        if let Some(duplicate_psbt) =
+            self.proposals.iter().find(|psbt| psbt.v1.psbt == proposal.v1.psbt)
+        {
+            return Err(InternalMultipartyError::IdenticalProposals(
+                IdenticalProposalError::IdenticalPsbts(
+                    Box::new(duplicate_psbt.v1.psbt.clone()),
+                    Box::new(proposal.v1.psbt.clone()),
+                ),
+            )
+            .into());
         }
         Ok(())
     }
@@ -218,6 +243,29 @@ impl FinalizedProposal {
                 InternalMultipartyError::ProposalVersionNotSupported(proposal.v1.params.v).into()
             );
         }
+        if let Some(duplicate_context) =
+            self.v2_proposals.iter().find(|c| c.context == proposal.context)
+        {
+            return Err(InternalMultipartyError::IdenticalProposals(
+                IdenticalProposalError::IdenticalContexts(
+                    Box::new(duplicate_context.id()),
+                    Box::new(proposal.id()),
+                ),
+            )
+            .into());
+        };
+
+        if let Some(duplicate_psbt) =
+            self.v2_proposals.iter().find(|psbt| psbt.v1.psbt == proposal.v1.psbt)
+        {
+            return Err(InternalMultipartyError::IdenticalProposals(
+                IdenticalProposalError::IdenticalPsbts(
+                    Box::new(duplicate_psbt.v1.psbt.clone()),
+                    Box::new(proposal.v1.psbt.clone()),
+                ),
+            )
+            .into());
+        }
         Ok(())
     }
 
@@ -253,35 +301,104 @@ impl FinalizedProposal {
 mod test {
 
     use std::any::{Any, TypeId};
+    use std::str::FromStr;
 
-    use payjoin_test_utils::{BoxError, PARSED_ORIGINAL_PSBT};
+    use bitcoin::Psbt;
+    use payjoin_test_utils::{
+        BoxError, MULTIPARTY_ORIGINAL_PSBT_ONE, MULTIPARTY_ORIGINAL_PSBT_TWO,
+    };
 
-    use super::{v1, v2, FinalizedProposal, UncheckedProposalBuilder, SUPPORTED_VERSIONS};
+    use super::error::IdenticalProposalError;
+    use super::{
+        v1, v2, FinalizedProposal, InternalMultipartyError, MultipartyError,
+        UncheckedProposalBuilder, SUPPORTED_VERSIONS,
+    };
     use crate::receive::optional_parameters::Params;
-    use crate::receive::v2::test::SHARED_CONTEXT;
+    use crate::receive::v2::test::{SHARED_CONTEXT, SHARED_CONTEXT_TWO};
 
-    fn multiparty_proposal_from_test_vector() -> v1::UncheckedProposal {
+    fn multiparty_proposals() -> Vec<v1::UncheckedProposal> {
         let pairs = url::form_urlencoded::parse("v=2&optimisticmerge=true".as_bytes());
         let params = Params::from_query_pairs(pairs, SUPPORTED_VERSIONS)
             .expect("Could not parse from query pairs");
-        v1::UncheckedProposal { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
+
+        [MULTIPARTY_ORIGINAL_PSBT_ONE, MULTIPARTY_ORIGINAL_PSBT_TWO]
+            .iter()
+            .map(|psbt_str| v1::UncheckedProposal {
+                psbt: Psbt::from_str(psbt_str).expect("known psbt should parse"),
+                params: params.clone(),
+            })
+            .collect()
     }
 
     #[test]
-    fn test_build_multiparty() -> Result<(), BoxError> {
+    fn test_single_context_multiparty() -> Result<(), BoxError> {
         let proposal_one = v2::UncheckedProposal {
-            v1: multiparty_proposal_from_test_vector(),
-            context: SHARED_CONTEXT.clone(),
-        };
-        let proposal_two = v2::UncheckedProposal {
-            v1: multiparty_proposal_from_test_vector(),
+            v1: multiparty_proposals()[0].clone(),
             context: SHARED_CONTEXT.clone(),
         };
         let mut multiparty = UncheckedProposalBuilder::new();
         multiparty.add(proposal_one)?;
-        multiparty.add(proposal_two)?;
-        let unchecked_proposal = multiparty.build();
-        assert!(unchecked_proposal?.contexts.len() == 2);
+        match multiparty.build() {
+            Ok(_) => panic!("multiparty has two identical participants and should error"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                MultipartyError::from(InternalMultipartyError::NotEnoughProposals).to_string()
+            ),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_duplicate_context_multiparty() -> Result<(), BoxError> {
+        let proposal_one = v2::UncheckedProposal {
+            v1: multiparty_proposals()[0].clone(),
+            context: SHARED_CONTEXT.clone(),
+        };
+        let proposal_two = v2::UncheckedProposal {
+            v1: multiparty_proposals()[1].clone(),
+            context: SHARED_CONTEXT.clone(),
+        };
+        let mut multiparty = UncheckedProposalBuilder::new().add(proposal_one.clone())?;
+        match multiparty.add(proposal_two.clone()) {
+            Ok(_) => panic!("multiparty has two identical contexts and should error"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                MultipartyError::from(InternalMultipartyError::IdenticalProposals(
+                    IdenticalProposalError::IdenticalContexts(
+                        Box::new(proposal_one.id()),
+                        Box::new(proposal_two.id())
+                    )
+                ))
+                .to_string()
+            ),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_duplicate_psbt_multiparty() -> Result<(), BoxError> {
+        let proposal_one = v2::UncheckedProposal {
+            v1: multiparty_proposals()[0].clone(),
+            context: SHARED_CONTEXT.clone(),
+        };
+        let proposal_two = v2::UncheckedProposal {
+            v1: multiparty_proposals()[0].clone(),
+            context: SHARED_CONTEXT_TWO.clone(),
+        };
+        let mut multiparty = UncheckedProposalBuilder::new().add(proposal_one.clone())?;
+        match multiparty.add(proposal_two.clone()) {
+            Ok(_) => panic!("multiparty has two identical psbts and should error"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                MultipartyError::from(InternalMultipartyError::IdenticalProposals(
+                    IdenticalProposalError::IdenticalPsbts(
+                        Box::new(proposal_one.v1.psbt),
+                        Box::new(proposal_two.v1.psbt)
+                    )
+                ))
+                .to_string()
+            ),
+        }
         Ok(())
     }
 
@@ -289,15 +406,15 @@ mod test {
     fn finalize_multiparty() -> Result<(), BoxError> {
         use crate::psbt::PsbtExt;
         let proposal_one = v2::UncheckedProposal {
-            v1: multiparty_proposal_from_test_vector(),
+            v1: multiparty_proposals()[0].clone(),
             context: SHARED_CONTEXT.clone(),
         };
         let proposal_two = v2::UncheckedProposal {
-            v1: multiparty_proposal_from_test_vector(),
-            context: SHARED_CONTEXT.clone(),
+            v1: multiparty_proposals()[1].clone(),
+            context: SHARED_CONTEXT_TWO.clone(),
         };
         let mut finalized_multiparty = FinalizedProposal::new();
-        finalized_multiparty.add(proposal_one.clone())?;
+        finalized_multiparty.add(proposal_one)?;
         assert_eq!(finalized_multiparty.v2()[0].type_id(), TypeId::of::<v2::UncheckedProposal>());
 
         finalized_multiparty.add(proposal_two)?;

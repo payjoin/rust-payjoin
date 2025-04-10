@@ -660,6 +660,20 @@ pub mod test {
         e: None,
     });
 
+    pub(crate) static SHARED_CONTEXT_TWO: Lazy<SessionContext> = Lazy::new(|| SessionContext {
+        address: Address::from_str("tb1qv7scm7gxs32qg3lnm9kf267kllc63yvdxyh72e")
+            .expect("valid address")
+            .assume_checked(),
+        directory: EXAMPLE_URL.clone(),
+        subdirectory: None,
+        ohttp_keys: OhttpKeys(
+            ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
+        ),
+        expiry: SystemTime::now() + Duration::from_secs(60),
+        s: HpkeKeyPair::gen_keypair(),
+        e: None,
+    });
+
     #[test]
     fn extract_err_req() -> Result<(), BoxError> {
         let mut proposal = UncheckedProposal {

@@ -655,15 +655,16 @@ fn id(s: &HpkeKeyPair) -> ShortId {
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use std::str::FromStr;
 
     use once_cell::sync::Lazy;
     use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, SYMMETRIC};
+    use persist::Value;
 
     use super::*;
 
-    static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
+    pub(crate) static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
         address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
             .expect("valid address")
             .assume_checked(),
@@ -708,8 +709,27 @@ mod test {
     }
 
     #[test]
+    fn default_expiry() {
+        let now = SystemTime::now();
+
+        let session = NewReceiver::new(
+            SHARED_CONTEXT.address.clone(),
+            SHARED_CONTEXT.directory.clone(),
+            SHARED_CONTEXT.ohttp_keys.clone(),
+            None,
+        );
+        let session_expiry = session.unwrap().context.expiry.duration_since(now).unwrap().as_secs();
+        let default_expiry = Duration::from_secs(86400);
+        if let Some(expected_expiry) = now.checked_add(default_expiry) {
+            assert_eq!(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY, default_expiry);
+            assert_eq!(session_expiry, expected_expiry.duration_since(now).unwrap().as_secs());
+        }
+    }
+
+    #[test]
     fn receiver_ser_de_roundtrip() -> Result<(), serde_json::Error> {
         let session = Receiver { context: SHARED_CONTEXT.clone() };
+        assert_eq!(session.key().as_ref(), session.key().0.as_bytes());
         let serialized = serde_json::to_string(&session)?;
         let deserialized: Receiver = serde_json::from_str(&serialized)?;
         assert_eq!(session, deserialized);

@@ -21,12 +21,11 @@
 //! [`bitmask-core`](https://github.com/diba-io/bitmask-core) BDK integration. Bring your own
 //! wallet and http client.
 
-use std::fmt::{self, Display};
-
 use bitcoin::hashes::{sha256, Hash};
 pub use error::{CreateRequestError, EncapsulationError, ImplementationError};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
+pub use persist::SenderToken;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -34,12 +33,13 @@ use super::error::BuildSenderError;
 use super::*;
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
-use crate::persist::{Persister, Value};
+use crate::persist::Persister;
 use crate::send::v1;
 use crate::uri::{ShortId, UrlExt};
 use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
 
 mod error;
+mod persist;
 
 /// A builder to construct the properties of a [`Sender`].
 #[derive(Clone)]
@@ -150,28 +150,6 @@ pub struct Sender {
     pub(crate) v1: v1::Sender,
     /// The secret key to decrypt the receiver's reply.
     pub(crate) reply_key: HpkeSecretKey,
-}
-
-/// Opaque key type for the sender
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SenderToken(Url);
-
-impl Display for SenderToken {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.0) }
-}
-
-impl From<Sender> for SenderToken {
-    fn from(sender: Sender) -> Self { SenderToken(sender.endpoint().clone()) }
-}
-
-impl AsRef<[u8]> for SenderToken {
-    fn as_ref(&self) -> &[u8] { self.0.as_str().as_bytes() }
-}
-
-impl Value for Sender {
-    type Key = SenderToken;
-
-    fn key(&self) -> Self::Key { SenderToken(self.endpoint().clone()) }
 }
 
 impl Sender {

@@ -11,7 +11,7 @@
 
 use std::str::FromStr;
 
-use bitcoin::{psbt, AddressType, Psbt, TxIn, TxOut};
+use bitcoin::{psbt, AddressType, OutPoint, Psbt, ScriptBuf, Sequence, TxIn, TxOut, Witness};
 pub(crate) use error::InternalPayloadError;
 pub use error::{
     Error, ImplementationError, InputContributionError, JsonReply, OutputSubstitutionError,
@@ -57,6 +57,80 @@ impl InputPair {
         Ok(input_pair)
     }
 
+    pub fn new_p2wpkh(
+        witness_utxo: TxOut,
+        previous_output: OutPoint,
+        sequence: Option<Sequence>,
+    ) -> Self {
+        let txin = TxIn {
+            previous_output,
+            script_sig: ScriptBuf::new(),
+            sequence: sequence.unwrap_or_default(),
+            witness: Witness::default(),
+        };
+        let psbtin = psbt::Input {
+            witness_utxo: Some(witness_utxo),
+            non_witness_utxo: None,
+            redeem_script: None,
+            witness_script: None,
+            bip32_derivation: Default::default(),
+            final_script_sig: None,
+            final_script_witness: None,
+            ripemd160_preimages: Default::default(),
+            sha256_preimages: Default::default(),
+            hash160_preimages: Default::default(),
+            hash256_preimages: Default::default(),
+            tap_key_sig: None,
+            tap_script_sigs: Default::default(),
+            tap_scripts: Default::default(),
+            tap_key_origins: Default::default(),
+            tap_internal_key: None,
+            tap_merkle_root: None,
+            proprietary: Default::default(),
+            unknown: Default::default(),
+            partial_sigs: Default::default(),
+            sighash_type: None,
+        };
+        Self { txin, psbtin }
+    }
+
+    pub fn new_p2tr(
+        witness_utxo: TxOut,
+        previous_output: OutPoint,
+        sequence: Option<Sequence>,
+    ) -> Self {
+        let txin = TxIn {
+            previous_output,
+            script_sig: ScriptBuf::new(),
+            sequence: sequence.unwrap_or_default(),
+            witness: Witness::default(),
+        };
+        let psbtin = psbt::Input {
+            witness_utxo: Some(witness_utxo),
+            non_witness_utxo: None,
+            redeem_script: None,
+            witness_script: None,
+            bip32_derivation: Default::default(),
+            final_script_sig: None,
+            final_script_witness: None,
+            ripemd160_preimages: Default::default(),
+            sha256_preimages: Default::default(),
+            hash160_preimages: Default::default(),
+            hash256_preimages: Default::default(),
+            tap_key_sig: None,
+            tap_script_sigs: Default::default(),
+            tap_scripts: Default::default(),
+            tap_key_origins: Default::default(),
+            tap_internal_key: None,
+            tap_merkle_root: None,
+            proprietary: Default::default(),
+            unknown: Default::default(),
+            partial_sigs: Default::default(),
+            sighash_type: None,
+        };
+        Self { txin, psbtin }
+    }
+
     pub(crate) fn previous_txout(&self) -> TxOut {
         InternalInputPair::from(self)
             .previous_txout()
@@ -86,4 +160,95 @@ pub(crate) fn parse_payload(
     log::debug!("Received request with params: {:?}", params);
 
     Ok((psbt, params))
+}
+
+#[cfg(test)]
+mod tests {
+    use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, TxOut, Txid};
+
+    use super::*; // Import things from the parent module (receive::mod) like InputPair
+
+    #[test]
+    fn test_new_p2wpkh_initializes_correctly() {
+        // Arrange: Create dummy data
+        let dummy_txid =
+            Txid::from_str("0000000000000000000000000000000000000000000000000000000000000000")
+                .unwrap();
+        let dummy_vout = 0;
+        let dummy_outpoint = OutPoint { txid: dummy_txid, vout: dummy_vout };
+        let dummy_script = ScriptBuf::new(); // A simple empty script for p2wpkh witness_utxo
+        let dummy_amount = Amount::from_sat(1000);
+        let dummy_txout = TxOut { value: dummy_amount, script_pubkey: dummy_script.clone() };
+
+        // Act: Call the constructor
+        let input_pair = InputPair::new_p2wpkh(dummy_txout.clone(), dummy_outpoint, None);
+
+        // Assert: Check the fields of the created InputPair
+        // Check psbtin fields
+        assert_eq!(input_pair.psbtin.witness_utxo, Some(dummy_txout));
+        assert_eq!(input_pair.psbtin.non_witness_utxo, None);
+        assert_eq!(input_pair.psbtin.redeem_script, None);
+        assert!(input_pair.psbtin.partial_sigs.is_empty());
+        assert_eq!(input_pair.psbtin.sighash_type, None);
+        assert_eq!(input_pair.psbtin.final_script_sig, None);
+        assert_eq!(input_pair.psbtin.final_script_witness, None);
+        assert!(input_pair.psbtin.ripemd160_preimages.is_empty());
+        assert!(input_pair.psbtin.sha256_preimages.is_empty());
+        assert!(input_pair.psbtin.hash160_preimages.is_empty());
+        assert_eq!(input_pair.psbtin.tap_key_sig, None);
+        assert!(input_pair.psbtin.tap_script_sigs.is_empty());
+        assert!(input_pair.psbtin.tap_scripts.is_empty());
+        assert!(input_pair.psbtin.proprietary.is_empty());
+        assert!(input_pair.psbtin.unknown.is_empty());
+
+        // Check txin field
+        assert_eq!(input_pair.txin.previous_output, dummy_outpoint);
+        // Other txin fields have defaults we didn't set, less critical to check here
+    }
+
+    #[test]
+    fn test_new_p2tr_initializes_correctly() {
+        // Arrange: Create dummy data (can reuse most logic)
+        let dummy_txid =
+            Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111")
+                .unwrap(); // Different TXID just for clarity
+        let dummy_vout = 1; // Different vout
+        let dummy_outpoint = OutPoint { txid: dummy_txid, vout: dummy_vout };
+        let dummy_script = ScriptBuf::new();
+        let dummy_amount = Amount::from_sat(2000);
+        let dummy_txout = TxOut { value: dummy_amount, script_pubkey: dummy_script.clone() };
+        let dummy_sequence = Sequence::MAX; // Use the default sequence
+
+        // Act: Call the constructor (using None for sequence to test default)
+        let input_pair = InputPair::new_p2tr(dummy_txout.clone(), dummy_outpoint, None);
+
+        // Assert: Check the fields of the created InputPair
+        // Check psbtin fields - most should be default/empty
+        assert_eq!(input_pair.psbtin.witness_utxo, Some(dummy_txout));
+        assert_eq!(input_pair.psbtin.non_witness_utxo, None);
+        assert_eq!(input_pair.psbtin.redeem_script, None);
+        assert_eq!(input_pair.psbtin.witness_script, None); // P2TR specific
+        assert!(input_pair.psbtin.partial_sigs.is_empty());
+        assert_eq!(input_pair.psbtin.sighash_type, None);
+        assert_eq!(input_pair.psbtin.final_script_sig, None);
+        assert_eq!(input_pair.psbtin.final_script_witness, None);
+        assert!(input_pair.psbtin.ripemd160_preimages.is_empty());
+        assert!(input_pair.psbtin.sha256_preimages.is_empty());
+        assert!(input_pair.psbtin.hash160_preimages.is_empty());
+        assert!(input_pair.psbtin.hash256_preimages.is_empty()); // P2TR specific check
+        assert_eq!(input_pair.psbtin.tap_key_sig, None);
+        assert!(input_pair.psbtin.tap_script_sigs.is_empty());
+        assert!(input_pair.psbtin.tap_scripts.is_empty());
+        assert!(input_pair.psbtin.tap_key_origins.is_empty()); // P2TR specific check
+        assert_eq!(input_pair.psbtin.tap_internal_key, None); // P2TR specific check
+        assert_eq!(input_pair.psbtin.tap_merkle_root, None); // P2TR specific check
+        assert!(input_pair.psbtin.proprietary.is_empty());
+        assert!(input_pair.psbtin.unknown.is_empty());
+
+        // Check txin field
+        assert_eq!(input_pair.txin.previous_output, dummy_outpoint);
+        assert_eq!(input_pair.txin.script_sig, ScriptBuf::new()); // Should be empty for P2TR
+        assert_eq!(input_pair.txin.sequence, dummy_sequence); // Check sequence default
+        assert!(input_pair.txin.witness.is_empty()); // Witness should be empty initially
+    }
 }

@@ -36,6 +36,10 @@ impl UncheckedProposalBuilder {
         if !params.optimistic_merge {
             return Err(InternalMultipartyError::OptimisticMergeNotSupported.into());
         }
+
+        if self.proposals.clone().into_iter().any(|c| c.context == proposal.context) {
+            return Err(InternalMultipartyError::IdenticalProposals.into());
+        };
         Ok(())
     }
 
@@ -247,4 +251,89 @@ impl FinalizedProposal {
     }
 
     pub fn v2(&self) -> &[v2::UncheckedProposal] { &self.v2_proposals }
+}
+
+#[cfg(test)]
+mod test {
+
+    use std::any::{Any, TypeId};
+
+    use payjoin_test_utils::{BoxError, PARSED_ORIGINAL_PSBT};
+
+    use super::{
+        v1, v2, FinalizedProposal, InternalMultipartyError, MultipartyError,
+        UncheckedProposalBuilder, SUPPORTED_VERSIONS,
+    };
+    use crate::receive::optional_parameters::Params;
+    use crate::receive::v2::test::SHARED_CONTEXT;
+
+    fn multiparty_proposal_from_test_vector() -> v1::UncheckedProposal {
+        let pairs = url::form_urlencoded::parse("v=2&optimisticmerge=true".as_bytes());
+        let params = Params::from_query_pairs(pairs, SUPPORTED_VERSIONS)
+            .expect("Could not parse from query pairs");
+        v1::UncheckedProposal { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
+    }
+
+    #[test]
+    fn test_single_context_multiparty() -> Result<(), BoxError> {
+        let proposal_one = v2::UncheckedProposal {
+            v1: multiparty_proposal_from_test_vector(),
+            context: SHARED_CONTEXT.clone(),
+        };
+        let mut multiparty = UncheckedProposalBuilder::new();
+        multiparty.add(proposal_one)?;
+        match multiparty.build() {
+            Ok(_) => panic!("multiparty has two identical participants and should error"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                MultipartyError::from(InternalMultipartyError::NotEnoughProposals).to_string()
+            ),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_duplicate_context_multiparty() -> Result<(), BoxError> {
+        let proposal_one = v2::UncheckedProposal {
+            v1: multiparty_proposal_from_test_vector(),
+            context: SHARED_CONTEXT.clone(),
+        };
+        let proposal_two = v2::UncheckedProposal {
+            v1: multiparty_proposal_from_test_vector(),
+            context: SHARED_CONTEXT.clone(),
+        };
+        let mut multiparty = UncheckedProposalBuilder::new().add(proposal_one)?;
+        match multiparty.add(proposal_two) {
+            Ok(_) => panic!("multiparty has two identical participants and should error"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                MultipartyError::from(InternalMultipartyError::IdenticalProposals).to_string()
+            ),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn finalize_multiparty() -> Result<(), BoxError> {
+        use crate::psbt::PsbtExt;
+        let proposal_one = v2::UncheckedProposal {
+            v1: multiparty_proposal_from_test_vector(),
+            context: SHARED_CONTEXT.clone(),
+        };
+        let proposal_two = v2::UncheckedProposal {
+            v1: multiparty_proposal_from_test_vector(),
+            context: SHARED_CONTEXT.clone(),
+        };
+        let mut finalized_multiparty = FinalizedProposal::new();
+        finalized_multiparty.add(proposal_one.clone())?;
+        assert_eq!(finalized_multiparty.v2()[0].type_id(), TypeId::of::<v2::UncheckedProposal>());
+
+        finalized_multiparty.add(proposal_two)?;
+        assert_eq!(finalized_multiparty.v2()[1].type_id(), TypeId::of::<v2::UncheckedProposal>());
+
+        let multiparty_psbt =
+            finalized_multiparty.combine().expect("could not create PSBT from finalized proposal");
+        assert!(multiparty_psbt.validate_input_utxos().is_ok());
+        Ok(())
+    }
 }

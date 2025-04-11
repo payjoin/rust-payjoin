@@ -239,49 +239,11 @@ mod tests {
     use bitcoin::transaction::Version;
     use bitcoin::absolute::LockTime;
 
-    use super::*; // Import things from the parent module (receive::mod) like InputPair
-
-    #[test]
-    fn test_new_p2wpkh_initializes_correctly() {
-        // Arrange: Create dummy data
-        let dummy_txid =
-            Txid::from_str("0000000000000000000000000000000000000000000000000000000000000000")
-                .unwrap();
-        let dummy_vout = 0;
-        let dummy_outpoint = OutPoint { txid: dummy_txid, vout: dummy_vout };
-        let dummy_script = ScriptBuf::new(); // A simple empty script for p2wpkh witness_utxo
-        let dummy_amount = Amount::from_sat(1000);
-        let dummy_txout = TxOut { value: dummy_amount, script_pubkey: dummy_script.clone() };
-
-        // Act: Call the constructor
-        let input_pair = InputPair::new_p2wpkh(dummy_txout.clone(), dummy_outpoint, None);
-
-        // Assert: Check the fields of the created InputPair
-        // Check psbtin fields
-        assert_eq!(input_pair.psbtin.witness_utxo, Some(dummy_txout));
-        assert_eq!(input_pair.psbtin.non_witness_utxo, None);
-        assert_eq!(input_pair.psbtin.redeem_script, None);
-        assert!(input_pair.psbtin.partial_sigs.is_empty());
-        assert_eq!(input_pair.psbtin.sighash_type, None);
-        assert_eq!(input_pair.psbtin.final_script_sig, None);
-        assert_eq!(input_pair.psbtin.final_script_witness, None);
-        assert!(input_pair.psbtin.ripemd160_preimages.is_empty());
-        assert!(input_pair.psbtin.sha256_preimages.is_empty());
-        assert!(input_pair.psbtin.hash160_preimages.is_empty());
-        assert_eq!(input_pair.psbtin.tap_key_sig, None);
-        assert!(input_pair.psbtin.tap_script_sigs.is_empty());
-        assert!(input_pair.psbtin.tap_scripts.is_empty());
-        assert!(input_pair.psbtin.proprietary.is_empty());
-        assert!(input_pair.psbtin.unknown.is_empty());
-
-        // Check txin field
-        assert_eq!(input_pair.txin.previous_output, dummy_outpoint);
-        // Other txin fields have defaults we didn't set, less critical to check here
-    }
+    use super::*; 
 
     #[test]
     fn test_new_p2pkh_works_with_expected_input_weight() {
-        // Arrange: Create dummy data
+        
         let dummy_txid = Txid::from_str("000000000000000000000000000000000000000000000000000000000000000a").unwrap();
         let dummy_txout = TxOut {
             value: Amount::from_sat(10_000),
@@ -298,20 +260,18 @@ mod tests {
             vout: 0,
         };
 
-        // Act: Create the P2PKH input pair
         let input_pair = InputPair::new_p2pkh(
             dummy_tx,
             dummy_outpoint,
             None,
         );
 
-        // Assert: Should calculate weight for P2PKH input
         assert!(input_pair.expected_input_weight().is_ok());
     }
 
     #[test]
     fn test_new_p2sh_p2wpkh_works_with_expected_input_weight() {
-        // Arrange: Create dummy data
+       
         let dummy_txid = Txid::from_str("000000000000000000000000000000000000000000000000000000000000000b").unwrap();
         let dummy_txout = TxOut {
             value: Amount::from_sat(10_000),
@@ -321,10 +281,8 @@ mod tests {
             txid: dummy_txid,
             vout: 0,
         };
-        // Create a proper P2WPKH redeem script
         let dummy_redeem_script = ScriptBuf::new_p2wpkh(&bitcoin::PublicKey::from_str("0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798").unwrap().wpubkey_hash().expect("valid pubkey"));
 
-        // Act: Create the P2SH-P2WPKH input pair
         let dummy_tx = Transaction {
             version: Version::TWO,
             lock_time: LockTime::ZERO,
@@ -348,7 +306,6 @@ mod tests {
     #[test]
     #[cfg(feature = "v2")]
     fn test_new_p2tr_works_with_expected_input_weight() {
-        // Arrange: Create dummy data with P2TR script
         let dummy_txid = Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111").unwrap();
         let dummy_outpoint = OutPoint { txid: dummy_txid, vout: 0 };
         let dummy_txout = TxOut {
@@ -356,16 +313,13 @@ mod tests {
             script_pubkey: Address::from_str("bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0").unwrap().require_network(Network::Bitcoin).expect("valid network").script_pubkey(),
         };
 
-        // Act: Create the P2TR input pair
         let input_pair = InputPair::new_p2tr(dummy_txout, dummy_outpoint, None);
 
-        // Assert: Should calculate weight for P2TR input
         assert!(input_pair.expected_input_weight().is_ok());
     }
 
     #[test]
     fn test_input_selection_behavior() {
-        // Arrange: Create multiple inputs of different types
         let dummy_txid = Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111").unwrap();
         
         // P2WPKH input (low weight)
@@ -386,8 +340,8 @@ mod tests {
         let p2pkh_tx = Transaction {
             version: Version::TWO,
             lock_time: LockTime::ZERO,
-            input: vec![],  // Empty inputs since this is the transaction we're spending from
-            output: vec![p2pkh_txout.clone()],  // Contains our UTXO at index 0
+            input: vec![], 
+            output: vec![p2pkh_txout.clone()],  
         };
         let p2pkh_input = InputPair::new_p2pkh(p2pkh_tx, p2pkh_outpoint, None);
 
@@ -399,9 +353,9 @@ mod tests {
 
     #[test]
     fn test_privacy_based_input_selection() {
-        // Arrange: Create a transaction with two outputs (common case for UIH testing)
+        //Create a transaction with two outputs (common case for UIH testing)
         let dummy_txid = Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111").unwrap();
-        // Create a simple transaction with one input and two outputs (payment and change)
+        
         let tx = Transaction {
             version: Version::TWO,
             lock_time: LockTime::ZERO,

@@ -3,9 +3,11 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 pub use error::{BuildSenderError, CreateRequestError, EncapsulationError, ResponseError};
+use payjoin::persist::Persister;
 
 pub use crate::error::SerdeJsonError;
 use crate::ohttp::ClientResponse;
+use crate::receive::ImplementationError;
 use crate::request::Request;
 use crate::uri::{PjUri, Url};
 
@@ -50,7 +52,7 @@ impl SenderBuilder {
     // The minfeerate parameter is set if the contribution is available in change.
     //
     // This method fails if no recommendation can be made or if the PSBT is malformed.
-    pub fn build_recommended(&self, min_fee_rate: u64) -> Result<Sender, BuildSenderError> {
+    pub fn build_recommended(&self, min_fee_rate: u64) -> Result<NewSender, BuildSenderError> {
         self.0
             .clone()
             .build_recommended(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate))
@@ -76,7 +78,7 @@ impl SenderBuilder {
         change_index: Option<u8>,
         min_fee_rate: u64,
         clamp_fee_contribution: bool,
-    ) -> Result<Sender, BuildSenderError> {
+    ) -> Result<NewSender, BuildSenderError> {
         self.0
             .clone()
             .build_with_additional_fee(
@@ -92,7 +94,10 @@ impl SenderBuilder {
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
-    pub fn build_non_incentivizing(&self, min_fee_rate: u64) -> Result<Sender, BuildSenderError> {
+    pub fn build_non_incentivizing(
+        &self,
+        min_fee_rate: u64,
+    ) -> Result<NewSender, BuildSenderError> {
         match self
             .0
             .clone()
@@ -103,6 +108,24 @@ impl SenderBuilder {
         }
     }
 }
+
+pub struct NewSender(payjoin::send::v2::NewSender);
+
+impl From<payjoin::send::v2::NewSender> for NewSender {
+    fn from(value: payjoin::send::v2::NewSender) -> Self {
+        Self(value)
+    }
+}
+
+impl NewSender {
+    pub fn persist<P: Persister<payjoin::send::v2::Sender>>(
+        &self,
+        persister: &mut P,
+    ) -> Result<P::Token, ImplementationError> {
+        self.0.persist(persister).map_err(ImplementationError::from)
+    }
+}
+
 #[derive(Clone)]
 pub struct Sender(payjoin::send::v2::Sender);
 
@@ -113,6 +136,15 @@ impl From<payjoin::send::v2::Sender> for Sender {
 }
 
 impl Sender {
+    pub fn load<P: Persister<payjoin::send::v2::Sender>>(
+        token: P::Token,
+        persister: &P,
+    ) -> Result<Self, ImplementationError> {
+        let sender =
+            payjoin::send::v2::Sender::load(token, persister).map_err(ImplementationError::from)?;
+        Ok(sender.into())
+    }
+
     pub fn extract_v1(&self) -> (Request, V1Context) {
         let (req, ctx) = self.0.clone().extract_v1();
         (req.into(), ctx.into())

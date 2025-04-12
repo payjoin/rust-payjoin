@@ -3,10 +3,10 @@ use std::sync::Arc;
 pub use crate::send::{
     BuildSenderError, CreateRequestError, EncapsulationError, ResponseError, SerdeJsonError,
 };
-use crate::{ClientResponse, PjUri, Request, Url};
+use crate::{ClientResponse, ImplementationError, PjUri, Request, Url};
 
 #[derive(uniffi::Object)]
-struct SenderBuilder(super::SenderBuilder);
+pub struct SenderBuilder(super::SenderBuilder);
 
 impl From<super::SenderBuilder> for SenderBuilder {
     fn from(value: super::SenderBuilder) -> Self {
@@ -46,7 +46,7 @@ impl SenderBuilder {
     // The minfeerate parameter is set if the contribution is available in change.
     //
     // This method fails if no recommendation can be made or if the PSBT is malformed.
-    pub fn build_recommended(&self, min_fee_rate: u64) -> Result<Arc<Sender>, BuildSenderError> {
+    pub fn build_recommended(&self, min_fee_rate: u64) -> Result<Arc<NewSender>, BuildSenderError> {
         self.0.build_recommended(min_fee_rate).map(|e| Arc::new(e.into()))
     }
 
@@ -69,7 +69,7 @@ impl SenderBuilder {
         change_index: Option<u8>,
         min_fee_rate: u64,
         clamp_fee_contribution: bool,
-    ) -> Result<Arc<Sender>, BuildSenderError> {
+    ) -> Result<Arc<NewSender>, BuildSenderError> {
         self.0
             .build_with_additional_fee(
                 max_fee_contribution,
@@ -86,13 +86,33 @@ impl SenderBuilder {
     pub fn build_non_incentivizing(
         &self,
         min_fee_rate: u64,
-    ) -> Result<Arc<Sender>, BuildSenderError> {
+    ) -> Result<Arc<NewSender>, BuildSenderError> {
         self.0.build_non_incentivizing(min_fee_rate).map(|e| Arc::new(e.into()))
     }
 }
 
 #[derive(uniffi::Object)]
-struct Sender(super::Sender);
+pub struct NewSender(super::NewSender);
+
+impl From<super::NewSender> for NewSender {
+    fn from(value: super::NewSender) -> Self {
+        Self(value)
+    }
+}
+
+#[uniffi::export]
+impl NewSender {
+    pub fn persist(
+        &self,
+        persister: Arc<dyn SenderPersister>,
+    ) -> Result<SenderToken, ImplementationError> {
+        let mut adapter = CallbackPersisterAdapter::new(persister);
+        self.0.persist(&mut adapter)
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct Sender(super::Sender);
 
 impl From<super::Sender> for Sender {
     fn from(value: super::Sender) -> Self {
@@ -228,5 +248,53 @@ impl V2GetContext {
         ohttp_ctx: Arc<ClientResponse>,
     ) -> Result<Option<String>, ResponseError> {
         self.0.process_response(response, ohttp_ctx.as_ref())
+    }
+}
+
+#[uniffi::export]
+pub trait SenderPersister: Send + Sync {
+    fn save(&self, sender: Arc<Sender>) -> Result<SenderToken, ImplementationError>;
+    fn load(&self, token: Arc<SenderToken>) -> Result<Sender, ImplementationError>;
+}
+
+// The adapter to use the save and load callbacks
+struct CallbackPersisterAdapter {
+    callback_persister: Arc<dyn SenderPersister>,
+}
+
+impl CallbackPersisterAdapter {
+    pub fn new(callback_persister: Arc<dyn SenderPersister>) -> Self {
+        Self { callback_persister }
+    }
+}
+
+// Implement the Persister trait for the adapter
+impl payjoin::persist::Persister<payjoin::send::v2::Sender> for CallbackPersisterAdapter {
+    type Token = SenderToken; // Define the token type
+    type Error = ImplementationError; // Define the error type
+
+    fn save(&mut self, sender: payjoin::send::v2::Sender) -> Result<Self::Token, Self::Error> {
+        let sender = Sender(super::Sender::from(sender));
+        self.callback_persister.save(sender.into())
+    }
+
+    fn load(&self, token: Self::Token) -> Result<payjoin::send::v2::Sender, Self::Error> {
+        // Use the callback to load the sender
+        self.callback_persister.load(token.into()).map(|sender| sender.0 .0)
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Object)]
+pub struct SenderToken(#[allow(dead_code)] payjoin::send::v2::SenderToken);
+
+impl From<payjoin::send::v2::Sender> for SenderToken {
+    fn from(value: payjoin::send::v2::Sender) -> Self {
+        SenderToken(value.into())
+    }
+}
+
+impl From<payjoin::send::v2::SenderToken> for SenderToken {
+    fn from(value: payjoin::send::v2::SenderToken) -> Self {
+        SenderToken(value)
     }
 }

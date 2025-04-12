@@ -11,6 +11,8 @@ pub mod send;
 pub mod test_utils;
 pub mod uri;
 
+pub use payjoin::persist::NoopPersister;
+
 pub use crate::bitcoin_ffi::*;
 pub use crate::ohttp::*;
 #[cfg(feature = "uniffi")]

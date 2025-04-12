@@ -7,6 +7,7 @@ pub use error::{
 };
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
+use payjoin::persist::Persister;
 
 use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 pub use crate::error::SerdeJsonError;
@@ -18,8 +19,63 @@ pub mod error;
 #[cfg(feature = "uniffi")]
 pub mod uni;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
+pub struct NewReceiver(payjoin::receive::v2::NewReceiver);
+
+impl From<NewReceiver> for payjoin::receive::v2::NewReceiver {
+    fn from(value: NewReceiver) -> Self {
+        value.0
+    }
+}
+
+impl From<payjoin::receive::v2::NewReceiver> for NewReceiver {
+    fn from(value: payjoin::receive::v2::NewReceiver) -> Self {
+        Self(value)
+    }
+}
+
+impl NewReceiver {
+    /// Creates a new [`NewReceiver`] with the provided parameters.
+    ///
+    /// # Parameters
+    /// - `address`: The Bitcoin address for the payjoin session.
+    /// - `directory`: The URL of the store-and-forward payjoin directory.
+    /// - `ohttp_keys`: The OHTTP keys used for encrypting and decrypting HTTP requests and responses.
+    /// - `expire_after`: The duration after which the session expires.
+    ///
+    /// # Returns
+    /// A new instance of [`NewReceiver`].
+    ///
+    /// # References
+    /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
+    pub fn new(
+        address: Address,
+        directory: String,
+        ohttp_keys: OhttpKeys,
+        expire_after: Option<u64>,
+    ) -> Result<Self, IntoUrlError> {
+        payjoin::receive::v2::NewReceiver::new(
+            address.into(),
+            directory,
+            ohttp_keys.into(),
+            expire_after.map(Duration::from_secs),
+        )
+        .map(Into::into)
+        .map_err(Into::into)
+    }
+
+    /// Saves the new [`Receiver`] using the provided persister and returns the storage token.
+    pub fn persist<P: Persister<payjoin::receive::v2::Receiver>>(
+        &self,
+        persister: &mut P,
+    ) -> Result<P::Token, ImplementationError> {
+        self.0.persist(persister).map_err(ImplementationError::from)
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Receiver(pub payjoin::receive::v2::Receiver);
+
 impl From<Receiver> for payjoin::receive::v2::Receiver {
     fn from(value: Receiver) -> Self {
         value.0
@@ -33,34 +89,12 @@ impl From<payjoin::receive::v2::Receiver> for Receiver {
 }
 
 impl Receiver {
-    /// Creates a new `SessionInitializer` with the provided parameters.
-    ///
-    /// # Parameters
-    /// - `address`: The Bitcoin address for the payjoin session.
-    /// - `directory`: The URL of the store-and-forward payjoin directory.
-    /// - `ohttp_keys`: The OHTTP keys used for encrypting and decrypting HTTP requests and responses.
-    /// - `ohttp_relay`: The URL of the OHTTP relay, used to keep client IP address confidential.
-    /// - `expire_after`: The duration in seconds after which the session expires.
-    ///
-    /// # Returns
-    /// A new instance of `SessionInitializer`.
-    ///
-    /// # References
-    /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
-    pub fn new(
-        address: Address,
-        directory: String,
-        ohttp_keys: OhttpKeys,
-        expire_after: Option<u64>,
-    ) -> Result<Self, IntoUrlError> {
-        payjoin::receive::v2::Receiver::new(
-            address.into(),
-            directory,
-            ohttp_keys.into(),
-            expire_after.map(Duration::from_secs),
-        )
-        .map(Into::into)
-        .map_err(Into::into)
+    /// Loads a [`Receiver`] from the provided persister using the storage token.
+    pub fn load<P: Persister<payjoin::receive::v2::Receiver>>(
+        token: P::Token,
+        persister: &P,
+    ) -> Result<Self, ImplementationError> {
+        Ok(Receiver::from(persister.load(token).unwrap()))
     }
 
     pub fn extract_req(&self, ohttp_relay: String) -> Result<(Request, ClientResponse), Error> {
@@ -427,10 +461,11 @@ impl PayjoinProposal {
             .to_string()
     }
 
-    pub fn extract_v2_req(&self, ohttp_relay: String) -> Result<(Request, ClientResponse), Error> {
+    /// Extract an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
+    pub fn extract_req(&self, ohttp_relay: String) -> Result<(Request, ClientResponse), Error> {
         self.0
             .clone()
-            .extract_v2_req(ohttp_relay)
+            .extract_req(ohttp_relay)
             .map_err(Into::into)
             .map(|(req, ctx)| (req.into(), ctx.into()))
     }

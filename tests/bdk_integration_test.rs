@@ -223,10 +223,10 @@ mod v2 {
 
     use bdk::wallet::AddressIndex;
     use bitcoin_ffi::{Address, Network};
-    use payjoin_ffi::receive::{PayjoinProposal, Receiver, UncheckedProposal};
-    use payjoin_ffi::send::SenderBuilder;
+    use payjoin_ffi::receive::{NewReceiver, PayjoinProposal, Receiver, UncheckedProposal};
+    use payjoin_ffi::send::{Sender, SenderBuilder};
     use payjoin_ffi::uri::Uri;
-    use payjoin_ffi::Request;
+    use payjoin_ffi::{NoopPersister, Request};
     use payjoin_test_utils::TestServices;
 
     use super::*;
@@ -258,12 +258,14 @@ mod v2 {
             .await?;
 
             let address = receiver.get_address(AddressIndex::New);
-            let session = Receiver::new(
+            let new_session = NewReceiver::new(
                 Address::new(address.to_string(), Network::Regtest).unwrap(),
                 directory.to_string(),
                 ohttp_keys,
                 None,
             )?;
+            let receiver_token = new_session.persist(&mut NoopPersister)?;
+            let session = Receiver::load(receiver_token, &NoopPersister)?;
             let ohttp_relay = services.ohttp_relay_url();
             // Poll receive request
             let (request, client_response) = session.extract_req(ohttp_relay.to_string())?;
@@ -287,8 +289,10 @@ mod v2 {
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             println!("\nOriginal sender psbt: {:#?}", psbt.to_string());
 
-            let req_ctx = SenderBuilder::new(psbt.to_string(), pj_uri)?
+            let new_sender = SenderBuilder::new(psbt.to_string(), pj_uri)?
                 .build_recommended(payjoin::bitcoin::FeeRate::BROADCAST_MIN.to_sat_per_kwu())?;
+            let sender_token = new_sender.persist(&mut NoopPersister)?;
+            let req_ctx = Sender::load(sender_token, &NoopPersister)?;
             let (request, context) = req_ctx.extract_v2(ohttp_relay.to_owned().into())?;
             let response = agent
                 .post(request.url.as_string())
@@ -316,7 +320,7 @@ mod v2 {
                 .expect("proposal should exist");
             let payjoin_proposal = handle_directory_proposal(receiver, proposal);
             let (request, client_response) =
-                payjoin_proposal.extract_v2_req(ohttp_relay.to_string())?;
+                payjoin_proposal.extract_req(ohttp_relay.to_string())?;
             let response = agent
                 .post(request.url.as_string())
                 .header("Content-Type", request.content_type)

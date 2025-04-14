@@ -1,8 +1,10 @@
 [package]
 name = "payjoin-test-utils"
-version = "0.1.0"
+version = "0.0.0"
 edition = "2021"
 authors = ["Dan Gould <d@ngould.dev>"]
+description = "Payjoin test utilities"
+repository = "https://github.com/payjoin/rust-payjoin"
 rust-version = "1.63"
 license = "MIT"
 

@@ -43,7 +43,7 @@ reqwest = { version = "0.12", default-features = false }
 rustls = { version = "0.22.4", optional = true }
 serde = { version = "1.0.160", features = ["derive"] }
 sled = "0.34"
-tokio = { version = "1.12.0", features = ["full"] }
+tokio = { version = "1.38.1", features = ["full"] }
 tokio-rustls = { version = "0.25", features = ["ring"], default-features = false, optional = true }
 url = { version = "2.3.1", features = ["serde"] }
 

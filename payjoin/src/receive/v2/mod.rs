@@ -1,5 +1,4 @@
 //! Receive BIP 77 Payjoin v2
-use std::fmt::{self, Display};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
@@ -8,6 +7,7 @@ use bitcoin::psbt::Psbt;
 use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
 pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
+pub use persist::ReceiverToken;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -20,12 +20,13 @@ use super::{
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::{self, Persister};
+use crate::persist::Persister;
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
 use crate::{IntoUrl, IntoUrlError, Request};
 
-pub(crate) mod error;
+mod error;
+mod persist;
 
 const SUPPORTED_VERSIONS: &[usize] = &[1, 2];
 
@@ -127,28 +128,6 @@ impl NewReceiver {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receiver {
     context: SessionContext,
-}
-
-/// Opaque key type for the receiver
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReceiverToken(ShortId);
-
-impl Display for ReceiverToken {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.0) }
-}
-
-impl From<Receiver> for ReceiverToken {
-    fn from(receiver: Receiver) -> Self { ReceiverToken(id(&receiver.context.s)) }
-}
-
-impl AsRef<[u8]> for ReceiverToken {
-    fn as_ref(&self) -> &[u8] { self.0.as_bytes() }
-}
-
-impl persist::Value for Receiver {
-    type Key = ReceiverToken;
-
-    fn key(&self) -> Self::Key { ReceiverToken(id(&self.context.s)) }
 }
 
 impl Receiver {
@@ -317,7 +296,7 @@ impl UncheckedProposal {
     /// requires manual intervention, as in most consumer wallets.
     ///
     /// So-called "non-interactive" receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks.
-    /// Those receivers call `extract_tx_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
+    /// Those receivers call `extract_tx_to_check_broadcast()` after making those checks downstream.
     pub fn assume_interactive_receiver(self) -> MaybeInputsOwned {
         let inner = self.v1.assume_interactive_receiver();
         MaybeInputsOwned { v1: inner, context: self.context }
@@ -655,15 +634,16 @@ fn id(s: &HpkeKeyPair) -> ShortId {
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use std::str::FromStr;
 
     use once_cell::sync::Lazy;
     use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, SYMMETRIC};
+    use persist::Value;
 
     use super::*;
 
-    static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
+    pub(crate) static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
         address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
             .expect("valid address")
             .assume_checked(),
@@ -708,8 +688,27 @@ mod test {
     }
 
     #[test]
+    fn default_expiry() {
+        let now = SystemTime::now();
+
+        let session = NewReceiver::new(
+            SHARED_CONTEXT.address.clone(),
+            SHARED_CONTEXT.directory.clone(),
+            SHARED_CONTEXT.ohttp_keys.clone(),
+            None,
+        );
+        let session_expiry = session.unwrap().context.expiry.duration_since(now).unwrap().as_secs();
+        let default_expiry = Duration::from_secs(86400);
+        if let Some(expected_expiry) = now.checked_add(default_expiry) {
+            assert_eq!(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY, default_expiry);
+            assert_eq!(session_expiry, expected_expiry.duration_since(now).unwrap().as_secs());
+        }
+    }
+
+    #[test]
     fn receiver_ser_de_roundtrip() -> Result<(), serde_json::Error> {
         let session = Receiver { context: SHARED_CONTEXT.clone() };
+        assert_eq!(session.key().as_ref(), session.key().0.as_bytes());
         let serialized = serde_json::to_string(&session)?;
         let deserialized: Receiver = serde_json::from_str(&serialized)?;
         assert_eq!(session, deserialized);

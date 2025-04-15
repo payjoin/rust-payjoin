@@ -15,7 +15,7 @@ use hyper_util::rt::TokioIo;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
 
 use crate::db::DbPool;
 pub mod key_config;
@@ -287,14 +287,14 @@ impl HandlerError {
             HandlerError::OhttpKeyRejection(e) => {
                 const OHTTP_KEY_REJECTION_RES_JSON: &str = r#"{"type":"https://iana.org/assignments/http-problem-types#ohttp-key", "title": "key identifier unknown"}"#;
 
-                error!("Bad request: Key configuration rejected: {}", e);
+                warn!("Bad request: Key configuration rejected: {}", e);
                 *res.status_mut() = StatusCode::BAD_REQUEST;
                 res.headers_mut()
                     .insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 *res.body_mut() = full(OHTTP_KEY_REJECTION_RES_JSON);
             }
             HandlerError::BadRequest(e) => {
-                error!("Bad request: {}", e);
+                warn!("Bad request: {}", e);
                 *res.status_mut() = StatusCode::BAD_REQUEST
             }
         };

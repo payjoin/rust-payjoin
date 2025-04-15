@@ -1,14 +1,15 @@
 [package]
 name = "payjoin-directory"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["Dan Gould <d@ngould.dev>"]
-description = "A directory server for Payjoin V2 coordination"
+description = "A store-and-forward and Oblivious Gateway Resource directory server for Async Payjoin"
 repository = "https://github.com/payjoin/rust-payjoin"
 readme = "README.md"
-keywords = ["bip78", "bip77", "payjoin", "bitcoin", "relay"]
+keywords = ["bip78", "bip77", "payjoin", "bitcoin", "ohttp"]
 categories = ["cryptography::cryptocurrencies", "network-programming"]
 license = "MITNFA"
 edition = "2021"
+rust-version = "1.63"
 resolver = "2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

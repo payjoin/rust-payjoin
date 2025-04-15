@@ -1,5 +1,27 @@
 use std::fmt::Display;
 
+use crate::receive::v2::ReceiverSessionEvent;
+use crate::send::v2::SenderSessionEvent;
+
+impl Event for ReceiverSessionEvent {}
+impl Event for SenderSessionEvent {}
+
+/// Types that can be persisted in a session
+pub trait Event: serde::Serialize + serde::de::DeserializeOwned + Sized + Clone {}
+
+/// A session that can be persisted and loaded from a store
+///
+/// This is a generic trait that can be implemented for any type that implements `Event`.
+///
+///
+pub trait PersistedSession<E: Event> {
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    fn save(&self, event: E) -> Result<(), Self::Error>; // Appends to list of session updates, Receives generic events
+    fn load(&self) -> Result<impl Iterator<Item = E>, Self::Error>; // Loads the latest session given all updates
+    fn close(&self) -> Result<(), Self::Error>; // Marks the session as closed, no more updates will be appended
+}
+
 /// Types that can generate their own keys for persistent storage
 pub trait Value: serde::Serialize + serde::de::DeserializeOwned + Sized + Clone {
     type Key: AsRef<[u8]> + Clone + Display;

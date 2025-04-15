@@ -78,6 +78,11 @@ async fn main() -> Result<()> {
             println!("resume");
             app.resume_payjoins().await?;
         }
+        #[cfg(feature = "v2")]
+        Some(("history", _)) => {
+            println!("history");
+            app.history().await?;
+        }
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
 
@@ -162,6 +167,10 @@ fn cli() -> ArgMatches {
 
     #[cfg(feature = "v2")]
     let mut cmd = cmd.subcommand(Command::new("resume"));
+
+    #[cfg(feature = "v2")]
+    let history_cmd = Command::new("history");
+    cmd = cmd.subcommand(history_cmd);
 
     // Conditional arguments based on features for the receive subcommand
     receive_cmd = receive_cmd.arg(

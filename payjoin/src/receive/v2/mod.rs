@@ -19,7 +19,7 @@ use super::{
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::Persister;
+use crate::persist::{self, PersistedSession, Persister};
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
 use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
@@ -113,13 +113,25 @@ impl NewReceiver {
     }
 
     /// Saves the new [`Receiver`] using the provided persister and returns the storage token.
-    pub fn persist<P: Persister<Receiver>>(
+    pub fn persist<P: PersistedSession<ReceiverSessionEvent>>(
         &self,
         persister: &mut P,
-    ) -> Result<P::Token, ImplementationError> {
+    ) -> Result<(), ImplementationError> {
         let receiver = Receiver { context: self.context.clone() };
-        Ok(persister.save(receiver)?)
+        Ok(persister.save(ReceiverSessionEvent::NewReceiver(receiver))?)
     }
+}
+
+/// Events that can be sent to a receiver session
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ReceiverSessionEvent {
+    /// A new Receiver was created
+    NewReceiver(Receiver),
+    /// Session Invalid
+    /// TODO specify error in event
+    SessionInvalid,
+    /// Fallback transaction was broadcasted
+    FallbackBroadcasted(bitcoin::Txid),
 }
 
 /// A payjoin V2 receiver, allowing for polled requests to the
@@ -530,7 +542,7 @@ impl ProvisionalProposal {
 
 /// A finalized payjoin proposal, complete with fees and receiver signatures, that the sender
 /// should find acceptable.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PayjoinProposal {
     v1: v1::PayjoinProposal,
     context: SessionContext,

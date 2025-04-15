@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
+use log::error;
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::receive::v2::{NewReceiver, Receiver, UncheckedProposal};
-use payjoin::receive::{Error, ReplyableError};
-use payjoin::send::v2::{Sender, SenderBuilder};
-use payjoin::{ImplementationError, Uri};
+use payjoin::persist::PersistedSession;
+use payjoin::receive::v2::{NewReceiver, Receiver, ReceiverSessionEvent, UncheckedProposal};
+use payjoin::receive::{Error, ImplementationError, ReplyableError};
+use payjoin::send::v2::{Sender, SenderBuilder, SenderSessionEvent};
+use payjoin::Uri;
 use tokio::sync::watch;
 
 use super::config::Config;
@@ -48,41 +50,52 @@ impl AppTrait for App {
         let uri = uri.assume_checked();
         let uri = uri.check_pj_supported().map_err(|_| anyhow!("URI does not support Payjoin"))?;
         let url = uri.extras.endpoint();
-        // match bip21 to send_session public_key
-        let req_ctx = match self.db.get_send_session(url)? {
-            Some(send_session) => send_session,
-            None => {
-                let psbt = self.create_original_psbt(&uri, fee_rate)?;
-                let mut persister = SenderPersister::new(self.db.clone());
-                let new_sender = SenderBuilder::new(psbt, uri.clone())
-                    .build_recommended(fee_rate)
-                    .with_context(|| "Failed to build payjoin request")?;
-                let storage_token = new_sender
-                    .persist(&mut persister)
-                    .map_err(|e| anyhow!("Failed to persist sender: {}", e))?;
-                Sender::load(storage_token, &persister)
-                    .map_err(|e| anyhow!("Failed to load sender: {}", e))?
+        // If sender session exists, resume it
+        for session in self.db.get_send_sessions()? {
+            let created_event = session.events.first().unwrap().clone();
+            if let SenderSessionEvent::Created(sender) = created_event {
+                if sender.endpoint() == url {
+                    return self.spawn_payjoin_sender(sender).await;
+                }
             }
+        }
+        let psbt = self.create_original_psbt(&uri, fee_rate)?;
+        let mut persister = SenderPersister::new(self.db.clone())?;
+        let new_sender = SenderBuilder::new(psbt, uri.clone())
+            .build_recommended(fee_rate)
+            .with_context(|| "Failed to build payjoin request")?;
+        new_sender
+            .persist(&mut persister)
+            .map_err(|e| anyhow!("Failed to persist sender: {}", e))?;
+        let events = persister.load()?.next().expect("Just created sender");
+
+        let sender = match events {
+            SenderSessionEvent::Created(sender) => sender,
+            _ => return Err(anyhow!("Failed to load sender: could not find created event")),
         };
-        self.spawn_payjoin_sender(req_ctx).await
+
+        self.spawn_payjoin_sender(sender).await
     }
 
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
-        let mut persister = ReceiverPersister::new(self.db.clone());
+        let mut persister = ReceiverPersister::new(self.db.clone())?;
         let new_receiver = NewReceiver::new(
             address,
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys.clone(),
             None,
         )?;
-        let storage_token = new_receiver
+        new_receiver
             .persist(&mut persister)
             .map_err(|e| anyhow!("Failed to persist receiver: {}", e))?;
-        let session = Receiver::load(storage_token, &persister)
-            .map_err(|e| anyhow!("Failed to load receiver: {}", e))?;
-        self.spawn_payjoin_receiver(session, Some(amount)).await
+        let events = persister.load()?.next().expect("Just created receiver");
+        let receiver = match events {
+            ReceiverSessionEvent::NewReceiver(receiver) => receiver,
+            _ => return Err(anyhow!("Failed to load receiver: could not find new receiver event")),
+        };
+        self.spawn_payjoin_receiver(receiver, Some(amount)).await
     }
 
     #[allow(clippy::incompatible_msrv)]
@@ -99,14 +112,27 @@ impl AppTrait for App {
 
         for session in recv_sessions {
             let self_clone = self.clone();
-            tasks.push(tokio::spawn(async move {
-                self_clone.spawn_payjoin_receiver(session, None).await
-            }));
+            let created_event = session.events.first().unwrap().clone();
+            if let ReceiverSessionEvent::NewReceiver(receiver) = created_event {
+                tasks.push(tokio::spawn(async move {
+                    self_clone.spawn_payjoin_receiver(receiver.clone(), None).await
+                }));
+            } else {
+                error!("First event is not a new receiver");
+            }
         }
 
         for session in send_sessions {
             let self_clone = self.clone();
-            tasks.push(tokio::spawn(async move { self_clone.spawn_payjoin_sender(session).await }));
+            let created_event = session.events.first().unwrap().clone();
+            println!("created_event: {:?}", created_event);
+            if let SenderSessionEvent::Created(sender) = created_event {
+                tasks.push(tokio::spawn(async move {
+                    self_clone.spawn_payjoin_sender(sender.clone()).await
+                }));
+            } else {
+                error!("First event is not a sender");
+            }
         }
 
         let mut interrupt = self.interrupt.clone();
@@ -124,6 +150,32 @@ impl AppTrait for App {
         }
         Ok(())
     }
+
+    #[cfg(feature = "v2")]
+    async fn history(&self) -> Result<()> {
+        let send_sessions = self.db.get_send_sessions()?;
+        let recv_sessions = self.db.get_recv_sessions()?;
+        let closed_send_sessions = self.db.get_closed_send_sessions()?;
+        let closed_recv_sessions = self.db.get_closed_recv_sessions()?;
+
+        println!("Open send sessions: {:?}", send_sessions.len());
+        for session in send_sessions {
+            println!("Send session: {:?}", session);
+        }
+        println!("Open recv sessions: {:?}", recv_sessions.len());
+        for session in recv_sessions {
+            println!("Recv session: {:?}", session);
+        }
+        println!("Closed send sessions: {:?}", closed_send_sessions.len());
+        for session in closed_send_sessions {
+            println!("Closed send session: {:?}", session);
+        }
+        println!("Closed recv sessions: {:?}", closed_recv_sessions.len());
+        for session in closed_recv_sessions {
+            println!("Closed recv session: {:?}", session);
+        }
+        Ok(())
+    }
 }
 
 impl App {
@@ -133,7 +185,8 @@ impl App {
         tokio::select! {
             res = self.long_poll_post(&mut req_ctx) => {
                 self.process_pj_response(res?)?;
-                self.db.clear_send_session(req_ctx.endpoint())?;
+                // TODO: use persister session to close
+                // self.db.close_send_session(req_ctx.endpoint())?;
             }
             _ = interrupt.changed() => {
                 println!("Interrupted. Call `send` with the same arguments to resume this session or `resume` to resume all sessions.");
@@ -187,7 +240,8 @@ impl App {
             "Response successful. Watch mempool for successful Payjoin. TXID: {}",
             payjoin_psbt.extract_tx_unchecked_fee_rate().clone().compute_txid()
         );
-        self.db.clear_recv_session()?;
+        // TODO: use persister session to close
+        // self.db.close_recv_session(session.into())?;
         Ok(())
     }
 

@@ -122,6 +122,11 @@ impl AppTrait for App {
     async fn resume_payjoins(&self) -> Result<()> {
         unimplemented!("resume_payjoins not implemented for v1");
     }
+
+    #[cfg(feature = "v2")]
+    async fn history(&self) -> Result<()> {
+        unimplemented!("history_payjoins not implemented for v1");
+    }
 }
 
 impl App {

@@ -3,11 +3,12 @@ use std::fmt;
 
 use bitcoin::FeeRate;
 use log::warn;
+use serde::{Deserialize, Serialize};
 
 use crate::output_substitution::OutputSubstitution;
 use crate::Version;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Params {
     // version
     pub v: Version,

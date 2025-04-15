@@ -33,7 +33,7 @@ use super::error::BuildSenderError;
 use super::*;
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
-use crate::persist::Persister;
+use crate::persist::{PersistedSession, Persister, Value};
 use crate::send::v1;
 use crate::uri::{ShortId, UrlExt};
 use crate::{HpkeKeyPair, HpkePublicKey, ImplementationError, IntoUrl, OhttpKeys, PjUri, Request};
@@ -133,18 +133,29 @@ pub struct NewSender {
 
 impl NewSender {
     /// Saves the new [`Sender`] using the provided persister and returns the storage token.
-    pub fn persist<P: Persister<Sender>>(
+    pub fn persist<P: PersistedSession<SenderSessionEvent>>(
         &self,
         persister: &mut P,
-    ) -> Result<P::Token, ImplementationError> {
+    ) -> Result<(), ImplementationError> {
         let sender = Sender { v1: self.v1.clone(), reply_key: self.reply_key.clone() };
-        Ok(persister.save(sender)?)
+        Ok(persister.save(SenderSessionEvent::Created(sender))?)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SenderSessionEvent {
+    /// Sender was created
+    Created(Sender),
+    /// Fallback broadcasted
+    FallbackBroadcasted(bitcoin::Txid),
+    /// Invalid session
+    /// TODO specify error in event
+    SessionInvalid,
 }
 
 /// A payjoin V2 sender, allowing the construction of a payjoin V2 request
 /// and the resulting [`V2PostContext`].
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sender {
     /// The v1 Sender.
     pub(crate) v1: v1::Sender,
@@ -320,7 +331,7 @@ impl V2PostContext {
 ///
 /// This type is used to make a BIP77 GET request and process the response.
 /// Call [`Self::process_response`] on it to continue the BIP77 flow.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct V2GetContext {
     /// The endpoint in the Payjoin URI
     pub(crate) endpoint: Url,
@@ -397,7 +408,7 @@ impl V2GetContext {
 }
 
 #[cfg(feature = "v2")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct HpkeContext {
     pub(crate) receiver: HpkePublicKey,
     pub(crate) reply_pair: HpkeKeyPair,

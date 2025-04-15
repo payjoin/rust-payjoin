@@ -119,7 +119,7 @@ impl UncheckedProposal {
     /// requires manual intervention, as in most consumer wallets.
     ///
     /// So-called "non-interactive" receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks.
-    /// Those receivers call `extract_tx_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
+    /// Those receivers call `extract_tx_to_check_broadcast()` after making those checks downstream.
     pub fn assume_interactive_receiver(self) -> MaybeInputsOwned {
         MaybeInputsOwned { psbt: self.psbt, params: self.params }
     }

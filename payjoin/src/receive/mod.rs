@@ -11,23 +11,23 @@
 
 use std::str::FromStr;
 
-use bitcoin::{Address, Network, OutPoint, Psbt, ScriptBuf, TxOut, Transaction, TxIn, Sequence, Weight, AddressType, psbt};
-
-pub use error::{
-    Error, ImplementationError, InputContributionError, JsonReply, OutputSubstitutionError,
-    PayloadError, ReplyableError, SelectionError
+use bitcoin::{
+    psbt, Address, AddressType, Network, OutPoint, Psbt, ScriptBuf, Sequence, Transaction, TxIn,
+    TxOut, Weight,
 };
 pub(crate) use error::InternalPayloadError;
-
+pub use error::{
+    Error, ImplementationError, InputContributionError, JsonReply, OutputSubstitutionError,
+    PayloadError, ReplyableError, SelectionError,
+};
 use optional_parameters::Params;
-
 #[cfg(test)]
 use payjoin_test_utils::ORIGINAL_PSBT;
-#[cfg(test)]
-use crate::receive::v1::UncheckedProposal;
 
 pub use crate::psbt::PsbtInputError;
 use crate::psbt::{InternalInputPair, InternalPsbtInputError, PsbtExt};
+#[cfg(test)]
+use crate::receive::v1::UncheckedProposal;
 
 mod error;
 pub(crate) mod optional_parameters;
@@ -61,9 +61,7 @@ pub enum InputWeightError {
 }
 
 impl From<bitcoin::address::FromScriptError> for InputWeightError {
-    fn from(err: bitcoin::address::FromScriptError) -> Self {
-        InputWeightError::ScriptError(err)
-    }
+    fn from(err: bitcoin::address::FromScriptError) -> Self { InputWeightError::ScriptError(err) }
 }
 
 /// Helper to construct a pair of (txin, psbtin) with some built-in validation
@@ -91,15 +89,9 @@ impl InputPair {
         previous_output: OutPoint,
         sequence: Option<Sequence>,
     ) -> Self {
-        let txin = TxIn {
-            previous_output,
-            sequence: sequence.unwrap_or_default(),
-            ..Default::default()
-        };
-        let psbtin = psbt::Input {
-            witness_utxo: Some(witness_utxo),
-            ..Default::default()
-        };
+        let txin =
+            TxIn { previous_output, sequence: sequence.unwrap_or_default(), ..Default::default() };
+        let psbtin = psbt::Input { witness_utxo: Some(witness_utxo), ..Default::default() };
         Self { txin, psbtin }
     }
 
@@ -108,15 +100,9 @@ impl InputPair {
         previous_output: OutPoint,
         sequence: Option<Sequence>,
     ) -> Self {
-        let txin = TxIn {
-            previous_output,
-            sequence: sequence.unwrap_or_default(),
-            ..Default::default()
-        };
-        let psbtin = psbt::Input {
-            non_witness_utxo: Some(non_witness_utxo),
-            ..Default::default()
-        };
+        let txin =
+            TxIn { previous_output, sequence: sequence.unwrap_or_default(), ..Default::default() };
+        let psbtin = psbt::Input { non_witness_utxo: Some(non_witness_utxo), ..Default::default() };
         Self { txin, psbtin }
     }
 
@@ -126,11 +112,8 @@ impl InputPair {
         sequence: Option<Sequence>,
         redeem_script: ScriptBuf,
     ) -> Self {
-        let txin = TxIn {
-            previous_output,
-            sequence: sequence.unwrap_or_default(),
-            ..Default::default()
-        };
+        let txin =
+            TxIn { previous_output, sequence: sequence.unwrap_or_default(), ..Default::default() };
         let psbtin = psbt::Input {
             witness_utxo: Some(witness_utxo),
             redeem_script: Some(redeem_script),
@@ -145,36 +128,39 @@ impl InputPair {
 
         // For P2PKH and P2SH inputs, we need the non-witness UTXO
         if let Some(ref non_witness_utxo) = psbtin.non_witness_utxo {
-            let txout = non_witness_utxo.output.get(txin.previous_output.vout as usize)
+            let txout = non_witness_utxo
+                .output
+                .get(txin.previous_output.vout as usize)
                 .ok_or(InputWeightError::MissingUtxo)?;
             let addr_type = Address::from_script(&txout.script_pubkey, Network::Bitcoin)?
                 .address_type()
                 .ok_or(InputWeightError::UnknownAddressType)?;
 
             match addr_type {
-                AddressType::P2pkh => Ok(Weight::from_wu(149 * 4)),  // P2PKH input weight
+                AddressType::P2pkh => Ok(Weight::from_wu(149 * 4)), // P2PKH input weight
                 AddressType::P2sh => {
                     if let Some(redeem_script) = psbtin.redeem_script.as_ref() {
                         if redeem_script.is_p2wpkh() {
-                            Ok(Weight::from_wu(91 * 4))  // P2SH-P2WPKH input weight
+                            Ok(Weight::from_wu(91 * 4)) // P2SH-P2WPKH input weight
                         } else {
                             Err(InputWeightError::NotSupported)
                         }
                     } else {
                         Err(InputWeightError::MissingRedeemScript)
                     }
-                },
+                }
                 _ => Err(InputWeightError::NotSupported),
             }
         } else {
             // For P2WPKH and P2TR inputs, we need the witness UTXO
             if let Some(ref witness_utxo) = psbtin.witness_utxo {
-                let addr_type = Address::from_script(&witness_utxo.script_pubkey, Network::Bitcoin)?
-                    .address_type()
-                    .ok_or(InputWeightError::UnknownAddressType)?;
+                let addr_type =
+                    Address::from_script(&witness_utxo.script_pubkey, Network::Bitcoin)?
+                        .address_type()
+                        .ok_or(InputWeightError::UnknownAddressType)?;
 
                 match addr_type {
-                    AddressType::P2wpkh => Ok(Weight::from_wu(68 * 4)),  // P2WPKH input weight
+                    AddressType::P2wpkh => Ok(Weight::from_wu(68 * 4)), // P2WPKH input weight
                     AddressType::P2tr => Ok(Weight::from_wu(57 * 4)),   // P2TR input weight
                     _ => Err(InputWeightError::NotSupported),
                 }
@@ -190,15 +176,9 @@ impl InputPair {
         previous_output: OutPoint,
         sequence: Option<Sequence>,
     ) -> Self {
-        let txin = TxIn {
-            previous_output,
-            sequence: sequence.unwrap_or_default(),
-            ..Default::default()
-        };
-        let psbtin = psbt::Input {
-            witness_utxo: Some(witness_utxo),
-            ..Default::default()
-        };
+        let txin =
+            TxIn { previous_output, sequence: sequence.unwrap_or_default(), ..Default::default() };
+        let psbtin = psbt::Input { witness_utxo: Some(witness_utxo), ..Default::default() };
         Self { txin, psbtin }
     }
 
@@ -235,19 +215,24 @@ pub(crate) fn parse_payload(
 
 #[cfg(test)]
 mod tests {
-    use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, TxOut, FeeRate, Txid};
-    use bitcoin::transaction::Version;
     use bitcoin::absolute::LockTime;
+    use bitcoin::transaction::Version;
+    use bitcoin::{Amount, FeeRate, OutPoint, ScriptBuf, Sequence, TxOut, Txid};
 
-    use super::*; 
+    use super::*;
 
     #[test]
     fn test_new_p2pkh_works_with_expected_input_weight() {
-        
-        let dummy_txid = Txid::from_str("000000000000000000000000000000000000000000000000000000000000000a").unwrap();
+        let dummy_txid =
+            Txid::from_str("000000000000000000000000000000000000000000000000000000000000000a")
+                .unwrap();
         let dummy_txout = TxOut {
             value: Amount::from_sat(10_000),
-            script_pubkey: Address::from_str("1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2").unwrap().require_network(Network::Bitcoin).expect("valid network").script_pubkey(),
+            script_pubkey: Address::from_str("1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2")
+                .unwrap()
+                .require_network(Network::Bitcoin)
+                .expect("valid network")
+                .script_pubkey(),
         };
         let dummy_tx = Transaction {
             version: Version::TWO,
@@ -255,33 +240,35 @@ mod tests {
             input: vec![],
             output: vec![dummy_txout.clone()],
         };
-        let dummy_outpoint = OutPoint {
-            txid: dummy_txid,
-            vout: 0,
-        };
+        let dummy_outpoint = OutPoint { txid: dummy_txid, vout: 0 };
 
-        let input_pair = InputPair::new_p2pkh(
-            dummy_tx,
-            dummy_outpoint,
-            None,
-        );
+        let input_pair = InputPair::new_p2pkh(dummy_tx, dummy_outpoint, None);
 
         assert!(input_pair.expected_input_weight().is_ok());
     }
 
     #[test]
     fn test_new_p2sh_p2wpkh_works_with_expected_input_weight() {
-       
-        let dummy_txid = Txid::from_str("000000000000000000000000000000000000000000000000000000000000000b").unwrap();
+        let dummy_txid =
+            Txid::from_str("000000000000000000000000000000000000000000000000000000000000000b")
+                .unwrap();
         let dummy_txout = TxOut {
             value: Amount::from_sat(10_000),
-            script_pubkey: Address::from_str("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy").unwrap().require_network(Network::Bitcoin).expect("valid network").script_pubkey(),
+            script_pubkey: Address::from_str("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy")
+                .unwrap()
+                .require_network(Network::Bitcoin)
+                .expect("valid network")
+                .script_pubkey(),
         };
-        let dummy_outpoint = OutPoint {
-            txid: dummy_txid,
-            vout: 0,
-        };
-        let dummy_redeem_script = ScriptBuf::new_p2wpkh(&bitcoin::PublicKey::from_str("0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798").unwrap().wpubkey_hash().expect("valid pubkey"));
+        let dummy_outpoint = OutPoint { txid: dummy_txid, vout: 0 };
+        let dummy_redeem_script = ScriptBuf::new_p2wpkh(
+            &bitcoin::PublicKey::from_str(
+                "0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798",
+            )
+            .unwrap()
+            .wpubkey_hash()
+            .expect("valid pubkey"),
+        );
 
         let dummy_tx = Transaction {
             version: Version::TWO,
@@ -289,12 +276,8 @@ mod tests {
             input: vec![],
             output: vec![dummy_txout.clone()],
         };
-        let mut input_pair = InputPair::new_p2sh_p2wpkh(
-            dummy_txout,
-            dummy_outpoint,
-            None,
-            dummy_redeem_script,
-        );
+        let mut input_pair =
+            InputPair::new_p2sh_p2wpkh(dummy_txout, dummy_outpoint, None, dummy_redeem_script);
         input_pair.psbtin.non_witness_utxo = Some(dummy_tx);
 
         // Assert: Should calculate weight for P2SH-P2WPKH input
@@ -306,11 +289,19 @@ mod tests {
     #[test]
     #[cfg(feature = "v2")]
     fn test_new_p2tr_works_with_expected_input_weight() {
-        let dummy_txid = Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111").unwrap();
+        let dummy_txid =
+            Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111")
+                .unwrap();
         let dummy_outpoint = OutPoint { txid: dummy_txid, vout: 0 };
         let dummy_txout = TxOut {
             value: Amount::from_sat(10_000),
-            script_pubkey: Address::from_str("bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0").unwrap().require_network(Network::Bitcoin).expect("valid network").script_pubkey(),
+            script_pubkey: Address::from_str(
+                "bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0",
+            )
+            .unwrap()
+            .require_network(Network::Bitcoin)
+            .expect("valid network")
+            .script_pubkey(),
         };
 
         let input_pair = InputPair::new_p2tr(dummy_txout, dummy_outpoint, None);
@@ -320,13 +311,19 @@ mod tests {
 
     #[test]
     fn test_input_selection_behavior() {
-        let dummy_txid = Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111").unwrap();
-        
+        let dummy_txid =
+            Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111")
+                .unwrap();
+
         // P2WPKH input (low weight)
         let p2wpkh_outpoint = OutPoint { txid: dummy_txid, vout: 0 };
         let p2wpkh_txout = TxOut {
             value: Amount::from_sat(10_000),
-            script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").unwrap().require_network(Network::Bitcoin).expect("valid network").script_pubkey(),
+            script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
+                .unwrap()
+                .require_network(Network::Bitcoin)
+                .expect("valid network")
+                .script_pubkey(),
         };
         let p2wpkh_input = InputPair::new_p2wpkh(p2wpkh_txout.clone(), p2wpkh_outpoint, None);
 
@@ -334,14 +331,18 @@ mod tests {
         let p2pkh_outpoint = OutPoint { txid: dummy_txid, vout: 0 };
         let p2pkh_txout = TxOut {
             value: Amount::from_sat(10_000),
-            script_pubkey: Address::from_str("1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2").unwrap().require_network(Network::Bitcoin).expect("valid network").script_pubkey(),
+            script_pubkey: Address::from_str("1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2")
+                .unwrap()
+                .require_network(Network::Bitcoin)
+                .expect("valid network")
+                .script_pubkey(),
         };
         // Create a transaction that contains our UTXO
         let p2pkh_tx = Transaction {
             version: Version::TWO,
             lock_time: LockTime::ZERO,
-            input: vec![], 
-            output: vec![p2pkh_txout.clone()],  
+            input: vec![],
+            output: vec![p2pkh_txout.clone()],
         };
         let p2pkh_input = InputPair::new_p2pkh(p2pkh_tx, p2pkh_outpoint, None);
 
@@ -354,8 +355,10 @@ mod tests {
     #[test]
     fn test_privacy_based_input_selection() {
         //Create a transaction with two outputs (common case for UIH testing)
-        let dummy_txid = Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111").unwrap();
-        
+        let dummy_txid =
+            Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111")
+                .unwrap();
+
         let tx = Transaction {
             version: Version::TWO,
             lock_time: LockTime::ZERO,
@@ -369,39 +372,48 @@ mod tests {
                 // Payment output to receiver
                 TxOut {
                     value: Amount::from_sat(40_000),
-                    script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").unwrap()
-                        .require_network(Network::Bitcoin).expect("valid network").script_pubkey(),
+                    script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
+                        .unwrap()
+                        .require_network(Network::Bitcoin)
+                        .expect("valid network")
+                        .script_pubkey(),
                 },
                 // Change output back to sender
                 TxOut {
                     value: Amount::from_sat(10_000),
-                    script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").unwrap()
-                        .require_network(Network::Bitcoin).expect("valid network").script_pubkey(),
+                    script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
+                        .unwrap()
+                        .require_network(Network::Bitcoin)
+                        .expect("valid network")
+                        .script_pubkey(),
                 },
             ],
         };
-        
+
         // Create PSBT from the transaction
         let mut psbt = Psbt::from_unsigned_tx(tx.clone()).unwrap();
-        
+
         // Add witness UTXO information to the input
         psbt.inputs[0].witness_utxo = Some(TxOut {
-            value: Amount::from_sat(50_000),  // Input covers both outputs
-            script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").unwrap()
-                .require_network(Network::Bitcoin).expect("valid network").script_pubkey(),
+            value: Amount::from_sat(50_000), // Input covers both outputs
+            script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
+                .unwrap()
+                .require_network(Network::Bitcoin)
+                .expect("valid network")
+                .script_pubkey(),
         });
-        
-        let proposal = UncheckedProposal {
-            psbt,
-            params: Params::default(),
-        };
-        
+
+        let proposal = UncheckedProposal { psbt, params: Params::default() };
+
         // Create candidate inputs with different amounts
         let small_input = InputPair::new_p2wpkh(
             TxOut {
                 value: Amount::from_sat(5_000),
-                script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").unwrap()
-                    .require_network(Network::Bitcoin).expect("valid network").script_pubkey(),
+                script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
+                    .unwrap()
+                    .require_network(Network::Bitcoin)
+                    .expect("valid network")
+                    .script_pubkey(),
             },
             OutPoint { txid: dummy_txid, vout: 0 },
             None,
@@ -410,8 +422,11 @@ mod tests {
         let large_input = InputPair::new_p2wpkh(
             TxOut {
                 value: Amount::from_sat(50_000),
-                script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").unwrap()
-                    .require_network(Network::Bitcoin).expect("valid network").script_pubkey(),
+                script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
+                    .unwrap()
+                    .require_network(Network::Bitcoin)
+                    .expect("valid network")
+                    .script_pubkey(),
             },
             OutPoint { txid: dummy_txid, vout: 1 },
             None,
@@ -428,18 +443,24 @@ mod tests {
             .unwrap()
             .commit_outputs();
 
-        let selected_input = wants_inputs.try_preserving_privacy(vec![small_input.clone(), large_input.clone()]).unwrap();
+        let selected_input = wants_inputs
+            .try_preserving_privacy(vec![small_input.clone(), large_input.clone()])
+            .unwrap();
 
         // Assert: Selected input should avoid UIH
         // For 2-output transactions, we should select an input that doesn't trigger UIH1 or UIH2
-        assert!(selected_input.txin.previous_output == small_input.txin.previous_output ||
-               selected_input.txin.previous_output == large_input.txin.previous_output);
+        assert!(
+            selected_input.txin.previous_output == small_input.txin.previous_output
+                || selected_input.txin.previous_output == large_input.txin.previous_output
+        );
     }
 
     #[test]
     fn test_fee_rate_based_selection() {
         // Arrange: Create a proposal with different fee rates
-        let _dummy_txid = Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111").unwrap();
+        let _dummy_txid =
+            Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111")
+                .unwrap();
         let proposal = UncheckedProposal {
             psbt: Psbt::from_str(ORIGINAL_PSBT).unwrap(),
             params: Params {
@@ -451,12 +472,16 @@ mod tests {
         // Act & Assert: Test minimum fee rate enforcement
         let result = proposal.clone().check_broadcast_suitability(
             Some(FeeRate::from_sat_per_vb(5).expect("valid fee rate")),
-            |_| Ok(true)
+            |_| Ok(true),
         );
 
         // Should fail if proposed fee rate is below minimum
-        assert!(matches!(result, 
-            Err(ReplyableError::Payload(PayloadError(InternalPayloadError::PsbtBelowFeeRate(_, _))))
+        assert!(matches!(
+            result,
+            Err(ReplyableError::Payload(PayloadError(InternalPayloadError::PsbtBelowFeeRate(
+                _,
+                _
+            ))))
         ));
     }
 
@@ -466,9 +491,11 @@ mod tests {
         // 1. Enforces minimum fee rates to prevent probing attacks
         // 2. Protects against excessive fees with max_effective_fee_rate
         // 3. Correctly deducts fees from receiver's change output
-        
+
         // Create a simple transaction with one input and one output
-        let dummy_txid = Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111").unwrap();
+        let dummy_txid =
+            Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111")
+                .unwrap();
         let tx = Transaction {
             version: Version::TWO,
             lock_time: LockTime::ZERO,
@@ -480,34 +507,40 @@ mod tests {
             }],
             output: vec![TxOut {
                 value: Amount::from_sat(50_000),
-                script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").unwrap()
-                    .require_network(Network::Bitcoin).expect("valid network").script_pubkey(),
+                script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
+                    .unwrap()
+                    .require_network(Network::Bitcoin)
+                    .expect("valid network")
+                    .script_pubkey(),
             }],
         };
-        
+
         // Create PSBT from the transaction
         let mut psbt = Psbt::from_unsigned_tx(tx.clone()).unwrap();
-        
+
         // Add witness UTXO information to the input
         psbt.inputs[0].witness_utxo = Some(TxOut {
-            value: Amount::from_sat(60_000),  // Input amount larger than output for fees
-            script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").unwrap()
-                .require_network(Network::Bitcoin).expect("valid network").script_pubkey(),
+            value: Amount::from_sat(60_000), // Input amount larger than output for fees
+            script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
+                .unwrap()
+                .require_network(Network::Bitcoin)
+                .expect("valid network")
+                .script_pubkey(),
         });
 
-        let proposal = UncheckedProposal {
-            psbt,
-            params: Params::default(),
-        };
+        let proposal = UncheckedProposal { psbt, params: Params::default() };
 
         // Create a P2WPKH input that will contribute to the payjoin
         let receiver_input = InputPair::new_p2wpkh(
             TxOut {
                 value: Amount::from_sat(10_000),
-                script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").unwrap()
-                    .require_network(Network::Bitcoin).expect("valid network").script_pubkey(),
+                script_pubkey: Address::from_str("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
+                    .unwrap()
+                    .require_network(Network::Bitcoin)
+                    .expect("valid network")
+                    .script_pubkey(),
             },
-            OutPoint { txid: dummy_txid, vout: 1 },  // Different vout from sender's input
+            OutPoint { txid: dummy_txid, vout: 1 }, // Different vout from sender's input
             None,
         );
 
@@ -529,9 +562,9 @@ mod tests {
         // - min_fee_rate: 2 sat/vB ensures transaction is broadcastable
         // - max_effective_fee_rate: 5 sat/vB protects receiver from overpaying
         let result = provisional.finalize_proposal(
-            |psbt| Ok(psbt.clone()),  // Mock wallet that just returns the PSBT unchanged
-            Some(FeeRate::from_sat_per_vb(2).expect("valid fee rate")),  // Minimum fee rate for broadcast
-            Some(FeeRate::from_sat_per_vb(5).expect("valid fee rate"))   // Maximum fee rate receiver will pay
+            |psbt| Ok(psbt.clone()), // Mock wallet that just returns the PSBT unchanged
+            Some(FeeRate::from_sat_per_vb(2).expect("valid fee rate")), // Minimum fee rate for broadcast
+            Some(FeeRate::from_sat_per_vb(5).expect("valid fee rate")), // Maximum fee rate receiver will pay
         );
 
         // Verify that fees were successfully applied within constraints

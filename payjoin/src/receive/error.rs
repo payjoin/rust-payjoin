@@ -1,8 +1,8 @@
 use std::{error, fmt};
 
-use crate::error_codes::ErrorCode::{
+use crate::{error_codes::ErrorCode::{
     self, NotEnoughMoney, OriginalPsbtRejected, Unavailable, VersionUnsupported,
-};
+}, persist::PersistableError};
 
 pub type ImplementationError = Box<dyn error::Error + Send + Sync>;
 
@@ -62,6 +62,8 @@ pub enum ReplyableError {
     /// e.g. database errors, network failures, wallet errors
     Implementation(ImplementationError),
 }
+
+impl PersistableError for ReplyableError {}
 
 /// The standard format for errors that can be replied as JSON.
 ///

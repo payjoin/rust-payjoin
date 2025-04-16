@@ -16,6 +16,7 @@ pub(crate) struct SessionWrapper<V> {
     pub(crate) events: Vec<V>,
 }
 
+#[derive(Debug, Clone)]
 pub struct SessionId([u8; 8]);
 
 impl SessionId {
@@ -88,6 +89,8 @@ impl PersistedSession<SenderSessionEvent> for SenderPersister {
         Ok(())
     }
 }
+
+#[derive(Clone)]
 pub(crate) struct ReceiverPersister {
     db: Arc<Database>,
     session_id: SessionId,

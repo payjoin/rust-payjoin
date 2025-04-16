@@ -6,7 +6,9 @@ use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::PersistedSession;
-use payjoin::receive::v2::{NewReceiver, Receiver, ReceiverSessionEvent, UncheckedProposal};
+use payjoin::receive::v2::{
+    Receiver, ReceiverSessionEvent, UncheckedProposal, UninitializedReceiver,
+};
 use payjoin::receive::{Error, ImplementationError, ReplyableError};
 use payjoin::send::v2::{Sender, SenderBuilder, SenderSessionEvent};
 use payjoin::Uri;
@@ -81,20 +83,13 @@ impl AppTrait for App {
         let address = self.wallet().get_new_address()?;
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
         let mut persister = ReceiverPersister::new(self.db.clone())?;
-        let new_receiver = NewReceiver::new(
+        let receiver = Receiver::new(
             address,
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys.clone(),
             None,
+            persister,
         )?;
-        new_receiver
-            .persist(&mut persister)
-            .map_err(|e| anyhow!("Failed to persist receiver: {}", e))?;
-        let events = persister.load()?.next().expect("Just created receiver");
-        let receiver = match events {
-            ReceiverSessionEvent::NewReceiver(receiver) => receiver,
-            _ => return Err(anyhow!("Failed to load receiver: could not find new receiver event")),
-        };
         self.spawn_payjoin_receiver(receiver, Some(amount)).await
     }
 
@@ -109,16 +104,21 @@ impl AppTrait for App {
         }
 
         let mut tasks = Vec::new();
+        let recv_persister = ReceiverPersister::new(self.db.clone())?;
 
         for session in recv_sessions {
             let self_clone = self.clone();
-            let created_event = session.events.first().unwrap().clone();
-            if let ReceiverSessionEvent::NewReceiver(receiver) = created_event {
+            // TODO: fix unwrap
+            let created_event =
+                session.events.first().ok_or_else(|| anyhow!("No events found"))?.clone();
+            if let ReceiverSessionEvent::Created(uninit_receiver) = created_event {
+                let receiver = Receiver::new_from_state(uninit_receiver, recv_persister.clone());
                 tasks.push(tokio::spawn(async move {
-                    self_clone.spawn_payjoin_receiver(receiver.clone(), None).await
+                    self_clone.spawn_payjoin_receiver(receiver, None).await
                 }));
             } else {
-                error!("First event is not a new receiver");
+                // This should never happen
+                error!("First event is not a receiver");
             }
         }
 
@@ -198,7 +198,7 @@ impl App {
     #[allow(clippy::incompatible_msrv)]
     async fn spawn_payjoin_receiver(
         &self,
-        mut session: Receiver,
+        mut session: Receiver<UninitializedReceiver, ReceiverPersister>,
         amount: Option<Amount>,
     ) -> Result<()> {
         println!("Receive session established");
@@ -288,8 +288,8 @@ impl App {
 
     async fn long_poll_fallback(
         &self,
-        session: &mut payjoin::receive::v2::Receiver,
-    ) -> Result<payjoin::receive::v2::UncheckedProposal> {
+        session: &mut payjoin::receive::v2::Receiver<UninitializedReceiver, ReceiverPersister>,
+    ) -> Result<payjoin::receive::v2::Receiver<UncheckedProposal, ReceiverPersister>> {
         loop {
             let (req, context) = session.extract_req(&self.config.v2()?.ohttp_relay)?;
             println!("Polling receive request...");
@@ -306,8 +306,11 @@ impl App {
 
     fn process_v2_proposal(
         &self,
-        proposal: payjoin::receive::v2::UncheckedProposal,
-    ) -> Result<payjoin::receive::v2::PayjoinProposal, Error> {
+        proposal: payjoin::receive::v2::Receiver<UncheckedProposal, ReceiverPersister>,
+    ) -> Result<
+        payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal, ReceiverPersister>,
+        Error,
+    > {
         let wallet = self.wallet();
 
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
@@ -348,7 +351,7 @@ impl App {
 /// Handle request error by sending an error response over the directory
 async fn handle_recoverable_error(
     e: ReplyableError,
-    mut receiver: UncheckedProposal,
+    mut receiver: payjoin::receive::v2::Receiver<UncheckedProposal, ReceiverPersister>,
     ohttp_relay: &payjoin::Url,
 ) -> anyhow::Error {
     let to_return = anyhow!("Replied with error: {}", e);
@@ -375,9 +378,12 @@ async fn handle_recoverable_error(
 }
 
 fn try_contributing_inputs(
-    payjoin: payjoin::receive::v2::WantsInputs,
+    payjoin: payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsInputs, ReceiverPersister>,
     wallet: &BitcoindWallet,
-) -> Result<payjoin::receive::v2::ProvisionalProposal, ImplementationError> {
+) -> Result<
+    payjoin::receive::v2::Receiver<payjoin::receive::v2::ProvisionalProposal, ReceiverPersister>,
+    ImplementationError,
+> {
     let candidate_inputs = wallet.list_unspent()?;
 
     let selected_input =

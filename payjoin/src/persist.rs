@@ -3,11 +3,25 @@ use std::fmt::Display;
 use crate::receive::v2::ReceiverSessionEvent;
 use crate::send::v2::SenderSessionEvent;
 
-impl Event for ReceiverSessionEvent {}
-impl Event for SenderSessionEvent {}
+impl Event for ReceiverSessionEvent {
+    fn session_invalid(error: &impl PersistableError) -> Self {
+        ReceiverSessionEvent::SessionInvalid(error.to_string())
+    }
+}
+impl Event for SenderSessionEvent {
+    fn session_invalid(error: &impl PersistableError) -> Self {
+        SenderSessionEvent::SessionInvalid(error.to_string())
+    }
+}
 
 /// Types that can be persisted in a session
-pub trait Event: serde::Serialize + serde::de::DeserializeOwned + Sized + Clone {}
+pub trait Event: serde::Serialize + serde::de::DeserializeOwned + Sized + Clone {
+    fn session_invalid(error: &impl PersistableError) -> Self;
+}
+
+/// Serializable error types that can be persisted in a session
+/// TODO: see if this can be a ext. trait with a blanket impl for all error types
+pub trait PersistableError: std::error::Error + ToString {}
 
 /// A session that can be persisted and loaded from a store
 ///
@@ -18,7 +32,12 @@ pub trait PersistedSession<E: Event> {
     type Error: std::error::Error + Send + Sync + 'static;
 
     fn save(&self, event: E) -> Result<(), Self::Error>; // Appends to list of session updates, Receives generic events
+    fn record_error(&self, error: &impl PersistableError) -> Result<(), Self::Error> {
+        self.save(E::session_invalid(error))?;
+        self.close()
+    }
     fn load(&self) -> Result<impl Iterator<Item = E>, Self::Error>; // Loads the latest session given all updates
+                                                                    // TODO: this should consume self
     fn close(&self) -> Result<(), Self::Error>; // Marks the session as closed, no more updates will be appended
 }
 

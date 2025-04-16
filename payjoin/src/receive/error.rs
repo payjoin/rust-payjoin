@@ -1,8 +1,8 @@
 use std::{error, fmt};
 
-use crate::error_codes::ErrorCode::{
+use crate::{error_codes::ErrorCode::{
     self, NotEnoughMoney, OriginalPsbtRejected, Unavailable, VersionUnsupported,
-};
+}, persist::PersistableError};
 
 /// The top-level error type for the payjoin receiver
 #[derive(Debug)]
@@ -60,6 +60,8 @@ pub enum ReplyableError {
     /// e.g. database errors, network failures, wallet errors
     Implementation(crate::ImplementationError),
 }
+
+impl PersistableError for ReplyableError {}
 
 /// The standard format for errors that can be replied as JSON.
 ///

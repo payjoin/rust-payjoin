@@ -33,7 +33,7 @@ use super::error::BuildSenderError;
 use super::*;
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
-use crate::persist::{PersistedSession, Persister, Value};
+use crate::persist::{PersistableError, PersistedSession, Persister, Value};
 use crate::send::v1;
 use crate::uri::{ShortId, UrlExt};
 use crate::{HpkeKeyPair, HpkePublicKey, ImplementationError, IntoUrl, OhttpKeys, PjUri, Request};
@@ -150,7 +150,7 @@ pub enum SenderSessionEvent {
     FallbackBroadcasted(bitcoin::Txid),
     /// Invalid session
     /// TODO specify error in event
-    SessionInvalid,
+    SessionInvalid(impl PersistableError),
 }
 
 /// A payjoin V2 sender, allowing the construction of a payjoin V2 request

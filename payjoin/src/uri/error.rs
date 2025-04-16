@@ -25,8 +25,9 @@ impl std::fmt::Display for BadEndpointError {
         match self {
             BadEndpointError::UrlParse(e) => write!(f, "Invalid URL: {:?}", e),
             #[cfg(feature = "v2")]
-            BadEndpointError::LowercaseFragment =>
-                write!(f, "Some or all of the fragment is lowercase"),
+            BadEndpointError::LowercaseFragment => {
+                write!(f, "Some or all of the fragment is lowercase")
+            }
         }
     }
 }

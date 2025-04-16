@@ -150,7 +150,7 @@ pub enum SenderSessionEvent {
     FallbackBroadcasted(bitcoin::Txid),
     /// Invalid session
     /// TODO specify error in event
-    SessionInvalid(impl PersistableError),
+    SessionInvalid(String),
 }
 
 /// A payjoin V2 sender, allowing the construction of a payjoin V2 request

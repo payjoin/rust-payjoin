@@ -1,8 +1,9 @@
 use std::{error, fmt};
 
-use crate::{error_codes::ErrorCode::{
+use crate::error_codes::ErrorCode::{
     self, NotEnoughMoney, OriginalPsbtRejected, Unavailable, VersionUnsupported,
-}, persist::PersistableError};
+};
+use crate::persist::PersistableError;
 
 pub type ImplementationError = Box<dyn error::Error + Send + Sync>;
 

@@ -19,7 +19,7 @@ use super::{
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::{PersistableError, PersistedSession};
+use crate::persist::PersistedSession;
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
 use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
@@ -71,28 +71,37 @@ fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
     sha256::Hash::hash(&pubkey.to_compressed_bytes()).into()
 }
 
-#[derive(Debug,Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ReceiverSessionEvent {
     /// Receiver was created
     Created(UninitializedReceiver),
     /// Receiver read a proposal from a directory
     UncheckedProposal(v1::UncheckedProposal),
-    /// Receiver read a proposal from a directory
     MaybeInputsOwned(v1::MaybeInputsOwned),
-    /// Fallback was not broadcastable
-    FallbackNotBroadcastable,
+    MaybeInputsSeen(v1::MaybeInputsSeen),
+    OutputsUnknown(v1::OutputsUnknown),
+    WantsOutputs(v1::WantsOutputs),
+    WantsInputs(v1::WantsInputs),
+    ProvisionalProposal(v1::ProvisionalProposal),
+    PayjoinProposal(v1::PayjoinProposal),
     /// Fallback broadcasted
     FallbackBroadcasted(bitcoin::Txid),
+    /* Error States */
+    /// Fallback was not broadcastable
+    FallbackNotBroadcastable,
     /// Invalid session: some inputs are owned by the receiver
     InputOwnedFailure(bitcoin::ScriptBuf),
     /// Invalid session: some inputs have been seen before
     InputSeen(bitcoin::OutPoint),
+    /// Missing payment to receiver
+    MissingPayment,
     /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
     /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
     /// Reason being in some cases we still want to preserve the error b/c the cause the session to fail but these are terminal states we dont need them to be structured or well typed
     /// b/c its a terminal state and there is nothing to replay. So serialization will be lossy and that is fine.
     SessionInvalid(String),
 }
+
 trait State: Clone {}
 #[derive(Debug, Clone)]
 pub struct Receiver<State, P> {
@@ -155,7 +164,11 @@ where
         Ok((req, ohttp_ctx))
     }
 
-    pub fn process_res(&mut self, body: &[u8], context: ohttp::ClientResponse) -> Result<Option<Receiver<UncheckedProposal, P>>, Error> {
+    pub fn process_res(
+        &mut self,
+        body: &[u8],
+        context: ohttp::ClientResponse,
+    ) -> Result<Option<Receiver<UncheckedProposal, P>>, Error> {
         let res = self.inner_process_res(body, context)?;
         if let Some(proposal) = res {
             // TODO: remove unwrap
@@ -185,7 +198,7 @@ where
         }
         match String::from_utf8(response.body().to_vec()) {
             // V1 response bodies are utf8 plaintext
-            Ok(response) => {Ok(Some(self.extract_proposal_from_v1(response)?))},
+            Ok(response) => Ok(Some(self.extract_proposal_from_v1(response)?)),
             // V2 response bodies are encrypted binary
             Err(_) => Ok(Some(self.extract_proposal_from_v2(response.body().to_vec())?)),
         }
@@ -253,7 +266,10 @@ where
         Ok(proposal)
     }
 
-    fn apply_unchecked_from_payload (&self, event: v1::UncheckedProposal) -> Receiver<UncheckedProposal, P> {
+    fn apply_unchecked_from_payload(
+        &self,
+        event: v1::UncheckedProposal,
+    ) -> Receiver<UncheckedProposal, P> {
         let new_state = UncheckedProposal { v1: event, context: self.state.context.clone() };
 
         Receiver { state: new_state, persister: self.persister.clone() }
@@ -304,28 +320,37 @@ where
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
     ) -> Result<Receiver<MaybeInputsOwned, P>, ReplyableError> {
-        let v1 = match self.state.clone().v1.check_broadcast_suitability(min_fee_rate, can_broadcast) {
-            Ok(v1) => {
-                // TODO: remove unwrap
-                self.persister.save(ReceiverSessionEvent::MaybeInputsOwned(v1.clone())).unwrap();
-                v1
-            }
-            Err(e) => {
-                if let ReplyableError::Payload(error) = &e {
-                    if let InternalPayloadError::OriginalPsbtNotBroadcastable = &error.0 {
-                        self.persister.save(ReceiverSessionEvent::FallbackNotBroadcastable).unwrap();
-                    } else {
-                        self.persister.record_error(&e);
-                    }
-                } else {
-                    self.persister.record_error(&e);
+        let v1 =
+            match self.state.clone().v1.check_broadcast_suitability(min_fee_rate, can_broadcast) {
+                Ok(v1) => {
+                    // TODO: remove unwrap
+                    self.persister
+                        .save(ReceiverSessionEvent::MaybeInputsOwned(v1.clone()))
+                        .unwrap();
+                    v1
                 }
-                return Err(e);
-            }
-        };
+                Err(e) => {
+                    match &e {
+                        ReplyableError::Payload(error)
+                            if matches!(
+                                error.0,
+                                InternalPayloadError::OriginalPsbtNotBroadcastable
+                            ) =>
+                        {
+                            self.persister
+                                .save(ReceiverSessionEvent::FallbackNotBroadcastable)
+                                .unwrap();
+                        }
+                        // TODO: remove unwrap
+                        _ => self.persister.record_error(&e).unwrap(),
+                    }
+                    return Err(e);
+                }
+            };
         Ok(self.extract_reply(v1))
     }
 
+    /// Note to self: this is the public entry point for replayability
     pub fn extract_reply(&self, v1: v1::MaybeInputsOwned) -> Receiver<MaybeInputsOwned, P> {
         let persister = self.persister.clone();
         let new_state = MaybeInputsOwned { v1, context: self.state.context.clone() };
@@ -409,29 +434,40 @@ where
         self,
         is_owned: impl Fn(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<Receiver<MaybeInputsSeen, P>, ReplyableError> {
+        let session_context = self.state.context.clone();
         let inner = match self.state.v1.check_inputs_not_owned(is_owned) {
             Ok(inner) => inner,
             Err(e) => {
-                if let ReplyableError::Payload(error) = &e {
-                    if let InternalPayloadError::InputOwned(script) = &error.0 {
-                        // TODO: remove unwraps
-                        self.persister
-                            .save(ReceiverSessionEvent::InputOwnedFailure(script.clone()))
-                            .unwrap();
-                    } else {
-                        // TODO: remove unwraps
-                        self.persister.record_error(e);
+                match &e {
+                    ReplyableError::Payload(error)
+                        if matches!(error.0, InternalPayloadError::InputOwned(_)) =>
+                    {
+                        if let InternalPayloadError::InputOwned(script) = &error.0 {
+                            // TODO: remove unwraps
+                            self.persister
+                                .save(ReceiverSessionEvent::InputOwnedFailure(script.clone()))
+                                .unwrap();
+                        }
                     }
-                } else {
                     // TODO: remove unwraps
-                    self.persister.record_error(e);
+                    _ => self.persister.record_error(&e).unwrap(),
                 }
                 return Err(e);
             }
         };
-        let new_state = MaybeInputsSeen { v1: inner, context: self.state.context };
-        self.persister.save(Rece)
-        Ok(Receiver { state: new_state, persister: self.persister.clone() })
+        // TODO: remove unwrap
+        self.persister.save(ReceiverSessionEvent::MaybeInputsSeen(inner.clone())).unwrap();
+        Ok(Self::extract_reply(inner, session_context, self.persister.clone()))
+    }
+
+    // TODO: this needs a better name
+    pub fn extract_reply(
+        v1: v1::MaybeInputsSeen,
+        session_context: SessionContext,
+        persister: P,
+    ) -> Receiver<MaybeInputsSeen, P> {
+        let new_state = MaybeInputsSeen { v1, context: session_context };
+        Receiver { state: new_state, persister }
     }
 }
 
@@ -457,23 +493,39 @@ where
         self,
         is_known: impl Fn(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<Receiver<OutputsUnknown, P>, ReplyableError> {
+        let session_context = self.state.context.clone();
         let inner = match self.state.v1.check_no_inputs_seen_before(is_known) {
             Ok(inner) => inner,
             Err(e) => {
-                if let ReplyableError::Payload(error) = &e {
-                    if let InternalPayloadError::InputSeen(outpoint) = &error.0 {
-                        self.persister.save(ReceiverSessionEvent::InputSeen(outpoint.clone())).unwrap();
-                    } else {
-                        self.persister.save(ReceiverSessionEvent::SessionInvalid).unwrap();
+                match &e {
+                    ReplyableError::Payload(error)
+                        if matches!(error.0, InternalPayloadError::InputSeen(_)) =>
+                    {
+                        if let InternalPayloadError::InputSeen(outpoint) = &error.0 {
+                            // TODO: remove unwrap
+                            self.persister
+                                .save(ReceiverSessionEvent::InputSeen(outpoint.clone()))
+                                .unwrap();
+                        }
                     }
-                } else {
-                    self.persister.save(ReceiverSessionEvent::SessionInvalid).unwrap();
+                    // TODO: remove unwrap
+                    _ => self.persister.record_error(&e).unwrap(),
                 }
                 return Err(e);
             }
         };
-        let new_state = OutputsUnknown { v1: inner, context: self.state.context };
-        Ok(Receiver { state: new_state, persister: self.persister.clone() })
+        // TODO: remove unwrap
+        self.persister.save(ReceiverSessionEvent::OutputsUnknown(inner.clone())).unwrap();
+        Ok(Self::extract_reply(inner, session_context, self.persister.clone()))
+    }
+
+    pub fn extract_reply(
+        v1: v1::OutputsUnknown,
+        session_context: SessionContext,
+        persister: P,
+    ) -> Receiver<OutputsUnknown, P> {
+        let new_state = OutputsUnknown { v1, context: session_context };
+        Receiver { state: new_state, persister }
     }
 }
 
@@ -498,9 +550,35 @@ where
         self,
         is_receiver_output: impl Fn(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<Receiver<WantsOutputs, P>, ReplyableError> {
-        let inner = self.state.v1.identify_receiver_outputs(is_receiver_output)?;
-        let new_state = WantsOutputs { v1: inner, context: self.state.context };
-        Ok(Receiver { state: new_state, persister: self.persister.clone() })
+        let session_context = self.state.context.clone();
+        let inner = match self.state.v1.identify_receiver_outputs(is_receiver_output) {
+            Ok(inner) => inner,
+            Err(e) => {
+                match &e {
+                    ReplyableError::Payload(error)
+                        if matches!(error.0, InternalPayloadError::MissingPayment) =>
+                    {
+                        // TODO: remove unwrap
+                        self.persister.save(ReceiverSessionEvent::MissingPayment).unwrap();
+                    }
+                    // TODO: remove unwrap
+                    _ => self.persister.record_error(&e).unwrap(),
+                }
+                return Err(e);
+            }
+        };
+        // TODO: remove unwrap
+        self.persister.save(ReceiverSessionEvent::WantsOutputs(inner.clone())).unwrap();
+        Ok(Self::extract_reply(inner, session_context, self.persister.clone()))
+    }
+
+    pub fn extract_reply(
+        v1: v1::WantsOutputs,
+        session_context: SessionContext,
+        persister: P,
+    ) -> Receiver<WantsOutputs, P> {
+        let new_state = WantsOutputs { v1, context: session_context };
+        Receiver { state: new_state, persister }
     }
 }
 
@@ -553,8 +631,18 @@ where
     /// Outputs cannot be modified after this function is called.
     pub fn commit_outputs(self) -> Receiver<WantsInputs, P> {
         let inner = self.state.v1.commit_outputs();
-        let new_state = WantsInputs { v1: inner, context: self.state.context };
-        Receiver { state: new_state, persister: self.persister.clone() }
+        let session_context = self.state.context.clone();
+        self.persister.save(ReceiverSessionEvent::WantsInputs(inner.clone())).unwrap();
+        Self::extract_reply(inner, session_context, self.persister.clone())
+    }
+
+    pub fn extract_reply(
+        v1: v1::WantsInputs,
+        session_context: SessionContext,
+        persister: P,
+    ) -> Receiver<WantsInputs, P> {
+        let new_state = WantsInputs { v1, context: session_context };
+        Receiver { state: new_state, persister }
     }
 }
 
@@ -607,8 +695,18 @@ where
     /// Inputs cannot be modified after this function is called.
     pub fn commit_inputs(self) -> Receiver<ProvisionalProposal, P> {
         let inner = self.state.v1.commit_inputs();
-        let new_state = ProvisionalProposal { v1: inner, context: self.state.context };
-        Receiver { state: new_state, persister: self.persister.clone() }
+        // TODO: remove unwrap
+        self.persister.save(ReceiverSessionEvent::ProvisionalProposal(inner.clone())).unwrap();
+        Self::extract_reply(inner, self.state.context.clone(), self.persister.clone())
+    }
+
+    pub fn extract_reply(
+        v1: v1::ProvisionalProposal,
+        session_context: SessionContext,
+        persister: P,
+    ) -> Receiver<ProvisionalProposal, P> {
+        let new_state = ProvisionalProposal { v1, context: session_context };
+        Receiver { state: new_state, persister }
     }
 }
 
@@ -633,13 +731,31 @@ where
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
     ) -> Result<Receiver<PayjoinProposal, P>, ReplyableError> {
-        let inner = self.state.v1.finalize_proposal(
+        let inner = match self.state.v1.finalize_proposal(
             wallet_process_psbt,
             min_fee_rate,
             max_effective_fee_rate,
-        )?;
-        let new_state = PayjoinProposal { v1: inner, context: self.state.context };
-        Ok(Receiver { state: new_state, persister: self.persister.clone() })
+        ) {
+            Ok(inner) => inner,
+            Err(e) => {
+                // TODO: remove unwrap
+                // TODO: are all errors here terminal?
+                self.persister.record_error(&e).unwrap();
+                return Err(e);
+            }
+        };
+        // TODO: remove unwrap
+        self.persister.save(ReceiverSessionEvent::PayjoinProposal(inner.clone())).unwrap();
+        Ok(Self::extract_reply(inner, self.state.context.clone(), self.persister.clone()))
+    }
+
+    pub fn extract_reply(
+        v1: v1::PayjoinProposal,
+        session_context: SessionContext,
+        persister: P,
+    ) -> Receiver<PayjoinProposal, P> {
+        let new_state = PayjoinProposal { v1, context: session_context };
+        Receiver { state: new_state, persister }
     }
 }
 

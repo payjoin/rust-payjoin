@@ -1,8 +1,9 @@
 use std::{error, fmt};
 
-use crate::{error_codes::ErrorCode::{
+use crate::error_codes::ErrorCode::{
     self, NotEnoughMoney, OriginalPsbtRejected, Unavailable, VersionUnsupported,
-}, persist::PersistableError};
+};
+use crate::persist::PersistableError;
 
 /// The top-level error type for the payjoin receiver
 #[derive(Debug)]

@@ -203,7 +203,7 @@ impl MaybeInputsSeen {
 ///
 /// Only accept PSBTs that send us money.
 /// Identify those outputs with [`Self::identify_receiver_outputs`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputsUnknown {
     psbt: Psbt,
     params: Params,
@@ -255,7 +255,7 @@ impl OutputsUnknown {
 /// A checked proposal that the receiver may substitute or add outputs to
 ///
 /// Call [`Self::commit_outputs`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WantsOutputs {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,
@@ -388,7 +388,7 @@ fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [
 /// A checked proposal that the receiver may contribute inputs to to make a payjoin
 ///
 /// Call [`Self::commit_inputs`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WantsInputs {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,
@@ -551,7 +551,7 @@ impl WantsInputs {
 /// sender will accept.
 ///
 /// Call [`Self::finalize_proposal`] to return a finalized [`PayjoinProposal`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProvisionalProposal {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,

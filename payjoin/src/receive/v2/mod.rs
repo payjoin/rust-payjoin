@@ -639,9 +639,9 @@ pub mod test {
 
     use once_cell::sync::Lazy;
     use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, SYMMETRIC};
-    use persist::Value;
 
     use super::*;
+    use crate::persist::Value;
 
     pub(crate) static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
         address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
@@ -708,7 +708,8 @@ pub mod test {
     #[test]
     fn receiver_ser_de_roundtrip() -> Result<(), serde_json::Error> {
         let session = Receiver { context: SHARED_CONTEXT.clone() };
-        assert_eq!(session.key().as_ref(), session.key().0.as_bytes());
+        let short_id = id(&session.context.s);
+        assert_eq!(session.key().as_ref(), short_id.as_bytes());
         let serialized = serde_json::to_string(&session)?;
         let deserialized: Receiver = serde_json::from_str(&serialized)?;
         assert_eq!(session, deserialized);

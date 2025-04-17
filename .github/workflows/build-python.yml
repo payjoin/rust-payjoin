@@ -5,7 +5,7 @@ on: [push, pull_request]
 jobs:
   build-manylinux_2_28-x86_64-wheels:
     name: "Build and test Manylinux 2.28 x86_64 wheels"
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: python
@@ -17,8 +17,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - python: "3.8"
-            python_dir: "cp38-cp38"
           - python: "3.9"
             python_dir: "cp39-cp39"
           - python: "3.10"
@@ -27,6 +25,8 @@ jobs:
             python_dir: "cp311-cp311"
           - python: "3.12"
             python_dir: "cp312-cp312"
+          - python: "3.13"
+            python_dir: "cp313-cp313"
     steps:
       - name: "Checkout"
         uses: actions/checkout@v4

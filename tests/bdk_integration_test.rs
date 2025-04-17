@@ -226,7 +226,7 @@ mod v2 {
     use payjoin_ffi::receive::{PayjoinProposal, Receiver, UncheckedProposal};
     use payjoin_ffi::send::SenderBuilder;
     use payjoin_ffi::uri::Uri;
-    use payjoin_ffi::{OhttpKeys, Request};
+    use payjoin_ffi::Request;
     use payjoin_test_utils::TestServices;
 
     use super::*;
@@ -250,13 +250,18 @@ mod v2 {
             let agent = services.http_agent();
             let directory = services.directory_url();
             services.wait_for_services_ready().await?;
-            let ohttp_keys = services.fetch_ohttp_keys().await?;
+            let ohttp_keys = payjoin_ffi::io::fetch_ohttp_keys_with_cert(
+                services.ohttp_relay_url().as_str(),
+                directory.as_str(),
+                services.cert(),
+            )
+            .await?;
 
             let address = receiver.get_address(AddressIndex::New);
             let session = Receiver::new(
                 Address::new(address.to_string(), Network::Regtest).unwrap(),
                 directory.to_string(),
-                OhttpKeys(ohttp_keys),
+                ohttp_keys,
                 None,
             )?;
             let ohttp_relay = services.ohttp_relay_url();

@@ -22,7 +22,7 @@ impl From<OhttpKeys> for payjoin::OhttpKeys {
 }
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 #[derive(Debug, Clone)]
-pub struct OhttpKeys(pub payjoin::OhttpKeys);
+pub struct OhttpKeys(payjoin::OhttpKeys);
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 impl OhttpKeys {

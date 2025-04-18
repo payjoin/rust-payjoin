@@ -1631,6 +1631,7 @@ dependencies = [
  "clap",
  "config",
  "env_logger",
+ "http",
  "http-body-util",
  "hyper",
  "hyper-rustls",

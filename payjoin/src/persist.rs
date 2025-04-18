@@ -28,16 +28,17 @@ pub trait PersistableError: std::error::Error + ToString {}
 /// This is a generic trait that can be implemented for any type that implements `Event`.
 ///
 ///
-pub trait PersistedSession<E: Event> {
+pub trait PersistedSession {
     type Error: std::error::Error + Send + Sync + 'static;
+    type SessionEvent: Event;
 
-    fn save(&self, event: E) -> Result<(), Self::Error>; // Appends to list of session updates, Receives generic events
+    fn save(&self, event: Self::SessionEvent) -> Result<(), Self::Error>; // Appends to list of session updates, Receives generic events
     fn record_error(&self, error: &impl PersistableError) -> Result<(), Self::Error> {
-        self.save(E::session_invalid(error))?;
+        self.save(Self::SessionEvent::session_invalid(error))?;
         self.close()
     }
-    fn load(&self) -> Result<impl Iterator<Item = E>, Self::Error>; // Loads the latest session given all updates
-                                                                    // TODO: this should consume self
+    fn load(&self) -> Result<impl Iterator<Item = Self::SessionEvent>, Self::Error>; // Loads the latest session given all updates
+                                                                                     // TODO: this should consume self
     fn close(&self) -> Result<(), Self::Error>; // Marks the session as closed, no more updates will be appended
 }
 

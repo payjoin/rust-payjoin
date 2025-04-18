@@ -74,7 +74,7 @@ fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ReceiverSessionEvent {
     /// Receiver was created
-    Created(UninitializedReceiver),
+    Created(SessionContext),
     /// Receiver read a proposal from a directory
     UncheckedProposal(v1::UncheckedProposal),
     MaybeInputsOwned(v1::MaybeInputsOwned),
@@ -102,32 +102,212 @@ pub enum ReceiverSessionEvent {
     SessionInvalid(String),
 }
 
-trait State: Clone {}
+pub enum ReceiverReplayError {
+    /// The session is invalid
+    SessionInvalid(String),
+    /// Sesssion has no event logs
+    NoEventLogs,
+    /// Logs are out of order
+    OutOfOrder,
+    /// Unrecognized event
+    UnrecognizedEvent(ReceiverSessionEvent),
+}
+
+pub enum ReceiverState {
+    Uninitialized(UninitializedReceiver),
+    WithContext(ReceiverWithContext),
+    UncheckedProposal(UncheckedProposal),
+    MaybeInputsOwned(MaybeInputsOwned),
+    MaybeInputsSeen(MaybeInputsSeen),
+    OutputsUnknown(OutputsUnknown),
+    WantsOutputs(WantsOutputs),
+    WantsInputs(WantsInputs),
+    ProvisionalProposal(ProvisionalProposal),
+    PayjoinProposal(PayjoinProposal),
+}
+
+pub fn replay_receiver_event_log<P>(
+    persister: P,
+) -> Result<Receiver<ReceiverState, P>, ReceiverReplayError>
+where
+    P: PersistedSession + Clone,
+    P::SessionEvent: From<ReceiverSessionEvent>,
+    ReceiverSessionEvent: Into<P::SessionEvent>,
+    ReceiverSessionEvent: From<P::SessionEvent>,
+{
+    let logs = persister.load().unwrap();
+    let mut receiver = Receiver {
+        persister: persister.clone(),
+        state: ReceiverState::Uninitialized(UninitializedReceiver {}),
+    };
+
+    for log in logs {
+        receiver = receiver.process_event(log.into());
+    }
+
+    Ok(receiver)
+}
+
+trait StateMachineProcessor<P: PersistedSession> {
+    fn process_event(&self, event: ReceiverSessionEvent) -> Receiver<ReceiverState, P>;
+}
+
+impl<P> StateMachineProcessor<P> for Receiver<ReceiverState, P>
+where
+    P: PersistedSession + Clone,
+    ReceiverSessionEvent: Into<P::SessionEvent>,
+    P::SessionEvent: From<ReceiverSessionEvent>,
+{
+    fn process_event(&self, event: ReceiverSessionEvent) -> Receiver<ReceiverState, P> {
+        match &self.state {
+            // Receiver is uninitialized, no session context is available yet
+            ReceiverState::Uninitialized(_state) => match event {
+                ReceiverSessionEvent::Created(context) => Receiver {
+                    state: ReceiverState::WithContext(ReceiverWithContext { context }),
+                    persister: self.persister.clone(),
+                },
+                _ => panic!("Invalid state transition for Uninitialized"),
+            },
+            // Receiver has a session context, should read from directory and process proposals
+            ReceiverState::WithContext(state) => match event {
+                ReceiverSessionEvent::UncheckedProposal(proposal) =>
+                    Receiver::apply_unchecked_from_payload(
+                        &Receiver { state: state.clone(), persister: self.persister.clone() },
+                        proposal,
+                    ),
+                _ => panic!("Invalid state transition for WithContext"),
+            },
+            // Receiver has an unchecked proposal, should process inputs owned
+            ReceiverState::UncheckedProposal(state) => match event {
+                ReceiverSessionEvent::MaybeInputsOwned(maybe_inputs_owned) =>
+                    Receiver::apply_maybe_inputs_owned(
+                        &Receiver { state: state.clone(), persister: self.persister.clone() },
+                        maybe_inputs_owned,
+                    ),
+                _ => panic!("Invalid state transition for UncheckedProposal"),
+            },
+            // Receiver has confirmation that non of the inputs owned by them, they should check if any of the inputs have been seen before
+            ReceiverState::MaybeInputsOwned(state) => match event {
+                ReceiverSessionEvent::MaybeInputsSeen(maybe_inputs_seen) =>
+                    Receiver::apply_maybe_inputs_seen(
+                        &Receiver { state: state.clone(), persister: self.persister.clone() },
+                        maybe_inputs_seen,
+                    ),
+                _ => panic!("Invalid state transition for MaybeInputsOwned"),
+            },
+            // Receiver has confirmation that none of the inputs have been seen before, they should identify the receiver's outputs
+            ReceiverState::MaybeInputsSeen(state) => match event {
+                ReceiverSessionEvent::OutputsUnknown(outputs_unknown) =>
+                    Receiver::apply_outputs_unknown(
+                        &Receiver { state: state.clone(), persister: self.persister.clone() },
+                        outputs_unknown,
+                    ),
+                _ => panic!("Invalid state transition for MaybeInputsSeen"),
+            },
+            // Receiver has identified the receiver's outputs, they should commit to them or substitute them for other outputs
+            ReceiverState::OutputsUnknown(state) => match event {
+                ReceiverSessionEvent::WantsOutputs(wants_outputs) => Receiver::apply_wants_outputs(
+                    &Receiver { state: state.clone(), persister: self.persister.clone() },
+                    wants_outputs,
+                ),
+                _ => panic!("Invalid state transition for OutputsUnknown"),
+            },
+            // Receiver has committed to the outputs, they should contribute inputs
+            ReceiverState::WantsOutputs(state) => match event {
+                ReceiverSessionEvent::WantsInputs(wants_inputs) => Receiver::apply_wants_inputs(
+                    &Receiver { state: state.clone(), persister: self.persister.clone() },
+                    wants_inputs,
+                ),
+                _ => panic!("Invalid state transition for WantsOutputs"),
+            },
+            // Receiver has committed to the inputs, they should finalize the proposal
+            ReceiverState::WantsInputs(state) => match event {
+                ReceiverSessionEvent::ProvisionalProposal(provisional_proposal) =>
+                    Receiver::apply_provisional_proposal(
+                        &Receiver { state: state.clone(), persister: self.persister.clone() },
+                        provisional_proposal,
+                    ),
+                _ => panic!("Invalid state transition for WantsInputs"),
+            },
+            // Receiver has a provisional proposal, they should sign their inputs and send the proposal to the sender
+            ReceiverState::ProvisionalProposal(state) => match event {
+                ReceiverSessionEvent::PayjoinProposal(payjoin_proposal) =>
+                    Receiver::apply_payjoin_proposal(
+                        &Receiver { state: state.clone(), persister: self.persister.clone() },
+                        payjoin_proposal,
+                    ),
+                _ => panic!("Invalid state transition for ProvisionalProposal"),
+            },
+            // TODO: other states
+            _ => panic!("Invalid state transition"),
+        }
+    }
+}
+
+trait State: Clone + std::fmt::Debug + 'static {}
 #[derive(Debug, Clone)]
 pub struct Receiver<State, P> {
     pub(crate) state: State,
     pub(crate) persister: P,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UninitializedReceiver {
-    context: SessionContext,
-}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The receiver is not initialized yet, no session context is available yet
+pub struct UninitializedReceiver {}
 
 impl State for UninitializedReceiver {}
 
 impl<P> Receiver<UninitializedReceiver, P>
 where
-    P: PersistedSession<ReceiverSessionEvent> + Clone,
+    P: PersistedSession + Clone,
+    ReceiverSessionEvent: Into<P::SessionEvent>,
 {
-    pub fn new(
+    pub fn apply_session_context(&self, context: SessionContext) -> Receiver<ReceiverState, P> {
+        Receiver {
+            state: ReceiverState::WithContext(ReceiverWithContext { context }),
+            persister: self.persister.clone(),
+        }
+    }
+
+    // TODO: do we need this?
+    // pub fn create_session(
+    //     &self,
+    //     address: Address,
+    //     directory: impl IntoUrl,
+    //     ohttp_keys: OhttpKeys,
+    //     expire_after: Option<Duration>,
+    // ) -> Result<Receiver<ReceiverState, P>, IntoUrlError> {
+    //     Receiver::<ReceiverState, P>::new_session(
+    //         address,
+    //         directory,
+    //         ohttp_keys,
+    //         expire_after,
+    //         self.persister.clone(),
+    //     )
+    // }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReceiverWithContext {
+    context: SessionContext,
+}
+
+impl State for ReceiverWithContext {}
+
+impl<P> Receiver<ReceiverWithContext, P>
+where
+    P: PersistedSession + Clone,
+    ReceiverSessionEvent: Into<P::SessionEvent>,
+{
+    // TODO: this shouldnt be pub anymore bc we have uninit receiver
+    pub fn new_session(
         address: Address,
         directory: impl IntoUrl,
         ohttp_keys: OhttpKeys,
         expire_after: Option<Duration>,
         persister: P,
     ) -> Result<Self, IntoUrlError> {
-        let state = UninitializedReceiver {
+        let state = ReceiverWithContext {
             context: SessionContext {
                 address,
                 directory: directory.into_url()?,
@@ -141,13 +321,12 @@ where
         };
 
         // TODO: fix unwrap
-        persister.save(ReceiverSessionEvent::Created(state.clone())).unwrap();
-        let receiver = Self { state: state.clone().into(), persister };
-        Ok(receiver)
+        persister.save(ReceiverSessionEvent::Created(state.context.clone()).into()).unwrap();
+        Ok(Self::new_from_state(state.context, persister))
     }
 
-    pub fn new_from_state(state: UninitializedReceiver, persister: P) -> Self {
-        Self { state, persister }
+    pub fn new_from_state(session_context: SessionContext, persister: P) -> Self {
+        Self { state: ReceiverWithContext { context: session_context }, persister }
     }
 
     /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
@@ -168,11 +347,14 @@ where
         &mut self,
         body: &[u8],
         context: ohttp::ClientResponse,
-    ) -> Result<Option<Receiver<UncheckedProposal, P>>, Error> {
+    ) -> Result<Option<Receiver<ReceiverState, P>>, Error> {
+        // TODO: we need to record error here
         let res = self.inner_process_res(body, context)?;
         if let Some(proposal) = res {
             // TODO: remove unwrap
-            self.persister.save(ReceiverSessionEvent::UncheckedProposal(proposal.clone())).unwrap();
+            self.persister
+                .save(ReceiverSessionEvent::UncheckedProposal(proposal.clone()).into())
+                .unwrap();
             Ok(Some(self.apply_unchecked_from_payload(proposal)))
         } else {
             Ok(None)
@@ -266,13 +448,16 @@ where
         Ok(proposal)
     }
 
-    fn apply_unchecked_from_payload(
+    pub fn apply_unchecked_from_payload(
         &self,
         event: v1::UncheckedProposal,
-    ) -> Receiver<UncheckedProposal, P> {
+    ) -> Receiver<ReceiverState, P> {
         let new_state = UncheckedProposal { v1: event, context: self.state.context.clone() };
 
-        Receiver { state: new_state, persister: self.persister.clone() }
+        Receiver {
+            state: ReceiverState::UncheckedProposal(new_state),
+            persister: self.persister.clone(),
+        }
     }
 
     /// Build a V2 Payjoin URI from the receiver's context
@@ -301,7 +486,8 @@ impl State for UncheckedProposal {}
 
 impl<P> Receiver<UncheckedProposal, P>
 where
-    P: PersistedSession<ReceiverSessionEvent> + Clone,
+    P: PersistedSession + Clone,
+    P::SessionEvent: From<ReceiverSessionEvent>,
 {
     /// Call after checking that the Original PSBT can be broadcast.
     ///
@@ -319,13 +505,13 @@ where
         &self,
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
-    ) -> Result<Receiver<MaybeInputsOwned, P>, ReplyableError> {
+    ) -> Result<Receiver<ReceiverState, P>, ReplyableError> {
         let v1 =
             match self.state.clone().v1.check_broadcast_suitability(min_fee_rate, can_broadcast) {
                 Ok(v1) => {
                     // TODO: remove unwrap
                     self.persister
-                        .save(ReceiverSessionEvent::MaybeInputsOwned(v1.clone()))
+                        .save(ReceiverSessionEvent::MaybeInputsOwned(v1.clone()).into())
                         .unwrap();
                     v1
                 }
@@ -338,7 +524,7 @@ where
                             ) =>
                         {
                             self.persister
-                                .save(ReceiverSessionEvent::FallbackNotBroadcastable)
+                                .save(ReceiverSessionEvent::FallbackNotBroadcastable.into())
                                 .unwrap();
                         }
                         // TODO: remove unwrap
@@ -347,14 +533,16 @@ where
                     return Err(e);
                 }
             };
-        Ok(self.extract_reply(v1))
+        Ok(self.apply_maybe_inputs_owned(v1))
     }
 
     /// Note to self: this is the public entry point for replayability
-    pub fn extract_reply(&self, v1: v1::MaybeInputsOwned) -> Receiver<MaybeInputsOwned, P> {
-        let persister = self.persister.clone();
+    pub fn apply_maybe_inputs_owned(&self, v1: v1::MaybeInputsOwned) -> Receiver<ReceiverState, P> {
         let new_state = MaybeInputsOwned { v1, context: self.state.context.clone() };
-        Receiver { state: new_state, persister }
+        Receiver {
+            state: ReceiverState::MaybeInputsOwned(new_state),
+            persister: self.persister.clone(),
+        }
     }
 
     /// The Sender's Original PSBT
@@ -424,7 +612,8 @@ impl State for MaybeInputsOwned {}
 
 impl<P> Receiver<MaybeInputsOwned, P>
 where
-    P: PersistedSession<ReceiverSessionEvent> + Clone,
+    P: PersistedSession + Clone,
+    P::SessionEvent: From<ReceiverSessionEvent>,
 {
     /// Check that the Original PSBT has no receiver-owned inputs.
     /// Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
@@ -433,9 +622,8 @@ where
     pub fn check_inputs_not_owned(
         self,
         is_owned: impl Fn(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<Receiver<MaybeInputsSeen, P>, ReplyableError> {
-        let session_context = self.state.context.clone();
-        let inner = match self.state.v1.check_inputs_not_owned(is_owned) {
+    ) -> Result<Receiver<ReceiverState, P>, ReplyableError> {
+        let inner = match self.state.v1.clone().check_inputs_not_owned(is_owned) {
             Ok(inner) => inner,
             Err(e) => {
                 match &e {
@@ -445,7 +633,9 @@ where
                         if let InternalPayloadError::InputOwned(script) = &error.0 {
                             // TODO: remove unwraps
                             self.persister
-                                .save(ReceiverSessionEvent::InputOwnedFailure(script.clone()))
+                                .save(
+                                    ReceiverSessionEvent::InputOwnedFailure(script.clone()).into(),
+                                )
                                 .unwrap();
                         }
                     }
@@ -456,18 +646,16 @@ where
             }
         };
         // TODO: remove unwrap
-        self.persister.save(ReceiverSessionEvent::MaybeInputsSeen(inner.clone())).unwrap();
-        Ok(Self::extract_reply(inner, session_context, self.persister.clone()))
+        self.persister.save(ReceiverSessionEvent::MaybeInputsSeen(inner.clone()).into()).unwrap();
+        Ok(self.apply_maybe_inputs_seen(inner))
     }
 
-    // TODO: this needs a better name
-    pub fn extract_reply(
-        v1: v1::MaybeInputsSeen,
-        session_context: SessionContext,
-        persister: P,
-    ) -> Receiver<MaybeInputsSeen, P> {
-        let new_state = MaybeInputsSeen { v1, context: session_context };
-        Receiver { state: new_state, persister }
+    pub fn apply_maybe_inputs_seen(&self, v1: v1::MaybeInputsSeen) -> Receiver<ReceiverState, P> {
+        let new_state = MaybeInputsSeen { v1, context: self.state.context.clone() };
+        Receiver {
+            state: ReceiverState::MaybeInputsSeen(new_state),
+            persister: self.persister.clone(),
+        }
     }
 }
 
@@ -484,7 +672,8 @@ impl State for MaybeInputsSeen {}
 
 impl<P> Receiver<MaybeInputsSeen, P>
 where
-    P: PersistedSession<ReceiverSessionEvent> + Clone,
+    P: PersistedSession + Clone,
+    P::SessionEvent: From<ReceiverSessionEvent>,
 {
     /// Make sure that the original transaction inputs have never been seen before.
     /// This prevents probing attacks. This prevents reentrant Payjoin, where a sender
@@ -492,9 +681,8 @@ where
     pub fn check_no_inputs_seen_before(
         self,
         is_known: impl Fn(&OutPoint) -> Result<bool, ImplementationError>,
-    ) -> Result<Receiver<OutputsUnknown, P>, ReplyableError> {
-        let session_context = self.state.context.clone();
-        let inner = match self.state.v1.check_no_inputs_seen_before(is_known) {
+    ) -> Result<Receiver<ReceiverState, P>, ReplyableError> {
+        let inner = match self.state.v1.clone().check_no_inputs_seen_before(is_known) {
             Ok(inner) => inner,
             Err(e) => {
                 match &e {
@@ -504,7 +692,7 @@ where
                         if let InternalPayloadError::InputSeen(outpoint) = &error.0 {
                             // TODO: remove unwrap
                             self.persister
-                                .save(ReceiverSessionEvent::InputSeen(outpoint.clone()))
+                                .save(ReceiverSessionEvent::InputSeen(outpoint.clone()).into())
                                 .unwrap();
                         }
                     }
@@ -515,17 +703,16 @@ where
             }
         };
         // TODO: remove unwrap
-        self.persister.save(ReceiverSessionEvent::OutputsUnknown(inner.clone())).unwrap();
-        Ok(Self::extract_reply(inner, session_context, self.persister.clone()))
+        self.persister.save(ReceiverSessionEvent::OutputsUnknown(inner.clone()).into()).unwrap();
+        Ok(self.apply_outputs_unknown(inner))
     }
 
-    pub fn extract_reply(
-        v1: v1::OutputsUnknown,
-        session_context: SessionContext,
-        persister: P,
-    ) -> Receiver<OutputsUnknown, P> {
-        let new_state = OutputsUnknown { v1, context: session_context };
-        Receiver { state: new_state, persister }
+    pub fn apply_outputs_unknown(&self, v1: v1::OutputsUnknown) -> Receiver<ReceiverState, P> {
+        let new_state = OutputsUnknown { v1, context: self.state.context.clone() };
+        Receiver {
+            state: ReceiverState::OutputsUnknown(new_state),
+            persister: self.persister.clone(),
+        }
     }
 }
 
@@ -543,15 +730,15 @@ impl State for OutputsUnknown {}
 
 impl<P> Receiver<OutputsUnknown, P>
 where
-    P: PersistedSession<ReceiverSessionEvent> + Clone,
+    P: PersistedSession + Clone,
+    P::SessionEvent: From<ReceiverSessionEvent>,
 {
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: impl Fn(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<Receiver<WantsOutputs, P>, ReplyableError> {
-        let session_context = self.state.context.clone();
-        let inner = match self.state.v1.identify_receiver_outputs(is_receiver_output) {
+    ) -> Result<Receiver<ReceiverState, P>, ReplyableError> {
+        let inner = match self.state.v1.clone().identify_receiver_outputs(is_receiver_output) {
             Ok(inner) => inner,
             Err(e) => {
                 match &e {
@@ -559,7 +746,7 @@ where
                         if matches!(error.0, InternalPayloadError::MissingPayment) =>
                     {
                         // TODO: remove unwrap
-                        self.persister.save(ReceiverSessionEvent::MissingPayment).unwrap();
+                        self.persister.save(ReceiverSessionEvent::MissingPayment.into()).unwrap();
                     }
                     // TODO: remove unwrap
                     _ => self.persister.record_error(&e).unwrap(),
@@ -568,17 +755,16 @@ where
             }
         };
         // TODO: remove unwrap
-        self.persister.save(ReceiverSessionEvent::WantsOutputs(inner.clone())).unwrap();
-        Ok(Self::extract_reply(inner, session_context, self.persister.clone()))
+        self.persister.save(ReceiverSessionEvent::WantsOutputs(inner.clone()).into()).unwrap();
+        Ok(self.apply_wants_outputs(inner))
     }
 
-    pub fn extract_reply(
-        v1: v1::WantsOutputs,
-        session_context: SessionContext,
-        persister: P,
-    ) -> Receiver<WantsOutputs, P> {
-        let new_state = WantsOutputs { v1, context: session_context };
-        Receiver { state: new_state, persister }
+    pub fn apply_wants_outputs(&self, v1: v1::WantsOutputs) -> Receiver<ReceiverState, P> {
+        let new_state = WantsOutputs { v1, context: self.state.context.clone() };
+        Receiver {
+            state: ReceiverState::WantsOutputs(new_state),
+            persister: self.persister.clone(),
+        }
     }
 }
 
@@ -595,7 +781,8 @@ impl State for WantsOutputs {}
 
 impl<P> Receiver<WantsOutputs, P>
 where
-    P: PersistedSession<ReceiverSessionEvent> + Clone,
+    P: PersistedSession + Clone,
+    P::SessionEvent: From<ReceiverSessionEvent>,
 {
     /// Whether the receiver is allowed to substitute original outputs or not.
     pub fn output_substitution(&self) -> OutputSubstitution { self.state.v1.output_substitution() }
@@ -629,20 +816,15 @@ where
 
     /// Proceed to the input contribution step.
     /// Outputs cannot be modified after this function is called.
-    pub fn commit_outputs(self) -> Receiver<WantsInputs, P> {
-        let inner = self.state.v1.commit_outputs();
-        let session_context = self.state.context.clone();
-        self.persister.save(ReceiverSessionEvent::WantsInputs(inner.clone())).unwrap();
-        Self::extract_reply(inner, session_context, self.persister.clone())
+    pub fn commit_outputs(self) -> Receiver<ReceiverState, P> {
+        let inner = self.state.v1.clone().commit_outputs();
+        self.persister.save(ReceiverSessionEvent::WantsInputs(inner.clone()).into()).unwrap();
+        self.apply_wants_inputs(inner)
     }
 
-    pub fn extract_reply(
-        v1: v1::WantsInputs,
-        session_context: SessionContext,
-        persister: P,
-    ) -> Receiver<WantsInputs, P> {
-        let new_state = WantsInputs { v1, context: session_context };
-        Receiver { state: new_state, persister }
+    pub fn apply_wants_inputs(&self, v1: v1::WantsInputs) -> Receiver<ReceiverState, P> {
+        let new_state = WantsInputs { v1, context: self.state.context.clone() };
+        Receiver { state: ReceiverState::WantsInputs(new_state), persister: self.persister.clone() }
     }
 }
 
@@ -659,7 +841,8 @@ impl State for WantsInputs {}
 
 impl<P> Receiver<WantsInputs, P>
 where
-    P: PersistedSession<ReceiverSessionEvent> + Clone,
+    P: PersistedSession + Clone,
+    P::SessionEvent: From<ReceiverSessionEvent>,
 {
     /// Select receiver input such that the payjoin avoids surveillance.
     /// Return the input chosen that has been applied to the Proposal.
@@ -685,7 +868,7 @@ where
         self,
         inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<Self, InputContributionError> {
-        let inner = self.state.v1.contribute_inputs(inputs)?;
+        let inner = self.state.v1.clone().contribute_inputs(inputs)?;
         let new_state = WantsInputs { v1: inner, context: self.state.context };
         let new_state = Self { state: new_state, persister: self.persister.clone() };
         Ok(new_state)
@@ -693,20 +876,24 @@ where
 
     /// Proceed to the proposal finalization step.
     /// Inputs cannot be modified after this function is called.
-    pub fn commit_inputs(self) -> Receiver<ProvisionalProposal, P> {
-        let inner = self.state.v1.commit_inputs();
+    pub fn commit_inputs(self) -> Receiver<ReceiverState, P> {
+        let inner = self.state.v1.clone().commit_inputs();
         // TODO: remove unwrap
-        self.persister.save(ReceiverSessionEvent::ProvisionalProposal(inner.clone())).unwrap();
-        Self::extract_reply(inner, self.state.context.clone(), self.persister.clone())
+        self.persister
+            .save(ReceiverSessionEvent::ProvisionalProposal(inner.clone()).into())
+            .unwrap();
+        self.apply_provisional_proposal(inner)
     }
 
-    pub fn extract_reply(
+    pub fn apply_provisional_proposal(
+        &self,
         v1: v1::ProvisionalProposal,
-        session_context: SessionContext,
-        persister: P,
-    ) -> Receiver<ProvisionalProposal, P> {
-        let new_state = ProvisionalProposal { v1, context: session_context };
-        Receiver { state: new_state, persister }
+    ) -> Receiver<ReceiverState, P> {
+        let new_state = ProvisionalProposal { v1, context: self.state.context.clone() };
+        Receiver {
+            state: ReceiverState::ProvisionalProposal(new_state),
+            persister: self.persister.clone(),
+        }
     }
 }
 
@@ -723,15 +910,16 @@ impl State for ProvisionalProposal {}
 
 impl<P> Receiver<ProvisionalProposal, P>
 where
-    P: PersistedSession<ReceiverSessionEvent> + Clone,
+    P: PersistedSession + Clone,
+    P::SessionEvent: From<ReceiverSessionEvent>,
 {
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
-    ) -> Result<Receiver<PayjoinProposal, P>, ReplyableError> {
-        let inner = match self.state.v1.finalize_proposal(
+    ) -> Result<Receiver<ReceiverState, P>, ReplyableError> {
+        let inner = match self.state.v1.clone().finalize_proposal(
             wallet_process_psbt,
             min_fee_rate,
             max_effective_fee_rate,
@@ -745,23 +933,22 @@ where
             }
         };
         // TODO: remove unwrap
-        self.persister.save(ReceiverSessionEvent::PayjoinProposal(inner.clone())).unwrap();
-        Ok(Self::extract_reply(inner, self.state.context.clone(), self.persister.clone()))
+        self.persister.save(ReceiverSessionEvent::PayjoinProposal(inner.clone()).into()).unwrap();
+        Ok(self.apply_payjoin_proposal(inner))
     }
 
-    pub fn extract_reply(
-        v1: v1::PayjoinProposal,
-        session_context: SessionContext,
-        persister: P,
-    ) -> Receiver<PayjoinProposal, P> {
-        let new_state = PayjoinProposal { v1, context: session_context };
-        Receiver { state: new_state, persister }
+    pub fn apply_payjoin_proposal(&self, v1: v1::PayjoinProposal) -> Receiver<ReceiverState, P> {
+        let new_state = PayjoinProposal { v1, context: self.state.context.clone() };
+        Receiver {
+            state: ReceiverState::PayjoinProposal(new_state),
+            persister: self.persister.clone(),
+        }
     }
 }
 
 /// A finalized payjoin proposal, complete with fees and receiver signatures, that the sender
 /// should find acceptable.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PayjoinProposal {
     v1: v1::PayjoinProposal,
     context: SessionContext,
@@ -778,7 +965,8 @@ impl State for PayjoinProposal {}
 
 impl<P> Receiver<PayjoinProposal, P>
 where
-    P: PersistedSession<ReceiverSessionEvent> + Clone,
+    P: PersistedSession + Clone,
+    P::SessionEvent: From<ReceiverSessionEvent>,
 {
     /// The UTXOs that would be spent by this Payjoin transaction
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {

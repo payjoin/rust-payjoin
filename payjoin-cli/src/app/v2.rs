@@ -7,7 +7,8 @@ use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::PersistedSession;
 use payjoin::receive::v2::{
-    Receiver, ReceiverSessionEvent, UncheckedProposal, UninitializedReceiver,
+    Receiver, ReceiverSessionEvent, ReceiverState, ReceiverWithContext, UncheckedProposal,
+    UninitializedReceiver,
 };
 use payjoin::receive::{Error, ImplementationError, ReplyableError};
 use payjoin::send::v2::{Sender, SenderBuilder, SenderSessionEvent};
@@ -83,7 +84,7 @@ impl AppTrait for App {
         let address = self.wallet().get_new_address()?;
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
         let mut persister = ReceiverPersister::new(self.db.clone())?;
-        let receiver = Receiver::new(
+        let receiver = Receiver::new_session(
             address,
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys.clone(),
@@ -198,7 +199,7 @@ impl App {
     #[allow(clippy::incompatible_msrv)]
     async fn spawn_payjoin_receiver(
         &self,
-        mut session: Receiver<UninitializedReceiver, ReceiverPersister>,
+        mut session: Receiver<ReceiverWithContext, ReceiverPersister>,
         amount: Option<Amount>,
     ) -> Result<()> {
         println!("Receive session established");
@@ -288,8 +289,10 @@ impl App {
 
     async fn long_poll_fallback(
         &self,
-        session: &mut payjoin::receive::v2::Receiver<UninitializedReceiver, ReceiverPersister>,
-    ) -> Result<payjoin::receive::v2::Receiver<UncheckedProposal, ReceiverPersister>> {
+        session: &mut payjoin::receive::v2::Receiver<ReceiverWithContext, ReceiverPersister>,
+    ) -> Result<
+        payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal, ReceiverPersister>,
+    > {
         loop {
             let (req, context) = session.extract_req(&self.config.v2()?.ohttp_relay)?;
             println!("Polling receive request...");

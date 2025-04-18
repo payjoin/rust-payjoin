@@ -18,8 +18,15 @@ Follow these steps to clone the repository and run the unit tests:
 git clone https://github.com/LtbLightning/payjoin-ffi.git
 cd python
 
+# Setup a python virtual environment
+python -m venv venv
+source venv/bin/activate
+
 # Install dependencies
 pip install --requirement requirements.txt --requirement requirements-dev.txt
+
+# Generate the bindings (use the script appropriate for your platform)
+PYBIN="./venv/bin/" bash ./scripts/generate_<platform>.sh
 
 # Build the wheel
 python setup.py bdist_wheel --verbose
@@ -43,8 +50,15 @@ Now, proceed with the integration test:
 git clone https://github.com/LtbLightning/payjoin-ffi.git
 cd python
 
+# Setup a python virtual environment
+python -m venv venv
+source venv/bin/activate
+
 # Install dependencies
 pip install --requirement requirements.txt --requirement requirements-dev.txt
+
+# Generate the bindings (use the script appropriate for your platform)
+PYBIN="./venv/bin/" bash ./scripts/generate_<platform>.sh
 
 # Build the wheel
 python setup.py bdist_wheel --verbose
@@ -60,11 +74,15 @@ python -m unittest --verbose test/payjoin_integration_test.py
 ## Building the Package
 
 ```shell
+# Setup a python virtual environment
+python -m venv venv
+source venv/bin/activate
+
 # Install dependencies
 pip install --requirement requirements.txt
 
 # Generate the bindings (use the script appropriate for your platform)
-bash ./scripts/generate_macos.sh
+PYBIN="./venv/bin/" bash ./scripts/generate_<platform>.sh
 
 # Build the wheel
 python setup.py --verbose bdist_wheel

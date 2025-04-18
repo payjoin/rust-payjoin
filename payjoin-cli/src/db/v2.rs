@@ -45,7 +45,8 @@ impl SenderPersister {
     }
 }
 
-impl PersistedSession<SenderSessionEvent> for SenderPersister {
+impl PersistedSession for SenderPersister {
+    type SessionEvent = SenderSessionEvent;
     type Error = crate::db::error::Error;
     fn save(&self, event: SenderSessionEvent) -> std::result::Result<(), Self::Error> {
         // Append to list of session updates
@@ -109,8 +110,10 @@ impl ReceiverPersister {
     }
 }
 
-impl PersistedSession<ReceiverSessionEvent> for ReceiverPersister {
+impl PersistedSession for ReceiverPersister {
+    type SessionEvent = ReceiverSessionEvent;
     type Error = crate::db::error::Error;
+
     fn save(&self, event: ReceiverSessionEvent) -> std::result::Result<(), Self::Error> {
         let recv_tree = self.db.0.open_tree("recv_sessions")?;
         let key = self.session_id.as_ref();

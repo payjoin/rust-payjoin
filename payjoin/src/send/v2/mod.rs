@@ -133,12 +133,14 @@ pub struct NewSender {
 
 impl NewSender {
     /// Saves the new [`Sender`] using the provided persister and returns the storage token.
-    pub fn persist<P: PersistedSession<SenderSessionEvent>>(
+    pub fn persist<P: PersistedSession>(
         &self,
         persister: &mut P,
     ) -> Result<(), ImplementationError> {
         let sender = Sender { v1: self.v1.clone(), reply_key: self.reply_key.clone() };
-        Ok(persister.save(SenderSessionEvent::Created(sender))?)
+        // TODO: Implement persisting Sender
+        // Ok(persister.save(sender)?)
+        Ok(())
     }
 }
 

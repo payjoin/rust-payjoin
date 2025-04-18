@@ -708,9 +708,8 @@ pub mod test {
     #[test]
     fn receiver_ser_de_roundtrip() -> Result<(), serde_json::Error> {
         let session = Receiver { context: SHARED_CONTEXT.clone() };
-        // Verify key consistency through Value trait implementation
-        let key = <Receiver as Value>::key(&session);
-        assert_eq!(key.as_ref(), key.as_ref());
+        let short_id = id(&session.context.s);
+        assert_eq!(session.key().as_ref(), short_id.as_bytes());
         let serialized = serde_json::to_string(&session)?;
         let deserialized: Receiver = serde_json::from_str(&serialized)?;
         assert_eq!(session, deserialized);

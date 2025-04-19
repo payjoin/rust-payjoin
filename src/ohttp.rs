@@ -1,12 +1,16 @@
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[error("OHTTP error: {message}")]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
-pub struct OhttpError {
-    message: String,
-}
-impl From<ohttp::Error> for OhttpError {
-    fn from(value: ohttp::Error) -> Self {
-        OhttpError { message: format!("{:?}", value) }
+pub use error::OhttpError;
+
+pub mod error {
+    #[derive(Debug, PartialEq, Eq, thiserror::Error)]
+    #[error("OHTTP error: {message}")]
+    #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+    pub struct OhttpError {
+        message: String,
+    }
+    impl From<ohttp::Error> for OhttpError {
+        fn from(value: ohttp::Error) -> Self {
+            OhttpError { message: format!("{:?}", value) }
+        }
     }
 }
 

@@ -72,6 +72,8 @@ fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// represents a piece of information that the reciever has learned about the session
+/// Each event can be used to transition the receiver state machine to a new state
 pub enum ReceiverSessionEvent {
     /// Receiver was created
     Created(SessionContext),
@@ -102,16 +104,27 @@ pub enum ReceiverReplayError {
 }
 
 #[derive(Debug, Clone)]
+/// The state of the receiver state machine
 pub enum ReceiverState {
+    /// The receiver is not initialized yet, no session context is available yet
     Uninitialized(UninitializedReceiver),
+    /// The receiver has a session context, needs to extract a proposal from directory
     WithContext(ReceiverWithContext),
+    /// The receiver has an unchecked proposal
     UncheckedProposal(UncheckedProposal),
+    /// The receiver knows the inputs are none of their own
     MaybeInputsOwned(MaybeInputsOwned),
+    /// The receiver knows the inputs have never been seen before
     MaybeInputsSeen(MaybeInputsSeen),
+    /// The receiver knows atleast one outputs are ones that pay to the receiver
     OutputsUnknown(OutputsUnknown),
+    /// The receiver wants to add outputs to the proposal
     WantsOutputs(WantsOutputs),
+    /// The receiver wants to add inputs to the proposal
     WantsInputs(WantsInputs),
+    /// The receiver has a provisional proposal
     ProvisionalProposal(ProvisionalProposal),
+    /// The receiver has a payjoin proposal
     PayjoinProposal(PayjoinProposal),
 }
 
@@ -121,7 +134,6 @@ pub fn replay_receiver_event_log<P>(
 where
     P: PersistedSession + Clone,
     P::SessionEvent: From<ReceiverSessionEvent>,
-    ReceiverSessionEvent: Into<P::SessionEvent>,
     ReceiverSessionEvent: From<P::SessionEvent>,
 {
     let logs = persister.load().unwrap();
@@ -153,66 +165,75 @@ where
                 state: ReceiverState::WithContext(ReceiverWithContext { context }),
                 persister: self.persister.clone(),
             },
-            
-            (ReceiverState::WithContext(state), ReceiverSessionEvent::UncheckedProposal(proposal)) => {
-                Receiver::apply_unchecked_from_payload(
-                    &Receiver { state: state.clone(), persister: self.persister.clone() },
-                    proposal,
-                )
-            },
-            
-            (ReceiverState::UncheckedProposal(state), ReceiverSessionEvent::MaybeInputsOwned(inputs)) => {
-                Receiver::apply_maybe_inputs_owned(
-                    &Receiver { state: state.clone(), persister: self.persister.clone() },
-                    inputs,
-                )
-            },
-            
-            (ReceiverState::MaybeInputsOwned(state), ReceiverSessionEvent::MaybeInputsSeen(maybe_inputs_seen)) => {
-                Receiver::apply_maybe_inputs_seen(
-                    &Receiver { state: state.clone(), persister: self.persister.clone() },
-                    maybe_inputs_seen,
-                )
-            },
-            
-            (ReceiverState::MaybeInputsSeen(state), ReceiverSessionEvent::OutputsUnknown(outputs_unknown)) => {
-                Receiver::apply_outputs_unknown(
-                    &Receiver { state: state.clone(), persister: self.persister.clone() },
-                    outputs_unknown,
-                )
-            },
-            
-            (ReceiverState::OutputsUnknown(state), ReceiverSessionEvent::WantsOutputs(wants_outputs)) => {
-                Receiver::apply_wants_outputs(
-                    &Receiver { state: state.clone(), persister: self.persister.clone() },
-                    wants_outputs,
-                )
-            },
-            
-            (ReceiverState::WantsOutputs(state), ReceiverSessionEvent::WantsInputs(wants_inputs)) => {
-                Receiver::apply_wants_inputs(
-                    &Receiver { state: state.clone(), persister: self.persister.clone() },
-                    wants_inputs,
-                )
-            },
-            
-            (ReceiverState::WantsInputs(state), ReceiverSessionEvent::ProvisionalProposal(provisional_proposal)) => {
-                Receiver::apply_provisional_proposal(
-                    &Receiver { state: state.clone(), persister: self.persister.clone() },
-                    provisional_proposal,
-                )
-            },
-            
-            (ReceiverState::ProvisionalProposal(state), ReceiverSessionEvent::PayjoinProposal(payjoin_proposal)) => {
-                Receiver::apply_payjoin_proposal(
-                    &Receiver { state: state.clone(), persister: self.persister.clone() },
-                    payjoin_proposal,
-                )
-            },
-            
-            // Handle invalid transitions with a catch-all that provides better error info
+
+            (
+                ReceiverState::WithContext(state),
+                ReceiverSessionEvent::UncheckedProposal(proposal),
+            ) => Receiver::apply_unchecked_from_payload(
+                &Receiver { state: state.clone(), persister: self.persister.clone() },
+                proposal,
+            ),
+
+            (
+                ReceiverState::UncheckedProposal(state),
+                ReceiverSessionEvent::MaybeInputsOwned(inputs),
+            ) => Receiver::apply_maybe_inputs_owned(
+                &Receiver { state: state.clone(), persister: self.persister.clone() },
+                inputs,
+            ),
+
+            (
+                ReceiverState::MaybeInputsOwned(state),
+                ReceiverSessionEvent::MaybeInputsSeen(maybe_inputs_seen),
+            ) => Receiver::apply_maybe_inputs_seen(
+                &Receiver { state: state.clone(), persister: self.persister.clone() },
+                maybe_inputs_seen,
+            ),
+
+            (
+                ReceiverState::MaybeInputsSeen(state),
+                ReceiverSessionEvent::OutputsUnknown(outputs_unknown),
+            ) => Receiver::apply_outputs_unknown(
+                &Receiver { state: state.clone(), persister: self.persister.clone() },
+                outputs_unknown,
+            ),
+
+            (
+                ReceiverState::OutputsUnknown(state),
+                ReceiverSessionEvent::WantsOutputs(wants_outputs),
+            ) => Receiver::apply_wants_outputs(
+                &Receiver { state: state.clone(), persister: self.persister.clone() },
+                wants_outputs,
+            ),
+
+            (
+                ReceiverState::WantsOutputs(state),
+                ReceiverSessionEvent::WantsInputs(wants_inputs),
+            ) => Receiver::apply_wants_inputs(
+                &Receiver { state: state.clone(), persister: self.persister.clone() },
+                wants_inputs,
+            ),
+
+            (
+                ReceiverState::WantsInputs(state),
+                ReceiverSessionEvent::ProvisionalProposal(provisional_proposal),
+            ) => Receiver::apply_provisional_proposal(
+                &Receiver { state: state.clone(), persister: self.persister.clone() },
+                provisional_proposal,
+            ),
+
+            (
+                ReceiverState::ProvisionalProposal(state),
+                ReceiverSessionEvent::PayjoinProposal(payjoin_proposal),
+            ) => Receiver::apply_payjoin_proposal(
+                &Receiver { state: state.clone(), persister: self.persister.clone() },
+                payjoin_proposal,
+            ),
+
+            // TODO: Handle invalid transitions with a catch-all that provides better error info
             (current_state, event) => {
-                panic!("Invalid state transition from {:?} with event {:?}", 
+                panic!(
+                    "Invalid state transition from {:?} with event {:?}",
                     std::mem::discriminant(current_state),
                     std::mem::discriminant(&event)
                 )
@@ -221,7 +242,6 @@ where
     }
 }
 
-trait State: Clone + std::fmt::Debug + 'static {}
 #[derive(Debug, Clone)]
 pub struct Receiver<State, P> {
     pub state: State,
@@ -231,8 +251,6 @@ pub struct Receiver<State, P> {
 #[derive(Debug, Clone)]
 /// The receiver is not initialized yet, no session context is available yet
 pub struct UninitializedReceiver {}
-
-impl State for UninitializedReceiver {}
 
 impl<P> Receiver<UninitializedReceiver, P>
 where
@@ -271,8 +289,6 @@ where
 pub struct ReceiverWithContext {
     context: SessionContext,
 }
-
-impl State for ReceiverWithContext {}
 
 impl<P> Receiver<ReceiverWithContext, P>
 where
@@ -434,8 +450,6 @@ pub struct UncheckedProposal {
     pub(crate) context: SessionContext,
 }
 
-impl State for UncheckedProposal {}
-
 impl<P> Receiver<UncheckedProposal, P>
 where
     P: PersistedSession + Clone,
@@ -550,8 +564,6 @@ pub struct MaybeInputsOwned {
     context: SessionContext,
 }
 
-impl State for MaybeInputsOwned {}
-
 impl<P> Receiver<MaybeInputsOwned, P>
 where
     P: PersistedSession + Clone,
@@ -597,8 +609,6 @@ pub struct MaybeInputsSeen {
     v1: v1::MaybeInputsSeen,
     context: SessionContext,
 }
-
-impl State for MaybeInputsSeen {}
 
 impl<P> Receiver<MaybeInputsSeen, P>
 where
@@ -646,8 +656,6 @@ pub struct OutputsUnknown {
     context: SessionContext,
 }
 
-impl State for OutputsUnknown {}
-
 impl<P> Receiver<OutputsUnknown, P>
 where
     P: PersistedSession + Clone,
@@ -690,8 +698,6 @@ pub struct WantsOutputs {
     v1: v1::WantsOutputs,
     context: SessionContext,
 }
-
-impl State for WantsOutputs {}
 
 impl<P> Receiver<WantsOutputs, P>
 where
@@ -753,8 +759,6 @@ pub struct WantsInputs {
     v1: v1::WantsInputs,
     context: SessionContext,
 }
-
-impl State for WantsInputs {}
 
 impl<P> Receiver<WantsInputs, P>
 where
@@ -826,8 +830,6 @@ pub struct ProvisionalProposal {
     context: SessionContext,
 }
 
-impl State for ProvisionalProposal {}
-
 impl<P> Receiver<ProvisionalProposal, P>
 where
     P: PersistedSession + Clone,
@@ -883,8 +885,6 @@ impl PayjoinProposal {
         Self { v1, context }
     }
 }
-
-impl State for PayjoinProposal {}
 
 impl<P> Receiver<PayjoinProposal, P>
 where

@@ -97,10 +97,6 @@ pub enum ReceiverSessionEvent {
 pub enum ReceiverReplayError {
     /// The session is invalid
     SessionInvalid(String),
-    /// Sesssion has no event logs
-    NoEventLogs,
-    /// Logs are out of order
-    OutOfOrder,
     /// Unrecognized event
     UnrecognizedEvent(ReceiverSessionEvent),
 }
@@ -152,87 +148,75 @@ where
     P::SessionEvent: From<ReceiverSessionEvent>,
 {
     fn process_event(&self, event: ReceiverSessionEvent) -> Receiver<ReceiverState, P> {
-        match &self.state {
-            // Receiver is uninitialized, no session context is available yet
-            ReceiverState::Uninitialized(_state) => match event {
-                ReceiverSessionEvent::Created(context) => Receiver {
-                    state: ReceiverState::WithContext(ReceiverWithContext { context }),
-                    persister: self.persister.clone(),
-                },
-                _ => panic!("Invalid state transition for Uninitialized"),
+        match (&self.state, event) {
+            (ReceiverState::Uninitialized(_), ReceiverSessionEvent::Created(context)) => Receiver {
+                state: ReceiverState::WithContext(ReceiverWithContext { context }),
+                persister: self.persister.clone(),
             },
-            // Receiver has a session context, should read from directory and process proposals
-            ReceiverState::WithContext(state) => match event {
-                ReceiverSessionEvent::UncheckedProposal(proposal) =>
-                    Receiver::apply_unchecked_from_payload(
-                        &Receiver { state: state.clone(), persister: self.persister.clone() },
-                        proposal,
-                    ),
-                _ => panic!("Invalid state transition for WithContext"),
+            
+            (ReceiverState::WithContext(state), ReceiverSessionEvent::UncheckedProposal(proposal)) => {
+                Receiver::apply_unchecked_from_payload(
+                    &Receiver { state: state.clone(), persister: self.persister.clone() },
+                    proposal,
+                )
             },
-            // Receiver has an unchecked proposal, should process inputs owned
-            ReceiverState::UncheckedProposal(state) => match event {
-                ReceiverSessionEvent::MaybeInputsOwned(maybe_inputs_owned) =>
-                    Receiver::apply_maybe_inputs_owned(
-                        &Receiver { state: state.clone(), persister: self.persister.clone() },
-                        maybe_inputs_owned,
-                    ),
-                _ => panic!("Invalid state transition for UncheckedProposal"),
+            
+            (ReceiverState::UncheckedProposal(state), ReceiverSessionEvent::MaybeInputsOwned(inputs)) => {
+                Receiver::apply_maybe_inputs_owned(
+                    &Receiver { state: state.clone(), persister: self.persister.clone() },
+                    inputs,
+                )
             },
-            // Receiver has confirmation that non of the inputs owned by them, they should check if any of the inputs have been seen before
-            ReceiverState::MaybeInputsOwned(state) => match event {
-                ReceiverSessionEvent::MaybeInputsSeen(maybe_inputs_seen) =>
-                    Receiver::apply_maybe_inputs_seen(
-                        &Receiver { state: state.clone(), persister: self.persister.clone() },
-                        maybe_inputs_seen,
-                    ),
-                _ => panic!("Invalid state transition for MaybeInputsOwned"),
+            
+            (ReceiverState::MaybeInputsOwned(state), ReceiverSessionEvent::MaybeInputsSeen(maybe_inputs_seen)) => {
+                Receiver::apply_maybe_inputs_seen(
+                    &Receiver { state: state.clone(), persister: self.persister.clone() },
+                    maybe_inputs_seen,
+                )
             },
-            // Receiver has confirmation that none of the inputs have been seen before, they should identify the receiver's outputs
-            ReceiverState::MaybeInputsSeen(state) => match event {
-                ReceiverSessionEvent::OutputsUnknown(outputs_unknown) =>
-                    Receiver::apply_outputs_unknown(
-                        &Receiver { state: state.clone(), persister: self.persister.clone() },
-                        outputs_unknown,
-                    ),
-                _ => panic!("Invalid state transition for MaybeInputsSeen"),
+            
+            (ReceiverState::MaybeInputsSeen(state), ReceiverSessionEvent::OutputsUnknown(outputs_unknown)) => {
+                Receiver::apply_outputs_unknown(
+                    &Receiver { state: state.clone(), persister: self.persister.clone() },
+                    outputs_unknown,
+                )
             },
-            // Receiver has identified the receiver's outputs, they should commit to them or substitute them for other outputs
-            ReceiverState::OutputsUnknown(state) => match event {
-                ReceiverSessionEvent::WantsOutputs(wants_outputs) => Receiver::apply_wants_outputs(
+            
+            (ReceiverState::OutputsUnknown(state), ReceiverSessionEvent::WantsOutputs(wants_outputs)) => {
+                Receiver::apply_wants_outputs(
                     &Receiver { state: state.clone(), persister: self.persister.clone() },
                     wants_outputs,
-                ),
-                _ => panic!("Invalid state transition for OutputsUnknown"),
+                )
             },
-            // Receiver has committed to the outputs, they should contribute inputs
-            ReceiverState::WantsOutputs(state) => match event {
-                ReceiverSessionEvent::WantsInputs(wants_inputs) => Receiver::apply_wants_inputs(
+            
+            (ReceiverState::WantsOutputs(state), ReceiverSessionEvent::WantsInputs(wants_inputs)) => {
+                Receiver::apply_wants_inputs(
                     &Receiver { state: state.clone(), persister: self.persister.clone() },
                     wants_inputs,
-                ),
-                _ => panic!("Invalid state transition for WantsOutputs"),
+                )
             },
-            // Receiver has committed to the inputs, they should finalize the proposal
-            ReceiverState::WantsInputs(state) => match event {
-                ReceiverSessionEvent::ProvisionalProposal(provisional_proposal) =>
-                    Receiver::apply_provisional_proposal(
-                        &Receiver { state: state.clone(), persister: self.persister.clone() },
-                        provisional_proposal,
-                    ),
-                _ => panic!("Invalid state transition for WantsInputs"),
+            
+            (ReceiverState::WantsInputs(state), ReceiverSessionEvent::ProvisionalProposal(provisional_proposal)) => {
+                Receiver::apply_provisional_proposal(
+                    &Receiver { state: state.clone(), persister: self.persister.clone() },
+                    provisional_proposal,
+                )
             },
-            // Receiver has a provisional proposal, they should sign their inputs and send the proposal to the sender
-            ReceiverState::ProvisionalProposal(state) => match event {
-                ReceiverSessionEvent::PayjoinProposal(payjoin_proposal) =>
-                    Receiver::apply_payjoin_proposal(
-                        &Receiver { state: state.clone(), persister: self.persister.clone() },
-                        payjoin_proposal,
-                    ),
-                _ => panic!("Invalid state transition for ProvisionalProposal"),
+            
+            (ReceiverState::ProvisionalProposal(state), ReceiverSessionEvent::PayjoinProposal(payjoin_proposal)) => {
+                Receiver::apply_payjoin_proposal(
+                    &Receiver { state: state.clone(), persister: self.persister.clone() },
+                    payjoin_proposal,
+                )
             },
-            // TODO: other states
-            _ => panic!("Invalid state transition"),
+            
+            // Handle invalid transitions with a catch-all that provides better error info
+            (current_state, event) => {
+                panic!("Invalid state transition from {:?} with event {:?}", 
+                    std::mem::discriminant(current_state),
+                    std::mem::discriminant(&event)
+                )
+            }
         }
     }
 }
@@ -257,13 +241,6 @@ where
 {
     pub fn new_uninitialized(persister: P) -> Receiver<UninitializedReceiver, P> {
         Receiver { state: UninitializedReceiver {}, persister }
-    }
-
-    pub fn apply_session_context(&self, context: SessionContext) -> Receiver<ReceiverState, P> {
-        Receiver {
-            state: ReceiverState::WithContext(ReceiverWithContext { context }),
-            persister: self.persister.clone(),
-        }
     }
 
     pub fn create_session(
@@ -302,36 +279,6 @@ where
     P: PersistedSession + Clone,
     P::SessionEvent: From<ReceiverSessionEvent>,
 {
-    // // TODO: this shouldnt be pub anymore bc we have uninit receiver
-    // pub fn new_session(
-    //     address: Address,
-    //     directory: impl IntoUrl,
-    //     ohttp_keys: OhttpKeys,
-    //     expire_after: Option<Duration>,
-    //     persister: P,
-    // ) -> Result<Self, IntoUrlError> {
-    //     let state = ReceiverWithContext {
-    //         context: SessionContext {
-    //             address,
-    //             directory: directory.into_url()?,
-    //             subdirectory: None,
-    //             ohttp_keys,
-    //             expiry: SystemTime::now()
-    //                 + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
-    //             s: HpkeKeyPair::gen_keypair(),
-    //             e: None,
-    //         },
-    //     };
-
-    //     // TODO: fix unwrap
-    //     persister.save(ReceiverSessionEvent::Created(state.context.clone()).into()).unwrap();
-    //     Ok(Self::new_from_state(state.context, persister))
-    // }
-
-    // pub fn new_from_state(session_context: SessionContext, persister: P) -> Self {
-    //     Self { state: ReceiverWithContext { context: session_context }, persister }
-    // }
-
     /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
     pub fn extract_req(
         &mut self,

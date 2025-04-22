@@ -86,15 +86,6 @@ pub enum ReceiverSessionEvent {
     PayjoinProposal(v1::PayjoinProposal),
     /// Fallback broadcasted
     FallbackBroadcasted(bitcoin::Txid),
-    /* Error States */
-    /// Fallback was not broadcastable
-    FallbackNotBroadcastable,
-    /// Invalid session: some inputs are owned by the receiver
-    InputOwnedFailure(bitcoin::ScriptBuf),
-    /// Invalid session: some inputs have been seen before
-    InputSeen(bitcoin::OutPoint),
-    /// Missing payment to receiver
-    MissingPayment,
     /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
     /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
     /// Reason being in some cases we still want to preserve the error b/c the cause the session to fail but these are terminal states we dont need them to be structured or well typed
@@ -530,20 +521,7 @@ where
                     v1
                 }
                 Err(e) => {
-                    match &e {
-                        ReplyableError::Payload(error)
-                            if matches!(
-                                error.0,
-                                InternalPayloadError::OriginalPsbtNotBroadcastable
-                            ) =>
-                        {
-                            self.persister
-                                .save(ReceiverSessionEvent::FallbackNotBroadcastable.into())
-                                .unwrap();
-                        }
-                        // TODO: remove unwrap
-                        _ => self.persister.record_error(&e).unwrap(),
-                    }
+                    self.persister.record_error(&e).unwrap();
                     return Err(e);
                 }
             };
@@ -643,22 +621,7 @@ where
         let inner = match self.state.v1.clone().check_inputs_not_owned(is_owned) {
             Ok(inner) => inner,
             Err(e) => {
-                match &e {
-                    ReplyableError::Payload(error)
-                        if matches!(error.0, InternalPayloadError::InputOwned(_)) =>
-                    {
-                        if let InternalPayloadError::InputOwned(script) = &error.0 {
-                            // TODO: remove unwraps
-                            self.persister
-                                .save(
-                                    ReceiverSessionEvent::InputOwnedFailure(script.clone()).into(),
-                                )
-                                .unwrap();
-                        }
-                    }
-                    // TODO: remove unwraps
-                    _ => self.persister.record_error(&e).unwrap(),
-                }
+                self.persister.record_error(&e).unwrap();
                 return Err(e);
             }
         };
@@ -705,20 +668,7 @@ where
         let inner = match self.state.v1.clone().check_no_inputs_seen_before(is_known) {
             Ok(inner) => inner,
             Err(e) => {
-                match &e {
-                    ReplyableError::Payload(error)
-                        if matches!(error.0, InternalPayloadError::InputSeen(_)) =>
-                    {
-                        if let InternalPayloadError::InputSeen(outpoint) = &error.0 {
-                            // TODO: remove unwrap
-                            self.persister
-                                .save(ReceiverSessionEvent::InputSeen(outpoint.clone()).into())
-                                .unwrap();
-                        }
-                    }
-                    // TODO: remove unwrap
-                    _ => self.persister.record_error(&e).unwrap(),
-                }
+                self.persister.record_error(&e).unwrap();
                 return Err(e);
             }
         };
@@ -764,16 +714,7 @@ where
         let inner = match self.state.v1.clone().identify_receiver_outputs(is_receiver_output) {
             Ok(inner) => inner,
             Err(e) => {
-                match &e {
-                    ReplyableError::Payload(error)
-                        if matches!(error.0, InternalPayloadError::MissingPayment) =>
-                    {
-                        // TODO: remove unwrap
-                        self.persister.save(ReceiverSessionEvent::MissingPayment.into()).unwrap();
-                    }
-                    // TODO: remove unwrap
-                    _ => self.persister.record_error(&e).unwrap(),
-                }
+                self.persister.record_error(&e).unwrap();
                 return Err(e);
             }
         };

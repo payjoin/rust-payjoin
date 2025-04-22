@@ -74,7 +74,7 @@ impl NewReceiver {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct Receiver(pub payjoin::receive::v2::Receiver);
+pub struct Receiver(payjoin::receive::v2::Receiver);
 
 impl From<Receiver> for payjoin::receive::v2::Receiver {
     fn from(value: Receiver) -> Self {

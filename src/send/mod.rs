@@ -135,6 +135,12 @@ impl From<payjoin::send::v2::Sender> for Sender {
     }
 }
 
+impl From<Sender> for payjoin::send::v2::Sender {
+    fn from(value: Sender) -> Self {
+        value.0
+    }
+}
+
 impl Sender {
     pub fn load<P: Persister<payjoin::send::v2::Sender>>(
         token: P::Token,

@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>Payjoin Dev Kit</h1>
+  <h1>Rust-Payjoin</h1>
 
   <img src="./static/monad.svg" width="150" />
 
@@ -8,7 +8,8 @@
   </p>
 
   <p>
-    <a href="https://github.com/payjoin/rust-payjoin/blob/master/LICENSE.md"><img alt="MIT" src="https://img.shields.io/badge/License-MIT-blue"/></a>
+    <a href="https://crates.io/crates/payjoin"><img alt="Crates" src="https://img.shields.io/crates/v/payjoin.svg?logo=rust"></a>
+    <a href="https://docs.rs/payjoin"><img alt="Crates" src="https://img.shields.io/static/v1?logo=read-the-docs&label=docs.rs&message=payjoin&color=f75390"></a>
     <a href="https://github.com/payjoin/rust-payjoin/actions/workflows/rust.yml"><img alt="CI Status" src="https://github.com/payjoin/rust-payjoin/actions/workflows/rust.yml/badge.svg"></a>
     <a href="https://coveralls.io/github/payjoin/rust-payjoin?branch=master"><img src="https://coveralls.io/repos/github/payjoin/rust-payjoin/badge.svg?branch=master"/></a>
     <a href="https://blog.rust-lang.org/2022/08/11/Rust-1.63.0.html"><img alt="Rustc Version 1.63.0+" src="https://img.shields.io/badge/rustc-1.63.0%2B-lightgrey.svg"/></a>

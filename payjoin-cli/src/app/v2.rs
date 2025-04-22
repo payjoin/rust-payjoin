@@ -7,8 +7,7 @@ use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::PersistedSession;
 use payjoin::receive::v2::{
-    replay_receiver_event_log, Receiver, ReceiverSessionEvent, ReceiverState, ReceiverWithContext,
-    UncheckedProposal, UninitializedReceiver,
+    replay_receiver_event_log, Receiver, ReceiverState, ReceiverWithContext, UncheckedProposal,
 };
 use payjoin::receive::{Error, ImplementationError, ReplyableError};
 use payjoin::send::v2::{Sender, SenderBuilder, SenderSessionEvent};
@@ -54,6 +53,7 @@ impl AppTrait for App {
         let uri = uri.check_pj_supported().map_err(|_| anyhow!("URI does not support Payjoin"))?;
         let url = uri.extras.endpoint();
         // If sender session exists, resume it
+        // TODO: need to replay the events not just read the first one
         for session in self.db.get_send_sessions()? {
             let created_event = session.events.first().unwrap().clone();
             if let SenderSessionEvent::Created(sender) = created_event {
@@ -64,6 +64,7 @@ impl AppTrait for App {
         }
         let psbt = self.create_original_psbt(&uri, fee_rate)?;
         let mut persister = SenderPersister::new(self.db.clone())?;
+        // TODO: new sender will be replaced with uninitialized sender a
         let new_sender = SenderBuilder::new(psbt, uri.clone())
             .build_recommended(fee_rate)
             .with_context(|| "Failed to build payjoin request")?;
@@ -126,6 +127,7 @@ impl AppTrait for App {
 
         for session in send_sessions {
             let self_clone = self.clone();
+            // TODO: should replay the events not just read the first one
             let created_event = session.events.first().unwrap().clone();
             println!("created_event: {:?}", created_event);
             if let SenderSessionEvent::Created(sender) = created_event {

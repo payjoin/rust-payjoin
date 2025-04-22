@@ -494,7 +494,7 @@ where
 
     /// Note to self: this is the public entry point for replayability
     pub fn apply_maybe_inputs_owned(&self, v1: v1::MaybeInputsOwned) -> Receiver<ReceiverState, P> {
-        let new_state = MaybeInputsOwned { v1, context: self.state.context.clone() };
+        let new_state: MaybeInputsOwned = MaybeInputsOwned { v1, context: self.state.context.clone() };
         Receiver {
             state: ReceiverState::MaybeInputsOwned(new_state),
             persister: self.persister.clone(),

@@ -4,7 +4,7 @@
   <img src="./static/monad.svg" width="150" />
 
   <p>
-    <strong>Supercharged payment batching to save fees and preserve privacy.</strong>
+    <strong>Supercharged payment batching to save fees and preserve privacy</strong>
   </p>
 
   <p>

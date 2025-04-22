@@ -7,8 +7,8 @@ use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::PersistedSession;
 use payjoin::receive::v2::{
-    Receiver, ReceiverSessionEvent, ReceiverState, ReceiverWithContext, UncheckedProposal,
-    UninitializedReceiver,
+    replay_receiver_event_log, Receiver, ReceiverSessionEvent, ReceiverState, ReceiverWithContext,
+    UncheckedProposal, UninitializedReceiver,
 };
 use payjoin::receive::{Error, ImplementationError, ReplyableError};
 use payjoin::send::v2::{Sender, SenderBuilder, SenderSessionEvent};
@@ -83,13 +83,13 @@ impl AppTrait for App {
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
-        let mut persister = ReceiverPersister::new(self.db.clone())?;
-        let receiver = Receiver::new_session(
+        let persister = ReceiverPersister::new(self.db.clone())?;
+        let receiver = Receiver::new_uninitialized(persister);
+        let receiver = receiver.create_session(
             address,
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys.clone(),
             None,
-            persister,
         )?;
         self.spawn_payjoin_receiver(receiver, Some(amount)).await
     }
@@ -105,21 +105,22 @@ impl AppTrait for App {
         }
 
         let mut tasks = Vec::new();
-        let recv_persister = ReceiverPersister::new(self.db.clone())?;
 
-        for session in recv_sessions {
+        for session_id in self.db.get_recv_session_ids()? {
+            let recv_persister = ReceiverPersister::from_id(self.db.clone(), session_id)?;
+            let receiver_state = replay_receiver_event_log(recv_persister.clone())
+                .map_err(|e| anyhow!("Failed to replay receiver event log: {:?}", e))?;
             let self_clone = self.clone();
-            // TODO: fix unwrap
-            let created_event =
-                session.events.first().ok_or_else(|| anyhow!("No events found"))?.clone();
-            if let ReceiverSessionEvent::Created(uninit_receiver) = created_event {
-                let receiver = Receiver::new_from_state(uninit_receiver, recv_persister.clone());
-                tasks.push(tokio::spawn(async move {
-                    self_clone.spawn_payjoin_receiver(receiver, None).await
-                }));
-            } else {
-                // This should never happen
-                error!("First event is not a receiver");
+
+            match receiver_state.state {
+                ReceiverState::WithContext(context) => {
+                    let receiver =
+                        Receiver { state: context, persister: receiver_state.persister.clone() };
+                    tasks.push(tokio::spawn(async move {
+                        self_clone.spawn_payjoin_receiver(receiver, None).await
+                    }));
+                }
+                _ => error!("Unexpected receiver state: {:?}", receiver_state.state),
             }
         }
 
@@ -241,8 +242,6 @@ impl App {
             "Response successful. Watch mempool for successful Payjoin. TXID: {}",
             payjoin_psbt.extract_tx_unchecked_fee_rate().clone().compute_txid()
         );
-        // TODO: use persister session to close
-        // self.db.close_recv_session(session.into())?;
         Ok(())
     }
 

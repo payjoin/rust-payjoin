@@ -98,7 +98,7 @@ pub(crate) struct ReceiverPersister {
 }
 impl ReceiverPersister {
     pub fn new(db: Arc<Database>) -> crate::db::Result<Self> {
-        let id = SessionId::new(db.0.generate_id().unwrap());
+        let id = SessionId::new(db.0.generate_id()?);
         let recv_tree = db.0.open_tree("recv_sessions")?;
         let empty_session: SessionWrapper<ReceiverSessionEvent> =
             SessionWrapper { completed_at: None, events: vec![] };
@@ -106,6 +106,10 @@ impl ReceiverPersister {
         recv_tree.insert(id.as_ref(), value.as_slice())?;
         recv_tree.flush()?;
 
+        Ok(Self { db: db.clone(), session_id: id })
+    }
+
+    pub fn from_id(db: Arc<Database>, id: SessionId) -> crate::db::Result<Self> {
         Ok(Self { db: db.clone(), session_id: id })
     }
 }
@@ -170,18 +174,15 @@ impl Database {
         Ok(sessions)
     }
 
-    // pub(crate) fn close_recv_session(&self, storage_token: ReceiverToken) -> Result<()> {
-    //     let recv_tree: Tree = self.0.open_tree("recv_sessions")?;
-    //     let session_wrapper = recv_tree.get(storage_token.as_ref())?;
-    //     if let Some(val) = session_wrapper {
-    //         let mut wrapper: SessionWrapper<ReceiverSessionEvent> =
-    //             serde_json::from_slice(&val).map_err(Error::Deserialize)?;
-    //         wrapper.completed_at = Some(SystemTime::now());
-    //         let value = serde_json::to_vec(&wrapper).map_err(Error::Serialize)?;
-    //         recv_tree.insert(storage_token.as_ref(), value.as_slice())?;
-    //     }
-    //     Ok(())
-    // }
+    pub(crate) fn get_recv_session_ids(&self) -> Result<Vec<SessionId>> {
+        let recv_tree = self.0.open_tree("recv_sessions")?;
+        let mut session_ids = Vec::new();
+        for item in recv_tree.iter() {
+            let (key, _) = item?;
+            session_ids.push(SessionId::new(u64::from_be_bytes(key.as_ref().try_into().unwrap())));
+        }
+        Ok(session_ids)
+    }
 
     pub(crate) fn get_send_sessions(&self) -> Result<Vec<SessionWrapper<SenderSessionEvent>>> {
         let send_tree: Tree = self.0.open_tree("send_sessions")?;
@@ -196,37 +197,6 @@ impl Database {
         }
         Ok(sessions)
     }
-
-    // pub(crate) fn get_send_session(
-    //     &self,
-    //     pj_url: &Url,
-    // ) -> Result<Option<SessionWrapper<SenderSessionEvent>>> {
-    //     let send_tree = self.0.open_tree("send_sessions")?;
-    //     if let Some(val) = send_tree.get(pj_url.as_str())? {
-    //         let wrapper: SessionWrapper<SenderSessionEvent> =
-    //             serde_json::from_slice(&val).map_err(Error::Deserialize)?;
-    //         if wrapper.completed_at.is_none() {
-    //             return Ok(Some(wrapper));
-    //         } else {
-    //             return Ok(None);
-    //         }
-    //     }
-    //     Ok(None)
-    // }
-
-    // pub(crate) fn close_send_session(&self, pj_url: &Url) -> Result<()> {
-    //     let send_tree: Tree = self.0.open_tree("send_sessions")?;
-    //     let wrapper = send_tree.get(pj_url.as_str())?;
-    //     if let Some(val) = wrapper {
-    //         let mut wrapper: SessionWrapper<SenderSessionEvent> =
-    //             serde_json::from_slice(&val).map_err(Error::Deserialize)?;
-    //         wrapper.completed_at = Some(SystemTime::now());
-    //         let value = serde_json::to_vec(&wrapper).map_err(Error::Serialize)?;
-    //         send_tree.insert(pj_url.as_str(), value.as_slice())?;
-    //     }
-    //     send_tree.flush()?;
-    //     Ok(())
-    // }
 
     pub(crate) fn get_closed_send_sessions(
         &self,

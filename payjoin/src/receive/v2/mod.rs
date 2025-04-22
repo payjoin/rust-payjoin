@@ -102,6 +102,7 @@ pub enum ReceiverSessionEvent {
     SessionInvalid(String),
 }
 
+#[derive(Debug)]
 pub enum ReceiverReplayError {
     /// The session is invalid
     SessionInvalid(String),
@@ -113,6 +114,7 @@ pub enum ReceiverReplayError {
     UnrecognizedEvent(ReceiverSessionEvent),
 }
 
+#[derive(Debug, Clone)]
 pub enum ReceiverState {
     Uninitialized(UninitializedReceiver),
     WithContext(ReceiverWithContext),
@@ -247,11 +249,11 @@ where
 trait State: Clone + std::fmt::Debug + 'static {}
 #[derive(Debug, Clone)]
 pub struct Receiver<State, P> {
-    pub(crate) state: State,
-    pub(crate) persister: P,
+    pub state: State,
+    pub persister: P,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 /// The receiver is not initialized yet, no session context is available yet
 pub struct UninitializedReceiver {}
 
@@ -262,6 +264,10 @@ where
     P: PersistedSession + Clone,
     ReceiverSessionEvent: Into<P::SessionEvent>,
 {
+    pub fn new_uninitialized(persister: P) -> Receiver<UninitializedReceiver, P> {
+        Receiver { state: UninitializedReceiver {}, persister }
+    }
+
     pub fn apply_session_context(&self, context: SessionContext) -> Receiver<ReceiverState, P> {
         Receiver {
             state: ReceiverState::WithContext(ReceiverWithContext { context }),
@@ -269,22 +275,28 @@ where
         }
     }
 
-    // TODO: do we need this?
-    // pub fn create_session(
-    //     &self,
-    //     address: Address,
-    //     directory: impl IntoUrl,
-    //     ohttp_keys: OhttpKeys,
-    //     expire_after: Option<Duration>,
-    // ) -> Result<Receiver<ReceiverState, P>, IntoUrlError> {
-    //     Receiver::<ReceiverState, P>::new_session(
-    //         address,
-    //         directory,
-    //         ohttp_keys,
-    //         expire_after,
-    //         self.persister.clone(),
-    //     )
-    // }
+    pub fn create_session(
+        &self,
+        address: Address,
+        directory: impl IntoUrl,
+        ohttp_keys: OhttpKeys,
+        expire_after: Option<Duration>,
+    ) -> Result<Receiver<ReceiverWithContext, P>, IntoUrlError> {
+        let session_context = SessionContext {
+            address,
+            directory: directory.into_url()?,
+            subdirectory: None,
+            ohttp_keys,
+            expiry: SystemTime::now() + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
+            s: HpkeKeyPair::gen_keypair(),
+            e: None,
+        };
+        self.persister.save(ReceiverSessionEvent::Created(session_context.clone()).into()).unwrap();
+        Ok(Receiver {
+            state: ReceiverWithContext { context: session_context },
+            persister: self.persister.clone(),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -297,37 +309,37 @@ impl State for ReceiverWithContext {}
 impl<P> Receiver<ReceiverWithContext, P>
 where
     P: PersistedSession + Clone,
-    ReceiverSessionEvent: Into<P::SessionEvent>,
+    P::SessionEvent: From<ReceiverSessionEvent>,
 {
-    // TODO: this shouldnt be pub anymore bc we have uninit receiver
-    pub fn new_session(
-        address: Address,
-        directory: impl IntoUrl,
-        ohttp_keys: OhttpKeys,
-        expire_after: Option<Duration>,
-        persister: P,
-    ) -> Result<Self, IntoUrlError> {
-        let state = ReceiverWithContext {
-            context: SessionContext {
-                address,
-                directory: directory.into_url()?,
-                subdirectory: None,
-                ohttp_keys,
-                expiry: SystemTime::now()
-                    + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
-                s: HpkeKeyPair::gen_keypair(),
-                e: None,
-            },
-        };
+    // // TODO: this shouldnt be pub anymore bc we have uninit receiver
+    // pub fn new_session(
+    //     address: Address,
+    //     directory: impl IntoUrl,
+    //     ohttp_keys: OhttpKeys,
+    //     expire_after: Option<Duration>,
+    //     persister: P,
+    // ) -> Result<Self, IntoUrlError> {
+    //     let state = ReceiverWithContext {
+    //         context: SessionContext {
+    //             address,
+    //             directory: directory.into_url()?,
+    //             subdirectory: None,
+    //             ohttp_keys,
+    //             expiry: SystemTime::now()
+    //                 + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
+    //             s: HpkeKeyPair::gen_keypair(),
+    //             e: None,
+    //         },
+    //     };
 
-        // TODO: fix unwrap
-        persister.save(ReceiverSessionEvent::Created(state.context.clone()).into()).unwrap();
-        Ok(Self::new_from_state(state.context, persister))
-    }
+    //     // TODO: fix unwrap
+    //     persister.save(ReceiverSessionEvent::Created(state.context.clone()).into()).unwrap();
+    //     Ok(Self::new_from_state(state.context, persister))
+    // }
 
-    pub fn new_from_state(session_context: SessionContext, persister: P) -> Self {
-        Self { state: ReceiverWithContext { context: session_context }, persister }
-    }
+    // pub fn new_from_state(session_context: SessionContext, persister: P) -> Self {
+    //     Self { state: ReceiverWithContext { context: session_context }, persister }
+    // }
 
     /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
     pub fn extract_req(
@@ -347,15 +359,17 @@ where
         &mut self,
         body: &[u8],
         context: ohttp::ClientResponse,
-    ) -> Result<Option<Receiver<ReceiverState, P>>, Error> {
-        // TODO: we need to record error here
+    ) -> Result<Option<Receiver<UncheckedProposal, P>>, Error> {
         let res = self.inner_process_res(body, context)?;
         if let Some(proposal) = res {
             // TODO: remove unwrap
             self.persister
                 .save(ReceiverSessionEvent::UncheckedProposal(proposal.clone()).into())
                 .unwrap();
-            Ok(Some(self.apply_unchecked_from_payload(proposal)))
+            Ok(Some(Receiver {
+                state: UncheckedProposal { v1: proposal, context: self.state.context.clone() },
+                persister: self.persister.clone(),
+            }))
         } else {
             Ok(None)
         }
@@ -505,7 +519,7 @@ where
         &self,
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
-    ) -> Result<Receiver<ReceiverState, P>, ReplyableError> {
+    ) -> Result<Receiver<MaybeInputsOwned, P>, ReplyableError> {
         let v1 =
             match self.state.clone().v1.check_broadcast_suitability(min_fee_rate, can_broadcast) {
                 Ok(v1) => {
@@ -533,7 +547,10 @@ where
                     return Err(e);
                 }
             };
-        Ok(self.apply_maybe_inputs_owned(v1))
+        Ok(Receiver {
+            state: MaybeInputsOwned { v1, context: self.state.context.clone() },
+            persister: self.persister.clone(),
+        })
     }
 
     /// Note to self: this is the public entry point for replayability
@@ -622,7 +639,7 @@ where
     pub fn check_inputs_not_owned(
         self,
         is_owned: impl Fn(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<Receiver<ReceiverState, P>, ReplyableError> {
+    ) -> Result<Receiver<MaybeInputsSeen, P>, ReplyableError> {
         let inner = match self.state.v1.clone().check_inputs_not_owned(is_owned) {
             Ok(inner) => inner,
             Err(e) => {
@@ -647,7 +664,10 @@ where
         };
         // TODO: remove unwrap
         self.persister.save(ReceiverSessionEvent::MaybeInputsSeen(inner.clone()).into()).unwrap();
-        Ok(self.apply_maybe_inputs_seen(inner))
+        Ok(Receiver {
+            state: MaybeInputsSeen { v1: inner, context: self.state.context.clone() },
+            persister: self.persister.clone(),
+        })
     }
 
     pub fn apply_maybe_inputs_seen(&self, v1: v1::MaybeInputsSeen) -> Receiver<ReceiverState, P> {
@@ -681,7 +701,7 @@ where
     pub fn check_no_inputs_seen_before(
         self,
         is_known: impl Fn(&OutPoint) -> Result<bool, ImplementationError>,
-    ) -> Result<Receiver<ReceiverState, P>, ReplyableError> {
+    ) -> Result<Receiver<OutputsUnknown, P>, ReplyableError> {
         let inner = match self.state.v1.clone().check_no_inputs_seen_before(is_known) {
             Ok(inner) => inner,
             Err(e) => {
@@ -704,7 +724,10 @@ where
         };
         // TODO: remove unwrap
         self.persister.save(ReceiverSessionEvent::OutputsUnknown(inner.clone()).into()).unwrap();
-        Ok(self.apply_outputs_unknown(inner))
+        Ok(Receiver {
+            state: OutputsUnknown { v1: inner, context: self.state.context.clone() },
+            persister: self.persister.clone(),
+        })
     }
 
     pub fn apply_outputs_unknown(&self, v1: v1::OutputsUnknown) -> Receiver<ReceiverState, P> {
@@ -737,7 +760,7 @@ where
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: impl Fn(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<Receiver<ReceiverState, P>, ReplyableError> {
+    ) -> Result<Receiver<WantsOutputs, P>, ReplyableError> {
         let inner = match self.state.v1.clone().identify_receiver_outputs(is_receiver_output) {
             Ok(inner) => inner,
             Err(e) => {
@@ -756,7 +779,10 @@ where
         };
         // TODO: remove unwrap
         self.persister.save(ReceiverSessionEvent::WantsOutputs(inner.clone()).into()).unwrap();
-        Ok(self.apply_wants_outputs(inner))
+        Ok(Receiver {
+            state: WantsOutputs { v1: inner, context: self.state.context.clone() },
+            persister: self.persister.clone(),
+        })
     }
 
     pub fn apply_wants_outputs(&self, v1: v1::WantsOutputs) -> Receiver<ReceiverState, P> {
@@ -816,10 +842,13 @@ where
 
     /// Proceed to the input contribution step.
     /// Outputs cannot be modified after this function is called.
-    pub fn commit_outputs(self) -> Receiver<ReceiverState, P> {
+    pub fn commit_outputs(self) -> Receiver<WantsInputs, P> {
         let inner = self.state.v1.clone().commit_outputs();
         self.persister.save(ReceiverSessionEvent::WantsInputs(inner.clone()).into()).unwrap();
-        self.apply_wants_inputs(inner)
+        Receiver {
+            state: WantsInputs { v1: inner, context: self.state.context.clone() },
+            persister: self.persister.clone(),
+        }
     }
 
     pub fn apply_wants_inputs(&self, v1: v1::WantsInputs) -> Receiver<ReceiverState, P> {
@@ -876,13 +905,16 @@ where
 
     /// Proceed to the proposal finalization step.
     /// Inputs cannot be modified after this function is called.
-    pub fn commit_inputs(self) -> Receiver<ReceiverState, P> {
+    pub fn commit_inputs(self) -> Receiver<ProvisionalProposal, P> {
         let inner = self.state.v1.clone().commit_inputs();
         // TODO: remove unwrap
         self.persister
             .save(ReceiverSessionEvent::ProvisionalProposal(inner.clone()).into())
             .unwrap();
-        self.apply_provisional_proposal(inner)
+        Receiver {
+            state: ProvisionalProposal { v1: inner, context: self.state.context },
+            persister: self.persister.clone(),
+        }
     }
 
     pub fn apply_provisional_proposal(
@@ -918,7 +950,7 @@ where
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
-    ) -> Result<Receiver<ReceiverState, P>, ReplyableError> {
+    ) -> Result<Receiver<PayjoinProposal, P>, ReplyableError> {
         let inner = match self.state.v1.clone().finalize_proposal(
             wallet_process_psbt,
             min_fee_rate,
@@ -934,7 +966,10 @@ where
         };
         // TODO: remove unwrap
         self.persister.save(ReceiverSessionEvent::PayjoinProposal(inner.clone()).into()).unwrap();
-        Ok(self.apply_payjoin_proposal(inner))
+        Ok(Receiver {
+            state: PayjoinProposal { v1: inner, context: self.state.context },
+            persister: self.persister.clone(),
+        })
     }
 
     pub fn apply_payjoin_proposal(&self, v1: v1::PayjoinProposal) -> Receiver<ReceiverState, P> {

@@ -33,7 +33,7 @@ use super::error::BuildSenderError;
 use super::*;
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
-use crate::persist::{PersistableError, PersistedSession, Persister, Value};
+use crate::persist::{PersistedSession, Persister, Value};
 use crate::send::v1;
 use crate::uri::{ShortId, UrlExt};
 use crate::{HpkeKeyPair, HpkePublicKey, ImplementationError, IntoUrl, OhttpKeys, PjUri, Request};
@@ -133,13 +133,15 @@ pub struct NewSender {
 
 impl NewSender {
     /// Saves the new [`Sender`] using the provided persister and returns the storage token.
-    pub fn persist<P: PersistedSession>(
-        &self,
-        persister: &mut P,
-    ) -> Result<(), ImplementationError> {
+    pub fn persist<P: PersistedSession>(&self, persister: &mut P) -> Result<(), ImplementationError>
+    where
+        P::SessionEvent: From<SenderSessionEvent>,
+    {
         let sender = Sender { v1: self.v1.clone(), reply_key: self.reply_key.clone() };
-        // TODO: Implement persisting Sender
-        // Ok(persister.save(sender)?)
+        persister
+            .save(SenderSessionEvent::Created(sender).into())
+            .map_err(ImplementationError::from)?;
+
         Ok(())
     }
 }
@@ -148,8 +150,6 @@ impl NewSender {
 pub enum SenderSessionEvent {
     /// Sender was created
     Created(Sender),
-    /// Fallback broadcasted
-    FallbackBroadcasted(bitcoin::Txid),
     /// Invalid session
     /// TODO specify error in event
     SessionInvalid(String),

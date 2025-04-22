@@ -157,6 +157,10 @@ impl Sender {
     pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
         super::Sender::from_json(json).map(Into::into)
     }
+
+    pub fn key(&self) -> SenderToken {
+        self.0.key().into()
+    }
 }
 
 #[derive(uniffi::Record)]

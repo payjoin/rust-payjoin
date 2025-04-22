@@ -3,7 +3,8 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 pub use error::{BuildSenderError, CreateRequestError, EncapsulationError, ResponseError};
-use payjoin::persist::Persister;
+use payjoin::persist::{Persister, Value};
+use payjoin::send::v2::SenderToken;
 
 pub use crate::error::SerdeJsonError;
 use crate::ohttp::ClientResponse;
@@ -173,6 +174,10 @@ impl Sender {
 
     pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
         serde_json::from_str::<payjoin::send::v2::Sender>(json).map_err(Into::into).map(Into::into)
+    }
+
+    pub fn key(&self) -> SenderToken {
+        self.0.key()
     }
 }
 

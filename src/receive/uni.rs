@@ -137,6 +137,10 @@ impl Receiver {
     pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
         super::Receiver::from_json(json).map(Into::into)
     }
+
+    pub fn key(&self) -> ReceiverToken {
+        self.0.key().into()
+    }
 }
 
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]

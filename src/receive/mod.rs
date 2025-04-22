@@ -7,7 +7,8 @@ pub use error::{
 };
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
-use payjoin::persist::Persister;
+use payjoin::persist::{Persister, Value};
+use payjoin::receive::v2::ReceiverToken;
 
 use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 pub use crate::error::SerdeJsonError;
@@ -135,6 +136,10 @@ impl Receiver {
         serde_json::from_str::<payjoin::receive::v2::Receiver>(json)
             .map_err(Into::into)
             .map(Into::into)
+    }
+
+    pub fn key(&self) -> ReceiverToken {
+        self.0.key()
     }
 }
 

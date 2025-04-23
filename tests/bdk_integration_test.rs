@@ -5,7 +5,7 @@ This test suite ensures the soundness of `payjoin_ffi` types. It verifies that t
 
 The tests simulate a full cycle of PayJoin transactions, including wallet initialization, transaction creation, and broadcasting. They cover both v1 and v2 PayJoin protocols, ensuring that the integration with `bdk` and `bitcoind` is seamless and reliable.
 */
-#![cfg(all(feature = "_danger-local-https", not(feature = "uniffi")))]
+#![cfg(all(feature = "_danger-local-https", feature = "_test-utils", not(feature = "uniffi")))]
 
 use std::str::FromStr;
 use std::sync::{Mutex, MutexGuard};

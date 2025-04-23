@@ -21,9 +21,9 @@ jobs:
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
       - name: Build on Rust ${{ matrix.toolchain }}
-        run: cargo build --color always --all-targets --features _danger-local-https
+        run: cargo build --color always --all-targets --features _danger-local-https,_test-utils
       - name: Run tests
-        run: cargo test --features=_danger-local-https
+        run: cargo test --features=_danger-local-https,_test-utils
 
   Format:
     runs-on: ubuntu-latest

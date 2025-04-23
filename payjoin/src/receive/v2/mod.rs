@@ -339,6 +339,9 @@ impl UncheckedProposal {
             _ => Err(InternalSessionError::UnexpectedStatusCode(response.status()).into()),
         }
     }
+
+    /// The per-session identifier
+    pub fn id(&self) -> ShortId { id(&self.context.s) }
 }
 
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.

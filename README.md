@@ -1,6 +1,24 @@
-# Rust-Payjoin
+<div align="center">
+  <h1>Rust-Payjoin</h1>
 
-Supercharged payment batching to save you fees and preserve your privacy.
+  <img src="./static/monad.svg" width="150" />
+
+  <p>
+    <strong>Supercharged payment batching to save fees and preserve privacy</strong>
+  </p>
+
+  <p>
+    <a href="https://crates.io/crates/payjoin"><img alt="Crates" src="https://img.shields.io/crates/v/payjoin.svg?logo=rust"></a>
+    <a href="https://docs.rs/payjoin"><img alt="Crates" src="https://img.shields.io/static/v1?logo=read-the-docs&label=docs.rs&message=payjoin&color=f75390"></a>
+    <a href="https://github.com/payjoin/rust-payjoin/actions/workflows/rust.yml"><img alt="CI Status" src="https://github.com/payjoin/rust-payjoin/actions/workflows/rust.yml/badge.svg"></a>
+    <a href="https://coveralls.io/github/payjoin/rust-payjoin?branch=master"><img src="https://coveralls.io/repos/github/payjoin/rust-payjoin/badge.svg?branch=master"/></a>
+    <a href="https://blog.rust-lang.org/2022/08/11/Rust-1.63.0.html"><img alt="Rustc Version 1.63.0+" src="https://img.shields.io/badge/rustc-1.63.0%2B-lightgrey.svg"/></a>
+  </p>
+
+  <h4>
+    <a href="https://payjoindevkit.org">Project Homepage</a>
+  </h4>
+</div>
 
 ## About
 
@@ -24,7 +42,7 @@ The [`payjoin-test-utils`](https://github.com/payjoin/rust-payjoin/tree/master/p
 
 **Use at your own risk. This crate has not yet been reviewed by independent Rust and Bitcoin security professionals.**
 
-While I don't think there is a *huge* risk running it, be careful relying on its security for now!
+While I don't think there is a _huge_ risk running it, be careful relying on its security for now!
 
 Seeking review of the code that verifies there is no overpayment. Contributions are welcome!
 

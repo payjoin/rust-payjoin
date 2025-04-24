@@ -7,7 +7,7 @@ pub use crate::receive::{
     ReplyableError, SelectionError, SerdeJsonError, SessionError,
 };
 use crate::uri::error::IntoUrlError;
-use crate::{ClientResponse, OhttpKeys, Request};
+use crate::{ClientResponse, OhttpKeys, OutputSubstitution, Request};
 
 #[derive(Debug, uniffi::Object)]
 pub struct NewReceiver(pub super::NewReceiver);
@@ -326,7 +326,7 @@ impl From<super::WantsOutputs> for WantsOutputs {
 }
 #[uniffi::export]
 impl WantsOutputs {
-    pub fn output_substitution(&self) -> bool {
+    pub fn output_substitution(&self) -> OutputSubstitution {
         self.0.output_substitution()
     }
 

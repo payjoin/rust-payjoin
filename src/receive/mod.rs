@@ -14,7 +14,7 @@ use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 pub use crate::error::SerdeJsonError;
 use crate::ohttp::OhttpKeys;
 use crate::uri::error::IntoUrlError;
-use crate::{ClientResponse, Request};
+use crate::{ClientResponse, OutputSubstitution, Request};
 
 pub mod error;
 #[cfg(feature = "uniffi")]
@@ -296,8 +296,8 @@ impl From<payjoin::receive::v2::WantsOutputs> for WantsOutputs {
 }
 
 impl WantsOutputs {
-    pub fn output_substitution(&self) -> bool {
-        self.0.output_substitution() == payjoin::OutputSubstitution::Enabled
+    pub fn output_substitution(&self) -> OutputSubstitution {
+        self.0.output_substitution()
     }
 
     pub fn replace_receiver_outputs(

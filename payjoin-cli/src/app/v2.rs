@@ -152,7 +152,7 @@ impl App {
         let mut pj_uri = session.pj_uri();
         pj_uri.amount = amount;
         println!("Request Payjoin by sharing this Payjoin Uri:");
-        println!("{}", pj_uri);
+        println!("{pj_uri}");
 
         let mut interrupt = self.interrupt.clone();
         let receiver = tokio::select! {
@@ -208,8 +208,8 @@ impl App {
                             println!("No response yet.");
                         }
                         Err(re) => {
-                            println!("{}", re);
-                            log::debug!("{:?}", re);
+                            println!("{re}");
+                            log::debug!("{re:?}");
                             return Err(anyhow!("Response error").context(re));
                         }
                     }
@@ -223,8 +223,8 @@ impl App {
                 match v1_ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()) {
                     Ok(psbt) => Ok(psbt),
                     Err(re) => {
-                        println!("{}", re);
-                        log::debug!("{:?}", re);
+                        println!("{re}");
+                        log::debug!("{re:?}");
                         Err(anyhow!("Response error").context(re))
                     }
                 }
@@ -286,7 +286,7 @@ impl App {
             self.config.max_fee_rate,
         )?;
         let payjoin_proposal_psbt = payjoin_proposal.psbt();
-        log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {:#?}", payjoin_proposal_psbt);
+        log::debug!("Receiver's Payjoin proposal PSBT Rsponse: {payjoin_proposal_psbt:#?}");
         Ok(payjoin_proposal)
     }
 }

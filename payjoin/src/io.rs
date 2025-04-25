@@ -102,10 +102,10 @@ impl std::fmt::Display for Error {
             ParseUrl(e) => e.fmt(f),
             Io(e) => e.fmt(f),
             InvalidOhttpKeys(e) => {
-                write!(f, "Invalid ohttp keys returned from payjoin directory: {}", e)
+                write!(f, "Invalid ohttp keys returned from payjoin directory: {e}")
             }
             UnexpectedStatusCode(code) => {
-                write!(f, "Unexpected status code from payjoin directory: {}", code)
+                write!(f, "Unexpected status code from payjoin directory: {code}")
             }
             #[cfg(feature = "_danger-local-https")]
             Rustls(e) => e.fmt(f),
@@ -172,8 +172,7 @@ mod tests {
             match parse_ohttp_keys_response(response).await {
                 Err(Error(InternalError::UnexpectedStatusCode(code))) => assert_eq!(code, status),
                 result => panic!(
-                    "Expected UnexpectedStatusCode error for status code: {}, got: {:?}",
-                    status, result
+                    "Expected UnexpectedStatusCode error for status code: {status}, got: {result:?}"
                 ),
             }
         }

@@ -638,7 +638,7 @@ mod test {
         match result {
             Ok(_) => panic!("Expected error, got success"),
             Err(error) => assert_eq!(
-                format!("{}", error),
+                format!("{error}"),
                 InternalProposalError::FeeContributionExceedsMaximum.to_string()
             ),
         }

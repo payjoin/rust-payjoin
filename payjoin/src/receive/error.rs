@@ -24,9 +24,9 @@ impl From<ReplyableError> for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::ReplyToSender(e) => write!(f, "replyable error: {}", e),
+            Error::ReplyToSender(e) => write!(f, "replyable error: {e}"),
             #[cfg(feature = "v2")]
-            Error::V2(e) => write!(f, "unreplyable error: {}", e),
+            Error::V2(e) => write!(f, "unreplyable error: {e}"),
         }
     }
 }
@@ -123,7 +123,7 @@ impl fmt::Display for ReplyableError {
             Self::Payload(e) => e.fmt(f),
             #[cfg(feature = "v1")]
             Self::V1(e) => e.fmt(f),
-            Self::Implementation(e) => write!(f, "Internal Server Error: {}", e),
+            Self::Implementation(e) => write!(f, "Internal Server Error: {e}"),
         }
     }
 }
@@ -235,25 +235,23 @@ impl fmt::Display for PayloadError {
         use InternalPayloadError::*;
 
         match &self.0 {
-            Utf8(e) => write!(f, "{}", e),
-            ParsePsbt(e) => write!(f, "{}", e),
-            SenderParams(e) => write!(f, "{}", e),
-            InconsistentPsbt(e) => write!(f, "{}", e),
-            PrevTxOut(e) => write!(f, "PrevTxOut Error: {}", e),
+            Utf8(e) => write!(f, "{e}"),
+            ParsePsbt(e) => write!(f, "{e}"),
+            SenderParams(e) => write!(f, "{e}"),
+            InconsistentPsbt(e) => write!(f, "{e}"),
+            PrevTxOut(e) => write!(f, "PrevTxOut Error: {e}"),
             MissingPayment => write!(f, "Missing payment."),
             OriginalPsbtNotBroadcastable => write!(f, "Can't broadcast. PSBT rejected by mempool."),
             InputOwned(_) => write!(f, "The receiver rejected the original PSBT."),
-            InputWeight(e) => write!(f, "InputWeight Error: {}", e),
+            InputWeight(e) => write!(f, "InputWeight Error: {e}"),
             InputSeen(_) => write!(f, "The receiver rejected the original PSBT."),
             PsbtBelowFeeRate(original_psbt_fee_rate, receiver_min_fee_rate) => write!(
                 f,
-                "Original PSBT fee rate too low: {} < {}.",
-                original_psbt_fee_rate, receiver_min_fee_rate
+                "Original PSBT fee rate too low: {original_psbt_fee_rate} < {receiver_min_fee_rate}."
             ),
             FeeTooHigh(proposed_fee_rate, max_fee_rate) => write!(
                 f,
-                "Effective receiver feerate exceeds maximum allowed feerate: {} > {}",
-                proposed_fee_rate, max_fee_rate
+                "Effective receiver feerate exceeds maximum allowed feerate: {proposed_fee_rate} > {max_fee_rate}"
             ),
         }
     }

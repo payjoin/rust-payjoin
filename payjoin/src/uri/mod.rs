@@ -257,13 +257,13 @@ mod tests {
 
         for address in [base58, bech32_upper, bech32_lower].iter() {
             for pj in [https, onion].iter() {
-                let uri_with_amount = format!("{}?amount=1&pj={}", address, pj);
+                let uri_with_amount = format!("{address}?amount=1&pj={pj}");
                 assert!(Uri::try_from(uri_with_amount).is_ok());
 
-                let uri_without_amount = format!("{}?pj={}", address, pj);
+                let uri_without_amount = format!("{address}?pj={pj}");
                 assert!(Uri::try_from(uri_without_amount).is_ok());
 
-                let uri_shuffled_params = format!("{}?pj={}&amount=1", address, pj);
+                let uri_shuffled_params = format!("{address}?pj={pj}&amount=1");
                 assert!(Uri::try_from(uri_shuffled_params).is_ok());
             }
         }
@@ -329,15 +329,13 @@ mod tests {
         pjuri.extras.output_substitution = OutputSubstitution::Disabled;
         assert!(
             pjuri.to_string().contains(expected_is_disabled),
-            "Pj uri should contain param: {}, but it did not",
-            expected_is_disabled
+            "Pj uri should contain param: {expected_is_disabled}, but it did not"
         );
 
         pjuri.extras.output_substitution = OutputSubstitution::Enabled;
         assert!(
             !pjuri.to_string().contains(expected_is_enabled),
-            "Pj uri should elide param: {}, but it did not",
-            expected_is_enabled
+            "Pj uri should elide param: {expected_is_enabled}, but it did not"
         );
     }
 

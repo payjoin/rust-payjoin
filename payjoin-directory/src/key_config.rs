@@ -74,7 +74,7 @@ pub fn read_server_config(dir: &Path) -> Result<ServerKeyConfig> {
 /// Get the path to the key configuration file
 /// For now, default to [KEY_ID].ikm.
 /// In the future this might be able to save multiple keys named by KeyId.
-fn key_path(dir: &Path) -> PathBuf { dir.join(format!("{}.ikm", KEY_ID)) }
+fn key_path(dir: &Path) -> PathBuf { dir.join(format!("{KEY_ID}.ikm")) }
 
 #[cfg(test)]
 mod tests {

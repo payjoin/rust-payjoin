@@ -308,10 +308,10 @@ mod test {
         let sender = SenderBuilder::new(
             PARSED_ORIGINAL_PSBT.clone(),
             Uri::try_from(PJ_URI)
-                .map_err(|e| format!("{}", e))?
+                .map_err(|e| format!("{e}"))?
                 .assume_checked()
                 .check_pj_supported()
-                .map_err(|e| format!("{}", e))?,
+                .map_err(|e| format!("{e}"))?,
         )
         .build_recommended(FeeRate::MIN);
         assert!(sender.is_ok(), "{:#?}", sender.err());

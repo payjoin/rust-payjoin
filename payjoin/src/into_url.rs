@@ -12,7 +12,7 @@ impl std::fmt::Display for Error {
 
         match self {
             BadScheme => write!(f, "URL scheme is not allowed"),
-            ParseError(e) => write!(f, "{}", e),
+            ParseError(e) => write!(f, "{e}"),
         }
     }
 }

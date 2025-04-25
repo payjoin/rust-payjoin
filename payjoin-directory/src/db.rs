@@ -26,8 +26,8 @@ impl std::fmt::Display for Error {
         use Error::*;
 
         match &self {
-            Redis(error) => write!(f, "Redis error: {}", error),
-            Timeout(timeout) => write!(f, "Timeout: {}", timeout),
+            Redis(error) => write!(f, "Redis error: {error}"),
+            Timeout(timeout) => write!(f, "Timeout: {timeout}"),
         }
     }
 }
@@ -49,7 +49,7 @@ pub(crate) type Result<T> = core::result::Result<T, Error>;
 
 impl DbPool {
     pub async fn new(timeout: Duration, db_host: String) -> Result<Self> {
-        let client = Client::open(format!("redis://{}", db_host))?;
+        let client = Client::open(format!("redis://{db_host}"))?;
         Ok(Self { client, timeout })
     }
 

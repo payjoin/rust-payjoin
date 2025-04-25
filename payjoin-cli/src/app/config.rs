@@ -71,7 +71,7 @@ impl Config {
                         "Multiple version flags specified. Please use only one of: {}",
                         Self::VERSION_FLAGS
                             .iter()
-                            .map(|(flag, _)| format!("--{}", flag))
+                            .map(|(flag, _)| format!("--{flag}"))
                             .collect::<Vec<_>>()
                             .join(", ")
                     )));
@@ -146,8 +146,7 @@ impl Config {
                         Ok(v1) => config.version = Some(VersionConfig::V1(v1)),
                         Err(e) =>
                             return Err(ConfigError::Message(format!(
-                                "Valid V1 configuration is required for BIP78 mode: {}",
-                                e
+                                "Valid V1 configuration is required for BIP78 mode: {e}"
                             ))),
                     }
                 }
@@ -163,8 +162,7 @@ impl Config {
                         Ok(v2) => config.version = Some(VersionConfig::V2(v2)),
                         Err(e) =>
                             return Err(ConfigError::Message(format!(
-                                "Valid V2 configuration is required for BIP77 mode: {}",
-                                e
+                                "Valid V2 configuration is required for BIP77 mode: {e}"
                             ))),
                     }
                 }
@@ -182,7 +180,7 @@ impl Config {
             ));
         }
 
-        log::debug!("App config: {:?}", config);
+        log::debug!("App config: {config:?}");
         Ok(config)
     }
 
@@ -315,10 +313,10 @@ where
     match path_str {
         None => Ok(None),
         Some(path) => std::fs::read(path)
-            .map_err(|e| serde::de::Error::custom(format!("Failed to read ohttp_keys file: {}", e)))
+            .map_err(|e| serde::de::Error::custom(format!("Failed to read ohttp_keys file: {e}")))
             .and_then(|bytes| {
                 payjoin::OhttpKeys::decode(&bytes).map_err(|e| {
-                    serde::de::Error::custom(format!("Failed to decode ohttp keys: {}", e))
+                    serde::de::Error::custom(format!("Failed to decode ohttp keys: {e}"))
                 })
             })
             .map(Some),

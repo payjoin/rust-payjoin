@@ -85,7 +85,7 @@ mod integration {
                 .check_pj_supported()
                 .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
-            debug!("Original psbt: {:#?}", psbt);
+            debug!("Original psbt: {psbt:#?}");
             let (req, ctx) = SenderBuilder::new(psbt, uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1();
@@ -150,7 +150,7 @@ mod integration {
                 .check_pj_supported()
                 .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
-            debug!("Original psbt: {:#?}", psbt);
+            debug!("Original psbt: {psbt:#?}");
             let (req, _ctx) = SenderBuilder::new(psbt, uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1();
@@ -656,14 +656,14 @@ mod integration {
                         .map(input_pair_from_list_unspent);
                     let selected_input =
                         payjoin.try_preserving_privacy(candidate_inputs).map_err(|e| {
-                            format!("Failed to make privacy preserving selection: {:?}", e)
+                            format!("Failed to make privacy preserving selection: {e:?}")
                         })?;
                     vec![selected_input]
                 }
             };
             let payjoin = payjoin
                 .contribute_inputs(inputs)
-                .map_err(|e| format!("Failed to contribute inputs: {:?}", e))?
+                .map_err(|e| format!("Failed to contribute inputs: {e:?}"))?
                 .commit_inputs();
 
             // Sign and finalize the proposal PSBT
@@ -1038,7 +1038,7 @@ mod integration {
                 .check_pj_supported()
                 .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
-            log::debug!("Original psbt: {:#?}", psbt);
+            log::debug!("Original psbt: {psbt:#?}");
             let max_additional_fee = Amount::from_sat(1000);
             let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)
                 .build_with_additional_fee(max_additional_fee, None, FeeRate::ZERO, false)?
@@ -1116,7 +1116,7 @@ mod integration {
                 .check_pj_supported()
                 .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
-            log::debug!("Original psbt: {:#?}", psbt);
+            log::debug!("Original psbt: {psbt:#?}");
             let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .extract_v1();
@@ -1226,7 +1226,7 @@ mod integration {
         let proposal =
             handle_proposal(proposal, receiver, custom_outputs, drain_script, custom_inputs)?;
         let psbt = proposal.psbt();
-        tracing::debug!("Receiver's Payjoin proposal PSBT: {:#?}", &psbt);
+        tracing::debug!("Receiver's Payjoin proposal PSBT: {psbt:#?}");
         Ok(psbt.to_string())
     }
 
@@ -1284,13 +1284,13 @@ mod integration {
                     .map(input_pair_from_list_unspent);
                 let selected_input = payjoin
                     .try_preserving_privacy(candidate_inputs)
-                    .map_err(|e| format!("Failed to make privacy preserving selection: {:?}", e))?;
+                    .map_err(|e| format!("Failed to make privacy preserving selection: {e:?}"))?;
                 vec![selected_input]
             }
         };
         let payjoin = payjoin
             .contribute_inputs(inputs)
-            .map_err(|e| format!("Failed to contribute inputs: {:?}", e))?
+            .map_err(|e| format!("Failed to contribute inputs: {e:?}"))?
             .commit_inputs();
 
         let payjoin_proposal = payjoin.finalize_proposal(
@@ -1320,7 +1320,7 @@ mod integration {
         let payjoin_psbt =
             sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.expect("should contain a PSBT");
         let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
-        tracing::debug!("Sender's Payjoin PSBT: {:#?}", payjoin_psbt);
+        tracing::debug!("Sender's Payjoin PSBT: {payjoin_psbt:#?}");
 
         Ok(payjoin_psbt.extract_tx()?)
     }

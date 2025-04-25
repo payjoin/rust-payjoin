@@ -52,17 +52,17 @@ impl fmt::Display for SessionError {
         use InternalSessionError::*;
 
         match &self.0 {
-            ParseUrl(e) => write!(f, "URL parsing failed: {}", e),
-            Expired(expiry) => write!(f, "Session expired at {:?}", expiry),
-            OhttpEncapsulation(e) => write!(f, "OHTTP Encapsulation Error: {}", e),
-            Hpke(e) => write!(f, "Hpke decryption failed: {}", e),
+            ParseUrl(e) => write!(f, "URL parsing failed: {e}"),
+            Expired(expiry) => write!(f, "Session expired at {expiry:?}"),
+            OhttpEncapsulation(e) => write!(f, "OHTTP Encapsulation Error: {e}"),
+            Hpke(e) => write!(f, "Hpke decryption failed: {e}"),
             UnexpectedResponseSize(size) => write!(
                 f,
                 "Unexpected response size {}, expected {} bytes",
                 size,
                 crate::directory::ENCAPSULATED_MESSAGE_BYTES
             ),
-            UnexpectedStatusCode(status) => write!(f, "Unexpected status code: {}", status),
+            UnexpectedStatusCode(status) => write!(f, "Unexpected status code: {status}"),
         }
     }
 }

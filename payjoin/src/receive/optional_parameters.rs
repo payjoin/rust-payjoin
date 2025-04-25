@@ -60,10 +60,7 @@ impl Params {
                     additional_fee_output_index = match index.parse::<usize>() {
                         Ok(index) => Some(index),
                         Err(_error) => {
-                            warn!(
-                                "bad `additionalfeeoutputindex` query value '{}': {}",
-                                index, _error
-                            );
+                            warn!("bad `additionalfeeoutputindex` query value '{index}': {_error}");
                             None
                         }
                     },
@@ -73,9 +70,8 @@ impl Params {
                             Ok(contribution) => Some(contribution),
                             Err(_error) => {
                                 warn!(
-                                    "bad `maxadditionalfeecontribution` query value '{}': {}",
-                                    fee, _error
-                                );
+                                "bad `maxadditionalfeecontribution` query value '{fee}': {_error}"
+                            );
                                 None
                             }
                         },
@@ -105,12 +101,12 @@ impl Params {
             (Some(amount), Some(index)) =>
                 params.additional_fee_contribution = Some((amount, index)),
             (Some(_), None) | (None, Some(_)) => {
-                warn!("only one additional-fee parameter specified: {:?}", params);
+                warn!("only one additional-fee parameter specified: {params:?}");
             }
             _ => (),
         }
 
-        log::debug!("parsed optional parameters: {:?}", params);
+        log::debug!("parsed optional parameters: {params:?}");
         Ok(params)
     }
 }

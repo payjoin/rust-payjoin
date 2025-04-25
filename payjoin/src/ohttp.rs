@@ -25,7 +25,7 @@ pub fn ohttp_encapsulate(
     let authority_bytes = url.host().map_or_else(Vec::new, |host| {
         let mut authority = host.to_string();
         if let Some(port) = url.port() {
-            write!(authority, ":{}", port).unwrap();
+            write!(authority, ":{port}").unwrap();
         }
         authority.into_bytes()
     });
@@ -249,9 +249,8 @@ impl std::fmt::Display for ParseOhttpKeysError {
         match self {
             ParseOhttpKeysError::InvalidFormat => write!(f, "Invalid format"),
             ParseOhttpKeysError::InvalidPublicKey => write!(f, "Invalid public key"),
-            ParseOhttpKeysError::DecodeBech32(e) => write!(f, "Failed to decode base64: {}", e),
-            ParseOhttpKeysError::DecodeKeyConfig(e) =>
-                write!(f, "Failed to decode KeyConfig: {}", e),
+            ParseOhttpKeysError::DecodeBech32(e) => write!(f, "Failed to decode base64: {e}"),
+            ParseOhttpKeysError::DecodeKeyConfig(e) => write!(f, "Failed to decode KeyConfig: {e}"),
         }
     }
 }

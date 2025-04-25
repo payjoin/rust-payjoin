@@ -156,7 +156,7 @@ impl std::fmt::Display for ParseOhttpKeysParamError {
 
         match &self {
             MissingOhttpKeys => write!(f, "ohttp keys are missing"),
-            InvalidOhttpKeys(o) => write!(f, "invalid ohttp keys: {}", o),
+            InvalidOhttpKeys(o) => write!(f, "invalid ohttp keys: {o}"),
         }
     }
 }
@@ -177,10 +177,10 @@ impl std::fmt::Display for ParseExpParamError {
 
         match &self {
             MissingExp => write!(f, "exp is missing"),
-            InvalidHrp(h) => write!(f, "incorrect hrp for exp: {}", h),
-            DecodeBech32(d) => write!(f, "exp is not valid bech32: {}", d),
+            InvalidHrp(h) => write!(f, "incorrect hrp for exp: {h}"),
+            DecodeBech32(d) => write!(f, "exp is not valid bech32: {d}"),
             InvalidExp(i) =>
-                write!(f, "exp param does not contain a bitcoin consensus encoded u32: {}", i),
+                write!(f, "exp param does not contain a bitcoin consensus encoded u32: {i}"),
         }
     }
 }
@@ -201,10 +201,10 @@ impl std::fmt::Display for ParseReceiverPubkeyParamError {
 
         match &self {
             MissingPubkey => write!(f, "receiver public key is missing"),
-            InvalidHrp(h) => write!(f, "incorrect hrp for receiver key: {}", h),
-            DecodeBech32(e) => write!(f, "receiver public is not valid base64: {}", e),
+            InvalidHrp(h) => write!(f, "incorrect hrp for receiver key: {h}"),
+            DecodeBech32(e) => write!(f, "receiver public is not valid base64: {e}"),
             InvalidPubkey(e) =>
-                write!(f, "receiver public key does not represent a valid pubkey: {}", e),
+                write!(f, "receiver public key does not represent a valid pubkey: {e}"),
         }
     }
 }
@@ -337,7 +337,7 @@ mod tests {
                    %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
         let pjuri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
         assert!(pjuri.extras.endpoint().ohttp().is_ok());
-        assert_eq!(format!("{}", pjuri), uri);
+        assert_eq!(format!("{pjuri}"), uri);
 
         let reordered = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
                    &pj=HTTPS://EXAMPLE.COM/\
@@ -346,7 +346,7 @@ mod tests {
         let pjuri =
             Uri::try_from(reordered).unwrap().assume_checked().check_pj_supported().unwrap();
         assert!(pjuri.extras.endpoint().ohttp().is_ok());
-        assert_eq!(format!("{}", pjuri), uri);
+        assert_eq!(format!("{pjuri}"), uri);
     }
 
     #[test]
@@ -359,9 +359,7 @@ mod tests {
         if let Err(bitcoin_uri::de::Error::Extras(error)) = Uri::try_from(uri) {
             assert!(
                 error.to_string().contains(expected_error),
-                "Error should indicate '{}' but was: {}",
-                expected_error,
-                error
+                "Error should indicate '{expected_error}' but was: {error}"
             );
         }
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
@@ -371,9 +369,7 @@ mod tests {
         if let Err(bitcoin_uri::de::Error::Extras(error)) = Uri::try_from(uri) {
             assert!(
                 error.to_string().contains(expected_error),
-                "Error should indicate '{}' but was: {}",
-                expected_error,
-                error
+                "Error should indicate '{expected_error}' but was: {error}"
             );
         }
         Ok(())

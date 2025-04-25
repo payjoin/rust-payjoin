@@ -45,8 +45,8 @@ impl fmt::Display for BuildSenderError {
         use InternalBuildSenderError::*;
 
         match &self.0 {
-            InvalidOriginalInput(e) => write!(f, "an input in the original transaction is invalid: {:#?}", e),
-            InconsistentOriginalPsbt(e) => write!(f, "the original transaction is inconsistent: {:#?}", e),
+            InvalidOriginalInput(e) => write!(f, "an input in the original transaction is invalid: {e:#?}"),
+            InconsistentOriginalPsbt(e) => write!(f, "the original transaction is inconsistent: {e:#?}"),
             NoInputs => write!(f, "the original transaction has no inputs"),
             PayeeValueNotEqual => write!(f, "the value in original transaction doesn't equal value requested in the payment link"),
             NoOutputs => write!(f, "the original transaction has no outputs"),
@@ -56,8 +56,8 @@ impl fmt::Display for BuildSenderError {
             AmbiguousChangeOutput => write!(f, "can not determine which output is change because there's more than two outputs"),
             ChangeIndexOutOfBounds => write!(f, "fee output index is points out of bounds"),
             ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),
-            AddressType(e) => write!(f, "can not determine input address type: {}", e),
-            InputWeight(e) => write!(f, "can not determine expected input weight: {}", e),
+            AddressType(e) => write!(f, "can not determine input address type: {e}"),
+            InputWeight(e) => write!(f, "can not determine expected input weight: {e}"),
         }
     }
 }
@@ -118,10 +118,10 @@ impl fmt::Display for ValidationError {
 
         match &self.0 {
             Parse => write!(f, "couldn't decode as PSBT or JSON",),
-            Io(e) => write!(f, "couldn't read PSBT: {}", e),
-            Proposal(e) => write!(f, "proposal PSBT error: {}", e),
+            Io(e) => write!(f, "couldn't read PSBT: {e}"),
+            Proposal(e) => write!(f, "proposal PSBT error: {e}"),
             #[cfg(feature = "v2")]
-            V2Encapsulation(e) => write!(f, "v2 encapsulation error: {}", e),
+            V2Encapsulation(e) => write!(f, "v2 encapsulation error: {e}"),
         }
     }
 }
@@ -181,13 +181,13 @@ impl fmt::Display for InternalProposalError {
         use InternalProposalError::*;
 
         match &self {
-            InvalidAddressType(e) => write!(f, "invalid input address type: {}", e),
+            InvalidAddressType(e) => write!(f, "invalid input address type: {e}"),
             NoInputs => write!(f, "PSBT doesn't have any inputs"),
-            PrevTxOut(e) => write!(f, "missing previous txout information: {}", e),
-            InputWeight(e) => write!(f, "can not determine expected input weight: {}", e),
-            VersionsDontMatch { proposed, original, } => write!(f, "proposed transaction version {} doesn't match the original {}", proposed, original),
-            LockTimesDontMatch { proposed, original, } => write!(f, "proposed transaction lock time {} doesn't match the original {}", proposed, original),
-            SenderTxinSequenceChanged { proposed, original, } => write!(f, "proposed transaction sequence number {} doesn't match the original {}", proposed, original),
+            PrevTxOut(e) => write!(f, "missing previous txout information: {e}"),
+            InputWeight(e) => write!(f, "can not determine expected input weight: {e}"),
+            VersionsDontMatch { proposed, original, } => write!(f, "proposed transaction version {proposed} doesn't match the original {original}"),
+            LockTimesDontMatch { proposed, original, } => write!(f, "proposed transaction lock time {proposed} doesn't match the original {original}"),
+            SenderTxinSequenceChanged { proposed, original, } => write!(f, "proposed transaction sequence number {proposed} doesn't match the original {original}"),
             SenderTxinContainsFinalScriptSig => write!(f, "an input in proposed transaction belonging to the sender contains finalized non-witness signature"),
             SenderTxinContainsFinalScriptWitness => write!(f, "an input in proposed transaction belonging to the sender contains finalized witness signature"),
             TxInContainsKeyPaths => write!(f, "proposed transaction inputs contain key paths"),
@@ -205,7 +205,7 @@ impl fmt::Display for InternalProposalError {
             PayeeTookContributedFee => write!(f, "payee tried to take fee contribution for himself"),
             FeeContributionPaysOutputSizeIncrease => write!(f, "fee contribution pays for additional outputs"),
             FeeRateBelowMinimum =>  write!(f, "the fee rate of proposed transaction is below minimum"),
-            Psbt(e) => write!(f, "psbt error: {}", e),
+            Psbt(e) => write!(f, "psbt error: {e}"),
         }
     }
 }
@@ -335,7 +335,7 @@ impl Display for ResponseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::WellKnown(e) => e.fmt(f),
-            Self::Validation(e) => write!(f, "The receiver sent an invalid response: {}", e),
+            Self::Validation(e) => write!(f, "The receiver sent an invalid response: {e}"),
 
             // Do NOT display unrecognized errors to end users, only debug logs
             Self::Unrecognized { .. } => write!(f, "The receiver sent an unrecognized error."),
@@ -351,16 +351,16 @@ impl fmt::Debug for ResponseError {
                     "errorCode": e.code.to_string(),
                     "message": e.message
                 });
-                write!(f, "Well known error: {}", json)
+                write!(f, "Well known error: {json}")
             }
-            Self::Validation(e) => write!(f, "Validation({:?})", e),
+            Self::Validation(e) => write!(f, "Validation({e:?})"),
 
             Self::Unrecognized { error_code, message } => {
                 let json = serde_json::json!({
                     "errorCode": error_code,
                     "message": message
                 });
-                write!(f, "Unrecognized error: {}", json)
+                write!(f, "Unrecognized error: {json}")
             }
         }
     }
@@ -395,7 +395,7 @@ impl core::fmt::Display for WellKnownError {
             ErrorCode::NotEnoughMoney => write!(f, "The receiver added some inputs but could not bump the fee of the payjoin proposal."),
             ErrorCode::VersionUnsupported => {
                 if let Some(supported) = &self.supported_versions {
-                    write!(f, "This version of payjoin is not supported. Use version {:?}.", supported)
+                    write!(f, "This version of payjoin is not supported. Use version {supported:?}.")
                 } else {
                     write!(f, "This version of payjoin is not supported.")
                 }

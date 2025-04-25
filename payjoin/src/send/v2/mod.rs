@@ -242,10 +242,10 @@ pub(crate) fn extract_request(
 
     let (body, ohttp_ctx) = ohttp_encapsulate(ohttp_keys, "POST", url.as_str(), Some(&body))
         .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
-    log::debug!("ohttp_relay_url: {:?}", ohttp_relay);
+    log::debug!("ohttp_relay_url: {ohttp_relay:?}");
     let directory_base = url.join("/").map_err(|e| InternalCreateRequestError::Url(e.into()))?;
     let full_ohttp_relay = ohttp_relay
-        .join(&format!("/{}", directory_base))
+        .join(&format!("/{directory_base}"))
         .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
     let request = Request::new_v2(&full_ohttp_relay, &body);
     Ok((request, ohttp_ctx))
@@ -269,7 +269,7 @@ pub(crate) fn serialize_v2_body(
     );
     let query_params = placeholder_url.query().unwrap_or_default();
     let base64 = psbt.to_string();
-    Ok(format!("{}\n{}", base64, query_params).into_bytes())
+    Ok(format!("{base64}\n{query_params}").into_bytes())
 }
 
 /// Data required to validate the POST response.
@@ -496,7 +496,7 @@ mod test {
 
         match result {
             Ok(_) => panic!("Expected error, got success"),
-            Err(error) => assert_eq!(format!("{}", error), expected_error),
+            Err(error) => assert_eq!(format!("{error}"), expected_error),
         }
         Ok(())
     }
@@ -514,7 +514,7 @@ mod test {
 
         match result {
             Ok(_) => panic!("Expected error, got success"),
-            Err(error) => assert_eq!(format!("{}", error), expected_error),
+            Err(error) => assert_eq!(format!("{error}"), expected_error),
         }
         Ok(())
     }
@@ -532,9 +532,9 @@ mod test {
         match result {
             Ok(_) => panic!("Expected error, got success"),
             Err(error) => assert_eq!(
-                format!("{}", error)
+                format!("{error}")
                     .split_once(" {")
-                    .map_or(format!("{}", error), |(prefix, _)| prefix.to_string()),
+                    .map_or(format!("{error}"), |(prefix, _)| prefix.to_string()),
                 expected_error
             ),
         }

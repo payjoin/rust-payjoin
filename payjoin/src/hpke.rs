@@ -303,8 +303,7 @@ impl fmt::Display for HpkeError {
             PayloadTooLarge { actual, max } => {
                 write!(
                     f,
-                    "Plaintext too large, max size is {} bytes, actual size is {} bytes",
-                    max, actual
+                    "Plaintext too large, max size is {max} bytes, actual size is {actual} bytes"
                 )
             }
             PayloadTooShort => write!(f, "Payload too small"),

@@ -129,7 +129,7 @@ pub async fn init_directory(
     (u16, tokio::task::JoinHandle<std::result::Result<(), BoxSendSyncError>>),
     BoxSendSyncError,
 > {
-    println!("Database running on {}", db_host);
+    println!("Database running on {db_host}");
     let timeout = Duration::from_secs(2);
     let ohttp_server = payjoin_directory::gen_ohttp_server_config()?;
     payjoin_directory::listen_tcp_with_tls_on_free_port(
@@ -221,7 +221,7 @@ pub fn init_bitcoind_multi_sender_single_reciever(
 ) -> Result<(bitcoind::BitcoinD, Vec<bitcoincore_rpc::Client>, bitcoincore_rpc::Client), BoxError> {
     let bitcoind = init_bitcoind()?;
     let wallets_to_create =
-        (0..number_of_senders + 1).map(|i| (format!("sender_{}", i), None)).collect::<Vec<_>>();
+        (0..number_of_senders + 1).map(|i| (format!("sender_{i}"), None)).collect::<Vec<_>>();
     let mut wallets = create_and_fund_wallets(&bitcoind, wallets_to_create)?;
     let receiver = wallets.pop().expect("receiver to exist");
     let senders = wallets;

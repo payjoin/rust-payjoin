@@ -78,12 +78,12 @@ pub(crate) fn parse_payload(
     let unchecked_psbt = Psbt::from_str(&base64).map_err(InternalPayloadError::ParsePsbt)?;
 
     let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
-    log::debug!("Received original psbt: {:?}", psbt);
+    log::debug!("Received original psbt: {psbt:?}");
 
     let pairs = url::form_urlencoded::parse(query.as_bytes());
     let params = Params::from_query_pairs(pairs, supported_versions)
         .map_err(InternalPayloadError::SenderParams)?;
-    log::debug!("Received request with params: {:?}", params);
+    log::debug!("Received request with params: {params:?}");
 
     Ok((psbt, params))
 }

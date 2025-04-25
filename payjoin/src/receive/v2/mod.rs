@@ -54,7 +54,7 @@ impl SessionContext {
 
         // Append that information as a path to the relay URL
         relay_base
-            .join(&format!("/{}", directory_base))
+            .join(&format!("/{directory_base}"))
             .map_err(|e| InternalSessionError::ParseUrl(e.into()))
     }
 }
@@ -208,7 +208,7 @@ impl Receiver {
     ) -> Result<UncheckedProposal, ReplyableError> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
-        log::trace!("Received query: {}, base64: {}", query, base64); // my guess is no \n so default is wrong
+        log::trace!("Received query: {query}, base64: {base64}"); // my guess is no \n so default is wrong
         let (psbt, mut params) = parse_payload(base64.to_string(), query, SUPPORTED_VERSIONS)
             .map_err(ReplyableError::Payload)?;
 

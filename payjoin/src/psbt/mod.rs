@@ -20,8 +20,8 @@ pub(crate) enum InconsistentPsbt {
 impl fmt::Display for InconsistentPsbt {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            InconsistentPsbt::UnequalInputCounts { tx_ins, psbt_ins, } => write!(f, "The number of PSBT inputs ({}) doesn't equal to the number of unsigned transaction inputs ({})", psbt_ins, tx_ins),
-            InconsistentPsbt::UnequalOutputCounts { tx_outs, psbt_outs, } => write!(f, "The number of PSBT outputs ({}) doesn't equal to the number of unsigned transaction outputs ({})", psbt_outs, tx_outs),
+            InconsistentPsbt::UnequalInputCounts { tx_ins, psbt_ins, } => write!(f, "The number of PSBT inputs ({psbt_ins}) doesn't equal to the number of unsigned transaction inputs ({tx_ins})"),
+            InconsistentPsbt::UnequalOutputCounts { tx_outs, psbt_outs, } => write!(f, "The number of PSBT outputs ({psbt_outs}) doesn't equal to the number of unsigned transaction outputs ({tx_outs})"),
         }
     }
 }
@@ -228,7 +228,7 @@ impl fmt::Display for PrevTxOutError {
         match self {
             PrevTxOutError::MissingUtxoInformation => write!(f, "missing UTXO information"),
             PrevTxOutError::IndexOutOfBounds { output_count, index } => {
-                write!(f, "index {} out of bounds (number of outputs: {})", index, output_count)
+                write!(f, "index {index} out of bounds (number of outputs: {output_count})")
             }
         }
     }

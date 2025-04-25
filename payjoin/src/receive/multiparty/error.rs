@@ -29,15 +29,15 @@ impl fmt::Display for MultipartyError {
         match &self.0 {
             InternalMultipartyError::NotEnoughProposals => write!(f, "Not enough proposals"),
             InternalMultipartyError::ProposalVersionNotSupported(v) =>
-                write!(f, "Proposal version not supported: {}", v),
+                write!(f, "Proposal version not supported: {v}"),
             InternalMultipartyError::OptimisticMergeNotSupported =>
                 write!(f, "Optimistic merge not supported"),
             InternalMultipartyError::BitcoinExtractTxError(e) =>
-                write!(f, "Bitcoin extract tx error: {:?}", e),
+                write!(f, "Bitcoin extract tx error: {e:?}"),
             InternalMultipartyError::InputMissingWitnessOrScriptSig =>
                 write!(f, "Input in Finalized Proposal is missing witness or script_sig"),
             InternalMultipartyError::FailedToCombinePsbts(e) =>
-                write!(f, "Failed to combine psbts: {:?}", e),
+                write!(f, "Failed to combine psbts: {e:?}"),
         }
     }
 }

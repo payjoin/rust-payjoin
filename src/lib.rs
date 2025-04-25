@@ -4,6 +4,7 @@ pub mod bitcoin_ffi;
 pub mod error;
 pub mod io;
 pub mod ohttp;
+pub mod output_substitution;
 pub mod receive;
 pub mod request;
 pub mod send;
@@ -11,8 +12,11 @@ pub mod send;
 pub mod test_utils;
 pub mod uri;
 
+pub use payjoin::persist::NoopPersister;
+
 pub use crate::bitcoin_ffi::*;
 pub use crate::ohttp::*;
+pub use crate::output_substitution::*;
 #[cfg(feature = "uniffi")]
 pub use crate::receive::uni::*;
 pub use crate::request::Request;

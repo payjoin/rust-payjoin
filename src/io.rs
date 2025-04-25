@@ -1,14 +1,18 @@
+pub use error::IoError;
+
 use crate::ohttp::OhttpKeys;
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[error("IO error: {message}")]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
-pub struct IoError {
-    message: String,
-}
-impl From<payjoin::io::Error> for IoError {
-    fn from(value: payjoin::io::Error) -> Self {
-        IoError { message: format!("{:?}", value) }
+pub mod error {
+    #[derive(Debug, PartialEq, Eq, thiserror::Error)]
+    #[error("IO error: {message}")]
+    #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+    pub struct IoError {
+        message: String,
+    }
+    impl From<payjoin::io::Error> for IoError {
+        fn from(value: payjoin::io::Error) -> Self {
+            IoError { message: format!("{:?}", value) }
+        }
     }
 }
 

@@ -7,10 +7,76 @@ pub use crate::receive::{
     ReplyableError, SelectionError, SerdeJsonError, SessionError,
 };
 use crate::uri::error::IntoUrlError;
-use crate::{ClientResponse, OhttpKeys, Request};
+use crate::{ClientResponse, OhttpKeys, OutputSubstitution, Request};
+
+#[derive(Debug, uniffi::Object)]
+pub struct NewReceiver(pub super::NewReceiver);
+
+impl From<NewReceiver> for super::NewReceiver {
+    fn from(value: NewReceiver) -> Self {
+        value.0
+    }
+}
+
+impl From<super::NewReceiver> for NewReceiver {
+    fn from(value: super::NewReceiver) -> Self {
+        Self(value)
+    }
+}
+
+#[uniffi::export]
+impl NewReceiver {
+    /// Creates a new [`NewReceiver`] with the provided parameters.
+    ///
+    /// # Parameters
+    /// - `address`: The Bitcoin address for the payjoin session.
+    /// - `directory`: The URL of the store-and-forward payjoin directory.
+    /// - `ohttp_keys`: The OHTTP keys used for encrypting and decrypting HTTP requests and responses.
+    /// - `expire_after`: The duration after which the session expires.
+    ///
+    /// # Returns
+    /// A new instance of [`NewReceiver`].
+    ///
+    /// # References
+    /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
+    #[uniffi::constructor]
+    pub fn new(
+        address: Arc<Address>,
+        directory: String,
+        ohttp_keys: Arc<OhttpKeys>,
+        expire_after: Option<u64>,
+    ) -> Result<Self, IntoUrlError> {
+        super::NewReceiver::new((*address).clone(), directory, (*ohttp_keys).clone(), expire_after)
+            .map(Into::into)
+    }
+
+    /// Saves the new [`Receiver`] using the provided persister and returns the storage token.
+    pub fn persist(
+        &self,
+        persister: Arc<dyn ReceiverPersister>,
+    ) -> Result<ReceiverToken, ImplementationError> {
+        let mut adapter = CallbackPersisterAdapter::new(persister);
+        self.0.persist(&mut adapter)
+    }
+}
 
 #[derive(Clone, Debug, uniffi::Object)]
-pub struct Receiver(pub super::Receiver);
+pub struct ReceiverToken(#[allow(dead_code)] payjoin::receive::v2::ReceiverToken);
+
+impl From<payjoin::receive::v2::Receiver> for ReceiverToken {
+    fn from(value: payjoin::receive::v2::Receiver) -> Self {
+        ReceiverToken(value.into())
+    }
+}
+
+impl From<payjoin::receive::v2::ReceiverToken> for ReceiverToken {
+    fn from(value: payjoin::receive::v2::ReceiverToken) -> Self {
+        ReceiverToken(value)
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Object)]
+pub struct Receiver(super::Receiver);
 
 impl From<Receiver> for super::Receiver {
     fn from(value: Receiver) -> Self {
@@ -26,29 +92,13 @@ impl From<super::Receiver> for Receiver {
 
 #[uniffi::export]
 impl Receiver {
-    /// Creates a new `SessionInitializer` with the provided parameters.
-    ///
-    /// # Parameters
-    /// - `address`: The Bitcoin address for the payjoin session.
-    /// - `directory`: The URL of the store-and-forward payjoin directory.
-    /// - `ohttp_keys`: The OHTTP keys used for encrypting and decrypting HTTP requests and responses.
-    /// - `ohttp_relay`: The URL of the OHTTP relay, used to keep client IP address confidential.
-    /// - `expire_after`: The duration in seconds after which the session expires.
-    ///
-    /// # Returns
-    /// A new instance of `SessionInitializer`.
-    ///
-    /// # References
-    /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
+    /// Loads a [`Receiver`] from the provided persister using the storage token.
     #[uniffi::constructor]
-    pub fn new(
-        address: Arc<Address>,
-        directory: String,
-        ohttp_keys: Arc<OhttpKeys>,
-        expire_after: Option<u64>,
-    ) -> Result<Self, IntoUrlError> {
-        super::Receiver::new((*address).clone(), directory, (*ohttp_keys).clone(), expire_after)
-            .map(Into::into)
+    pub fn load(
+        token: Arc<ReceiverToken>,
+        persister: Arc<dyn ReceiverPersister>,
+    ) -> Result<Self, ImplementationError> {
+        Ok(super::Receiver::from(persister.load(token).unwrap()).into())
     }
 
     /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
@@ -86,6 +136,10 @@ impl Receiver {
     #[uniffi::constructor]
     pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
         super::Receiver::from_json(json).map(Into::into)
+    }
+
+    pub fn key(&self) -> ReceiverToken {
+        self.0.key().into()
     }
 }
 
@@ -272,7 +326,7 @@ impl From<super::WantsOutputs> for WantsOutputs {
 }
 #[uniffi::export]
 impl WantsOutputs {
-    pub fn output_substitution(&self) -> bool {
+    pub fn output_substitution(&self) -> OutputSubstitution {
         self.0.output_substitution()
     }
 
@@ -415,8 +469,9 @@ impl PayjoinProposal {
         self.0.psbt()
     }
 
-    pub fn extract_v2_req(&self, ohttp_relay: String) -> Result<RequestResponse, Error> {
-        let (req, res) = self.0.extract_v2_req(ohttp_relay)?;
+    /// Extract an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
+    pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestResponse, Error> {
+        let (req, res) = self.0.extract_req(ohttp_relay)?;
         Ok(RequestResponse { request: req, client_response: Arc::new(res) })
     }
 
@@ -427,5 +482,39 @@ impl PayjoinProposal {
     /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or choose to broadcast the original PSBT.
     pub fn process_res(&self, body: &[u8], ctx: Arc<ClientResponse>) -> Result<(), Error> {
         self.0.process_res(body, ctx.as_ref())
+    }
+}
+
+#[uniffi::export]
+pub trait ReceiverPersister: Send + Sync {
+    fn save(&self, receiver: Arc<Receiver>) -> Result<ReceiverToken, ImplementationError>;
+    fn load(&self, token: Arc<ReceiverToken>) -> Result<Receiver, ImplementationError>;
+}
+
+/// Adapter for the ReceiverPersister trait to use the save and load callbacks.
+struct CallbackPersisterAdapter {
+    callback_persister: Arc<dyn ReceiverPersister>,
+}
+
+impl CallbackPersisterAdapter {
+    pub fn new(callback_persister: Arc<dyn ReceiverPersister>) -> Self {
+        Self { callback_persister }
+    }
+}
+
+impl payjoin::persist::Persister<payjoin::receive::v2::Receiver> for CallbackPersisterAdapter {
+    type Token = ReceiverToken;
+    type Error = ImplementationError;
+
+    fn save(
+        &mut self,
+        receiver: payjoin::receive::v2::Receiver,
+    ) -> Result<Self::Token, Self::Error> {
+        let receiver = Receiver(super::Receiver::from(receiver));
+        self.callback_persister.save(receiver.into())
+    }
+
+    fn load(&self, token: Self::Token) -> Result<payjoin::receive::v2::Receiver, Self::Error> {
+        self.callback_persister.load(token.into()).map(|receiver| receiver.0 .0)
     }
 }

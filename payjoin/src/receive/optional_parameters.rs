@@ -5,11 +5,12 @@ use bitcoin::FeeRate;
 use log::warn;
 
 use crate::output_substitution::OutputSubstitution;
+use crate::Version;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Params {
     // version
-    pub v: usize,
+    pub v: Version,
     // disableoutputsubstitution
     pub output_substitution: OutputSubstitution,
     // maxadditionalfeecontribution, additionalfeeoutputindex
@@ -24,7 +25,7 @@ pub(crate) struct Params {
 impl Default for Params {
     fn default() -> Self {
         Params {
-            v: 1,
+            v: Version::One,
             output_substitution: OutputSubstitution::Enabled,
             additional_fee_contribution: None,
             min_fee_rate: FeeRate::BROADCAST_MIN,
@@ -37,7 +38,7 @@ impl Default for Params {
 impl Params {
     pub fn from_query_pairs<K, V, I>(
         pairs: I,
-        supported_versions: &'static [usize],
+        supported_versions: &'static [Version],
     ) -> Result<Self, Error>
     where
         I: Iterator<Item = (K, V)>,
@@ -52,8 +53,9 @@ impl Params {
         for (key, v) in pairs {
             match (key.borrow(), v.borrow()) {
                 ("v", version) =>
-                    params.v = match version.parse::<usize>() {
-                        Ok(version) if supported_versions.contains(&version) => version,
+                    params.v = match version {
+                        "1" => Version::One,
+                        "2" => Version::Two,
                         _ => return Err(Error::UnknownVersion { supported_versions }),
                     },
                 ("additionalfeeoutputindex", index) =>
@@ -111,9 +113,9 @@ impl Params {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Error {
-    UnknownVersion { supported_versions: &'static [usize] },
+    UnknownVersion { supported_versions: &'static [Version] },
     FeeRate,
 }
 
@@ -135,19 +137,30 @@ pub(crate) mod test {
     use bitcoin::Amount;
 
     use super::*;
+    use crate::receive::optional_parameters::Params;
+    use crate::Version;
 
     #[test]
     fn test_parse_params() {
         use bitcoin::FeeRate;
 
         let pairs = url::form_urlencoded::parse(b"maxadditionalfeecontribution=182&additionalfeeoutputindex=0&minfeerate=1&disableoutputsubstitution=true&optimisticmerge=true");
-        let params =
-            Params::from_query_pairs(pairs, &[1]).expect("Could not parse params from query pairs");
-        assert_eq!(params.v, 1);
+        let params = Params::from_query_pairs(pairs, &[Version::One])
+            .expect("Could not parse params from query pairs");
+        assert_eq!(params.v, Version::One);
         assert_eq!(params.output_substitution, OutputSubstitution::Disabled);
         assert_eq!(params.additional_fee_contribution, Some((Amount::from_sat(182), 0)));
         assert_eq!(params.min_fee_rate, FeeRate::BROADCAST_MIN);
         #[cfg(feature = "_multiparty")]
         assert!(params.optimistic_merge)
+    }
+
+    #[test]
+    fn from_query_pairs_unsupported_versions() {
+        let invalid_pair: Vec<(&str, &str)> = vec![("v", "888")];
+        let supported_versions = &[Version::One, Version::Two];
+        let params = Params::from_query_pairs(invalid_pair.into_iter(), supported_versions);
+        assert!(params.is_err());
+        assert_eq!(params.err().unwrap(), Error::UnknownVersion { supported_versions });
     }
 }

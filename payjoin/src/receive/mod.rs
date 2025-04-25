@@ -21,6 +21,7 @@ use optional_parameters::Params;
 
 pub use crate::psbt::PsbtInputError;
 use crate::psbt::{InternalInputPair, InternalPsbtInputError, PsbtExt};
+use crate::Version;
 
 mod error;
 pub(crate) mod optional_parameters;
@@ -73,7 +74,7 @@ impl<'a> From<&'a InputPair> for InternalInputPair<'a> {
 pub(crate) fn parse_payload(
     base64: String,
     query: &str,
-    supported_versions: &'static [usize],
+    supported_versions: &'static [Version],
 ) -> Result<(Psbt, Params), PayloadError> {
     let unchecked_psbt = Psbt::from_str(&base64).map_err(InternalPayloadError::ParsePsbt)?;
 

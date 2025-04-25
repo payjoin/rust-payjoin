@@ -74,3 +74,5 @@ pub mod core;
 pub(crate) mod error_codes;
 #[cfg(feature = "_core")]
 pub use crate::core::error::ImplementationError;
+#[cfg(feature = "_core")]
+pub(crate) use crate::core::version::Version;

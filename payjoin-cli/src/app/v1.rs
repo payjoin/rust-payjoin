@@ -91,8 +91,8 @@ impl AppTrait for App {
         );
         let psbt = ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()).map_err(
             |e| {
-                log::debug!("Error processing response: {:?}", e);
-                anyhow!("Failed to process response {}", e)
+                log::debug!("Error processing response: {e:?}");
+                anyhow!("Failed to process response {e}")
             },
         )?;
 
@@ -165,7 +165,7 @@ impl App {
                 let stream = match tls_acceptor.accept(stream).await {
                     Ok(tls_stream) => tls_stream,
                     Err(e) => {
-                        log::error!("TLS accept error: {}", e);
+                        log::error!("TLS accept error: {e}");
                         return;
                     }
                 };
@@ -211,11 +211,11 @@ impl App {
         self,
         req: Request<Incoming>,
     ) -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
-        log::debug!("Received request: {:?}", req);
+        log::debug!("Received request: {req:?}");
         let mut response = match (req.method(), req.uri().path()) {
             (&Method::GET, "/bip21") => {
                 let query_string = req.uri().query().unwrap_or("");
-                log::debug!("{:?}, {:?}", req.method(), query_string);
+                log::debug!("{:?}, {query_string:?}", req.method());
                 let query_params: HashMap<_, _> =
                     url::form_urlencoded::parse(query_string.as_bytes()).into_owned().collect();
                 let amount = query_params.get("amount").map(|amt| {
@@ -223,7 +223,7 @@ impl App {
                 });
                 self.handle_get_bip21(amount)
                     .map_err(|e| {
-                        log::error!("Error handling request: {}", e);
+                        log::error!("Error handling request: {e}");
                         Response::builder().status(500).body(full(e.to_string())).unwrap()
                     })
                     .unwrap_or_else(|err_resp| err_resp)
@@ -233,11 +233,11 @@ impl App {
                 .await
                 .map_err(|e| match e {
                     V1(e) => {
-                        log::error!("Error handling request: {}", e);
+                        log::error!("Error handling request: {e}");
                         Response::builder().status(400).body(full(e.to_string())).unwrap()
                     }
                     e => {
-                        log::error!("Error handling request: {}", e);
+                        log::error!("Error handling request: {e}");
                         Response::builder().status(500).body(full(e.to_string())).unwrap()
                     }
                 })

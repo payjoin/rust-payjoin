@@ -48,7 +48,7 @@ mod e2e {
             let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
             let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
             let cookie_file = &bitcoind.params.cookie_file;
-            let pj_endpoint = format!("https://localhost:{}", port);
+            let pj_endpoint = format!("https://localhost:{port}");
             let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
 
             let mut cli_receiver = Command::new(payjoin_cli)
@@ -82,7 +82,7 @@ mod e2e {
             {
                 // Write to stdout regardless
                 stdout
-                    .write_all(format!("{}\n", line).as_bytes())
+                    .write_all(format!("{line}\n").as_bytes())
                     .await
                     .expect("Failed to write to stdout");
 
@@ -121,7 +121,7 @@ mod e2e {
                     lines.next_line().await.expect("Failed to read line from stdout")
                 {
                     stdout
-                        .write_all(format!("{}\n", line).as_bytes())
+                        .write_all(format!("{line}\n").as_bytes())
                         .await
                         .expect("Failed to write to stdout");
                     if line.contains("Payjoin sent") {
@@ -173,8 +173,8 @@ mod e2e {
             CleanupGuard { paths: vec![receiver_db_path.clone(), sender_db_path.clone()] };
 
         let result = tokio::select! {
-            res = services.take_ohttp_relay_handle() => Err(format!("Ohttp relay is long running: {:?}", res).into()),
-            res = services.take_directory_handle() => Err(format!("Directory server is long running: {:?}", res).into()),
+            res = services.take_ohttp_relay_handle() => Err(format!("Ohttp relay is long running: {res:?}").into()),
+            res = services.take_directory_handle() => Err(format!("Directory server is long running: {res:?}").into()),
             res = send_receive_cli_async(&services, receiver_db_path.clone(), sender_db_path.clone()) => res,
         };
 
@@ -357,7 +357,7 @@ mod e2e {
             {
                 // Write all output to tests stdout
                 stdout
-                    .write_all(format!("{}\n", line).as_bytes())
+                    .write_all(format!("{line}\n").as_bytes())
                     .await
                     .expect("Failed to write to stdout");
 
@@ -375,7 +375,7 @@ mod e2e {
 
     fn cleanup_temp_file(path: &std::path::Path) {
         if let Err(e) = std::fs::remove_dir_all(path) {
-            eprintln!("Failed to remove {:?}: {}", path, e);
+            eprintln!("Failed to remove {path:?}: {e}");
         }
     }
 }

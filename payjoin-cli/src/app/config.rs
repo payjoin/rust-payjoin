@@ -146,8 +146,7 @@ impl Config {
                         Ok(v1) => config.version = Some(VersionConfig::V1(v1)),
                         Err(e) =>
                             return Err(ConfigError::Message(format!(
-                                "Valid V1 configuration is required for BIP78 mode: {}",
-                                e
+                                "Valid V1 configuration is required for BIP78 mode: {e}"
                             ))),
                     }
                 }

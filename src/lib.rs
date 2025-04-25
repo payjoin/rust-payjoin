@@ -7,6 +7,8 @@ pub mod ohttp;
 pub mod receive;
 pub mod request;
 pub mod send;
+#[cfg(feature = "_test-utils")]
+pub mod test_utils;
 pub mod uri;
 
 pub use crate::bitcoin_ffi::*;
@@ -16,6 +18,8 @@ pub use crate::receive::uni::*;
 pub use crate::request::Request;
 #[cfg(feature = "uniffi")]
 pub use crate::send::uni::*;
+#[cfg(feature = "_test-utils")]
+pub use crate::test_utils::*;
 pub use crate::uri::{PjUri, Uri, Url};
 #[cfg(feature = "uniffi")]
 uniffi::setup_scaffolding!();

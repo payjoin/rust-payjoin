@@ -80,10 +80,9 @@ impl TestServices {
             .map_err(|e| payjoin_test_utils::BoxSendSyncError::from(e).into())
     }
 
-    // Commented out waiting for #78 mismatched type between payjoin versions
-    //pub async fn fetch_ohttp_keys(&self) -> Result<OhttpKeys, IoError> {
-    //    self.0.lock().await.fetch_ohttp_keys().await.map_err(Into::into).map(Into::into)
-    //}
+    pub async fn fetch_ohttp_keys(&self) -> Result<crate::OhttpKeys, crate::io::IoError> {
+        self.0.lock().await.fetch_ohttp_keys().await.map_err(Into::into).map(Into::into)
+    }
 }
 
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]

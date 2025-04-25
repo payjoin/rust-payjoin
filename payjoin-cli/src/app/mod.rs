@@ -43,14 +43,14 @@ pub trait App: Send + Sync {
     }
 
     fn process_pj_response(&self, psbt: Psbt) -> Result<bitcoin::Txid> {
-        log::debug!("Proposed psbt: {:#?}", psbt);
+        log::debug!("Proposed psbt: {psbt:#?}");
 
         let signed = self.wallet().process_psbt(&psbt)?;
         let tx = self.wallet().finalize_psbt(&signed)?;
 
         let txid = self.wallet().broadcast_tx(&tx)?;
 
-        println!("Payjoin sent. TXID: {}", txid);
+        println!("Payjoin sent. TXID: {txid}");
         Ok(txid)
     }
 }
@@ -83,7 +83,7 @@ fn read_local_cert() -> Result<Vec<u8>> {
 
 async fn handle_interrupt(tx: watch::Sender<()>) {
     if let Err(e) = signal::ctrl_c().await {
-        eprintln!("Error setting up Ctrl-C handler: {}", e);
+        eprintln!("Error setting up Ctrl-C handler: {e}");
     }
     let _ = tx.send(());
 }

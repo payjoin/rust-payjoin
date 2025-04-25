@@ -26,13 +26,13 @@ impl fmt::Display for CreateRequestError {
         use InternalCreateRequestError::*;
 
         match &self.0 {
-            Url(e) => write!(f, "cannot parse url: {:#?}", e),
-            Hpke(e) => write!(f, "v2 error: {}", e),
-            OhttpEncapsulation(e) => write!(f, "v2 error: {}", e),
-            ParseReceiverPubkey(e) => write!(f, "cannot parse receiver public key: {}", e),
+            Url(e) => write!(f, "cannot parse url: {e:#?}"),
+            Hpke(e) => write!(f, "v2 error: {e}"),
+            OhttpEncapsulation(e) => write!(f, "v2 error: {e}"),
+            ParseReceiverPubkey(e) => write!(f, "cannot parse receiver public key: {e}"),
             MissingOhttpConfig =>
                 write!(f, "no ohttp configuration with which to make a v2 request available"),
-            Expired(expiry) => write!(f, "session expired at {:?}", expiry),
+            Expired(expiry) => write!(f, "session expired at {expiry:?}"),
         }
     }
 }
@@ -89,10 +89,10 @@ impl fmt::Display for EncapsulationError {
         use InternalEncapsulationError::*;
 
         match &self.0 {
-            InvalidSize(size) => write!(f, "invalid size: {}", size),
-            UnexpectedStatusCode(status) => write!(f, "unexpected status code: {}", status),
-            Ohttp(error) => write!(f, "OHTTP encapsulation error: {}", error),
-            Hpke(error) => write!(f, "HPKE error: {}", error),
+            InvalidSize(size) => write!(f, "invalid size: {size}"),
+            UnexpectedStatusCode(status) => write!(f, "unexpected status code: {status}"),
+            Ohttp(error) => write!(f, "OHTTP encapsulation error: {error}"),
+            Hpke(error) => write!(f, "HPKE error: {error}"),
         }
     }
 }

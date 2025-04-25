@@ -142,7 +142,7 @@ pub async fn listen_tcp_with_tls(
     cert_key: (Vec<u8>, Vec<u8>),
     ohttp: ohttp::Server,
 ) -> Result<tokio::task::JoinHandle<Result<(), BoxError>>, BoxError> {
-    let addr = format!("0.0.0.0:{}", port);
+    let addr = format!("0.0.0.0:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     listen_tcp_with_tls_on_listener(listener, db_host, timeout, cert_key, ohttp).await
 }
@@ -352,7 +352,7 @@ async fn post_fallback_v1(
         Err(_) => return Ok(bad_request_body_res),
     };
 
-    let v2_compat_body = format!("{}\n{}", body_str, query);
+    let v2_compat_body = format!("{body_str}\n{query}");
     let id = ShortId::from_str(id)?;
     pool.push_default(&id, v2_compat_body.into())
         .await

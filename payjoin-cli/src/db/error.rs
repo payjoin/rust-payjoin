@@ -20,13 +20,13 @@ pub(crate) enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Sled(e) => write!(f, "Database operation failed: {}", e),
+            Error::Sled(e) => write!(f, "Database operation failed: {e}"),
             #[cfg(feature = "v2")]
-            Error::Serialize(e) => write!(f, "Serialization failed: {}", e),
+            Error::Serialize(e) => write!(f, "Serialization failed: {e}"),
             #[cfg(feature = "v2")]
-            Error::Deserialize(e) => write!(f, "Deserialization failed: {}", e),
+            Error::Deserialize(e) => write!(f, "Deserialization failed: {e}"),
             #[cfg(feature = "v2")]
-            Error::NotFound(key) => write!(f, "Key not found: {}", key),
+            Error::NotFound(key) => write!(f, "Key not found: {key}"),
         }
     }
 }

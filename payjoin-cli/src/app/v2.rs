@@ -5,9 +5,9 @@ use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v2::{NewReceiver, Receiver, UncheckedProposal};
-use payjoin::receive::{Error, ImplementationError, ReplyableError};
+use payjoin::receive::{Error, ReplyableError};
 use payjoin::send::v2::{Sender, SenderBuilder};
-use payjoin::Uri;
+use payjoin::{ImplementationError, Uri};
 use tokio::sync::watch;
 
 use super::config::Config;

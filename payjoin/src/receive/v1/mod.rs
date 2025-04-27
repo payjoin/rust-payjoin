@@ -36,12 +36,11 @@ use super::error::{
     InternalSelectionError,
 };
 use super::optional_parameters::Params;
-use super::{
-    ImplementationError, InputPair, OutputSubstitutionError, ReplyableError, SelectionError,
-};
+use super::{InputPair, OutputSubstitutionError, ReplyableError, SelectionError};
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
 use crate::receive::InternalPayloadError;
+use crate::ImplementationError;
 
 #[cfg(feature = "v1")]
 mod exclusive;

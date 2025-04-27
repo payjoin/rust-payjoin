@@ -14,8 +14,7 @@ use url::Url;
 
 use super::error::{Error, InputContributionError};
 use super::{
-    v1, ImplementationError, InternalPayloadError, JsonReply, OutputSubstitutionError,
-    ReplyableError, SelectionError,
+    v1, InternalPayloadError, JsonReply, OutputSubstitutionError, ReplyableError, SelectionError,
 };
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
@@ -23,7 +22,7 @@ use crate::output_substitution::OutputSubstitution;
 use crate::persist::Persister;
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
-use crate::{IntoUrl, IntoUrlError, Request};
+use crate::{ImplementationError, IntoUrl, IntoUrlError, Request};
 
 mod error;
 mod persist;

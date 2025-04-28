@@ -339,6 +339,9 @@ impl UncheckedProposal {
             _ => Err(InternalSessionError::UnexpectedStatusCode(response.status()).into()),
         }
     }
+
+    /// The per-session identifier
+    pub fn id(&self) -> ShortId { id(&self.context.s) }
 }
 
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
@@ -645,6 +648,20 @@ pub mod test {
 
     pub(crate) static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
         address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
+            .expect("valid address")
+            .assume_checked(),
+        directory: EXAMPLE_URL.clone(),
+        subdirectory: None,
+        ohttp_keys: OhttpKeys(
+            ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
+        ),
+        expiry: SystemTime::now() + Duration::from_secs(60),
+        s: HpkeKeyPair::gen_keypair(),
+        e: None,
+    });
+
+    pub(crate) static SHARED_CONTEXT_TWO: Lazy<SessionContext> = Lazy::new(|| SessionContext {
+        address: Address::from_str("tb1qv7scm7gxs32qg3lnm9kf267kllc63yvdxyh72e")
             .expect("valid address")
             .assume_checked(),
         directory: EXAMPLE_URL.clone(),

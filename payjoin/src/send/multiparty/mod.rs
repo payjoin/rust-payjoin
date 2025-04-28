@@ -13,7 +13,7 @@ use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
 use crate::send::v2::{ImplementationError, V2PostContext};
 use crate::uri::UrlExt;
-use crate::{PjUri, Request};
+use crate::{IntoUrl, PjUri, Request};
 
 mod error;
 mod persist;
@@ -117,7 +117,7 @@ impl GetContext {
     /// Extract the GET request that will give us the psbt to be finalized
     pub fn extract_req(
         &self,
-        ohttp_relay: Url,
+        ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), crate::send::v2::CreateRequestError> {
         self.0.extract_req(ohttp_relay)
     }
@@ -175,7 +175,7 @@ pub struct FinalizeContext {
 impl FinalizeContext {
     pub fn extract_req(
         &self,
-        ohttp_relay: Url,
+        ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
         let reply_key = self.hpke_ctx.reply_pair.secret_key();
         let body = serialize_v2_body(

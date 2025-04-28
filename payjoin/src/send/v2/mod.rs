@@ -169,7 +169,7 @@ impl Sender {
     /// and has no fallback to v1.
     pub fn extract_v2(
         &self,
-        ohttp_relay: Url,
+        ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, V2PostContext), CreateRequestError> {
         if let Ok(expiry) = self.v1.endpoint.exp() {
             if std::time::SystemTime::now() > expiry {
@@ -225,13 +225,14 @@ impl Sender {
 }
 
 pub(crate) fn extract_request(
-    ohttp_relay: Url,
+    ohttp_relay: impl IntoUrl,
     reply_key: HpkeSecretKey,
     body: Vec<u8>,
     url: Url,
     receiver_pubkey: HpkePublicKey,
     ohttp_keys: &mut OhttpKeys,
 ) -> Result<(Request, ClientResponse), CreateRequestError> {
+    let ohttp_relay = ohttp_relay.into_url()?;
     let hpke_ctx = HpkeContext::new(receiver_pubkey, &reply_key);
     let body = encrypt_message_a(
         body,

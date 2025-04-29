@@ -348,10 +348,7 @@ impl WantsOutputs {
         &self,
         output_script: Arc<Script>,
     ) -> Result<Arc<WantsOutputs>, OutputSubstitutionError> {
-        self.0
-            .substitute_receiver_script(&output_script)
-            .map(|t| Arc::new(t.into()))
-            .map_err(Into::into)
+        self.0.substitute_receiver_script(&output_script).map(|t| Arc::new(t.into()))
     }
 }
 

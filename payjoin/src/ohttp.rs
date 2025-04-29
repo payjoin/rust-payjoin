@@ -3,6 +3,7 @@ use std::{error, fmt};
 
 use bitcoin::bech32::{self, EncodeError};
 use bitcoin::key::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE;
+use hpke::rand_core::{OsRng, RngCore};
 
 use crate::directory::ENCAPSULATED_MESSAGE_BYTES;
 
@@ -41,6 +42,7 @@ pub fn ohttp_encapsulate(
     }
 
     let mut bhttp_req = [0u8; PADDED_BHTTP_REQ_BYTES];
+    OsRng.fill_bytes(&mut bhttp_req);
     bhttp_message.write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_req.as_mut_slice())?;
     let (encapsulated, ohttp_ctx) = ctx.encapsulate(&bhttp_req)?;
 

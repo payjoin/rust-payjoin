@@ -11,7 +11,7 @@ pub mod error {
     }
     impl From<payjoin::io::Error> for IoError {
         fn from(value: payjoin::io::Error) -> Self {
-            IoError { message: format!("{:?}", value) }
+            IoError { message: format!("{value:?}") }
         }
     }
 }

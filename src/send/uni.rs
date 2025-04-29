@@ -28,7 +28,7 @@ impl SenderBuilder {
     /// to create a [`Sender`]
     #[uniffi::constructor]
     pub fn new(psbt: String, uri: Arc<PjUri>) -> Result<Self, BuildSenderError> {
-        super::SenderBuilder::new(psbt, (*uri).clone()).map(Into::into).map_err(Into::into)
+        super::SenderBuilder::new(psbt, (*uri).clone()).map(Into::into)
     }
 
     /// Disable output substitution even if the receiver didn't.

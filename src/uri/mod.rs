@@ -86,6 +86,14 @@ impl PjUri {
         self.0.clone().amount.map(|e| e.to_sat())
     }
 
+    /// Sets the amount in sats and returns a new PjUri
+    pub fn set_amount_sats(&self, amount_sats: u64) -> Self {
+        let mut uri = self.0.clone();
+        let amount = payjoin::bitcoin::Amount::from_sat(amount_sats);
+        uri.amount = Some(amount);
+        uri.into()
+    }
+
     pub fn pj_endpoint(&self) -> String {
         self.0.extras.endpoint().to_string()
     }

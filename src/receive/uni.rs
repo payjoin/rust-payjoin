@@ -112,7 +112,10 @@ impl Receiver {
         token: Arc<ReceiverToken>,
         persister: Arc<dyn ReceiverPersister>,
     ) -> Result<Self, ImplementationError> {
-        Ok(super::Receiver::from((*persister.load(token).unwrap()).clone()).into())
+        Ok(super::Receiver::from(
+            (*persister.load(token).map_err(|e| ImplementationError::from(e.to_string()))?).clone(),
+        )
+        .into())
     }
 
     /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.

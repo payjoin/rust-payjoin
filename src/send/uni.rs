@@ -134,7 +134,10 @@ impl Sender {
         token: Arc<SenderToken>,
         persister: Arc<dyn SenderPersister>,
     ) -> Result<Self, ImplementationError> {
-        Ok(super::Sender::from((*persister.load(token).unwrap()).clone()).into())
+        Ok(super::Sender::from(
+            (*persister.load(token).map_err(|e| ImplementationError::from(e.to_string()))?).clone(),
+        )
+        .into())
     }
 
     pub fn extract_v1(&self) -> RequestV1Context {

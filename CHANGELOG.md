@@ -1,3 +1,13 @@
+## [0.23.0]
+
+- Update to payjoin-0.23.0
+- Expose many error variants
+  ([#58](https://github.com/LtbLightning/payjoin-ffi/pull/58))
+  ([#71](https://github.com/LtbLightning/payjoin-ffi/pull/71))
+- Bind payjoin-test-utils ([#82](https://github.com/LtbLightning/payjoin-ffi/pull/82))
+- Depend on bitcoin-ffi @ 6b1d1315dff8696b5ffeb3e5669f308ade227749
+- Rename to payjoin-ffi from payjoin_ffi to match bitcoin-ffi
+
 ## [0.22.1]
 - Expose label and messge params on Uri. ([#44](https://github.com/LtbLightning/payjoin-ffi/pull/44))
 

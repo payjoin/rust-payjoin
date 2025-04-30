@@ -22,7 +22,7 @@
 //! wallet and http client.
 
 use bitcoin::hashes::{sha256, Hash};
-pub use error::{CreateRequestError, EncapsulationError, ImplementationError};
+pub use error::{CreateRequestError, EncapsulationError};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
 pub use persist::SenderToken;
@@ -36,7 +36,7 @@ use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
 use crate::persist::Persister;
 use crate::send::v1;
 use crate::uri::{ShortId, UrlExt};
-use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
+use crate::{HpkeKeyPair, HpkePublicKey, ImplementationError, IntoUrl, OhttpKeys, PjUri, Request};
 
 mod error;
 mod persist;

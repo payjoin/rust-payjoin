@@ -11,9 +11,9 @@ use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, Internal
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
-use crate::send::v2::{ImplementationError, V2PostContext};
+use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
-use crate::{PjUri, Request};
+use crate::{ImplementationError, PjUri, Request};
 
 mod error;
 mod persist;

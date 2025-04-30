@@ -15,10 +15,9 @@ use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 use payjoin::receive::v1::{PayjoinProposal, UncheckedProposal};
-use payjoin::receive::ImplementationError;
 use payjoin::receive::ReplyableError::{self, Implementation, V1};
 use payjoin::send::v1::SenderBuilder;
-use payjoin::{Uri, UriExt};
+use payjoin::{ImplementationError, Uri, UriExt};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 

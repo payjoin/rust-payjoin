@@ -2,10 +2,11 @@ use bitcoin::{FeeRate, Psbt};
 use error::IdenticalProposalError;
 
 use super::error::InputContributionError;
-use super::{v1, v2, Error, ImplementationError, InputPair};
+use super::{v1, v2, Error, InputPair};
 use crate::psbt::merge::merge_unsigned_tx;
 use crate::receive::multiparty::error::{InternalMultipartyError, MultipartyError};
 use crate::receive::v2::SessionContext;
+use crate::ImplementationError;
 
 pub(crate) mod error;
 

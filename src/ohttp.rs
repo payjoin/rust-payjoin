@@ -12,6 +12,11 @@ pub mod error {
             OhttpError { message: format!("{value:?}") }
         }
     }
+    impl From<String> for OhttpError {
+        fn from(value: String) -> Self {
+            OhttpError { message: value }
+        }
+    }
 }
 
 impl From<payjoin::OhttpKeys> for OhttpKeys {
@@ -35,8 +40,17 @@ impl OhttpKeys {
     pub fn decode(bytes: Vec<u8>) -> Result<Self, OhttpError> {
         payjoin::OhttpKeys::decode(bytes.as_slice()).map(Into::into).map_err(Into::into)
     }
+
+    /// Create an OHTTP KeyConfig from a string
+    #[cfg_attr(feature = "uniffi", uniffi::constructor)]
+    pub fn from_string(s: String) -> Result<Self, OhttpError> {
+        let res = payjoin::OhttpKeys::from_str(s.as_str())
+            .map_err(|e| OhttpError::from(e.to_string()))?;
+        Ok(Self(res))
+    }
 }
 
+use std::str::FromStr;
 use std::sync::Mutex;
 
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]

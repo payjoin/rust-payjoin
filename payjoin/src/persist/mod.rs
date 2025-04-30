@@ -37,7 +37,7 @@ pub trait PersistedSession {
         self.save(Self::SessionEvent::session_invalid(error))?;
         self.close()
     }
-    fn load(&self) -> Result<impl Iterator<Item = Self::SessionEvent>, Self::Error>; // Loads the latest session given all updates
+    fn load(&self) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::Error>; // Loads the latest session given all updates
                                                                                      // TODO: this should consume self
     fn close(&self) -> Result<(), Self::Error>; // Marks the session as closed, no more updates will be appended
 }

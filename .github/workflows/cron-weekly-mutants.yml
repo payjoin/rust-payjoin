@@ -6,6 +6,8 @@ on:
 jobs:
   cargo-mutants:
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
     steps:
       - uses: actions/checkout@v4
       - uses: taiki-e/install-action@v2

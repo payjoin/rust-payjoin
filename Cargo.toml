@@ -1,5 +1,5 @@
 [package]
-name = "payjoin_ffi"
+name = "payjoin-ffi"
 version = "0.22.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"

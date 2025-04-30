@@ -1980,34 +1980,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "payjoin-test-utils"
-version = "0.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f239ed1431504cc4efb8469e0986656d3741b5c2f810d9eef8de06e329a67e37"
-dependencies = [
- "bitcoin 0.32.5",
- "bitcoin-ohttp",
- "bitcoincore-rpc",
- "bitcoind",
- "http",
- "log",
- "ohttp-relay 0.0.10",
- "once_cell",
- "payjoin",
- "payjoin-directory",
- "rcgen",
- "reqwest",
- "rustls 0.22.4",
- "testcontainers",
- "testcontainers-modules 0.3.7",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
-name = "payjoin_ffi"
+name = "payjoin-ffi"
 version = "0.22.1"
 dependencies = [
  "base64 0.22.1",
@@ -2031,6 +2004,33 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "uniffi",
+ "url",
+]
+
+[[package]]
+name = "payjoin-test-utils"
+version = "0.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f239ed1431504cc4efb8469e0986656d3741b5c2f810d9eef8de06e329a67e37"
+dependencies = [
+ "bitcoin 0.32.5",
+ "bitcoin-ohttp",
+ "bitcoincore-rpc",
+ "bitcoind",
+ "http",
+ "log",
+ "ohttp-relay 0.0.10",
+ "once_cell",
+ "payjoin",
+ "payjoin-directory",
+ "rcgen",
+ "reqwest",
+ "rustls 0.22.4",
+ "testcontainers",
+ "testcontainers-modules 0.3.7",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
  "url",
 ]
 

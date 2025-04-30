@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::error::PersistenceError;
 pub use crate::send::{
     BuildSenderError, CreateRequestError, EncapsulationError, ResponseError, SerdeJsonError,
 };
@@ -111,7 +112,7 @@ impl NewSender {
     }
 }
 
-#[derive(uniffi::Object)]
+#[derive(Clone, uniffi::Object)]
 pub struct Sender(super::Sender);
 
 impl From<super::Sender> for Sender {
@@ -128,6 +129,14 @@ impl From<Sender> for super::Sender {
 
 #[uniffi::export]
 impl Sender {
+    #[uniffi::constructor]
+    pub fn load(
+        token: Arc<SenderToken>,
+        persister: Arc<dyn SenderPersister>,
+    ) -> Result<Self, ImplementationError> {
+        Ok(super::Sender::from((*persister.load(token).unwrap()).clone()).into())
+    }
+
     pub fn extract_v1(&self) -> RequestV1Context {
         let (req, ctx) = self.0.extract_v1();
         RequestV1Context { request: req, context: Arc::new(ctx.into()) }
@@ -255,10 +264,10 @@ impl V2GetContext {
     }
 }
 
-#[uniffi::export]
+#[uniffi::export(with_foreign)]
 pub trait SenderPersister: Send + Sync {
-    fn save(&self, sender: Arc<Sender>) -> Result<SenderToken, ImplementationError>;
-    fn load(&self, token: Arc<SenderToken>) -> Result<Sender, ImplementationError>;
+    fn save(&self, sender: Arc<Sender>) -> Result<Arc<SenderToken>, PersistenceError>;
+    fn load(&self, token: Arc<SenderToken>) -> Result<Arc<Sender>, PersistenceError>;
 }
 
 // The adapter to use the save and load callbacks
@@ -275,21 +284,28 @@ impl CallbackPersisterAdapter {
 // Implement the Persister trait for the adapter
 impl payjoin::persist::Persister<payjoin::send::v2::Sender> for CallbackPersisterAdapter {
     type Token = SenderToken; // Define the token type
-    type Error = ImplementationError; // Define the error type
+    type Error = PersistenceError; // Define the error type
 
     fn save(&mut self, sender: payjoin::send::v2::Sender) -> Result<Self::Token, Self::Error> {
         let sender = Sender(super::Sender::from(sender));
-        self.callback_persister.save(sender.into())
+        self.callback_persister.save(sender.into()).map(|token| (*token).clone())
     }
 
     fn load(&self, token: Self::Token) -> Result<payjoin::send::v2::Sender, Self::Error> {
         // Use the callback to load the sender
-        self.callback_persister.load(token.into()).map(|sender| sender.0 .0)
+        self.callback_persister.load(token.into()).map(|sender| (*sender).clone().0 .0)
     }
 }
 
 #[derive(Clone, Debug, uniffi::Object)]
+#[uniffi::export(Display)]
 pub struct SenderToken(#[allow(dead_code)] payjoin::send::v2::SenderToken);
+
+impl std::fmt::Display for SenderToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 impl From<payjoin::send::v2::Sender> for SenderToken {
     fn from(value: payjoin::send::v2::Sender) -> Self {

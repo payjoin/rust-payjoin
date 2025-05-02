@@ -1,6 +1,6 @@
 # `payjoin-cli`
 
-## A command-line payjoin client for [Bitcoin Core](https://github.com/bitcoin/bitcoin?tab=readme-ov-file) in Rust.
+## A command-line payjoin client for [Bitcoin Core](https://github.com/bitcoin/bitcoin?tab=readme-ov-file) in Rust
 
 `payjoin-cli` is the reference implementation for the payjoin protocol, written using the [Payjoin Dev Kit](https://payjoindevkit.org).
 
@@ -17,15 +17,18 @@ Independent audit is welcome.
 
 ## Quick Start
 
-Here's a minimal payjoin example using `payjoin-cli` with the `v2` feature connected to `bitcoind` on [regtest](https://developer.bitcoin.org/examples/testing.html#regtest-mode). This example uses [`nigiri`](https://github.com/vulpemventures/nigiri) to setup a regtest environment. 
+Here's a minimal payjoin example using `payjoin-cli` with the `v2` feature connected to `bitcoind` on [regtest](https://developer.bitcoin.org/examples/testing.html#regtest-mode). This example uses [`nigiri`](https://github.com/vulpemventures/nigiri) to setup a regtest environment.
 
 Payjoin `v2` allows for transactions to be completed asynchronously. Thus the sender and receiver do not need to be online at the same time to payjoin. Learn more about how `v2` works [here](https://payjoin.org/docs/how-it-works/payjoin-v2-bip-77).
 
-To get started, install `nigiri`. Payjoin requires the sender and receiver each to have spendable [UTXOs](https://www.unchained.com/blog/what-is-a-utxo-bitcoin), so we'll create two wallets and fund each.
+To get started, install `nigiri` and [`docker`](https://www.docker.com/get-started). Payjoin requires the sender and receiver each to have spendable [UTXOs](https://www.unchained.com/blog/what-is-a-utxo-bitcoin), so we'll create two wallets and fund each.
 
 ```sh
-cargo install nigiri
+# Download nigiri and check install succeeded
+curl https://getnigiri.vulpem.com | bash
+nigiri --version
 
+# Create two regtest wallets
 nigiri rpc createwallet "sender"
 nigiri rpc createwallet "receiver"
 
@@ -126,7 +129,6 @@ Config options can be passed from the command line, or manually edited in a `con
 See the
 [example.config.toml](https://github.com/payjoin/rust-payjoin/blob/fde867b93ede767c9a50913432a73782a94ef40b/payjoin-cli/example.config.toml)
 for inspiration.
-
 
 ### Asynchronous Operation
 

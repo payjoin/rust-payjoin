@@ -144,6 +144,10 @@ impl NewSender {
 
         Ok(())
     }
+
+    pub fn build(&self) -> Sender {
+        Sender { v1: self.v1.clone(), reply_key: self.reply_key.clone() }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

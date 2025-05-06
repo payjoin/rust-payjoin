@@ -67,13 +67,15 @@ impl PersistedSession for SenderPersister {
         Ok(())
     }
 
-    fn load(&self) -> std::result::Result<impl Iterator<Item = SenderSessionEvent>, Self::Error> {
+    fn load(
+        &self,
+    ) -> std::result::Result<Box<dyn Iterator<Item = SenderSessionEvent>>, Self::Error> {
         let send_tree = self.db.0.open_tree("send_sessions")?;
         let session_wrapper = send_tree.get(self.session_id.as_ref())?;
         let value = session_wrapper.expect("key should exist");
         let wrapper: SessionWrapper<SenderSessionEvent> =
             serde_json::from_slice(&value).map_err(Error::Deserialize)?;
-        Ok(wrapper.events.into_iter())
+        Ok(Box::new(wrapper.events.into_iter()))
     }
 
     fn close(&self) -> std::result::Result<(), Self::Error> {
@@ -135,13 +137,15 @@ impl PersistedSession for ReceiverPersister {
         Ok(())
     }
 
-    fn load(&self) -> std::result::Result<impl Iterator<Item = ReceiverSessionEvent>, Self::Error> {
+    fn load(
+        &self,
+    ) -> std::result::Result<Box<dyn Iterator<Item = ReceiverSessionEvent>>, Self::Error> {
         let recv_tree = self.db.0.open_tree("recv_sessions")?;
         let session_wrapper = recv_tree.get(self.session_id.as_ref())?;
         let value = session_wrapper.expect("key should exist");
         let wrapper: SessionWrapper<ReceiverSessionEvent> =
             serde_json::from_slice(&value).map_err(Error::Deserialize)?;
-        Ok(wrapper.events.into_iter())
+        Ok(Box::new(wrapper.events.into_iter()))
     }
 
     fn close(&self) -> std::result::Result<(), Self::Error> {

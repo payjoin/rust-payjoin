@@ -283,6 +283,119 @@ mod integration {
         }
 
         #[tokio::test]
+        async fn test_err_response() -> Result<(), BoxSendSyncError> {
+            init_tracing();
+            let mut services = TestServices::initialize().await?;
+            let result = tokio::select!(
+            err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
+            err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
+            res = process_err_res(&services) => res
+            );
+
+            assert!(result.is_ok(), "v2 send receive failed: {:#?}", result.unwrap_err());
+
+            async fn process_err_res(services: &TestServices) -> Result<(), BoxError> {
+                let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
+                let agent = services.http_agent();
+                services.wait_for_services_ready().await?;
+                let directory = services.directory_url();
+                let ohttp_keys = services.fetch_ohttp_keys().await?;
+                // **********************
+                // Inside the Receiver:
+                let address = receiver.get_new_address(None, None)?.assume_checked();
+
+                let new_receiver =
+                    NewReceiver::new(address.clone(), directory.clone(), ohttp_keys.clone(), None)?;
+                let storage_token =
+                    new_receiver.persist(&mut NoopPersister).map_err(|e| e.to_string())?;
+                let mut session =
+                    Receiver::load(storage_token, &NoopPersister).map_err(|e| e.to_string())?;
+                println!("session: {:#?}", &session);
+                // Poll receive request
+                let ohttp_relay = services.ohttp_relay_url();
+                let (req, ctx) = session.extract_req(&ohttp_relay)?;
+                let response = agent
+                    .post(req.url)
+                    .header("Content-Type", req.content_type)
+                    .body(req.body)
+                    .send()
+                    .await?;
+                assert!(response.status().is_success(), "error response: {}", response.status());
+                let response_body =
+                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?;
+                // No proposal yet since sender has not responded
+                assert!(response_body.is_none());
+
+                // **********************
+                // Inside the Sender:
+                // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
+                let pj_uri = Uri::from_str(&session.pj_uri().to_string())
+                    .map_err(|e| e.to_string())?
+                    .assume_checked()
+                    .check_pj_supported()
+                    .map_err(|e| e.to_string())?;
+                let psbt = build_sweep_psbt(&sender, &pj_uri)?;
+                let new_sender =
+                    SenderBuilder::new(psbt, pj_uri).build_recommended(FeeRate::BROADCAST_MIN)?;
+                let storage_token =
+                    new_sender.persist(&mut NoopPersister).map_err(|e| e.to_string())?;
+                let req_ctx =
+                    Sender::load(storage_token, &NoopPersister).map_err(|e| e.to_string())?;
+                let (Request { url, body, content_type, .. }, _send_ctx) =
+                    req_ctx.extract_v2(ohttp_relay.to_owned())?;
+                let response = agent
+                    .post(url.clone())
+                    .header("Content-Type", content_type)
+                    .body(body.clone())
+                    .send()
+                    .await?;
+                log::info!("Response: {:#?}", &response);
+                assert!(response.status().is_success(), "error response: {}", response.status());
+                // POST Original PSBT
+
+                // **********************
+                // Inside the Receiver:
+
+                // GET fallback psbt
+                let (req, ctx) = session.extract_req(&ohttp_relay)?;
+                let response = agent
+                    .post(req.url)
+                    .header("Content-Type", req.content_type)
+                    .body(req.body)
+                    .send()
+                    .await?;
+                // POST payjoin
+                let mut proposal = session
+                    .process_res(response.bytes().await?.to_vec().as_slice(), ctx)?
+                    .expect("proposal should exist");
+                // Generate replyable error
+                let server_error = || {
+                    proposal
+                        .clone()
+                        .check_broadcast_suitability(None, |_| Err("mock error".into()))
+                        .expect_err("expected broadcast suitability check to fail")
+                };
+
+                let (err_req, err_ctx) =
+                    proposal.clone().extract_err_req(&server_error().into(), ohttp_relay)?;
+                let err_response = agent
+                    .post(err_req.url)
+                    .header("Content-Type", err_req.content_type)
+                    .body(err_req.body)
+                    .send()
+                    .await?;
+
+                let err_bytes = err_response.bytes().await?;
+                // Ensure that the error was handled properly
+                assert!(proposal.process_err_res(&err_bytes, err_ctx).is_ok());
+
+                Ok(())
+            }
+
+            Ok(())
+        }
+
+        #[tokio::test]
         async fn v2_to_v2() -> Result<(), BoxSendSyncError> {
             init_tracing();
             let mut services = TestServices::initialize().await?;

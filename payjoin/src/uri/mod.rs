@@ -316,6 +316,31 @@ mod tests {
     }
 
     #[test]
+    fn test_pj_duplicate_params() {
+        let uri =
+            "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pjos=1&pjos=1&pj=HTTPS://EXAMPLE.COM/\
+                   %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
+        let pjuri = Uri::try_from(uri);
+        assert!(matches!(
+            pjuri,
+            Err(bitcoin_uri::de::Error::Extras(PjParseError(
+                InternalPjParseError::DuplicateParams("pjos")
+            )))
+        ));
+        let uri =
+            "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pjos=1&pj=HTTPS://EXAMPLE.COM/\
+                   %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC&pj=HTTPS://EXAMPLE.COM/\
+                   %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
+        let pjuri = Uri::try_from(uri);
+        assert!(matches!(
+            pjuri,
+            Err(bitcoin_uri::de::Error::Extras(PjParseError(
+                InternalPjParseError::DuplicateParams("pj")
+            )))
+        ));
+    }
+
+    #[test]
     fn test_serialize_pjos() {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=HTTPS://EXAMPLE.COM/%23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
         let expected_is_disabled = "pjos=0";

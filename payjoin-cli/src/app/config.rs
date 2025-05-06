@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::ArgMatches;
+use clap::{ArgMatches, Parser};
 use config::builder::DefaultState;
 use config::{ConfigError, File, FileFormat};
 use payjoin::bitcoin::FeeRate;
@@ -12,27 +12,56 @@ use crate::db;
 
 type Builder = config::builder::ConfigBuilder<DefaultState>;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Parser)]
 pub struct BitcoindConfig {
+    #[arg(
+        long,
+        short = 'h',
+        help = "The URL of the Bitcoin RPC host, e.g. regtest default is http://localhost:18443"
+    )]
     pub rpchost: Url,
+    #[arg(
+        long,
+        short = 'c',
+        help = "The cookie file to use for authentication. Mutually exclusive with --rpcuser and --rpcpassword"
+    )]
     pub cookie: Option<PathBuf>,
+    #[arg(
+        long,
+        short = 'u',
+        help = "The RPC username to use for authentication. Mutually exclusive with --cookie"
+    )]
     pub rpcuser: String,
+    #[arg(
+        long,
+        short = 'p',
+        help = "The RPC password to use for authentication. Mutually exclusive with --cookie"
+    )]
     pub rpcpassword: String,
 }
 
 #[cfg(feature = "v1")]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Parser)]
 pub struct V1Config {
+    #[arg(long, short = 't', help = "The port of the payjoin V1 server to listen on.")]
     pub port: u16,
+    #[arg(
+        long,
+        short = 'e',
+        help = "The URL endpoint of the payjoin V1 server, e.g. https://localhost:3000"
+    )]
     pub pj_endpoint: Url,
 }
 
 #[cfg(feature = "v2")]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Parser)]
 pub struct V2Config {
     #[serde(deserialize_with = "deserialize_ohttp_keys_from_path")]
+    #[arg(long = "ohttp-keys", short = 'k', help = "The path to the ohttp keys file")]
     pub ohttp_keys: Option<payjoin::OhttpKeys>,
+    #[arg(long = "ohttp-relay", short = 'r', help = "The URL of the ohttp relay")]
     pub ohttp_relay: Url,
+    #[arg(long = "pj-directory", short = 'd', help = "The directory to store payjoin requests")]
     pub pj_directory: Url,
 }
 
@@ -48,11 +77,19 @@ pub enum VersionConfig {
     V2(V2Config),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Parser)]
 pub struct Config {
+    #[arg(
+        long,
+        short = 'd',
+        help = "Sets a custom database path. Defaults to ~/.config/payjoin-cli"
+    )]
     pub db_path: PathBuf,
+    #[arg(long = "max-fee-rate", short = 'f', help = "The maximum fee rate to accept in sat/vB")]
     pub max_fee_rate: Option<FeeRate>,
+    #[clap(flatten)]
     pub bitcoind: BitcoindConfig,
+    #[clap(flatten)]
     #[serde(skip)]
     pub version: Option<VersionConfig>,
 }
@@ -144,10 +181,11 @@ impl Config {
                 {
                     match built_config.get::<V1Config>("v1") {
                         Ok(v1) => config.version = Some(VersionConfig::V1(v1)),
-                        Err(e) =>
+                        Err(e) => {
                             return Err(ConfigError::Message(format!(
                                 "Valid V1 configuration is required for BIP78 mode: {e}"
-                            ))),
+                            )))
+                        }
                     }
                 }
                 #[cfg(not(feature = "v1"))]
@@ -160,10 +198,11 @@ impl Config {
                 {
                     match built_config.get::<V2Config>("v2") {
                         Ok(v2) => config.version = Some(VersionConfig::V2(v2)),
-                        Err(e) =>
+                        Err(e) => {
                             return Err(ConfigError::Message(format!(
                                 "Valid V2 configuration is required for BIP77 mode: {e}"
-                            ))),
+                            )))
+                        }
                     }
                 }
                 #[cfg(not(feature = "v2"))]

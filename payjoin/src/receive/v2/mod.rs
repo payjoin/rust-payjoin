@@ -22,12 +22,12 @@ use crate::output_substitution::OutputSubstitution;
 use crate::persist::Persister;
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
-use crate::{ImplementationError, IntoUrl, IntoUrlError, Request};
+use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
 
 mod error;
 mod persist;
 
-const SUPPORTED_VERSIONS: &[usize] = &[1, 2];
+const SUPPORTED_VERSIONS: &[Version] = &[Version::One, Version::Two];
 
 static TWENTY_FOUR_HOURS_DEFAULT_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
 
@@ -219,7 +219,7 @@ impl Receiver {
         // V2 proposals are authenticated and encrypted to prevent such attacks.
         //
         // see: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#unsecured-payjoin-server
-        if params.v == 1 {
+        if params.v == Version::One {
             params.output_substitution = OutputSubstitution::Disabled;
 
             // Additionally V1 sessions never have an optimistic merge opportunity

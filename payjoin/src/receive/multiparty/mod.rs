@@ -6,11 +6,11 @@ use super::{v1, v2, Error, InputPair};
 use crate::psbt::merge::merge_unsigned_tx;
 use crate::receive::multiparty::error::{InternalMultipartyError, MultipartyError};
 use crate::receive::v2::SessionContext;
-use crate::ImplementationError;
+use crate::{ImplementationError, Version};
 
 pub(crate) mod error;
 
-const SUPPORTED_VERSIONS: &[usize] = &[2];
+const SUPPORTED_VERSIONS: &[Version] = &[Version::Two];
 
 #[derive(Default)]
 pub struct UncheckedProposalBuilder {

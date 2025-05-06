@@ -2,6 +2,7 @@ use core::fmt;
 use std::error;
 
 use crate::uri::ShortId;
+use crate::Version;
 
 #[derive(Debug)]
 pub struct MultipartyError(InternalMultipartyError);
@@ -13,7 +14,7 @@ pub(crate) enum InternalMultipartyError {
     /// Duplicate proposals
     IdenticalProposals(IdenticalProposalError),
     /// Proposal version not supported
-    ProposalVersionNotSupported(usize),
+    ProposalVersionNotSupported(Version),
     /// Optimistic merge not supported
     OptimisticMergeNotSupported,
     /// Bitcoin Internal Error

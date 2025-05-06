@@ -4,10 +4,11 @@ pub use error::RequestError;
 
 use super::*;
 use crate::into_url::IntoUrl;
+use crate::Version;
 
 /// 4_000_000 * 4 / 3 fits in u32
 const MAX_CONTENT_LENGTH: usize = 4_000_000 * 4 / 3;
-const SUPPORTED_VERSIONS: &[usize] = &[1];
+const SUPPORTED_VERSIONS: &[Version] = &[Version::One];
 
 pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
@@ -131,7 +132,7 @@ mod tests {
             Address::from_script(&witness_utxo.script_pubkey, bitcoin::params::Params::MAINNET)?;
         assert_eq!(address.address_type(), Some(AddressType::P2sh));
 
-        assert_eq!(proposal.params.v, 1);
+        assert_eq!(proposal.params.v, Version::One);
         assert_eq!(proposal.params.additional_fee_contribution, Some((Amount::from_sat(182), 0)));
         Ok(())
     }

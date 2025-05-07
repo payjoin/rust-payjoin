@@ -553,8 +553,8 @@ impl WantsInputs {
 /// Call [`Self::finalize_proposal`] to return a finalized [`PayjoinProposal`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProvisionalProposal {
-    original_psbt: Psbt,
-    payjoin_psbt: Psbt,
+    pub(crate) original_psbt: Psbt,
+    pub(crate) payjoin_psbt: Psbt,
     params: Params,
     change_vout: usize,
 }

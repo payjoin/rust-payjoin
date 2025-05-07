@@ -22,7 +22,7 @@ use crate::output_substitution::OutputSubstitution;
 use crate::persist::PersistedSession;
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
-use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
+use crate::{ImplementationError, IntoUrl, IntoUrlError, PjUri, Request, Version};
 
 mod error;
 mod persist;
@@ -185,21 +185,75 @@ impl ReceiverState {
     }
 }
 
-pub fn replay_receiver_event_log<P>(persister: P) -> Result<ReceiverState, ReceiverReplayError>
-where
-    P: PersistedSession + Clone,
-    P::SessionEvent: From<ReceiverSessionEvent>,
-    ReceiverSessionEvent: From<P::SessionEvent>,
-{
-    let logs =
-        persister.load().map_err(|_| ReceiverReplayError::SessionInvalid("No good".to_string()))?;
-    let mut receiver = ReceiverState::Uninitialized(UninitializedReceiver {});
+#[derive(Default, Clone)]
+pub struct SessionHistory {
+    events: Vec<ReceiverSessionEvent>,
+}
 
-    for log in logs {
-        receiver = receiver.process_event(log.into());
+impl SessionHistory {
+    pub fn replay_receiver_event_log<P>(
+        &mut self,
+        persister: P,
+    ) -> Result<ReceiverState, ReceiverReplayError>
+    where
+        P: PersistedSession + Clone,
+        P::SessionEvent: From<ReceiverSessionEvent>,
+        ReceiverSessionEvent: From<P::SessionEvent>,
+    {
+        let logs = persister
+            .load()
+            .map_err(|_| ReceiverReplayError::SessionInvalid("No good".to_string()))?;
+        let mut receiver = ReceiverState::Uninitialized(UninitializedReceiver {});
+
+        for log in logs {
+            self.events.push(log.clone().into());
+            receiver = receiver.process_event(log.into());
+        }
+
+        Ok(receiver)
     }
 
-    Ok(receiver)
+    pub fn pj_uri<'a>(&self) -> Option<PjUri<'a>> {
+        self.events.iter().find_map(|event| match event {
+            ReceiverSessionEvent::Created(session_context) => {
+                // TODO this code was copied from ReceiverWithContext::pj_uri. Should be deduped
+                use crate::uri::{PayjoinExtras, UrlExt};
+                let id = id(&session_context.s);
+                let mut pj = subdir(&session_context.directory, &id).clone();
+                pj.set_receiver_pubkey(session_context.s.public_key().clone());
+                pj.set_ohttp(session_context.ohttp_keys.clone());
+                pj.set_exp(session_context.expiry);
+                let extras = PayjoinExtras {
+                    endpoint: pj,
+                    output_substitution: OutputSubstitution::Disabled,
+                };
+                Some(bitcoin_uri::Uri::with_extras(session_context.address.clone(), extras))
+            }
+            _ => None,
+        })
+    }
+
+    pub fn payment_amount(&self) -> Option<bitcoin::Amount> { self.pj_uri().map(|uri| uri.amount)? }
+
+    pub fn payment_address(&self) -> Option<bitcoin::Address<bitcoin::address::NetworkChecked>> {
+        self.pj_uri().map(|uri| uri.address)
+    }
+
+    pub fn proposal_txid(&self) -> Option<bitcoin::Txid> {
+        self.events.iter().find_map(|event| match event {
+            ReceiverSessionEvent::ProvisionalProposal(proposal) =>
+                Some(proposal.payjoin_psbt.unsigned_tx.compute_txid()),
+            _ => None,
+        })
+    }
+
+    pub fn fallback_txid(&self) -> Option<bitcoin::Txid> {
+        self.events.iter().find_map(|event| match event {
+            ReceiverSessionEvent::UncheckedProposal(proposal) =>
+                Some(proposal.psbt.unsigned_tx.compute_txid()),
+            _ => None,
+        })
+    }
 }
 #[derive(Debug, Clone)]
 pub struct Receiver<State, P> {
@@ -541,7 +595,7 @@ where
     }
 
     /// The per-session identifier
-    pub fn id(&self) -> ShortId { id(&self.context.s) }
+    pub fn id(&self) -> ShortId { id(&self.state.context.s) }
 }
 
 impl UncheckedProposal {

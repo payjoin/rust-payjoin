@@ -7,11 +7,11 @@ use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::PersistedSession;
 use payjoin::receive::v2::{
-    replay_receiver_event_log, MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal,
-    ProvisionalProposal, Receiver, ReceiverState, ReceiverWithContext, State, UncheckedProposal,
+    MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal,
+    Receiver, ReceiverState, ReceiverWithContext, SessionHistory, UncheckedProposal,
     UninitializedReceiver, WantsInputs, WantsOutputs,
 };
-use payjoin::receive::{Error, ImplementationError, ReplyableError};
+use payjoin::receive::{ImplementationError, ReplyableError};
 use payjoin::send::v2::{Sender, SenderBuilder, SenderSessionEvent};
 use payjoin::Uri;
 use tokio::sync::watch;
@@ -99,7 +99,7 @@ impl AppTrait for App {
         pj_uri.amount = Some(amount);
         println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{}", pj_uri);
-        self.process_receiver_session(session, persister).await
+        self.process_receiver_session(ReceiverState::WithContext(session)).await
     }
 
     #[allow(clippy::incompatible_msrv)]
@@ -117,11 +117,11 @@ impl AppTrait for App {
         for session_id in self.db.get_recv_session_ids()? {
             let self_clone = self.clone();
             let recv_persister = ReceiverPersister::from_id(self.db.clone(), session_id)?;
-            let receiver_state = replay_receiver_event_log(recv_persister.clone())
+            let receiver_state = SessionHistory::default()
+                .replay_receiver_event_log(recv_persister.clone())
                 .map_err(|e| anyhow!("Failed to replay receiver event log: {:?}", e))?;
             tasks.push(tokio::spawn(async move {
-                let session = receiver_state.into_receiver(recv_persister.clone());
-                self_clone.process_receiver_session(session, recv_persister).await
+                self_clone.process_receiver_session(receiver_state).await
             }));
         }
 
@@ -199,60 +199,37 @@ impl App {
         Ok(())
     }
 
-    async fn process_receiver_session<S: State>(
+    async fn process_receiver_session(
         &self,
-        session: Receiver<S, ReceiverPersister>,
-        persister: ReceiverPersister,
+        session: ReceiverState<ReceiverPersister>,
     ) -> Result<()> {
-        let mut state = session.into_receiver_state();
+        let mut session = session.clone();
         loop {
-            match state {
-                ReceiverState::WithContext(context) => {
-                    state = self
-                        .read_from_directory(context.into_receiver(persister.clone()), None)
-                        .await?
-                        .into_receiver_state();
-                }
-                ReceiverState::UncheckedProposal(proposal) => {
-                    state = self
-                        .check_proposal(proposal.into_receiver(persister.clone()))?
-                        .into_receiver_state();
-                }
-                ReceiverState::MaybeInputsOwned(proposal) => {
-                    state = self
-                        .check_inputs_not_owned(proposal.into_receiver(persister.clone()))?
-                        .into_receiver_state();
-                }
-                ReceiverState::MaybeInputsSeen(proposal) => {
-                    state = self
-                        .check_no_inputs_seen_before(proposal.into_receiver(persister.clone()))?
-                        .into_receiver_state();
-                }
-                ReceiverState::OutputsUnknown(proposal) => {
-                    state = self
-                        .identify_receiver_outputs(proposal.into_receiver(persister.clone()))?
-                        .into_receiver_state();
-                }
-                ReceiverState::WantsOutputs(proposal) => {
-                    state = self
-                        .commit_outputs(proposal.into_receiver(persister.clone()))?
-                        .into_receiver_state();
-                }
-                ReceiverState::WantsInputs(proposal) => {
-                    state = self
-                        .contribute_inputs(proposal.into_receiver(persister.clone()))?
-                        .into_receiver_state();
-                }
-                ReceiverState::ProvisionalProposal(proposal) => {
-                    state = self
-                        .finalize_proposal(proposal.into_receiver(persister.clone()))?
-                        .into_receiver_state();
-                }
+            match session {
+                ReceiverState::WithContext(context) =>
+                    session = ReceiverState::UncheckedProposal(
+                        self.read_from_directory(context, None).await?,
+                    ),
+                ReceiverState::UncheckedProposal(proposal) =>
+                    session = ReceiverState::MaybeInputsOwned(self.check_proposal(proposal)?),
+                ReceiverState::MaybeInputsOwned(proposal) =>
+                    session = ReceiverState::MaybeInputsSeen(self.check_inputs_not_owned(proposal)?),
+                ReceiverState::MaybeInputsSeen(proposal) =>
+                    session =
+                        ReceiverState::OutputsUnknown(self.check_no_inputs_seen_before(proposal)?),
+                ReceiverState::OutputsUnknown(proposal) =>
+                    session = ReceiverState::WantsOutputs(self.identify_receiver_outputs(proposal)?),
+                ReceiverState::WantsOutputs(proposal) =>
+                    session = ReceiverState::WantsInputs(self.commit_outputs(proposal)?),
+                ReceiverState::WantsInputs(proposal) =>
+                    session = ReceiverState::ProvisionalProposal(self.contribute_inputs(proposal)?),
+                ReceiverState::ProvisionalProposal(proposal) =>
+                    session = ReceiverState::PayjoinProposal(self.finalize_proposal(proposal)?),
                 ReceiverState::PayjoinProposal(proposal) => {
-                    self.send_payjoin_proposal(proposal.into_receiver(persister.clone())).await?;
+                    self.send_payjoin_proposal(proposal).await?;
                     return Ok(());
                 }
-                _ => return Err(anyhow!("Unexpected receiver state: {:?}", state)),
+                _ => return Err(anyhow!("Unexpected receiver state")),
             }
         }
     }

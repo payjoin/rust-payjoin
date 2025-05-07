@@ -104,38 +104,32 @@ pub enum ReceiverReplayError {
 }
 
 #[derive(Debug, Clone)]
-pub enum ReceiverState {
-    Uninitialized(UninitializedReceiver),
-    WithContext(ReceiverWithContext),
-    UncheckedProposal(UncheckedProposal),
-    MaybeInputsOwned(MaybeInputsOwned),
-    MaybeInputsSeen(MaybeInputsSeen),
-    OutputsUnknown(OutputsUnknown),
-    WantsOutputs(WantsOutputs),
-    WantsInputs(WantsInputs),
-    ProvisionalProposal(ProvisionalProposal),
-    PayjoinProposal(PayjoinProposal),
+pub enum ReceiverState<P> {
+    Uninitialized(Receiver<UninitializedReceiver, P>),
+    WithContext(Receiver<ReceiverWithContext, P>),
+    UncheckedProposal(Receiver<UncheckedProposal, P>),
+    MaybeInputsOwned(Receiver<MaybeInputsOwned, P>),
+    MaybeInputsSeen(Receiver<MaybeInputsSeen, P>),
+    OutputsUnknown(Receiver<OutputsUnknown, P>),
+    WantsOutputs(Receiver<WantsOutputs, P>),
+    WantsInputs(Receiver<WantsInputs, P>),
+    ProvisionalProposal(Receiver<ProvisionalProposal, P>),
+    PayjoinProposal(Receiver<PayjoinProposal, P>),
 }
 
-impl State for ReceiverState {
-    fn into_receiver<P>(self, persister: P) -> Receiver<Self, P>
-    where
-        P: PersistedSession + Clone,
-        P::SessionEvent: From<ReceiverSessionEvent>,
-    {
-        Receiver { persister, state: self }
-    }
-
-    fn into_receiver_state(self) -> ReceiverState { self }
-}
-
-impl ReceiverState {
-    fn process_event(&self, event: ReceiverSessionEvent) -> ReceiverState {
+impl<P> ReceiverState<P>
+where
+    P: PersistedSession + Clone,
+    P::SessionEvent: From<ReceiverSessionEvent>,
+    ReceiverSessionEvent: From<P::SessionEvent>,
+{
+    fn process_event(&self, event: ReceiverSessionEvent, persister: P) -> ReceiverState<P> {
         match (&self, event) {
-            (ReceiverState::Uninitialized(_), ReceiverSessionEvent::Created(context)) => {
-                println!("Created context: {:?}", context);
-                ReceiverState::WithContext(ReceiverWithContext { context })
-            }
+            (ReceiverState::Uninitialized(_), ReceiverSessionEvent::Created(context)) =>
+                ReceiverState::WithContext(Receiver {
+                    state: ReceiverWithContext { context },
+                    persister,
+                }),
 
             (
                 ReceiverState::WithContext(state),
@@ -179,7 +173,7 @@ impl ReceiverState {
 
             // TODO: Handle invalid transitions with a catch-all that provides better error info
             (current_state, event) => {
-                panic!("Invalid state transition from {:?} with event {:?}", current_state, event);
+                panic!("Invalid state transition");
             }
         }
     }
@@ -194,7 +188,7 @@ impl SessionHistory {
     pub fn replay_receiver_event_log<P>(
         &mut self,
         persister: P,
-    ) -> Result<ReceiverState, ReceiverReplayError>
+    ) -> Result<ReceiverState<P>, ReceiverReplayError>
     where
         P: PersistedSession + Clone,
         P::SessionEvent: From<ReceiverSessionEvent>,
@@ -203,11 +197,14 @@ impl SessionHistory {
         let logs = persister
             .load()
             .map_err(|_| ReceiverReplayError::SessionInvalid("No good".to_string()))?;
-        let mut receiver = ReceiverState::Uninitialized(UninitializedReceiver {});
+        let mut receiver = ReceiverState::Uninitialized(Receiver {
+            state: UninitializedReceiver {},
+            persister: persister.clone(),
+        });
 
         for log in logs {
             self.events.push(log.clone().into());
-            receiver = receiver.process_event(log.into());
+            receiver = receiver.process_event(log.into(), persister.clone());
         }
 
         Ok(receiver)
@@ -261,36 +258,13 @@ pub struct Receiver<State, P> {
     persister: P,
 }
 
-impl<S, P> Receiver<S, P>
-where
-    P: PersistedSession + Clone,
-    P::SessionEvent: From<ReceiverSessionEvent>,
-    S: State,
-{
-    pub fn into_receiver_state(self) -> ReceiverState { self.state.into_receiver_state() }
-    pub fn from_receiver_state(state: S, persister: P) -> Self { Self { persister, state } }
-}
-
-pub trait State: Clone {
-    /// Convert receiver state into a enum representation
-    fn into_receiver_state(self) -> ReceiverState;
-    /// Convert receiver state into a receiver that is generic over the state and persister
-    fn into_receiver<P>(self, persister: P) -> Receiver<Self, P>
-    where
-        P: PersistedSession + Clone,
-        P::SessionEvent: From<ReceiverSessionEvent>,
-    {
-        Receiver { persister, state: self }
-    }
-}
+trait State: Clone {}
 
 #[derive(Debug, Clone)]
 /// The receiver is not initialized yet, no session context is available yet
 pub struct UninitializedReceiver {}
 
-impl State for UninitializedReceiver {
-    fn into_receiver_state(self) -> ReceiverState { ReceiverState::Uninitialized(self) }
-}
+impl State for UninitializedReceiver {}
 
 impl<P> Receiver<UninitializedReceiver, P>
 where
@@ -322,17 +296,7 @@ where
 pub struct ReceiverWithContext {
     context: SessionContext,
 }
-impl State for ReceiverWithContext {
-    fn into_receiver_state(self) -> ReceiverState { ReceiverState::WithContext(self) }
-
-    fn into_receiver<P>(self, persister: P) -> Receiver<Self, P>
-    where
-        P: PersistedSession + Clone,
-        P::SessionEvent: From<ReceiverSessionEvent>,
-    {
-        Receiver { persister, state: self }
-    }
-}
+impl State for ReceiverWithContext {}
 
 impl<P> Receiver<ReceiverWithContext, P>
 where
@@ -474,11 +438,12 @@ where
 
     /// The per-session identifier
     pub fn id(&self) -> ShortId { id(&self.state.context.s) }
-}
 
-impl ReceiverWithContext {
-    pub fn apply_unchecked_from_payload(&self, event: v1::UncheckedProposal) -> ReceiverState {
-        let new_state = UncheckedProposal { v1: event, context: self.context.clone() };
+    pub fn apply_unchecked_from_payload(&self, event: v1::UncheckedProposal) -> ReceiverState<P> {
+        let new_state = Receiver {
+            state: UncheckedProposal { v1: event, context: self.state.context.clone() },
+            persister: self.persister.clone(),
+        };
 
         ReceiverState::UncheckedProposal(new_state)
     }
@@ -490,9 +455,7 @@ pub struct UncheckedProposal {
     pub(crate) context: SessionContext,
 }
 
-impl State for UncheckedProposal {
-    fn into_receiver_state(self) -> ReceiverState { ReceiverState::UncheckedProposal(self) }
-}
+impl State for UncheckedProposal {}
 
 impl<P> Receiver<UncheckedProposal, P>
 where
@@ -594,13 +557,11 @@ where
         }
     }
 
-    /// The per-session identifier
-    pub fn id(&self) -> ShortId { id(&self.state.context.s) }
-}
-
-impl UncheckedProposal {
-    pub fn apply_maybe_inputs_owned(&self, v1: v1::MaybeInputsOwned) -> ReceiverState {
-        let new_state = MaybeInputsOwned { v1, context: self.context.clone() };
+    pub fn apply_maybe_inputs_owned(&self, v1: v1::MaybeInputsOwned) -> ReceiverState<P> {
+        let new_state = Receiver {
+            state: MaybeInputsOwned { v1, context: self.state.context.clone() },
+            persister: self.persister.clone(),
+        };
         ReceiverState::MaybeInputsOwned(new_state)
     }
 }
@@ -609,10 +570,6 @@ impl UncheckedProposal {
 pub struct MaybeInputsOwned {
     v1: v1::MaybeInputsOwned,
     context: SessionContext,
-}
-
-impl State for MaybeInputsOwned {
-    fn into_receiver_state(self) -> ReceiverState { ReceiverState::MaybeInputsOwned(self) }
 }
 
 impl<P> Receiver<MaybeInputsOwned, P>
@@ -642,11 +599,12 @@ where
             state: MaybeInputsSeen { v1: inner, context: self.state.context.clone() },
         })
     }
-}
 
-impl MaybeInputsOwned {
-    pub fn apply_maybe_inputs_seen(&self, v1: v1::MaybeInputsSeen) -> ReceiverState {
-        let new_state = MaybeInputsSeen { v1, context: self.context.clone() };
+    pub fn apply_maybe_inputs_seen(&self, v1: v1::MaybeInputsSeen) -> ReceiverState<P> {
+        let new_state = Receiver {
+            state: MaybeInputsSeen { v1, context: self.state.context.clone() },
+            persister: self.persister.clone(),
+        };
         ReceiverState::MaybeInputsSeen(new_state)
     }
 }
@@ -660,9 +618,7 @@ pub struct MaybeInputsSeen {
     context: SessionContext,
 }
 
-impl State for MaybeInputsSeen {
-    fn into_receiver_state(self) -> ReceiverState { ReceiverState::MaybeInputsSeen(self) }
-}
+impl State for MaybeInputsSeen {}
 
 impl<P> Receiver<MaybeInputsSeen, P>
 where
@@ -690,11 +646,12 @@ where
             state: OutputsUnknown { v1: inner, context: self.state.context.clone() },
         })
     }
-}
 
-impl MaybeInputsSeen {
-    pub fn apply_outputs_unknown(&self, v1: v1::OutputsUnknown) -> ReceiverState {
-        let new_state = OutputsUnknown { v1, context: self.context.clone() };
+    pub fn apply_outputs_unknown(&self, v1: v1::OutputsUnknown) -> ReceiverState<P> {
+        let new_state = Receiver {
+            state: OutputsUnknown { v1, context: self.state.context.clone() },
+            persister: self.persister.clone(),
+        };
         ReceiverState::OutputsUnknown(new_state)
     }
 }
@@ -709,9 +666,7 @@ pub struct OutputsUnknown {
     context: SessionContext,
 }
 
-impl State for OutputsUnknown {
-    fn into_receiver_state(self) -> ReceiverState { ReceiverState::OutputsUnknown(self) }
-}
+impl State for OutputsUnknown {}
 
 impl<P> Receiver<OutputsUnknown, P>
 where
@@ -737,15 +692,15 @@ where
             state: WantsOutputs { v1: inner, context: self.state.context.clone() },
         })
     }
-}
 
-impl OutputsUnknown {
-    pub fn apply_wants_outputs(&self, v1: v1::WantsOutputs) -> ReceiverState {
-        let new_state = WantsOutputs { v1, context: self.context.clone() };
+    pub fn apply_wants_outputs(&self, v1: v1::WantsOutputs) -> ReceiverState<P> {
+        let new_state = Receiver {
+            state: WantsOutputs { v1, context: self.state.context.clone() },
+            persister: self.persister.clone(),
+        };
         ReceiverState::WantsOutputs(new_state)
     }
 }
-
 /// A checked proposal that the receiver may substitute or add outputs to
 ///
 /// Call [`Self::commit_outputs`] to proceed.
@@ -755,9 +710,7 @@ pub struct WantsOutputs {
     context: SessionContext,
 }
 
-impl State for WantsOutputs {
-    fn into_receiver_state(self) -> ReceiverState { ReceiverState::WantsOutputs(self) }
-}
+impl State for WantsOutputs {}
 
 impl<P> Receiver<WantsOutputs, P>
 where
@@ -806,11 +759,12 @@ where
             state: WantsInputs { v1: inner, context: self.state.context.clone() },
         }
     }
-}
 
-impl WantsOutputs {
-    pub fn apply_wants_inputs(&self, v1: v1::WantsInputs) -> ReceiverState {
-        let new_state = WantsInputs { v1, context: self.context.clone() };
+    pub fn apply_wants_inputs(&self, v1: v1::WantsInputs) -> ReceiverState<P> {
+        let new_state = Receiver {
+            state: WantsInputs { v1, context: self.state.context.clone() },
+            persister: self.persister.clone(),
+        };
         ReceiverState::WantsInputs(new_state)
     }
 }
@@ -824,9 +778,7 @@ pub struct WantsInputs {
     context: SessionContext,
 }
 
-impl State for WantsInputs {
-    fn into_receiver_state(self) -> ReceiverState { ReceiverState::WantsInputs(self) }
-}
+impl State for WantsInputs {}
 
 impl<P> Receiver<WantsInputs, P>
 where
@@ -876,11 +828,12 @@ where
             state: ProvisionalProposal { v1: inner, context: self.state.context.clone() },
         }
     }
-}
 
-impl WantsInputs {
-    pub fn apply_provisional_proposal(&self, v1: v1::ProvisionalProposal) -> ReceiverState {
-        let new_state = ProvisionalProposal { v1, context: self.context.clone() };
+    pub fn apply_provisional_proposal(&self, v1: v1::ProvisionalProposal) -> ReceiverState<P> {
+        let new_state = Receiver {
+            state: ProvisionalProposal { v1, context: self.state.context.clone() },
+            persister: self.persister.clone(),
+        };
         ReceiverState::ProvisionalProposal(new_state)
     }
 }
@@ -894,9 +847,7 @@ pub struct ProvisionalProposal {
     context: SessionContext,
 }
 
-impl State for ProvisionalProposal {
-    fn into_receiver_state(self) -> ReceiverState { ReceiverState::ProvisionalProposal(self) }
-}
+impl State for ProvisionalProposal {}
 
 impl<P> Receiver<ProvisionalProposal, P>
 where
@@ -929,15 +880,15 @@ where
             state: PayjoinProposal { v1: inner, context: self.state.context.clone() },
         })
     }
-}
 
-impl ProvisionalProposal {
-    pub fn apply_payjoin_proposal(&self, v1: v1::PayjoinProposal) -> ReceiverState {
-        let new_state = PayjoinProposal { v1, context: self.context.clone() };
+    pub fn apply_payjoin_proposal(&self, v1: v1::PayjoinProposal) -> ReceiverState<P> {
+        let new_state = Receiver {
+            state: PayjoinProposal { v1, context: self.state.context.clone() },
+            persister: self.persister.clone(),
+        };
         ReceiverState::PayjoinProposal(new_state)
     }
 }
-
 /// A finalized payjoin proposal, complete with fees and receiver signatures, that the sender
 /// should find acceptable.
 #[derive(Debug, Clone)]
@@ -946,9 +897,7 @@ pub struct PayjoinProposal {
     context: SessionContext,
 }
 
-impl State for PayjoinProposal {
-    fn into_receiver_state(self) -> ReceiverState { ReceiverState::PayjoinProposal(self) }
-}
+impl State for PayjoinProposal {}
 
 impl PayjoinProposal {
     #[cfg(feature = "_multiparty")]

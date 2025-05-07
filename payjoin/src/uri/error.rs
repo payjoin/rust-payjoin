@@ -1,7 +1,7 @@
 use url::ParseError;
 
 #[derive(Debug)]
-pub struct PjParseError(InternalPjParseError);
+pub struct PjParseError(pub(crate) InternalPjParseError);
 
 #[derive(Debug)]
 pub(crate) enum InternalPjParseError {

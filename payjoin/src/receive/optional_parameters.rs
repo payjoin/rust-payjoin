@@ -105,7 +105,7 @@ impl Params {
             (Some(_), None) | (None, Some(_)) => {
                 warn!("only one additional-fee parameter specified: {params:?}");
             }
-            _ => (),
+            (None, None) => (),
         }
 
         log::debug!("parsed optional parameters: {params:?}");
@@ -134,7 +134,7 @@ impl std::error::Error for Error {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use bitcoin::Amount;
+    use bitcoin::{Amount, FeeRate};
 
     use super::*;
     use crate::receive::optional_parameters::Params;
@@ -142,15 +142,16 @@ pub(crate) mod test {
 
     #[test]
     fn test_parse_params() {
-        use bitcoin::FeeRate;
-
-        let pairs = url::form_urlencoded::parse(b"maxadditionalfeecontribution=182&additionalfeeoutputindex=0&minfeerate=1&disableoutputsubstitution=true&optimisticmerge=true");
+        let pairs = url::form_urlencoded::parse(b"&maxadditionalfeecontribution=182&additionalfeeoutputindex=0&minfeerate=2&disableoutputsubstitution=true&optimisticmerge=true");
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");
         assert_eq!(params.v, Version::One);
         assert_eq!(params.output_substitution, OutputSubstitution::Disabled);
         assert_eq!(params.additional_fee_contribution, Some((Amount::from_sat(182), 0)));
-        assert_eq!(params.min_fee_rate, FeeRate::BROADCAST_MIN);
+        assert_eq!(
+            params.min_fee_rate,
+            FeeRate::from_sat_per_vb(2).expect("Could not calculate feerate")
+        );
         #[cfg(feature = "_multiparty")]
         assert!(params.optimistic_merge)
     }

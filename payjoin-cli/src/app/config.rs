@@ -85,12 +85,15 @@ pub struct Config {
         help = "Sets a custom database path. Defaults to ~/.config/payjoin-cli"
     )]
     pub db_path: PathBuf,
+
     #[arg(long = "max-fee-rate", short = 'f', help = "The maximum fee rate to accept in sat/vB")]
     pub max_fee_rate: Option<FeeRate>,
-    #[clap(flatten)]
+
+    #[command(flatten)]
     pub bitcoind: BitcoindConfig,
-    #[clap(flatten)]
+
     #[serde(skip)]
+    #[arg(skip)]
     pub version: Option<VersionConfig>,
 }
 

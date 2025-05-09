@@ -1030,103 +1030,48 @@ mod test {
     });
 
     #[test]
-    fn debugging_test() {
-        #[derive(Clone)]
-        pub struct NoopPersister;
+    fn extract_err_req() -> Result<(), BoxError> {
+        let mut proposal = UncheckedProposal {
+            v1: crate::receive::v1::test::unchecked_proposal_from_test_vector(),
+            context: SHARED_CONTEXT.clone(),
+        };
 
-        impl PersistedSession for NoopPersister {
-            type SessionEvent = ReceiverSessionEvent;
-            type Error = ReplyableError;
+        let server_error = || {
+            proposal
+                .clone()
+                .check_broadcast_suitability(None, |_| Err("mock error".into()))
+                .expect_err("expected broadcast suitability check to fail")
+        };
 
-            fn save(&self, event: Self::SessionEvent) -> Result<(), Self::Error> { Ok(()) }
+        let expected_json = serde_json::json!({
+            "errorCode": "unavailable",
+            "message": "Receiver error"
+        });
 
-            fn load(&self) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::Error> {
-                Ok(Box::new(std::iter::empty()))
-            }
+        let actual_json = JsonReply::from(server_error()).to_json().clone();
+        assert_eq!(actual_json, expected_json);
 
-            fn close(&self) -> Result<(), Self::Error> { Ok(()) }
-        }
+        let (_req, _ctx) =
+            proposal.clone().extract_err_req(&server_error().into(), &*EXAMPLE_URL)?;
 
-        let ohttp_keys =
-            OhttpKeys::from_str("OH1QYPEKJA0N5XWWJAQQ83JCSKZSJ8QKJYLR77QVU6UKA48C0EJSSJ07PG")
-                .unwrap();
-        println!("Test initialized with OHTTP keys: {:?}", ohttp_keys);
-
-        let address =
-            Address::from_str("2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK").unwrap().assume_checked();
-        let directory = EXAMPLE_URL.clone();
-        let mut receiver = UninitializedReceiver::create_session(
-            address,
-            directory.clone(),
-            ohttp_keys,
-            None,
-            NoopPersister,
-        )
-        .unwrap();
-
-        println!("Created receiver with directory: {}", directory);
-        let pj_uri = receiver.pj_uri();
-        println!("Generated PJ URI: {:?}", pj_uri);
-
-        let sender = crate::send::v2::SenderBuilder::new(
-            Psbt::from_str(payjoin_test_utils::ORIGINAL_PSBT).unwrap(),
-            pj_uri,
-        )
-        .build_recommended(FeeRate::BROADCAST_MIN)
-        .unwrap()
-        .build();
-        let (req, ctx) = sender.extract_v2(EXAMPLE_URL.clone()).unwrap();
-        println!("Extracted sender request with body length: {}", req.body.len());
-
-        let (recv_req, ohttp_ctx) = receiver.extract_req(EXAMPLE_URL.clone()).unwrap();
-        println!("Extracted receiver request with body length: {}", recv_req.body.len());
-
-        receiver.process_res(&req.body, ohttp_ctx, NoopPersister).unwrap();
+        let internal_error: ReplyableError = InternalPayloadError::MissingPayment.into();
+        let (_req, _ctx) = proposal.extract_err_req(&internal_error.into(), &*EXAMPLE_URL)?;
+        Ok(())
     }
 
-    // #[test]
-    // fn extract_err_req() -> Result<(), BoxError> {
-    //     let mut proposal = UncheckedProposal {
-    //         v1: crate::receive::v1::test::unchecked_proposal_from_test_vector(),
-    //         context: SHARED_CONTEXT.clone(),
-    //     };
+    #[test]
+    fn receiver_ser_de_roundtrip() -> Result<(), serde_json::Error> {
+        let session = Receiver { context: SHARED_CONTEXT.clone() };
+        let serialized = serde_json::to_string(&session)?;
+        let deserialized: Receiver = serde_json::from_str(&serialized)?;
+        assert_eq!(session, deserialized);
+        Ok(())
+    }
 
-    //     let server_error = || {
-    //         proposal
-    //             .clone()
-    //             .check_broadcast_suitability(None, |_| Err("mock error".into()))
-    //             .expect_err("expected broadcast suitability check to fail")
-    //     };
-
-    //     let expected_json = serde_json::json!({
-    //         "errorCode": "unavailable",
-    //         "message": "Receiver error"
-    //     });
-
-    //     let actual_json = JsonReply::from(server_error()).to_json().clone();
-    //     assert_eq!(actual_json, expected_json);
-
-    //     let (_req, _ctx) =
-    //         proposal.clone().extract_err_req(&server_error().into(), &*EXAMPLE_URL)?;
-
-    //     let internal_error: ReplyableError = InternalPayloadError::MissingPayment.into();
-    //     let (_req, _ctx) = proposal.extract_err_req(&internal_error.into(), &*EXAMPLE_URL)?;
-    //     Ok(())
-    // }
-
-    // #[test]
-    // fn receiver_ser_de_roundtrip() -> Result<(), serde_json::Error> {
-    //     let session = Receiver { context: SHARED_CONTEXT.clone() };
-    //     let serialized = serde_json::to_string(&session)?;
-    //     let deserialized: Receiver = serde_json::from_str(&serialized)?;
-    //     assert_eq!(session, deserialized);
-    //     Ok(())
-    // }
-
-    // #[test]
-    // fn test_v2_pj_uri() {
-    //     let uri = Receiver { context: SHARED_CONTEXT.clone() }.pj_uri();
-    //     assert_ne!(uri.extras.endpoint, EXAMPLE_URL.clone());
-    //     assert_eq!(uri.extras.output_substitution, OutputSubstitution::Enabled);
-    // }
+    #[test]
+    fn test_v2_pj_uri() {
+        let uri = Receiver { context: SHARED_CONTEXT.clone() }.pj_uri();
+        assert_ne!(uri.extras.endpoint, EXAMPLE_URL.clone());
+        assert_eq!(uri.extras.output_substitution, OutputSubstitution::Enabled);
+    }
 }

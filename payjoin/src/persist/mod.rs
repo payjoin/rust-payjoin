@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 use crate::receive::v2::ReceiverSessionEvent;
 use crate::send::v2::SenderSessionEvent;
 
@@ -42,62 +40,35 @@ pub trait PersistedSession {
     fn close(&self) -> Result<(), Self::Error>; // Marks the session as closed, no more updates will be appended
 }
 
-/// Types that can generate their own keys for persistent storage
-pub trait Value: serde::Serialize + serde::de::DeserializeOwned + Sized + Clone {
-    type Key: AsRef<[u8]> + Clone + Display;
+/// A persister that does nothing
+/// This persister cannot be used to replay a session
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NoopPersisterEvent;
 
-    /// Unique identifier for this persisted value
-    fn key(&self) -> Self::Key;
+impl Event for NoopPersisterEvent {
+    fn session_invalid(_error: &impl PersistableError) -> Self { NoopPersisterEvent }
 }
 
-/// Implemented types that should be persisted by the application.
-pub trait Persister<V: Value> {
-    type Token: From<V>;
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    fn save(&mut self, value: V) -> Result<Self::Token, Self::Error>;
-    fn load(&self, token: Self::Token) -> Result<V, Self::Error>;
+impl From<ReceiverSessionEvent> for NoopPersisterEvent {
+    fn from(_event: ReceiverSessionEvent) -> Self { NoopPersisterEvent }
 }
 
-/// A key type that stores the value itself for no-op persistence
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct NoopToken<V: Value>(V);
-
-impl<V: Value> AsRef<[u8]> for NoopToken<V> {
-    fn as_ref(&self) -> &[u8] {
-        // Since this is a no-op implementation, we can return an empty slice
-        // as we never actually need to use the bytes
-        &[]
-    }
+impl From<SenderSessionEvent> for NoopPersisterEvent {
+    fn from(_event: SenderSessionEvent) -> Self { NoopPersisterEvent }
 }
 
-impl<'de, V: Value> serde::Deserialize<'de> for NoopToken<V> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(NoopToken(V::deserialize(deserializer)?))
-    }
-}
-
-impl<V: Value> Value for NoopToken<V> {
-    type Key = V::Key;
-
-    fn key(&self) -> Self::Key { self.0.key() }
-}
-
-/// A persister that does nothing but store values in memory
 #[derive(Debug, Clone)]
 pub struct NoopPersister;
 
-impl<V: Value> From<V> for NoopToken<V> {
-    fn from(value: V) -> Self { NoopToken(value) }
-}
-impl<V: Value> Persister<V> for NoopPersister {
-    type Token = NoopToken<V>;
-    type Error = std::convert::Infallible;
+impl PersistedSession for NoopPersister {
+    type Error = std::io::Error;
+    type SessionEvent = NoopPersisterEvent;
 
-    fn save(&mut self, value: V) -> Result<Self::Token, Self::Error> { Ok(NoopToken(value)) }
+    fn save(&self, _event: Self::SessionEvent) -> Result<(), Self::Error> { Ok(()) }
 
-    fn load(&self, token: Self::Token) -> Result<V, Self::Error> { Ok(token.0) }
+    fn load(&self) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::Error> {
+        Ok(Box::new(std::iter::empty()))
+    }
+
+    fn close(&self) -> Result<(), Self::Error> { Ok(()) }
 }

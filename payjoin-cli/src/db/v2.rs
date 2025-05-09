@@ -27,6 +27,7 @@ impl AsRef<[u8]> for SessionId {
     fn as_ref(&self) -> &[u8] { self.0.as_ref() }
 }
 
+#[derive(Clone)]
 pub(crate) struct SenderPersister {
     db: Arc<Database>,
     session_id: SessionId,
@@ -41,6 +42,10 @@ impl SenderPersister {
         send_tree.insert(id.as_ref(), value.as_slice())?;
         send_tree.flush()?;
 
+        Ok(Self { db: db.clone(), session_id: id })
+    }
+
+    pub fn from_id(db: Arc<Database>, id: SessionId) -> crate::db::Result<Self> {
         Ok(Self { db: db.clone(), session_id: id })
     }
 }
@@ -182,6 +187,16 @@ impl Database {
         let recv_tree = self.0.open_tree("recv_sessions")?;
         let mut session_ids = Vec::new();
         for item in recv_tree.iter() {
+            let (key, _) = item?;
+            session_ids.push(SessionId::new(u64::from_be_bytes(key.as_ref().try_into().unwrap())));
+        }
+        Ok(session_ids)
+    }
+
+    pub(crate) fn get_send_session_ids(&self) -> Result<Vec<SessionId>> {
+        let send_tree = self.0.open_tree("send_sessions")?;
+        let mut session_ids = Vec::new();
+        for item in send_tree.iter() {
             let (key, _) = item?;
             session_ids.push(SessionId::new(u64::from_be_bytes(key.as_ref().try_into().unwrap())));
         }

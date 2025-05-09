@@ -1,11 +1,8 @@
-use std::fmt::{self, Display};
-
 use bitcoin::{FeeRate, Psbt};
 use error::{
     CreateRequestError, FinalizeResponseError, FinalizedError, InternalCreateRequestError,
     InternalFinalizeResponseError, InternalFinalizedError,
 };
-use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::v2::{self, extract_request, EncapsulationError, HpkeContext};
@@ -13,7 +10,7 @@ use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, Internal
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::{self, Persister};
+use crate::persist::PersistedSession;
 use crate::send::v2::{ImplementationError, V2PostContext};
 use crate::uri::UrlExt;
 use crate::{PjUri, Request};
@@ -21,62 +18,33 @@ use crate::{PjUri, Request};
 mod error;
 
 #[derive(Clone)]
-pub struct SenderBuilder<'a>(v2::SenderBuilder<'a>);
+pub struct SenderBuilder<'a, P>(v2::SenderBuilder<'a, P>);
 
-impl<'a> SenderBuilder<'a> {
-    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v2::SenderBuilder::new(psbt, uri)) }
+impl<'a, P> SenderBuilder<'a, P>
+where
+    P: PersistedSession + Clone,
+    P::SessionEvent: From<v2::SenderSessionEvent>,
+{
+    pub fn new(psbt: Psbt, uri: PjUri<'a>, persister: P) -> Self {
+        Self(v2::SenderBuilder::new(psbt, uri, persister))
+    }
 
-    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<NewSender, BuildSenderError> {
+    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender<P>, BuildSenderError> {
         let sender = self.0.build_recommended(min_fee_rate)?;
-        Ok(NewSender(sender))
+        Ok(Sender(sender))
     }
 }
 
-pub struct NewSender(v2::NewSender);
+#[derive(Clone)]
+pub struct Sender<P>(pub(crate) v2::Sender<v2::SenderWithReplyKey, P>);
 
-impl NewSender {
-    pub fn persist<P: Persister<Sender>>(
-        &self,
-        persister: &mut P,
-    ) -> Result<P::Token, ImplementationError> {
-        let sender =
-            Sender(v2::Sender { v1: self.0.v1.clone(), reply_key: self.0.reply_key.clone() });
-        persister.save(sender).map_err(ImplementationError::from)
-    }
-}
+// TODO: need to impl partial eq and eqfor sender
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SenderToken(Url);
-
-impl Display for SenderToken {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.0) }
-}
-
-impl From<Sender> for SenderToken {
-    fn from(sender: Sender) -> Self { SenderToken(sender.0.endpoint().clone()) }
-}
-
-impl AsRef<[u8]> for SenderToken {
-    fn as_ref(&self) -> &[u8] { self.0.as_str().as_bytes() }
-}
-
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Sender(v2::Sender);
-
-impl persist::Value for Sender {
-    type Key = SenderToken;
-
-    fn key(&self) -> Self::Key { SenderToken(self.0.endpoint().clone()) }
-}
-
-impl Sender {
-    pub fn load<P: Persister<Sender>>(
-        token: P::Token,
-        persister: &P,
-    ) -> Result<Self, ImplementationError> {
-        let sender = persister.load(token).map_err(ImplementationError::from)?;
-        Ok(sender)
-    }
+impl<P: PersistedSession + Clone> Sender<P>
+where
+    P::SessionEvent: From<v2::SenderSessionEvent>,
+    v2::SenderSessionEvent: From<P::SessionEvent>,
+{
     pub fn extract_v2(
         &self,
         ohttp_relay: Url,
@@ -90,15 +58,16 @@ impl Sender {
             .endpoint()
             .ohttp()
             .map_err(|_| InternalCreateRequestError::MissingOhttpConfig)?;
+        let state = self.0.state().clone();
         let body = serialize_v2_body(
-            &self.0.v1.psbt,
-            self.0.v1.output_substitution,
-            self.0.v1.fee_contribution,
-            self.0.v1.min_fee_rate,
+            &state.v1.psbt,
+            state.v1.output_substitution,
+            state.v1.fee_contribution,
+            state.v1.min_fee_rate,
         )?;
         let (request, ohttp_ctx) = extract_request(
             ohttp_relay,
-            self.0.reply_key.clone(),
+            state.reply_key.clone(),
             body,
             self.0.endpoint().clone(),
             rs.clone(),
@@ -108,16 +77,25 @@ impl Sender {
         let v2_post_ctx = V2PostContext {
             endpoint: self.0.endpoint().clone(),
             psbt_ctx: crate::send::PsbtContext {
-                original_psbt: self.0.v1.psbt.clone(),
-                output_substitution: self.0.v1.output_substitution,
-                fee_contribution: self.0.v1.fee_contribution,
-                payee: self.0.v1.payee.clone(),
-                min_fee_rate: self.0.v1.min_fee_rate,
+                original_psbt: state.v1.psbt.clone(),
+                output_substitution: state.v1.output_substitution,
+                fee_contribution: state.v1.fee_contribution,
+                payee: state.v1.payee.clone(),
+                min_fee_rate: state.v1.min_fee_rate,
             },
-            hpke_ctx: HpkeContext::new(rs, &self.0.reply_key),
+            hpke_ctx: HpkeContext::new(rs, &state.reply_key),
             ohttp_ctx,
         };
         Ok((request, PostContext(v2_post_ctx)))
+    }
+
+    pub fn process_response(
+        self,
+        response: &[u8],
+        post_ctx: PostContext,
+    ) -> Result<GetContext<P>, EncapsulationError> {
+        let v2_get_ctx = self.0.process_response(response, post_ctx.0)?;
+        Ok(GetContext(v2_get_ctx))
     }
 }
 
@@ -143,18 +121,15 @@ fn serialize_v2_body(
 /// the GET context which can be used to extract a request for the receiver
 pub struct PostContext(v2::V2PostContext);
 
-impl PostContext {
-    pub fn process_response(self, response: &[u8]) -> Result<GetContext, EncapsulationError> {
-        let v2_get_ctx = self.0.process_response(response)?;
-        Ok(GetContext(v2_get_ctx))
-    }
-}
-
 /// Get context is used to extract a request for the receiver. In the multiparty context this is a
 /// merged PSBT with other senders.
-pub struct GetContext(v2::V2GetContext);
+pub struct GetContext<P>(v2::Sender<v2::V2GetContext, P>);
 
-impl GetContext {
+impl<P> GetContext<P>
+where
+    P: PersistedSession + Clone,
+    P::SessionEvent: From<v2::SenderSessionEvent>,
+{
     /// Extract the GET request that will give us the psbt to be finalized
     pub fn extract_req(
         &self,
@@ -171,7 +146,8 @@ impl GetContext {
         ohttp_ctx: ohttp::ClientResponse,
         finalize_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> Result<FinalizeContext, FinalizedError> {
-        let psbt_ctx = PsbtContext { inner: self.0.psbt_ctx.clone() };
+        let state = self.0.state();
+        let psbt_ctx = PsbtContext { inner: state.psbt_ctx.clone() };
         let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
             response.try_into().map_err(|_| InternalFinalizedError::InvalidSize)?;
 
@@ -185,8 +161,8 @@ impl GetContext {
         if let Some(body) = body {
             let psbt = decrypt_message_b(
                 &body,
-                self.0.hpke_ctx.receiver.clone(),
-                self.0.hpke_ctx.reply_pair.secret_key().clone(),
+                state.hpke_ctx.receiver.clone(),
+                state.hpke_ctx.reply_pair.secret_key().clone(),
             )
             .map_err(InternalFinalizedError::Hpke)?;
 
@@ -196,8 +172,8 @@ impl GetContext {
             let finalized_psbt =
                 finalize_psbt(&psbt).map_err(InternalFinalizedError::FinalizePsbt)?;
             Ok(FinalizeContext {
-                hpke_ctx: self.0.hpke_ctx.clone(),
-                directory_url: self.0.endpoint.clone(),
+                hpke_ctx: state.hpke_ctx.clone(),
+                directory_url: state.endpoint.clone(),
                 psbt: finalized_psbt,
             })
         } else {

@@ -1,14 +1,70 @@
-use std::path::PathBuf;
-
 use anyhow::Result;
-use clap::{ArgMatches, Parser};
+use clap::{value_parser, ArgMatches, Parser, Subcommand};
 use config::builder::DefaultState;
 use config::{ConfigError, File, FileFormat};
-use payjoin::bitcoin::FeeRate;
+use payjoin::bitcoin::amount::ParseAmountError;
+use payjoin::bitcoin::{Amount, FeeRate};
 use serde::Deserialize;
+use std::path::PathBuf;
 use url::Url;
 
 use crate::db;
+
+#[derive(Debug, Parser)]
+#[command(version = env!("CARGO_PKG_VERSION"), about = "Payjoin - bitcoin scaling, savings, and privacy by default", long_about = None)]
+pub struct Cli {
+    #[command(flatten)]
+    pub config: Config,
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Send a payjoin payment
+    Send {
+        /// The `bitcoin:...` payjoin uri to send to
+        #[arg(required = true)]
+        bip21: String,
+
+        /// Fee rate in sat/vB
+        #[arg(short, long = "fee-rate", value_parser = parse_fee_rate_in_sat_per_vb)]
+        fee_rate: Option<FeeRate>,
+    },
+    /// Receive a payjoin payment
+    Receive {
+        /// The amount to receive in satoshis
+        #[arg(required = true)]
+        amount: Amount,
+
+        /// The maximum effective fee rate the receiver is willing to pay (in sat/vB)
+        #[arg(short, long = "max-fee-rate", value_parser = parse_fee_rate_in_sat_per_vb)]
+        max_fee_rate: Option<FeeRate>,
+
+        #[cfg(feature = "v1")]
+        /// The local port to listen on
+        #[arg(short, long = "port")]
+        port: Option<u16>,
+
+        #[cfg(feature = "v1")]
+        /// The `pj=` endpoint to receive the payjoin request
+        #[arg(long = "pj-endpoint", value_parser = value_parser!(Url))]
+        pj_endpoint: Option<Url>,
+
+        #[cfg(feature = "v2")]
+        /// The directory to store payjoin requests
+        #[arg(long = "pj-directory", value_parser = value_parser!(Url))]
+        pj_directory: Option<Url>,
+
+        #[cfg(feature = "v2")]
+        /// The path to the ohttp keys file
+        #[arg(long = "ohttp-keys", value_parser = value_parser!(Url))]
+        ohttp_keys: Option<PathBuf>,
+    },
+    /// Resume pending payjoins (BIP77/v2 only)
+    #[cfg(feature = "v2")]
+    Resume,
+}
 
 type Builder = config::builder::ConfigBuilder<DefaultState>;
 
@@ -16,7 +72,7 @@ type Builder = config::builder::ConfigBuilder<DefaultState>;
 pub struct BitcoindConfig {
     #[arg(
         long,
-        short = 'h',
+        short = 'r',
         help = "The URL of the Bitcoin RPC host, e.g. regtest default is http://localhost:18443"
     )]
     pub rpchost: Url,
@@ -80,6 +136,22 @@ pub enum VersionConfig {
 #[derive(Debug, Clone, Deserialize, Parser)]
 pub struct Config {
     #[arg(
+        long = "bip77",
+        help = "Use BIP77 (v2) protocol (default)",
+        conflicts_with = "bip78",
+        action = clap::ArgAction::SetTrue
+        )]
+    pub bip77: bool,
+
+    #[arg(
+        long = "bip78",
+        help = "Use BIP78 (v1) protocol",
+        conflicts_with = "bip77",
+        action = clap::ArgAction::SetTrue
+        )]
+    pub bip78: bool,
+
+    #[arg(
         long,
         short = 'd',
         help = "Sets a custom database path. Defaults to ~/.config/payjoin-cli"
@@ -102,21 +174,29 @@ impl Config {
     const VERSION_FLAGS: &'static [(&'static str, u8)] = &[("bip77", 2), ("bip78", 1)];
 
     /// Check for multiple version flags and return the highest precedence version
-    fn determine_version(matches: &ArgMatches) -> Result<u8, ConfigError> {
+    fn determine_version(cli: &Cli) -> Result<u8, ConfigError> {
         let mut selected_version = None;
-        for &(flag, version) in Self::VERSION_FLAGS.iter() {
-            if matches.get_flag(flag) {
+        for _ in Self::VERSION_FLAGS.iter() {
+            #[cfg(feature = "v2")]
+            if cli.config.bip77 {
                 if selected_version.is_some() {
-                    return Err(ConfigError::Message(format!(
-                        "Multiple version flags specified. Please use only one of: {}",
-                        Self::VERSION_FLAGS
-                            .iter()
-                            .map(|(flag, _)| format!("--{flag}"))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )));
+                    return Err(ConfigError::Message(
+                            "Multiple version flags specified. Please use only one of: --bip77, --bip78"
+                            .to_string()
+                        ));
                 }
-                selected_version = Some(version);
+                selected_version = Some(2);
+            }
+
+            #[cfg(feature = "v1")]
+            if cli.config.bip78 {
+                if selected_version.is_some() {
+                    return Err(ConfigError::Message(
+                            "Multiple version flags specified. Please use only one of: --bip77, --bip78"
+                            .to_string()
+                        ));
+                }
+                selected_version = Some(1);
             }
         }
 
@@ -135,12 +215,14 @@ impl Config {
         ));
     }
 
-    pub(crate) fn new(matches: &ArgMatches) -> Result<Self, ConfigError> {
+    // Matches should be a param that has the same return type
+    // as Cli::parse
+    pub(crate) fn new(cli: &Cli) -> Result<Self, ConfigError> {
         let mut builder = config::Config::builder();
-        builder = add_bitcoind_defaults(builder, matches)?;
-        builder = add_common_defaults(builder, matches)?;
+        builder = add_bitcoind_defaults(builder, cli)?;
+        builder = add_common_defaults(builder, cli)?;
 
-        let version = Self::determine_version(matches)?;
+        let version = Self::determine_version(cli)?;
 
         match version {
             1 => {
@@ -156,7 +238,7 @@ impl Config {
             2 => {
                 #[cfg(feature = "v2")]
                 {
-                    builder = add_v2_defaults(builder, matches)?;
+                    builder = add_v2_defaults(builder)?;
                 }
                 #[cfg(not(feature = "v2"))]
                 return Err(ConfigError::Message(
@@ -166,7 +248,7 @@ impl Config {
             _ => unreachable!("determine_version() should only return 1 or 2"),
         }
 
-        builder = handle_subcommands(builder, matches)?;
+        builder = handle_subcommands(builder, cli)?;
         builder = builder.add_source(File::new("config.toml", FileFormat::Toml).required(false));
 
         let built_config = builder.build()?;
@@ -176,6 +258,8 @@ impl Config {
             max_fee_rate: built_config.get("max_fee_rate").ok(),
             bitcoind: built_config.get("bitcoind")?,
             version: None,
+            bip77: cli.config.bip77,
+            bip78: cli.config.bip78,
         };
 
         match version {
@@ -246,35 +330,35 @@ impl Config {
 }
 
 /// Set up default values and CLI overrides for Bitcoin RPC connection settings
-fn add_bitcoind_defaults(builder: Builder, matches: &ArgMatches) -> Result<Builder, ConfigError> {
+fn add_bitcoind_defaults(builder: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
     builder
         .set_default("bitcoind.rpchost", "http://localhost:18443")?
         .set_override_option(
             "bitcoind.rpchost",
-            matches.get_one::<Url>("rpchost").map(|s| s.as_str()),
+            Some(cli.config.bitcoind.rpchost.to_owned().as_str()),
         )?
         .set_default("bitcoind.cookie", None::<String>)?
         .set_override_option(
             "bitcoind.cookie",
-            matches.get_one::<String>("cookie_file").map(|s| s.as_str()),
+            cli.config.bitcoind.cookie.as_ref().map(|p| p.to_string_lossy().into_owned()),
         )?
         .set_default("bitcoind.rpcuser", "bitcoin")?
         .set_override_option(
             "bitcoind.rpcuser",
-            matches.get_one::<String>("rpcuser").map(|s| s.as_str()),
+            Some(cli.config.bitcoind.rpcuser.to_owned().as_str()),
         )?
         .set_default("bitcoind.rpcpassword", "")?
         .set_override_option(
             "bitcoind.rpcpassword",
-            matches.get_one::<String>("rpcpassword").map(|s| s.as_str()),
+            Some(cli.config.bitcoind.rpcpassword.to_owned().as_str()),
         )
 }
 
 /// Set up default values and CLI overrides for common settings shared between v1 and v2
-fn add_common_defaults(builder: Builder, matches: &ArgMatches) -> Result<Builder, ConfigError> {
+fn add_common_defaults(builder: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
     builder
         .set_default("db_path", db::DB_PATH)?
-        .set_override_option("db_path", matches.get_one::<String>("db_path").map(|s| s.as_str()))
+        .set_override_option("db_path", cli.config.db_path.to_str())
 }
 
 /// Set up default values for v1-specific settings when v2 is not enabled
@@ -287,28 +371,43 @@ fn add_v1_defaults(builder: Builder) -> Result<Builder, ConfigError> {
 
 /// Set up default values and CLI overrides for v2-specific settings
 #[cfg(feature = "v2")]
-fn add_v2_defaults(builder: Builder, matches: &ArgMatches) -> Result<Builder, ConfigError> {
+fn add_v2_defaults(builder: Builder) -> Result<Builder, ConfigError> {
     builder
-        .set_override_option(
-            "v2.ohttp_relay",
-            matches.get_one::<Url>("ohttp_relay").map(|s| s.as_str()),
-        )?
+        .set_default("v2.ohttp_relay", "https://pj.bobspacebkk.com")?
         .set_default("v2.pj_directory", "https://payjo.in")?
         .set_default("v2.ohttp_keys", None::<String>)
 }
 
 /// Handles configuration overrides based on CLI subcommands
-fn handle_subcommands(builder: Builder, matches: &ArgMatches) -> Result<Builder, ConfigError> {
-    match matches.subcommand() {
-        Some(("send", _)) => Ok(builder),
-        Some(("receive", matches)) => {
-            let builder = handle_receive_command(builder, matches)?;
-            let max_fee_rate = matches.get_one::<FeeRate>("max_fee_rate");
-            builder.set_override_option("max_fee_rate", max_fee_rate.map(|f| f.to_string()))
+fn handle_subcommands(builder: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
+    match &cli.command {
+        Commands::Send { .. } => Ok(builder),
+        Commands::Receive {
+            #[cfg(feature = "v1")]
+            port,
+            #[cfg(feature = "v1")]
+            pj_endpoint,
+            #[cfg(feature = "v2")]
+            pj_directory,
+            #[cfg(feature = "v2")]
+            ohttp_keys,
+            ..
+        } => {
+            #[cfg(feature = "v1")]
+            let builder = builder
+                .set_override_option("v1.port", port.map(|p| p.to_string()))?
+                .set_override_option("v1.pj_endpoint", pj_endpoint.as_ref().map(|s| s.as_str()))?;
+            #[cfg(feature = "v2")]
+            let builder = builder
+                .set_override_option("v2.pj_directory", pj_directory.as_ref().map(|s| s.as_str()))?
+                .set_override_option(
+                    "v2.ohttp_keys",
+                    ohttp_keys.as_ref().map(|s| s.to_string_lossy().into_owned()),
+                )?;
+            Ok(builder)
         }
         #[cfg(feature = "v2")]
-        Some(("resume", _)) => Ok(builder),
-        _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
+        Commands::Resume => Ok(builder),
     }
 }
 
@@ -363,4 +462,14 @@ where
             })
             .map(Some),
     }
+}
+
+fn parse_amount_in_sat(s: &str) -> Result<Amount, ParseAmountError> {
+    Amount::from_str_in(s, payjoin::bitcoin::Denomination::Satoshi)
+}
+
+fn parse_fee_rate_in_sat_per_vb(s: &str) -> Result<FeeRate, std::num::ParseFloatError> {
+    let fee_rate_sat_per_vb: f32 = s.parse()?;
+    let fee_rate_sat_per_kwu = fee_rate_sat_per_vb * 250.0_f32;
+    Ok(FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64))
 }

@@ -1,18 +1,17 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use log::error;
 use payjoin::bitcoin::consensus::encode::serialize_hex;
-use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::persist::PersistedSession;
 use payjoin::receive::v2::{
     MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal,
-    Receiver, ReceiverState, ReceiverWithContext, SessionHistory, UncheckedProposal,
-    UninitializedReceiver, WantsInputs, WantsOutputs,
+    Receiver, ReceiverState, ReceiverWithContext, UncheckedProposal, UninitializedReceiver,
+    WantsInputs, WantsOutputs,
 };
 use payjoin::receive::{ImplementationError, ReplyableError};
-use payjoin::send::v2::{Sender, SenderBuilder, SenderSessionEvent};
+use payjoin::send::v2::{
+    ProposalReceived, Sender, SenderBuilder, SenderState, SenderWithReplyKey, V2GetContext,
+};
 use payjoin::Uri;
 use tokio::sync::watch;
 
@@ -54,33 +53,37 @@ impl AppTrait for App {
         let uri = uri.assume_checked();
         let uri = uri.check_pj_supported().map_err(|_| anyhow!("URI does not support Payjoin"))?;
         let url = uri.extras.endpoint();
-        // If sender session exists, resume it
-        // TODO: need to replay the events not just read the first one
-        for session in self.db.get_send_sessions()? {
-            let created_event = session.events.first().unwrap().clone();
-            if let SenderSessionEvent::Created(sender) = created_event {
-                if sender.endpoint() == url {
-                    return self.spawn_payjoin_sender(sender).await;
-                }
+        let sender_state = self.db.get_send_session_ids()?.into_iter().find_map(|session_id| {
+            let sender_persister = SenderPersister::from_id(self.db.clone(), session_id).ok()?;
+            let mut session_history = payjoin::send::v2::SessionHistory::default();
+            let sender_state = session_history
+                .replay_sender_event_log(sender_persister.clone())
+                .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))
+                .ok()?;
+
+            let pj_uri = session_history.endpoint();
+            pj_uri.filter(|uri| uri == &url).map(|_| sender_state)
+        });
+
+        let sender_state = match sender_state {
+            Some(sender_state) => sender_state,
+            None => {
+                let sender_persister = SenderPersister::new(self.db.clone())?;
+                let psbt = self.create_original_psbt(&uri, fee_rate)?;
+                let sender = SenderBuilder::new(psbt, uri.clone(), sender_persister.clone())
+                    .build_recommended(fee_rate)
+                    .with_context(|| "Failed to build payjoin request")?;
+                SenderState::WithReplyKey(sender)
+            }
+        };
+        let mut interrupt = self.interrupt.clone();
+        tokio::select! {
+            _ = self.process_sender_session(sender_state) => return Ok(()),
+            _ = interrupt.changed() => {
+                println!("Interrupted. Call `send` with the same arguments to resume this session or `resume` to resume all sessions.");
+                return Err(anyhow!("Interrupted"))
             }
         }
-        let psbt = self.create_original_psbt(&uri, fee_rate)?;
-        let mut persister = SenderPersister::new(self.db.clone())?;
-        // TODO: new sender will be replaced with uninitialized sender a
-        let new_sender = SenderBuilder::new(psbt, uri.clone())
-            .build_recommended(fee_rate)
-            .with_context(|| "Failed to build payjoin request")?;
-        new_sender
-            .persist(&mut persister)
-            .map_err(|e| anyhow!("Failed to persist sender: {}", e))?;
-        let events = persister.load()?.next().expect("Just created sender");
-
-        let sender = match events {
-            SenderSessionEvent::Created(sender) => sender,
-            _ => return Err(anyhow!("Failed to load sender: could not find created event")),
-        };
-
-        self.spawn_payjoin_sender(sender).await
     }
 
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
@@ -104,20 +107,19 @@ impl AppTrait for App {
 
     #[allow(clippy::incompatible_msrv)]
     async fn resume_payjoins(&self) -> Result<()> {
-        let recv_sessions = self.db.get_recv_sessions()?;
-        let send_sessions = self.db.get_send_sessions()?;
-
-        if recv_sessions.is_empty() && send_sessions.is_empty() {
+        let recv_session_ids = self.db.get_recv_session_ids()?;
+        let send_session_ids = self.db.get_send_session_ids()?;
+        if recv_session_ids.is_empty() && send_session_ids.is_empty() {
             println!("No sessions to resume.");
             return Ok(());
         }
 
         let mut tasks = Vec::new();
 
-        for session_id in self.db.get_recv_session_ids()? {
+        for session_id in recv_session_ids {
             let self_clone = self.clone();
             let recv_persister = ReceiverPersister::from_id(self.db.clone(), session_id)?;
-            let receiver_state = SessionHistory::default()
+            let receiver_state = payjoin::receive::v2::SessionHistory::default()
                 .replay_receiver_event_log(recv_persister.clone())
                 .map_err(|e| anyhow!("Failed to replay receiver event log: {:?}", e))?;
             tasks.push(tokio::spawn(async move {
@@ -125,18 +127,15 @@ impl AppTrait for App {
             }));
         }
 
-        for session in send_sessions {
+        for session_id in send_session_ids {
+            let sender_persiter = SenderPersister::from_id(self.db.clone(), session_id)?;
+            let sender_state = payjoin::send::v2::SessionHistory::default()
+                .replay_sender_event_log(sender_persiter.clone())
+                .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))?;
             let self_clone = self.clone();
-            // TODO: should replay the events not just read the first one
-            let created_event = session.events.first().unwrap().clone();
-            println!("created_event: {:?}", created_event);
-            if let SenderSessionEvent::Created(sender) = created_event {
-                tasks.push(tokio::spawn(async move {
-                    self_clone.spawn_payjoin_sender(sender.clone()).await
-                }));
-            } else {
-                error!("First event is not a sender");
-            }
+            tasks.push(tokio::spawn(async move {
+                self_clone.process_sender_session(sender_state).await
+            }));
         }
 
         let mut interrupt = self.interrupt.clone();
@@ -157,46 +156,100 @@ impl AppTrait for App {
 
     #[cfg(feature = "v2")]
     async fn history(&self) -> Result<()> {
-        let send_sessions = self.db.get_send_sessions()?;
-        let recv_sessions = self.db.get_recv_sessions()?;
-        let closed_send_sessions = self.db.get_closed_send_sessions()?;
-        let closed_recv_sessions = self.db.get_closed_recv_sessions()?;
+        // TODO: re-enable this. We want to display certain session details for each closed and pending session.
+        // Thes details can be obtained by replaying the event logs and querying the `SessionHistory` for each session.
+        // let send_sessions = self.db.get_send_sessions()?;
+        // let recv_sessions = self.db.get_recv_sessions()?;
+        // let closed_send_sessions = self.db.get_closed_send_sessions()?;
+        // let closed_recv_sessions = self.db.get_closed_recv_sessions()?;
 
-        println!("Open send sessions: {:?}", send_sessions.len());
-        for session in send_sessions {
-            println!("Send session: {:?}", session);
-        }
-        println!("Open recv sessions: {:?}", recv_sessions.len());
-        for session in recv_sessions {
-            println!("Recv session: {:?}", session);
-        }
-        println!("Closed send sessions: {:?}", closed_send_sessions.len());
-        for session in closed_send_sessions {
-            println!("Closed send session: {:?}", session);
-        }
-        println!("Closed recv sessions: {:?}", closed_recv_sessions.len());
-        for session in closed_recv_sessions {
-            println!("Closed recv session: {:?}", session);
-        }
+        // println!("Open send sessions: {:?}", send_sessions.len());
+        // for session in send_sessions {
+        //     println!("Send session: {:?}", session);
+        // }
+        // println!("Open recv sessions: {:?}", recv_sessions.len());
+        // for session in recv_sessions {
+        //     println!("Recv session: {:?}", session);
+        // }
+        // println!("Closed send sessions: {:?}", closed_send_sessions.len());
+        // for session in closed_send_sessions {
+        //     println!("Closed send session: {:?}", session);
+        // }
+        // println!("Closed recv sessions: {:?}", closed_recv_sessions.len());
+        // for session in closed_recv_sessions {
+        //     println!("Closed recv session: {:?}", session);
+        // }
         Ok(())
     }
 }
 
 impl App {
-    #[allow(clippy::incompatible_msrv)]
-    async fn spawn_payjoin_sender(&self, mut req_ctx: Sender) -> Result<()> {
-        let mut interrupt = self.interrupt.clone();
-        tokio::select! {
-            res = self.long_poll_post(&mut req_ctx) => {
-                self.process_pj_response(res?)?;
-                // TODO: use persister session to close
-                // self.db.close_send_session(req_ctx.endpoint())?;
-            }
-            _ = interrupt.changed() => {
-                println!("Interrupted. Call `send` with the same arguments to resume this session or `resume` to resume all sessions.");
+    async fn process_sender_session(&self, session: SenderState<SenderPersister>) -> Result<()> {
+        let mut session = session.clone();
+        loop {
+            match session {
+                SenderState::WithReplyKey(context) => {
+                    match self.post_orginal_proposal(&context).await {
+                        Ok(sender) => session = SenderState::V2GetContext(sender),
+                        Err(_) => {
+                            let (req, v1_ctx) = context.extract_v1();
+                            let response = post_request(req).await?;
+                            let psbt = Arc::new(v1_ctx.process_response(
+                                &mut response.bytes().await?.to_vec().as_slice(),
+                            )?);
+                            self.process_pj_response((*psbt).clone())?;
+                            return Ok(());
+                        }
+                    }
+                }
+
+                SenderState::V2GetContext(context) => {
+                    session = SenderState::ProposalReceived(
+                        self.get_proposed_payjoin_psbt(&context).await?,
+                    );
+                }
+
+                SenderState::ProposalReceived(proposal) => {
+                    let psbt = proposal.psbt().clone();
+                    self.process_pj_response(psbt)?;
+                    return Ok(());
+                }
+                _ => return Err(anyhow!("Unexpected sender state")),
             }
         }
-        Ok(())
+    }
+
+    async fn post_orginal_proposal(
+        &self,
+        sender: &Sender<SenderWithReplyKey, SenderPersister>,
+    ) -> Result<Sender<V2GetContext, SenderPersister>> {
+        let (req, ctx) = sender.extract_v2(self.config.v2()?.ohttp_relay.clone())?;
+        let response = post_request(req).await?;
+        // TODO: clone here smells
+        let v2_ctx = sender.clone().process_response(&response.bytes().await?, ctx)?;
+        Ok(v2_ctx)
+    }
+
+    async fn get_proposed_payjoin_psbt(
+        &self,
+        sender: &Sender<V2GetContext, SenderPersister>,
+    ) -> Result<Sender<ProposalReceived, SenderPersister>> {
+        // Long poll until we get a response
+        loop {
+            let (req, ctx) = sender.extract_req(self.config.v2()?.ohttp_relay.clone())?;
+            let response = post_request(req).await?;
+            match sender.process_response(&response.bytes().await?, ctx) {
+                Ok(Some(psbt)) => return Ok(psbt),
+                Ok(None) => {
+                    println!("No response yet.");
+                }
+                Err(re) => {
+                    println!("{}", re);
+                    log::debug!("{:?}", re);
+                    return Err(anyhow!("Response error").context(re));
+                }
+            }
+        }
     }
 
     async fn process_receiver_session(
@@ -267,7 +320,6 @@ impl App {
         // Receive Check 1: Can Broadcast
         let proposal =
             proposal.check_broadcast_suitability(None, |tx| Ok(wallet.can_broadcast(tx)?))?;
-        log::trace!("check1");
 
         Ok(proposal)
     }
@@ -346,47 +398,6 @@ impl App {
             payjoin_psbt.extract_tx_unchecked_fee_rate().clone().compute_txid()
         );
         Ok(())
-    }
-
-    async fn long_poll_post(&self, req_ctx: &mut Sender) -> Result<Psbt> {
-        match req_ctx.extract_v2(self.config.v2()?.ohttp_relay.clone()) {
-            Ok((req, ctx)) => {
-                println!("Posting Original PSBT Payload request...");
-                let response = post_request(req).await?;
-                println!("Sent fallback transaction");
-                let v2_ctx = Arc::new(ctx.process_response(&response.bytes().await?)?);
-                loop {
-                    let (req, ohttp_ctx) =
-                        v2_ctx.extract_req(self.config.v2()?.ohttp_relay.clone())?;
-                    let response = post_request(req).await?;
-                    match v2_ctx.process_response(&response.bytes().await?, ohttp_ctx) {
-                        Ok(Some(psbt)) => return Ok(psbt),
-                        Ok(None) => {
-                            println!("No response yet.");
-                        }
-                        Err(re) => {
-                            println!("{re}");
-                            log::debug!("{re:?}");
-                            return Err(anyhow!("Response error").context(re));
-                        }
-                    }
-                }
-            }
-            Err(_) => {
-                let (req, v1_ctx) = req_ctx.extract_v1();
-                println!("Posting Original PSBT Payload request...");
-                let response = post_request(req).await?;
-                println!("Sent fallback transaction");
-                match v1_ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()) {
-                    Ok(psbt) => Ok(psbt),
-                    Err(re) => {
-                        println!("{re}");
-                        log::debug!("{re:?}");
-                        Err(anyhow!("Response error").context(re))
-                    }
-                }
-            }
-        }
     }
 
     async fn long_poll_fallback(

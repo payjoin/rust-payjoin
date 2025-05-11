@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::{value_parser, ArgMatches, Parser, Subcommand};
+use clap::{value_parser, Parser, Subcommand};
 use config::builder::DefaultState;
 use config::{ConfigError, File, FileFormat};
 use payjoin::bitcoin::amount::ParseAmountError;
@@ -13,6 +13,7 @@ use crate::db;
 #[derive(Debug, Parser)]
 #[command(version = env!("CARGO_PKG_VERSION"), about = "Payjoin - bitcoin scaling, savings, and privacy by default", long_about = None)]
 pub struct Cli {
+    // Make the config from the cli optional
     #[command(flatten)]
     pub config: Config,
     #[command(subcommand)]
@@ -34,7 +35,7 @@ pub enum Commands {
     /// Receive a payjoin payment
     Receive {
         /// The amount to receive in satoshis
-        #[arg(required = true)]
+        #[arg(required = true, value_parser = parse_amount_in_sat)]
         amount: Amount,
 
         /// The maximum effective fee rate the receiver is willing to pay (in sat/vB)
@@ -215,8 +216,6 @@ impl Config {
         ));
     }
 
-    // Matches should be a param that has the same return type
-    // as Cli::parse
     pub(crate) fn new(cli: &Cli) -> Result<Self, ConfigError> {
         let mut builder = config::Config::builder();
         builder = add_bitcoind_defaults(builder, cli)?;
@@ -258,8 +257,8 @@ impl Config {
             max_fee_rate: built_config.get("max_fee_rate").ok(),
             bitcoind: built_config.get("bitcoind")?,
             version: None,
-            bip77: cli.config.bip77,
-            bip78: cli.config.bip78,
+            bip77: built_config.get("bip77")?,
+            bip78: built_config.get("bip78")?,
         };
 
         match version {
@@ -329,25 +328,21 @@ impl Config {
     }
 }
 
-/// Set up default values and CLI overrides for Bitcoin RPC connection settings
-fn add_bitcoind_defaults(builder: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
-    builder
-        .set_default("bitcoind.rpchost", "http://localhost:18443")?
+/// Set up config -> cli overrides -> defaults for Bitcoin RPC connection settings
+fn add_bitcoind_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
+    config
         .set_override_option(
             "bitcoind.rpchost",
             Some(cli.config.bitcoind.rpchost.to_owned().as_str()),
         )?
-        .set_default("bitcoind.cookie", None::<String>)?
         .set_override_option(
             "bitcoind.cookie",
             cli.config.bitcoind.cookie.as_ref().map(|p| p.to_string_lossy().into_owned()),
         )?
-        .set_default("bitcoind.rpcuser", "bitcoin")?
         .set_override_option(
             "bitcoind.rpcuser",
             Some(cli.config.bitcoind.rpcuser.to_owned().as_str()),
         )?
-        .set_default("bitcoind.rpcpassword", "")?
         .set_override_option(
             "bitcoind.rpcpassword",
             Some(cli.config.bitcoind.rpcpassword.to_owned().as_str()),
@@ -355,24 +350,22 @@ fn add_bitcoind_defaults(builder: Builder, cli: &Cli) -> Result<Builder, ConfigE
 }
 
 /// Set up default values and CLI overrides for common settings shared between v1 and v2
-fn add_common_defaults(builder: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
-    builder
+fn add_common_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
+    config
         .set_default("db_path", db::DB_PATH)?
         .set_override_option("db_path", cli.config.db_path.to_str())
 }
 
 /// Set up default values for v1-specific settings when v2 is not enabled
 #[cfg(feature = "v1")]
-fn add_v1_defaults(builder: Builder) -> Result<Builder, ConfigError> {
-    builder
-        .set_default("v1.port", 3000_u16)?
-        .set_default("v1.pj_endpoint", "https://localhost:3000")
+fn add_v1_defaults(config: Builder) -> Result<Builder, ConfigError> {
+    config.set_default("v1.port", 3000_u16)?.set_default("v1.pj_endpoint", "https://localhost:3000")
 }
 
 /// Set up default values and CLI overrides for v2-specific settings
 #[cfg(feature = "v2")]
-fn add_v2_defaults(builder: Builder) -> Result<Builder, ConfigError> {
-    builder
+fn add_v2_defaults(config: Builder) -> Result<Builder, ConfigError> {
+    config
         .set_default("v2.ohttp_relay", "https://pj.bobspacebkk.com")?
         .set_default("v2.pj_directory", "https://payjo.in")?
         .set_default("v2.ohttp_keys", None::<String>)
@@ -409,37 +402,6 @@ fn handle_subcommands(builder: Builder, cli: &Cli) -> Result<Builder, ConfigErro
         #[cfg(feature = "v2")]
         Commands::Resume => Ok(builder),
     }
-}
-
-/// Handle configuration overrides specific to the receive command
-fn handle_receive_command(builder: Builder, matches: &ArgMatches) -> Result<Builder, ConfigError> {
-    #[cfg(feature = "v1")]
-    let builder = {
-        let port = matches
-            .get_one::<String>("port")
-            .map(|port| port.parse::<u16>())
-            .transpose()
-            .map_err(|_| ConfigError::Message("\"port\" must be a valid number".to_string()))?;
-        builder.set_override_option("v1.port", port)?.set_override_option(
-            "v1.pj_endpoint",
-            matches.get_one::<Url>("pj_endpoint").map(|s| s.as_str()),
-        )?
-    };
-
-    #[cfg(feature = "v2")]
-    let builder = {
-        builder
-            .set_override_option(
-                "v2.pj_directory",
-                matches.get_one::<Url>("pj_directory").map(|s| s.as_str()),
-            )?
-            .set_override_option(
-                "v2.ohttp_keys",
-                matches.get_one::<String>("ohttp_keys").map(|s| s.as_str()),
-            )?
-    };
-
-    Ok(builder)
 }
 
 #[cfg(feature = "v2")]

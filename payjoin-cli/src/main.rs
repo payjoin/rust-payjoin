@@ -1,8 +1,8 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use app::config::{Cli, Commands, Config};
 use app::App as AppTrait;
 use clap::Parser;
-use payjoin::bitcoin::{Amount, FeeRate};
+use payjoin::bitcoin::FeeRate;
 
 mod app;
 mod db;
@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     let config = Config::new(&cli)?;
 
     #[allow(clippy::if_same_then_else)]
-    let app: Box<dyn AppTrait> = if cli.config.bip78 {
+    let app: Box<dyn AppTrait> = if config.bip78 {
         #[cfg(feature = "v1")]
         {
             Box::new(crate::app::v1::App::new(config)?)

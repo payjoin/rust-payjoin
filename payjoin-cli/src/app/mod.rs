@@ -56,10 +56,14 @@ pub trait App: Send + Sync {
 }
 
 #[cfg(feature = "_danger-local-https")]
-fn http_agent() -> Result<reqwest::Client> { Ok(http_agent_builder()?.build()?) }
+fn http_agent() -> Result<reqwest::Client> {
+    Ok(http_agent_builder()?.build()?)
+}
 
 #[cfg(not(feature = "_danger-local-https"))]
-fn http_agent() -> Result<reqwest::Client> { Ok(reqwest::Client::new()) }
+fn http_agent() -> Result<reqwest::Client> {
+    Ok(reqwest::Client::new())
+}
 
 #[cfg(feature = "_danger-local-https")]
 fn http_agent_builder() -> Result<reqwest::ClientBuilder> {

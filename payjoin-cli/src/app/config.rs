@@ -217,17 +217,16 @@ impl Config {
     }
 
     pub(crate) fn new(cli: &Cli) -> Result<Self, ConfigError> {
-        let mut builder = config::Config::builder();
-        builder = add_bitcoind_defaults(builder, cli)?;
-        builder = add_common_defaults(builder, cli)?;
-
+        let mut config = config::Config::builder();
+        config = add_bitcoind_defaults(config, cli)?;
+        config = add_common_defaults(config, cli)?;
         let version = Self::determine_version(cli)?;
 
         match version {
             1 => {
                 #[cfg(feature = "v1")]
                 {
-                    builder = add_v1_defaults(builder)?;
+                    config = add_v1_defaults(config)?;
                 }
                 #[cfg(not(feature = "v1"))]
                 return Err(ConfigError::Message(
@@ -237,7 +236,7 @@ impl Config {
             2 => {
                 #[cfg(feature = "v2")]
                 {
-                    builder = add_v2_defaults(builder)?;
+                    config = add_v2_defaults(config)?;
                 }
                 #[cfg(not(feature = "v2"))]
                 return Err(ConfigError::Message(
@@ -247,10 +246,10 @@ impl Config {
             _ => unreachable!("determine_version() should only return 1 or 2"),
         }
 
-        builder = handle_subcommands(builder, cli)?;
-        builder = builder.add_source(File::new("config.toml", FileFormat::Toml).required(false));
+        config = handle_subcommands(config, cli)?;
+        config = config.add_source(File::new("config.toml", FileFormat::Toml).required(false));
 
-        let built_config = builder.build()?;
+        let built_config = config.build()?;
 
         let mut config = Config {
             db_path: built_config.get("db_path")?,
@@ -372,9 +371,14 @@ fn add_v2_defaults(config: Builder) -> Result<Builder, ConfigError> {
 }
 
 /// Handles configuration overrides based on CLI subcommands
-fn handle_subcommands(builder: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
+fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
+    // TODO:
+    // 1. override config values with command line arguments
+    // 2. if neither command line or config values are set, use default values
+    // 3. for those that should not have default values because there's no
+    //    standard, return an error
     match &cli.command {
-        Commands::Send { .. } => Ok(builder),
+        Commands::Send { .. } => Ok(config),
         Commands::Receive {
             #[cfg(feature = "v1")]
             port,
@@ -387,20 +391,20 @@ fn handle_subcommands(builder: Builder, cli: &Cli) -> Result<Builder, ConfigErro
             ..
         } => {
             #[cfg(feature = "v1")]
-            let builder = builder
+            let config = config
                 .set_override_option("v1.port", port.map(|p| p.to_string()))?
                 .set_override_option("v1.pj_endpoint", pj_endpoint.as_ref().map(|s| s.as_str()))?;
             #[cfg(feature = "v2")]
-            let builder = builder
+            let config = config
                 .set_override_option("v2.pj_directory", pj_directory.as_ref().map(|s| s.as_str()))?
                 .set_override_option(
                     "v2.ohttp_keys",
                     ohttp_keys.as_ref().map(|s| s.to_string_lossy().into_owned()),
                 )?;
-            Ok(builder)
+            Ok(config)
         }
         #[cfg(feature = "v2")]
-        Commands::Resume => Ok(builder),
+        Commands::Resume => Ok(config),
     }
 }
 

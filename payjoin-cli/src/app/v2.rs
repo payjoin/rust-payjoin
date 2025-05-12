@@ -4,13 +4,14 @@ use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v2::{
-    MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal,
-    Receiver, ReceiverState, ReceiverWithContext, UncheckedProposal, UninitializedReceiver,
-    WantsInputs, WantsOutputs,
+    replay_receiver_event_log, MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal,
+    ProvisionalProposal, Receiver, ReceiverState, ReceiverWithContext, UncheckedProposal,
+    UninitializedReceiver, WantsInputs, WantsOutputs,
 };
 use payjoin::receive::{ImplementationError, ReplyableError};
 use payjoin::send::v2::{
-    ProposalReceived, Sender, SenderBuilder, SenderState, SenderWithReplyKey, V2GetContext,
+    replay_sender_event_log, ProposalReceived, Sender, SenderBuilder, SenderState,
+    SenderWithReplyKey, V2GetContext,
 };
 use payjoin::Uri;
 use tokio::sync::watch;
@@ -55,14 +56,12 @@ impl AppTrait for App {
         let url = uri.extras.endpoint();
         let sender_state = self.db.get_send_session_ids()?.into_iter().find_map(|session_id| {
             let sender_persister = SenderPersister::from_id(self.db.clone(), session_id).ok()?;
-            let mut session_history = payjoin::send::v2::SessionHistory::default();
-            let sender_state = session_history
-                .replay_sender_event_log(sender_persister.clone())
+            let replay_results = replay_sender_event_log(sender_persister.clone())
                 .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))
                 .ok()?;
 
-            let pj_uri = session_history.endpoint();
-            pj_uri.filter(|uri| uri == &url).map(|_| sender_state)
+            let pj_uri = replay_results.1.endpoint();
+            pj_uri.filter(|uri| uri == &url).map(|_| replay_results.0)
         });
 
         let sender_state = match sender_state {
@@ -119,9 +118,9 @@ impl AppTrait for App {
         for session_id in recv_session_ids {
             let self_clone = self.clone();
             let recv_persister = ReceiverPersister::from_id(self.db.clone(), session_id)?;
-            let receiver_state = payjoin::receive::v2::SessionHistory::default()
-                .replay_receiver_event_log(recv_persister.clone())
-                .map_err(|e| anyhow!("Failed to replay receiver event log: {:?}", e))?;
+            let receiver_state = replay_receiver_event_log(recv_persister.clone())
+                .map_err(|e| anyhow!("Failed to replay receiver event log: {:?}", e))?
+                .0;
             tasks.push(tokio::spawn(async move {
                 self_clone.process_receiver_session(receiver_state).await
             }));
@@ -129,9 +128,9 @@ impl AppTrait for App {
 
         for session_id in send_session_ids {
             let sender_persiter = SenderPersister::from_id(self.db.clone(), session_id)?;
-            let sender_state = payjoin::send::v2::SessionHistory::default()
-                .replay_sender_event_log(sender_persiter.clone())
-                .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))?;
+            let sender_state = replay_sender_event_log(sender_persiter.clone())
+                .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))?
+                .0;
             let self_clone = self.clone();
             tasks.push(tokio::spawn(async move {
                 self_clone.process_sender_session(sender_state).await

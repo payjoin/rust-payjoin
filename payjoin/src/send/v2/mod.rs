@@ -169,7 +169,6 @@ pub struct Sender<State, P> {
     state: State,
     persister: P,
 }
-trait State: Clone {}
 
 #[derive(Debug, Clone)]
 pub enum SenderState<P> {
@@ -262,8 +261,6 @@ pub struct SenderWithReplyKey {
     /// The secret key to decrypt the receiver's reply.
     pub(crate) reply_key: HpkeSecretKey,
 }
-
-impl State for SenderWithReplyKey {}
 
 impl<P> Sender<SenderWithReplyKey, P>
 where
@@ -453,8 +450,6 @@ pub struct V2GetContext {
     pub(crate) hpke_ctx: HpkeContext,
 }
 
-impl State for V2GetContext {}
-
 impl<P> Sender<V2GetContext, P>
 where
     P: PersistedSession + Clone,
@@ -552,8 +547,6 @@ where
 pub struct ProposalReceived {
     pub(crate) proposal: Psbt,
 }
-
-impl State for ProposalReceived {}
 
 impl<P> Sender<ProposalReceived, P>
 where

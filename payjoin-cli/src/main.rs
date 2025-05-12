@@ -1,5 +1,5 @@
 use anyhow::Result;
-use app::config::{Cli, Commands, Config};
+use app::config::{Cli, Commands, RawConfig};
 use app::App as AppTrait;
 use clap::Parser;
 use payjoin::bitcoin::FeeRate;
@@ -15,7 +15,9 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     let cli = Cli::parse();
-    let config = Config::new(&cli)?;
+    let config = load_config();
+
+    // validate
 
     #[allow(clippy::if_same_then_else)]
     let app: Box<dyn AppTrait> = if config.bip78 {

@@ -15,7 +15,7 @@ use crate::db;
 pub struct Cli {
     // Make the config from the cli optional
     #[command(flatten)]
-    pub config: Config,
+    pub config: RawConfig,
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -70,13 +70,13 @@ pub enum Commands {
 type Builder = config::builder::ConfigBuilder<DefaultState>;
 
 #[derive(Debug, Clone, Deserialize, Parser)]
-pub struct BitcoindConfig {
+pub struct RawBitcoindConfig {
     #[arg(
         long,
         short = 'r',
         help = "The URL of the Bitcoin RPC host, e.g. regtest default is http://localhost:18443"
     )]
-    pub rpchost: Url,
+    pub rpchost: Option<Url>,
     #[arg(
         long,
         short = 'c',
@@ -88,38 +88,38 @@ pub struct BitcoindConfig {
         short = 'u',
         help = "The RPC username to use for authentication. Mutually exclusive with --cookie"
     )]
-    pub rpcuser: String,
+    pub rpcuser: Option<String>,
     #[arg(
         long,
         short = 'p',
         help = "The RPC password to use for authentication. Mutually exclusive with --cookie"
     )]
-    pub rpcpassword: String,
+    pub rpcpassword: Option<String>,
 }
 
 #[cfg(feature = "v1")]
 #[derive(Debug, Clone, Deserialize, Parser)]
-pub struct V1Config {
+pub struct RawV1Config {
     #[arg(long, short = 't', help = "The port of the payjoin V1 server to listen on.")]
-    pub port: u16,
+    pub port: Option<u16>,
     #[arg(
         long,
         short = 'e',
         help = "The URL endpoint of the payjoin V1 server, e.g. https://localhost:3000"
     )]
-    pub pj_endpoint: Url,
+    pub pj_endpoint: Option<Url>,
 }
 
 #[cfg(feature = "v2")]
 #[derive(Debug, Clone, Deserialize, Parser)]
-pub struct V2Config {
+pub struct RawV2Config {
     #[serde(deserialize_with = "deserialize_ohttp_keys_from_path")]
     #[arg(long = "ohttp-keys", short = 'k', help = "The path to the ohttp keys file")]
     pub ohttp_keys: Option<payjoin::OhttpKeys>,
     #[arg(long = "ohttp-relay", short = 'r', help = "The URL of the ohttp relay")]
-    pub ohttp_relay: Url,
+    pub ohttp_relay: Option<Url>,
     #[arg(long = "pj-directory", short = 'd', help = "The directory to store payjoin requests")]
-    pub pj_directory: Url,
+    pub pj_directory: Option<Url>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -128,21 +128,21 @@ pub struct V2Config {
 pub enum VersionConfig {
     #[cfg(feature = "v1")]
     #[serde(rename = "v1")]
-    V1(V1Config),
+    V1(RawV1Config),
     #[cfg(feature = "v2")]
     #[serde(rename = "v2")]
-    V2(V2Config),
+    V2(RawV2Config),
 }
 
 #[derive(Debug, Clone, Deserialize, Parser)]
-pub struct Config {
+pub struct RawConfig {
     #[arg(
         long = "bip77",
         help = "Use BIP77 (v2) protocol (default)",
         conflicts_with = "bip78",
         action = clap::ArgAction::SetTrue
         )]
-    pub bip77: bool,
+    pub bip77: Option<bool>,
 
     #[arg(
         long = "bip78",
@@ -150,27 +150,39 @@ pub struct Config {
         conflicts_with = "bip77",
         action = clap::ArgAction::SetTrue
         )]
-    pub bip78: bool,
+    pub bip78: Option<bool>,
 
     #[arg(
         long,
         short = 'd',
         help = "Sets a custom database path. Defaults to ~/.config/payjoin-cli"
     )]
-    pub db_path: PathBuf,
+    pub db_path: Option<PathBuf>,
 
     #[arg(long = "max-fee-rate", short = 'f', help = "The maximum fee rate to accept in sat/vB")]
     pub max_fee_rate: Option<FeeRate>,
 
     #[command(flatten)]
-    pub bitcoind: BitcoindConfig,
+    pub bitcoind: Option<RawBitcoindConfig>,
 
     #[serde(skip)]
     #[arg(skip)]
     pub version: Option<VersionConfig>,
 }
 
-impl Config {
+#[derive(Debug, Clone, Deserialize)]
+pub struct ValidatedConfig {
+    pub bip77: bool,
+    pub bip78: bool,
+    pub db_path: PathBuf,
+    pub max_fee_rate: Option<FeeRate>,
+    pub bitcoind: RawBitcoindConfig,
+
+    #[serde(skip)]
+    pub version: Option<VersionConfig>,
+}
+
+impl ValidatedConfig {
     /// Version flags in order of precedence (newest to oldest)
     const VERSION_FLAGS: &'static [(&'static str, u8)] = &[("bip77", 2), ("bip78", 1)];
 
@@ -179,7 +191,7 @@ impl Config {
         let mut selected_version = None;
         for _ in Self::VERSION_FLAGS.iter() {
             #[cfg(feature = "v2")]
-            if cli.config.bip77 {
+            if cli.config.bip77.is_some() {
                 if selected_version.is_some() {
                     return Err(ConfigError::Message(
                             "Multiple version flags specified. Please use only one of: --bip77, --bip78"
@@ -190,7 +202,7 @@ impl Config {
             }
 
             #[cfg(feature = "v1")]
-            if cli.config.bip78 {
+            if cli.config.bip78.is_some() {
                 if selected_version.is_some() {
                     return Err(ConfigError::Message(
                             "Multiple version flags specified. Please use only one of: --bip77, --bip78"
@@ -218,6 +230,13 @@ impl Config {
 
     pub(crate) fn new(cli: &Cli) -> Result<Self, ConfigError> {
         let mut config = config::Config::builder();
+
+        // Validate bitcoind settings
+        // 1. override config values with command line arguments where applicable
+        // 2. if neither command line or config values are set, use default values where applicable
+        // 3. for those that should not have default values because there's no
+        //    standard, return an error
+
         config = add_bitcoind_defaults(config, cli)?;
         config = add_common_defaults(config, cli)?;
         let version = Self::determine_version(cli)?;
@@ -251,7 +270,7 @@ impl Config {
 
         let built_config = config.build()?;
 
-        let mut config = Config {
+        let mut config = ValidatedConfig {
             db_path: built_config.get("db_path")?,
             max_fee_rate: built_config.get("max_fee_rate").ok(),
             bitcoind: built_config.get("bitcoind")?,
@@ -264,7 +283,7 @@ impl Config {
             1 => {
                 #[cfg(feature = "v1")]
                 {
-                    match built_config.get::<V1Config>("v1") {
+                    match built_config.get::<RawV1Config>("v1") {
                         Ok(v1) => config.version = Some(VersionConfig::V1(v1)),
                         Err(e) => {
                             return Err(ConfigError::Message(format!(
@@ -281,7 +300,7 @@ impl Config {
             2 => {
                 #[cfg(feature = "v2")]
                 {
-                    match built_config.get::<V2Config>("v2") {
+                    match built_config.get::<RawV2Config>("v2") {
                         Ok(v2) => config.version = Some(VersionConfig::V2(v2)),
                         Err(e) => {
                             return Err(ConfigError::Message(format!(
@@ -309,7 +328,7 @@ impl Config {
     }
 
     #[cfg(feature = "v1")]
-    pub fn v1(&self) -> Result<&V1Config, anyhow::Error> {
+    pub fn v1(&self) -> Result<&RawV1Config, anyhow::Error> {
         match &self.version {
             Some(VersionConfig::V1(v1_config)) => Ok(v1_config),
             #[allow(unreachable_patterns)]
@@ -318,7 +337,7 @@ impl Config {
     }
 
     #[cfg(feature = "v2")]
-    pub fn v2(&self) -> Result<&V2Config, anyhow::Error> {
+    pub fn v2(&self) -> Result<&RawV2Config, anyhow::Error> {
         match &self.version {
             Some(VersionConfig::V2(v2_config)) => Ok(v2_config),
             #[allow(unreachable_patterns)]
@@ -329,30 +348,58 @@ impl Config {
 
 /// Set up config -> cli overrides -> defaults for Bitcoin RPC connection settings
 fn add_bitcoind_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
-    config
-        .set_override_option(
+    let mut config = config;
+
+    if let Some(bitcoind) = &cli.config.bitcoind {
+        config = config.set_override_option(
             "bitcoind.rpchost",
-            Some(cli.config.bitcoind.rpchost.to_owned().as_str()),
-        )?
-        .set_override_option(
+            bitcoind.rpchost.as_ref().map(|s| s.as_str()),
+        )?;
+        config = config.set_override_option(
             "bitcoind.cookie",
-            cli.config.bitcoind.cookie.as_ref().map(|p| p.to_string_lossy().into_owned()),
-        )?
-        .set_override_option(
+            bitcoind.cookie.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        )?;
+        config = config.set_override_option(
             "bitcoind.rpcuser",
-            Some(cli.config.bitcoind.rpcuser.to_owned().as_str()),
-        )?
-        .set_override_option(
+            bitcoind.rpcuser.as_ref().map(|s| s.as_str()),
+        )?;
+        config = config.set_override_option(
             "bitcoind.rpcpassword",
-            Some(cli.config.bitcoind.rpcpassword.to_owned().as_str()),
-        )
+            bitcoind.rpcpassword.as_ref().map(|s| s.as_str()),
+        )?;
+    };
+
+    // if !bitcoind.rpcuser.
+    //     config = config.set_override_option("bitcoind.rpcuser", Some(&bitcoind.rpcuser))?;
+    // }
+    // if !bitcoind.rpcpassword.is_empty() {
+    //     config =
+    //         config.set_override_option("bitcoind.rpcpassword", Some(&bitcoind.rpcpassword))?;
+    // }
+
+    // config
+    //     .set_override_option("bitcoind.rpchost", cli.config.bitcoind.rpchost.to_owned().as_str())?
+    //     .set_override_option(
+    //         "bitcoind.cookie",
+    //         cli.config.bitcoind.cookie.as_ref().map(|p| p.to_string_lossy().into_owned()),
+    //     )?
+    //     .set_override_option(
+    //         "bitcoind.rpcuser",
+    //         Some(cli.config.bitcoind.rpcuser.to_owned().as_str()),
+    //     )?
+    //     .set_override_option(
+    //         "bitcoind.rpcpassword",
+    //         Some(cli.config.bitcoind.rpcpassword.to_owned().as_str()),
+    //     )
+    Ok(config)
 }
 
 /// Set up default values and CLI overrides for common settings shared between v1 and v2
 fn add_common_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
-    config
-        .set_default("db_path", db::DB_PATH)?
-        .set_override_option("db_path", cli.config.db_path.to_str())
+    config.set_default("db_path", db::DB_PATH)?.set_override_option(
+        "db_path",
+        cli.config.db_path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+    )
 }
 
 /// Set up default values for v1-specific settings when v2 is not enabled
@@ -372,11 +419,6 @@ fn add_v2_defaults(config: Builder) -> Result<Builder, ConfigError> {
 
 /// Handles configuration overrides based on CLI subcommands
 fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
-    // TODO:
-    // 1. override config values with command line arguments
-    // 2. if neither command line or config values are set, use default values
-    // 3. for those that should not have default values because there's no
-    //    standard, return an error
     match &cli.command {
         Commands::Send { .. } => Ok(config),
         Commands::Receive {

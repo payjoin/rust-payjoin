@@ -21,7 +21,7 @@ use payjoin::{ImplementationError, Uri, UriExt};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
-use super::config::Config;
+use super::config::RawConfig;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::{handle_interrupt, http_agent};
@@ -38,7 +38,7 @@ impl payjoin::receive::v1::Headers for Headers<'_> {
 
 #[derive(Clone)]
 pub(crate) struct App {
-    config: Config,
+    config: RawConfig,
     db: Arc<Database>,
     wallet: BitcoindWallet,
     interrupt: watch::Receiver<()>,
@@ -46,7 +46,7 @@ pub(crate) struct App {
 
 #[async_trait::async_trait]
 impl AppTrait for App {
-    fn new(config: Config) -> Result<Self> {
+    fn new(config: RawConfig) -> Result<Self> {
         let db = Arc::new(Database::create(&config.db_path)?);
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
@@ -58,7 +58,9 @@ impl AppTrait for App {
         Ok(app)
     }
 
-    fn wallet(&self) -> BitcoindWallet { self.wallet.clone() }
+    fn wallet(&self) -> BitcoindWallet {
+        self.wallet.clone()
+    }
 
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {
         let uri =

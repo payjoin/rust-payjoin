@@ -10,7 +10,7 @@ use payjoin::send::v2::{Sender, SenderBuilder};
 use payjoin::{ImplementationError, Uri};
 use tokio::sync::watch;
 
-use super::config::Config;
+use super::config::RawConfig;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::{handle_interrupt, http_agent};
@@ -19,7 +19,7 @@ use crate::db::Database;
 
 #[derive(Clone)]
 pub(crate) struct App {
-    config: Config,
+    config: RawConfig,
     db: Arc<Database>,
     wallet: BitcoindWallet,
     interrupt: watch::Receiver<()>,
@@ -27,7 +27,7 @@ pub(crate) struct App {
 
 #[async_trait::async_trait]
 impl AppTrait for App {
-    fn new(config: Config) -> Result<Self> {
+    fn new(config: RawConfig) -> Result<Self> {
         let db = Arc::new(Database::create(&config.db_path)?);
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
@@ -39,7 +39,9 @@ impl AppTrait for App {
         Ok(app)
     }
 
-    fn wallet(&self) -> BitcoindWallet { self.wallet.clone() }
+    fn wallet(&self) -> BitcoindWallet {
+        self.wallet.clone()
+    }
 
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {
         use payjoin::UriExt;
@@ -335,7 +337,7 @@ fn try_contributing_inputs(
         .commit_inputs())
 }
 
-async fn unwrap_ohttp_keys_or_else_fetch(config: &Config) -> Result<payjoin::OhttpKeys> {
+async fn unwrap_ohttp_keys_or_else_fetch(config: &RawConfig) -> Result<payjoin::OhttpKeys> {
     if let Some(keys) = config.v2()?.ohttp_keys.clone() {
         println!("Using OHTTP Keys from config");
         Ok(keys)

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use app::config::{Cli, Commands, RawConfig};
+use app::config::{load_config, Cli, Commands, RawConfig};
 use app::App as AppTrait;
 use clap::Parser;
 use payjoin::bitcoin::FeeRate;

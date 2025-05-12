@@ -61,7 +61,7 @@ impl From<SenderSessionEvent> for NoopPersisterEvent {
 pub struct NoopPersister;
 
 impl PersistedSession for NoopPersister {
-    type Error = std::io::Error;
+    type Error = std::convert::Infallible;
     type SessionEvent = NoopPersisterEvent;
 
     fn save(&self, _event: Self::SessionEvent) -> Result<(), Self::Error> { Ok(()) }

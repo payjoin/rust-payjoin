@@ -827,9 +827,7 @@ mod integration {
     mod multiparty {
         use bitcoin::ScriptBuf;
         use payjoin::persist::NoopPersister;
-        use payjoin::receive::v2::{
-            Receiver, ReceiverWithContext, UncheckedProposal, UninitializedReceiver,
-        };
+        use payjoin::receive::v2::{Receiver, ReceiverWithContext, UninitializedReceiver};
         use payjoin::send::multiparty::{
             GetContext as MultiPartyGetContext, SenderBuilder as MultiPartySenderBuilder,
         };
@@ -877,7 +875,7 @@ mod integration {
                 // Senders will generate a sweep psbt and send PSBT to receiver subdir
                 for sender in senders.iter() {
                     let address = receiver.get_new_address(None, None)?.assume_checked();
-                    let mut receiver_session =
+                    let receiver_session =
                         Receiver::<UninitializedReceiver, NoopPersister>::create_session(
                             address.clone(),
                             directory.clone(),
@@ -899,8 +897,10 @@ mod integration {
                         .send()
                         .await?;
                     assert!(response.status().is_success());
-                    let sender_get_ctx = send_post_ctx
-                        .process_response(response.bytes().await?.to_vec().as_slice())?;
+                    let sender_get_ctx = sender_session.process_response(
+                        response.bytes().await?.to_vec().as_slice(),
+                        send_post_ctx,
+                    )?;
 
                     inner_sender_test_sessions.push(InnerSenderTestSession {
                         receiver_session,
@@ -936,8 +936,12 @@ mod integration {
                     handle_multiparty_proposal(&receiver, multiparty_proposal)?;
 
                 // Send the payjoin proposals to the senders
-                for mut proposal in multi_sender_payjoin_proposal.sender_iter() {
-                    let (req, ctx) = proposal.extract_req(&ohttp_relay)?;
+                for proposal in multi_sender_payjoin_proposal.sender_iter() {
+                    let mut v2_receiver = Receiver::<
+                        payjoin::receive::v2::PayjoinProposal,
+                        NoopPersister,
+                    >::new(proposal, NoopPersister);
+                    let (req, ctx) = v2_receiver.extract_req(&ohttp_relay)?;
                     let response = agent
                         .post(req.url)
                         .header("Content-Type", req.content_type)
@@ -947,7 +951,7 @@ mod integration {
 
                     assert!(response.status().is_success());
                     let res = response.bytes().await?.to_vec();
-                    proposal.process_res(&res, ctx)?;
+                    v2_receiver.process_res(&res, ctx)?;
                 }
 
                 // **********************
@@ -1002,7 +1006,7 @@ mod integration {
                     let finalized_response = receiver_session
                         .process_res(response.bytes().await?.to_vec().as_slice(), reciever_ctx)?
                         .unwrap();
-                    finalized_proposals.add(finalized_response)?;
+                    finalized_proposals.add(finalized_response.inner())?;
                 }
 
                 let agg_psbt = finalized_proposals.combine()?;

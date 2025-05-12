@@ -202,6 +202,26 @@ where
     }
 }
 
+pub fn replay_sender_event_log<P>(
+    persister: P,
+) -> Result<(SenderState<P>, SessionHistory), SenderReplayError>
+where
+    P: PersistedSession + Clone,
+    P::SessionEvent: From<SenderSessionEvent>,
+    SenderSessionEvent: From<P::SessionEvent>,
+{
+    let logs = persister.load().unwrap();
+
+    let mut sender = SenderState::Uninitialized();
+    let mut history = SessionHistory::new(Vec::new());
+    for log in logs {
+        history.events.push(log.clone().into());
+        sender = sender.process_event(log.into(), persister.clone());
+    }
+
+    Ok((sender, history))
+}
+
 #[derive(Default)]
 pub struct SessionHistory {
     events: Vec<SenderSessionEvent>,
@@ -213,26 +233,7 @@ pub enum SenderReplayError {
 }
 
 impl SessionHistory {
-    pub fn replay_sender_event_log<P>(
-        &mut self,
-        persister: P,
-    ) -> Result<SenderState<P>, SenderReplayError>
-    where
-        P: PersistedSession + Clone,
-        P::SessionEvent: From<SenderSessionEvent>,
-        SenderSessionEvent: From<P::SessionEvent>,
-    {
-        let logs = persister.load().unwrap();
-
-        let mut sender = SenderState::Uninitialized();
-
-        for log in logs {
-            self.events.push(log.clone().into());
-            sender = sender.process_event(log.into(), persister.clone());
-        }
-
-        Ok(sender)
-    }
+    fn new(events: Vec<SenderSessionEvent>) -> Self { Self { events } }
 
     pub fn payee_script(&self) -> Option<ScriptBuf> {
         self.events.iter().find_map(|event| match event {

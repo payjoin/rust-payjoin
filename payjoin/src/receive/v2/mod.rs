@@ -179,36 +179,38 @@ where
     }
 }
 
-#[derive(Default, Clone)]
+pub fn replay_receiver_event_log<P>(
+    persister: P,
+) -> Result<(ReceiverState<P>, SessionHistory), ReceiverReplayError>
+where
+    P: PersistedSession + Clone,
+    P::SessionEvent: From<ReceiverSessionEvent>,
+    ReceiverSessionEvent: From<P::SessionEvent>,
+{
+    let logs =
+        persister.load().map_err(|_| ReceiverReplayError::SessionInvalid("No good".to_string()))?;
+    let mut receiver = ReceiverState::Uninitialized(Receiver {
+        state: UninitializedReceiver {},
+        persister: persister.clone(),
+    });
+
+    let mut history = SessionHistory::new(Vec::new());
+
+    for log in logs {
+        history.events.push(log.clone().into());
+        receiver = receiver.process_event(log.into(), persister.clone());
+    }
+
+    Ok((receiver, history))
+}
+
+#[derive(Clone)]
 pub struct SessionHistory {
     events: Vec<ReceiverSessionEvent>,
 }
 
 impl SessionHistory {
-    pub fn replay_receiver_event_log<P>(
-        &mut self,
-        persister: P,
-    ) -> Result<ReceiverState<P>, ReceiverReplayError>
-    where
-        P: PersistedSession + Clone,
-        P::SessionEvent: From<ReceiverSessionEvent>,
-        ReceiverSessionEvent: From<P::SessionEvent>,
-    {
-        let logs = persister
-            .load()
-            .map_err(|_| ReceiverReplayError::SessionInvalid("No good".to_string()))?;
-        let mut receiver = ReceiverState::Uninitialized(Receiver {
-            state: UninitializedReceiver {},
-            persister: persister.clone(),
-        });
-
-        for log in logs {
-            self.events.push(log.clone().into());
-            receiver = receiver.process_event(log.into(), persister.clone());
-        }
-
-        Ok(receiver)
-    }
+    fn new(events: Vec<ReceiverSessionEvent>) -> Self { Self { events } }
 
     pub fn pj_uri<'a>(&self) -> Option<PjUri<'a>> {
         self.events.iter().find_map(|event| match event {
@@ -564,6 +566,8 @@ where
         };
         ReceiverState::MaybeInputsOwned(new_state)
     }
+
+    pub fn inner(&self) -> UncheckedProposal { self.state.clone() }
 }
 
 #[derive(Debug, Clone)]
@@ -911,6 +915,11 @@ where
     P: PersistedSession + Clone,
     P::SessionEvent: From<ReceiverSessionEvent>,
 {
+    #[cfg(feature = "_multiparty")]
+    pub fn new(proposal: PayjoinProposal, persister: P) -> Self {
+        Self { state: proposal, persister }
+    }
+
     /// The UTXOs that would be spent by this Payjoin transaction
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
         self.state.v1.utxos_to_be_locked()

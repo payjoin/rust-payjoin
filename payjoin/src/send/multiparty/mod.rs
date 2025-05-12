@@ -43,8 +43,8 @@ pub struct Sender<P>(pub(crate) v2::Sender<v2::SenderWithReplyKey, P>);
 
 impl<P: PersistedSession + Clone> Sender<P>
 where
+    P: PersistedSession + Clone,
     P::SessionEvent: From<v2::SenderSessionEvent>,
-    v2::SenderSessionEvent: From<P::SessionEvent>,
 {
     pub fn extract_v2(
         &self,

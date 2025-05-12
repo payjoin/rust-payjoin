@@ -99,6 +99,8 @@ pub enum ReceiverSessionEvent {
 pub enum ReceiverReplayError {
     /// The session is invalid
     SessionInvalid(String),
+    /// Session expired
+    SessionExpired(SystemTime),
     /// Unrecognized event
     UnrecognizedEvent(ReceiverSessionEvent),
 }
@@ -123,58 +125,60 @@ where
     P::SessionEvent: From<ReceiverSessionEvent>,
     ReceiverSessionEvent: From<P::SessionEvent>,
 {
-    fn process_event(&self, event: ReceiverSessionEvent, persister: P) -> ReceiverState<P> {
+    fn process_event(
+        &self,
+        event: ReceiverSessionEvent,
+        persister: P,
+    ) -> Result<ReceiverState<P>, ReceiverReplayError> {
         match (&self, event) {
             (ReceiverState::Uninitialized(_), ReceiverSessionEvent::Created(context)) =>
-                ReceiverState::WithContext(Receiver {
+                Ok(ReceiverState::WithContext(Receiver {
                     state: ReceiverWithContext { context },
                     persister,
-                }),
+                })),
 
             (
                 ReceiverState::WithContext(state),
                 ReceiverSessionEvent::UncheckedProposal(proposal),
-            ) => state.apply_unchecked_from_payload(proposal),
+            ) => Ok(state.apply_unchecked_from_payload(proposal)?),
 
             (
                 ReceiverState::UncheckedProposal(state),
                 ReceiverSessionEvent::MaybeInputsOwned(inputs),
-            ) => state.apply_maybe_inputs_owned(inputs),
+            ) => Ok(state.apply_maybe_inputs_owned(inputs)),
 
             (
                 ReceiverState::MaybeInputsOwned(state),
                 ReceiverSessionEvent::MaybeInputsSeen(maybe_inputs_seen),
-            ) => state.apply_maybe_inputs_seen(maybe_inputs_seen),
+            ) => Ok(state.apply_maybe_inputs_seen(maybe_inputs_seen)),
 
             (
                 ReceiverState::MaybeInputsSeen(state),
                 ReceiverSessionEvent::OutputsUnknown(outputs_unknown),
-            ) => state.apply_outputs_unknown(outputs_unknown),
+            ) => Ok(state.apply_outputs_unknown(outputs_unknown)),
 
             (
                 ReceiverState::OutputsUnknown(state),
                 ReceiverSessionEvent::WantsOutputs(wants_outputs),
-            ) => state.apply_wants_outputs(wants_outputs),
+            ) => Ok(state.apply_wants_outputs(wants_outputs)),
 
             (
                 ReceiverState::WantsOutputs(state),
                 ReceiverSessionEvent::WantsInputs(wants_inputs),
-            ) => state.apply_wants_inputs(wants_inputs),
+            ) => Ok(state.apply_wants_inputs(wants_inputs)),
 
             (
                 ReceiverState::WantsInputs(state),
                 ReceiverSessionEvent::ProvisionalProposal(provisional_proposal),
-            ) => state.apply_provisional_proposal(provisional_proposal),
+            ) => Ok(state.apply_provisional_proposal(provisional_proposal)),
 
             (
                 ReceiverState::ProvisionalProposal(state),
                 ReceiverSessionEvent::PayjoinProposal(payjoin_proposal),
-            ) => state.apply_payjoin_proposal(payjoin_proposal),
+            ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
 
             // TODO: Handle invalid transitions with a catch-all that provides better error info
-            (current_state, event) => {
-                panic!("Invalid state transition");
-            }
+            (_current_state, event) => Err(ReceiverReplayError::UnrecognizedEvent(event)),
         }
     }
 }
@@ -198,7 +202,7 @@ where
 
     for log in logs {
         history.events.push(log.clone().into());
-        receiver = receiver.process_event(log.into(), persister.clone());
+        receiver = receiver.process_event(log.into(), persister.clone())?;
     }
 
     Ok((receiver, history))
@@ -306,6 +310,9 @@ where
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), Error> {
         if SystemTime::now() > self.state.context.expiry {
+            // Session is expired, close the session
+            // TODO: remove unwrap
+            self.persister.close().unwrap();
             return Err(InternalSessionError::Expired(self.state.context.expiry).into());
         }
         let (body, ohttp_ctx) =
@@ -436,13 +443,23 @@ where
     /// The per-session identifier
     pub fn id(&self) -> ShortId { id(&self.state.context.s) }
 
-    pub fn apply_unchecked_from_payload(&self, event: v1::UncheckedProposal) -> ReceiverState<P> {
+    pub fn apply_unchecked_from_payload(
+        &self,
+        event: v1::UncheckedProposal,
+    ) -> Result<ReceiverState<P>, ReceiverReplayError> {
+        if self.state.context.expiry < SystemTime::now() {
+            // Session is expired, close the session
+            // TODO: remove unwrap
+            self.persister.close().unwrap();
+            return Err(ReceiverReplayError::SessionExpired(self.state.context.expiry));
+        }
+
         let new_state = Receiver {
             state: UncheckedProposal { v1: event, context: self.state.context.clone() },
             persister: self.persister.clone(),
         };
 
-        ReceiverState::UncheckedProposal(new_state)
+        Ok(ReceiverState::UncheckedProposal(new_state))
     }
 }
 

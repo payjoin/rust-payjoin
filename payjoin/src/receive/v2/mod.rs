@@ -259,13 +259,9 @@ pub struct Receiver<State, P> {
     persister: P,
 }
 
-trait State: Clone {}
-
 #[derive(Debug, Clone)]
 /// The receiver is not initialized yet, no session context is available yet
 pub struct UninitializedReceiver {}
-
-impl State for UninitializedReceiver {}
 
 impl<P> Receiver<UninitializedReceiver, P>
 where
@@ -297,7 +293,6 @@ where
 pub struct ReceiverWithContext {
     context: SessionContext,
 }
-impl State for ReceiverWithContext {}
 
 impl<P> Receiver<ReceiverWithContext, P>
 where
@@ -455,8 +450,6 @@ pub struct UncheckedProposal {
     pub(crate) v1: v1::UncheckedProposal,
     pub(crate) context: SessionContext,
 }
-
-impl State for UncheckedProposal {}
 
 impl<P> Receiver<UncheckedProposal, P>
 where
@@ -621,8 +614,6 @@ pub struct MaybeInputsSeen {
     context: SessionContext,
 }
 
-impl State for MaybeInputsSeen {}
-
 impl<P> Receiver<MaybeInputsSeen, P>
 where
     P: PersistedSession + Clone,
@@ -669,8 +660,6 @@ pub struct OutputsUnknown {
     context: SessionContext,
 }
 
-impl State for OutputsUnknown {}
-
 impl<P> Receiver<OutputsUnknown, P>
 where
     P: PersistedSession + Clone,
@@ -712,8 +701,6 @@ pub struct WantsOutputs {
     v1: v1::WantsOutputs,
     context: SessionContext,
 }
-
-impl State for WantsOutputs {}
 
 impl<P> Receiver<WantsOutputs, P>
 where
@@ -780,8 +767,6 @@ pub struct WantsInputs {
     v1: v1::WantsInputs,
     context: SessionContext,
 }
-
-impl State for WantsInputs {}
 
 impl<P> Receiver<WantsInputs, P>
 where
@@ -850,8 +835,6 @@ pub struct ProvisionalProposal {
     context: SessionContext,
 }
 
-impl State for ProvisionalProposal {}
-
 impl<P> Receiver<ProvisionalProposal, P>
 where
     P: PersistedSession + Clone,
@@ -899,8 +882,6 @@ pub struct PayjoinProposal {
     v1: v1::PayjoinProposal,
     context: SessionContext,
 }
-
-impl State for PayjoinProposal {}
 
 impl PayjoinProposal {
     #[cfg(feature = "_multiparty")]

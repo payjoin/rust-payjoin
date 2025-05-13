@@ -200,79 +200,31 @@ pub struct V2Config {
 }
 
 impl ValidatedConfig {
-    /// Version flags in order of precedence (newest to oldest)
-    const VERSION_FLAGS: &'static [(&'static str, u8)] = &[("bip77", 2), ("bip78", 1)];
-
-    /// Check for multiple version flags and return the highest precedence version
-    fn determine_version(cli: &Cli) -> Result<u8, ConfigError> {
-        let mut selected_version = None;
-        for _ in Self::VERSION_FLAGS.iter() {
-            #[cfg(feature = "v2")]
-            if cli.config.bip77.is_some() {
-                if selected_version.is_some() {
-                    return Err(ConfigError::Message(
-                        "Multiple version flags specified. Please use only one of: --bip77, --bip78"
-                        .to_string()
-                    ));
-                }
-                selected_version = Some(2);
-            }
-
-            #[cfg(feature = "v1")]
-            if cli.config.bip78.is_some() {
-                if selected_version.is_some() {
-                    return Err(ConfigError::Message(
-                        "Multiple version flags specified. Please use only one of: --bip77, --bip78"
-                        .to_string()
-                    ));
-                }
-                selected_version = Some(1);
-            }
-        }
-
-        if let Some(version) = selected_version {
-            return Ok(version);
-        }
-
-        #[cfg(feature = "v2")]
-        return Ok(2);
-        #[cfg(all(feature = "v1", not(feature = "v2")))]
-        return Ok(1);
-
-        #[cfg(not(any(feature = "v1", feature = "v2")))]
-        return Err(ConfigError::Message(
-            "No valid version available - must compile with v1 or v2 feature".to_string(),
-        ));
-    }
-
-    pub(crate) fn new(cli: &Cli) -> Result<Self> {
+    pub(crate) fn new(cli: &Cli) -> Result<Self, ConfigError> {
         let mut config_builder = config::Config::builder();
         config_builder = add_bitcoind_defaults(config_builder, cli)?;
         config_builder = add_common_defaults(config_builder, cli)?;
-        let version = Self::determine_version(cli)?;
 
-        match version {
-            1 => {
-                #[cfg(feature = "v1")]
-                {
-                    config_builder = add_v1_defaults(config_builder)?;
-                }
-                #[cfg(not(feature = "v1"))]
-                return Err(ConfigError::Message(
-                    "BIP78 (v1) selected but v1 feature not enabled".to_string(),
-                ));
-            }
-            2 => {
-                #[cfg(feature = "v2")]
-                {
-                    config_builder = add_v2_defaults(config_builder)?;
-                }
-                #[cfg(not(feature = "v2"))]
-                return Err(ConfigError::Message(
-                    "BIP77 (v2) selected but v2 feature not enabled".to_string(),
-                ));
-            }
-            _ => unreachable!("determine_version() should only return 1 or 2"),
+        #[cfg(feature = "v1")]
+        {
+            config_builder = add_v1_defaults(config_builder)?;
+        }
+        #[cfg(not(feature = "v1"))]
+        {
+            return Err(ConfigError::Message(
+                "BIP78 (v1) selected but v1 feature not enabled".to_string(),
+            ));
+        }
+
+        #[cfg(feature = "v2")]
+        {
+            config_builder = add_v2_defaults(config_builder)?;
+        }
+        #[cfg(not(feature = "v2"))]
+        {
+            return Err(ConfigError::Message(
+                "BIP77 (v2) selected but v2 feature not enabled".to_string(),
+            ));
         }
 
         config_builder = handle_subcommands(config_builder, cli)?;
@@ -280,24 +232,6 @@ impl ValidatedConfig {
 
         Ok(config)
     }
-
-    // #[cfg(feature = "v1")]
-    // pub fn v1(&self) -> Result<&V1Config, anyhow::Error> {
-    //     match &self.version {
-    //         Some(VersionConfig::V1(v1_config)) => Ok(v1_config),
-    //         #[allow(unreachable_patterns)]
-    //         _ => Err(anyhow::anyhow!("V1 configuration is required for BIP78 mode")),
-    //     }
-    // }
-    //
-    // #[cfg(feature = "v2")]
-    // pub fn v2(&self) -> Result<&V2Config, anyhow::Error> {
-    //     match &self.version {
-    //         Some(VersionConfig::V2(v2_config)) => Ok(v2_config),
-    //         #[allow(unreachable_patterns)]
-    //         _ => Err(anyhow::anyhow!("V2 configuration is required for v2 mode")),
-    //     }
-    // }
 }
 
 // pub fn load_config() -> Result<RawConfig, ConfigError> {
@@ -416,3 +350,4 @@ fn parse_fee_rate_in_sat_per_vb(s: &str) -> Result<FeeRate, std::num::ParseFloat
     let fee_rate_sat_per_kwu = fee_rate_sat_per_vb * 250.0_f32;
     Ok(FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64))
 }
+

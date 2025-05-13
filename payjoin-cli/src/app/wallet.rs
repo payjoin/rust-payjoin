@@ -23,10 +23,11 @@ pub struct BitcoindWallet {
 impl BitcoindWallet {
     pub fn new(config: &crate::app::config::BitcoindConfig) -> Result<Self> {
         let client = match &config.cookie {
-            Some(cookie) if cookie.as_os_str().is_empty() =>
+            Some(cookie) if cookie.as_os_str().is_empty() => {
                 return Err(anyhow!(
                     "Cookie authentication enabled but no cookie path provided in config.toml"
-                )),
+                ))
+            }
             Some(cookie) => Client::new(config.rpchost.as_str(), Auth::CookieFile(cookie.into())),
             None => Client::new(
                 config.rpchost.as_str(),

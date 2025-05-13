@@ -3,6 +3,10 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate};
+use payjoin::persist::{
+    AcceptNextState, PersistedError, PersistedSession, RejectFatal, RejectNoResults,
+    RejectTransient,
+};
 use payjoin::receive::v2::{
     replay_receiver_event_log, MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal,
     ProvisionalProposal, Receiver, ReceiverState, ReceiverWithContext, UncheckedProposal,
@@ -67,9 +71,8 @@ impl AppTrait for App {
         let sender_state = match sender_state {
             Some(sender_state) => sender_state,
             None => {
-                let sender_persister = SenderPersister::new(self.db.clone())?;
                 let psbt = self.create_original_psbt(&uri, fee_rate)?;
-                let sender = SenderBuilder::new(psbt, uri.clone(), sender_persister.clone())
+                let sender = SenderBuilder::new(psbt, uri.clone())
                     .build_recommended(fee_rate)
                     .with_context(|| "Failed to build payjoin request")?;
                 SenderState::WithReplyKey(sender)
@@ -89,19 +92,19 @@ impl AppTrait for App {
         let address = self.wallet().get_new_address()?;
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
         let persister = ReceiverPersister::new(self.db.clone())?;
-        let session = Receiver::<UninitializedReceiver, ReceiverPersister>::create_session(
+        let state_transition = Receiver::<UninitializedReceiver>::create_session(
             address,
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys.clone(),
             None,
-            persister.clone(),
-        )?;
+        );
+        let session = persister.save_maybe_bad_init_inputs(state_transition)?;
         println!("Receive session established");
         let mut pj_uri = session.pj_uri();
         pj_uri.amount = Some(amount);
         println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{}", pj_uri);
-        self.process_receiver_session(ReceiverState::WithContext(session)).await
+        self.process_receiver_session(session, persister).await
     }
 
     #[allow(clippy::incompatible_msrv)]
@@ -122,7 +125,7 @@ impl AppTrait for App {
                 .map_err(|e| anyhow!("Failed to replay receiver event log: {:?}", e))?
                 .0;
             tasks.push(tokio::spawn(async move {
-                self_clone.process_receiver_session(receiver_state).await
+                self_clone.process_receiver_session(receiver_state, recv_persister).await
             }));
         }
 
@@ -183,7 +186,7 @@ impl AppTrait for App {
 }
 
 impl App {
-    async fn process_sender_session(&self, session: SenderState<SenderPersister>) -> Result<()> {
+    async fn process_sender_session(&self, session: SenderState) -> Result<()> {
         let mut session = session.clone();
         loop {
             match session {
@@ -220,8 +223,8 @@ impl App {
 
     async fn post_orginal_proposal(
         &self,
-        sender: &Sender<SenderWithReplyKey, SenderPersister>,
-    ) -> Result<Sender<V2GetContext, SenderPersister>> {
+        sender: &Sender<SenderWithReplyKey>,
+    ) -> Result<Sender<V2GetContext>> {
         let (req, ctx) = sender.extract_v2(self.config.v2()?.ohttp_relay.clone())?;
         let response = post_request(req).await?;
         // TODO: clone here smells
@@ -231,8 +234,8 @@ impl App {
 
     async fn get_proposed_payjoin_psbt(
         &self,
-        sender: &Sender<V2GetContext, SenderPersister>,
-    ) -> Result<Sender<ProposalReceived, SenderPersister>> {
+        sender: &Sender<V2GetContext>,
+    ) -> Result<Sender<ProposalReceived>> {
         // Long poll until we get a response
         loop {
             let (req, ctx) = sender.extract_req(self.config.v2()?.ohttp_relay.clone())?;
@@ -253,32 +256,43 @@ impl App {
 
     async fn process_receiver_session(
         &self,
-        session: ReceiverState<ReceiverPersister>,
+        session: ReceiverState,
+        persister: ReceiverPersister,
     ) -> Result<()> {
         let mut session = session.clone();
         loop {
             match session {
                 ReceiverState::WithContext(context) =>
                     session = ReceiverState::UncheckedProposal(
-                        self.read_from_directory(context, None).await?,
+                        self.read_from_directory(context, None, &persister).await?,
                     ),
                 ReceiverState::UncheckedProposal(proposal) =>
-                    session = ReceiverState::MaybeInputsOwned(self.check_proposal(proposal)?),
-                ReceiverState::MaybeInputsOwned(proposal) =>
-                    session = ReceiverState::MaybeInputsSeen(self.check_inputs_not_owned(proposal)?),
-                ReceiverState::MaybeInputsSeen(proposal) =>
                     session =
-                        ReceiverState::OutputsUnknown(self.check_no_inputs_seen_before(proposal)?),
+                        ReceiverState::MaybeInputsOwned(self.check_proposal(proposal, &persister)?),
+                ReceiverState::MaybeInputsOwned(proposal) =>
+                    session = ReceiverState::MaybeInputsSeen(
+                        self.check_inputs_not_owned(proposal, &persister)?,
+                    ),
+                ReceiverState::MaybeInputsSeen(proposal) =>
+                    session = ReceiverState::OutputsUnknown(
+                        self.check_no_inputs_seen_before(proposal, &persister)?,
+                    ),
                 ReceiverState::OutputsUnknown(proposal) =>
-                    session = ReceiverState::WantsOutputs(self.identify_receiver_outputs(proposal)?),
+                    session = ReceiverState::WantsOutputs(
+                        self.identify_receiver_outputs(proposal, &persister)?,
+                    ),
                 ReceiverState::WantsOutputs(proposal) =>
-                    session = ReceiverState::WantsInputs(self.commit_outputs(proposal)?),
+                    session = ReceiverState::WantsInputs(self.commit_outputs(proposal, &persister)?),
                 ReceiverState::WantsInputs(proposal) =>
-                    session = ReceiverState::ProvisionalProposal(self.contribute_inputs(proposal)?),
+                    session = ReceiverState::ProvisionalProposal(
+                        self.contribute_inputs(proposal, &persister)?,
+                    ),
                 ReceiverState::ProvisionalProposal(proposal) =>
-                    session = ReceiverState::PayjoinProposal(self.finalize_proposal(proposal)?),
+                    session = ReceiverState::PayjoinProposal(
+                        self.finalize_proposal(proposal, &persister)?,
+                    ),
                 ReceiverState::PayjoinProposal(proposal) => {
-                    self.send_payjoin_proposal(proposal).await?;
+                    self.send_payjoin_proposal(proposal, &persister).await?;
                     return Ok(());
                 }
                 _ => return Err(anyhow!("Unexpected receiver state")),
@@ -288,9 +302,10 @@ impl App {
 
     async fn read_from_directory(
         &self,
-        mut session: Receiver<ReceiverWithContext, ReceiverPersister>,
+        mut session: Receiver<ReceiverWithContext>,
         amount: Option<Amount>,
-    ) -> Result<Receiver<UncheckedProposal, ReceiverPersister>> {
+        persister: &ReceiverPersister,
+    ) -> Result<Receiver<UncheckedProposal>> {
         println!("Receive session established");
         let mut pj_uri = session.pj_uri();
         pj_uri.amount = amount;
@@ -299,7 +314,7 @@ impl App {
 
         let mut interrupt = self.interrupt.clone();
         let receiver = tokio::select! {
-            res = self.long_poll_fallback(&mut session) => res,
+            res = self.long_poll_fallback(&mut session, persister) => res,
             _ = interrupt.changed() => {
                 println!("Interrupted. Call the `resume` command to resume all sessions.");
                 return Err(anyhow!("Interrupted"));
@@ -313,84 +328,99 @@ impl App {
 
     fn check_proposal(
         &self,
-        proposal: Receiver<UncheckedProposal, ReceiverPersister>,
-    ) -> Result<Receiver<MaybeInputsOwned, ReceiverPersister>> {
+        proposal: Receiver<UncheckedProposal>,
+        persister: &ReceiverPersister,
+    ) -> Result<Receiver<MaybeInputsOwned>> {
         let wallet = self.wallet();
         // Receive Check 1: Can Broadcast
-        let proposal =
-            proposal.check_broadcast_suitability(None, |tx| Ok(wallet.can_broadcast(tx)?))?;
+        let state_transition =
+            proposal.check_broadcast_suitability(None, |tx| Ok(wallet.can_broadcast(tx)?));
+        let proposal = persister.save_maybe_fatal_error_transition(state_transition)?;
 
         Ok(proposal)
     }
 
     fn check_inputs_not_owned(
         &self,
-        proposal: Receiver<MaybeInputsOwned, ReceiverPersister>,
-    ) -> Result<Receiver<MaybeInputsSeen, ReceiverPersister>> {
+        proposal: Receiver<MaybeInputsOwned>,
+        persister: &ReceiverPersister,
+    ) -> Result<Receiver<MaybeInputsSeen>> {
         let wallet = self.wallet();
-        let proposal = proposal.check_inputs_not_owned(|input| Ok(wallet.is_mine(input)?))?;
+        let state_transition = proposal.check_inputs_not_owned(|input| Ok(wallet.is_mine(input)?));
+        let proposal = persister.save_maybe_fatal_error_transition(state_transition)?;
         Ok(proposal)
     }
 
     fn check_no_inputs_seen_before(
         &self,
-        proposal: Receiver<MaybeInputsSeen, ReceiverPersister>,
-    ) -> Result<Receiver<OutputsUnknown, ReceiverPersister>> {
-        let proposal = proposal
-            .check_no_inputs_seen_before(|input| Ok(self.db.insert_input_seen_before(*input)?))?;
+        proposal: Receiver<MaybeInputsSeen>,
+        persister: &ReceiverPersister,
+    ) -> Result<Receiver<OutputsUnknown>> {
+        let state_transition = proposal
+            .check_no_inputs_seen_before(|input| Ok(self.db.insert_input_seen_before(*input)?));
+        let proposal = persister.save_maybe_fatal_error_transition(state_transition)?;
         Ok(proposal)
     }
 
     fn identify_receiver_outputs(
         &self,
-        proposal: Receiver<OutputsUnknown, ReceiverPersister>,
-    ) -> Result<Receiver<WantsOutputs, ReceiverPersister>> {
+        proposal: Receiver<OutputsUnknown>,
+        persister: &ReceiverPersister,
+    ) -> Result<Receiver<WantsOutputs>> {
         let wallet = self.wallet();
-        let proposal = proposal
-            .identify_receiver_outputs(|output_script| Ok(wallet.is_mine(output_script)?))?;
+        let state_transition =
+            proposal.identify_receiver_outputs(|output_script| Ok(wallet.is_mine(output_script)?));
+        let proposal = persister.save_maybe_fatal_error_transition(state_transition)?;
         Ok(proposal)
     }
     fn commit_outputs(
         &self,
-        proposal: Receiver<WantsOutputs, ReceiverPersister>,
-    ) -> Result<Receiver<WantsInputs, ReceiverPersister>> {
-        let proposal = proposal.commit_outputs();
+        proposal: Receiver<WantsOutputs>,
+        persister: &ReceiverPersister,
+    ) -> Result<Receiver<WantsInputs>> {
+        let state_transition = proposal.commit_outputs();
+        let proposal = persister.save_progression_transition(state_transition)?;
         Ok(proposal)
     }
 
     fn contribute_inputs(
         &self,
-        proposal: Receiver<WantsInputs, ReceiverPersister>,
-    ) -> Result<Receiver<ProvisionalProposal, ReceiverPersister>> {
+        proposal: Receiver<WantsInputs>,
+        persister: &ReceiverPersister,
+    ) -> Result<Receiver<ProvisionalProposal>> {
         let wallet = self.wallet();
-        let proposal = proposal.contribute_inputs(wallet.list_unspent()?)?.commit_inputs();
+        let state_transition = proposal.contribute_inputs(wallet.list_unspent()?)?.commit_inputs();
+        let proposal = persister.save_progression_transition(state_transition)?;
         Ok(proposal)
     }
 
     fn finalize_proposal(
         &self,
-        proposal: Receiver<ProvisionalProposal, ReceiverPersister>,
-    ) -> Result<Receiver<PayjoinProposal, ReceiverPersister>> {
+        proposal: Receiver<ProvisionalProposal>,
+        persister: &ReceiverPersister,
+    ) -> Result<Receiver<PayjoinProposal>> {
         let wallet = self.wallet();
-        let proposal = proposal.finalize_proposal(
+        let state_transition = proposal.finalize_proposal(
             |psbt| Ok(wallet.process_psbt(psbt)?),
             None,
             self.config.max_fee_rate,
-        )?;
+        );
+        let proposal = persister.save_maybe_transient_error_transition(state_transition)?;
         Ok(proposal)
     }
 
     async fn send_payjoin_proposal(
         &self,
-        mut proposal: Receiver<PayjoinProposal, ReceiverPersister>,
+        mut proposal: Receiver<PayjoinProposal>,
+        persister: &ReceiverPersister,
     ) -> Result<()> {
         let (req, ohttp_ctx) = proposal
             .extract_req(&self.config.v2()?.ohttp_relay)
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         let res = post_request(req).await?;
-        proposal
-            .process_res(&res.bytes().await?, ohttp_ctx)
-            .map_err(|e| anyhow!("Failed to deserialize response {}", e))?;
+        let state_transition = proposal.process_res(&res.bytes().await?, ohttp_ctx);
+        persister.save_maybe_success_transition(state_transition)?;
+        // Note to self: session is closed by above
         let payjoin_psbt = proposal.psbt().clone();
         println!(
             "Response successful. Watch mempool for successful Payjoin. TXID: {}",
@@ -401,18 +431,32 @@ impl App {
 
     async fn long_poll_fallback(
         &self,
-        session: &mut Receiver<ReceiverWithContext, ReceiverPersister>,
-    ) -> Result<Receiver<UncheckedProposal, ReceiverPersister>> {
+        session: &mut Receiver<ReceiverWithContext>,
+        persister: &ReceiverPersister,
+    ) -> Result<Receiver<UncheckedProposal>> {
         loop {
             let (req, context) = session.extract_req(&self.config.v2()?.ohttp_relay)?;
             println!("Polling receive request...");
             let ohttp_response = post_request(req).await?;
-            let proposal = session
-                .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), context)
-                .map_err(|_| anyhow!("GET fallback failed"))?;
-            log::debug!("got response");
-            if let Some(proposal) = proposal {
-                break Ok(proposal);
+            let state_transition =
+                session.process_res(ohttp_response.bytes().await?.to_vec().as_slice(), context);
+            match persister.save_maybe_no_results_transition(state_transition) {
+                Ok(next_state) => {
+                    return Ok(next_state);
+                }
+                Err(e) => match e {
+                    PersistedError::None(_) => {
+                        continue;
+                    }
+                    PersistedError::BadInitInputs(e)
+                    | PersistedError::Fatal(e)
+                    | PersistedError::Transient(_, e) => {
+                        return Err(e.into());
+                    }
+                    PersistedError::Storage(e) => {
+                        return Err(e.into());
+                    }
+                },
             }
         }
     }
@@ -421,7 +465,7 @@ impl App {
 /// Handle request error by sending an error response over the directory
 async fn handle_recoverable_error(
     e: ReplyableError,
-    mut receiver: Receiver<UncheckedProposal, ReceiverPersister>,
+    mut receiver: Receiver<UncheckedProposal>,
     ohttp_relay: &payjoin::Url,
 ) -> anyhow::Error {
     let to_return = anyhow!("Replied with error: {}", e);
@@ -448,18 +492,22 @@ async fn handle_recoverable_error(
 }
 
 fn try_contributing_inputs(
-    payjoin: Receiver<WantsInputs, ReceiverPersister>,
+    payjoin: Receiver<WantsInputs>,
     wallet: &BitcoindWallet,
-) -> Result<Receiver<ProvisionalProposal, ReceiverPersister>, ImplementationError> {
+    persister: &ReceiverPersister,
+) -> Result<Receiver<ProvisionalProposal>, ImplementationError> {
     let candidate_inputs = wallet.list_unspent()?;
 
     let selected_input =
         payjoin.try_preserving_privacy(candidate_inputs).map_err(ImplementationError::from)?;
 
-    Ok(payjoin
+    let state_transition = payjoin
         .contribute_inputs(vec![selected_input])
         .map_err(ImplementationError::from)?
-        .commit_inputs())
+        .commit_inputs();
+
+    let next_state = persister.save_progression_transition(state_transition)?;
+    Ok(next_state)
 }
 
 async fn unwrap_ohttp_keys_or_else_fetch(config: &Config) -> Result<payjoin::OhttpKeys> {

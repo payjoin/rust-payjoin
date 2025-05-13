@@ -43,23 +43,14 @@ mod persist;
 
 /// A builder to construct the properties of a [`Sender`].
 #[derive(Clone)]
-pub struct SenderBuilder<'a, P> {
-    v1: v1::SenderBuilder<'a>,
-    persister: P,
-}
+pub struct SenderBuilder<'a>(v1::SenderBuilder<'a>);
 
-impl<'a, P> SenderBuilder<'a, P>
-where
-    P: PersistedSession + Clone,
-    P::SessionEvent: From<SenderSessionEvent>,
-{
+impl<'a> SenderBuilder<'a> {
     /// Prepare the context from which to make Sender requests
     ///
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
     /// to create a [`Sender`]
-    pub fn new(psbt: Psbt, uri: PjUri<'a>, persister: P) -> Self {
-        Self { v1: v1::SenderBuilder::new(psbt, uri), persister }
-    }
+    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v1::SenderBuilder::new(psbt, uri)) }
 
     /// Disable output substitution even if the receiver didn't.
     ///
@@ -68,7 +59,7 @@ where
     /// doing advanced operations such as opening LN channels and it also guarantees the
     /// receiver will **not** reward the sender with a discount.
     pub fn always_disable_output_substitution(self) -> Self {
-        Self { v1: self.v1.always_disable_output_substitution(), persister: self.persister }
+        Self(self.0.always_disable_output_substitution())
     }
 
     // Calculate the recommended fee contribution for an Original PSBT.
@@ -80,16 +71,12 @@ where
     pub fn build_recommended(
         self,
         min_fee_rate: FeeRate,
-    ) -> Result<Sender<SenderWithReplyKey, P>, BuildSenderError> {
+    ) -> Result<Sender<SenderWithReplyKey>, BuildSenderError> {
         let sender_with_reply_key = SenderWithReplyKey {
-            v1: self.v1.build_recommended(min_fee_rate)?,
+            v1: self.0.build_recommended(min_fee_rate)?,
             reply_key: HpkeKeyPair::gen_keypair().0,
         };
-        let sender =
-            Sender { state: sender_with_reply_key.clone(), persister: self.persister.clone() };
-        self.persister
-            .save(SenderSessionEvent::CreatedReplyKey(sender_with_reply_key).into())
-            .unwrap();
+        let sender = Sender { state: sender_with_reply_key.clone() };
         Ok(sender)
     }
 
@@ -112,9 +99,9 @@ where
         change_index: Option<usize>,
         min_fee_rate: FeeRate,
         clamp_fee_contribution: bool,
-    ) -> Result<Sender<SenderWithReplyKey, P>, BuildSenderError> {
+    ) -> Result<Sender<SenderWithReplyKey>, BuildSenderError> {
         let sender_with_reply_key = SenderWithReplyKey {
-            v1: self.v1.build_with_additional_fee(
+            v1: self.0.build_with_additional_fee(
                 max_fee_contribution,
                 change_index,
                 min_fee_rate,
@@ -122,11 +109,7 @@ where
             )?,
             reply_key: HpkeKeyPair::gen_keypair().0,
         };
-        let sender =
-            Sender { state: sender_with_reply_key.clone(), persister: self.persister.clone() };
-        self.persister
-            .save(SenderSessionEvent::CreatedReplyKey(sender_with_reply_key).into())
-            .unwrap();
+        let sender = Sender { state: sender_with_reply_key.clone() };
         Ok(sender)
     }
 
@@ -137,16 +120,12 @@ where
     pub fn build_non_incentivizing(
         self,
         min_fee_rate: FeeRate,
-    ) -> Result<Sender<SenderWithReplyKey, P>, BuildSenderError> {
+    ) -> Result<Sender<SenderWithReplyKey>, BuildSenderError> {
         let sender_with_reply_key = SenderWithReplyKey {
-            v1: self.v1.build_non_incentivizing(min_fee_rate)?,
+            v1: self.0.build_non_incentivizing(min_fee_rate)?,
             reply_key: HpkeKeyPair::gen_keypair().0,
         };
-        let sender =
-            Sender { state: sender_with_reply_key.clone(), persister: self.persister.clone() };
-        self.persister
-            .save(SenderSessionEvent::CreatedReplyKey(sender_with_reply_key).into())
-            .unwrap();
+        let sender = Sender { state: sender_with_reply_key.clone() };
         Ok(sender)
     }
 }
@@ -165,31 +144,25 @@ pub enum SenderSessionEvent {
 }
 
 #[derive(Debug, Clone)]
-pub struct Sender<State, P> {
+pub struct Sender<State> {
     state: State,
-    persister: P,
 }
 
 #[derive(Debug, Clone)]
-pub enum SenderState<P> {
+pub enum SenderState {
     Uninitialized(),
-    WithReplyKey(Sender<SenderWithReplyKey, P>),
-    V2GetContext(Sender<V2GetContext, P>),
-    ProposalReceived(Sender<ProposalReceived, P>),
+    WithReplyKey(Sender<SenderWithReplyKey>),
+    V2GetContext(Sender<V2GetContext>),
+    ProposalReceived(Sender<ProposalReceived>),
 }
 
-impl<P> SenderState<P>
-where
-    P: PersistedSession + Clone,
-    P::SessionEvent: From<SenderSessionEvent>,
-    SenderSessionEvent: From<P::SessionEvent>,
-{
-    fn process_event(&self, event: SenderSessionEvent, persister: P) -> SenderState<P> {
+impl SenderState {
+    fn process_event(&self, event: SenderSessionEvent) -> SenderState {
         match (&self, event) {
             (
                 SenderState::Uninitialized(),
                 SenderSessionEvent::CreatedReplyKey(sender_with_reply_key),
-            ) => SenderState::WithReplyKey(Sender { state: sender_with_reply_key, persister }),
+            ) => SenderState::WithReplyKey(Sender { state: sender_with_reply_key }),
             (
                 SenderState::WithReplyKey(state),
                 SenderSessionEvent::V2GetContext(v2_get_context),
@@ -203,7 +176,7 @@ where
 
 pub fn replay_sender_event_log<P>(
     persister: P,
-) -> Result<(SenderState<P>, SessionHistory), SenderReplayError>
+) -> Result<(SenderState, SessionHistory), SenderReplayError>
 where
     P: PersistedSession + Clone,
     P::SessionEvent: From<SenderSessionEvent>,
@@ -215,7 +188,7 @@ where
     let mut history = SessionHistory::new(Vec::new());
     for log in logs {
         history.events.push(log.clone().into());
-        sender = sender.process_event(log.into(), persister.clone());
+        sender = sender.process_event(log.into());
     }
 
     Ok((sender, history))
@@ -262,11 +235,7 @@ pub struct SenderWithReplyKey {
     pub(crate) reply_key: HpkeSecretKey,
 }
 
-impl<P> Sender<SenderWithReplyKey, P>
-where
-    P: PersistedSession + Clone,
-    P::SessionEvent: From<SenderSessionEvent>,
-{
+impl Sender<SenderWithReplyKey> {
     /// Extract serialized V1 Request and Context from a Payjoin Proposal
     pub fn extract_v1(&self) -> (Request, v1::V1Context) { self.state.v1.extract_v1() }
 
@@ -336,7 +305,7 @@ where
         self,
         response: &[u8],
         post_ctx: V2PostContext,
-    ) -> Result<Sender<V2GetContext, P>, EncapsulationError> {
+    ) -> Result<Sender<V2GetContext>, EncapsulationError> {
         let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] = response
             .try_into()
             .map_err(|_| InternalEncapsulationError::InvalidSize(response.len()))?;
@@ -350,10 +319,7 @@ where
                     psbt_ctx: post_ctx.psbt_ctx,
                     hpke_ctx: post_ctx.hpke_ctx,
                 };
-                self.persister
-                    .save(SenderSessionEvent::V2GetContext(v2_get_context.clone()).into())
-                    .unwrap();
-                Ok(Sender { state: v2_get_context, persister: self.persister })
+                Ok(Sender { state: v2_get_context })
             }
             _ => Err(InternalEncapsulationError::UnexpectedStatusCode(response.status()))?,
         }
@@ -371,8 +337,8 @@ where
     pub fn endpoint(&self) -> &Url { self.state.v1.endpoint() }
 
     /// Apply already known state and transition to the type state
-    pub fn apply_v2_get_context(&self, v2_get_context: V2GetContext) -> SenderState<P> {
-        let new_state = Sender { state: v2_get_context, persister: self.persister.clone() };
+    pub fn apply_v2_get_context(&self, v2_get_context: V2GetContext) -> SenderState {
+        let new_state = Sender { state: v2_get_context };
         SenderState::V2GetContext(new_state)
     }
 }
@@ -450,11 +416,7 @@ pub struct V2GetContext {
     pub(crate) hpke_ctx: HpkeContext,
 }
 
-impl<P> Sender<V2GetContext, P>
-where
-    P: PersistedSession + Clone,
-    P::SessionEvent: From<SenderSessionEvent>,
-{
+impl Sender<V2GetContext> {
     /// Extract an OHTTP Encapsulated HTTP GET request for the Proposal PSBT
     pub fn extract_req(
         &self,
@@ -501,7 +463,7 @@ where
         &self,
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
-    ) -> Result<Option<Sender<ProposalReceived, P>>, ResponseError> {
+    ) -> Result<Option<Sender<ProposalReceived>>, ResponseError> {
         let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] = response
             .try_into()
             .map_err(|_| InternalEncapsulationError::InvalidSize(response.len()))?;
@@ -521,22 +483,12 @@ where
         .map_err(InternalEncapsulationError::Hpke)?;
 
         let proposal = Psbt::deserialize(&psbt).map_err(InternalProposalError::Psbt)?;
-        let processed_proposal = self.state.psbt_ctx.clone().process_proposal(proposal)?;
-        self.persister
-            .clone()
-            .save(SenderSessionEvent::ProposalReceived(processed_proposal.clone()).into())
-            .unwrap();
-        self.persister.clone().close().unwrap();
-        let sender = Sender {
-            state: ProposalReceived { proposal: processed_proposal },
-            persister: self.persister.clone(),
-        };
+        let sender = Sender { state: ProposalReceived { proposal } };
         Ok(Some(sender))
     }
 
-    pub fn apply_proposal_received(&self, proposal: Psbt) -> SenderState<P> {
-        let new_state =
-            Sender { state: ProposalReceived { proposal }, persister: self.persister.clone() };
+    pub fn apply_proposal_received(&self, proposal: Psbt) -> SenderState {
+        let new_state = Sender { state: ProposalReceived { proposal } };
         SenderState::ProposalReceived(new_state)
     }
 
@@ -548,11 +500,7 @@ pub struct ProposalReceived {
     pub(crate) proposal: Psbt,
 }
 
-impl<P> Sender<ProposalReceived, P>
-where
-    P: PersistedSession + Clone,
-    P::SessionEvent: From<SenderSessionEvent>,
-{
+impl Sender<ProposalReceived> {
     pub fn psbt(&self) -> &Psbt { &self.state.proposal }
 }
 

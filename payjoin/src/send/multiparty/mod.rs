@@ -10,7 +10,6 @@ use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, Internal
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::PersistedSession;
 use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
@@ -19,33 +18,23 @@ mod error;
 mod persist;
 
 #[derive(Clone)]
-pub struct SenderBuilder<'a, P>(v2::SenderBuilder<'a, P>);
+pub struct SenderBuilder<'a>(v2::SenderBuilder<'a>);
 
-impl<'a, P> SenderBuilder<'a, P>
-where
-    P: PersistedSession + Clone,
-    P::SessionEvent: From<v2::SenderSessionEvent>,
-{
-    pub fn new(psbt: Psbt, uri: PjUri<'a>, persister: P) -> Self {
-        Self(v2::SenderBuilder::new(psbt, uri, persister))
-    }
+impl<'a> SenderBuilder<'a> {
+    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v2::SenderBuilder::new(psbt, uri)) }
 
-    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender<P>, BuildSenderError> {
+    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, BuildSenderError> {
         let sender = self.0.build_recommended(min_fee_rate)?;
         Ok(Sender(sender))
     }
 }
 
 #[derive(Clone)]
-pub struct Sender<P>(pub(crate) v2::Sender<v2::SenderWithReplyKey, P>);
+pub struct Sender(pub(crate) v2::Sender<v2::SenderWithReplyKey>);
 
 // TODO: need to impl partial eq and eqfor sender
 
-impl<P: PersistedSession + Clone> Sender<P>
-where
-    P: PersistedSession + Clone,
-    P::SessionEvent: From<v2::SenderSessionEvent>,
-{
+impl Sender {
     pub fn extract_v2(
         &self,
         ohttp_relay: impl IntoUrl,
@@ -94,7 +83,7 @@ where
         self,
         response: &[u8],
         post_ctx: PostContext,
-    ) -> Result<GetContext<P>, EncapsulationError> {
+    ) -> Result<GetContext, EncapsulationError> {
         let v2_get_ctx = self.0.process_response(response, post_ctx.0)?;
         Ok(GetContext(v2_get_ctx))
     }
@@ -124,13 +113,9 @@ pub struct PostContext(v2::V2PostContext);
 
 /// Get context is used to extract a request for the receiver. In the multiparty context this is a
 /// merged PSBT with other senders.
-pub struct GetContext<P>(v2::Sender<v2::V2GetContext, P>);
+pub struct GetContext(v2::Sender<v2::V2GetContext>);
 
-impl<P> GetContext<P>
-where
-    P: PersistedSession + Clone,
-    P::SessionEvent: From<v2::SenderSessionEvent>,
-{
+impl GetContext {
     /// Extract the GET request that will give us the psbt to be finalized
     pub fn extract_req(
         &self,

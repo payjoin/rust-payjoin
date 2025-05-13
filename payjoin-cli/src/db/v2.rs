@@ -52,8 +52,11 @@ impl SenderPersister {
 
 impl PersistedSession for SenderPersister {
     type SessionEvent = SenderSessionEvent;
-    type Error = crate::db::error::Error;
-    fn save(&self, event: SenderSessionEvent) -> std::result::Result<(), Self::Error> {
+    type InternalStorageError = crate::db::error::Error;
+    fn save_event(
+        &self,
+        event: &SenderSessionEvent,
+    ) -> std::result::Result<(), Self::InternalStorageError> {
         // Append to list of session updates
         let send_tree = self.db.0.open_tree("send_sessions")?;
         let key = self.session_id.as_ref();
@@ -63,7 +66,7 @@ impl PersistedSession for SenderPersister {
         let mut session_wrapper: SessionWrapper<SenderSessionEvent> =
             serde_json::from_slice(&session).map_err(Error::Deserialize)?;
         // Append new event
-        session_wrapper.events.push(event);
+        session_wrapper.events.push(event.clone());
         // Serialize and save updated events
         let value = serde_json::to_vec(&session_wrapper).map_err(Error::Serialize)?;
         send_tree.insert(key, value.as_slice())?;
@@ -74,7 +77,8 @@ impl PersistedSession for SenderPersister {
 
     fn load(
         &self,
-    ) -> std::result::Result<Box<dyn Iterator<Item = SenderSessionEvent>>, Self::Error> {
+    ) -> std::result::Result<Box<dyn Iterator<Item = SenderSessionEvent>>, Self::InternalStorageError>
+    {
         let send_tree = self.db.0.open_tree("send_sessions")?;
         let session_wrapper = send_tree.get(self.session_id.as_ref())?;
         let value = session_wrapper.expect("key should exist");
@@ -83,7 +87,7 @@ impl PersistedSession for SenderPersister {
         Ok(Box::new(wrapper.events.into_iter()))
     }
 
-    fn close(&self) -> std::result::Result<(), Self::Error> {
+    fn close(&self) -> std::result::Result<(), Self::InternalStorageError> {
         let send_tree = self.db.0.open_tree("send_sessions")?;
         let key = self.session_id.as_ref();
         if let Some(existing) = send_tree.get(key)? {
@@ -123,9 +127,12 @@ impl ReceiverPersister {
 
 impl PersistedSession for ReceiverPersister {
     type SessionEvent = ReceiverSessionEvent;
-    type Error = crate::db::error::Error;
+    type InternalStorageError = crate::db::error::Error;
 
-    fn save(&self, event: ReceiverSessionEvent) -> std::result::Result<(), Self::Error> {
+    fn save_event(
+        &self,
+        event: &ReceiverSessionEvent,
+    ) -> std::result::Result<(), Self::InternalStorageError> {
         let recv_tree = self.db.0.open_tree("recv_sessions")?;
         let key = self.session_id.as_ref();
         // Check if key exists
@@ -134,7 +141,7 @@ impl PersistedSession for ReceiverPersister {
         let mut session_wrapper: SessionWrapper<ReceiverSessionEvent> =
             serde_json::from_slice(&session).map_err(Error::Deserialize)?;
         // Append new event
-        session_wrapper.events.push(event);
+        session_wrapper.events.push(event.clone());
         // Serialize and save updated events
         let value = serde_json::to_vec(&session_wrapper).map_err(Error::Serialize)?;
         recv_tree.insert(key, value.as_slice())?;
@@ -144,7 +151,10 @@ impl PersistedSession for ReceiverPersister {
 
     fn load(
         &self,
-    ) -> std::result::Result<Box<dyn Iterator<Item = ReceiverSessionEvent>>, Self::Error> {
+    ) -> std::result::Result<
+        Box<dyn Iterator<Item = ReceiverSessionEvent>>,
+        Self::InternalStorageError,
+    > {
         let recv_tree = self.db.0.open_tree("recv_sessions")?;
         let session_wrapper = recv_tree.get(self.session_id.as_ref())?;
         let value = session_wrapper.expect("key should exist");
@@ -153,7 +163,7 @@ impl PersistedSession for ReceiverPersister {
         Ok(Box::new(wrapper.events.into_iter()))
     }
 
-    fn close(&self) -> std::result::Result<(), Self::Error> {
+    fn close(&self) -> std::result::Result<(), Self::InternalStorageError> {
         let recv_tree = self.db.0.open_tree("recv_sessions")?;
         let key = self.session_id.as_ref();
         if let Some(existing) = recv_tree.get(key)? {

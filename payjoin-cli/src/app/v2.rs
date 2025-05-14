@@ -62,22 +62,29 @@ impl AppTrait for App {
                 .ok()?;
 
             let pj_uri = replay_results.1.endpoint();
-            pj_uri.filter(|uri| uri == &url).map(|_| replay_results.0)
+            let sender_state = pj_uri.filter(|uri| uri == &url).map(|_| replay_results.0);
+            if let Some(sender_state) = sender_state {
+                Some((sender_state, sender_persister))
+            } else {
+                None
+            }
         });
 
-        let sender_state = match sender_state {
-            Some(sender_state) => sender_state,
+        let (sender_state, persister) = match sender_state {
+            Some((sender_state, persister)) => (sender_state, persister),
             None => {
+                let persister = SenderPersister::new(self.db.clone())?;
                 let psbt = self.create_original_psbt(&uri, fee_rate)?;
-                let sender = SenderBuilder::new(psbt, uri.clone())
-                    .build_recommended(fee_rate)
-                    .with_context(|| "Failed to build payjoin request")?;
-                SenderState::WithReplyKey(sender)
+                let state_transition =
+                    SenderBuilder::new(psbt, uri.clone()).build_recommended(fee_rate);
+                let sender = persister.save_maybe_bad_init_inputs(state_transition)?;
+
+                (SenderState::WithReplyKey(sender), persister)
             }
         };
         let mut interrupt = self.interrupt.clone();
         tokio::select! {
-            _ = self.process_sender_session(sender_state) => return Ok(()),
+            _ = self.process_sender_session(sender_state, &persister) => return Ok(()),
             _ = interrupt.changed() => {
                 println!("Interrupted. Call `send` with the same arguments to resume this session or `resume` to resume all sessions.");
                 return Err(anyhow!("Interrupted"))
@@ -133,7 +140,7 @@ impl AppTrait for App {
                 .0;
             let self_clone = self.clone();
             tasks.push(tokio::spawn(async move {
-                self_clone.process_sender_session(sender_state).await
+                self_clone.process_sender_session(sender_state, &sender_persiter).await
             }));
         }
 
@@ -183,70 +190,78 @@ impl AppTrait for App {
 }
 
 impl App {
-    async fn process_sender_session(&self, session: SenderState) -> Result<()> {
-        let mut session = session.clone();
-        loop {
-            match session {
-                SenderState::WithReplyKey(context) => {
-                    match self.post_orginal_proposal(&context).await {
-                        Ok(sender) => session = SenderState::V2GetContext(sender),
-                        Err(_) => {
-                            let (req, v1_ctx) = context.extract_v1();
-                            let response = post_request(req).await?;
-                            let psbt = Arc::new(v1_ctx.process_response(
+    async fn process_sender_session(
+        &self,
+        session: SenderState,
+        persister: &SenderPersister,
+    ) -> Result<()> {
+        match session {
+            SenderState::WithReplyKey(context) => {
+                // TODO: can we handle the fall back case in `post_original_proposal`. That way we don't have to clone here
+                match self.post_orginal_proposal(context.clone(), persister).await {
+                    Ok(()) => (),
+                    Err(_) => {
+                        let (req, v1_ctx) = context.extract_v1();
+                        let response = post_request(req).await?;
+                        let psbt =
+                            Arc::new(v1_ctx.process_response(
                                 &mut response.bytes().await?.to_vec().as_slice(),
                             )?);
-                            self.process_pj_response((*psbt).clone())?;
-                            return Ok(());
-                        }
+                        self.process_pj_response((*psbt).clone())?;
                     }
                 }
-
-                SenderState::V2GetContext(context) => {
-                    session = SenderState::ProposalReceived(
-                        self.get_proposed_payjoin_psbt(context).await?,
-                    );
-                }
-
-                SenderState::ProposalReceived(proposal) => {
-                    let psbt = proposal.psbt().clone();
-                    self.process_pj_response(psbt)?;
-                    return Ok(());
-                }
-                _ => return Err(anyhow!("Unexpected sender state")),
+                return Ok(());
             }
+            SenderState::V2GetContext(context) =>
+                self.get_proposed_payjoin_psbt(context, persister).await?,
+            SenderState::ProposalReceived(proposal) => {
+                self.process_pj_response(proposal.psbt().clone())?;
+                return Ok(());
+            }
+            _ => return Err(anyhow!("Unexpected sender state")),
         }
+        return Ok(());
     }
 
     async fn post_orginal_proposal(
         &self,
-        sender: &Sender<SenderWithReplyKey>,
-    ) -> Result<Sender<V2GetContext>> {
+        sender: Sender<SenderWithReplyKey>,
+        persister: &SenderPersister,
+    ) -> Result<()> {
         let (req, ctx) = sender.extract_v2(self.config.v2()?.ohttp_relay.clone())?;
         let response = post_request(req).await?;
-        // TODO: clone here smells
-        let v2_ctx = sender.clone().process_response(&response.bytes().await?, ctx)?;
-        Ok(v2_ctx)
+        println!("Posted original proposal...");
+        let state_transition = sender.process_response(&response.bytes().await?, ctx);
+        let next_state = persister.save_maybe_fatal_error_transition(state_transition)?;
+        self.get_proposed_payjoin_psbt(next_state, persister).await
     }
 
     async fn get_proposed_payjoin_psbt(
         &self,
         sender: Sender<V2GetContext>,
-    ) -> Result<Sender<ProposalReceived>> {
+        persister: &SenderPersister,
+    ) -> Result<()> {
+        let mut session = sender.clone();
         // Long poll until we get a response
         loop {
-            let sender = sender.clone();
-            let (req, ctx) = sender.extract_req(self.config.v2()?.ohttp_relay.clone())?;
+            let (req, ctx) = session.extract_req(self.config.v2()?.ohttp_relay.clone())?;
             let response = post_request(req).await?;
-            match sender.process_response(&response.bytes().await?, ctx) {
-                Ok(Some(psbt)) => return Ok(psbt),
-                Ok(None) => {
-                    println!("No response yet.");
+            let state_transition = session.process_response(&response.bytes().await?, ctx);
+            match persister.save_maybe_no_results_transition(state_transition) {
+                Ok(PersistedSucccessWithMaybeNoResults::Success(psbt)) => {
+                    println!("Proposal received. Processing...");
+                    self.process_pj_response(psbt.psbt().clone())?;
+                    return Ok(());
                 }
-                Err(re) => {
-                    println!("{}", re);
-                    log::debug!("{:?}", re);
-                    return Err(anyhow!("Response error").context(re));
+                Ok(PersistedSucccessWithMaybeNoResults::NoResults(current_state)) => {
+                    println!("No response yet.");
+                    session = current_state;
+                    continue;
+                }
+                Err(e) => {
+                    println!("{}", e);
+                    log::debug!("{:?}", e);
+                    return Err(anyhow!("Response error").context(e));
                 }
             }
         }

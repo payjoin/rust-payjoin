@@ -3,10 +3,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::persist::{
-    AcceptNextState, PersistedError, PersistedSession, RejectFatal, RejectNoResults,
-    RejectTransient,
-};
+use payjoin::persist::{PersistedError, PersistedSession, PersistedSucccessWithMaybeNoResults};
 use payjoin::receive::v2::{
     replay_receiver_event_log, MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal,
     ProvisionalProposal, Receiver, ReceiverState, ReceiverWithContext, UncheckedProposal,
@@ -284,7 +281,7 @@ impl App {
 
     async fn read_from_directory(
         &self,
-        mut session: Receiver<ReceiverWithContext>,
+        session: Receiver<ReceiverWithContext>,
         amount: Option<Amount>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
@@ -296,7 +293,7 @@ impl App {
 
         let mut interrupt = self.interrupt.clone();
         let receiver = tokio::select! {
-            res = self.long_poll_fallback(&mut session, persister) => res,
+            res = self.long_poll_fallback(session, persister) => res,
             _ = interrupt.changed() => {
                 println!("Interrupted. Call the `resume` command to resume all sessions.");
                 return Err(anyhow!("Interrupted"));
@@ -415,9 +412,10 @@ impl App {
 
     async fn long_poll_fallback(
         &self,
-        session: &mut Receiver<ReceiverWithContext>,
+        session: Receiver<ReceiverWithContext>,
         persister: &ReceiverPersister,
     ) -> Result<Receiver<UncheckedProposal>> {
+        let mut session = session;
         loop {
             let (req, context) = session.extract_req(&self.config.v2()?.ohttp_relay)?;
             println!("Polling receive request...");
@@ -425,16 +423,17 @@ impl App {
             let state_transition =
                 session.process_res(ohttp_response.bytes().await?.to_vec().as_slice(), context);
             match persister.save_maybe_no_results_transition(state_transition) {
-                Ok(next_state) => {
+                Ok(PersistedSucccessWithMaybeNoResults::Success(next_state)) => {
                     return Ok(next_state);
                 }
+                Ok(PersistedSucccessWithMaybeNoResults::NoResults(current_state)) => {
+                    session = current_state;
+                    continue;
+                }
                 Err(e) => match e {
-                    PersistedError::None(_) => {
-                        continue;
-                    }
                     PersistedError::BadInitInputs(e)
                     | PersistedError::Fatal(e)
-                    | PersistedError::Transient(_, e) => {
+                    | PersistedError::Transient(e) => {
                         return Err(e.into());
                     }
                     PersistedError::Storage(e) => {

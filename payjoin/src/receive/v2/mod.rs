@@ -22,8 +22,7 @@ use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
     AcceptCompleted, AcceptNextState, AcceptWithMaybeNoResults, MaybeBadInitInputsTransition,
     MaybeFatalRejection, MaybeFatalStateTransitionResult,
-    MaybeFatalStateTransitionResultWithNoResults, MaybeFatalTransition,
-    MaybeFatalTransitionWithNoResults, MaybeSuccessTransition, MaybeTransientTransition,
+    MaybeFatalStateTransitionResultWithNoResults, MaybeSuccessTransition, MaybeTransientTransition,
     NextStateTransition, PersistedSession, RejectBadInitInputs, RejectFatal, RejectTransient,
 };
 use crate::receive::{parse_payload, InputPair};
@@ -48,6 +47,13 @@ pub struct SessionContext {
     s: HpkeKeyPair,
     e: Option<HpkePublicKey>,
 }
+
+// #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// pub struct SessionContextWithReplyKey {
+//     context: SessionContext,
+//     /// Receiver reply key
+//     reply_key: HpkePublicKey,
+// }
 
 impl SessionContext {
     fn full_relay_url(&self, ohttp_relay: impl IntoUrl) -> Result<Url, InternalSessionError> {
@@ -317,8 +323,7 @@ impl Receiver<ReceiverWithContext> {
     }
 
     pub fn process_res(
-        // TODO This should consume self not mut ref
-        &mut self,
+        self,
         body: &[u8],
         context: ohttp::ClientResponse,
     ) -> MaybeFatalStateTransitionResultWithNoResults<
@@ -327,13 +332,15 @@ impl Receiver<ReceiverWithContext> {
         Receiver<ReceiverWithContext>,
         Error,
     > {
-        let res = self
-            .inner_process_res(body, context)
-            .map_err(|e| {
+        let session_context = self.state.context.clone();
+        let current_state = self.clone();
+        let (proposal, e) = match self.inner_process_res(body, context) {
+            Ok((proposal, reply_key)) => (proposal, reply_key),
+            Err(e) => {
                 // Dir and OHTTP related error are transient
                 // Malformities or invalid responses are considered fatal
                 // TODO: could use granular session event for specific error types
-                match e {
+                let err = match e {
                     Error::ReplyToSender(ref reply_error) => match reply_error {
                         ReplyableError::Implementation(_) =>
                             MaybeFatalRejection::Transient(RejectTransient(e)),
@@ -346,28 +353,28 @@ impl Receiver<ReceiverWithContext> {
                         ReceiverSessionEvent::SessionInvalid(e.to_string()),
                         e,
                     )),
-                }
-            })
-            .map_err(|e| {
-                return MaybeFatalStateTransitionResult::Err(e);
-            })
-            .unwrap_or_default();
+                };
+                return MaybeFatalStateTransitionResultWithNoResults::Err(err);
+            }
+        };
 
-        if let Some(proposal) = res {
+        // .unwrap_or_default();
+
+        if let Some(proposal) = proposal {
             MaybeFatalStateTransitionResultWithNoResults::Ok(AcceptWithMaybeNoResults::Success(
                 AcceptNextState(
                     ReceiverSessionEvent::UncheckedProposal(proposal.clone()),
                     Receiver {
                         state: UncheckedProposal {
                             v1: proposal,
-                            context: self.state.context.clone(),
+                            context: SessionContext { e, ..session_context },
                         },
                     },
                 ),
             ))
         } else {
             MaybeFatalStateTransitionResultWithNoResults::Ok(AcceptWithMaybeNoResults::NoResults(
-                self.clone(),
+                current_state,
             ))
         }
     }
@@ -375,10 +382,10 @@ impl Receiver<ReceiverWithContext> {
     /// The response can either be an UncheckedProposal or an ACCEPTED message
     /// indicating no UncheckedProposal is available yet.
     fn inner_process_res(
-        &mut self,
+        self,
         body: &[u8],
         context: ohttp::ClientResponse,
-    ) -> Result<Option<v1::UncheckedProposal>, Error> {
+    ) -> Result<(Option<v1::UncheckedProposal>, Option<HpkePublicKey>), Error> {
         let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
             body.try_into()
                 .map_err(|_| InternalSessionError::UnexpectedResponseSize(body.len()))?;
@@ -387,13 +394,17 @@ impl Receiver<ReceiverWithContext> {
             .map_err(InternalSessionError::OhttpEncapsulation)?;
         if response.body().is_empty() {
             log::debug!("response is empty");
-            return Ok(None);
+            return Ok((None, None));
         }
         match String::from_utf8(response.body().to_vec()) {
             // V1 response bodies are utf8 plaintext
-            Ok(response) => Ok(Some(self.extract_proposal_from_v1(response)?)),
+            Ok(response) => Ok((Some(self.extract_proposal_from_v1(response)?), None)),
             // V2 response bodies are encrypted binary
-            Err(_) => Ok(Some(self.extract_proposal_from_v2(response.body().to_vec())?)),
+            Err(_) => {
+                let (proposal, reply_key) =
+                    self.extract_proposal_from_v2(response.body().to_vec())?;
+                Ok((Some(proposal), Some(reply_key)))
+            }
         }
     }
 
@@ -408,26 +419,26 @@ impl Receiver<ReceiverWithContext> {
     }
 
     fn extract_proposal_from_v1(
-        &mut self,
+        self,
         response: String,
     ) -> Result<v1::UncheckedProposal, ReplyableError> {
         self.unchecked_from_payload(response)
     }
 
     fn extract_proposal_from_v2(
-        &mut self,
+        self,
         response: Vec<u8>,
-    ) -> Result<v1::UncheckedProposal, Error> {
+    ) -> Result<(v1::UncheckedProposal, HpkePublicKey), Error> {
         let (payload_bytes, e) =
             decrypt_message_a(&response, self.state.context.s.secret_key().clone())?;
-        self.state.context.e = Some(e);
         let payload = String::from_utf8(payload_bytes)
             .map_err(|e| Error::ReplyToSender(InternalPayloadError::Utf8(e).into()))?;
-        self.unchecked_from_payload(payload).map_err(Error::ReplyToSender)
+        let proposal = self.unchecked_from_payload(payload).map_err(Error::ReplyToSender)?;
+        Ok((proposal, e))
     }
 
     fn unchecked_from_payload(
-        &mut self,
+        self,
         payload: String,
     ) -> Result<v1::UncheckedProposal, ReplyableError> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
@@ -514,7 +525,7 @@ impl Receiver<UncheckedProposal> {
     ///
     /// Call this after checking downstream.
     pub fn check_broadcast_suitability(
-        &self,
+        self,
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
     ) -> MaybeFatalStateTransitionResult<ReceiverSessionEvent, Receiver<MaybeInputsOwned>, Error>
@@ -992,7 +1003,7 @@ impl Receiver<PayjoinProposal> {
     /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or
     /// choose to broadcast the original PSBT.
     pub fn process_res(
-        &self,
+        self,
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
     ) -> MaybeSuccessTransition<Error> {

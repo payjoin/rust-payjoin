@@ -399,10 +399,10 @@ impl App {
             .extract_req(&self.config.v2()?.ohttp_relay)
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         let res = post_request(req).await?;
+        let payjoin_psbt = proposal.psbt().clone();
         let state_transition = proposal.process_res(&res.bytes().await?, ohttp_ctx);
         persister.save_maybe_success_transition(state_transition)?;
         // Note to self: session is closed by above
-        let payjoin_psbt = proposal.psbt().clone();
         println!(
             "Response successful. Watch mempool for successful Payjoin. TXID: {}",
             payjoin_psbt.extract_tx_unchecked_fee_rate().clone().compute_txid()

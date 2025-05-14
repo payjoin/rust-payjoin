@@ -5,11 +5,16 @@ use error::{
 };
 use url::Url;
 
-use super::v2::{self, extract_request, EncapsulationError, HpkeContext};
+use super::v2::{
+    self, extract_request, EncapsulationError, HpkeContext, SenderSessionEvent, SenderWithReplyKey,
+};
 use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, InternalResult};
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
+use crate::persist::{
+    MaybeBadInitInputsTransition, MaybeFatalStateTransitionResult, NoopPersister, PersistedSession,
+};
 use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
@@ -23,9 +28,15 @@ pub struct SenderBuilder<'a>(v2::SenderBuilder<'a>);
 impl<'a> SenderBuilder<'a> {
     pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v2::SenderBuilder::new(psbt, uri)) }
 
-    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, BuildSenderError> {
-        let sender = self.0.build_recommended(min_fee_rate)?;
-        Ok(Sender(sender))
+    pub fn build_recommended(
+        self,
+        min_fee_rate: FeeRate,
+    ) -> MaybeBadInitInputsTransition<
+        crate::send::v2::SenderSessionEvent,
+        crate::send::v2::Sender<SenderWithReplyKey>,
+        BuildSenderError,
+    > {
+        self.0.build_recommended(min_fee_rate)
     }
 }
 
@@ -83,9 +94,12 @@ impl Sender {
         self,
         response: &[u8],
         post_ctx: PostContext,
-    ) -> Result<GetContext, EncapsulationError> {
-        let v2_get_ctx = self.0.process_response(response, post_ctx.0)?;
-        Ok(GetContext(v2_get_ctx))
+    ) -> MaybeFatalStateTransitionResult<
+        crate::send::v2::SenderSessionEvent,
+        crate::send::v2::Sender<v2::V2GetContext>,
+        EncapsulationError,
+    > {
+        self.0.process_response(response, post_ctx.0)
     }
 }
 

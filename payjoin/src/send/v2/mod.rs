@@ -266,6 +266,8 @@ pub struct SenderWithReplyKey {
 }
 
 impl Sender<SenderWithReplyKey> {
+    #[cfg(feature = "_multiparty")]
+    pub fn state(&self) -> &SenderWithReplyKey { &self.state }
     /// Extract serialized V1 Request and Context from a Payjoin Proposal
     pub fn extract_v1(&self) -> (Request, v1::V1Context) { self.state.v1.extract_v1() }
 

@@ -157,8 +157,8 @@ pub enum SenderState {
 }
 
 impl SenderState {
-    fn process_event(&self, event: SenderSessionEvent) -> SenderState {
-        match (&self, event) {
+    fn process_event(self, event: SenderSessionEvent) -> SenderState {
+        match (self, event) {
             (
                 SenderState::Uninitialized(),
                 SenderSessionEvent::CreatedReplyKey(sender_with_reply_key),
@@ -337,7 +337,7 @@ impl Sender<SenderWithReplyKey> {
     pub fn endpoint(&self) -> &Url { self.state.v1.endpoint() }
 
     /// Apply already known state and transition to the type state
-    pub fn apply_v2_get_context(&self, v2_get_context: V2GetContext) -> SenderState {
+    pub fn apply_v2_get_context(self, v2_get_context: V2GetContext) -> SenderState {
         let new_state = Sender { state: v2_get_context };
         SenderState::V2GetContext(new_state)
     }
@@ -460,7 +460,7 @@ impl Sender<V2GetContext> {
     /// After this function is called, the sender can sign and finalize the
     /// PSBT and broadcast the resulting Payjoin transaction to the network.
     pub fn process_response(
-        &self,
+        self,
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
     ) -> Result<Option<Sender<ProposalReceived>>, ResponseError> {
@@ -487,7 +487,7 @@ impl Sender<V2GetContext> {
         Ok(Some(sender))
     }
 
-    pub fn apply_proposal_received(&self, proposal: Psbt) -> SenderState {
+    pub fn apply_proposal_received(self, proposal: Psbt) -> SenderState {
         let new_state = Sender { state: ProposalReceived { proposal } };
         SenderState::ProposalReceived(new_state)
     }

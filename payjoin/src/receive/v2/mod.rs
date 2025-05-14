@@ -48,13 +48,6 @@ pub struct SessionContext {
     e: Option<HpkePublicKey>,
 }
 
-// #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-// pub struct SessionContextWithReplyKey {
-//     context: SessionContext,
-//     /// Receiver reply key
-//     reply_key: HpkePublicKey,
-// }
-
 impl SessionContext {
     fn full_relay_url(&self, ohttp_relay: impl IntoUrl) -> Result<Url, InternalSessionError> {
         let relay_base = ohttp_relay.into_url().map_err(InternalSessionError::ParseUrl)?;
@@ -135,10 +128,10 @@ pub enum ReceiverState {
 
 impl ReceiverState {
     fn process_event(
-        &self,
+        self,
         event: ReceiverSessionEvent,
     ) -> Result<ReceiverState, ReceiverReplayError> {
-        match (&self, event) {
+        match (self, event) {
             (ReceiverState::Uninitialized(_), ReceiverSessionEvent::Created(context)) =>
                 Ok(ReceiverState::WithContext(Receiver { state: ReceiverWithContext { context } })),
 
@@ -486,7 +479,7 @@ impl Receiver<ReceiverWithContext> {
     pub fn id(&self) -> ShortId { id(&self.state.context.s) }
 
     pub fn apply_unchecked_from_payload(
-        &self,
+        self,
         event: v1::UncheckedProposal,
     ) -> Result<ReceiverState, ReceiverReplayError> {
         if self.state.context.expiry < SystemTime::now() {
@@ -620,7 +613,7 @@ impl Receiver<UncheckedProposal> {
         }
     }
 
-    pub fn apply_maybe_inputs_owned(&self, v1: v1::MaybeInputsOwned) -> ReceiverState {
+    pub fn apply_maybe_inputs_owned(self, v1: v1::MaybeInputsOwned) -> ReceiverState {
         let new_state =
             Receiver { state: MaybeInputsOwned { v1, context: self.state.context.clone() } };
         ReceiverState::MaybeInputsOwned(new_state)
@@ -669,7 +662,7 @@ impl Receiver<MaybeInputsOwned> {
         ))
     }
 
-    pub fn apply_maybe_inputs_seen(&self, v1: v1::MaybeInputsSeen) -> ReceiverState {
+    pub fn apply_maybe_inputs_seen(self, v1: v1::MaybeInputsSeen) -> ReceiverState {
         let new_state =
             Receiver { state: MaybeInputsSeen { v1, context: self.state.context.clone() } };
         ReceiverState::MaybeInputsSeen(new_state)
@@ -718,7 +711,7 @@ impl Receiver<MaybeInputsSeen> {
         ))
     }
 
-    pub fn apply_outputs_unknown(&self, v1: v1::OutputsUnknown) -> ReceiverState {
+    pub fn apply_outputs_unknown(self, v1: v1::OutputsUnknown) -> ReceiverState {
         let new_state =
             Receiver { state: OutputsUnknown { v1, context: self.state.context.clone() } };
         ReceiverState::OutputsUnknown(new_state)
@@ -763,7 +756,7 @@ impl Receiver<OutputsUnknown> {
         ))
     }
 
-    pub fn apply_wants_outputs(&self, v1: v1::WantsOutputs) -> ReceiverState {
+    pub fn apply_wants_outputs(self, v1: v1::WantsOutputs) -> ReceiverState {
         let new_state =
             Receiver { state: WantsOutputs { v1, context: self.state.context.clone() } };
         ReceiverState::WantsOutputs(new_state)
@@ -817,7 +810,7 @@ impl Receiver<WantsOutputs> {
         )
     }
 
-    pub fn apply_wants_inputs(&self, v1: v1::WantsInputs) -> ReceiverState {
+    pub fn apply_wants_inputs(self, v1: v1::WantsInputs) -> ReceiverState {
         let new_state = Receiver { state: WantsInputs { v1, context: self.state.context.clone() } };
         ReceiverState::WantsInputs(new_state)
     }
@@ -875,7 +868,7 @@ impl Receiver<WantsInputs> {
         )
     }
 
-    pub fn apply_provisional_proposal(&self, v1: v1::ProvisionalProposal) -> ReceiverState {
+    pub fn apply_provisional_proposal(self, v1: v1::ProvisionalProposal) -> ReceiverState {
         let new_state =
             Receiver { state: ProvisionalProposal { v1, context: self.state.context.clone() } };
         ReceiverState::ProvisionalProposal(new_state)
@@ -917,7 +910,7 @@ impl Receiver<ProvisionalProposal> {
         ))
     }
 
-    pub fn apply_payjoin_proposal(&self, v1: v1::PayjoinProposal) -> ReceiverState {
+    pub fn apply_payjoin_proposal(self, v1: v1::PayjoinProposal) -> ReceiverState {
         let new_state =
             Receiver { state: PayjoinProposal { v1, context: self.state.context.clone() } };
         ReceiverState::PayjoinProposal(new_state)

@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
         }
         #[cfg(all(feature = "v1", not(feature = "v2")))]
         {
-            Box::new(crate::app::v1::App::new(config)?)
+            Box::new(crate::app::v1::App::new(validated_config)?)
         }
         #[cfg(not(any(feature = "v1", feature = "v2")))]
         {

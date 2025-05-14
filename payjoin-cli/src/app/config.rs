@@ -130,14 +130,14 @@ pub struct RawV1Config {
     pub pj_endpoint: Option<Url>,
 }
 
-
+#[cfg(feature = "v1")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct V1Config {
     pub port: u16,
     pub pj_endpoint: Url,
 }
 
-
+#[cfg(feature = "v2")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct V2Config {
     #[serde(deserialize_with = "deserialize_ohttp_keys_from_path")]
@@ -247,8 +247,8 @@ fn add_bitcoind_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigEr
     if let Some(bitcoind) = &cli.config.bitcoind {
         let rpchost = bitcoind.rpchost.as_ref().map(|s| s.as_str());
         let cookie = bitcoind.cookie.as_ref().map(|p| p.to_string_lossy().into_owned());
-        let rpcuser = bitcoind.rpcuser.as_ref().map(|s| s.as_str());
-        let rpcpassword = bitcoind.rpcpassword.as_ref().map(|s| s.as_str());
+        let rpcuser = bitcoind.rpcuser.as_deref();
+        let rpcpassword = bitcoind.rpcpassword.as_deref();
 
         config
             .set_override_option("bitcoind.rpchost", rpchost)?

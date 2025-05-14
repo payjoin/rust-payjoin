@@ -24,30 +24,38 @@ Payjoin `v2` allows for transactions to be completed asynchronously. Thus the se
 To get started, install `nigiri` and [`docker`](https://www.docker.com/get-started). Payjoin requires the sender and receiver each to have spendable [UTXOs](https://www.unchained.com/blog/what-is-a-utxo-bitcoin), so we'll create two wallets and fund each.
 
 ```sh
-# Download nigiri and check install succeeded
+# Download nigiri and check that installation has succeeded.
 curl https://getnigiri.vulpem.com | bash
 nigiri --version
 
-# Create two regtest wallets
-nigiri rpc createwallet "sender"
-nigiri rpc createwallet "receiver"
+# Create two regtest wallets.
+nigiri rpc createwallet sender
+nigiri rpc createwallet receiver
 
 # We need 101 blocks for the UTXOs to be spendable due to the coinbase maturity requirement.
-nigiri rpc generatetoaddress $(nigiri rpc getnewaddress "sender") 101
-nigiri rpc generatetoaddress $(nigiri rpc getnewaddress "receiver") 101
+nigiri rpc generatetoaddress 101 $(nigiri rpc -rpcwallet=sender getnewaddress)
+nigiri rpc generatetoaddress 101 $(nigiri rpc -rpcwallet=receiver getnewaddress)
+
+# Check the balances before doing a Payjoin transaction.
+nigiri rpc -rpcwallet=sender getbalance
+nigiri rpc -rpcwallet=receiver getbalance
 ```
 
-Great! Our wallets are setup, now let's do an async payjoin.
+Great! Our wallets are setup. Now let's do an async payjoin.
 
 ### Install `payjoin-cli`
 
+The following command will install the most recent version of payjoin-cli. See the crates.io page [here](https://crates.io/crates/payjoin-cli).
+
 ```sh
-cargo install payjoin-cli --version $VERSION
+cargo install payjoin-cli
 ```
 
-where `$VERSION` is the [latest version](https://crates.io/crates/payjoin-cli).
+Optionally, you can install a specific version by setting the `--version` flag in the command.
 
 Next, create a directory for the sender & receiver and create a file called `config.toml` for each. This file provides the information required for `payjoin-cli` to connect to your node and, for `v2`, to know which Payjoin Directory and OHTTP Relay to use.
+
+When running commands, `payjoin-cli` will read the `config.toml` file which is in the current working directory.
 
 ```sh
 mkdir sender receiver
@@ -56,9 +64,8 @@ touch sender/config.toml receiver/config.toml
 
 Edit the `config.toml` files.
 
+#### `sender/config.toml`
 ```toml
-# sender/config.toml
-
 # Nigiri uses the following RPC credentials
 [bitcoind]
 rpcuser = "admin1"
@@ -71,9 +78,8 @@ pj_directory = "https://payjo.in"
 ohttp_relay = "https://pj.bobspacebkk.com"
 ```
 
+#### `receiver/config.toml`
 ```toml
-# receiver/config.toml
-
 # Nigiri uses the following RPC credentials
 [bitcoind]
 rpcuser = "admin1"

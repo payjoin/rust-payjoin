@@ -11,9 +11,16 @@ use url::Url;
 use crate::db;
 
 #[derive(Debug, Parser)]
-#[command(version = env!("CARGO_PKG_VERSION"), about = "Payjoin - bitcoin scaling, savings, and privacy by default", long_about = None)]
+#[command(
+    version = env!("CARGO_PKG_VERSION"),
+    about = "Payjoin - bitcoin scaling, savings, and privacy by default",
+    long_about = None, 
+    subcommand_required = true
+)]
 pub struct Cli {
-    // Make the config from the cli optional
+    #[command(flatten)]
+    pub flags: Flags,
+    // TODO: Make the config from the cli optional
     #[command(flatten)]
     pub config: RawConfig,
     #[command(subcommand)]
@@ -70,30 +77,32 @@ pub enum Commands {
 type Builder = config::builder::ConfigBuilder<DefaultState>;
 
 #[derive(Debug, Clone, Deserialize, Parser)]
+pub struct Flags {
+    #[arg(long = "bip77", help = "Use BIP77 (v2) protocol (default)", action = clap::ArgAction::SetTrue)]
+    pub bip77: Option<bool>,
+    #[arg(long = "bip78", help = "Use BIP78 (v1) protocol", action = clap::ArgAction::SetTrue)]
+    pub bip78: Option<bool>
+}
+
+#[derive(Debug, Clone, Deserialize, Parser)]
 pub struct RawBitcoindConfig {
     #[arg(
         long,
         short = 'r',
+        num_args(1),
         help = "The URL of the Bitcoin RPC host, e.g. regtest default is http://localhost:18443"
     )]
     pub rpchost: Option<Url>,
     #[arg(
-        long,
+        long = "cookie-file",
         short = 'c',
-        help = "The cookie file to use for authentication. Mutually exclusive with --rpcuser and --rpcpassword"
+        num_args(1),
+        help = "Path to the cookie file of the bitcoin node"
     )]
     pub cookie: Option<PathBuf>,
-    #[arg(
-        long,
-        short = 'u',
-        help = "The RPC username to use for authentication. Mutually exclusive with --cookie"
-    )]
+    #[arg(long = "rpcuser", num_args(1), help = "The username for the bitcoin node")]
     pub rpcuser: Option<String>,
-    #[arg(
-        long,
-        short = 'p',
-        help = "The RPC password to use for authentication. Mutually exclusive with --cookie"
-    )]
+    #[arg(long = "rpcpassword", num_args(1), help = "The password for the bitcoin node")]
     pub rpcpassword: Option<String>,
 }
 
@@ -114,37 +123,18 @@ pub struct RawV1Config {
 #[derive(Debug, Clone, Deserialize, Parser)]
 pub struct RawV2Config {
     #[serde(deserialize_with = "deserialize_ohttp_keys_from_path")]
-    #[arg(long = "ohttp-keys", short = 'k', help = "The path to the ohttp keys file")]
+    #[arg(long = "ohttp-keys", help = "The path to the ohttp keys file")]
     pub ohttp_keys: Option<payjoin::OhttpKeys>,
-    #[arg(long = "ohttp-relay", short = 'r', help = "The URL of the ohttp relay")]
+    #[arg(long = "ohttp-relay", help = "The URL of the ohttp relay")]
     pub ohttp_relay: Option<Url>,
-    #[arg(long = "pj-directory", short = 'd', help = "The directory to store payjoin requests")]
+    #[arg(long = "pj-directory", help = "The directory to store payjoin requests")]
     pub pj_directory: Option<Url>,
 }
 
 #[derive(Debug, Clone, Deserialize, Parser)]
 pub struct RawConfig {
-    #[arg(
-        long = "bip77",
-        help = "Use BIP77 (v2) protocol (default)",
-        conflicts_with = "bip78",
-        action = clap::ArgAction::SetTrue
-    )]
-    pub bip77: Option<bool>,
-
-    #[arg(
-        long = "bip78",
-        help = "Use BIP78 (v1) protocol",
-        conflicts_with = "bip77",
-        action = clap::ArgAction::SetTrue
-    )]
-    pub bip78: Option<bool>,
-
-    #[arg(
-        long,
-        short = 'd',
-        help = "Sets a custom database path. Defaults to ~/.config/payjoin-cli"
-    )]
+    
+    #[arg(long, short = 'd', help = "Sets a custom database path")]
     pub db_path: Option<PathBuf>,
 
     #[arg(long = "max-fee-rate", short = 'f', help = "The maximum fee rate to accept in sat/vB")]
@@ -172,11 +162,12 @@ pub struct BitcoindConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ValidatedConfig {
-    pub bip77: bool,
-    pub bip78: bool,
     pub db_path: PathBuf,
     pub max_fee_rate: Option<FeeRate>,
     pub bitcoind: BitcoindConfig,
+
+    pub bip78: bool,
+    pub bip77: bool,
 
     #[cfg(feature = "v1")]
     pub v1: V1Config,
@@ -205,26 +196,30 @@ impl ValidatedConfig {
         config_builder = add_bitcoind_defaults(config_builder, cli)?;
         config_builder = add_common_defaults(config_builder, cli)?;
 
-        #[cfg(feature = "v1")]
-        {
-            config_builder = add_v1_defaults(config_builder)?;
-        }
-        #[cfg(not(feature = "v1"))]
-        {
-            return Err(ConfigError::Message(
-                "BIP78 (v1) selected but v1 feature not enabled".to_string(),
-            ));
-        }
-
-        #[cfg(feature = "v2")]
-        {
-            config_builder = add_v2_defaults(config_builder)?;
-        }
-        #[cfg(not(feature = "v2"))]
-        {
-            return Err(ConfigError::Message(
-                "BIP77 (v2) selected but v2 feature not enabled".to_string(),
-            ));
+        if cli.flags.bip78.unwrap_or(false) {
+            #[cfg(feature = "v1")]
+            {
+                config_builder = add_v1_defaults(config_builder)?;
+                config_builder = config_builder.set_default("bip78", true)?;
+            }
+            #[cfg(not(feature = "v1"))]
+            {
+                return Err(ConfigError::Message(
+                    "BIP78 (v1) selected but v1 feature not enabled".to_string(),
+                ));
+            }
+        } else {
+            #[cfg(feature = "v2")]
+            {
+                config_builder = add_v2_defaults(config_builder)?;
+                config_builder = config_builder.set_default("bip77", true)?;
+            }
+            #[cfg(not(feature = "v2"))]
+            {
+                return Err(ConfigError::Message(
+                    "BIP77 (v2) selected but v2 feature not enabled".to_string(),
+                ));
+            }
         }
 
         config_builder = handle_subcommands(config_builder, cli)?;
@@ -234,35 +229,25 @@ impl ValidatedConfig {
     }
 }
 
-// pub fn load_config() -> Result<RawConfig, ConfigError> {
-//     let mut config = config::Config::builder();
-//     // let config.add_source(File::with_name("config").format(FileFormat::Toml).required(false)).build()?;
-//     config = config.add_source(File::with_name("config").format(FileFormat::Toml).required(false));
-//     config.build()?.try_deserialize()
-// }
-
-// Validate bitcoind settings
-// 1. override config values with command line arguments where applicable
-// 2. if neither command line or config values are set, use default values where applicable
-// 3. for those that should not have default values because there's no
-//    standard, return an error
-
 /// Set up config -> cli overrides -> defaults for Bitcoin RPC connection settings
 fn add_bitcoind_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
     // FIXME: unwrap shouldn't be used?
 
     // Override config values with command line arguments if applicable
-    let bitcoind = &cli.config.bitcoind.clone().unwrap();
-    let rpchost = bitcoind.rpchost.as_ref().map(|s| s.as_str());
-    let cookie = bitcoind.cookie.as_ref().map(|p| p.to_string_lossy().into_owned());
-    let rpcuser = bitcoind.rpcuser.as_ref().map(|s| s.as_str());
-    let rpcpassword = bitcoind.rpcpassword.as_ref().map(|s| s.as_str());
+    if let Some(bitcoind) = &cli.config.bitcoind {
+        let rpchost = bitcoind.rpchost.as_ref().map(|s| s.as_str());
+        let cookie = bitcoind.cookie.as_ref().map(|p| p.to_string_lossy().into_owned());
+        let rpcuser = bitcoind.rpcuser.as_ref().map(|s| s.as_str());
+        let rpcpassword = bitcoind.rpcpassword.as_ref().map(|s| s.as_str());
 
-    config
-        .set_override_option("bitcoind.rpchost", rpchost)?
-        .set_override_option("bitcoind.cookie", cookie)?
-        .set_override_option("bitcoind.rpcuser", rpcuser)?
-        .set_override_option("bitcoind.rpcpassword", rpcpassword)
+        config
+            .set_override_option("bitcoind.rpchost", rpchost)?
+            .set_override_option("bitcoind.cookie", cookie)?
+            .set_override_option("bitcoind.rpcuser", rpcuser)?
+            .set_override_option("bitcoind.rpcpassword", rpcpassword)
+    } else {
+        Ok(config)
+    }
 }
 
 /// Set up default values and CLI overrides for common settings shared between v1 and v2
@@ -350,4 +335,3 @@ fn parse_fee_rate_in_sat_per_vb(s: &str) -> Result<FeeRate, std::num::ParseFloat
     let fee_rate_sat_per_kwu = fee_rate_sat_per_vb * 250.0_f32;
     Ok(FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64))
 }
-

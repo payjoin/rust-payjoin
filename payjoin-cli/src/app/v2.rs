@@ -204,7 +204,7 @@ impl App {
 
                 SenderState::V2GetContext(context) => {
                     session = SenderState::ProposalReceived(
-                        self.get_proposed_payjoin_psbt(&context).await?,
+                        self.get_proposed_payjoin_psbt(context).await?,
                     );
                 }
 
@@ -231,10 +231,11 @@ impl App {
 
     async fn get_proposed_payjoin_psbt(
         &self,
-        sender: &Sender<V2GetContext>,
+        sender: Sender<V2GetContext>,
     ) -> Result<Sender<ProposalReceived>> {
         // Long poll until we get a response
         loop {
+            let sender = sender.clone();
             let (req, ctx) = sender.extract_req(self.config.v2()?.ohttp_relay.clone())?;
             let response = post_request(req).await?;
             match sender.process_response(&response.bytes().await?, ctx) {

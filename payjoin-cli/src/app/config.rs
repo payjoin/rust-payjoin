@@ -208,7 +208,6 @@ impl ValidatedConfig {
             #[cfg(feature = "v1")]
             {
                 config_builder = add_v1_defaults(config_builder)?;
-                config_builder = config_builder.set_default("bip78", true)?;
             }
             #[cfg(not(feature = "v1"))]
             {
@@ -220,7 +219,6 @@ impl ValidatedConfig {
             #[cfg(feature = "v2")]
             {
                 config_builder = add_v2_defaults(config_builder)?;
-                config_builder = config_builder.set_default("bip77", true)?;
             }
             #[cfg(not(feature = "v2"))]
             {
@@ -231,6 +229,7 @@ impl ValidatedConfig {
         }
 
         config_builder = handle_subcommands(config_builder, cli)?;
+
         let config = config_builder.build()?.try_deserialize()?;
 
         Ok(config)
@@ -239,7 +238,10 @@ impl ValidatedConfig {
 
 /// Set up config -> cli overrides -> defaults for Bitcoin RPC connection settings
 fn add_bitcoind_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
-    // FIXME: unwrap shouldn't be used?
+    // Set defaults
+    let config = config.set_default("bitcoind.rpchost", "http://localhost:18443")?
+        .set_default("bitcoind.rpcuser", "bitcoin")?
+        .set_default("bitcoind.rpcpassword", "")?;
 
     // Override config values with command line arguments if applicable
     if let Some(bitcoind) = &cli.config.bitcoind {
@@ -267,13 +269,19 @@ fn add_common_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigErro
 /// Set up default values for v1-specific settings when v2 is not enabled
 #[cfg(feature = "v1")]
 fn add_v1_defaults(config: Builder) -> Result<Builder, ConfigError> {
-    config.set_default("v1.port", 3000_u16)?.set_default("v1.pj_endpoint", "https://localhost:3000")
+    config
+        .set_default("bip78", true)?
+        .set_default("bip77", false)?
+        .set_default("v1.port", 3000_u16)?
+        .set_default("v1.pj_endpoint", "https://localhost:3000")
 }
 
 /// Set up default values and CLI overrides for v2-specific settings
 #[cfg(feature = "v2")]
 fn add_v2_defaults(config: Builder) -> Result<Builder, ConfigError> {
     config
+        .set_default("bip77", true)?
+        .set_default("bip78", false)?
         .set_default("v2.ohttp_relay", "https://pj.bobspacebkk.com")?
         .set_default("v2.pj_directory", "https://payjo.in")?
         .set_default("v2.ohttp_keys", None::<String>)

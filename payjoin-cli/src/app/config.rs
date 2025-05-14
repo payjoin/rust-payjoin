@@ -10,6 +10,9 @@ use url::Url;
 
 use crate::db;
 
+
+type Builder = config::builder::ConfigBuilder<DefaultState>;
+
 #[derive(Debug, Parser)]
 #[command(
     version = env!("CARGO_PKG_VERSION"),
@@ -74,7 +77,6 @@ pub enum Commands {
     Resume,
 }
 
-type Builder = config::builder::ConfigBuilder<DefaultState>;
 
 #[derive(Debug, Clone, Deserialize, Parser)]
 pub struct Flags {
@@ -106,6 +108,15 @@ pub struct RawBitcoindConfig {
     pub rpcpassword: Option<String>,
 }
 
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BitcoindConfig {
+    pub rpchost: Url,
+    pub cookie: Option<PathBuf>,
+    pub rpcuser: String,
+    pub rpcpassword: String,
+}
+
 #[cfg(feature = "v1")]
 #[derive(Debug, Clone, Deserialize, Parser)]
 pub struct RawV1Config {
@@ -117,6 +128,22 @@ pub struct RawV1Config {
         help = "The URL endpoint of the payjoin V1 server, e.g. https://localhost:3000"
     )]
     pub pj_endpoint: Option<Url>,
+}
+
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct V1Config {
+    pub port: u16,
+    pub pj_endpoint: Url,
+}
+
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct V2Config {
+    #[serde(deserialize_with = "deserialize_ohttp_keys_from_path")]
+    pub ohttp_keys: Option<payjoin::OhttpKeys>,
+    pub ohttp_relay: Url,
+    pub pj_directory: Url,
 }
 
 #[cfg(feature = "v2")]
@@ -152,13 +179,6 @@ pub struct RawConfig {
     pub v2: Option<RawV2Config>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct BitcoindConfig {
-    pub rpchost: Url,
-    pub cookie: Option<PathBuf>,
-    pub rpcuser: String,
-    pub rpcpassword: String,
-}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ValidatedConfig {
@@ -176,19 +196,7 @@ pub struct ValidatedConfig {
     pub v2: V2Config,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct V1Config {
-    pub port: u16,
-    pub pj_endpoint: Url,
-}
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct V2Config {
-    #[serde(deserialize_with = "deserialize_ohttp_keys_from_path")]
-    pub ohttp_keys: Option<payjoin::OhttpKeys>,
-    pub ohttp_relay: Url,
-    pub pj_directory: Url,
-}
 
 impl ValidatedConfig {
     pub(crate) fn new(cli: &Cli) -> Result<Self, ConfigError> {

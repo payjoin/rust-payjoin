@@ -164,6 +164,16 @@ pub enum PersistedSucccessWithMaybeNoResults<NextState, CurrentState> {
     NoResults(CurrentState),
 }
 
+impl<NextState, CurrentState> PersistedSucccessWithMaybeNoResults<NextState, CurrentState> {
+    pub fn is_none(&self) -> bool {
+        matches!(self, PersistedSucccessWithMaybeNoResults::NoResults(_))
+    }
+
+    pub fn is_success(&self) -> bool {
+        matches!(self, PersistedSucccessWithMaybeNoResults::Success(_))
+    }
+}
+
 #[derive(Debug)]
 pub struct StorageError<Err>(Err);
 
@@ -367,11 +377,15 @@ impl From<SenderSessionEvent> for NoopPersisterEvent {
 }
 
 #[derive(Debug, Clone)]
-pub struct NoopPersister;
+pub struct NoopPersister<E = NoopPersisterEvent>(std::marker::PhantomData<E>);
 
-impl PersistedSession for NoopPersister {
+impl<E> Default for NoopPersister<E> {
+    fn default() -> Self { Self(std::marker::PhantomData) }
+}
+
+impl<E: Event + 'static> PersistedSession for NoopPersister<E> {
     type InternalStorageError = std::convert::Infallible;
-    type SessionEvent = NoopPersisterEvent;
+    type SessionEvent = E;
 
     fn save_event(&self, _event: &Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
         Ok(())

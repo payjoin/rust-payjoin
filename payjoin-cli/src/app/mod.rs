@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use bitcoincore_rpc::bitcoin::Amount;
+use config::ValidatedConfig;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 use payjoin::{bitcoin, PjUri};
@@ -10,7 +11,6 @@ use tokio::sync::watch;
 
 pub mod config;
 pub mod wallet;
-use crate::app::config::Config;
 use crate::app::wallet::BitcoindWallet;
 
 #[cfg(feature = "v1")]
@@ -23,7 +23,7 @@ pub const LOCAL_CERT_FILE: &str = "localhost.der";
 
 #[async_trait::async_trait]
 pub trait App: Send + Sync {
-    fn new(config: Config) -> Result<Self>
+    fn new(config: ValidatedConfig) -> Result<Self>
     where
         Self: Sized;
     fn wallet(&self) -> BitcoindWallet;
@@ -56,10 +56,14 @@ pub trait App: Send + Sync {
 }
 
 #[cfg(feature = "_danger-local-https")]
-fn http_agent() -> Result<reqwest::Client> { Ok(http_agent_builder()?.build()?) }
+fn http_agent() -> Result<reqwest::Client> {
+    Ok(http_agent_builder()?.build()?)
+}
 
 #[cfg(not(feature = "_danger-local-https"))]
-fn http_agent() -> Result<reqwest::Client> { Ok(reqwest::Client::new()) }
+fn http_agent() -> Result<reqwest::Client> {
+    Ok(reqwest::Client::new())
+}
 
 #[cfg(feature = "_danger-local-https")]
 fn http_agent_builder() -> Result<reqwest::ClientBuilder> {

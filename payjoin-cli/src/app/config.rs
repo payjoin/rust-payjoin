@@ -1,16 +1,113 @@
-use std::path::PathBuf;
-
 use anyhow::Result;
-use clap::ArgMatches;
+use clap::{value_parser, Parser, Subcommand};
 use config::builder::DefaultState;
-use config::{ConfigError, File, FileFormat};
-use payjoin::bitcoin::FeeRate;
+use config::ConfigError;
+use payjoin::bitcoin::amount::ParseAmountError;
+use payjoin::bitcoin::{Amount, FeeRate};
 use serde::Deserialize;
+use std::path::PathBuf;
 use url::Url;
 
 use crate::db;
 
+
 type Builder = config::builder::ConfigBuilder<DefaultState>;
+
+#[derive(Debug, Parser)]
+#[command(
+    version = env!("CARGO_PKG_VERSION"),
+    about = "Payjoin - bitcoin scaling, savings, and privacy by default",
+    long_about = None, 
+    subcommand_required = true
+)]
+pub struct Cli {
+    #[command(flatten)]
+    pub flags: Flags,
+    // TODO: Make the config from the cli optional
+    #[command(flatten)]
+    pub config: RawConfig,
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Send a payjoin payment
+    Send {
+        /// The `bitcoin:...` payjoin uri to send to
+        #[arg(required = true)]
+        bip21: String,
+
+        /// Fee rate in sat/vB
+        #[arg(short, long = "fee-rate", value_parser = parse_fee_rate_in_sat_per_vb)]
+        fee_rate: Option<FeeRate>,
+    },
+    /// Receive a payjoin payment
+    Receive {
+        /// The amount to receive in satoshis
+        #[arg(required = true, value_parser = parse_amount_in_sat)]
+        amount: Amount,
+
+        /// The maximum effective fee rate the receiver is willing to pay (in sat/vB)
+        #[arg(short, long = "max-fee-rate", value_parser = parse_fee_rate_in_sat_per_vb)]
+        max_fee_rate: Option<FeeRate>,
+
+        #[cfg(feature = "v1")]
+        /// The local port to listen on
+        #[arg(short, long = "port")]
+        port: Option<u16>,
+
+        #[cfg(feature = "v1")]
+        /// The `pj=` endpoint to receive the payjoin request
+        #[arg(long = "pj-endpoint", value_parser = value_parser!(Url))]
+        pj_endpoint: Option<Url>,
+
+        #[cfg(feature = "v2")]
+        /// The directory to store payjoin requests
+        #[arg(long = "pj-directory", value_parser = value_parser!(Url))]
+        pj_directory: Option<Url>,
+
+        #[cfg(feature = "v2")]
+        /// The path to the ohttp keys file
+        #[arg(long = "ohttp-keys", value_parser = value_parser!(Url))]
+        ohttp_keys: Option<PathBuf>,
+    },
+    /// Resume pending payjoins (BIP77/v2 only)
+    #[cfg(feature = "v2")]
+    Resume,
+}
+
+
+#[derive(Debug, Clone, Deserialize, Parser)]
+pub struct Flags {
+    #[arg(long = "bip77", help = "Use BIP77 (v2) protocol (default)", action = clap::ArgAction::SetTrue)]
+    pub bip77: Option<bool>,
+    #[arg(long = "bip78", help = "Use BIP78 (v1) protocol", action = clap::ArgAction::SetTrue)]
+    pub bip78: Option<bool>
+}
+
+#[derive(Debug, Clone, Deserialize, Parser)]
+pub struct RawBitcoindConfig {
+    #[arg(
+        long,
+        short = 'r',
+        num_args(1),
+        help = "The URL of the Bitcoin RPC host, e.g. regtest default is http://localhost:18443"
+    )]
+    pub rpchost: Option<Url>,
+    #[arg(
+        long = "cookie-file",
+        short = 'c',
+        num_args(1),
+        help = "Path to the cookie file of the bitcoin node"
+    )]
+    pub cookie: Option<PathBuf>,
+    #[arg(long = "rpcuser", num_args(1), help = "The username for the bitcoin node")]
+    pub rpcuser: Option<String>,
+    #[arg(long = "rpcpassword", num_args(1), help = "The password for the bitcoin node")]
+    pub rpcpassword: Option<String>,
+}
+
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BitcoindConfig {
@@ -18,6 +115,19 @@ pub struct BitcoindConfig {
     pub cookie: Option<PathBuf>,
     pub rpcuser: String,
     pub rpcpassword: String,
+}
+
+#[cfg(feature = "v1")]
+#[derive(Debug, Clone, Deserialize, Parser)]
+pub struct RawV1Config {
+    #[arg(long, short = 't', help = "The port of the payjoin V1 server to listen on.")]
+    pub port: Option<u16>,
+    #[arg(
+        long,
+        short = 'e',
+        help = "The URL endpoint of the payjoin V1 server, e.g. https://localhost:3000"
+    )]
+    pub pj_endpoint: Option<Url>,
 }
 
 #[cfg(feature = "v1")]
@@ -36,269 +146,178 @@ pub struct V2Config {
     pub pj_directory: Url,
 }
 
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "version")]
-pub enum VersionConfig {
-    #[cfg(feature = "v1")]
-    #[serde(rename = "v1")]
-    V1(V1Config),
-    #[cfg(feature = "v2")]
-    #[serde(rename = "v2")]
-    V2(V2Config),
+#[cfg(feature = "v2")]
+#[derive(Debug, Clone, Deserialize, Parser)]
+pub struct RawV2Config {
+    #[serde(deserialize_with = "deserialize_ohttp_keys_from_path")]
+    #[arg(long = "ohttp-keys", help = "The path to the ohttp keys file")]
+    pub ohttp_keys: Option<payjoin::OhttpKeys>,
+    #[arg(long = "ohttp-relay", help = "The URL of the ohttp relay")]
+    pub ohttp_relay: Option<Url>,
+    #[arg(long = "pj-directory", help = "The directory to store payjoin requests")]
+    pub pj_directory: Option<Url>,
 }
 
+#[derive(Debug, Clone, Deserialize, Parser)]
+pub struct RawConfig {
+    
+    #[arg(long, short = 'd', help = "Sets a custom database path")]
+    pub db_path: Option<PathBuf>,
+
+    #[arg(long = "max-fee-rate", short = 'f', help = "The maximum fee rate to accept in sat/vB")]
+    pub max_fee_rate: Option<FeeRate>,
+
+    #[command(flatten)]
+    pub bitcoind: Option<RawBitcoindConfig>,
+
+    #[cfg(feature = "v1")]
+    #[command(flatten)]
+    pub v1: Option<RawV1Config>,
+
+    #[cfg(feature = "v2")]
+    #[command(flatten)]
+    pub v2: Option<RawV2Config>,
+}
+
+
 #[derive(Debug, Clone, Deserialize)]
-pub struct Config {
+pub struct ValidatedConfig {
     pub db_path: PathBuf,
     pub max_fee_rate: Option<FeeRate>,
     pub bitcoind: BitcoindConfig,
-    #[serde(skip)]
-    pub version: Option<VersionConfig>,
-}
 
-impl Config {
-    /// Version flags in order of precedence (newest to oldest)
-    const VERSION_FLAGS: &'static [(&'static str, u8)] = &[("bip77", 2), ("bip78", 1)];
-
-    /// Check for multiple version flags and return the highest precedence version
-    fn determine_version(matches: &ArgMatches) -> Result<u8, ConfigError> {
-        let mut selected_version = None;
-        for &(flag, version) in Self::VERSION_FLAGS.iter() {
-            if matches.get_flag(flag) {
-                if selected_version.is_some() {
-                    return Err(ConfigError::Message(format!(
-                        "Multiple version flags specified. Please use only one of: {}",
-                        Self::VERSION_FLAGS
-                            .iter()
-                            .map(|(flag, _)| format!("--{flag}"))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )));
-                }
-                selected_version = Some(version);
-            }
-        }
-
-        if let Some(version) = selected_version {
-            return Ok(version);
-        }
-
-        #[cfg(feature = "v2")]
-        return Ok(2);
-        #[cfg(all(feature = "v1", not(feature = "v2")))]
-        return Ok(1);
-
-        #[cfg(not(any(feature = "v1", feature = "v2")))]
-        return Err(ConfigError::Message(
-            "No valid version available - must compile with v1 or v2 feature".to_string(),
-        ));
-    }
-
-    pub(crate) fn new(matches: &ArgMatches) -> Result<Self, ConfigError> {
-        let mut builder = config::Config::builder();
-        builder = add_bitcoind_defaults(builder, matches)?;
-        builder = add_common_defaults(builder, matches)?;
-
-        let version = Self::determine_version(matches)?;
-
-        match version {
-            1 => {
-                #[cfg(feature = "v1")]
-                {
-                    builder = add_v1_defaults(builder)?;
-                }
-                #[cfg(not(feature = "v1"))]
-                return Err(ConfigError::Message(
-                    "BIP78 (v1) selected but v1 feature not enabled".to_string(),
-                ));
-            }
-            2 => {
-                #[cfg(feature = "v2")]
-                {
-                    builder = add_v2_defaults(builder, matches)?;
-                }
-                #[cfg(not(feature = "v2"))]
-                return Err(ConfigError::Message(
-                    "BIP77 (v2) selected but v2 feature not enabled".to_string(),
-                ));
-            }
-            _ => unreachable!("determine_version() should only return 1 or 2"),
-        }
-
-        builder = handle_subcommands(builder, matches)?;
-        builder = builder.add_source(File::new("config.toml", FileFormat::Toml).required(false));
-
-        let built_config = builder.build()?;
-
-        let mut config = Config {
-            db_path: built_config.get("db_path")?,
-            max_fee_rate: built_config.get("max_fee_rate").ok(),
-            bitcoind: built_config.get("bitcoind")?,
-            version: None,
-        };
-
-        match version {
-            1 => {
-                #[cfg(feature = "v1")]
-                {
-                    match built_config.get::<V1Config>("v1") {
-                        Ok(v1) => config.version = Some(VersionConfig::V1(v1)),
-                        Err(e) =>
-                            return Err(ConfigError::Message(format!(
-                                "Valid V1 configuration is required for BIP78 mode: {e}"
-                            ))),
-                    }
-                }
-                #[cfg(not(feature = "v1"))]
-                return Err(ConfigError::Message(
-                    "BIP78 (v1) selected but v1 feature not enabled".to_string(),
-                ));
-            }
-            2 => {
-                #[cfg(feature = "v2")]
-                {
-                    match built_config.get::<V2Config>("v2") {
-                        Ok(v2) => config.version = Some(VersionConfig::V2(v2)),
-                        Err(e) =>
-                            return Err(ConfigError::Message(format!(
-                                "Valid V2 configuration is required for BIP77 mode: {e}"
-                            ))),
-                    }
-                }
-                #[cfg(not(feature = "v2"))]
-                return Err(ConfigError::Message(
-                    "BIP77 (v2) selected but v2 feature not enabled".to_string(),
-                ));
-            }
-            _ => unreachable!("determine_version() should only return 1 or 2"),
-        }
-
-        if config.version.is_none() {
-            return Err(ConfigError::Message(
-                "No valid version configuration found for the specified mode".to_string(),
-            ));
-        }
-
-        log::debug!("App config: {config:?}");
-        Ok(config)
-    }
+    pub bip78: bool,
+    pub bip77: bool,
 
     #[cfg(feature = "v1")]
-    pub fn v1(&self) -> Result<&V1Config, anyhow::Error> {
-        match &self.version {
-            Some(VersionConfig::V1(v1_config)) => Ok(v1_config),
-            #[allow(unreachable_patterns)]
-            _ => Err(anyhow::anyhow!("V1 configuration is required for BIP78 mode")),
-        }
-    }
+    pub v1: V1Config,
 
     #[cfg(feature = "v2")]
-    pub fn v2(&self) -> Result<&V2Config, anyhow::Error> {
-        match &self.version {
-            Some(VersionConfig::V2(v2_config)) => Ok(v2_config),
-            #[allow(unreachable_patterns)]
-            _ => Err(anyhow::anyhow!("V2 configuration is required for v2 mode")),
+    pub v2: V2Config,
+}
+
+
+
+impl ValidatedConfig {
+    pub(crate) fn new(cli: &Cli) -> Result<Self, ConfigError> {
+        let mut config_builder = config::Config::builder();
+        config_builder = add_bitcoind_defaults(config_builder, cli)?;
+        config_builder = add_common_defaults(config_builder, cli)?;
+
+        if cli.flags.bip78.unwrap_or(false) {
+            #[cfg(feature = "v1")]
+            {
+                config_builder = add_v1_defaults(config_builder)?;
+            }
+            #[cfg(not(feature = "v1"))]
+            {
+                return Err(ConfigError::Message(
+                    "BIP78 (v1) selected but v1 feature not enabled".to_string(),
+                ));
+            }
+        } else {
+            #[cfg(feature = "v2")]
+            {
+                config_builder = add_v2_defaults(config_builder)?;
+            }
+            #[cfg(not(feature = "v2"))]
+            {
+                return Err(ConfigError::Message(
+                    "BIP77 (v2) selected but v2 feature not enabled".to_string(),
+                ));
+            }
         }
+
+        config_builder = handle_subcommands(config_builder, cli)?;
+
+        let config = config_builder.build()?.try_deserialize()?;
+
+        Ok(config)
     }
 }
 
-/// Set up default values and CLI overrides for Bitcoin RPC connection settings
-fn add_bitcoind_defaults(builder: Builder, matches: &ArgMatches) -> Result<Builder, ConfigError> {
-    builder
-        .set_default("bitcoind.rpchost", "http://localhost:18443")?
-        .set_override_option(
-            "bitcoind.rpchost",
-            matches.get_one::<Url>("rpchost").map(|s| s.as_str()),
-        )?
-        .set_default("bitcoind.cookie", None::<String>)?
-        .set_override_option(
-            "bitcoind.cookie",
-            matches.get_one::<String>("cookie_file").map(|s| s.as_str()),
-        )?
+/// Set up config -> cli overrides -> defaults for Bitcoin RPC connection settings
+fn add_bitcoind_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
+    // Set defaults
+    let config = config.set_default("bitcoind.rpchost", "http://localhost:18443")?
         .set_default("bitcoind.rpcuser", "bitcoin")?
-        .set_override_option(
-            "bitcoind.rpcuser",
-            matches.get_one::<String>("rpcuser").map(|s| s.as_str()),
-        )?
-        .set_default("bitcoind.rpcpassword", "")?
-        .set_override_option(
-            "bitcoind.rpcpassword",
-            matches.get_one::<String>("rpcpassword").map(|s| s.as_str()),
-        )
+        .set_default("bitcoind.rpcpassword", "")?;
+
+    // Override config values with command line arguments if applicable
+    if let Some(bitcoind) = &cli.config.bitcoind {
+        let rpchost = bitcoind.rpchost.as_ref().map(|s| s.as_str());
+        let cookie = bitcoind.cookie.as_ref().map(|p| p.to_string_lossy().into_owned());
+        let rpcuser = bitcoind.rpcuser.as_deref();
+        let rpcpassword = bitcoind.rpcpassword.as_deref();
+
+        config
+            .set_override_option("bitcoind.rpchost", rpchost)?
+            .set_override_option("bitcoind.cookie", cookie)?
+            .set_override_option("bitcoind.rpcuser", rpcuser)?
+            .set_override_option("bitcoind.rpcpassword", rpcpassword)
+    } else {
+        Ok(config)
+    }
 }
 
 /// Set up default values and CLI overrides for common settings shared between v1 and v2
-fn add_common_defaults(builder: Builder, matches: &ArgMatches) -> Result<Builder, ConfigError> {
-    builder
-        .set_default("db_path", db::DB_PATH)?
-        .set_override_option("db_path", matches.get_one::<String>("db_path").map(|s| s.as_str()))
+fn add_common_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
+    let db_path = cli.config.db_path.as_ref().map(|p| p.to_string_lossy().into_owned());
+    config.set_default("db_path", db::DB_PATH)?.set_override_option("db_path", db_path)
 }
 
 /// Set up default values for v1-specific settings when v2 is not enabled
 #[cfg(feature = "v1")]
-fn add_v1_defaults(builder: Builder) -> Result<Builder, ConfigError> {
-    builder
+fn add_v1_defaults(config: Builder) -> Result<Builder, ConfigError> {
+    config
+        .set_default("bip78", true)?
+        .set_default("bip77", false)?
         .set_default("v1.port", 3000_u16)?
         .set_default("v1.pj_endpoint", "https://localhost:3000")
 }
 
 /// Set up default values and CLI overrides for v2-specific settings
 #[cfg(feature = "v2")]
-fn add_v2_defaults(builder: Builder, matches: &ArgMatches) -> Result<Builder, ConfigError> {
-    builder
-        .set_override_option(
-            "v2.ohttp_relay",
-            matches.get_one::<Url>("ohttp_relay").map(|s| s.as_str()),
-        )?
+fn add_v2_defaults(config: Builder) -> Result<Builder, ConfigError> {
+    config
+        .set_default("bip77", true)?
+        .set_default("bip78", false)?
+        .set_default("v2.ohttp_relay", "https://pj.bobspacebkk.com")?
         .set_default("v2.pj_directory", "https://payjo.in")?
         .set_default("v2.ohttp_keys", None::<String>)
 }
 
 /// Handles configuration overrides based on CLI subcommands
-fn handle_subcommands(builder: Builder, matches: &ArgMatches) -> Result<Builder, ConfigError> {
-    match matches.subcommand() {
-        Some(("send", _)) => Ok(builder),
-        Some(("receive", matches)) => {
-            let builder = handle_receive_command(builder, matches)?;
-            let max_fee_rate = matches.get_one::<FeeRate>("max_fee_rate");
-            builder.set_override_option("max_fee_rate", max_fee_rate.map(|f| f.to_string()))
+fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
+    match &cli.command {
+        Commands::Send { .. } => Ok(config),
+        Commands::Receive {
+            #[cfg(feature = "v1")]
+            port,
+            #[cfg(feature = "v1")]
+            pj_endpoint,
+            #[cfg(feature = "v2")]
+            pj_directory,
+            #[cfg(feature = "v2")]
+            ohttp_keys,
+            ..
+        } => {
+            #[cfg(feature = "v1")]
+            let config = config
+                .set_override_option("v1.port", port.map(|p| p.to_string()))?
+                .set_override_option("v1.pj_endpoint", pj_endpoint.as_ref().map(|s| s.as_str()))?;
+            #[cfg(feature = "v2")]
+            let config = config
+                .set_override_option("v2.pj_directory", pj_directory.as_ref().map(|s| s.as_str()))?
+                .set_override_option(
+                    "v2.ohttp_keys",
+                    ohttp_keys.as_ref().map(|s| s.to_string_lossy().into_owned()),
+                )?;
+            Ok(config)
         }
         #[cfg(feature = "v2")]
-        Some(("resume", _)) => Ok(builder),
-        _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
+        Commands::Resume => Ok(config),
     }
-}
-
-/// Handle configuration overrides specific to the receive command
-fn handle_receive_command(builder: Builder, matches: &ArgMatches) -> Result<Builder, ConfigError> {
-    #[cfg(feature = "v1")]
-    let builder = {
-        let port = matches
-            .get_one::<String>("port")
-            .map(|port| port.parse::<u16>())
-            .transpose()
-            .map_err(|_| ConfigError::Message("\"port\" must be a valid number".to_string()))?;
-        builder.set_override_option("v1.port", port)?.set_override_option(
-            "v1.pj_endpoint",
-            matches.get_one::<Url>("pj_endpoint").map(|s| s.as_str()),
-        )?
-    };
-
-    #[cfg(feature = "v2")]
-    let builder = {
-        builder
-            .set_override_option(
-                "v2.pj_directory",
-                matches.get_one::<Url>("pj_directory").map(|s| s.as_str()),
-            )?
-            .set_override_option(
-                "v2.ohttp_keys",
-                matches.get_one::<String>("ohttp_keys").map(|s| s.as_str()),
-            )?
-    };
-
-    Ok(builder)
 }
 
 #[cfg(feature = "v2")]
@@ -321,4 +340,14 @@ where
             })
             .map(Some),
     }
+}
+
+fn parse_amount_in_sat(s: &str) -> Result<Amount, ParseAmountError> {
+    Amount::from_str_in(s, payjoin::bitcoin::Denomination::Satoshi)
+}
+
+fn parse_fee_rate_in_sat_per_vb(s: &str) -> Result<FeeRate, std::num::ParseFloatError> {
+    let fee_rate_sat_per_vb: f32 = s.parse()?;
+    let fee_rate_sat_per_kwu = fee_rate_sat_per_vb * 250.0_f32;
+    Ok(FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64))
 }

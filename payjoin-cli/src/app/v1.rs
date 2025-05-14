@@ -21,7 +21,7 @@ use payjoin::{ImplementationError, Uri, UriExt};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
-use super::config::Config;
+use super::config::ValidatedConfig;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::{handle_interrupt, http_agent};
@@ -38,7 +38,7 @@ impl payjoin::receive::v1::Headers for Headers<'_> {
 
 #[derive(Clone)]
 pub(crate) struct App {
-    config: Config,
+    config: ValidatedConfig,
     db: Arc<Database>,
     wallet: BitcoindWallet,
     interrupt: watch::Receiver<()>,
@@ -46,7 +46,7 @@ pub(crate) struct App {
 
 #[async_trait::async_trait]
 impl AppTrait for App {
-    fn new(config: Config) -> Result<Self> {
+    fn new(config: ValidatedConfig) -> Result<Self> {
         let db = Arc::new(Database::create(&config.db_path)?);
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
@@ -58,7 +58,9 @@ impl AppTrait for App {
         Ok(app)
     }
 
-    fn wallet(&self) -> BitcoindWallet { self.wallet.clone() }
+    fn wallet(&self) -> BitcoindWallet {
+        self.wallet.clone()
+    }
 
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {
         let uri =
@@ -104,7 +106,7 @@ impl AppTrait for App {
         let pj_uri_string = self.construct_payjoin_uri(amount, None)?;
         println!(
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
-            self.config.v1()?.port
+            self.config.v1.port
         );
         println!("{}", pj_uri_string);
 
@@ -133,7 +135,7 @@ impl App {
         let pj_receiver_address = self.wallet.get_new_address()?;
         let pj_part = match fallback_target {
             Some(target) => target,
-            None => self.config.v1()?.pj_endpoint.as_str(),
+            None => self.config.v1.pj_endpoint.as_str(),
         };
         let pj_part = payjoin::Url::parse(pj_part)
             .map_err(|e| anyhow!("Failed to parse pj_endpoint: {}", e))?;
@@ -149,7 +151,7 @@ impl App {
     }
 
     async fn start_http_server(&self) -> Result<()> {
-        let addr = SocketAddr::from(([0, 0, 0, 0], self.config.v1()?.port));
+        let addr = SocketAddr::from(([0, 0, 0, 0], self.config.v1.port));
         let listener = TcpListener::bind(addr).await?;
         let app = self.clone();
 
@@ -253,7 +255,9 @@ impl App {
         &self,
         amount: Option<Amount>,
     ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, ReplyableError> {
-        let v1_config = self.config.v1().map_err(|e| Implementation(e.into()))?;
+        // FIXME:
+        // let v1_config = self.config.v1.map_err(|e| Implementation(e.into()))?;
+        let v1_config = &self.config.v1;
         let address = self.wallet.get_new_address().map_err(|e| Implementation(e.into()))?;
         let uri_string = if let Some(amount) = amount {
             format!(

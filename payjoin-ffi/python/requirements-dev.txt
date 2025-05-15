@@ -1,0 +1,4 @@
+python-bitcoinlib==0.12.2
+toml==0.10.2
+yapf==0.43.0
+httpx==0.28.1

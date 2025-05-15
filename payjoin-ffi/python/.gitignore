@@ -1,0 +1,20 @@
+
+dist/
+payjoin.egg-info/
+__pycache__/
+.idea/
+.DS_Store
+
+*.swp
+*.whl
+build/
+venv
+
+# Auto-generated shared libraries
+*.dylib
+*.so
+*.dll
+
+# Auto-generated bindings python file
+src/payjoin/payjoin_ffi.py
+src/payjoin/bitcoin.py

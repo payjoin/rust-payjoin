@@ -44,8 +44,8 @@ impl UncheckedProposalBuilder {
         {
             return Err(InternalMultipartyError::IdenticalProposals(
                 IdenticalProposalError::IdenticalContexts(
-                    Box::new(duplicate_context.id()),
-                    Box::new(proposal.id()),
+                    Box::new(duplicate_context.context.id()),
+                    Box::new(proposal.context.id()),
                 ),
             )
             .into());
@@ -249,8 +249,8 @@ impl FinalizedProposal {
         {
             return Err(InternalMultipartyError::IdenticalProposals(
                 IdenticalProposalError::IdenticalContexts(
-                    Box::new(duplicate_context.id()),
-                    Box::new(proposal.id()),
+                    Box::new(duplicate_context.context.id()),
+                    Box::new(proposal.context.id()),
                 ),
             )
             .into());
@@ -366,8 +366,8 @@ mod test {
                 e.to_string(),
                 MultipartyError::from(InternalMultipartyError::IdenticalProposals(
                     IdenticalProposalError::IdenticalContexts(
-                        Box::new(proposal_one.id()),
-                        Box::new(proposal_two.id())
+                        Box::new(proposal_one.context.id()),
+                        Box::new(proposal_two.context.id())
                     )
                 ))
                 .to_string()

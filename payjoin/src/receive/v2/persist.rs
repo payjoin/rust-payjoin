@@ -1,6 +1,6 @@
 use std::fmt::{self, Display};
 
-use super::{id, Receiver};
+use super::Receiver;
 use crate::persist::{self};
 use crate::uri::ShortId;
 
@@ -13,7 +13,7 @@ impl Display for ReceiverToken {
 }
 
 impl From<Receiver> for ReceiverToken {
-    fn from(receiver: Receiver) -> Self { ReceiverToken(id(&receiver.context.s)) }
+    fn from(receiver: Receiver) -> Self { ReceiverToken(receiver.context.id()) }
 }
 
 impl AsRef<[u8]> for ReceiverToken {
@@ -23,5 +23,5 @@ impl AsRef<[u8]> for ReceiverToken {
 impl persist::Value for Receiver {
     type Key = ReceiverToken;
 
-    fn key(&self) -> Self::Key { ReceiverToken(id(&self.context.s)) }
+    fn key(&self) -> Self::Key { ReceiverToken(self.context.id()) }
 }

@@ -138,10 +138,34 @@ where
     ApiErr: std::error::Error,
     StorageErr: std::error::Error,
 {
+    /// Error indicating that the session should be retried from the same state
     Transient(ApiErr),
+    /// Error indicating that the session is terminally closed
     Fatal(ApiErr),
+    /// Error indicating that the session cannot be created because session configurations are invalid
     BadInitInputs(ApiErr),
+    /// Error indicating that application failed to save the session event. This should be treated as a transient error
     Storage(StorageError<StorageErr>),
+}
+
+impl<ApiErr, StorageErr> PersistedError<ApiErr, StorageErr>
+where
+    StorageErr: std::error::Error,
+    ApiErr: std::error::Error,
+{
+    pub fn storage_error(&self) -> Option<&StorageError<StorageErr>> {
+        match self {
+            PersistedError::Storage(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    pub fn api_error(&self) -> Option<&ApiErr> {
+        match self {
+            PersistedError::Fatal(e) | PersistedError::BadInitInputs(e) => Some(e),
+            _ => None,
+        }
+    }
 }
 
 impl<ApiErr, StorageErr> std::error::Error for PersistedError<ApiErr, StorageErr>
@@ -171,6 +195,13 @@ impl<NextState, CurrentState> PersistedSucccessWithMaybeNoResults<NextState, Cur
 
     pub fn is_success(&self) -> bool {
         matches!(self, PersistedSucccessWithMaybeNoResults::Success(_))
+    }
+
+    pub fn success(&self) -> Option<&NextState> {
+        match self {
+            PersistedSucccessWithMaybeNoResults::Success(next_state) => Some(next_state),
+            PersistedSucccessWithMaybeNoResults::NoResults(_) => None,
+        }
     }
 }
 

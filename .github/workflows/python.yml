@@ -1,6 +1,9 @@
 # Copied from [bdk-ffi](https://github.com/bitcoindevkit/bdk-ffi/blob/master/.github/workflows/test-python.yaml)
 name: Build and Test Python
-on: [push, pull_request]
+on:
+  pull_request:
+    paths:
+      - payjoin-ffi/python/**
 
 jobs:
   build-wheels-and-test:
@@ -11,7 +14,7 @@ jobs:
         image: redis:7-alpine
     defaults:
       run:
-        working-directory: python
+        working-directory: payjoin-ffi/python
     strategy:
       matrix:
         include:
@@ -63,7 +66,7 @@ jobs:
     runs-on: macos-13
     defaults:
       run:
-        working-directory: python
+        working-directory: payjoin-ffi/python
     strategy:
       matrix:
         python:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-CRATES="payjoin payjoin-cli payjoin-directory"
+CRATES="payjoin payjoin-cli payjoin-directory payjoin-ffi"
 
 cargo --version
 rustc --version

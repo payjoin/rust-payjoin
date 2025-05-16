@@ -31,48 +31,145 @@ use crate::send::v2::SenderSessionEvent;
 /// NextState is the new state type
 ///
 
-/// Enum that can be either a success or a fatal error
-/// TODO: def needs to be renamed
-pub enum MaybeFatalStateTransitionResultWithNoResults<Event, NextState, CurrentState, Err> {
+/// A transition that can be either fatal or transient or have no results.
+/// If success it must have a next state and an event to save
+pub enum MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err> {
     Ok(AcceptWithMaybeNoResults<Event, NextState, CurrentState>),
     Err(MaybeFatalRejection<Event, Err>),
 }
 
-pub enum MaybeFatalStateTransitionResult<Event, NextState, Err> {
+impl<Event, NextState, CurrentState, Err>
+    MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err>
+{
+    pub fn save<P>(
+        self,
+        persister: &P,
+    ) -> Result<
+        PersistedSucccessWithMaybeNoResults<NextState, CurrentState>,
+        PersistedError<Err, P::InternalStorageError>,
+    >
+    where
+        P: PersistedSession<SessionEvent = Event>,
+        Err: std::error::Error,
+    {
+        persister.save_maybe_no_results_transition(self)
+    }
+}
+
+/// A transition that can be either fatal or transient.
+/// If success it must have a next state and an event to save
+pub enum MaybeFatalTransition<Event, NextState, Err> {
     Ok(AcceptNextState<Event, NextState>),
     Err(MaybeFatalRejection<Event, Err>),
 }
 
-/// A transition that can be either fatal or transient or have no results.
-/// If success it must have a next state and an event to save
-pub type MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err> =
-    MaybeFatalStateTransitionResultWithNoResults<Event, NextState, CurrentState, Err>;
-
-/// A transition that can be either fatal or transient.
-/// If success it must have a next state and an event to save
-/// If Fatal error we must save the event and close the session
-pub type MaybeFatalTransition<Event, NextState, Err> =
-    MaybeFatalStateTransitionResult<Event, NextState, Err>;
+impl<Event, NextState, Err> MaybeFatalTransition<Event, NextState, Err> {
+    pub fn save<P>(
+        self,
+        persister: &P,
+    ) -> Result<NextState, PersistedError<Err, P::InternalStorageError>>
+    where
+        P: PersistedSession<SessionEvent = Event>,
+        Err: std::error::Error,
+    {
+        persister.save_maybe_fatal_error_transition(self)
+    }
+}
 
 /// A transition that can be transient.
 /// If success it must have a next state and an event to save
-pub type MaybeTransientTransition<Event, NextState, Err> =
-    Result<AcceptNextState<Event, NextState>, RejectTransient<Err>>;
+pub struct MaybeTransientTransition<Event, NextState, Err>(
+    pub(crate) Result<AcceptNextState<Event, NextState>, RejectTransient<Err>>,
+);
+
+impl<Event, NextState, Err> From<Result<AcceptNextState<Event, NextState>, RejectTransient<Err>>>
+    for MaybeTransientTransition<Event, NextState, Err>
+{
+    fn from(value: Result<AcceptNextState<Event, NextState>, RejectTransient<Err>>) -> Self {
+        MaybeTransientTransition(value)
+    }
+}
+
+impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err> {
+    pub fn save<P>(
+        self,
+        persister: &P,
+    ) -> Result<NextState, PersistedError<Err, P::InternalStorageError>>
+    where
+        P: PersistedSession<SessionEvent = Event>,
+        Err: std::error::Error,
+    {
+        persister.save_maybe_transient_error_transition(self)
+    }
+}
 
 /// A transition that can be success or transient error
 /// If success there are no events to save or next state
 /// If transient error we can retry this state transition
-pub type MaybeSuccessTransition<Err> = Result<AcceptCompleted, RejectTransient<Err>>;
+pub struct MaybeSuccessTransition<Err>(pub(crate) Result<AcceptCompleted, RejectTransient<Err>>);
+
+impl<Err> From<Result<AcceptCompleted, RejectTransient<Err>>> for MaybeSuccessTransition<Err> {
+    fn from(value: Result<AcceptCompleted, RejectTransient<Err>>) -> Self {
+        MaybeSuccessTransition(value)
+    }
+}
+
+impl<Err> MaybeSuccessTransition<Err> {
+    pub fn save<P>(self, persister: &P) -> Result<(), PersistedError<Err, P::InternalStorageError>>
+    where
+        P: PersistedSession,
+        Err: std::error::Error,
+    {
+        persister.save_maybe_success_transition(self)
+    }
+}
 
 /// A transition that is always a next state transition
-pub type NextStateTransition<Event, NextState> = AcceptNextState<Event, NextState>;
+pub struct NextStateTransition<Event, NextState>(pub(crate) AcceptNextState<Event, NextState>);
+
+impl<Event, NextState> From<AcceptNextState<Event, NextState>>
+    for NextStateTransition<Event, NextState>
+{
+    fn from(value: AcceptNextState<Event, NextState>) -> Self { NextStateTransition(value) }
+}
+
+impl<Event, NextState> NextStateTransition<Event, NextState> {
+    pub fn save<P>(self, persister: &P) -> Result<NextState, StorageError<P::InternalStorageError>>
+    where
+        P: PersistedSession<SessionEvent = Event>,
+    {
+        persister.save_progression_transition(self)
+    }
+}
 
 /// A transition that can be success or bad init inputs
 /// This is a special case where the state machine init inputs are bad and we can't proceed
 /// The only thing we can do is reject the session. Since the session doesnt really exist at this point
 /// there is no need to save events or close the session
-pub type MaybeBadInitInputsTransition<Event, NextState, Err> =
-    Result<AcceptNextState<Event, NextState>, RejectBadInitInputs<Err>>;
+pub struct MaybeBadInitInputsTransition<Event, NextState, Err>(
+    pub(crate) Result<AcceptNextState<Event, NextState>, RejectBadInitInputs<Err>>,
+);
+
+impl<Event, NextState, Err>
+    From<Result<AcceptNextState<Event, NextState>, RejectBadInitInputs<Err>>>
+    for MaybeBadInitInputsTransition<Event, NextState, Err>
+{
+    fn from(value: Result<AcceptNextState<Event, NextState>, RejectBadInitInputs<Err>>) -> Self {
+        MaybeBadInitInputsTransition(value)
+    }
+}
+impl<Event, NextState, Err> MaybeBadInitInputsTransition<Event, NextState, Err> {
+    pub fn save<P>(
+        self,
+        persister: &P,
+    ) -> Result<NextState, PersistedError<Err, P::InternalStorageError>>
+    where
+        P: PersistedSession<SessionEvent = Event>,
+        Err: std::error::Error,
+    {
+        persister.save_maybe_bad_init_inputs(self)
+    }
+}
 
 /* Accept */
 // TODO: should these be pub?
@@ -118,6 +215,12 @@ impl Event for ReceiverSessionEvent {
 impl Event for SenderSessionEvent {
     fn session_invalid(error: &impl PersistableError) -> Self {
         SenderSessionEvent::SessionInvalid(error.to_string())
+    }
+}
+
+impl Event for crate::send::multiparty::SenderSessionEvent {
+    fn session_invalid(error: &impl PersistableError) -> Self {
+        crate::send::multiparty::SenderSessionEvent::SessionInvalid(error.to_string())
     }
 }
 
@@ -234,8 +337,8 @@ pub trait PersistedSession {
         &self,
         state_transition: NextStateTransition<Self::SessionEvent, NextState>,
     ) -> Result<NextState, StorageError<Self::InternalStorageError>> {
-        self.save_event(&state_transition.0).map_err(|e| StorageError(e))?;
-        Ok(state_transition.1)
+        self.save_event(&state_transition.0 .0).map_err(|e| StorageError(e))?;
+        Ok(state_transition.0 .1)
     }
 
     /// Save a transition that can be success or transient error
@@ -246,7 +349,7 @@ pub trait PersistedSession {
     where
         Err: std::error::Error,
     {
-        match state_transition {
+        match state_transition.0 {
             Ok(AcceptCompleted()) => {
                 self.close().map_err(|e| PersistedError::Storage(StorageError(e)))?;
                 return Ok(());
@@ -260,10 +363,9 @@ pub trait PersistedSession {
         state_transition: MaybeBadInitInputsTransition<Self::SessionEvent, NextState, Err>,
     ) -> Result<NextState, PersistedError<Err, Self::InternalStorageError>>
     where
-        NextState: std::fmt::Debug,
         Err: std::error::Error,
     {
-        match state_transition {
+        match state_transition.0 {
             Ok(AcceptNextState(event, next_state)) => {
                 self.save_event(&event).map_err(|e| PersistedError::Storage(StorageError(e)))?;
                 Ok(next_state)
@@ -292,22 +394,20 @@ pub trait PersistedSession {
         Err: std::error::Error,
     {
         match state_transition {
-            MaybeFatalStateTransitionResultWithNoResults::Ok(
-                AcceptWithMaybeNoResults::Success(AcceptNextState(event, next_state)),
-            ) => {
+            MaybeFatalTransitionWithNoResults::Ok(AcceptWithMaybeNoResults::Success(
+                AcceptNextState(event, next_state),
+            )) => {
                 self.save_event(&event).map_err(|e| PersistedError::Storage(StorageError(e)))?;
                 Ok(PersistedSucccessWithMaybeNoResults::Success(next_state))
             }
-            MaybeFatalStateTransitionResultWithNoResults::Ok(
-                AcceptWithMaybeNoResults::NoResults(current_state),
-            ) => Ok(PersistedSucccessWithMaybeNoResults::NoResults(current_state)),
-            MaybeFatalStateTransitionResultWithNoResults::Err(MaybeFatalRejection::Fatal(
-                fatal_rejection,
-            )) => {
+            MaybeFatalTransitionWithNoResults::Ok(AcceptWithMaybeNoResults::NoResults(
+                current_state,
+            )) => Ok(PersistedSucccessWithMaybeNoResults::NoResults(current_state)),
+            MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::Fatal(fatal_rejection)) => {
                 self.handle_fatal_reject(&fatal_rejection)?;
                 Err(PersistedError::Fatal(fatal_rejection.1))
             }
-            MaybeFatalStateTransitionResultWithNoResults::Err(MaybeFatalRejection::Transient(
+            MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::Transient(
                 RejectTransient(err),
             )) => Err(PersistedError::Transient(err)),
         }
@@ -322,7 +422,7 @@ pub trait PersistedSession {
     where
         Err: std::error::Error,
     {
-        match state_transition {
+        match state_transition.0 {
             Ok(AcceptNextState(event, next_state)) => {
                 self.save_event(&event).map_err(|e| PersistedError::Storage(StorageError(e)))?;
                 Ok(next_state)
@@ -339,17 +439,17 @@ pub trait PersistedSession {
     /// or a transient error
     fn save_maybe_fatal_error_transition<NextState, Err>(
         &self,
-        state_transition: MaybeFatalStateTransitionResult<Self::SessionEvent, NextState, Err>,
+        state_transition: MaybeFatalTransition<Self::SessionEvent, NextState, Err>,
     ) -> Result<NextState, PersistedError<Err, Self::InternalStorageError>>
     where
         Err: std::error::Error,
     {
         match state_transition {
-            MaybeFatalStateTransitionResult::Ok(AcceptNextState(event, next_state)) => {
+            MaybeFatalTransition::Ok(AcceptNextState(event, next_state)) => {
                 self.save_event(&event).map_err(|e| PersistedError::Storage(StorageError(e)))?;
                 Ok(next_state)
             }
-            MaybeFatalStateTransitionResult::Err(e) => {
+            MaybeFatalTransition::Err(e) => {
                 match e {
                     MaybeFatalRejection::Fatal(fatal_rejection) => {
                         self.handle_fatal_reject(&fatal_rejection)?;
@@ -405,6 +505,10 @@ impl From<ReceiverSessionEvent> for NoopPersisterEvent {
 
 impl From<SenderSessionEvent> for NoopPersisterEvent {
     fn from(_event: SenderSessionEvent) -> Self { NoopPersisterEvent }
+}
+
+impl From<crate::send::multiparty::SenderSessionEvent> for NoopPersisterEvent {
+    fn from(_event: crate::send::multiparty::SenderSessionEvent) -> Self { NoopPersisterEvent }
 }
 
 #[derive(Debug, Clone)]

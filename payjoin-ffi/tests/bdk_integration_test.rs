@@ -125,17 +125,13 @@ impl Wallet {
         self.get_wallet().get_address(address_index.into()).unwrap().address
     }
 
-    pub fn get_balance(&self) -> String {
-        self.get_wallet().get_balance().unwrap().to_string()
-    }
+    pub fn get_balance(&self) -> String { self.get_wallet().get_balance().unwrap().to_string() }
 
     pub fn is_mine(&self, script: &Script) -> Result<bool, bdk::Error> {
         self.get_wallet().is_mine(&script)
     }
 
-    pub fn list_unspent(&self) -> Vec<LocalUtxo> {
-        self.get_wallet().list_unspent().unwrap()
-    }
+    pub fn list_unspent(&self) -> Vec<LocalUtxo> { self.get_wallet().list_unspent().unwrap() }
     pub fn sync(&self, client: &RpcClient) {
         self.get_wallet().sync(&client.0, Default::default()).unwrap();
     }
@@ -420,9 +416,7 @@ fn is_script_owned(wallet: &Wallet, script: Vec<u8>) -> Result<bool, Implementat
     wallet.is_mine(Script::from_bytes(script.as_slice())).map_err(|e| e.to_string().into())
 }
 
-fn mock_is_output_known(_: bitcoin_ffi::OutPoint) -> Result<bool, ImplementationError> {
-    Ok(false)
-}
+fn mock_is_output_known(_: bitcoin_ffi::OutPoint) -> Result<bool, ImplementationError> { Ok(false) }
 
 fn process_psbt(wallet: &Wallet, psbt: String) -> Result<String, ImplementationError> {
     wallet

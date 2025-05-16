@@ -8,26 +8,18 @@ pub mod error {
         message: String,
     }
     impl From<ohttp::Error> for OhttpError {
-        fn from(value: ohttp::Error) -> Self {
-            OhttpError { message: format!("{value:?}") }
-        }
+        fn from(value: ohttp::Error) -> Self { OhttpError { message: format!("{value:?}") } }
     }
     impl From<String> for OhttpError {
-        fn from(value: String) -> Self {
-            OhttpError { message: value }
-        }
+        fn from(value: String) -> Self { OhttpError { message: value } }
     }
 }
 
 impl From<payjoin::OhttpKeys> for OhttpKeys {
-    fn from(value: payjoin::OhttpKeys) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::OhttpKeys) -> Self { Self(value) }
 }
 impl From<OhttpKeys> for payjoin::OhttpKeys {
-    fn from(value: OhttpKeys) -> Self {
-        value.0
-    }
+    fn from(value: OhttpKeys) -> Self { value.0 }
 }
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 #[derive(Debug, Clone)]
@@ -64,7 +56,5 @@ impl From<&ClientResponse> for ohttp::ClientResponse {
 }
 
 impl From<ohttp::ClientResponse> for ClientResponse {
-    fn from(value: ohttp::ClientResponse) -> Self {
-        Self(Mutex::new(Some(value)))
-    }
+    fn from(value: ohttp::ClientResponse) -> Self { Self(Mutex::new(Some(value))) }
 }

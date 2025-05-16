@@ -10,9 +10,7 @@ pub mod error {
         message: String,
     }
     impl From<payjoin::io::Error> for IoError {
-        fn from(value: payjoin::io::Error) -> Self {
-            IoError { message: format!("{value:?}") }
-        }
+        fn from(value: payjoin::io::Error) -> Self { IoError { message: format!("{value:?}") } }
     }
 }
 

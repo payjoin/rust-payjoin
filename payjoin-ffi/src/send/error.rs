@@ -14,15 +14,11 @@ pub struct BuildSenderError {
 }
 
 impl From<PsbtParseError> for BuildSenderError {
-    fn from(value: PsbtParseError) -> Self {
-        BuildSenderError { msg: value.to_string() }
-    }
+    fn from(value: PsbtParseError) -> Self { BuildSenderError { msg: value.to_string() } }
 }
 
 impl From<send::BuildSenderError> for BuildSenderError {
-    fn from(value: send::BuildSenderError) -> Self {
-        BuildSenderError { msg: value.to_string() }
-    }
+    fn from(value: send::BuildSenderError) -> Self { BuildSenderError { msg: value.to_string() } }
 }
 
 /// Error returned when request could not be created.
@@ -78,9 +74,8 @@ impl From<send::ResponseError> for ResponseError {
         match value {
             send::ResponseError::WellKnown(e) => ResponseError::WellKnown(Arc::new(e.into())),
             send::ResponseError::Validation(e) => ResponseError::Validation(Arc::new(e.into())),
-            send::ResponseError::Unrecognized { error_code, message } => {
-                ResponseError::Unrecognized { error_code, msg: message }
-            }
+            send::ResponseError::Unrecognized { error_code, message } =>
+                ResponseError::Unrecognized { error_code, msg: message },
         }
     }
 }

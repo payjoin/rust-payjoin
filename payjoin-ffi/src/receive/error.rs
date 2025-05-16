@@ -67,20 +67,6 @@ impl From<ReplyableError> for JsonReply {
     }
 }
 
-/// Error arising due to the specific receiver implementation
-///
-/// e.g. database errors, network failures, wallet errors
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
-pub struct ImplementationError(#[from] receive::ImplementationError);
-
-impl From<String> for ImplementationError {
-    fn from(value: String) -> Self {
-        Self(value.into())
-    }
-}
-
 /// Error that may occur during a v2 session typestate change
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]

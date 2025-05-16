@@ -9,7 +9,7 @@ use payjoin::send::v2::SenderToken;
 pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::ClientResponse;
 use crate::request::Request;
-use crate::uri::{PjUri, Url};
+use crate::uri::PjUri;
 
 pub mod error;
 #[cfg(feature = "uniffi")]
@@ -159,9 +159,9 @@ impl Sender {
     /// Extract serialized Request and Context from a Payjoin Proposal.
     pub fn extract_v2(
         &self,
-        ohttp_relay: Url,
+        ohttp_relay: String,
     ) -> Result<(Request, V2PostContext), CreateRequestError> {
-        match self.0.extract_v2(ohttp_relay.into()) {
+        match self.0.extract_v2(ohttp_relay) {
             Ok((req, ctx)) => Ok((req.into(), ctx.into())),
             Err(e) => Err(e.into()),
         }

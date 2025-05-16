@@ -4,7 +4,7 @@ use crate::error::ForeignError;
 pub use crate::send::{
     BuildSenderError, CreateRequestError, EncapsulationError, ResponseError, SerdeJsonError,
 };
-use crate::{ClientResponse, ImplementationError, PjUri, Request, Url};
+use crate::{ClientResponse, ImplementationError, PjUri, Request};
 
 #[derive(uniffi::Object)]
 pub struct SenderBuilder(super::SenderBuilder);
@@ -151,9 +151,9 @@ impl Sender {
     /// and has no fallback to v1.
     pub fn extract_v2(
         &self,
-        ohttp_proxy_url: Arc<Url>,
+        ohttp_relay_url: String,
     ) -> Result<RequestV2PostContext, CreateRequestError> {
-        match self.0.extract_v2((*ohttp_proxy_url).clone()) {
+        match self.0.extract_v2(ohttp_relay_url) {
             Ok((req, ctx)) => {
                 Ok(RequestV2PostContext { request: req, context: Arc::new(ctx.into()) })
             }

@@ -1,3 +1,17 @@
+/// Error arising due to the specific receiver implementation
+///
+/// e.g. database errors, network failures, wallet errors
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+pub struct ImplementationError(#[from] payjoin::ImplementationError);
+
+impl From<String> for ImplementationError {
+    fn from(value: String) -> Self {
+        Self(value.into())
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("Error de/serializing JSON object: {0}")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]

@@ -2,8 +2,8 @@ use std::str::FromStr;
 use std::time::Duration;
 
 pub use error::{
-    Error, ImplementationError, InputContributionError, JsonReply, OutputSubstitutionError,
-    PsbtInputError, ReplyableError, SelectionError, SessionError,
+    Error, InputContributionError, JsonReply, OutputSubstitutionError, PsbtInputError,
+    ReplyableError, SelectionError, SessionError,
 };
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
@@ -11,7 +11,7 @@ use payjoin::persist::{Persister, Value};
 use payjoin::receive::v2::ReceiverToken;
 
 use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
-pub use crate::error::SerdeJsonError;
+pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::OhttpKeys;
 use crate::uri::error::IntoUrlError;
 use crate::{ClientResponse, OutputSubstitution, Request};

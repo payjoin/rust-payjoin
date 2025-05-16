@@ -6,9 +6,8 @@ pub use error::{BuildSenderError, CreateRequestError, EncapsulationError, Respon
 use payjoin::persist::{Persister, Value};
 use payjoin::send::v2::SenderToken;
 
-pub use crate::error::SerdeJsonError;
+pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::ClientResponse;
-use crate::receive::ImplementationError;
 use crate::request::Request;
 use crate::uri::{PjUri, Url};
 

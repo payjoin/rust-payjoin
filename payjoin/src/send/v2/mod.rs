@@ -173,7 +173,9 @@ pub enum SenderSessionEvent {
     SessionInvalid(String),
 }
 
+//TODO: this can just be a wrapper around the state
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "_multiparty", derive(Serialize, Deserialize))]
 pub struct Sender<State> {
     state: State,
 }

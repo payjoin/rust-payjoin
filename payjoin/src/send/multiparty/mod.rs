@@ -3,17 +3,17 @@ use error::{
     CreateRequestError, FinalizeResponseError, FinalizedError, InternalCreateRequestError,
     InternalFinalizeResponseError, InternalFinalizedError,
 };
+use serde::{Deserialize, Serialize};
 use url::Url;
 
-use super::v2::{
-    self, extract_request, EncapsulationError, HpkeContext, SenderSessionEvent, SenderWithReplyKey,
-};
+use super::v2::{self, extract_request, EncapsulationError, HpkeContext};
 use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, InternalResult};
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
-    MaybeBadInitInputsTransition, MaybeFatalStateTransitionResult, NoopPersister, PersistedSession,
+    AcceptNextState, MaybeBadInitInputsTransition, MaybeFatalRejection,
+    MaybeFatalStateTransitionResult, NoopPersister, PersistedSession, RejectFatal, RejectTransient,
 };
 use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
@@ -21,6 +21,15 @@ use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
 mod error;
 mod persist;
+
+#[derive(Clone, Serialize, Deserialize)]
+pub enum SenderSessionEvent {
+    CreatedReplyKey(SenderWithReplyKey),
+    V2GetContext(GetContext),
+    ProposalReceived(Psbt),
+    FinalizeContext(FinalizeContext),
+    SessionInvalid(String),
+}
 
 #[derive(Clone)]
 pub struct SenderBuilder<'a>(v2::SenderBuilder<'a>);
@@ -32,59 +41,71 @@ impl<'a> SenderBuilder<'a> {
         self,
         min_fee_rate: FeeRate,
     ) -> MaybeBadInitInputsTransition<
-        crate::send::v2::SenderSessionEvent,
-        crate::send::v2::Sender<SenderWithReplyKey>,
+        SenderSessionEvent,
+        Sender<SenderWithReplyKey>,
         BuildSenderError,
     > {
-        self.0.build_recommended(min_fee_rate)
+        let state_transition = self.0.build_recommended(min_fee_rate);
+        let noop_persister = NoopPersister::<crate::send::v2::SenderSessionEvent>::default();
+        let res = noop_persister.save_maybe_bad_init_inputs(state_transition).unwrap();
+
+        let sender_with_reply_key = SenderWithReplyKey(res);
+        let next_state = Sender { state: sender_with_reply_key.clone() };
+        Ok(AcceptNextState(SenderSessionEvent::CreatedReplyKey(sender_with_reply_key), next_state))
     }
 }
 
 #[derive(Clone)]
-pub struct Sender(pub(crate) v2::Sender<v2::SenderWithReplyKey>);
+pub struct Sender<State> {
+    state: State,
+}
 
 // TODO: need to impl partial eq and eqfor sender
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SenderWithReplyKey(pub(crate) v2::Sender<v2::SenderWithReplyKey>);
 
-impl Sender {
+impl Sender<SenderWithReplyKey> {
     pub fn extract_v2(
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, PostContext), CreateRequestError> {
         let rs = self
+            .state
             .0
             .extract_rs_pubkey()
             .map_err(InternalCreateRequestError::ParseReceiverPubkeyParam)?;
         let mut ohttp_keys = self
+            .state
             .0
             .endpoint()
             .ohttp()
             .map_err(|_| InternalCreateRequestError::MissingOhttpConfig)?;
-        let state = self.0.state().clone();
+        let inner = self.state.0.state();
         let body = serialize_v2_body(
-            &state.v1.psbt,
-            state.v1.output_substitution,
-            state.v1.fee_contribution,
-            state.v1.min_fee_rate,
+            &inner.v1.psbt,
+            inner.v1.output_substitution,
+            inner.v1.fee_contribution,
+            inner.v1.min_fee_rate,
         )?;
         let (request, ohttp_ctx) = extract_request(
             ohttp_relay,
-            state.reply_key.clone(),
+            inner.reply_key.clone(),
             body,
-            self.0.endpoint().clone(),
+            self.state.0.endpoint().clone(),
             rs.clone(),
             &mut ohttp_keys,
         )
         .map_err(InternalCreateRequestError::V2CreateRequest)?;
         let v2_post_ctx = V2PostContext {
-            endpoint: self.0.endpoint().clone(),
+            endpoint: self.state.0.endpoint().clone(),
             psbt_ctx: crate::send::PsbtContext {
-                original_psbt: state.v1.psbt.clone(),
-                output_substitution: state.v1.output_substitution,
-                fee_contribution: state.v1.fee_contribution,
-                payee: state.v1.payee.clone(),
-                min_fee_rate: state.v1.min_fee_rate,
+                original_psbt: inner.v1.psbt.clone(),
+                output_substitution: inner.v1.output_substitution,
+                fee_contribution: inner.v1.fee_contribution,
+                payee: inner.v1.payee.clone(),
+                min_fee_rate: inner.v1.min_fee_rate,
             },
-            hpke_ctx: HpkeContext::new(rs, &state.reply_key),
+            hpke_ctx: HpkeContext::new(rs, &inner.reply_key),
             ohttp_ctx,
         };
         Ok((request, PostContext(v2_post_ctx)))
@@ -94,12 +115,17 @@ impl Sender {
         self,
         response: &[u8],
         post_ctx: PostContext,
-    ) -> MaybeFatalStateTransitionResult<
-        crate::send::v2::SenderSessionEvent,
-        crate::send::v2::Sender<v2::V2GetContext>,
-        EncapsulationError,
-    > {
-        self.0.process_response(response, post_ctx.0)
+    ) -> MaybeFatalStateTransitionResult<SenderSessionEvent, Sender<GetContext>, EncapsulationError>
+    {
+        let state_transition = self.state.0.process_response(response, post_ctx.0);
+        let noop_persister = NoopPersister::<crate::send::v2::SenderSessionEvent>::default();
+        let res = noop_persister.save_maybe_fatal_error_transition(state_transition).unwrap();
+
+        let next_state = Sender { state: GetContext(res.clone()) };
+        MaybeFatalStateTransitionResult::Ok(AcceptNextState(
+            SenderSessionEvent::V2GetContext(GetContext(res)),
+            next_state,
+        ))
     }
 }
 
@@ -127,15 +153,16 @@ pub struct PostContext(v2::V2PostContext);
 
 /// Get context is used to extract a request for the receiver. In the multiparty context this is a
 /// merged PSBT with other senders.
-pub struct GetContext(v2::Sender<v2::V2GetContext>);
+#[derive(Clone, Serialize, Deserialize)]
+pub struct GetContext(pub v2::Sender<v2::V2GetContext>);
 
-impl GetContext {
+impl Sender<GetContext> {
     /// Extract the GET request that will give us the psbt to be finalized
     pub fn extract_req(
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), crate::send::v2::CreateRequestError> {
-        self.0.extract_req(ohttp_relay)
+        self.state.0.extract_req(ohttp_relay)
     }
 
     /// Process the response from the directory. Provide a closure to finalize the inputs
@@ -145,63 +172,128 @@ impl GetContext {
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
         finalize_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-    ) -> Result<FinalizeContext, FinalizedError> {
-        let state = self.0.state();
+    ) -> MaybeFatalStateTransitionResult<SenderSessionEvent, Sender<FinalizeContext>, FinalizedError>
+    {
+        let state = self.state.0.state();
         let psbt_ctx = PsbtContext { inner: state.psbt_ctx.clone() };
+        // TODO: need a short hand way to create fatal or transient errors.
+        // Match statmes are a pain to write and read.
         let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
-            response.try_into().map_err(|_| InternalFinalizedError::InvalidSize)?;
+            match response.try_into() {
+                Ok(response_array) => response_array,
+                Err(_) =>
+                    return MaybeFatalStateTransitionResult::Err(MaybeFatalRejection::Fatal(
+                        RejectFatal(
+                            SenderSessionEvent::SessionInvalid(format!(
+                                "Invalid size: {}",
+                                response.len()
+                            )),
+                            InternalFinalizedError::InvalidSize.into(),
+                        ),
+                    )),
+            };
 
-        let response =
-            ohttp_decapsulate(ohttp_ctx, response_array).map_err(InternalFinalizedError::Ohttp)?;
+        let response = match ohttp_decapsulate(ohttp_ctx, response_array) {
+            Ok(response) => response,
+            Err(e) =>
+                return MaybeFatalStateTransitionResult::Err(MaybeFatalRejection::Transient(
+                    RejectTransient(InternalFinalizedError::Ohttp(e).into()),
+                )),
+        };
         let body = match response.status() {
             http::StatusCode::OK => Some(response.body().to_vec()),
             http::StatusCode::ACCEPTED => None,
-            _ => return Err(InternalFinalizedError::UnexpectedStatusCode(response.status()))?,
+            _ =>
+                return MaybeFatalStateTransitionResult::Err(MaybeFatalRejection::Transient(
+                    RejectTransient(
+                        InternalFinalizedError::UnexpectedStatusCode(response.status()).into(),
+                    ),
+                )),
         };
         if let Some(body) = body {
-            let psbt = decrypt_message_b(
+            let psbt = match decrypt_message_b(
                 &body,
                 state.hpke_ctx.receiver.clone(),
                 state.hpke_ctx.reply_pair.secret_key().clone(),
-            )
-            .map_err(InternalFinalizedError::Hpke)?;
+            ) {
+                Ok(psbt) => psbt,
+                Err(e) =>
+                    return MaybeFatalStateTransitionResult::Err(MaybeFatalRejection::Fatal(
+                        RejectFatal(
+                            SenderSessionEvent::SessionInvalid(format!("Hpke error: {}", e)),
+                            InternalFinalizedError::Hpke(e).into(),
+                        ),
+                    )),
+            };
 
-            let proposal = Psbt::deserialize(&psbt).map_err(InternalFinalizedError::Psbt)?;
-            let psbt =
-                psbt_ctx.process_proposal(proposal).map_err(InternalFinalizedError::Proposal)?;
-            let finalized_psbt =
-                finalize_psbt(&psbt).map_err(InternalFinalizedError::FinalizePsbt)?;
-            Ok(FinalizeContext {
+            let proposal = match Psbt::deserialize(&psbt) {
+                Ok(proposal) => proposal,
+                Err(e) =>
+                    return MaybeFatalStateTransitionResult::Err(MaybeFatalRejection::Fatal(
+                        RejectFatal(
+                            SenderSessionEvent::SessionInvalid(format!(
+                                "Psbt deserialize error: {}",
+                                e
+                            )),
+                            InternalFinalizedError::Psbt(e).into(),
+                        ),
+                    )),
+            };
+
+            let psbt = match psbt_ctx.process_proposal(proposal) {
+                Ok(psbt) => psbt,
+                Err(e) =>
+                    return MaybeFatalStateTransitionResult::Err(MaybeFatalRejection::Transient(
+                        RejectTransient(InternalFinalizedError::Proposal(e).into()),
+                    )),
+            };
+            let finalized_psbt = match finalize_psbt(&psbt) {
+                Ok(finalized_psbt) => finalized_psbt,
+                Err(e) =>
+                    return MaybeFatalStateTransitionResult::Err(MaybeFatalRejection::Transient(
+                        RejectTransient(InternalFinalizedError::FinalizePsbt(e).into()),
+                    )),
+            };
+            let next_state = FinalizeContext {
                 hpke_ctx: state.hpke_ctx.clone(),
                 directory_url: state.endpoint.clone(),
                 psbt: finalized_psbt,
-            })
+            };
+            MaybeFatalStateTransitionResult::Ok(AcceptNextState(
+                SenderSessionEvent::FinalizeContext(next_state.clone()),
+                Sender { state: next_state },
+            ))
         } else {
-            Err(InternalFinalizedError::MissingResponse.into())
+            // TODO: this method needs to return a fatal with maybe no results type. And this should be returning a success no results type.
+            MaybeFatalStateTransitionResult::Err(MaybeFatalRejection::Transient(RejectTransient(
+                InternalFinalizedError::MissingResponse.into(),
+            )))
         }
     }
 }
 
 /// Finalize context is used to extract the last POST request and process the response sent back from the directory.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct FinalizeContext {
     hpke_ctx: HpkeContext,
     directory_url: Url,
     psbt: Psbt,
 }
 
-impl FinalizeContext {
+impl Sender<FinalizeContext> {
     pub fn extract_req(
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
-        let reply_key = self.hpke_ctx.reply_pair.secret_key();
+        let reply_key = self.state.hpke_ctx.reply_pair.secret_key();
         let body = serialize_v2_body(
-            &self.psbt,
+            &self.state.psbt,
             OutputSubstitution::Disabled,
             None,
             FeeRate::BROADCAST_MIN,
         )?;
         let mut ohttp_keys = self
+            .state
             .directory_url
             .ohttp()
             .map_err(|_| InternalCreateRequestError::MissingOhttpConfig)?;
@@ -209,8 +301,8 @@ impl FinalizeContext {
             ohttp_relay,
             reply_key.clone(),
             body,
-            self.directory_url.clone(),
-            self.hpke_ctx.receiver.clone(),
+            self.state.directory_url.clone(),
+            self.state.hpke_ctx.receiver.clone(),
             &mut ohttp_keys,
         )
         .map_err(InternalCreateRequestError::V2CreateRequest)?;

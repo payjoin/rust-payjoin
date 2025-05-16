@@ -869,7 +869,8 @@ mod integration {
         use payjoin::persist::{NoopPersister, PersistedSession};
         use payjoin::receive::v2::{Receiver, ReceiverWithContext, UninitializedReceiver};
         use payjoin::send::multiparty::{
-            GetContext as MultiPartyGetContext, SenderBuilder as MultiPartySenderBuilder,
+            GetContext as MultiPartyGetContext, Sender as MultiPartySender,
+            SenderBuilder as MultiPartySenderBuilder,
         };
         use payjoin_test_utils::{
             init_bitcoind_multi_sender_single_reciever, BoxSendSyncError, TestServices,
@@ -880,7 +881,7 @@ mod integration {
 
         struct InnerSenderTestSession {
             receiver_session: Receiver<ReceiverWithContext>,
-            sender_get_ctx: MultiPartyGetContext,
+            sender_get_ctx: MultiPartySender<MultiPartyGetContext>,
             script_pubkey: ScriptBuf,
         }
         #[tokio::test]
@@ -930,7 +931,7 @@ mod integration {
                         MultiPartySenderBuilder::new(psbt.clone(), pj_uri.clone())
                             .build_recommended(FeeRate::BROADCAST_MIN);
                     let sender_session =
-                        NoopPersister::<payjoin::send::v2::SenderSessionEvent>::default()
+                        NoopPersister::<payjoin::send::multiparty::SenderSessionEvent>::default()
                             .save_maybe_bad_init_inputs(state_transition)?;
                     let (Request { url, body, content_type, .. }, send_post_ctx) =
                         sender_session.extract_v2(ohttp_relay.to_owned())?;
@@ -946,12 +947,12 @@ mod integration {
                         send_post_ctx,
                     );
                     let sender_get_ctx =
-                        NoopPersister::<payjoin::send::v2::SenderSessionEvent>::default()
+                        NoopPersister::<payjoin::send::multiparty::SenderSessionEvent>::default()
                             .save_maybe_fatal_error_transition(state_transition)?;
 
                     inner_sender_test_sessions.push(InnerSenderTestSession {
                         receiver_session,
-                        sender_get_ctx: MultiPartyGetContext(sender_get_ctx),
+                        sender_get_ctx,
                         script_pubkey: address.script_pubkey(),
                     });
                 }
@@ -1015,11 +1016,14 @@ mod integration {
                         .body(body.clone())
                         .send()
                         .await?;
-                    let finalize_ctx = sender_get_ctx.process_response_and_finalize(
+                    let state_transition = sender_get_ctx.process_response_and_finalize(
                         response.bytes().await?.to_vec().as_slice(),
                         ohttp_response_ctx,
                         |psbt| finalize_psbt(&senders[i], psbt),
-                    )?;
+                    );
+                    let finalize_ctx =
+                        NoopPersister::<payjoin::send::multiparty::SenderSessionEvent>::default()
+                            .save_maybe_fatal_error_transition(state_transition)?;
                     let (Request { url, body, content_type, .. }, ohttp_response_ctx) =
                         finalize_ctx.extract_req(ohttp_relay.to_owned())?;
                     let response = agent

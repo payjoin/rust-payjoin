@@ -63,7 +63,7 @@ class InMemoryReceiverPersister(payjoin.payjoin_ffi.ReceiverPersister):
         return payjoin.Receiver.from_json(self.receivers[token])
 
  
-class TestRecieverPersistence(unittest.TestCase):
+class TestReceiverPersistence(unittest.TestCase):
     def test_receiver_persistence(self):
         persister = InMemoryReceiverPersister()
         address = payjoin.bitcoin.Address("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4", payjoin.bitcoin.Network.SIGNET)
@@ -102,8 +102,8 @@ class TestSenderPersistence(unittest.TestCase):
             None
         )
         token = new_receiver.persist(persister)
-        reciever = payjoin.Receiver.load(token, persister)
-        uri = reciever.pj_uri()
+        receiver = payjoin.Receiver.load(token, persister)
+        uri = receiver.pj_uri()
 
         persister = InMemorySenderPersister()
         psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA="

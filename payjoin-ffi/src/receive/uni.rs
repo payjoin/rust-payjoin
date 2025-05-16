@@ -173,7 +173,7 @@ pub trait CanBroadcast: Send + Sync {
 
 /// The sender’s original PSBT and optional parameters
 ///
-/// This type is used to proces the request. It is returned by UncheckedProposal::from_request().
+/// This type is used to process the request. It is returned by UncheckedProposal::from_request().
 ///
 /// If you are implementing an interactive payment processor, you should get extract the original transaction with get_transaction_to_schedule_broadcast() and schedule, followed by checking that the transaction can be broadcast with check_can_broadcast. Otherwise it is safe to call assume_interactive_receive to proceed with validation.
 #[derive(Clone, uniffi::Object)]

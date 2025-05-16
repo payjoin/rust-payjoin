@@ -427,7 +427,9 @@ mod integration {
                     directory.clone(),
                     ohttp_keys.clone(),
                     None,
-                );
+                )
+                .save(persister);
+
                 let mut session = NoopPersister::<ReceiverSessionEvent>::default()
                     .save_maybe_bad_init_inputs(state_transition)?;
                 println!("session: {:#?}", &session);

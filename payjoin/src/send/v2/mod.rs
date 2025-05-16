@@ -35,8 +35,8 @@ use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
 use crate::persist::{
     AcceptNextState, AcceptWithMaybeNoResults, MaybeBadInitInputsTransition, MaybeFatalRejection,
-    MaybeFatalStateTransitionResult, MaybeFatalStateTransitionResultWithNoResults,
-    PersistedSession, RejectBadInitInputs, RejectFatal, RejectTransient,
+    MaybeFatalTransition, MaybeFatalTransitionWithNoResults, PersistedSession, RejectBadInitInputs,
+    RejectFatal, RejectTransient,
 };
 use crate::send::v1;
 use crate::uri::{ShortId, UrlExt};
@@ -83,13 +83,14 @@ impl<'a> SenderBuilder<'a> {
         let v1 = match self.0.build_recommended(min_fee_rate) {
             Ok(inner) => inner,
             Err(e) => {
-                return Err(RejectBadInitInputs(e));
+                return Err(RejectBadInitInputs(e)).into();
             }
         };
         let sender_with_reply_key =
             SenderWithReplyKey { v1, reply_key: HpkeKeyPair::gen_keypair().0 };
         let sender = Sender { state: sender_with_reply_key.clone() };
         Ok(AcceptNextState(SenderSessionEvent::CreatedReplyKey(sender_with_reply_key), sender))
+            .into()
     }
 
     /// Offer the receiver contribution to pay for his input.
@@ -125,7 +126,7 @@ impl<'a> SenderBuilder<'a> {
             Ok(inner) => inner,
             Err(e) => {
                 // TODO: need more grandual error handling
-                return Err(RejectBadInitInputs(e));
+                return Err(RejectBadInitInputs(e)).into();
             }
         };
 
@@ -133,6 +134,7 @@ impl<'a> SenderBuilder<'a> {
             SenderWithReplyKey { v1, reply_key: HpkeKeyPair::gen_keypair().0 };
         let sender = Sender { state: sender_with_reply_key.clone() };
         Ok(AcceptNextState(SenderSessionEvent::CreatedReplyKey(sender_with_reply_key), sender))
+            .into()
     }
 
     /// Perform Payjoin without incentivizing the payee to cooperate.
@@ -150,13 +152,14 @@ impl<'a> SenderBuilder<'a> {
         let v1 = match self.0.build_non_incentivizing(min_fee_rate) {
             Ok(inner) => inner,
             Err(e) => {
-                return Err(RejectBadInitInputs(e));
+                return Err(RejectBadInitInputs(e)).into();
             }
         };
         let sender_with_reply_key =
             SenderWithReplyKey { v1, reply_key: HpkeKeyPair::gen_keypair().0 };
         let sender = Sender { state: sender_with_reply_key.clone() };
         Ok(AcceptNextState(SenderSessionEvent::CreatedReplyKey(sender_with_reply_key), sender))
+            .into()
     }
 }
 
@@ -339,31 +342,24 @@ impl Sender<SenderWithReplyKey> {
         self,
         response: &[u8],
         post_ctx: V2PostContext,
-    ) -> MaybeFatalStateTransitionResult<SenderSessionEvent, Sender<V2GetContext>, EncapsulationError>
-    {
-        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
-            match response.try_into() {
-                Ok(response_array) => response_array,
-                Err(_) =>
-                    return MaybeFatalStateTransitionResult::Err(MaybeFatalRejection::Fatal(
-                        RejectFatal(
-                            SenderSessionEvent::SessionInvalid(format!(
-                                "Invalid size: {}",
-                                response.len()
-                            )),
-                            InternalEncapsulationError::InvalidSize(response.len()).into(),
-                        ),
-                    )),
-            };
+    ) -> MaybeFatalTransition<SenderSessionEvent, Sender<V2GetContext>, EncapsulationError> {
+        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] = match response
+            .try_into()
+        {
+            Ok(response_array) => response_array,
+            Err(_) =>
+                return MaybeFatalTransition::Err(MaybeFatalRejection::Fatal(RejectFatal(
+                    SenderSessionEvent::SessionInvalid(format!("Invalid size: {}", response.len())),
+                    InternalEncapsulationError::InvalidSize(response.len()).into(),
+                ))),
+        };
         let response = match ohttp_decapsulate(post_ctx.ohttp_ctx, response_array) {
             Ok(response) => response,
             Err(e) =>
-                return MaybeFatalStateTransitionResult::Err(MaybeFatalRejection::Fatal(
-                    RejectFatal(
-                        SenderSessionEvent::SessionInvalid(e.to_string()),
-                        InternalEncapsulationError::Ohttp(e).into(),
-                    ),
-                )),
+                return MaybeFatalTransition::Err(MaybeFatalRejection::Fatal(RejectFatal(
+                    SenderSessionEvent::SessionInvalid(e.to_string()),
+                    InternalEncapsulationError::Ohttp(e).into(),
+                ))),
         };
         match response.status() {
             http::StatusCode::OK => {
@@ -373,12 +369,12 @@ impl Sender<SenderWithReplyKey> {
                     psbt_ctx: post_ctx.psbt_ctx,
                     hpke_ctx: post_ctx.hpke_ctx,
                 };
-                MaybeFatalStateTransitionResult::Ok(AcceptNextState(
+                MaybeFatalTransition::Ok(AcceptNextState(
                     SenderSessionEvent::V2GetContext(v2_get_context.clone()),
                     Sender { state: v2_get_context },
                 ))
             }
-            _ => MaybeFatalStateTransitionResult::Err(MaybeFatalRejection::Fatal(RejectFatal(
+            _ => MaybeFatalTransition::Err(MaybeFatalRejection::Fatal(RejectFatal(
                 SenderSessionEvent::SessionInvalid(format!(
                     "Unexpected status code: {}",
                     response.status()
@@ -524,7 +520,7 @@ impl Sender<V2GetContext> {
         self,
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
-    ) -> MaybeFatalStateTransitionResultWithNoResults<
+    ) -> MaybeFatalTransitionWithNoResults<
         SenderSessionEvent,
         Sender<ProposalReceived>,
         Sender<V2GetContext>,
@@ -534,38 +530,38 @@ impl Sender<V2GetContext> {
             match response.try_into() {
                 Ok(response_array) => response_array,
                 Err(_) =>
-                    return MaybeFatalStateTransitionResultWithNoResults::Err(
-                        MaybeFatalRejection::Fatal(RejectFatal(
+                    return MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::Fatal(
+                        RejectFatal(
                             SenderSessionEvent::SessionInvalid(format!(
                                 "Invalid size: {}",
                                 response.len()
                             )),
                             InternalEncapsulationError::InvalidSize(response.len()).into(),
-                        )),
-                    ),
+                        ),
+                    )),
             };
         let response = match ohttp_decapsulate(ohttp_ctx, response_array) {
             Ok(response) => response,
             Err(e) =>
-                return MaybeFatalStateTransitionResultWithNoResults::Err(
-                    MaybeFatalRejection::Fatal(RejectFatal(
+                return MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::Fatal(
+                    RejectFatal(
                         SenderSessionEvent::SessionInvalid(e.to_string()),
                         InternalEncapsulationError::Ohttp(e).into(),
-                    )),
-                ),
+                    ),
+                )),
         };
         let body = match response.status() {
             http::StatusCode::OK => response.body().to_vec(),
             http::StatusCode::ACCEPTED =>
-                return MaybeFatalStateTransitionResultWithNoResults::Ok(
-                    AcceptWithMaybeNoResults::NoResults(self.clone()),
-                ),
+                return MaybeFatalTransitionWithNoResults::Ok(AcceptWithMaybeNoResults::NoResults(
+                    self.clone(),
+                )),
             _ =>
-                return MaybeFatalStateTransitionResultWithNoResults::Err(
-                    MaybeFatalRejection::Transient(RejectTransient(
+                return MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::Transient(
+                    RejectTransient(
                         InternalEncapsulationError::UnexpectedStatusCode(response.status()).into(),
-                    )),
-                ),
+                    ),
+                )),
         };
         let psbt = match decrypt_message_b(
             &body,
@@ -574,29 +570,29 @@ impl Sender<V2GetContext> {
         ) {
             Ok(psbt) => psbt,
             Err(e) =>
-                return MaybeFatalStateTransitionResultWithNoResults::Err(
-                    MaybeFatalRejection::Fatal(RejectFatal(
+                return MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::Fatal(
+                    RejectFatal(
                         SenderSessionEvent::SessionInvalid(e.to_string()),
                         InternalEncapsulationError::Hpke(e).into(),
-                    )),
-                ),
+                    ),
+                )),
         };
 
         let proposal = match Psbt::deserialize(&psbt) {
             Ok(proposal) => proposal,
             Err(e) =>
-                return MaybeFatalStateTransitionResultWithNoResults::Err(
-                    MaybeFatalRejection::Fatal(RejectFatal(
+                return MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::Fatal(
+                    RejectFatal(
                         SenderSessionEvent::SessionInvalid(e.to_string()),
                         InternalProposalError::Psbt(e).into(),
-                    )),
-                ),
+                    ),
+                )),
         };
         let event = SenderSessionEvent::ProposalReceived(proposal.clone());
         let sender = Sender { state: ProposalReceived { proposal } };
-        MaybeFatalStateTransitionResultWithNoResults::Ok(AcceptWithMaybeNoResults::Success(
-            AcceptNextState(event, sender),
-        ))
+        MaybeFatalTransitionWithNoResults::Ok(AcceptWithMaybeNoResults::Success(AcceptNextState(
+            event, sender,
+        )))
     }
 
     pub fn apply_proposal_received(self, proposal: Psbt) -> SenderState {

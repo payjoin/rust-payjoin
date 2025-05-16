@@ -11,8 +11,7 @@ use payjoin::receive::v2::{
 };
 use payjoin::receive::{ImplementationError, ReplyableError};
 use payjoin::send::v2::{
-    replay_sender_event_log, ProposalReceived, Sender, SenderBuilder, SenderState,
-    SenderWithReplyKey, V2GetContext,
+    replay_sender_event_log, Sender, SenderBuilder, SenderState, SenderWithReplyKey, V2GetContext,
 };
 use payjoin::Uri;
 use tokio::sync::watch;
@@ -231,9 +230,8 @@ impl App {
         let (req, ctx) = sender.extract_v2(self.config.v2()?.ohttp_relay.clone())?;
         let response = post_request(req).await?;
         println!("Posted original proposal...");
-        let state_transition = sender.process_response(&response.bytes().await?, ctx);
-        let next_state = persister.save_maybe_fatal_error_transition(state_transition)?;
-        self.get_proposed_payjoin_psbt(next_state, persister).await
+        let sender = sender.process_response(&response.bytes().await?, ctx).save(persister);
+        self.get_proposed_payjoin_psbt(sender, persister).await
     }
 
     async fn get_proposed_payjoin_psbt(
@@ -246,8 +244,8 @@ impl App {
         loop {
             let (req, ctx) = session.extract_req(self.config.v2()?.ohttp_relay.clone())?;
             let response = post_request(req).await?;
-            let state_transition = session.process_response(&response.bytes().await?, ctx);
-            match persister.save_maybe_no_results_transition(state_transition) {
+            let res = session.process_response(&response.bytes().await?, ctx).save(persister);
+            match res {
                 Ok(PersistedSucccessWithMaybeNoResults::Success(psbt)) => {
                     println!("Proposal received. Processing...");
                     self.process_pj_response(psbt.psbt().clone())?;
@@ -329,9 +327,9 @@ impl App {
     ) -> Result<()> {
         let wallet = self.wallet();
         // Receive Check 1: Can Broadcast
-        let state_transition =
-            proposal.check_broadcast_suitability(None, |tx| Ok(wallet.can_broadcast(tx)?));
-        let proposal = persister.save_maybe_fatal_error_transition(state_transition)?;
+        let proposal = proposal
+            .check_broadcast_suitability(None, |tx| Ok(wallet.can_broadcast(tx)?))
+            .save(persister);
 
         self.check_inputs_not_owned(proposal, persister).await
     }
@@ -342,8 +340,8 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let wallet = self.wallet();
-        let state_transition = proposal.check_inputs_not_owned(|input| Ok(wallet.is_mine(input)?));
-        let proposal = persister.save_maybe_fatal_error_transition(state_transition)?;
+        let proposal =
+            proposal.check_inputs_not_owned(|input| Ok(wallet.is_mine(input)?)).save(persister);
         self.check_no_inputs_seen_before(proposal, persister).await
     }
 
@@ -352,9 +350,9 @@ impl App {
         proposal: Receiver<MaybeInputsSeen>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        let state_transition = proposal
-            .check_no_inputs_seen_before(|input| Ok(self.db.insert_input_seen_before(*input)?));
-        let proposal = persister.save_maybe_fatal_error_transition(state_transition)?;
+        let proposal = proposal
+            .check_no_inputs_seen_before(|input| Ok(self.db.insert_input_seen_before(*input)?))
+            .save(persister);
         self.identify_receiver_outputs(proposal, persister).await
     }
 
@@ -364,9 +362,9 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let wallet = self.wallet();
-        let state_transition =
-            proposal.identify_receiver_outputs(|output_script| Ok(wallet.is_mine(output_script)?));
-        let proposal = persister.save_maybe_fatal_error_transition(state_transition)?;
+        let proposal = proposal
+            .identify_receiver_outputs(|output_script| Ok(wallet.is_mine(output_script)?))
+            .save(persister);
         self.commit_outputs(proposal, persister).await
     }
 
@@ -375,8 +373,7 @@ impl App {
         proposal: Receiver<WantsOutputs>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        let state_transition = proposal.commit_outputs();
-        let proposal = persister.save_progression_transition(state_transition)?;
+        let proposal = proposal.commit_outputs().save(persister);
         self.contribute_inputs(proposal, persister).await
     }
 
@@ -386,8 +383,8 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let wallet = self.wallet();
-        let state_transition = proposal.contribute_inputs(wallet.list_unspent()?)?.commit_inputs();
-        let proposal = persister.save_progression_transition(state_transition)?;
+        let proposal =
+            proposal.contribute_inputs(wallet.list_unspent()?)?.commit_inputs().save(persister);
         self.finalize_proposal(proposal, persister).await
     }
 
@@ -397,12 +394,13 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let wallet = self.wallet();
-        let state_transition = proposal.finalize_proposal(
-            |psbt| Ok(wallet.process_psbt(psbt)?),
-            None,
-            self.config.max_fee_rate,
-        );
-        let proposal = persister.save_maybe_transient_error_transition(state_transition)?;
+        let proposal = proposal
+            .finalize_proposal(
+                |psbt| Ok(wallet.process_psbt(psbt)?),
+                None,
+                self.config.max_fee_rate,
+            )
+            .save(persister);
         self.send_payjoin_proposal(proposal, persister).await
     }
 
@@ -436,9 +434,10 @@ impl App {
             let (req, context) = session.extract_req(&self.config.v2()?.ohttp_relay)?;
             println!("Polling receive request...");
             let ohttp_response = post_request(req).await?;
-            let state_transition =
-                session.process_res(ohttp_response.bytes().await?.to_vec().as_slice(), context);
-            match persister.save_maybe_no_results_transition(state_transition) {
+            let state_transition = session
+                .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), context)
+                .save(persister);
+            match state_transition {
                 Ok(PersistedSucccessWithMaybeNoResults::Success(next_state)) => {
                     return Ok(next_state);
                 }

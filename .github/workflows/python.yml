@@ -11,7 +11,7 @@ jobs:
         image: redis:7-alpine
     defaults:
       run:
-        working-directory: python
+        working-directory: payjoin-ffi/python
     strategy:
       matrix:
         include:
@@ -63,7 +63,7 @@ jobs:
     runs-on: macos-13
     defaults:
       run:
-        working-directory: python
+        working-directory: payjoin-ffi/python
     strategy:
       matrix:
         python:

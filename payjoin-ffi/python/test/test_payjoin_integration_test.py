@@ -107,7 +107,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             persister = InMemorySenderPersister()
             token = new_sender.persist(persister)
             req_ctx: Sender = Sender.load(token, persister)
-            request: RequestV2PostContext = req_ctx.extract_v2(ohttp_relay)
+            request: RequestV2PostContext = req_ctx.extract_v2(ohttp_relay.as_string())
             response = await agent.post(
                 url=request.request.url.as_string(),
                 headers={"Content-Type": request.request.content_type},

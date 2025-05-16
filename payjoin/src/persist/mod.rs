@@ -218,6 +218,7 @@ impl Event for SenderSessionEvent {
     }
 }
 
+#[cfg(feature = "_multiparty")]
 impl Event for crate::send::multiparty::SenderSessionEvent {
     fn session_invalid(error: &impl PersistableError) -> Self {
         crate::send::multiparty::SenderSessionEvent::SessionInvalid(error.to_string())
@@ -507,6 +508,7 @@ impl From<SenderSessionEvent> for NoopPersisterEvent {
     fn from(_event: SenderSessionEvent) -> Self { NoopPersisterEvent }
 }
 
+#[cfg(feature = "_multiparty")]
 impl From<crate::send::multiparty::SenderSessionEvent> for NoopPersisterEvent {
     fn from(_event: crate::send::multiparty::SenderSessionEvent) -> Self { NoopPersisterEvent }
 }

@@ -182,27 +182,34 @@ pub struct Sender<State> {
 }
 
 #[derive(Debug, Clone)]
+pub enum SenderReplayError {
+    InvalidStateAndEvent,
+}
+
+#[derive(Debug, Clone)]
 pub enum SenderState {
     Uninitialized(),
     WithReplyKey(Sender<SenderWithReplyKey>),
     V2GetContext(Sender<V2GetContext>),
     ProposalReceived(Sender<ProposalReceived>),
+    TerminalState,
 }
 
 impl SenderState {
-    fn process_event(self, event: SenderSessionEvent) -> SenderState {
+    fn process_event(self, event: SenderSessionEvent) -> Result<SenderState, SenderReplayError> {
         match (self, event) {
             (
                 SenderState::Uninitialized(),
                 SenderSessionEvent::CreatedReplyKey(sender_with_reply_key),
-            ) => SenderState::WithReplyKey(Sender { state: sender_with_reply_key }),
+            ) => Ok(SenderState::WithReplyKey(Sender { state: sender_with_reply_key })),
             (
                 SenderState::WithReplyKey(state),
                 SenderSessionEvent::V2GetContext(v2_get_context),
-            ) => state.apply_v2_get_context(v2_get_context),
+            ) => Ok(state.apply_v2_get_context(v2_get_context)),
             (SenderState::V2GetContext(state), SenderSessionEvent::ProposalReceived(proposal)) =>
-                state.apply_proposal_received(proposal),
-            _ => panic!("Invalid state and event"),
+                Ok(state.apply_proposal_received(proposal)),
+            (_, SenderSessionEvent::SessionInvalid(_)) => Ok(SenderState::TerminalState),
+            _ => Err(SenderReplayError::InvalidStateAndEvent),
         }
     }
 }
@@ -221,7 +228,7 @@ where
     let mut history = SessionHistory::new(Vec::new());
     for log in logs {
         history.events.push(log.clone().into());
-        sender = sender.process_event(log.into());
+        sender = sender.process_event(log.into())?;
     }
 
     Ok((sender, history))
@@ -230,11 +237,6 @@ where
 #[derive(Default)]
 pub struct SessionHistory {
     events: Vec<SenderSessionEvent>,
-}
-
-#[derive(Debug, Clone)]
-pub enum SenderReplayError {
-    SessionInvalid(String),
 }
 
 impl SessionHistory {

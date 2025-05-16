@@ -230,7 +230,7 @@ impl App {
         let (req, ctx) = sender.extract_v2(self.config.v2()?.ohttp_relay.clone())?;
         let response = post_request(req).await?;
         println!("Posted original proposal...");
-        let sender = sender.process_response(&response.bytes().await?, ctx).save(persister);
+        let sender = sender.process_response(&response.bytes().await?, ctx).save(persister)?;
         self.get_proposed_payjoin_psbt(sender, persister).await
     }
 
@@ -328,7 +328,7 @@ impl App {
         // Receive Check 1: Can Broadcast
         let proposal = proposal
             .check_broadcast_suitability(None, |tx| Ok(wallet.can_broadcast(tx)?))
-            .save(persister);
+            .save(persister)?;
 
         self.check_inputs_not_owned(proposal, persister).await
     }
@@ -340,7 +340,7 @@ impl App {
     ) -> Result<()> {
         let wallet = self.wallet();
         let proposal =
-            proposal.check_inputs_not_owned(|input| Ok(wallet.is_mine(input)?)).save(persister);
+            proposal.check_inputs_not_owned(|input| Ok(wallet.is_mine(input)?)).save(persister)?;
         self.check_no_inputs_seen_before(proposal, persister).await
     }
 
@@ -351,7 +351,7 @@ impl App {
     ) -> Result<()> {
         let proposal = proposal
             .check_no_inputs_seen_before(|input| Ok(self.db.insert_input_seen_before(*input)?))
-            .save(persister);
+            .save(persister)?;
         self.identify_receiver_outputs(proposal, persister).await
     }
 
@@ -363,7 +363,7 @@ impl App {
         let wallet = self.wallet();
         let proposal = proposal
             .identify_receiver_outputs(|output_script| Ok(wallet.is_mine(output_script)?))
-            .save(persister);
+            .save(persister)?;
         self.commit_outputs(proposal, persister).await
     }
 
@@ -372,7 +372,7 @@ impl App {
         proposal: Receiver<WantsOutputs>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        let proposal = proposal.commit_outputs().save(persister);
+        let proposal = proposal.commit_outputs().save(persister)?;
         self.contribute_inputs(proposal, persister).await
     }
 
@@ -383,7 +383,7 @@ impl App {
     ) -> Result<()> {
         let wallet = self.wallet();
         let proposal =
-            proposal.contribute_inputs(wallet.list_unspent()?)?.commit_inputs().save(persister);
+            proposal.contribute_inputs(wallet.list_unspent()?)?.commit_inputs().save(persister)?;
         self.finalize_proposal(proposal, persister).await
     }
 
@@ -399,7 +399,7 @@ impl App {
                 None,
                 self.config.max_fee_rate,
             )
-            .save(persister);
+            .save(persister)?;
         self.send_payjoin_proposal(proposal, persister).await
     }
 

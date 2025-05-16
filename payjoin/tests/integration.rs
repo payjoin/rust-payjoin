@@ -422,16 +422,15 @@ mod integration {
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
                 // test session with expiry in the future
-                let state_transition = Receiver::<UninitializedReceiver>::create_session(
+                let persister = NoopPersister::<ReceiverSessionEvent>::default();
+                let mut session = Receiver::<UninitializedReceiver>::create_session(
                     address.clone(),
                     directory.clone(),
                     ohttp_keys.clone(),
                     None,
                 )
-                .save(persister);
+                .save(&persister)?;
 
-                let mut session = NoopPersister::<ReceiverSessionEvent>::default()
-                    .save_maybe_bad_init_inputs(state_transition)?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
                 let ohttp_relay = services.ohttp_relay_url();
@@ -443,11 +442,9 @@ mod integration {
                     .send()
                     .await?;
                 assert!(response.status().is_success(), "error response: {}", response.status());
-                let state_transition =
+                let response_body =
                     // Clone here bc we keep using the same session object when the sender responds
-                    session.clone().process_res(response.bytes().await?.to_vec().as_slice(), ctx);
-                let response_body = NoopPersister::<ReceiverSessionEvent>::default()
-                    .save_maybe_no_results_transition(state_transition)?;
+                    session.clone().process_res(response.bytes().await?.to_vec().as_slice(), ctx).save(&persister)?;
 
                 // No proposal yet since sender has not responded
                 assert!(response_body.is_none());

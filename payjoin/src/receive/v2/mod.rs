@@ -104,12 +104,10 @@ pub enum ReceiverSessionEvent {
 
 #[derive(Debug)]
 pub enum ReceiverReplayError {
-    /// The session is invalid
-    SessionInvalid(String),
     /// Session expired
     SessionExpired(SystemTime),
-    /// Unrecognized event
-    UnrecognizedEvent(ReceiverSessionEvent),
+    /// Invalid combination of state and event
+    InvalidStateAndEvent,
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +122,7 @@ pub enum ReceiverState {
     WantsInputs(Receiver<WantsInputs>),
     ProvisionalProposal(Receiver<ProvisionalProposal>),
     PayjoinProposal(Receiver<PayjoinProposal>),
+    TerminalState,
 }
 
 impl ReceiverState {
@@ -174,9 +173,9 @@ impl ReceiverState {
                 ReceiverState::ProvisionalProposal(state),
                 ReceiverSessionEvent::PayjoinProposal(payjoin_proposal),
             ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
-
+            (_, ReceiverSessionEvent::SessionInvalid(_)) => Ok(ReceiverState::TerminalState),
             // TODO: Handle invalid transitions with a catch-all that provides better error info
-            (_current_state, event) => Err(ReceiverReplayError::UnrecognizedEvent(event)),
+            (_current_state, _event) => Err(ReceiverReplayError::InvalidStateAndEvent),
         }
     }
 }
@@ -190,10 +189,8 @@ where
     ReceiverSessionEvent: From<P::SessionEvent>,
 {
     // TODO: fix this
-    let logs =
-        persister.load().map_err(|_| ReceiverReplayError::SessionInvalid("No good".to_string()))?;
+    let logs = persister.load().unwrap();
     let mut receiver = ReceiverState::Uninitialized(Receiver { state: UninitializedReceiver {} });
-
     let mut history = SessionHistory::new(Vec::new());
 
     for log in logs {
@@ -997,13 +994,23 @@ impl Receiver<PayjoinProposal> {
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
     ) -> MaybeSuccessTransition<Error> {
-        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] = res
-            .try_into()
-            .map_err(|_| InternalSessionError::UnexpectedResponseSize(res.len()))
-            .map_err(|e| RejectTransient(Error::V2(e.into())))?;
-        let res = ohttp_decapsulate(ohttp_context, response_array)
-            .map_err(InternalSessionError::OhttpEncapsulation)
-            .map_err(|e| RejectTransient(Error::V2(e.into())))?;
+        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
+            match res.try_into() {
+                Ok(response_array) => response_array,
+                Err(_) =>
+                    return Err(RejectTransient(Error::V2(
+                        InternalSessionError::UnexpectedResponseSize(res.len()).into(),
+                    )))
+                    .into(),
+            };
+        let res = match ohttp_decapsulate(ohttp_context, response_array) {
+            Ok(res) => res,
+            Err(e) =>
+                return Err(RejectTransient(Error::V2(
+                    InternalSessionError::OhttpEncapsulation(e).into(),
+                )))
+                .into(),
+        };
         if res.status().is_success() {
             Ok(AcceptCompleted()).into()
         } else {

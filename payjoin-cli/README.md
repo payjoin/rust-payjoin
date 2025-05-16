@@ -75,7 +75,7 @@ rpchost = "http://localhost:18443/wallet/sender"
 # For v2, our config also requires a payjoin directory server and OHTTP relay
 [v2]
 pj_directory = "https://payjo.in"
-ohttp_relay = "https://pj.bobspacebkk.com"
+ohttp_relays = ["https://pj.benalleng.com", "https://pj.bobspacebkk.com", "https://ohttp.achow101.com"]
 ```
 
 #### `receiver/config.toml`
@@ -89,7 +89,7 @@ rpchost = "http://localhost:18443/wallet/receiver"
 # For v2, our config also requires a payjoin directory server and OHTTP relay
 [v2]
 pj_directory = "https://payjo.in"
-ohttp_relay = "https://pj.bobspacebkk.com"
+ohttp_relays = ["https://pj.benalleng.com", "https://pj.bobspacebkk.com", "https://ohttp.achow101.com"]
 ```
 
 Now, the receiver must generate an address to receive the payment. The format is:

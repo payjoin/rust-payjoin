@@ -32,7 +32,7 @@ pub struct V1Config {
 pub struct V2Config {
     #[serde(deserialize_with = "deserialize_ohttp_keys_from_path")]
     pub ohttp_keys: Option<payjoin::OhttpKeys>,
-    pub ohttp_relay: Url,
+    pub ohttp_relays: Vec<Url>,
     pub pj_directory: Url,
 }
 
@@ -248,8 +248,10 @@ fn add_v1_defaults(builder: Builder) -> Result<Builder, ConfigError> {
 fn add_v2_defaults(builder: Builder, matches: &ArgMatches) -> Result<Builder, ConfigError> {
     builder
         .set_override_option(
-            "v2.ohttp_relay",
-            matches.get_one::<Url>("ohttp_relay").map(|s| s.as_str()),
+            "v2.ohttp_relays",
+            matches
+                .get_many::<Url>("ohttp_relays")
+                .map(|val| val.map(|s| s.as_str()).collect::<Vec<_>>()),
         )?
         .set_default("v2.pj_directory", "https://payjo.in")?
         .set_default("v2.ohttp_keys", None::<String>)

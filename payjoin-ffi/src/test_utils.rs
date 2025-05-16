@@ -31,17 +31,11 @@ pub struct BitcoindEnv {
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 impl BitcoindEnv {
-    pub fn get_receiver(&self) -> Arc<RpcClient> {
-        self.receiver.clone()
-    }
+    pub fn get_receiver(&self) -> Arc<RpcClient> { self.receiver.clone() }
 
-    pub fn get_sender(&self) -> Arc<RpcClient> {
-        self.sender.clone()
-    }
+    pub fn get_sender(&self) -> Arc<RpcClient> { self.sender.clone() }
 
-    pub fn get_bitcoind(&self) -> Arc<BitcoindInstance> {
-        self.bitcoind.clone()
-    }
+    pub fn get_bitcoind(&self) -> Arc<BitcoindInstance> { self.bitcoind.clone() }
 }
 
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
@@ -59,11 +53,9 @@ impl RpcClient {
     pub fn call(&self, method: String, params: Vec<Option<String>>) -> Result<String, FfiError> {
         let parsed_params: Vec<Value> = params
             .into_iter()
-            .map(|param| {
-                match param {
-                    Some(p) => serde_json::from_str(&p).unwrap_or(Value::String(p)),
-                    None => Value::Null,
-                }
+            .map(|param| match param {
+                Some(p) => serde_json::from_str(&p).unwrap_or(Value::String(p)),
+                None => Value::Null,
             })
             .collect();
 
@@ -89,9 +81,7 @@ pub enum FfiError {
 }
 
 impl FfiError {
-    pub fn new(msg: impl Into<String>) -> Self {
-        FfiError::Message(msg.into())
-    }
+    pub fn new(msg: impl Into<String>) -> Self { FfiError::Message(msg.into()) }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -100,15 +90,11 @@ impl FfiError {
 pub struct BoxSendSyncError(#[from] payjoin_test_utils::BoxSendSyncError);
 
 impl From<io::Error> for BoxSendSyncError {
-    fn from(err: io::Error) -> Self {
-        payjoin_test_utils::BoxSendSyncError::from(err).into()
-    }
+    fn from(err: io::Error) -> Self { payjoin_test_utils::BoxSendSyncError::from(err).into() }
 }
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
-pub fn init_tracing() {
-    payjoin_test_utils::init_tracing();
-}
+pub fn init_tracing() { payjoin_test_utils::init_tracing(); }
 
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct JoinHandle(
@@ -120,15 +106,11 @@ pub struct JoinHandle(
 pub struct TestServices(pub(crate) Mutex<payjoin_test_utils::TestServices>);
 
 impl From<payjoin_test_utils::TestServices> for TestServices {
-    fn from(value: payjoin_test_utils::TestServices) -> Self {
-        Self(Mutex::new(value))
-    }
+    fn from(value: payjoin_test_utils::TestServices) -> Self { Self(Mutex::new(value)) }
 }
 
 impl From<TestServices> for payjoin_test_utils::TestServices {
-    fn from(value: TestServices) -> Self {
-        value.0.into_inner()
-    }
+    fn from(value: TestServices) -> Self { value.0.into_inner() }
 }
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
@@ -213,29 +195,19 @@ pub fn init_bitcoind_sender_receiver() -> Result<Arc<BitcoindEnv>, FfiError> {
 }
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
-pub fn example_url() -> Url {
-    EXAMPLE_URL.clone().into()
-}
+pub fn example_url() -> Url { EXAMPLE_URL.clone().into() }
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
-pub fn query_params() -> String {
-    QUERY_PARAMS.to_string()
-}
+pub fn query_params() -> String { QUERY_PARAMS.to_string() }
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
-pub fn original_psbt() -> String {
-    ORIGINAL_PSBT.to_string()
-}
+pub fn original_psbt() -> String { ORIGINAL_PSBT.to_string() }
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
-pub fn invalid_psbt() -> String {
-    INVALID_PSBT.to_string()
-}
+pub fn invalid_psbt() -> String { INVALID_PSBT.to_string() }
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
-pub fn payjoin_proposal() -> String {
-    PAYJOIN_PROPOSAL.to_string()
-}
+pub fn payjoin_proposal() -> String { PAYJOIN_PROPOSAL.to_string() }
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 pub fn payjoin_proposal_with_sender_info() -> String {
@@ -243,19 +215,13 @@ pub fn payjoin_proposal_with_sender_info() -> String {
 }
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
-pub fn receiver_input_contribution() -> String {
-    RECEIVER_INPUT_CONTRIBUTION.to_string()
-}
+pub fn receiver_input_contribution() -> String { RECEIVER_INPUT_CONTRIBUTION.to_string() }
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
-pub fn parsed_original_psbt() -> Psbt {
-    PARSED_ORIGINAL_PSBT.clone().into()
-}
+pub fn parsed_original_psbt() -> Psbt { PARSED_ORIGINAL_PSBT.clone().into() }
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
-pub fn parsed_payjoin_proposal() -> Psbt {
-    PARSED_PAYJOIN_PROPOSAL.clone().into()
-}
+pub fn parsed_payjoin_proposal() -> Psbt { PARSED_PAYJOIN_PROPOSAL.clone().into() }
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 pub fn parsed_payjoin_proposal_with_sender_info() -> Psbt {

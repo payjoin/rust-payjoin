@@ -14,15 +14,11 @@ use crate::{ClientResponse, OhttpKeys, OutputSubstitution, Request};
 pub struct NewReceiver(pub super::NewReceiver);
 
 impl From<NewReceiver> for super::NewReceiver {
-    fn from(value: NewReceiver) -> Self {
-        value.0
-    }
+    fn from(value: NewReceiver) -> Self { value.0 }
 }
 
 impl From<super::NewReceiver> for NewReceiver {
-    fn from(value: super::NewReceiver) -> Self {
-        Self(value)
-    }
+    fn from(value: super::NewReceiver) -> Self { Self(value) }
 }
 
 #[uniffi::export]
@@ -66,42 +62,30 @@ impl NewReceiver {
 pub struct ReceiverToken(#[allow(dead_code)] Arc<payjoin::receive::v2::ReceiverToken>);
 
 impl std::fmt::Display for ReceiverToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) }
 }
 
 impl From<payjoin::receive::v2::Receiver> for ReceiverToken {
-    fn from(value: payjoin::receive::v2::Receiver) -> Self {
-        ReceiverToken(Arc::new(value.into()))
-    }
+    fn from(value: payjoin::receive::v2::Receiver) -> Self { ReceiverToken(Arc::new(value.into())) }
 }
 
 impl From<payjoin::receive::v2::ReceiverToken> for ReceiverToken {
-    fn from(value: payjoin::receive::v2::ReceiverToken) -> Self {
-        ReceiverToken(Arc::new(value))
-    }
+    fn from(value: payjoin::receive::v2::ReceiverToken) -> Self { ReceiverToken(Arc::new(value)) }
 }
 
 impl From<ReceiverToken> for payjoin::receive::v2::ReceiverToken {
-    fn from(value: ReceiverToken) -> Self {
-        (*value.0).clone()
-    }
+    fn from(value: ReceiverToken) -> Self { (*value.0).clone() }
 }
 
 #[derive(Clone, Debug, uniffi::Object)]
 pub struct Receiver(super::Receiver);
 
 impl From<Receiver> for super::Receiver {
-    fn from(value: Receiver) -> Self {
-        value.0
-    }
+    fn from(value: Receiver) -> Self { value.0 }
 }
 
 impl From<super::Receiver> for Receiver {
-    fn from(value: super::Receiver) -> Self {
-        Self(value)
-    }
+    fn from(value: super::Receiver) -> Self { Self(value) }
 }
 
 #[uniffi::export]
@@ -120,9 +104,7 @@ impl Receiver {
 
     /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
     /// This identifies a session at the payjoin directory server.
-    pub fn pj_uri(&self) -> crate::PjUri {
-        self.0.pj_uri()
-    }
+    pub fn pj_uri(&self) -> crate::PjUri { self.0.pj_uri() }
 
     pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestResponse, Error> {
         self.0
@@ -142,22 +124,16 @@ impl Receiver {
     }
 
     ///The per-session public key to use as an identifier
-    pub fn id(&self) -> String {
-        self.0.id()
-    }
+    pub fn id(&self) -> String { self.0.id() }
 
-    pub fn to_json(&self) -> Result<String, SerdeJsonError> {
-        self.0.to_json()
-    }
+    pub fn to_json(&self) -> Result<String, SerdeJsonError> { self.0.to_json() }
 
     #[uniffi::constructor]
     pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
         super::Receiver::from_json(json).map(Into::into)
     }
 
-    pub fn key(&self) -> ReceiverToken {
-        self.0.key().into()
-    }
+    pub fn key(&self) -> ReceiverToken { self.0.key().into() }
 }
 
 #[derive(uniffi::Record)]
@@ -180,9 +156,7 @@ pub trait CanBroadcast: Send + Sync {
 pub struct UncheckedProposal(super::UncheckedProposal);
 
 impl From<super::UncheckedProposal> for UncheckedProposal {
-    fn from(value: super::UncheckedProposal) -> Self {
-        Self(value)
-    }
+    fn from(value: super::UncheckedProposal) -> Self { Self(value) }
 }
 
 #[uniffi::export]
@@ -252,9 +226,7 @@ impl UncheckedProposal {
 pub struct MaybeInputsOwned(super::MaybeInputsOwned);
 
 impl From<super::MaybeInputsOwned> for MaybeInputsOwned {
-    fn from(value: super::MaybeInputsOwned) -> Self {
-        Self(value)
-    }
+    fn from(value: super::MaybeInputsOwned) -> Self { Self(value) }
 }
 
 #[uniffi::export(with_foreign)]
@@ -292,9 +264,7 @@ pub trait IsOutputKnown: Send + Sync {
 pub struct MaybeInputsSeen(super::MaybeInputsSeen);
 
 impl From<super::MaybeInputsSeen> for MaybeInputsSeen {
-    fn from(value: super::MaybeInputsSeen) -> Self {
-        Self(value)
-    }
+    fn from(value: super::MaybeInputsSeen) -> Self { Self(value) }
 }
 
 #[uniffi::export]
@@ -322,9 +292,7 @@ impl MaybeInputsSeen {
 pub struct OutputsUnknown(super::OutputsUnknown);
 
 impl From<super::OutputsUnknown> for OutputsUnknown {
-    fn from(value: super::OutputsUnknown) -> Self {
-        Self(value)
-    }
+    fn from(value: super::OutputsUnknown) -> Self { Self(value) }
 }
 
 #[uniffi::export]
@@ -349,15 +317,11 @@ impl OutputsUnknown {
 pub struct WantsOutputs(super::WantsOutputs);
 
 impl From<super::WantsOutputs> for WantsOutputs {
-    fn from(value: super::WantsOutputs) -> Self {
-        Self(value)
-    }
+    fn from(value: super::WantsOutputs) -> Self { Self(value) }
 }
 #[uniffi::export]
 impl WantsOutputs {
-    pub fn output_substitution(&self) -> OutputSubstitution {
-        self.0.output_substitution()
-    }
+    pub fn output_substitution(&self) -> OutputSubstitution { self.0.output_substitution() }
 
     pub fn replace_receiver_outputs(
         &self,
@@ -369,9 +333,7 @@ impl WantsOutputs {
             .map(|t| Arc::new(t.into()))
     }
 
-    pub fn commit_outputs(&self) -> Arc<WantsInputs> {
-        Arc::new(self.0.commit_outputs().into())
-    }
+    pub fn commit_outputs(&self) -> Arc<WantsInputs> { Arc::new(self.0.commit_outputs().into()) }
 
     pub fn substitute_receiver_script(
         &self,
@@ -385,9 +347,7 @@ impl WantsOutputs {
 pub struct WantsInputs(super::WantsInputs);
 
 impl From<super::WantsInputs> for WantsInputs {
-    fn from(value: super::WantsInputs) -> Self {
-        Self(value)
-    }
+    fn from(value: super::WantsInputs) -> Self { Self(value) }
 }
 
 #[uniffi::export]
@@ -435,9 +395,7 @@ impl WantsInputs {
 pub struct ProvisionalProposal(super::ProvisionalProposal);
 
 impl From<super::ProvisionalProposal> for ProvisionalProposal {
-    fn from(value: super::ProvisionalProposal) -> Self {
-        Self(value)
-    }
+    fn from(value: super::ProvisionalProposal) -> Self { Self(value) }
 }
 
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
@@ -472,15 +430,11 @@ pub trait ProcessPsbt: Send + Sync {
 pub struct PayjoinProposal(super::PayjoinProposal);
 
 impl From<PayjoinProposal> for super::PayjoinProposal {
-    fn from(value: PayjoinProposal) -> Self {
-        value.0
-    }
+    fn from(value: PayjoinProposal) -> Self { value.0 }
 }
 
 impl From<super::PayjoinProposal> for PayjoinProposal {
-    fn from(value: super::PayjoinProposal) -> Self {
-        Self(value)
-    }
+    fn from(value: super::PayjoinProposal) -> Self { Self(value) }
 }
 
 #[uniffi::export]
@@ -495,9 +449,7 @@ impl PayjoinProposal {
         outpoints
     }
 
-    pub fn psbt(&self) -> String {
-        self.0.psbt()
-    }
+    pub fn psbt(&self) -> String { self.0.psbt() }
 
     /// Extract an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
     pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestResponse, Error> {

@@ -10,15 +10,11 @@ use crate::{ClientResponse, ImplementationError, PjUri, Request};
 pub struct SenderBuilder(super::SenderBuilder);
 
 impl From<super::SenderBuilder> for SenderBuilder {
-    fn from(value: super::SenderBuilder) -> Self {
-        Self(value)
-    }
+    fn from(value: super::SenderBuilder) -> Self { Self(value) }
 }
 
 impl From<SenderBuilder> for super::SenderBuilder {
-    fn from(value: SenderBuilder) -> Self {
-        value.0
-    }
+    fn from(value: SenderBuilder) -> Self { value.0 }
 }
 
 #[uniffi::export]
@@ -96,9 +92,7 @@ impl SenderBuilder {
 pub struct NewSender(super::NewSender);
 
 impl From<super::NewSender> for NewSender {
-    fn from(value: super::NewSender) -> Self {
-        Self(value)
-    }
+    fn from(value: super::NewSender) -> Self { Self(value) }
 }
 
 #[uniffi::export]
@@ -116,15 +110,11 @@ impl NewSender {
 pub struct Sender(super::Sender);
 
 impl From<super::Sender> for Sender {
-    fn from(value: super::Sender) -> Self {
-        Self(value)
-    }
+    fn from(value: super::Sender) -> Self { Self(value) }
 }
 
 impl From<Sender> for super::Sender {
-    fn from(value: Sender) -> Self {
-        value.0
-    }
+    fn from(value: Sender) -> Self { value.0 }
 }
 
 #[uniffi::export]
@@ -154,25 +144,20 @@ impl Sender {
         ohttp_relay_url: String,
     ) -> Result<RequestV2PostContext, CreateRequestError> {
         match self.0.extract_v2(ohttp_relay_url) {
-            Ok((req, ctx)) => {
-                Ok(RequestV2PostContext { request: req, context: Arc::new(ctx.into()) })
-            }
+            Ok((req, ctx)) =>
+                Ok(RequestV2PostContext { request: req, context: Arc::new(ctx.into()) }),
             Err(e) => Err(e),
         }
     }
 
-    pub fn to_json(&self) -> Result<String, SerdeJsonError> {
-        self.0.to_json()
-    }
+    pub fn to_json(&self) -> Result<String, SerdeJsonError> { self.0.to_json() }
 
     #[uniffi::constructor]
     pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
         super::Sender::from_json(json).map(Into::into)
     }
 
-    pub fn key(&self) -> SenderToken {
-        self.0.key().into()
-    }
+    pub fn key(&self) -> SenderToken { self.0.key().into() }
 }
 
 #[derive(uniffi::Record)]
@@ -193,9 +178,7 @@ pub struct RequestV1Context {
 pub struct V1Context(super::V1Context);
 
 impl From<super::V1Context> for V1Context {
-    fn from(value: super::V1Context) -> Self {
-        Self(value)
-    }
+    fn from(value: super::V1Context) -> Self { Self(value) }
 }
 
 #[uniffi::export]
@@ -224,9 +207,7 @@ impl V2PostContext {
 }
 
 impl From<super::V2PostContext> for V2PostContext {
-    fn from(value: super::V2PostContext) -> Self {
-        Self(value)
-    }
+    fn from(value: super::V2PostContext) -> Self { Self(value) }
 }
 
 #[derive(uniffi::Record)]
@@ -239,9 +220,7 @@ pub struct RequestOhttpContext {
 pub struct V2GetContext(super::V2GetContext);
 
 impl From<super::V2GetContext> for V2GetContext {
-    fn from(value: super::V2GetContext) -> Self {
-        Self(value)
-    }
+    fn from(value: super::V2GetContext) -> Self { Self(value) }
 }
 
 #[uniffi::export]
@@ -279,9 +258,7 @@ struct CallbackPersisterAdapter {
 }
 
 impl CallbackPersisterAdapter {
-    pub fn new(callback_persister: Arc<dyn SenderPersister>) -> Self {
-        Self { callback_persister }
-    }
+    pub fn new(callback_persister: Arc<dyn SenderPersister>) -> Self { Self { callback_persister } }
 }
 
 // Implement the Persister trait for the adapter
@@ -305,19 +282,13 @@ impl payjoin::persist::Persister<payjoin::send::v2::Sender> for CallbackPersiste
 pub struct SenderToken(#[allow(dead_code)] payjoin::send::v2::SenderToken);
 
 impl std::fmt::Display for SenderToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) }
 }
 
 impl From<payjoin::send::v2::Sender> for SenderToken {
-    fn from(value: payjoin::send::v2::Sender) -> Self {
-        SenderToken(value.into())
-    }
+    fn from(value: payjoin::send::v2::Sender) -> Self { SenderToken(value.into()) }
 }
 
 impl From<payjoin::send::v2::SenderToken> for SenderToken {
-    fn from(value: payjoin::send::v2::SenderToken) -> Self {
-        SenderToken(value)
-    }
+    fn from(value: payjoin::send::v2::SenderToken) -> Self { SenderToken(value) }
 }

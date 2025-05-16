@@ -7,9 +7,7 @@
 pub struct ImplementationError(#[from] payjoin::ImplementationError);
 
 impl From<String> for ImplementationError {
-    fn from(value: String) -> Self {
-        Self(value.into())
-    }
+    fn from(value: String) -> Self { Self(value.into()) }
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -6,9 +6,7 @@ pub struct PjParseError {
 }
 
 impl From<String> for PjParseError {
-    fn from(msg: String) -> Self {
-        PjParseError { msg }
-    }
+    fn from(msg: String) -> Self { PjParseError { msg } }
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -19,9 +17,7 @@ pub struct PjNotSupported {
 }
 
 impl From<String> for PjNotSupported {
-    fn from(msg: String) -> Self {
-        PjNotSupported { msg }
-    }
+    fn from(msg: String) -> Self { PjNotSupported { msg } }
 }
 
 #[derive(Debug, thiserror::Error)]

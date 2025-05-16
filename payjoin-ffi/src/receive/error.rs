@@ -56,15 +56,11 @@ pub struct ReplyableError(#[from] receive::ReplyableError);
 pub struct JsonReply(receive::JsonReply);
 
 impl From<JsonReply> for receive::JsonReply {
-    fn from(value: JsonReply) -> Self {
-        value.0
-    }
+    fn from(value: JsonReply) -> Self { value.0 }
 }
 
 impl From<ReplyableError> for JsonReply {
-    fn from(value: ReplyableError) -> Self {
-        Self(value.0.into())
-    }
+    fn from(value: ReplyableError) -> Self { Self(value.0.into()) }
 }
 
 /// Error that may occur during a v2 session typestate change

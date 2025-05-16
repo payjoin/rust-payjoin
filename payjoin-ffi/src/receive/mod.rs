@@ -24,15 +24,11 @@ pub mod uni;
 pub struct NewReceiver(payjoin::receive::v2::NewReceiver);
 
 impl From<NewReceiver> for payjoin::receive::v2::NewReceiver {
-    fn from(value: NewReceiver) -> Self {
-        value.0
-    }
+    fn from(value: NewReceiver) -> Self { value.0 }
 }
 
 impl From<payjoin::receive::v2::NewReceiver> for NewReceiver {
-    fn from(value: payjoin::receive::v2::NewReceiver) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::receive::v2::NewReceiver) -> Self { Self(value) }
 }
 
 impl NewReceiver {
@@ -78,15 +74,11 @@ impl NewReceiver {
 pub struct Receiver(payjoin::receive::v2::Receiver);
 
 impl From<Receiver> for payjoin::receive::v2::Receiver {
-    fn from(value: Receiver) -> Self {
-        value.0
-    }
+    fn from(value: Receiver) -> Self { value.0 }
 }
 
 impl From<payjoin::receive::v2::Receiver> for Receiver {
-    fn from(value: payjoin::receive::v2::Receiver) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::receive::v2::Receiver) -> Self { Self(value) }
 }
 
 impl Receiver {
@@ -138,24 +130,18 @@ impl Receiver {
             .map(Into::into)
     }
 
-    pub fn key(&self) -> ReceiverToken {
-        self.0.key()
-    }
+    pub fn key(&self) -> ReceiverToken { self.0.key() }
 }
 
 #[derive(Clone)]
 pub struct UncheckedProposal(payjoin::receive::v2::UncheckedProposal);
 
 impl From<payjoin::receive::v2::UncheckedProposal> for UncheckedProposal {
-    fn from(value: payjoin::receive::v2::UncheckedProposal) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::receive::v2::UncheckedProposal) -> Self { Self(value) }
 }
 
 impl From<UncheckedProposal> for payjoin::receive::v2::UncheckedProposal {
-    fn from(value: UncheckedProposal) -> Self {
-        value.0
-    }
+    fn from(value: UncheckedProposal) -> Self { value.0 }
 }
 
 impl UncheckedProposal {
@@ -220,9 +206,7 @@ impl UncheckedProposal {
 pub struct MaybeInputsOwned(payjoin::receive::v2::MaybeInputsOwned);
 
 impl From<payjoin::receive::v2::MaybeInputsOwned> for MaybeInputsOwned {
-    fn from(value: payjoin::receive::v2::MaybeInputsOwned) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::receive::v2::MaybeInputsOwned) -> Self { Self(value) }
 }
 
 impl MaybeInputsOwned {
@@ -242,9 +226,7 @@ impl MaybeInputsOwned {
 pub struct MaybeInputsSeen(payjoin::receive::v2::MaybeInputsSeen);
 
 impl From<payjoin::receive::v2::MaybeInputsSeen> for MaybeInputsSeen {
-    fn from(value: payjoin::receive::v2::MaybeInputsSeen) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::receive::v2::MaybeInputsSeen) -> Self { Self(value) }
 }
 
 impl MaybeInputsSeen {
@@ -268,9 +250,7 @@ impl MaybeInputsSeen {
 pub struct OutputsUnknown(payjoin::receive::v2::OutputsUnknown);
 
 impl From<payjoin::receive::v2::OutputsUnknown> for OutputsUnknown {
-    fn from(value: payjoin::receive::v2::OutputsUnknown) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::receive::v2::OutputsUnknown) -> Self { Self(value) }
 }
 
 impl OutputsUnknown {
@@ -290,15 +270,11 @@ impl OutputsUnknown {
 pub struct WantsOutputs(payjoin::receive::v2::WantsOutputs);
 
 impl From<payjoin::receive::v2::WantsOutputs> for WantsOutputs {
-    fn from(value: payjoin::receive::v2::WantsOutputs) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::receive::v2::WantsOutputs) -> Self { Self(value) }
 }
 
 impl WantsOutputs {
-    pub fn output_substitution(&self) -> OutputSubstitution {
-        self.0.output_substitution()
-    }
+    pub fn output_substitution(&self) -> OutputSubstitution { self.0.output_substitution() }
 
     pub fn replace_receiver_outputs(
         &self,
@@ -325,17 +301,13 @@ impl WantsOutputs {
             .map_err(Into::into)
     }
 
-    pub fn commit_outputs(&self) -> WantsInputs {
-        self.0.clone().commit_outputs().into()
-    }
+    pub fn commit_outputs(&self) -> WantsInputs { self.0.clone().commit_outputs().into() }
 }
 
 pub struct WantsInputs(payjoin::receive::v2::WantsInputs);
 
 impl From<payjoin::receive::v2::WantsInputs> for WantsInputs {
-    fn from(value: payjoin::receive::v2::WantsInputs) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::receive::v2::WantsInputs) -> Self { Self(value) }
 }
 impl WantsInputs {
     /// Select receiver input such that the payjoin avoids surveillance.
@@ -370,9 +342,7 @@ impl WantsInputs {
             .map_err(Into::into)
     }
 
-    pub fn commit_inputs(&self) -> ProvisionalProposal {
-        self.0.clone().commit_inputs().into()
-    }
+    pub fn commit_inputs(&self) -> ProvisionalProposal { self.0.clone().commit_inputs().into() }
 }
 
 #[derive(Debug, Clone)]
@@ -391,23 +361,17 @@ impl InputPair {
 }
 
 impl From<InputPair> for payjoin::receive::InputPair {
-    fn from(value: InputPair) -> Self {
-        value.0
-    }
+    fn from(value: InputPair) -> Self { value.0 }
 }
 
 impl From<payjoin::receive::InputPair> for InputPair {
-    fn from(value: payjoin::receive::InputPair) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::receive::InputPair) -> Self { Self(value) }
 }
 
 pub struct ProvisionalProposal(pub payjoin::receive::v2::ProvisionalProposal);
 
 impl From<payjoin::receive::v2::ProvisionalProposal> for ProvisionalProposal {
-    fn from(value: payjoin::receive::v2::ProvisionalProposal) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::receive::v2::ProvisionalProposal) -> Self { Self(value) }
 }
 
 impl ProvisionalProposal {
@@ -436,15 +400,11 @@ impl ProvisionalProposal {
 pub struct PayjoinProposal(pub payjoin::receive::v2::PayjoinProposal);
 
 impl From<PayjoinProposal> for payjoin::receive::v2::PayjoinProposal {
-    fn from(value: PayjoinProposal) -> Self {
-        value.0
-    }
+    fn from(value: PayjoinProposal) -> Self { value.0 }
 }
 
 impl From<payjoin::receive::v2::PayjoinProposal> for PayjoinProposal {
-    fn from(value: payjoin::receive::v2::PayjoinProposal) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::receive::v2::PayjoinProposal) -> Self { Self(value) }
 }
 
 impl PayjoinProposal {

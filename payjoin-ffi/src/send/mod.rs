@@ -22,9 +22,7 @@ pub mod uni;
 pub struct SenderBuilder(payjoin::send::v2::SenderBuilder<'static>);
 
 impl From<payjoin::send::v2::SenderBuilder<'static>> for SenderBuilder {
-    fn from(value: payjoin::send::v2::SenderBuilder<'static>) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::send::v2::SenderBuilder<'static>) -> Self { Self(value) }
 }
 
 impl SenderBuilder {
@@ -112,9 +110,7 @@ impl SenderBuilder {
 pub struct NewSender(payjoin::send::v2::NewSender);
 
 impl From<payjoin::send::v2::NewSender> for NewSender {
-    fn from(value: payjoin::send::v2::NewSender) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::send::v2::NewSender) -> Self { Self(value) }
 }
 
 impl NewSender {
@@ -130,15 +126,11 @@ impl NewSender {
 pub struct Sender(payjoin::send::v2::Sender);
 
 impl From<payjoin::send::v2::Sender> for Sender {
-    fn from(value: payjoin::send::v2::Sender) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::send::v2::Sender) -> Self { Self(value) }
 }
 
 impl From<Sender> for payjoin::send::v2::Sender {
-    fn from(value: Sender) -> Self {
-        value.0
-    }
+    fn from(value: Sender) -> Self { value.0 }
 }
 
 impl Sender {
@@ -175,9 +167,7 @@ impl Sender {
         serde_json::from_str::<payjoin::send::v2::Sender>(json).map_err(Into::into).map(Into::into)
     }
 
-    pub fn key(&self) -> SenderToken {
-        self.0.key()
-    }
+    pub fn key(&self) -> SenderToken { self.0.key() }
 }
 
 /// Data required for validation of response.
@@ -185,9 +175,7 @@ impl Sender {
 #[derive(Clone)]
 pub struct V1Context(Arc<payjoin::send::v1::V1Context>);
 impl From<payjoin::send::v1::V1Context> for V1Context {
-    fn from(value: payjoin::send::v1::V1Context) -> Self {
-        Self(Arc::new(value))
-    }
+    fn from(value: payjoin::send::v1::V1Context) -> Self { Self(Arc::new(value)) }
 }
 
 impl V1Context {
@@ -224,17 +212,13 @@ impl From<&V2PostContext> for payjoin::send::v2::V2PostContext {
 }
 
 impl From<payjoin::send::v2::V2PostContext> for V2PostContext {
-    fn from(value: payjoin::send::v2::V2PostContext) -> Self {
-        Self(Mutex::new(Some(value)))
-    }
+    fn from(value: payjoin::send::v2::V2PostContext) -> Self { Self(Mutex::new(Some(value))) }
 }
 
 pub struct V2GetContext(payjoin::send::v2::V2GetContext);
 
 impl From<payjoin::send::v2::V2GetContext> for V2GetContext {
-    fn from(value: payjoin::send::v2::V2GetContext) -> Self {
-        Self(value)
-    }
+    fn from(value: payjoin::send::v2::V2GetContext) -> Self { Self(value) }
 }
 
 impl V2GetContext {

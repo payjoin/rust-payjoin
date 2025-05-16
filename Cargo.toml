@@ -7,3 +7,10 @@ path = "payjoin"
 
 [patch.crates-io.payjoin-directory]
 path = "payjoin-directory"
+
+[profile.release-smaller]
+inherits = "release"
+opt-level = 'z'
+lto = true
+codegen-units = 1
+strip = true

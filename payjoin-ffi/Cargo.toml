@@ -48,10 +48,3 @@ rustls = "0.22.2"
 testcontainers = "0.15.0"
 testcontainers-modules = { version = "0.1.3", features = ["redis"] }
 uniffi = { version = "0.29.1", features = ["bindgen-tests"] }
-
-[profile.release-smaller]
-inherits = "release"
-opt-level = 'z'
-lto = true
-codegen-units = 1
-strip = true

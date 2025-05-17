@@ -41,6 +41,28 @@ pub enum MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err> 
 impl<Event, NextState, CurrentState, Err>
     MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err>
 {
+    #[inline]
+    pub fn fatal(event: Event, error: Err) -> Self {
+        MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::fatal(event, error))
+    }
+
+    #[inline]
+    pub fn transient(error: Err) -> Self {
+        MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::transient(error))
+    }
+
+    #[inline]
+    pub fn no_results(current_state: CurrentState) -> Self {
+        MaybeFatalTransitionWithNoResults::Ok(AcceptWithMaybeNoResults::NoResults(current_state))
+    }
+
+    #[inline]
+    pub fn success(event: Event, next_state: NextState) -> Self {
+        MaybeFatalTransitionWithNoResults::Ok(AcceptWithMaybeNoResults::Success(AcceptNextState(
+            event, next_state,
+        )))
+    }
+
     pub fn save<P>(
         self,
         persister: &P,
@@ -64,6 +86,21 @@ pub enum MaybeFatalTransition<Event, NextState, Err> {
 }
 
 impl<Event, NextState, Err> MaybeFatalTransition<Event, NextState, Err> {
+    #[inline]
+    pub fn fatal(event: Event, error: Err) -> Self {
+        MaybeFatalTransition::Err(MaybeFatalRejection::fatal(event, error))
+    }
+
+    #[inline]
+    pub fn transient(error: Err) -> Self {
+        MaybeFatalTransition::Err(MaybeFatalRejection::transient(error))
+    }
+
+    #[inline]
+    pub fn success(event: Event, next_state: NextState) -> Self {
+        MaybeFatalTransition::Ok(AcceptNextState(event, next_state))
+    }
+
     pub fn save<P>(
         self,
         persister: &P,
@@ -189,6 +226,15 @@ pub enum AcceptWithMaybeNoResults<Event, NextState, CurrentState> {
 pub enum MaybeFatalRejection<Event, Err> {
     Fatal(RejectFatal<Event, Err>),
     Transient(RejectTransient<Err>),
+}
+
+impl<Event, Err> MaybeFatalRejection<Event, Err> {
+    #[inline]
+    pub fn fatal(event: Event, error: Err) -> Self {
+        MaybeFatalRejection::Fatal(RejectFatal(event, error))
+    }
+    #[inline]
+    pub fn transient(error: Err) -> Self { MaybeFatalRejection::Transient(RejectTransient(error)) }
 }
 
 pub struct RejectFatal<Event, Err>(pub Event, pub Err);

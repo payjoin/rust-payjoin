@@ -642,42 +642,49 @@ mod integration {
             custom_inputs: Option<Vec<InputPair>>,
         ) -> Result<Receiver<PayjoinProposal>, BoxError> {
             // Create noop persister to reduce boilerplate
-            let noop_persister = NoopPersister::<ReceiverSessionEvent>::default();
+            let persister = NoopPersister::<ReceiverSessionEvent>::default();
             // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
             let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
             // Receive Check 1: Can Broadcast
-            let state_transition = proposal.check_broadcast_suitability(None, |tx| {
-                Ok(receiver
-                    .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])?
-                    .first()
-                    .ok_or(ImplementationError::from("testmempoolaccept should return a result"))?
-                    .allowed)
-            });
-            let proposal = noop_persister.save_maybe_fatal_error_transition(state_transition)?;
+            let proposal = proposal
+                .check_broadcast_suitability(None, |tx| {
+                    Ok(receiver
+                        .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])?
+                        .first()
+                        .ok_or(ImplementationError::from(
+                            "testmempoolaccept should return a result",
+                        ))?
+                        .allowed)
+                })
+                .save(&persister)?;
 
             // Receive Check 2: receiver can't sign for proposal inputs
-            let state_transition = proposal.check_inputs_not_owned(|input| {
-                let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)?;
-                Ok(receiver.get_address_info(&address).map(|info| info.is_mine.unwrap_or(false))?)
-            });
-            let proposal = noop_persister.save_maybe_fatal_error_transition(state_transition)?;
+            let proposal = proposal
+                .check_inputs_not_owned(|input| {
+                    let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)?;
+                    Ok(receiver
+                        .get_address_info(&address)
+                        .map(|info| info.is_mine.unwrap_or(false))?)
+                })
+                .save(&persister)?;
 
             // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
-            let state_transition = proposal.check_no_inputs_seen_before(|_| Ok(false));
-            let proposal = noop_persister.save_maybe_fatal_error_transition(state_transition)?;
+            let proposal = proposal.check_no_inputs_seen_before(|_| Ok(false)).save(&persister)?;
 
             // Receive Check 4: identify receiver outputs
-            let state_transition = proposal.identify_receiver_outputs(|output_script| {
-                let address =
-                    bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)?;
-                Ok(receiver.get_address_info(&address).map(|info| info.is_mine.unwrap_or(false))?)
-            });
-            let proposal = noop_persister.save_maybe_fatal_error_transition(state_transition)?;
+            let proposal = proposal
+                .identify_receiver_outputs(|output_script| {
+                    let address =
+                        bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)?;
+                    Ok(receiver
+                        .get_address_info(&address)
+                        .map(|info| info.is_mine.unwrap_or(false))?)
+                })
+                .save(&persister)?;
 
             // Receive Check 5: commit outputs
-            let state_transition = proposal.commit_outputs();
-            let payjoin = noop_persister.save_progression_transition(state_transition)?;
+            let proposal = proposal.commit_outputs().save(&persister)?;
 
             let inputs = match custom_inputs {
                 Some(inputs) => inputs,
@@ -688,20 +695,20 @@ mod integration {
                         .into_iter()
                         .map(input_pair_from_list_unspent);
                     let selected_input =
-                        payjoin.try_preserving_privacy(candidate_inputs).map_err(|e| {
+                        proposal.try_preserving_privacy(candidate_inputs).map_err(|e| {
                             format!("Failed to make privacy preserving selection: {:?}", e)
                         })?;
                     vec![selected_input]
                 }
             };
-            let state_transition = payjoin
+            let proposal = proposal
                 .contribute_inputs(inputs)
                 .map_err(|e| format!("Failed to contribute inputs: {:?}", e))?
-                .commit_inputs();
-            let payjoin = noop_persister.save_progression_transition(state_transition)?;
+                .commit_inputs()
+                .save(&persister)?;
 
             // Sign and finalize the proposal PSBT
-            let state_transition = payjoin.finalize_proposal(
+            let proposal = proposal.finalize_proposal(
                 |psbt: &Psbt| {
                     Ok(receiver
                         .wallet_process_psbt(
@@ -717,8 +724,8 @@ mod integration {
                 Some(FeeRate::BROADCAST_MIN),
                 Some(FeeRate::from_sat_per_vb_unchecked(2)),
             );
-            let payjoin = noop_persister.save_maybe_transient_error_transition(state_transition)?;
-            Ok(payjoin)
+            let proposal = proposal.save(&persister)?;
+            Ok(proposal)
         }
 
         pub fn build_sweep_psbt(

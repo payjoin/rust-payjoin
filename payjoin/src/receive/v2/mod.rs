@@ -20,10 +20,10 @@ use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicK
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
-    AcceptCompleted, AcceptNextState, AcceptWithMaybeNoResults, MaybeBadInitInputsTransition,
-    MaybeFatalRejection, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
-    MaybeSuccessTransition, MaybeTransientTransition, NextStateTransition, PersistedSession,
-    RejectBadInitInputs, RejectFatal, RejectTransient,
+    AcceptCompleted, AcceptNextState, MaybeBadInitInputsTransition, MaybeFatalRejection,
+    MaybeFatalTransition, MaybeFatalTransitionWithNoResults, MaybeSuccessTransition,
+    MaybeTransientTransition, NextStateTransition, PersistedSession, RejectBadInitInputs,
+    RejectFatal, RejectTransient,
 };
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
@@ -353,24 +353,18 @@ impl Receiver<ReceiverWithContext> {
             }
         };
 
-        // .unwrap_or_default();
-
         if let Some(proposal) = proposal {
-            MaybeFatalTransitionWithNoResults::Ok(AcceptWithMaybeNoResults::Success(
-                AcceptNextState(
-                    ReceiverSessionEvent::UncheckedProposal(proposal.clone()),
-                    Receiver {
-                        state: UncheckedProposal {
-                            v1: proposal,
-                            context: SessionContext { e, ..session_context },
-                        },
+            MaybeFatalTransitionWithNoResults::success(
+                ReceiverSessionEvent::UncheckedProposal(proposal.clone()),
+                Receiver {
+                    state: UncheckedProposal {
+                        v1: proposal,
+                        context: SessionContext { e, ..session_context },
                     },
-                ),
-            ))
+                },
+            )
         } else {
-            MaybeFatalTransitionWithNoResults::Ok(AcceptWithMaybeNoResults::NoResults(
-                current_state,
-            ))
+            MaybeFatalTransitionWithNoResults::no_results(current_state)
         }
     }
 
@@ -530,18 +524,14 @@ impl Receiver<UncheckedProposal> {
                 Err(e) => {
                     match e {
                         ReplyableError::Implementation(_) => {
-                            return MaybeFatalTransition::Err(MaybeFatalRejection::Transient(
-                                RejectTransient(Error::ReplyToSender(e)),
-                            ));
+                            return MaybeFatalTransition::transient(Error::ReplyToSender(e));
                         }
                         // Payload or spec related error as treated as fatal
                         _ => {
-                            return MaybeFatalTransition::Err(MaybeFatalRejection::Fatal(
-                                RejectFatal(
-                                    ReceiverSessionEvent::SessionInvalid(e.to_string()),
-                                    Error::ReplyToSender(e),
-                                ),
-                            ));
+                            return MaybeFatalTransition::fatal(
+                                ReceiverSessionEvent::SessionInvalid(e.to_string()),
+                                Error::ReplyToSender(e),
+                            );
                         }
                     }
                 }
@@ -640,22 +630,20 @@ impl Receiver<MaybeInputsOwned> {
             Ok(inner) => inner,
             Err(e) => match e {
                 ReplyableError::Implementation(_) => {
-                    return MaybeFatalTransition::Err(MaybeFatalRejection::Transient(
-                        RejectTransient(e),
-                    ));
+                    return MaybeFatalTransition::transient(e);
                 }
                 _ => {
-                    return MaybeFatalTransition::Err(MaybeFatalRejection::Fatal(RejectFatal(
+                    return MaybeFatalTransition::fatal(
                         ReceiverSessionEvent::SessionInvalid(e.to_string()),
                         e,
-                    )));
+                    );
                 }
             },
         };
-        MaybeFatalTransition::Ok(AcceptNextState(
+        MaybeFatalTransition::success(
             ReceiverSessionEvent::MaybeInputsSeen(inner.clone()),
             Receiver { state: MaybeInputsSeen { v1: inner, context: self.state.context.clone() } },
-        ))
+        )
     }
 
     pub fn apply_maybe_inputs_seen(self, v1: v1::MaybeInputsSeen) -> ReceiverState {
@@ -686,22 +674,20 @@ impl Receiver<MaybeInputsSeen> {
             Ok(inner) => inner,
             Err(e) => match e {
                 ReplyableError::Implementation(_) => {
-                    return MaybeFatalTransition::Err(MaybeFatalRejection::Transient(
-                        RejectTransient(e),
-                    ));
+                    return MaybeFatalTransition::transient(e);
                 }
                 _ => {
-                    return MaybeFatalTransition::Err(MaybeFatalRejection::Fatal(RejectFatal(
+                    return MaybeFatalTransition::fatal(
                         ReceiverSessionEvent::SessionInvalid(e.to_string()),
                         e,
-                    )));
+                    );
                 }
             },
         };
-        MaybeFatalTransition::Ok(AcceptNextState(
+        MaybeFatalTransition::success(
             ReceiverSessionEvent::OutputsUnknown(inner.clone()),
             Receiver { state: OutputsUnknown { v1: inner, context: self.state.context.clone() } },
-        ))
+        )
     }
 
     pub fn apply_outputs_unknown(self, v1: v1::OutputsUnknown) -> ReceiverState {
@@ -731,22 +717,20 @@ impl Receiver<OutputsUnknown> {
             Ok(inner) => inner,
             Err(e) => match e {
                 ReplyableError::Implementation(_) => {
-                    return MaybeFatalTransition::Err(MaybeFatalRejection::Transient(
-                        RejectTransient(e),
-                    ));
+                    return MaybeFatalTransition::transient(e);
                 }
                 _ => {
-                    return MaybeFatalTransition::Err(MaybeFatalRejection::Fatal(RejectFatal(
+                    return MaybeFatalTransition::fatal(
                         ReceiverSessionEvent::SessionInvalid(e.to_string()),
                         e,
-                    )));
+                    );
                 }
             },
         };
-        MaybeFatalTransition::Ok(AcceptNextState(
+        MaybeFatalTransition::success(
             ReceiverSessionEvent::WantsOutputs(inner.clone()),
             Receiver { state: WantsOutputs { v1: inner, context: self.state.context.clone() } },
-        ))
+        )
     }
 
     pub fn apply_wants_outputs(self, v1: v1::WantsOutputs) -> ReceiverState {

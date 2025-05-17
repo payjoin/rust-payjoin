@@ -34,9 +34,8 @@ use super::*;
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
 use crate::persist::{
-    AcceptNextState, AcceptWithMaybeNoResults, MaybeBadInitInputsTransition, MaybeFatalRejection,
-    MaybeFatalTransition, MaybeFatalTransitionWithNoResults, PersistedSession, RejectBadInitInputs,
-    RejectFatal, RejectTransient,
+    AcceptNextState, MaybeBadInitInputsTransition, MaybeFatalTransition,
+    MaybeFatalTransitionWithNoResults, PersistedSession, RejectBadInitInputs,
 };
 use crate::send::v1;
 use crate::uri::{ShortId, UrlExt};
@@ -350,18 +349,18 @@ impl Sender<SenderWithReplyKey> {
         {
             Ok(response_array) => response_array,
             Err(_) =>
-                return MaybeFatalTransition::Err(MaybeFatalRejection::Fatal(RejectFatal(
+                return MaybeFatalTransition::fatal(
                     SenderSessionEvent::SessionInvalid(format!("Invalid size: {}", response.len())),
                     InternalEncapsulationError::InvalidSize(response.len()).into(),
-                ))),
+                ),
         };
         let response = match ohttp_decapsulate(post_ctx.ohttp_ctx, response_array) {
             Ok(response) => response,
             Err(e) =>
-                return MaybeFatalTransition::Err(MaybeFatalRejection::Fatal(RejectFatal(
+                return MaybeFatalTransition::fatal(
                     SenderSessionEvent::SessionInvalid(e.to_string()),
                     InternalEncapsulationError::Ohttp(e).into(),
-                ))),
+                ),
         };
         match response.status() {
             http::StatusCode::OK => {
@@ -371,18 +370,18 @@ impl Sender<SenderWithReplyKey> {
                     psbt_ctx: post_ctx.psbt_ctx,
                     hpke_ctx: post_ctx.hpke_ctx,
                 };
-                MaybeFatalTransition::Ok(AcceptNextState(
+                MaybeFatalTransition::success(
                     SenderSessionEvent::V2GetContext(v2_get_context.clone()),
                     Sender { state: v2_get_context },
-                ))
+                )
             }
-            _ => MaybeFatalTransition::Err(MaybeFatalRejection::Fatal(RejectFatal(
+            _ => MaybeFatalTransition::fatal(
                 SenderSessionEvent::SessionInvalid(format!(
                     "Unexpected status code: {}",
                     response.status()
                 )),
                 InternalEncapsulationError::UnexpectedStatusCode(response.status()).into(),
-            ))),
+            ),
         }
     }
 
@@ -528,42 +527,32 @@ impl Sender<V2GetContext> {
         Sender<V2GetContext>,
         ResponseError,
     > {
-        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
-            match response.try_into() {
-                Ok(response_array) => response_array,
-                Err(_) =>
-                    return MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::Fatal(
-                        RejectFatal(
-                            SenderSessionEvent::SessionInvalid(format!(
-                                "Invalid size: {}",
-                                response.len()
-                            )),
-                            InternalEncapsulationError::InvalidSize(response.len()).into(),
-                        ),
-                    )),
-            };
+        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] = match response
+            .try_into()
+        {
+            Ok(response_array) => response_array,
+            Err(_) =>
+                return MaybeFatalTransitionWithNoResults::fatal(
+                    SenderSessionEvent::SessionInvalid(format!("Invalid size: {}", response.len())),
+                    InternalEncapsulationError::InvalidSize(response.len()).into(),
+                ),
+        };
         let response = match ohttp_decapsulate(ohttp_ctx, response_array) {
             Ok(response) => response,
             Err(e) =>
-                return MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::Fatal(
-                    RejectFatal(
-                        SenderSessionEvent::SessionInvalid(e.to_string()),
-                        InternalEncapsulationError::Ohttp(e).into(),
-                    ),
-                )),
+                return MaybeFatalTransitionWithNoResults::fatal(
+                    SenderSessionEvent::SessionInvalid(e.to_string()),
+                    InternalEncapsulationError::Ohttp(e).into(),
+                ),
         };
         let body = match response.status() {
             http::StatusCode::OK => response.body().to_vec(),
             http::StatusCode::ACCEPTED =>
-                return MaybeFatalTransitionWithNoResults::Ok(AcceptWithMaybeNoResults::NoResults(
-                    self.clone(),
-                )),
+                return MaybeFatalTransitionWithNoResults::no_results(self.clone()),
             _ =>
-                return MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::Transient(
-                    RejectTransient(
-                        InternalEncapsulationError::UnexpectedStatusCode(response.status()).into(),
-                    ),
-                )),
+                return MaybeFatalTransitionWithNoResults::transient(
+                    InternalEncapsulationError::UnexpectedStatusCode(response.status()).into(),
+                ),
         };
         let psbt = match decrypt_message_b(
             &body,
@@ -572,29 +561,23 @@ impl Sender<V2GetContext> {
         ) {
             Ok(psbt) => psbt,
             Err(e) =>
-                return MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::Fatal(
-                    RejectFatal(
-                        SenderSessionEvent::SessionInvalid(e.to_string()),
-                        InternalEncapsulationError::Hpke(e).into(),
-                    ),
-                )),
+                return MaybeFatalTransitionWithNoResults::fatal(
+                    SenderSessionEvent::SessionInvalid(e.to_string()),
+                    InternalEncapsulationError::Hpke(e).into(),
+                ),
         };
 
         let proposal = match Psbt::deserialize(&psbt) {
             Ok(proposal) => proposal,
             Err(e) =>
-                return MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::Fatal(
-                    RejectFatal(
-                        SenderSessionEvent::SessionInvalid(e.to_string()),
-                        InternalProposalError::Psbt(e).into(),
-                    ),
-                )),
+                return MaybeFatalTransitionWithNoResults::fatal(
+                    SenderSessionEvent::SessionInvalid(e.to_string()),
+                    InternalProposalError::Psbt(e).into(),
+                ),
         };
         let event = SenderSessionEvent::ProposalReceived(proposal.clone());
         let sender = Sender { state: ProposalReceived { proposal } };
-        MaybeFatalTransitionWithNoResults::Ok(AcceptWithMaybeNoResults::Success(AcceptNextState(
-            event, sender,
-        )))
+        MaybeFatalTransitionWithNoResults::success(event, sender)
     }
 
     pub fn apply_proposal_received(self, proposal: Psbt) -> SenderState {

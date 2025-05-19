@@ -9,11 +9,11 @@ use payjoin::receive::v2::{
     ProvisionalProposal, Receiver, ReceiverState, ReceiverWithContext, UncheckedProposal,
     UninitializedReceiver, WantsInputs, WantsOutputs,
 };
-use payjoin::receive::{ImplementationError, ReplyableError};
+use payjoin::receive::ReplyableError;
 use payjoin::send::v2::{
     replay_sender_event_log, Sender, SenderBuilder, SenderState, SenderWithReplyKey, V2GetContext,
 };
-use payjoin::Uri;
+use payjoin::{ImplementationError, Uri};
 use tokio::sync::watch;
 
 use super::config::Config;
@@ -74,9 +74,9 @@ impl AppTrait for App {
             None => {
                 let persister = SenderPersister::new(self.db.clone())?;
                 let psbt = self.create_original_psbt(&uri, fee_rate)?;
-                let state_transition =
-                    SenderBuilder::new(psbt, uri.clone()).build_recommended(fee_rate);
-                let sender = persister.save_maybe_bad_init_inputs(state_transition)?;
+                let sender = SenderBuilder::new(psbt, uri.clone())
+                    .build_recommended(fee_rate)
+                    .save(&persister)?;
 
                 (SenderState::WithReplyKey(sender), persister)
             }
@@ -95,13 +95,13 @@ impl AppTrait for App {
         let address = self.wallet().get_new_address()?;
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
         let persister = ReceiverPersister::new(self.db.clone())?;
-        let state_transition = Receiver::<UninitializedReceiver>::create_session(
+        let session = Receiver::<UninitializedReceiver>::create_session(
             address,
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys.clone(),
             None,
-        );
-        let session = persister.save_maybe_bad_init_inputs(state_transition)?;
+        )
+        .save(&persister)?;
         println!("Receive session established");
         let mut pj_uri = session.pj_uri();
         pj_uri.amount = Some(amount);
@@ -414,8 +414,7 @@ impl App {
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         let res = post_request(req).await?;
         let payjoin_psbt = proposal.psbt().clone();
-        let state_transition = proposal.process_res(&res.bytes().await?, ohttp_ctx);
-        persister.save_maybe_success_transition(state_transition)?;
+        proposal.process_res(&res.bytes().await?, ohttp_ctx).save(persister)?;
         // Note to self: session is closed by above
         println!(
             "Response successful. Watch mempool for successful Payjoin. TXID: {}",
@@ -499,12 +498,12 @@ fn try_contributing_inputs(
     let selected_input =
         payjoin.try_preserving_privacy(candidate_inputs).map_err(ImplementationError::from)?;
 
-    let state_transition = payjoin
+    let next_state = payjoin
         .contribute_inputs(vec![selected_input])
         .map_err(ImplementationError::from)?
-        .commit_inputs();
+        .commit_inputs()
+        .save(persister)?;
 
-    let next_state = persister.save_progression_transition(state_transition)?;
     Ok(next_state)
 }
 

@@ -378,6 +378,17 @@ pub trait PersistedSession {
     /// Session events types that we are persisting
     type SessionEvent: Event;
 
+    /// Appends to list of session updates, Receives generic events
+    fn save_event(&self, event: &Self::SessionEvent) -> Result<(), Self::InternalStorageError>;
+
+    fn load(
+        &self,
+    ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError>; // Loads the latest session given all updates
+                                                                                           // TODO: this should consume self
+    fn close(&self) -> Result<(), Self::InternalStorageError>; // Marks the session as closed, no more updates will be appended
+}
+
+pub(crate) trait InternalPersistedSession: PersistedSession {
     /// Save progression transition where state transition does not return an error
     /// Only returns an error if the storage fails
     fn save_progression_transition<NextState>(
@@ -526,16 +537,10 @@ pub trait PersistedSession {
         // Nothing to do close session
         self.close().map_err(|e| PersistedError::Storage(StorageError(e)))
     }
-
-    /// Appends to list of session updates, Receives generic events
-    fn save_event(&self, event: &Self::SessionEvent) -> Result<(), Self::InternalStorageError>;
-
-    fn load(
-        &self,
-    ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError>; // Loads the latest session given all updates
-                                                                                           // TODO: this should consume self
-    fn close(&self) -> Result<(), Self::InternalStorageError>; // Marks the session as closed, no more updates will be appended
 }
+
+// Automatically implement the internal trait for anything that implements PersistedSession
+impl<T: PersistedSession> InternalPersistedSession for T {}
 
 /// A persister that does nothing
 /// This persister cannot be used to replay a session

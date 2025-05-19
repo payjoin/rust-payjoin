@@ -1,6 +1,7 @@
 [workspace]
 members = ["payjoin", "payjoin-cli", "payjoin-directory", "payjoin-test-utils"]
 resolver = "2"
+exclude = ["payjoin-ffi"]
 
 [patch.crates-io.payjoin]
 path = "payjoin"

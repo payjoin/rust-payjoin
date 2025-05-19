@@ -56,6 +56,11 @@ impl SessionContext {
             .join(&format!("/{directory_base}"))
             .map_err(|e| InternalSessionError::ParseUrl(e.into()))
     }
+
+    /// The per-session identifier
+    pub fn id(&self) -> ShortId {
+        sha256::Hash::hash(&self.s.public_key().to_compressed_bytes()).into()
+    }
 }
 
 fn deserialize_address_assume_checked<'de, D>(deserializer: D) -> Result<Address, D::Error>
@@ -182,7 +187,7 @@ impl Receiver {
         ([u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES], ohttp::ClientResponse),
         OhttpEncapsulationError,
     > {
-        let fallback_target = subdir(&self.context.directory, &self.id());
+        let fallback_target = subdir(&self.context.directory, &self.context.id());
         ohttp_encapsulate(&mut self.context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
 
@@ -236,7 +241,7 @@ impl Receiver {
     /// Build a V2 Payjoin URI from the receiver's context
     pub fn pj_uri<'a>(&self) -> crate::PjUri<'a> {
         use crate::uri::{PayjoinExtras, UrlExt};
-        let mut pj = subdir(&self.context.directory, &self.id()).clone();
+        let mut pj = subdir(&self.context.directory, &self.context.id()).clone();
         pj.set_receiver_pubkey(self.context.s.public_key().clone());
         pj.set_ohttp(self.context.ohttp_keys.clone());
         pj.set_exp(self.context.expiry);
@@ -244,9 +249,6 @@ impl Receiver {
             PayjoinExtras { endpoint: pj, output_substitution: OutputSubstitution::Enabled };
         bitcoin_uri::Uri::with_extras(self.context.address.clone(), extras)
     }
-
-    /// The per-session identifier
-    pub fn id(&self) -> ShortId { id(&self.context.s) }
 }
 
 /// The sender's original PSBT and optional parameters
@@ -308,7 +310,7 @@ impl UncheckedProposal {
         err: &JsonReply,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
-        let subdir = subdir(&self.context.directory, &id(&self.context.s));
+        let subdir = subdir(&self.context.directory, &self.context.id());
         let (body, ohttp_ctx) = ohttp_encapsulate(
             &mut self.context.ohttp_keys,
             "POST",
@@ -338,9 +340,6 @@ impl UncheckedProposal {
             _ => Err(InternalSessionError::UnexpectedStatusCode(response.status()).into()),
         }
     }
-
-    /// The per-session identifier
-    pub fn id(&self) -> ShortId { id(&self.context.s) }
 }
 
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
@@ -630,11 +629,6 @@ fn subdir(directory: &Url, id: &ShortId) -> Url {
     url
 }
 
-/// The per-session identifier
-fn id(s: &HpkeKeyPair) -> ShortId {
-    sha256::Hash::hash(&s.public_key().to_compressed_bytes()).into()
-}
-
 #[cfg(test)]
 pub mod test {
     use std::str::FromStr;
@@ -724,7 +718,7 @@ pub mod test {
     #[test]
     fn receiver_ser_de_roundtrip() -> Result<(), serde_json::Error> {
         let session = Receiver { context: SHARED_CONTEXT.clone() };
-        let short_id = id(&session.context.s);
+        let short_id = &session.context.id();
         assert_eq!(session.key().as_ref(), short_id.as_bytes());
         let serialized = serde_json::to_string(&session)?;
         let deserialized: Receiver = serde_json::from_str(&serialized)?;

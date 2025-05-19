@@ -25,6 +25,7 @@
 //! [reference implementation](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli)
 
 use std::cmp::{max, min};
+use std::collections::BTreeMap;
 
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::rand::seq::SliceRandom;
@@ -680,31 +681,42 @@ impl ProvisionalProposal {
         output_contribution_weight
     }
 
-    /// Prepare the PSBT by clearing the fields that the sender expects to be empty
-    fn prepare_psbt(mut self, processed_psbt: Psbt) -> PayjoinProposal {
-        self.payjoin_psbt = processed_psbt;
-        log::trace!("Preparing PSBT {:#?}", self.payjoin_psbt);
-        for output in self.payjoin_psbt.outputs_mut() {
-            output.bip32_derivation.clear();
-            output.tap_key_origins.clear();
-            output.tap_internal_key = None;
-        }
-        for input in self.payjoin_psbt.inputs_mut() {
-            input.bip32_derivation.clear();
-            input.tap_key_origins.clear();
-            input.tap_internal_key = None;
-            input.partial_sigs.clear();
-        }
-        for i in self.sender_input_indexes() {
-            log::trace!("Clearing sender input {i}");
-            self.payjoin_psbt.inputs[i].non_witness_utxo = None;
-            self.payjoin_psbt.inputs[i].witness_utxo = None;
-            self.payjoin_psbt.inputs[i].final_script_sig = None;
-            self.payjoin_psbt.inputs[i].final_script_witness = None;
-            self.payjoin_psbt.inputs[i].tap_key_sig = None;
+    /// Prepare the PSBT by creating a new PSBT and copying only the fields allowed by the [spec](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#senders-payjoin-proposal-checklist)
+    fn prepare_psbt(self, processed_psbt: Psbt) -> PayjoinProposal {
+        log::trace!("Original PSBT from callback: {processed_psbt:#?}");
+
+        // Create a new PSBT and copy only the allowed fields
+        let mut filtered_psbt = Psbt {
+            unsigned_tx: processed_psbt.unsigned_tx,
+            version: processed_psbt.version,
+            xpub: BTreeMap::new(),
+            proprietary: BTreeMap::new(),
+            unknown: BTreeMap::new(),
+            inputs: vec![],
+            outputs: vec![],
+        };
+
+        for input in &processed_psbt.inputs {
+            filtered_psbt.inputs.push(bitcoin::psbt::Input {
+                witness_utxo: input.witness_utxo.clone(),
+                non_witness_utxo: input.non_witness_utxo.clone(),
+                sighash_type: input.sighash_type,
+                final_script_sig: input.final_script_sig.clone(),
+                final_script_witness: input.final_script_witness.clone(),
+                tap_key_sig: input.tap_key_sig,
+                tap_script_sigs: input.tap_script_sigs.clone(),
+                tap_merkle_root: input.tap_merkle_root,
+                ..Default::default()
+            });
         }
 
-        PayjoinProposal { payjoin_psbt: self.payjoin_psbt }
+        for _ in &processed_psbt.outputs {
+            filtered_psbt.outputs.push(bitcoin::psbt::Output::default());
+        }
+
+        log::trace!("Filtered PSBT: {filtered_psbt:#?}");
+
+        PayjoinProposal { payjoin_psbt: filtered_psbt }
     }
 
     /// Return the indexes of the sender inputs
@@ -775,7 +787,10 @@ impl PayjoinProposal {
 pub(crate) mod test {
     use std::str::FromStr;
 
-    use bitcoin::{Address, Network};
+    use bitcoin::bip32::{DerivationPath, Fingerprint, Xpriv, Xpub};
+    use bitcoin::secp256k1::Secp256k1;
+    use bitcoin::taproot::LeafVersion;
+    use bitcoin::{Address, Network, ScriptBuf, TapLeafHash};
     use payjoin_test_utils::{PARSED_ORIGINAL_PSBT, QUERY_PARAMS, RECEIVER_INPUT_CONTRIBUTION};
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -1069,5 +1084,64 @@ pub(crate) mod test {
         assert_eq!(original1, vec![1, 6, 2, 5, 4, 3]);
         assert_eq!(original2, vec![1, 5, 4, 2, 6, 3]);
         assert_eq!(original3, vec![4, 5, 1, 2, 6, 3]);
+    }
+
+    /// Add keypath data to psbt to be prepared and verify it is excluded from the final PSBT
+    /// See: <https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#senders-payjoin-proposal-checklist>
+    #[test]
+    fn test_prepare_psbt_excludes_keypaths() {
+        let proposal = unchecked_proposal_from_test_vector();
+        let mut processed_psbt = proposal.psbt.clone();
+
+        let secp = Secp256k1::new();
+        let (_, pk) = secp.generate_keypair(&mut bitcoin::key::rand::thread_rng());
+        let xpriv = Xpriv::new_master(Network::Bitcoin, &[]).expect("Could not generate new xpriv");
+        let (x_only, _) = pk.x_only_public_key();
+
+        processed_psbt.xpub.insert(
+            Xpub::from_priv(&secp, &xpriv),
+            (Fingerprint::default(), DerivationPath::default()),
+        );
+
+        for input in &mut processed_psbt.inputs {
+            input.bip32_derivation.insert(pk, (Fingerprint::default(), DerivationPath::default()));
+            input.tap_key_origins.insert(
+                x_only,
+                (
+                    vec![TapLeafHash::from_script(&ScriptBuf::new(), LeafVersion::TapScript)],
+                    (Fingerprint::default(), DerivationPath::default()),
+                ),
+            );
+            input.tap_internal_key = Some(x_only);
+        }
+
+        for output in &mut processed_psbt.outputs {
+            output.bip32_derivation.insert(pk, (Fingerprint::default(), DerivationPath::default()));
+            output.tap_key_origins.insert(
+                x_only,
+                (
+                    vec![TapLeafHash::from_script(&ScriptBuf::new(), LeafVersion::TapScript)],
+                    (Fingerprint::default(), DerivationPath::default()),
+                ),
+            );
+            output.tap_internal_key = Some(x_only);
+        }
+
+        let provisional = provisional_proposal_from_test_vector(proposal);
+        let payjoin_proposal = provisional.prepare_psbt(processed_psbt);
+
+        assert!(payjoin_proposal.payjoin_psbt.xpub.is_empty());
+
+        for input in &payjoin_proposal.payjoin_psbt.inputs {
+            assert!(input.bip32_derivation.is_empty());
+            assert!(input.tap_key_origins.is_empty());
+            assert!(input.tap_internal_key.is_none());
+        }
+
+        for output in &payjoin_proposal.payjoin_psbt.outputs {
+            assert!(output.bip32_derivation.is_empty());
+            assert!(output.tap_key_origins.is_empty());
+            assert!(output.tap_internal_key.is_none());
+        }
     }
 }

@@ -123,9 +123,6 @@ impl Receiver {
             .map(|e| e.map(|x| Arc::new(x.into())))
     }
 
-    ///The per-session public key to use as an identifier
-    pub fn id(&self) -> String { self.0.id() }
-
     pub fn to_json(&self) -> Result<String, SerdeJsonError> { self.0.to_json() }
 
     #[uniffi::constructor]

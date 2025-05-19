@@ -115,11 +115,6 @@ impl Receiver {
         <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone()).pj_uri().into()
     }
 
-    ///The per-session public key to use as an identifier
-    pub fn id(&self) -> String {
-        <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone()).id().to_string()
-    }
-
     pub fn to_json(&self) -> Result<String, SerdeJsonError> {
         serde_json::to_string(&self.0).map_err(Into::into)
     }

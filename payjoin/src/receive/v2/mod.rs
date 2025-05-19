@@ -59,6 +59,9 @@ impl SessionContext {
             .join(&format!("/{directory_base}"))
             .map_err(|e| InternalSessionError::ParseUrl(e.into()))
     }
+
+    /// The per-session identifier
+    pub fn id(&self) -> ShortId { id(&self.s) }
 }
 
 fn deserialize_address_assume_checked<'de, D>(deserializer: D) -> Result<Address, D::Error>
@@ -607,6 +610,9 @@ impl Receiver<UncheckedProposal> {
     }
 
     pub fn inner(&self) -> UncheckedProposal { self.state.clone() }
+
+    /// The per-session identifier
+    pub fn id(&self) -> ShortId { id(&self.state.context.s) }
 }
 
 #[derive(Debug, Clone)]

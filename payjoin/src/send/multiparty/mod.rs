@@ -13,7 +13,7 @@ use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
     AcceptNextState, MaybeBadInitInputsTransition, MaybeFatalRejection, MaybeFatalTransition,
-    NoopPersister,RejectFatal, RejectTransient,
+    NoopPersister, RejectFatal, RejectTransient,
 };
 use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
@@ -119,7 +119,8 @@ impl Sender<SenderWithReplyKey> {
         post_ctx: PostContext,
     ) -> MaybeFatalTransition<SenderSessionEvent, Sender<GetContext>, EncapsulationError> {
         let noop_persister = NoopPersister::<crate::send::v2::SenderSessionEvent>::default();
-        let res = self.state.0.process_response(response, post_ctx.0).save(&noop_persister).unwrap();
+        let res =
+            self.state.0.process_response(response, post_ctx.0).save(&noop_persister).unwrap();
 
         let next_state = Sender { state: GetContext(res.clone()) };
         MaybeFatalTransition::Ok(AcceptNextState(

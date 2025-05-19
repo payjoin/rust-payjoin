@@ -10,8 +10,8 @@ mod integration {
     use bitcoind::bitcoincore_rpc::json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use payjoin::receive::v1::build_v1_pj_uri;
+    use payjoin::receive::InputPair;
     use payjoin::receive::ReplyableError::Implementation;
-    use payjoin::receive::{ImplementationError, InputPair};
     use payjoin::{OutputSubstitution, PjUri, Request, Uri};
     use payjoin_test_utils::{init_bitcoind_sender_receiver, init_tracing, BoxError};
 

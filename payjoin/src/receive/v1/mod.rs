@@ -681,7 +681,7 @@ impl ProvisionalProposal {
         output_contribution_weight
     }
 
-    /// Prepare the PSBT by creating a new PSBT and copying only the fields allowed by the spec
+    /// Prepare the PSBT by creating a new PSBT and copying only the fields allowed by the [spec](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#senders-payjoin-proposal-checklist)
     fn prepare_psbt(self, processed_psbt: Psbt) -> PayjoinProposal {
         log::trace!("Original PSBT from callback: {processed_psbt:#?}");
 

@@ -13,7 +13,7 @@ use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
     AcceptNextState, MaybeBadInitInputsTransition, MaybeFatalRejection, MaybeFatalTransition,
-    NoopPersister, PersistedSession, RejectFatal, RejectTransient,
+    NoopPersister,RejectFatal, RejectTransient,
 };
 use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
@@ -45,11 +45,10 @@ impl<'a> SenderBuilder<'a> {
         Sender<SenderWithReplyKey>,
         BuildSenderError,
     > {
-        let state_transition = self.0.build_recommended(min_fee_rate);
         let noop_persister = NoopPersister::<crate::send::v2::SenderSessionEvent>::default();
-        let res = noop_persister.save_maybe_bad_init_inputs(state_transition).unwrap();
+        let sender = self.0.build_recommended(min_fee_rate).save(&noop_persister).unwrap();
 
-        let sender_with_reply_key = SenderWithReplyKey(res);
+        let sender_with_reply_key = SenderWithReplyKey(sender);
         let next_state = Sender { state: sender_with_reply_key.clone() };
         MaybeBadInitInputsTransition(Ok(AcceptNextState(
             SenderSessionEvent::CreatedReplyKey(sender_with_reply_key),
@@ -119,9 +118,8 @@ impl Sender<SenderWithReplyKey> {
         response: &[u8],
         post_ctx: PostContext,
     ) -> MaybeFatalTransition<SenderSessionEvent, Sender<GetContext>, EncapsulationError> {
-        let state_transition = self.state.0.process_response(response, post_ctx.0);
         let noop_persister = NoopPersister::<crate::send::v2::SenderSessionEvent>::default();
-        let res = noop_persister.save_maybe_fatal_error_transition(state_transition).unwrap();
+        let res = self.state.0.process_response(response, post_ctx.0).save(&noop_persister).unwrap();
 
         let next_state = Sender { state: GetContext(res.clone()) };
         MaybeFatalTransition::Ok(AcceptNextState(

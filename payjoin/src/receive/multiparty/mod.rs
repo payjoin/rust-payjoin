@@ -44,8 +44,8 @@ impl UncheckedProposalBuilder {
         {
             return Err(InternalMultipartyError::IdenticalProposals(
                 IdenticalProposalError::IdenticalContexts(
-                    Box::new(duplicate_context.id()),
-                    Box::new(proposal.id()),
+                    Box::new(duplicate_context.context.id),
+                    Box::new(proposal.context.id()),
                 ),
             )
             .into());

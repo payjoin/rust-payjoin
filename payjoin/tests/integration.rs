@@ -647,29 +647,41 @@ mod integration {
             let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
             // Receive Check 1: Can Broadcast
-            let proposal = proposal.check_broadcast_suitability(None, |tx| {
-                Ok(receiver
-                    .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])?
-                    .first()
-                    .ok_or(ImplementationError::from("testmempoolaccept should return a result"))?
-                    .allowed)
-            }).save(&persister)?;
+            let proposal = proposal
+                .check_broadcast_suitability(None, |tx| {
+                    Ok(receiver
+                        .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])?
+                        .first()
+                        .ok_or(ImplementationError::from(
+                            "testmempoolaccept should return a result",
+                        ))?
+                        .allowed)
+                })
+                .save(&persister)?;
 
             // Receive Check 2: receiver can't sign for proposal inputs
-            let proposal = proposal.check_inputs_not_owned(|input| {
-                let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)?;
-                Ok(receiver.get_address_info(&address).map(|info| info.is_mine.unwrap_or(false))?)
-            }).save(&persister)?;
+            let proposal = proposal
+                .check_inputs_not_owned(|input| {
+                    let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)?;
+                    Ok(receiver
+                        .get_address_info(&address)
+                        .map(|info| info.is_mine.unwrap_or(false))?)
+                })
+                .save(&persister)?;
 
             // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
             let proposal = proposal.check_no_inputs_seen_before(|_| Ok(false)).save(&persister)?;
 
             // Receive Check 4: identify receiver outputs
-            let proposal = proposal.identify_receiver_outputs(|output_script| {
-                let address =
-                    bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)?;
-                Ok(receiver.get_address_info(&address).map(|info| info.is_mine.unwrap_or(false))?)
-            }).save(&persister)?;
+            let proposal = proposal
+                .identify_receiver_outputs(|output_script| {
+                    let address =
+                        bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)?;
+                    Ok(receiver
+                        .get_address_info(&address)
+                        .map(|info| info.is_mine.unwrap_or(false))?)
+                })
+                .save(&persister)?;
 
             // Receive Check 5: commit outputs
             let proposal = proposal.commit_outputs().save(&persister)?;
@@ -689,7 +701,8 @@ mod integration {
                     vec![selected_input]
                 }
             };
-            let proposal = proposal.contribute_inputs(inputs)
+            let proposal = proposal
+                .contribute_inputs(inputs)
                 .map_err(|e| format!("Failed to contribute inputs: {e:?}"))?
                 .commit_inputs()
                 .save(&persister)?;

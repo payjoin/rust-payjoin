@@ -49,7 +49,7 @@ rpcpassword = "password"
 # Version 2 Configuration
 # [v2]
 # pj_directory = "https://payjo.in"
-# ohttp_relay = "https://pj.bobspacebkk.com"
+# ohttp_relays = ["https://pj.benalleng.com", "https://pj.bobspacebkk.com", "https://ohttp.achow101.com", "https://example.com"]
 # # Optional: The HPKE keys which need to be fetched ahead of time from the pj_endpoint
 # # for the payjoin packets to be encrypted.
 # # These can now be fetched and no longer need to be configured.

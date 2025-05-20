@@ -444,10 +444,17 @@ fn serialize_url(
 mod test {
     use std::str::FromStr;
 
+    use bitcoin::absolute::LockTime;
+    use bitcoin::ecdsa::Signature;
     use bitcoin::hex::FromHex;
-    use bitcoin::{Amount, FeeRate, Script, XOnlyPublicKey};
+    use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
+    use bitcoin::transaction::Version;
+    use bitcoin::{
+        Amount, FeeRate, OutPoint, Script, ScriptBuf, Sequence, Witness, XOnlyPublicKey,
+    };
     use payjoin_test_utils::{
-        BoxError, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO,
+        BoxError, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL,
+        PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO,
     };
     use url::Url;
 
@@ -458,6 +465,7 @@ mod test {
     use crate::psbt::PsbtExt;
     use crate::send::{AdditionalFeeContribution, InternalBuildSenderError, InternalProposalError};
 
+    /// Creates a PSBT context from the original PSBT test vector from BIP-78
     pub(crate) fn create_psbt_context() -> Result<super::PsbtContext, BoxError> {
         let payee = PARSED_ORIGINAL_PSBT.unsigned_tx.output[1].script_pubkey.clone();
         Ok(super::PsbtContext {
@@ -606,42 +614,12 @@ mod test {
             input.bip32_derivation.clear();
         }
         proposal.inputs_mut()[0].witness_utxo = None;
-        let result = ctx.process_proposal(proposal.clone());
+        let result = ctx.process_proposal(proposal);
         assert!(result.is_ok(), "Expected an Ok result got: {:#?}", result.err());
         assert_eq!(
             result.unwrap().inputs_mut()[0].witness_utxo,
             PARSED_ORIGINAL_PSBT.inputs[0].witness_utxo,
         );
-        Ok(())
-    }
-
-    #[test]
-    fn test_receiver_steals_sender_change() -> Result<(), BoxError> {
-        let ctx = create_psbt_context()?;
-        let mut proposal = PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO.clone();
-        for output in proposal.outputs_mut() {
-            output.bip32_derivation.clear();
-        }
-        for input in proposal.inputs_mut() {
-            input.bip32_derivation.clear();
-        }
-        proposal.inputs_mut()[0].witness_utxo = None;
-        // Steal 0.5 BTC from the sender output and add it to the receiver output
-        proposal.unsigned_tx.output[0].value -= bitcoin::Amount::from_btc(0.5)?;
-        proposal.unsigned_tx.output[1].value += bitcoin::Amount::from_btc(0.5)?;
-        let result = ctx.clone().process_proposal(proposal.clone());
-        assert!(
-            result.is_err(),
-            "Process response expected fee contribution exceeds maximum error, but it succeeded"
-        );
-
-        match result {
-            Ok(_) => panic!("Expected error, got success"),
-            Err(error) => assert_eq!(
-                format!("{error}"),
-                InternalProposalError::FeeContributionExceedsMaximum.to_string()
-            ),
-        }
         Ok(())
     }
 
@@ -665,5 +643,417 @@ mod test {
         );
         assert_eq!(url, Url::parse("http://localhost?v=2")?);
         Ok(())
+    }
+
+    /// Test the sender's payjoin proposal checklist
+    /// See: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-Senders_payjoin_proposal_checklist
+    mod bip78_checklist {
+        use super::*;
+
+        #[test]
+        fn test_transaction_versions_dont_match() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            let original_version = ctx.original_psbt.unsigned_tx.version;
+            let proposed_version = Version::non_standard(88);
+            proposal.unsigned_tx.version = proposed_version;
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::VersionsDontMatch {
+                    proposed: proposed_version,
+                    original: original_version
+                }
+                .to_string()
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn test_transaction_locktimes_dont_match() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            let original_locktime = ctx.original_psbt.unsigned_tx.lock_time;
+            let proposed_locktime = LockTime::from_consensus(
+                ctx.original_psbt.unsigned_tx.lock_time.to_consensus_u32() - 1,
+            );
+            proposal.unsigned_tx.lock_time = proposed_locktime;
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::LockTimesDontMatch {
+                    proposed: proposed_locktime,
+                    original: original_locktime
+                }
+                .to_string()
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn test_key_path_found_in_proposal() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            // Add a keypath to the input
+            let context = Secp256k1::new();
+            let secret_key =
+                SecretKey::from_slice(&[0xcd; 32]).expect("32 bytes, within curve order");
+            proposal.inputs[0].bip32_derivation.insert(
+                PublicKey::from_secret_key(&context, &secret_key),
+                bitcoin::bip32::KeySource::default(),
+            );
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::TxInContainsKeyPaths.to_string()
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn test_partial_sig_found_in_proposal() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            // Add a keypath to the input
+            let context = Secp256k1::new();
+            let secret_key =
+                SecretKey::from_slice(&[0xcd; 32]).expect("32 bytes, within curve order");
+            proposal.inputs[0].partial_sigs.insert(
+                PublicKey::from_secret_key(&context, &secret_key).into(),
+                Signature::sighash_all(secret_key.sign_ecdsa(Message::from_digest([0; 32]))),
+            );
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::ContainsPartialSigs.to_string()
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn test_sender_input_sequence_number_changed() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            // Change the sequence number of the proposal
+            let original_sequence = proposal.unsigned_tx.input.first().unwrap().sequence;
+            let new_sequence = Sequence::from_consensus(original_sequence.to_consensus_u32() - 1);
+            proposal.unsigned_tx.input.get_mut(0).unwrap().sequence = new_sequence;
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::SenderTxinSequenceChanged {
+                    proposed: new_sequence,
+                    original: original_sequence
+                }
+                .to_string()
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn test_sender_input_final_script_sig_is_present() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+            proposal.inputs.get_mut(0).unwrap().final_script_sig = Some(ScriptBuf::new());
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::SenderTxinContainsFinalScriptSig.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_sender_input_final_script_witness_is_present() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+            proposal.inputs.get_mut(0).unwrap().final_script_witness = Some(Witness::new());
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::SenderTxinContainsFinalScriptWitness.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_receiver_input_is_not_finalized() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            // If the outpoints are different, they are considered a receiver input and will be checked as such
+            let proposed_outpoint = proposal.unsigned_tx.input.first().unwrap().previous_output;
+            proposal.unsigned_tx.input.get_mut(0).unwrap().previous_output =
+                OutPoint::new(proposed_outpoint.txid, proposed_outpoint.vout + 1);
+
+            // Make the receiver's input un-finalized
+            proposal.inputs.get_mut(0).unwrap().final_script_sig = None;
+            proposal.inputs.get_mut(0).unwrap().final_script_witness = None;
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::ReceiverTxinNotFinalized.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_receiver_input_missing_witness_info() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            // If the outpoints are different, they are considered a receiver input and will be checked as such
+            let proposed_outpoint = proposal.unsigned_tx.input.first().unwrap().previous_output;
+            proposal.unsigned_tx.input.get_mut(0).unwrap().previous_output =
+                OutPoint::new(proposed_outpoint.txid, proposed_outpoint.vout + 1);
+            proposal.inputs.get_mut(0).unwrap().final_script_sig = Some(ScriptBuf::new());
+            proposal.inputs.get_mut(0).unwrap().final_script_witness = Some(Witness::new());
+
+            // Make the receiver's input un-finalized
+            proposal.inputs.get_mut(0).unwrap().witness_utxo = None;
+            proposal.inputs.get_mut(0).unwrap().non_witness_utxo = None;
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::ReceiverTxinMissingUtxoInfo.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_receiver_input_has_mixed_sequence_() -> Result<(), BoxError> {
+            let mut ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            // If the outpoints are different, they are considered a receiver input and will be checked as such
+            let proposed_outpoint = proposal.unsigned_tx.input.first().unwrap().previous_output;
+            proposal.unsigned_tx.input.get_mut(0).unwrap().previous_output =
+                OutPoint::new(proposed_outpoint.txid, proposed_outpoint.vout + 1);
+            proposal.inputs.get_mut(0).unwrap().final_script_sig = Some(ScriptBuf::new());
+            proposal.inputs.get_mut(0).unwrap().final_script_witness = Some(Witness::new());
+
+            // Ensure the sequence is different
+            let sequence = ctx.original_psbt.unsigned_tx.input.get_mut(0).unwrap().sequence;
+            proposal.unsigned_tx.input.get_mut(0).unwrap().sequence =
+                Sequence::from_consensus(sequence.to_consensus_u32() + 1);
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::MixedSequence.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_process_proposal_when_missing_original_inputs() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            proposal.unsigned_tx.input.clear();
+            proposal.inputs.clear();
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::MissingOrShuffledInputs.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_process_proposal_when_output_contains_key_path() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            let context = Secp256k1::new();
+            let secret_key =
+                SecretKey::from_slice(&[0xcd; 32]).expect("32 bytes, within curve order");
+            proposal.outputs.get_mut(0).unwrap().bip32_derivation.insert(
+                PublicKey::from_secret_key(&context, &secret_key),
+                bitcoin::bip32::KeySource::default(),
+            );
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::TxOutContainsKeyPaths.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_receiver_steals_sender_change() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal = PARSED_PAYJOIN_PROPOSAL.clone();
+            // Steal 0.5 BTC from the sender output and add it to the receiver output
+            proposal.unsigned_tx.output[0].value -= Amount::from_btc(0.5)?;
+            proposal.unsigned_tx.output[1].value += Amount::from_btc(0.5)?;
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::FeeContributionExceedsMaximum.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_process_proposal_when_payee_output_has_disallowed_output_substitution(
+        ) -> Result<(), BoxError> {
+            let mut ctx = create_psbt_context()?;
+            let proposal = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            ctx.original_psbt.unsigned_tx.output.get_mut(0).unwrap().script_pubkey =
+                ctx.payee.clone();
+            ctx.output_substitution = OutputSubstitution::Disabled;
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::DisallowedOutputSubstitution.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_process_proposal_when_output_value_decreased() -> Result<(), BoxError> {
+            let mut ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            ctx.fee_contribution = None;
+            proposal.unsigned_tx.output.get_mut(0).unwrap().value =
+                ctx.original_psbt.unsigned_tx.output.get_mut(0).unwrap().value
+                    - Amount::from_sat(1);
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::OutputValueDecreased.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_process_proposal_when_output_missing() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            proposal.unsigned_tx.output.clear();
+            proposal.outputs.clear();
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::MissingOrShuffledOutputs.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_absolute_fee_less_than_original_psbt() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal = PARSED_PAYJOIN_PROPOSAL.clone();
+            for output in proposal.outputs_mut() {
+                output.bip32_derivation.clear();
+            }
+            for input in proposal.inputs_mut() {
+                input.bip32_derivation.clear();
+            }
+
+            // Reduce the proposed fee to be less than the original fee
+            proposal.unsigned_tx.output[0].value += bitcoin::Amount::from_sat(183);
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::AbsoluteFeeDecreased.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_payee_took_contributed_fee() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal = ctx.original_psbt.clone();
+
+            for input in proposal.inputs_mut() {
+                input.bip32_derivation.clear();
+                input.partial_sigs.clear();
+                input.final_script_sig = None;
+                input.final_script_witness = None;
+            }
+
+            let redistributed_amount = Amount::from_sat(1);
+
+            // Redistribute 1 sat between outputs so that the net on-chain fee doesn't increase
+            let output_0 = proposal.unsigned_tx.output[0].value;
+            proposal.unsigned_tx.output[0].value = output_0 - redistributed_amount;
+            let output_1 = proposal.unsigned_tx.output[1].value;
+            proposal.unsigned_tx.output[1].value = output_1 + redistributed_amount;
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::PayeeTookContributedFee.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_fee_contribution_pays_output_size_increase() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal = ctx.original_psbt.clone();
+
+            for input in proposal.inputs_mut() {
+                input.bip32_derivation.clear();
+                input.partial_sigs.clear();
+                input.final_script_sig = None;
+                input.final_script_witness = None;
+            }
+
+            let contributed_fee = Amount::from_sat(10);
+            let original_output = proposal.unsigned_tx.output[0].value;
+            proposal.unsigned_tx.output[0].value = original_output - contributed_fee;
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::FeeContributionPaysOutputSizeIncrease.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_fee_rate_below_minimum() -> Result<(), BoxError> {
+            let mut ctx = create_psbt_context()?;
+            let mut proposal = ctx.original_psbt.clone();
+
+            for input in proposal.inputs_mut() {
+                input.bip32_derivation.clear();
+                input.partial_sigs.clear();
+                input.final_script_sig = None;
+                input.final_script_witness = None;
+            }
+
+            // The fee rate will always be below this min_fee_rate
+            ctx.min_fee_rate = FeeRate::MAX;
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::FeeRateBelowMinimum.to_string()
+            );
+
+            Ok(())
+        }
     }
 }

@@ -2,7 +2,7 @@
 set -e
 
 DEPS="recent minimal"
-CRATES="payjoin payjoin-cli payjoin-directory"
+CRATES="payjoin payjoin-cli payjoin-directory payjoin-ffi"
 
 for dep in $DEPS; do
     cargo --version

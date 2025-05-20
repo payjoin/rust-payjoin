@@ -1,0 +1,125 @@
+# Copied from [bdk-ffi](https://github.com/bitcoindevkit/bdk-ffi/blob/master/.github/workflows/test-python.yaml)
+name: Build and Test Python
+on:
+  pull_request:
+    paths:
+      - payjoin-ffi/python/**
+
+jobs:
+  build-wheels-and-test:
+    name: "Build and test wheels with Redis"
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+    defaults:
+      run:
+        working-directory: payjoin-ffi/python
+    strategy:
+      matrix:
+        include:
+          - python: "3.9"
+          - python: "3.10"
+          - python: "3.11"
+          - python: "3.12"
+          - python: "3.13"
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v4
+
+      - name: "Install Rust 1.78.0"
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.78.0
+
+      - name: "Install Python"
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: "Install build dependencies"
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential python3-dev
+
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+
+      - name: "Generate payjoin-ffi.py and binaries"
+        run: |
+            PYBIN=$(dirname $(which python))
+            PYBIN="$PYBIN" bash ./scripts/generate_linux.sh
+
+      - name: "Build wheel"
+        run: python setup.py bdist_wheel --verbose
+
+      - name: "Install wheel"
+        run: pip install ./dist/*.whl
+
+      - name: "Run tests"
+        env:
+          REDIS_URL: redis://localhost:6379
+        run: python -m unittest -v
+
+  build-macos:
+    name: "Build and test macOS"
+    runs-on: macos-13
+    defaults:
+      run:
+        working-directory: payjoin-ffi/python
+    strategy:
+      matrix:
+        python:
+          - "3.12"
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: "Install Rust 1.78.0"
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.78.0
+
+      - name: "Install Python"
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Setup Docker on macOS
+        uses: douglascamata/setup-docker-macos-action@v1.0.0
+
+      - name: "Install Redis"
+        run: |
+          brew update
+          brew install redis
+
+      - name: "Start Redis"
+        run: |
+          redis-server --daemonize yes
+          for i in {1..10}; do
+            if redis-cli ping | grep -q PONG; then
+              echo "Redis is ready"
+              break
+            fi
+            echo "Waiting for Redis..."
+            sleep 1
+          done
+
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+
+      - name: "Generate payjoin-ffi.py and binaries"
+        run: bash ./scripts/generate_macos.sh
+
+      - name: "Build wheel"
+        run: python3 setup.py bdist_wheel --verbose
+
+      - name: "Install wheel"
+        run: pip3 install ./dist/*.whl
+
+      - name: "Run tests"
+        env:
+          REDIS_URL: redis://localhost:6379
+        run: python3 -m unittest -v

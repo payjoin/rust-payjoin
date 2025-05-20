@@ -196,7 +196,17 @@ where
 
     for log in logs {
         history.events.push(log.clone().into());
-        receiver = receiver.process_event(log.into())?;
+        // TODO: remove clone
+        match receiver.clone().process_event(log.into()) {
+            Ok(next_receiver) => {
+                receiver = next_receiver;
+            }
+            Err(_e) => {
+                // All error cases are terminal. Close the session in its current state
+                persister.close().unwrap();
+                break;
+            }
+        }
     }
 
     Ok((receiver, history))
@@ -481,10 +491,7 @@ impl Receiver<ReceiverWithContext> {
     ) -> Result<ReceiverState, ReceiverReplayError> {
         if self.state.context.expiry < SystemTime::now() {
             // Session is expired, close the session
-            // TODO: remove unwrap
-            // self.persister.close().unwrap();
-            // return Err(ReceiverReplayError::SessionExpired(self.state.context.expiry));
-            todo!("handle this");
+            return Err(ReceiverReplayError::SessionExpired(self.state.context.expiry));
         }
 
         let new_state = Receiver {

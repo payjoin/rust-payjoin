@@ -366,8 +366,8 @@ mod test {
                 e.to_string(),
                 MultipartyError::from(InternalMultipartyError::IdenticalProposals(
                     IdenticalProposalError::IdenticalContexts(
-                        Box::new(proposal_one.id()),
-                        Box::new(proposal_two.id())
+                        Box::new(proposal_one.context.id()),
+                        Box::new(proposal_two.context.id())
                     )
                 ))
                 .to_string()

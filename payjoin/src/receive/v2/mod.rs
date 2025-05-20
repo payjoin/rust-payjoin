@@ -391,7 +391,7 @@ impl Receiver<ReceiverWithContext> {
         pj.set_ohttp(self.state.context.ohttp_keys.clone());
         pj.set_exp(self.state.context.expiry);
         let extras =
-            PayjoinExtras { endpoint: pj, output_substitution: OutputSubstitution::Disabled };
+            PayjoinExtras { endpoint: pj, output_substitution: OutputSubstitution::Enabled };
         bitcoin_uri::Uri::with_extras(self.state.context.address.clone(), extras)
     }
 
@@ -438,32 +438,18 @@ impl Receiver<UncheckedProposal> {
         self,
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
-    ) -> MaybeFatalTransition<ReceiverSessionEvent, Receiver<MaybeInputsOwned>, Error> {
+    ) -> MaybeFatalTransition<ReceiverSessionEvent, Receiver<MaybeInputsOwned>, ReplyableError>
+    {
         let v1 =
             match self.state.v1.clone().check_broadcast_suitability(min_fee_rate, can_broadcast) {
                 Ok(v1) => v1,
-                Err(e) => {
-                    match e {
-                        ReplyableError::Implementation(_) => {
-                            return MaybeFatalTransition::transient(Error::ReplyToSender(e));
-                        }
-                        // Payload or spec related error as treated as fatal
-                        _ => {
-                            return MaybeFatalTransition::fatal(
-                                ReceiverSessionEvent::SessionInvalid(e.to_string()),
-                                Error::ReplyToSender(e),
-                            );
-                        }
-                    }
-                }
+                Err(e) => return MaybeFatalTransition::transient(e),
             };
-        MaybeFatalTransition::Ok(AcceptNextState(
+        MaybeFatalTransition::success(
             ReceiverSessionEvent::MaybeInputsOwned(v1.clone()),
             Receiver { state: MaybeInputsOwned { v1, context: self.state.context.clone() } },
-        ))
+        )
     }
-
-    /// Note to self: this is the public entry point for replayability
 
     /// The Sender's Original PSBT
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
@@ -956,7 +942,7 @@ pub mod test {
     use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, SYMMETRIC};
 
     use super::*;
-    use crate::persist::Value;
+    use crate::persist::NoopPersister;
 
     pub(crate) static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
         address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
@@ -988,16 +974,19 @@ pub mod test {
 
     #[test]
     fn extract_err_req() -> Result<(), BoxError> {
-        let mut proposal = UncheckedProposal {
-            v1: crate::receive::v1::test::unchecked_proposal_from_test_vector(),
-            context: SHARED_CONTEXT.clone(),
+        let noop_persister = NoopPersister::default();
+        let receiver = Receiver {
+            state: UncheckedProposal {
+                v1: crate::receive::v1::test::unchecked_proposal_from_test_vector(),
+                context: SHARED_CONTEXT.clone(),
+            },
         };
 
         let server_error = || {
-            proposal
+            receiver
                 .clone()
                 .check_broadcast_suitability(None, |_| Err("mock error".into()))
-                .expect_err("expected broadcast suitability check to fail")
+                .save(&noop_persister)
         };
 
         let expected_json = serde_json::json!({
@@ -1005,35 +994,33 @@ pub mod test {
             "message": "Receiver error"
         });
 
-        let actual_json = JsonReply::from(server_error()).to_json().clone();
-        assert_eq!(actual_json, expected_json);
+        let error = server_error().expect_err("expected error");
+        let res = error.api_error().expect("expected api error");
+        let actual_json = JsonReply::from(res);
+        assert_eq!(actual_json.to_json(), expected_json);
 
-        let (_req, _ctx) =
-            proposal.clone().extract_err_req(&server_error().into(), &*EXAMPLE_URL)?;
+        let (_req, _ctx) = receiver.clone().extract_err_req(&actual_json, &*EXAMPLE_URL)?;
 
         let internal_error: ReplyableError = InternalPayloadError::MissingPayment.into();
-        let (_req, _ctx) = proposal.extract_err_req(&internal_error.into(), &*EXAMPLE_URL)?;
+        let (_req, _ctx) =
+            receiver.clone().extract_err_req(&internal_error.into(), &*EXAMPLE_URL)?;
         Ok(())
     }
 
-    #[test]
-    fn receiver_ser_de_roundtrip() -> Result<(), serde_json::Error> {
-        let session = Receiver { context: SHARED_CONTEXT.clone() };
-        let serialized = serde_json::to_string(&session)?;
-        let deserialized: Receiver = serde_json::from_str(&serialized)?;
-        assert_eq!(session, deserialized);
-        Ok(())
-    }
+    // TODO: test needs to be re-written to ensure each event log can be serialized and deserialized
     // #[test]
-    // fn extract_err_req() -> Result<(), BoxError> {
-    //     let mut proposal = UncheckedProposal {
-    //         v1: crate::receive::v1::test::unchecked_proposal_from_test_vector(),
-    //         context: SHARED_CONTEXT.clone(),
-    //     };
+    // fn receiver_ser_de_roundtrip() -> Result<(), serde_json::Error> {
+    //     let session = Receiver { state: ReceiverWithContext { context: SHARED_CONTEXT.clone() } };
+    //     let serialized = serde_json::to_string(&session)?;
+    //     let deserialized: Receiver<ReceiverWithContext> = serde_json::from_str(&serialized)?;
+    //     assert_eq!(session, deserialized);
+    //     Ok(())
+    // }
 
     #[test]
     fn test_v2_pj_uri() {
-        let uri = Receiver { context: SHARED_CONTEXT.clone() }.pj_uri();
+        let uri =
+            Receiver { state: ReceiverWithContext { context: SHARED_CONTEXT.clone() } }.pj_uri();
         assert_ne!(uri.extras.endpoint, EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Enabled);
     }

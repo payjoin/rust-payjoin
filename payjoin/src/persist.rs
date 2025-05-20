@@ -303,16 +303,18 @@ where
     StorageErr: std::error::Error,
     ApiErr: std::error::Error,
 {
-    pub fn storage_error(&self) -> Option<&StorageError<StorageErr>> {
+    pub fn storage_error(self) -> Option<StorageError<StorageErr>> {
         match self {
             PersistedError::Storage(e) => Some(e),
             _ => None,
         }
     }
 
-    pub fn api_error(&self) -> Option<&ApiErr> {
+    pub fn api_error(self) -> Option<ApiErr> {
         match self {
-            PersistedError::Fatal(e) | PersistedError::BadInitInputs(e) => Some(e),
+            PersistedError::Fatal(e)
+            | PersistedError::BadInitInputs(e)
+            | PersistedError::Transient(e) => Some(e),
             _ => None,
         }
     }

@@ -12,7 +12,7 @@ use log::{log_enabled, Level};
 use ohttp::hpke::{Aead, Kdf, Kem};
 use ohttp::{KeyId, SymmetricSuite};
 use once_cell::sync::{Lazy, OnceCell};
-use payjoin::io::{fetch_ohttp_keys_with_cert, Error as IOError};
+use payjoin::io::{fetch_ohttp_keys, Error as IOError};
 use payjoin::OhttpKeys;
 use rcgen::Certificate;
 use reqwest::{Client, ClientBuilder};
@@ -111,7 +111,7 @@ impl TestServices {
     }
 
     pub async fn fetch_ohttp_keys(&self) -> Result<OhttpKeys, IOError> {
-        fetch_ohttp_keys_with_cert(self.ohttp_relay_url(), self.directory_url(), self.cert()).await
+        fetch_ohttp_keys(self.ohttp_relay_url(), self.directory_url(), Some(self.cert())).await
     }
 }
 

@@ -13,7 +13,7 @@ use tokio::sync::watch;
 use super::config::Config;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
-use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, validate_relay, RelayState};
+use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, validate_relay, RelayManager};
 use crate::app::{handle_interrupt, http_agent};
 use crate::db::v2::{ReceiverPersister, SenderPersister};
 use crate::db::Database;
@@ -26,14 +26,14 @@ pub(crate) struct App {
     db: Arc<Database>,
     wallet: BitcoindWallet,
     interrupt: watch::Receiver<()>,
-    relay_state: Arc<Mutex<RelayState>>,
+    relay_state: Arc<Mutex<RelayManager>>,
 }
 
 #[async_trait::async_trait]
 impl AppTrait for App {
     fn new(config: Config) -> Result<Self> {
         let db = Arc::new(Database::create(&config.db_path)?);
-        let relay_state = Arc::new(Mutex::new(RelayState::new()));
+        let relay_state = Arc::new(Mutex::new(RelayManager::new()));
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
         let wallet = BitcoindWallet::new(&config.bitcoind)?;
@@ -49,7 +49,7 @@ impl AppTrait for App {
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {
         use payjoin::UriExt;
         let uri =
-            Uri::try_from(bip21).map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
+            Uri::try_from(bip21).map_err(|e| anyhow!("Failed to create URI from BIP21: {e}"))?;
         let uri = uri.assume_checked();
         let uri = uri.check_pj_supported().map_err(|_| anyhow!("URI does not support Payjoin"))?;
         let url = uri.extras.endpoint();
@@ -64,9 +64,9 @@ impl AppTrait for App {
                     .with_context(|| "Failed to build payjoin request")?;
                 let storage_token = new_sender
                     .persist(&mut persister)
-                    .map_err(|e| anyhow!("Failed to persist sender: {}", e))?;
+                    .map_err(|e| anyhow!("Failed to persist sender: {e}"))?;
                 Sender::load(storage_token, &persister)
-                    .map_err(|e| anyhow!("Failed to load sender: {}", e))?
+                    .map_err(|e| anyhow!("Failed to load sender: {e}"))?
             }
         };
         self.spawn_payjoin_sender(req_ctx).await
@@ -85,9 +85,9 @@ impl AppTrait for App {
         )?;
         let storage_token = new_receiver
             .persist(&mut persister)
-            .map_err(|e| anyhow!("Failed to persist receiver: {}", e))?;
+            .map_err(|e| anyhow!("Failed to persist receiver: {e}"))?;
         let session = Receiver::load(storage_token, &persister)
-            .map_err(|e| anyhow!("Failed to load receiver: {}", e))?;
+            .map_err(|e| anyhow!("Failed to load receiver: {e}"))?;
         self.spawn_payjoin_receiver(session, Some(amount)).await
     }
 
@@ -172,7 +172,7 @@ impl App {
         }?;
 
         println!("Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:");
-        println!("{}", serialize_hex(&receiver.extract_tx_to_schedule_broadcast()));
+        println!("{tx}", tx = serialize_hex(&receiver.extract_tx_to_schedule_broadcast()));
         let mut payjoin_proposal = match self.process_v2_proposal(receiver.clone()) {
             Ok(proposal) => proposal,
             Err(Error::ReplyToSender(e)) => {
@@ -182,16 +182,16 @@ impl App {
         };
         let (req, ohttp_ctx) = payjoin_proposal
             .extract_req(ohttp_relay)
-            .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
+            .map_err(|e| anyhow!("v2 req extraction failed {e}"))?;
         println!("Got a request from the sender. Responding with a Payjoin proposal.");
         let res = post_request(req).await?;
         payjoin_proposal
             .process_res(&res.bytes().await?, ohttp_ctx)
-            .map_err(|e| anyhow!("Failed to deserialize response {}", e))?;
+            .map_err(|e| anyhow!("Failed to deserialize response {e}"))?;
         let payjoin_psbt = payjoin_proposal.psbt().clone();
         println!(
-            "Response successful. Watch mempool for successful Payjoin. TXID: {}",
-            payjoin_psbt.extract_tx_unchecked_fee_rate().clone().compute_txid()
+            "Response successful. Watch mempool for successful Payjoin. TXID: {txid}",
+            txid = payjoin_psbt.extract_tx_unchecked_fee_rate().clone().compute_txid()
         );
         self.db.clear_recv_session()?;
         Ok(())
@@ -319,21 +319,21 @@ async fn handle_recoverable_error(
     let to_return = anyhow!("Replied with error: {}", e);
     let (err_req, err_ctx) = match receiver.extract_err_req(&e.into(), ohttp_relay) {
         Ok(req_ctx) => req_ctx,
-        Err(e) => return anyhow!("Failed to extract error request: {}", e),
+        Err(e) => return anyhow!("Failed to extract error request: {e}"),
     };
 
     let err_response = match post_request(err_req).await {
         Ok(response) => response,
-        Err(e) => return anyhow!("Failed to post error request: {}", e),
+        Err(e) => return anyhow!("Failed to post error request: {e}"),
     };
 
     let err_bytes = match err_response.bytes().await {
         Ok(bytes) => bytes,
-        Err(e) => return anyhow!("Failed to get error response bytes: {}", e),
+        Err(e) => return anyhow!("Failed to get error response bytes: {e}"),
     };
 
     if let Err(e) = receiver.process_err_res(&err_bytes, err_ctx) {
-        return anyhow!("Failed to process error response: {}", e);
+        return anyhow!("Failed to process error response: {e}");
     }
 
     to_return
@@ -366,7 +366,7 @@ async fn post_request(req: payjoin::Request) -> Result<reqwest::Response> {
 
 fn map_reqwest_err(e: reqwest::Error) -> anyhow::Error {
     match e.status() {
-        Some(status_code) => anyhow!("HTTP request failed: {} {}", status_code, e),
-        None => anyhow!("No HTTP response: {}", e),
+        Some(status_code) => anyhow!("HTTP request failed: {status_code} {e}"),
+        None => anyhow!("No HTTP response: {e}"),
     }
 }

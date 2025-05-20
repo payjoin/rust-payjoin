@@ -21,7 +21,7 @@ path = "src/main.rs"
 [features]
 default = ["v2"]
 native-certs = ["reqwest/rustls-tls-native-roots"]
-_danger-local-https = ["rcgen", "reqwest/rustls-tls", "rustls", "hyper-rustls", "payjoin/_danger-local-https", "tokio-rustls"]
+_danger-local-https = ["reqwest/rustls-tls", "rustls", "hyper-rustls", "payjoin/_danger-local-https", "tokio-rustls"]
 v1 = ["payjoin/v1","hyper", "hyper-util", "http-body-util"]
 v2 = ["payjoin/v2", "payjoin/io"]
 
@@ -38,7 +38,7 @@ hyper-rustls = { version = "0.26", optional = true }
 hyper-util = { version = "0.1", optional = true }
 log = "0.4.7"
 payjoin = { version = "0.23.0", default-features = false }
-rcgen = { version = "0.11.1", optional = true }
+rcgen = { version = "0.11.1" }
 reqwest = { version = "0.12", default-features = false }
 rustls = { version = "0.22.4", optional = true }
 serde = { version = "1.0.160", features = ["derive"] }

@@ -1,40 +1,30 @@
 use std::sync::{Arc, Mutex};
 
-#[cfg(feature = "_danger-local-https")]
-use anyhow::Result;
-#[cfg(not(feature = "_danger-local-https"))]
 use anyhow::{anyhow, Result};
 
 use super::Config;
 
 #[derive(Debug, Clone)]
-pub struct RelayState {
+pub(crate) struct RelayManager {
     selected_relay: Option<payjoin::Url>,
-    #[cfg(not(feature = "_danger-local-https"))]
     failed_relays: Vec<payjoin::Url>,
 }
 
-impl RelayState {
-    #[cfg(feature = "_danger-local-https")]
-    pub fn new() -> Self { RelayState { selected_relay: None } }
-    #[cfg(not(feature = "_danger-local-https"))]
-    pub fn new() -> Self { RelayState { selected_relay: None, failed_relays: Vec::new() } }
+impl RelayManager {
+    pub fn new() -> Self { RelayManager { selected_relay: None, failed_relays: Vec::new() } }
 
-    #[cfg(not(feature = "_danger-local-https"))]
     pub fn set_selected_relay(&mut self, relay: payjoin::Url) { self.selected_relay = Some(relay); }
 
     pub fn get_selected_relay(&self) -> Option<payjoin::Url> { self.selected_relay.clone() }
 
-    #[cfg(not(feature = "_danger-local-https"))]
     pub fn add_failed_relay(&mut self, relay: payjoin::Url) { self.failed_relays.push(relay); }
 
-    #[cfg(not(feature = "_danger-local-https"))]
     pub fn get_failed_relays(&self) -> Vec<payjoin::Url> { self.failed_relays.clone() }
 }
 
 pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
     config: &Config,
-    relay_state: Arc<Mutex<RelayState>>,
+    relay_state: Arc<Mutex<RelayManager>>,
 ) -> Result<payjoin::OhttpKeys> {
     if let Some(keys) = config.v2()?.ohttp_keys.clone() {
         println!("Using OHTTP Keys from config");
@@ -48,10 +38,9 @@ pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
     }
 }
 
-#[cfg(not(feature = "_danger-local-https"))]
-async fn fetch_keys(
+pub(crate) async fn fetch_keys(
     config: &Config,
-    relay_state: Arc<Mutex<RelayState>>,
+    relay_state: Arc<Mutex<RelayManager>>,
 ) -> Result<Option<payjoin::OhttpKeys>> {
     use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;
     let payjoin_directory = config.v2()?.pj_directory.clone();
@@ -80,7 +69,8 @@ async fn fetch_keys(
             .set_selected_relay(selected_relay.clone());
 
         let ohttp_keys = {
-            payjoin::io::fetch_ohttp_keys(selected_relay.clone(), payjoin_directory.clone()).await
+            payjoin::io::fetch_ohttp_keys(selected_relay.clone(), payjoin_directory.clone(), None)
+                .await
         };
 
         match ohttp_keys {
@@ -99,21 +89,9 @@ async fn fetch_keys(
     }
 }
 
-///Local relays are incapable of acting as proxies so we must opportunistically fetch keys from the config
-#[cfg(feature = "_danger-local-https")]
-async fn fetch_keys(
-    config: &Config,
-    _relay_state: Arc<Mutex<RelayState>>,
-) -> Result<Option<payjoin::OhttpKeys>> {
-    let keys = config.v2()?.ohttp_keys.clone().expect("No OHTTP keys set");
-
-    Ok(Some(keys))
-}
-
-#[cfg(not(feature = "_danger-local-https"))]
 pub(crate) async fn validate_relay(
     config: &Config,
-    relay_state: Arc<Mutex<RelayState>>,
+    relay_state: Arc<Mutex<RelayManager>>,
 ) -> Result<payjoin::Url> {
     use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;
     let payjoin_directory = config.v2()?.pj_directory.clone();
@@ -141,10 +119,12 @@ pub(crate) async fn validate_relay(
             .expect("Lock should not be poisoned")
             .set_selected_relay(selected_relay.clone());
 
-        let ohttp_keys =
-            payjoin::io::fetch_ohttp_keys(selected_relay.clone(), payjoin_directory.clone()).await;
+        let ohttp_keys = {
+            payjoin::io::fetch_ohttp_keys(selected_relay.clone(), payjoin_directory.clone(), None)
+                .await
+        };
 
-        match ohttp_keys {
+        match Ok(ohttp_keys) {
             Ok(_) => return Ok(selected_relay),
             Err(payjoin::io::Error::UnexpectedStatusCode(e)) => {
                 return Err(payjoin::io::Error::UnexpectedStatusCode(e).into());
@@ -158,14 +138,4 @@ pub(crate) async fn validate_relay(
             }
         }
     }
-}
-
-#[cfg(feature = "_danger-local-https")]
-pub(crate) async fn validate_relay(
-    config: &Config,
-    _relay_state: Arc<Mutex<RelayState>>,
-) -> Result<payjoin::Url> {
-    let relay = config.v2()?.ohttp_relays.first().expect("no OHTTP relay set").clone();
-
-    Ok(relay)
 }

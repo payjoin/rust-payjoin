@@ -20,7 +20,7 @@ pub fn replay_sender_event_log<P>(
 ) -> Result<(SenderState, SessionHistory), SenderReplayError>
 where
     P: PersistedSession + Clone,
-    P::SessionEvent: From<SenderSessionEvent>,
+    P::SessionEvent: From<SenderSessionEvent> + Clone,
     SenderSessionEvent: From<P::SessionEvent>,
 {
     let logs = persister.load().unwrap();

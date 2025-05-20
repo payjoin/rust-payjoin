@@ -9,7 +9,9 @@ pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
-pub use session::{replay_receiver_event_log, ReceiverReplayError, SessionHistory};
+pub use session::{
+    replay_receiver_event_log, ReceiverReplayError, ReceiverSessionEvent, SessionHistory,
+};
 use url::Url;
 
 use super::error::{Error, InputContributionError};
@@ -77,32 +79,6 @@ where
 
 fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
     sha256::Hash::hash(&pubkey.to_compressed_bytes()).into()
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-/// represents a piece of information that the reciever has learned about the session
-/// Each event can be used to transition the receiver state machine to a new state
-pub enum ReceiverSessionEvent {
-    /// Receiver was created
-    Created(SessionContext),
-    /// Receiver read a proposal from a directory
-    UncheckedProposal(v1::UncheckedProposal),
-    MaybeInputsOwned(v1::MaybeInputsOwned),
-    MaybeInputsSeen(v1::MaybeInputsSeen),
-    OutputsUnknown(v1::OutputsUnknown),
-    WantsOutputs(v1::WantsOutputs),
-    WantsInputs(v1::WantsInputs),
-    ProvisionalProposal(v1::ProvisionalProposal),
-    PayjoinProposal(v1::PayjoinProposal),
-    /// Fallback broadcasted
-    FallbackBroadcasted(bitcoin::Txid),
-    /// Original tx cannot be broadcasted
-    OriginalTxCannotBeBroadcasted(bitcoin::Txid),
-    /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
-    /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
-    /// Reason being in some cases we still want to preserve the error b/c the cause the session to fail but these are terminal states we dont need them to be structured or well typed
-    /// b/c its a terminal state and there is nothing to replay. So serialization will be lossy and that is fine.
-    SessionInvalid(String),
 }
 
 #[derive(Debug, Clone)]

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::output_substitution::OutputSubstitution;
 use crate::Version;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct Params {
     // version
     pub v: Version,

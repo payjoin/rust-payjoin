@@ -57,7 +57,7 @@ pub use exclusive::*;
 /// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
 /// that the transaction can be broadcast with check_broadcast_suitability. Otherwise it is safe to
 /// call assume_interactive_receive to proceed with validation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UncheckedProposal {
     pub(crate) psbt: Psbt,
     pub(crate) params: Params,
@@ -128,7 +128,7 @@ impl UncheckedProposal {
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
 /// Call [`Self::check_inputs_not_owned`] to proceed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MaybeInputsOwned {
     psbt: Psbt,
     params: Params,
@@ -171,7 +171,7 @@ impl MaybeInputsOwned {
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
 /// Call [`Self::check_no_inputs_seen_before`] to proceed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MaybeInputsSeen {
     psbt: Psbt,
     params: Params,
@@ -203,7 +203,7 @@ impl MaybeInputsSeen {
 ///
 /// Only accept PSBTs that send us money.
 /// Identify those outputs with [`Self::identify_receiver_outputs`] to proceed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OutputsUnknown {
     psbt: Psbt,
     params: Params,
@@ -255,7 +255,7 @@ impl OutputsUnknown {
 /// A checked proposal that the receiver may substitute or add outputs to
 ///
 /// Call [`Self::commit_outputs`] to proceed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsOutputs {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,
@@ -388,7 +388,7 @@ fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [
 /// A checked proposal that the receiver may contribute inputs to to make a payjoin
 ///
 /// Call [`Self::commit_inputs`] to proceed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsInputs {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,
@@ -551,7 +551,7 @@ impl WantsInputs {
 /// sender will accept.
 ///
 /// Call [`Self::finalize_proposal`] to return a finalized [`PayjoinProposal`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProvisionalProposal {
     pub(crate) original_psbt: Psbt,
     pub(crate) payjoin_psbt: Psbt,
@@ -757,7 +757,7 @@ impl ProvisionalProposal {
 
 /// A finalized payjoin proposal, complete with fees and receiver signatures, that the sender
 /// should find acceptable.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PayjoinProposal {
     payjoin_psbt: Psbt,
 }
@@ -792,7 +792,25 @@ pub(crate) mod test {
         UncheckedProposal { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
     }
 
-    fn wants_outputs_from_test_vector(proposal: UncheckedProposal) -> WantsOutputs {
+    pub(crate) fn maybe_inputs_owned_from_test_vector() -> MaybeInputsOwned {
+        let proposal = unchecked_proposal_from_test_vector();
+        let maybe_inputs_owned = proposal.check_broadcast_suitability(None, |_| Ok(true)).unwrap();
+        maybe_inputs_owned
+    }
+
+    pub(crate) fn maybe_inputs_seen_from_test_vector() -> MaybeInputsSeen {
+        let maybe_inputs_owned = maybe_inputs_owned_from_test_vector();
+        let maybe_inputs_seen = maybe_inputs_owned.check_inputs_not_owned(|_| Ok(false)).unwrap();
+        maybe_inputs_seen
+    }
+
+    pub(crate) fn outputs_unknown_from_test_vector() -> OutputsUnknown {
+        let maybe_inputs_seen = maybe_inputs_seen_from_test_vector();
+        let outputs_unknown = maybe_inputs_seen.check_no_inputs_seen_before(|_| Ok(false)).unwrap();
+        outputs_unknown
+    }
+
+    pub(crate) fn wants_outputs_from_test_vector(proposal: UncheckedProposal) -> WantsOutputs {
         proposal
             .assume_interactive_receiver()
             .check_inputs_not_owned(|_| Ok(false))
@@ -810,8 +828,23 @@ pub(crate) mod test {
             .expect("Receiver output should be identified")
     }
 
-    fn provisional_proposal_from_test_vector(proposal: UncheckedProposal) -> ProvisionalProposal {
+    pub(crate) fn wants_inputs_from_test_vector() -> WantsInputs {
+        let proposal = unchecked_proposal_from_test_vector();
+        wants_outputs_from_test_vector(proposal).commit_outputs()
+    }
+
+    pub(crate) fn provisional_proposal_from_test_vector(
+        proposal: UncheckedProposal,
+    ) -> ProvisionalProposal {
         wants_outputs_from_test_vector(proposal).commit_outputs().commit_inputs()
+    }
+
+    pub(crate) fn payjoin_proposal_from_test_vector(
+        proposal: UncheckedProposal,
+    ) -> PayjoinProposal {
+        provisional_proposal_from_test_vector(proposal)
+            .finalize_proposal(|_| Ok(PARSED_ORIGINAL_PSBT.clone()), None, None)
+            .unwrap()
     }
 
     #[test]

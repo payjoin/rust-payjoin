@@ -253,29 +253,6 @@ pub enum Rejected<Event, Err> {
     Fatal(Event, Err),
 }
 
-impl Event for ReceiverSessionEvent {
-    fn session_invalid(error: &impl PersistableError) -> Self {
-        ReceiverSessionEvent::SessionInvalid(error.to_string())
-    }
-}
-impl Event for SenderSessionEvent {
-    fn session_invalid(error: &impl PersistableError) -> Self {
-        SenderSessionEvent::SessionInvalid(error.to_string())
-    }
-}
-
-#[cfg(feature = "_multiparty")]
-impl Event for crate::send::multiparty::SenderSessionEvent {
-    fn session_invalid(error: &impl PersistableError) -> Self {
-        crate::send::multiparty::SenderSessionEvent::SessionInvalid(error.to_string())
-    }
-}
-
-/// Types that can be persisted in a session
-pub trait Event: serde::Serialize + serde::de::DeserializeOwned + Sized + Clone {
-    fn session_invalid(error: &impl PersistableError) -> Self;
-}
-
 /// Serializable error types that can be persisted in a session
 /// TODO: see if this can be a ext. trait with a blanket impl for all error types
 pub trait PersistableError: std::error::Error + ToString {}
@@ -378,7 +355,7 @@ pub trait PersistedSession {
     /// Errors that may arise from implementers storage layer
     type InternalStorageError: std::error::Error + Send + Sync + 'static;
     /// Session events types that we are persisting
-    type SessionEvent: Event;
+    type SessionEvent;
 
     /// Appends to list of session updates, Receives generic events
     fn save_event(&self, event: &Self::SessionEvent) -> Result<(), Self::InternalStorageError>;
@@ -549,10 +526,6 @@ impl<T: PersistedSession> InternalPersistedSession for T {}
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NoopPersisterEvent;
 
-impl Event for NoopPersisterEvent {
-    fn session_invalid(_error: &impl PersistableError) -> Self { NoopPersisterEvent }
-}
-
 impl From<ReceiverSessionEvent> for NoopPersisterEvent {
     fn from(_event: ReceiverSessionEvent) -> Self { NoopPersisterEvent }
 }
@@ -573,7 +546,7 @@ impl<E> Default for NoopPersister<E> {
     fn default() -> Self { Self(std::marker::PhantomData) }
 }
 
-impl<E: Event + 'static> PersistedSession for NoopPersister<E> {
+impl<E: 'static> PersistedSession for NoopPersister<E> {
     type InternalStorageError = std::convert::Infallible;
     type SessionEvent = E;
 

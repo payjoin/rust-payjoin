@@ -206,9 +206,6 @@ impl Receiver<ReceiverWithContext> {
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), Error> {
         if SystemTime::now() > self.state.context.expiry {
-            // Session is expired, close the session
-            // TODO: remove unwrap
-            // self.persister.close().unwrap();
             return Err(InternalSessionError::Expired(self.state.context.expiry).into());
         }
         let (body, ohttp_ctx) =

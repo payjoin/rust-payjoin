@@ -3,10 +3,12 @@ use url::Url;
 
 use super::{SenderSessionEvent, SenderState, SenderWithReplyKey};
 use crate::persist::PersistedSession;
+use crate::ImplementationError;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum SenderReplayError {
     InvalidStateAndEvent(SenderState, SenderSessionEvent),
+    PersistenceFailure(ImplementationError),
 }
 
 impl std::fmt::Display for SenderReplayError {
@@ -23,7 +25,7 @@ where
     P::SessionEvent: From<SenderSessionEvent> + Clone,
     SenderSessionEvent: From<P::SessionEvent>,
 {
-    let logs = persister.load().unwrap();
+    let logs = persister.load().map_err(|e| SenderReplayError::PersistenceFailure(Box::new(e)))?;
 
     let mut sender = SenderState::Uninitialized();
     let mut history = SessionHistory::new(Vec::new());
@@ -32,7 +34,9 @@ where
         match sender.clone().process_event(log.into()) {
             Ok(next_sender) => sender = next_sender,
             Err(_e) => {
-                persister.close().unwrap();
+                persister
+                    .close()
+                    .map_err(|e| SenderReplayError::PersistenceFailure(Box::new(e)))?;
                 break;
             }
         }

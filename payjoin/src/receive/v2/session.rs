@@ -7,7 +7,7 @@ use crate::output_substitution::OutputSubstitution;
 use crate::persist::PersistedSession;
 use crate::receive::v1;
 use crate::receive::v2::{id, subdir};
-use crate::PjUri;
+use crate::{ImplementationError, PjUri};
 
 #[derive(Debug)]
 /// Errors that can occur when replaying a receiver event log
@@ -16,6 +16,8 @@ pub enum ReceiverReplayError {
     SessionExpired(SystemTime),
     /// Invalid combination of state and event
     InvalidStateAndEvent(ReceiverState, ReceiverSessionEvent),
+    /// Persistence failure
+    PersistenceFailure(ImplementationError),
 }
 
 impl std::fmt::Display for ReceiverReplayError {
@@ -33,8 +35,8 @@ where
     P::SessionEvent: From<ReceiverSessionEvent> + Clone,
     ReceiverSessionEvent: From<P::SessionEvent>,
 {
-    // TODO: fix this
-    let logs = persister.load().unwrap();
+    let logs =
+        persister.load().map_err(|e| ReceiverReplayError::PersistenceFailure(Box::new(e)))?;
     let mut receiver = ReceiverState::Uninitialized(Receiver { state: UninitializedReceiver {} });
     let mut history = SessionHistory::new(Vec::new());
 
@@ -47,7 +49,9 @@ where
             }
             Err(_e) => {
                 // All error cases are terminal. Close the session in its current state
-                persister.close().unwrap();
+                persister
+                    .close()
+                    .map_err(|e| ReceiverReplayError::PersistenceFailure(Box::new(e)))?;
                 break;
             }
         }

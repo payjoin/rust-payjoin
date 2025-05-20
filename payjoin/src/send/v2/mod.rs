@@ -26,6 +26,7 @@ pub use error::{CreateRequestError, EncapsulationError};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
 use serde::{Deserialize, Serialize};
+pub use session::{replay_sender_event_log, SenderReplayError, SessionHistory};
 use url::Url;
 
 use super::error::BuildSenderError;
@@ -34,14 +35,14 @@ use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
 use crate::persist::{
     AcceptNextState, MaybeBadInitInputsTransition, MaybeFatalTransition,
-    MaybeFatalTransitionWithNoResults, PersistedSession, RejectBadInitInputs,
+    MaybeFatalTransitionWithNoResults, RejectBadInitInputs,
 };
 use crate::send::v1;
 use crate::uri::{ShortId, UrlExt};
 use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
 
 mod error;
-
+mod session;
 /// A builder to construct the properties of a [`Sender`].
 #[derive(Clone)]
 pub struct SenderBuilder<'a>(v1::SenderBuilder<'a>);
@@ -160,7 +161,7 @@ impl<'a> SenderBuilder<'a> {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SenderSessionEvent {
     /// Sender was created
     CreatedReplyKey(SenderWithReplyKey),
@@ -178,11 +179,6 @@ pub enum SenderSessionEvent {
 #[cfg_attr(feature = "_multiparty", derive(Serialize, Deserialize))]
 pub struct Sender<State> {
     state: State,
-}
-
-#[derive(Debug, Clone)]
-pub enum SenderReplayError {
-    InvalidStateAndEvent,
 }
 
 #[derive(Debug, Clone)]
@@ -208,57 +204,12 @@ impl SenderState {
             (SenderState::V2GetContext(state), SenderSessionEvent::ProposalReceived(proposal)) =>
                 Ok(state.apply_proposal_received(proposal)),
             (_, SenderSessionEvent::SessionInvalid(_)) => Ok(SenderState::TerminalState),
-            _ => Err(SenderReplayError::InvalidStateAndEvent),
+            (current_state, event) =>
+                Err(SenderReplayError::InvalidStateAndEvent(current_state, event)),
         }
     }
 }
 
-pub fn replay_sender_event_log<P>(
-    persister: P,
-) -> Result<(SenderState, SessionHistory), SenderReplayError>
-where
-    P: PersistedSession + Clone,
-    P::SessionEvent: From<SenderSessionEvent>,
-    SenderSessionEvent: From<P::SessionEvent>,
-{
-    let logs = persister.load().unwrap();
-
-    let mut sender = SenderState::Uninitialized();
-    let mut history = SessionHistory::new(Vec::new());
-    for log in logs {
-        history.events.push(log.clone().into());
-        sender = sender.process_event(log.into())?;
-    }
-
-    Ok((sender, history))
-}
-
-#[derive(Default)]
-pub struct SessionHistory {
-    events: Vec<SenderSessionEvent>,
-}
-
-impl SessionHistory {
-    fn new(events: Vec<SenderSessionEvent>) -> Self { Self { events } }
-
-    pub fn payee_script(&self) -> Option<ScriptBuf> {
-        self.events.iter().find_map(|event| match event {
-            SenderSessionEvent::CreatedReplyKey(sender_with_reply_key) =>
-                Some(sender_with_reply_key.v1.payee.clone()),
-            _ => None,
-        })
-    }
-
-    pub fn endpoint(&self) -> Option<&Url> {
-        self.events.iter().find_map(|event| match event {
-            SenderSessionEvent::CreatedReplyKey(sender_with_reply_key) =>
-                Some(sender_with_reply_key.v1.endpoint()),
-            _ => None,
-        })
-    }
-
-    // TODO: Add more methods as needed
-}
 /// A payjoin V2 sender, allowing the construction of a payjoin V2 request
 /// and the resulting [`V2PostContext`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

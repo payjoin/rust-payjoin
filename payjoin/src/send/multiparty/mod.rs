@@ -20,7 +20,6 @@ use crate::uri::UrlExt;
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
 mod error;
-mod persist;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum SenderSessionEvent {

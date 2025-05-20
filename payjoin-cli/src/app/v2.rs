@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::persist::{PersistedError, PersistedSession, PersistedSucccessWithMaybeNoResults};
+use payjoin::persist::{PersistedError, PersistedSucccessWithMaybeNoResults};
 use payjoin::receive::v2::{
     replay_receiver_event_log, MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal,
     ProvisionalProposal, Receiver, ReceiverState, ReceiverWithContext, UncheckedProposal,

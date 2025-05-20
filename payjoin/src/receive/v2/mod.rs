@@ -9,6 +9,7 @@ pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
+pub use session::{replay_receiver_event_log, ReceiverReplayError, SessionHistory};
 use url::Url;
 
 use super::error::{Error, InputContributionError};
@@ -21,14 +22,15 @@ use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
     AcceptCompleted, AcceptNextState, MaybeBadInitInputsTransition, MaybeFatalRejection,
     MaybeFatalTransition, MaybeFatalTransitionWithNoResults, MaybeSuccessTransition,
-    MaybeTransientTransition, NextStateTransition, PersistedSession, RejectBadInitInputs,
-    RejectFatal, RejectTransient,
+    MaybeTransientTransition, NextStateTransition, RejectBadInitInputs, RejectFatal,
+    RejectTransient,
 };
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
-use crate::{ImplementationError, IntoUrl, IntoUrlError, PjUri, Request, Version};
+use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
 
 mod error;
+mod session;
 
 const SUPPORTED_VERSIONS: &[Version] = &[Version::One, Version::Two];
 
@@ -103,14 +105,6 @@ pub enum ReceiverSessionEvent {
     SessionInvalid(String),
 }
 
-#[derive(Debug)]
-pub enum ReceiverReplayError {
-    /// Session expired
-    SessionExpired(SystemTime),
-    /// Invalid combination of state and event
-    InvalidStateAndEvent,
-}
-
 #[derive(Debug, Clone)]
 pub enum ReceiverState {
     Uninitialized(Receiver<UninitializedReceiver>),
@@ -175,93 +169,12 @@ impl ReceiverState {
                 ReceiverSessionEvent::PayjoinProposal(payjoin_proposal),
             ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
             (_, ReceiverSessionEvent::SessionInvalid(_)) => Ok(ReceiverState::TerminalState),
-            // TODO: Handle invalid transitions with a catch-all that provides better error info
-            (_current_state, _event) => Err(ReceiverReplayError::InvalidStateAndEvent),
+            (current_state, event) =>
+                Err(ReceiverReplayError::InvalidStateAndEvent(current_state, event)),
         }
     }
 }
 
-pub fn replay_receiver_event_log<P>(
-    persister: P,
-) -> Result<(ReceiverState, SessionHistory), ReceiverReplayError>
-where
-    P: PersistedSession + Clone,
-    P::SessionEvent: From<ReceiverSessionEvent>,
-    ReceiverSessionEvent: From<P::SessionEvent>,
-{
-    // TODO: fix this
-    let logs = persister.load().unwrap();
-    let mut receiver = ReceiverState::Uninitialized(Receiver { state: UninitializedReceiver {} });
-    let mut history = SessionHistory::new(Vec::new());
-
-    for log in logs {
-        history.events.push(log.clone().into());
-        // TODO: remove clone
-        match receiver.clone().process_event(log.into()) {
-            Ok(next_receiver) => {
-                receiver = next_receiver;
-            }
-            Err(_e) => {
-                // All error cases are terminal. Close the session in its current state
-                persister.close().unwrap();
-                break;
-            }
-        }
-    }
-
-    Ok((receiver, history))
-}
-
-#[derive(Clone)]
-pub struct SessionHistory {
-    events: Vec<ReceiverSessionEvent>,
-}
-
-impl SessionHistory {
-    fn new(events: Vec<ReceiverSessionEvent>) -> Self { Self { events } }
-
-    pub fn pj_uri<'a>(&self) -> Option<PjUri<'a>> {
-        self.events.iter().find_map(|event| match event {
-            ReceiverSessionEvent::Created(session_context) => {
-                // TODO this code was copied from ReceiverWithContext::pj_uri. Should be deduped
-                use crate::uri::{PayjoinExtras, UrlExt};
-                let id = id(&session_context.s);
-                let mut pj = subdir(&session_context.directory, &id).clone();
-                pj.set_receiver_pubkey(session_context.s.public_key().clone());
-                pj.set_ohttp(session_context.ohttp_keys.clone());
-                pj.set_exp(session_context.expiry);
-                let extras = PayjoinExtras {
-                    endpoint: pj,
-                    output_substitution: OutputSubstitution::Disabled,
-                };
-                Some(bitcoin_uri::Uri::with_extras(session_context.address.clone(), extras))
-            }
-            _ => None,
-        })
-    }
-
-    pub fn payment_amount(&self) -> Option<bitcoin::Amount> { self.pj_uri().map(|uri| uri.amount)? }
-
-    pub fn payment_address(&self) -> Option<bitcoin::Address<bitcoin::address::NetworkChecked>> {
-        self.pj_uri().map(|uri| uri.address)
-    }
-
-    pub fn proposal_txid(&self) -> Option<bitcoin::Txid> {
-        self.events.iter().find_map(|event| match event {
-            ReceiverSessionEvent::ProvisionalProposal(proposal) =>
-                Some(proposal.payjoin_psbt.unsigned_tx.compute_txid()),
-            _ => None,
-        })
-    }
-
-    pub fn fallback_txid(&self) -> Option<bitcoin::Txid> {
-        self.events.iter().find_map(|event| match event {
-            ReceiverSessionEvent::UncheckedProposal(proposal) =>
-                Some(proposal.psbt.unsigned_tx.compute_txid()),
-            _ => None,
-        })
-    }
-}
 #[derive(Debug, Clone)]
 pub struct Receiver<State> {
     state: State,

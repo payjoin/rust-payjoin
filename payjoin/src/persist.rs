@@ -151,11 +151,17 @@ impl<Err> From<Result<AcceptCompleted, RejectTransient<Err>>> for MaybeSuccessTr
     }
 }
 
-impl<Err> MaybeSuccessTransition<Err> {
+impl<Err> MaybeSuccessTransition<Err>
+where
+    Err: std::error::Error,
+{
+    pub fn success() -> Self { MaybeSuccessTransition(Ok(AcceptCompleted())) }
+
+    pub fn transient(error: Err) -> Self { MaybeSuccessTransition(Err(RejectTransient(error))) }
+
     pub fn save<P>(self, persister: &P) -> Result<(), PersistedError<Err, P::InternalStorageError>>
     where
         P: PersistedSession,
-        Err: std::error::Error,
     {
         persister.save_maybe_success_transition(self)
     }
@@ -171,6 +177,10 @@ impl<Event, NextState> From<AcceptNextState<Event, NextState>>
 }
 
 impl<Event, NextState> NextStateTransition<Event, NextState> {
+    pub fn success(event: Event, next_state: NextState) -> Self {
+        NextStateTransition(AcceptNextState(event, next_state))
+    }
+
     pub fn save<P>(self, persister: &P) -> Result<NextState, StorageError<P::InternalStorageError>>
     where
         P: PersistedSession<SessionEvent = Event>,
@@ -196,6 +206,14 @@ impl<Event, NextState, Err>
     }
 }
 impl<Event, NextState, Err> MaybeBadInitInputsTransition<Event, NextState, Err> {
+    pub fn success(event: Event, next_state: NextState) -> Self {
+        MaybeBadInitInputsTransition(Ok(AcceptNextState(event, next_state)))
+    }
+
+    pub fn bad_init_inputs(error: Err) -> Self {
+        MaybeBadInitInputsTransition(Err(RejectBadInitInputs(error)))
+    }
+
     pub fn save<P>(
         self,
         persister: &P,
@@ -312,6 +330,7 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{:?}", self) }
 }
 
+#[derive(Debug, PartialEq)]
 pub enum PersistedSucccessWithMaybeNoResults<NextState, CurrentState> {
     Success(NextState),
     NoResults(CurrentState),
@@ -561,4 +580,361 @@ impl<E: 'static> PersistedSession for NoopPersister<E> {
     }
 
     fn close(&self) -> Result<(), Self::InternalStorageError> { Ok(()) }
+}
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, RwLock};
+    use std::time::UNIX_EPOCH;
+
+    use serde::{Deserialize, Serialize};
+
+    use super::*;
+    use crate::receive::v2::ReceiverReplayError;
+
+    type InMemoryTestState = String;
+    #[derive(Clone, Default)]
+    pub struct InMemoryTestPersister {
+        inner: Arc<RwLock<InnerStorage>>,
+    }
+
+    #[derive(Clone)]
+    struct InnerStorage {
+        events: Vec<String>,
+        is_closed: bool,
+    }
+    impl Default for InnerStorage {
+        fn default() -> Self { Self { events: Vec::new(), is_closed: false } }
+    }
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct InMemoryTestEvent(String);
+
+    impl PersistedSession for InMemoryTestPersister {
+        type InternalStorageError = std::convert::Infallible;
+        type SessionEvent = InMemoryTestEvent;
+
+        fn save_event(&self, event: &Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
+            let mut inner = self.inner.write().expect("Lock should not be poisoned");
+            inner.events.push(event.0.clone());
+            Ok(())
+        }
+
+        fn load(
+            &self,
+        ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError>
+        {
+            let inner = self.inner.read().expect("Lock should not be poisoned");
+            let events = inner.events.clone();
+            Ok(Box::new(events.into_iter().map(|e| InMemoryTestEvent(e))))
+        }
+
+        fn close(&self) -> Result<(), Self::InternalStorageError> {
+            let mut inner = self.inner.write().expect("Lock should not be poisoned");
+            inner.is_closed = true;
+            Ok(())
+        }
+    }
+
+    struct TestCase<SuccessState, ErrorState> {
+        test: Box<dyn Fn(&InMemoryTestPersister) -> Result<SuccessState, ErrorState>>,
+        expected_result: ExpectedResult<SuccessState, ErrorState>,
+    }
+
+    struct ExpectedResult<SuccessState, ErrorState> {
+        /// Events that should be saved
+        events: Vec<InMemoryTestEvent>,
+        /// Whether the session should be closed
+        is_closed: bool,
+        /// Error that should be returned
+        error: Option<ErrorState>,
+        /// Success state if one exists for this test case
+        success: Option<SuccessState>,
+    }
+
+    fn do_test<SuccessState: std::fmt::Debug + PartialEq, ErrorState: std::error::Error>(
+        persister: &InMemoryTestPersister,
+        test_case: &TestCase<SuccessState, ErrorState>,
+    ) {
+        let expected_result = &test_case.expected_result;
+        let res = (test_case.test)(persister);
+        let events = persister.load().expect("Persister should not fail").collect::<Vec<_>>();
+        assert_eq!(events.len(), expected_result.events.len());
+        for (event, expected_event) in events.iter().zip(expected_result.events.iter()) {
+            assert_eq!(event.0, expected_event.0);
+        }
+
+        assert_eq!(
+            persister.inner.read().expect("Lock should not be poisoned").is_closed,
+            expected_result.is_closed
+        );
+
+        match (&res, &expected_result.error) {
+            (Ok(actual), None) => {
+                assert_eq!(Some(actual), expected_result.success.as_ref());
+            }
+            (Err(actual), Some(expected)) => {
+                assert_eq!(actual.to_string(), expected.to_string());
+            }
+            _ => panic!("Unexpected result state"),
+        }
+    }
+
+    #[test]
+    fn test_maybe_bad_init_inputs() {
+        let event = InMemoryTestEvent("foo".to_string());
+        let next_state = "Next state".to_string();
+        let test_cases: Vec<
+            TestCase<
+                InMemoryTestState,
+                PersistedError<ReceiverReplayError, std::convert::Infallible>,
+            >,
+        > = vec![
+            // Success
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![event.clone()],
+                    is_closed: false,
+                    error: None,
+                    success: Some(next_state.clone()),
+                },
+                test: Box::new(move |persister| {
+                    MaybeBadInitInputsTransition::success(event.clone(), next_state.clone())
+                        .save(persister)
+                }),
+            },
+            // Bad init inputs
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![],
+                    is_closed: false,
+                    error: Some(PersistedError::BadInitInputs(
+                        ReceiverReplayError::SessionExpired(UNIX_EPOCH),
+                    )),
+                    success: None,
+                },
+                test: Box::new(move |persister| {
+                    MaybeBadInitInputsTransition::bad_init_inputs(
+                        ReceiverReplayError::SessionExpired(UNIX_EPOCH),
+                    )
+                    .save(persister)
+                }),
+            },
+        ];
+
+        for test in test_cases {
+            let persister = InMemoryTestPersister::default();
+            do_test(&persister, &test);
+        }
+    }
+
+    #[test]
+    fn test_next_state_transition() {
+        let event = InMemoryTestEvent("foo".to_string());
+        let next_state = "Next state".to_string();
+        let test_cases: Vec<TestCase<InMemoryTestState, StorageError<std::convert::Infallible>>> = vec![
+            // Success
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![event.clone()],
+                    is_closed: false,
+                    error: None,
+                    success: Some(next_state.clone()),
+                },
+                test: Box::new(move |persister| {
+                    NextStateTransition::success(event.clone(), next_state.clone()).save(persister)
+                }),
+            },
+        ];
+
+        for test in test_cases {
+            let persister = InMemoryTestPersister::default();
+            do_test(&persister, &test);
+        }
+    }
+
+    #[test]
+    fn test_maybe_success_transition() {
+        let test_cases: Vec<
+            TestCase<(), PersistedError<ReceiverReplayError, std::convert::Infallible>>,
+        > = vec![
+            // Success
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![],
+                    is_closed: true,
+                    error: None,
+                    success: Some(()),
+                },
+                test: Box::new(move |persister| MaybeSuccessTransition::success().save(persister)),
+            },
+            // Transient error
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![],
+                    is_closed: false,
+                    error: Some(PersistedError::Transient(ReceiverReplayError::SessionExpired(
+                        UNIX_EPOCH,
+                    ))),
+                    success: None,
+                },
+                test: Box::new(move |persister| {
+                    MaybeSuccessTransition::transient(ReceiverReplayError::SessionExpired(
+                        UNIX_EPOCH,
+                    ))
+                    .save(persister)
+                }),
+            },
+        ];
+
+        for test in test_cases {
+            let persister = InMemoryTestPersister::default();
+            do_test(&persister, &test);
+        }
+    }
+
+    #[test]
+    fn test_maybe_fatal_transition() {
+        let event = InMemoryTestEvent("foo".to_string());
+        let error_event = InMemoryTestEvent("error event".to_string());
+        let next_state = "Next state".to_string();
+
+        let test_cases: Vec<
+            TestCase<
+                InMemoryTestState,
+                PersistedError<ReceiverReplayError, std::convert::Infallible>,
+            >,
+        > = vec![
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![event.clone()],
+                    is_closed: false,
+                    error: None,
+                    success: Some(next_state.clone()),
+                },
+                test: Box::new(move |persister| {
+                    MaybeFatalTransition::success(event.clone(), next_state.clone()).save(persister)
+                }),
+            },
+            // Transient error
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![],
+                    is_closed: false,
+                    error: Some(PersistedError::Transient(ReceiverReplayError::SessionExpired(
+                        UNIX_EPOCH,
+                    ))),
+                    success: None,
+                },
+                test: Box::new(move |persister| {
+                    MaybeFatalTransition::transient(ReceiverReplayError::SessionExpired(UNIX_EPOCH))
+                        .save(persister)
+                }),
+            },
+            // Fatal error
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![error_event.clone()],
+                    is_closed: true,
+                    error: Some(PersistedError::Fatal(ReceiverReplayError::SessionExpired(
+                        UNIX_EPOCH,
+                    ))),
+                    success: None,
+                },
+                test: Box::new(move |persister| {
+                    MaybeFatalTransition::fatal(
+                        error_event.clone(),
+                        ReceiverReplayError::SessionExpired(UNIX_EPOCH),
+                    )
+                    .save(persister)
+                }),
+            },
+        ];
+
+        for test in test_cases {
+            let persister = InMemoryTestPersister::default();
+            do_test(&persister, &test);
+        }
+    }
+
+    #[test]
+    fn test_maybe_fatal_transition_with_no_results() {
+        let event = InMemoryTestEvent("foo".to_string());
+        let error_event = InMemoryTestEvent("error event".to_string());
+        let current_state = "Current state".to_string();
+        let next_state = "Next state".to_string();
+        let test_cases: Vec<
+            TestCase<
+                PersistedSucccessWithMaybeNoResults<InMemoryTestState, InMemoryTestState>,
+                PersistedError<ReceiverReplayError, std::convert::Infallible>,
+            >,
+        > = vec![
+            // Success
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![event.clone()],
+                    is_closed: false,
+                    error: None,
+                    success: Some(PersistedSucccessWithMaybeNoResults::Success(next_state.clone())),
+                },
+                test: Box::new(move |persister| {
+                    MaybeFatalTransitionWithNoResults::success(event.clone(), next_state.clone())
+                        .save(persister)
+                }),
+            },
+            // No results
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![],
+                    is_closed: false,
+                    error: None,
+                    success: Some(PersistedSucccessWithMaybeNoResults::NoResults(
+                        current_state.clone(),
+                    )),
+                },
+                test: Box::new(move |persister| {
+                    MaybeFatalTransitionWithNoResults::no_results(current_state.clone())
+                        .save(persister)
+                }),
+            },
+            // Transient error
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![],
+                    is_closed: false,
+                    error: Some(PersistedError::Transient(ReceiverReplayError::SessionExpired(
+                        UNIX_EPOCH,
+                    ))),
+                    success: None,
+                },
+                test: Box::new(move |persister| {
+                    MaybeFatalTransitionWithNoResults::transient(
+                        ReceiverReplayError::SessionExpired(UNIX_EPOCH),
+                    )
+                    .save(persister)
+                }),
+            },
+            // Fatal error
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![error_event.clone()],
+                    is_closed: true,
+                    error: Some(PersistedError::Fatal(ReceiverReplayError::SessionExpired(
+                        UNIX_EPOCH,
+                    ))),
+                    success: None,
+                },
+                test: Box::new(move |persister| {
+                    MaybeFatalTransitionWithNoResults::fatal(
+                        error_event.clone(),
+                        ReceiverReplayError::SessionExpired(UNIX_EPOCH),
+                    )
+                    .save(persister)
+                }),
+            },
+        ];
+
+        for test in test_cases {
+            let persister = InMemoryTestPersister::default();
+            do_test(&persister, &test);
+        }
+    }
 }

@@ -38,6 +38,10 @@ The [`payjoin-directory`](https://github.com/payjoin/rust-payjoin/tree/master/pa
 
 The [`payjoin-test-utils`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-test-utils) crate provides commonly used testing fixtures such as a local OHTTP relay and payjoin directory, bitcoind node and wallets, and official test vectors.
 
+### `payjoin-ffi`
+
+The [`payjoin-ffi`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-ffi) crate provides language bindings that expose the Rust-based Payjoin implementation to various programming languages.
+
 ### Disclaimer ⚠️ WIP
 
 **Use at your own risk. This crate has not yet been reviewed by independent Rust and Bitcoin security professionals.**

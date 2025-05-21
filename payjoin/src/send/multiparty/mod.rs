@@ -11,10 +11,7 @@ use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, Internal
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::{
-    AcceptNextState, MaybeBadInitInputsTransition, MaybeFatalRejection, MaybeFatalTransition,
-    NoopPersister, RejectFatal, RejectTransient,
-};
+use crate::persist::{MaybeBadInitInputsTransition, MaybeFatalTransition, NoopPersister};
 use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
@@ -49,10 +46,10 @@ impl<'a> SenderBuilder<'a> {
 
         let sender_with_reply_key = SenderWithReplyKey(sender);
         let next_state = Sender { state: sender_with_reply_key.clone() };
-        MaybeBadInitInputsTransition(Ok(AcceptNextState(
+        MaybeBadInitInputsTransition::success(
             SenderSessionEvent::CreatedReplyKey(sender_with_reply_key),
             next_state,
-        )))
+        )
     }
 }
 
@@ -118,14 +115,15 @@ impl Sender<SenderWithReplyKey> {
         post_ctx: PostContext,
     ) -> MaybeFatalTransition<SenderSessionEvent, Sender<GetContext>, EncapsulationError> {
         let noop_persister = NoopPersister::<crate::send::v2::SenderSessionEvent>::default();
-        let res =
-            self.state.0.process_response(response, post_ctx.0).save(&noop_persister).unwrap();
+        let res = self
+            .state
+            .0
+            .process_response(response, post_ctx.0)
+            .save(&noop_persister)
+            .expect("Noop doesnt fail");
 
         let next_state = Sender { state: GetContext(res.clone()) };
-        MaybeFatalTransition::Ok(AcceptNextState(
-            SenderSessionEvent::V2GetContext(GetContext(res)),
-            next_state,
-        ))
+        MaybeFatalTransition::success(SenderSessionEvent::V2GetContext(GetContext(res)), next_state)
     }
 }
 
@@ -182,26 +180,24 @@ impl Sender<GetContext> {
         {
             Ok(response_array) => response_array,
             Err(_) =>
-                return MaybeFatalTransition::Err(MaybeFatalRejection::Fatal(RejectFatal(
+                return MaybeFatalTransition::fatal(
                     SenderSessionEvent::SessionInvalid(format!("Invalid size: {}", response.len())),
                     InternalFinalizedError::InvalidSize.into(),
-                ))),
+                ),
         };
 
         let response = match ohttp_decapsulate(ohttp_ctx, response_array) {
             Ok(response) => response,
             Err(e) =>
-                return MaybeFatalTransition::Err(MaybeFatalRejection::Transient(RejectTransient(
-                    InternalFinalizedError::Ohttp(e).into(),
-                ))),
+                return MaybeFatalTransition::transient(InternalFinalizedError::Ohttp(e).into()),
         };
         let body = match response.status() {
             http::StatusCode::OK => Some(response.body().to_vec()),
             http::StatusCode::ACCEPTED => None,
             _ =>
-                return MaybeFatalTransition::Err(MaybeFatalRejection::Transient(RejectTransient(
+                return MaybeFatalTransition::transient(
                     InternalFinalizedError::UnexpectedStatusCode(response.status()).into(),
-                ))),
+                ),
         };
         if let Some(body) = body {
             let psbt = match decrypt_message_b(
@@ -211,52 +207,49 @@ impl Sender<GetContext> {
             ) {
                 Ok(psbt) => psbt,
                 Err(e) =>
-                    return MaybeFatalTransition::Err(MaybeFatalRejection::Fatal(RejectFatal(
+                    return MaybeFatalTransition::fatal(
                         SenderSessionEvent::SessionInvalid(format!("Hpke error: {}", e)),
                         InternalFinalizedError::Hpke(e).into(),
-                    ))),
+                    ),
             };
 
             let proposal = match Psbt::deserialize(&psbt) {
                 Ok(proposal) => proposal,
                 Err(e) =>
-                    return MaybeFatalTransition::Err(MaybeFatalRejection::Fatal(RejectFatal(
+                    return MaybeFatalTransition::fatal(
                         SenderSessionEvent::SessionInvalid(format!(
                             "Psbt deserialize error: {}",
                             e
                         )),
                         InternalFinalizedError::Psbt(e).into(),
-                    ))),
+                    ),
             };
 
             let psbt = match psbt_ctx.process_proposal(proposal) {
                 Ok(psbt) => psbt,
                 Err(e) =>
-                    return MaybeFatalTransition::Err(MaybeFatalRejection::Transient(
-                        RejectTransient(InternalFinalizedError::Proposal(e).into()),
-                    )),
+                    return MaybeFatalTransition::transient(
+                        InternalFinalizedError::Proposal(e).into(),
+                    ),
             };
             let finalized_psbt = match finalize_psbt(&psbt) {
                 Ok(finalized_psbt) => finalized_psbt,
                 Err(e) =>
-                    return MaybeFatalTransition::Err(MaybeFatalRejection::Transient(
-                        RejectTransient(InternalFinalizedError::FinalizePsbt(e).into()),
-                    )),
+                    return MaybeFatalTransition::transient(
+                        InternalFinalizedError::FinalizePsbt(e).into(),
+                    ),
             };
             let next_state = FinalizeContext {
                 hpke_ctx: state.hpke_ctx.clone(),
                 directory_url: state.endpoint.clone(),
                 psbt: finalized_psbt,
             };
-            MaybeFatalTransition::Ok(AcceptNextState(
+            MaybeFatalTransition::success(
                 SenderSessionEvent::FinalizeContext(next_state.clone()),
                 Sender { state: next_state },
-            ))
+            )
         } else {
-            // TODO: this method needs to return a fatal with maybe no results type. And this should be returning a success no results type.
-            MaybeFatalTransition::Err(MaybeFatalRejection::Transient(RejectTransient(
-                InternalFinalizedError::MissingResponse.into(),
-            )))
+            MaybeFatalTransition::transient(InternalFinalizedError::MissingResponse.into())
         }
     }
 }

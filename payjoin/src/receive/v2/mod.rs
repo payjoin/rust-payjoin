@@ -22,10 +22,8 @@ use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicK
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
-    AcceptCompleted, AcceptNextState, MaybeBadInitInputsTransition, MaybeFatalRejection,
-    MaybeFatalTransition, MaybeFatalTransitionWithNoResults, MaybeSuccessTransition,
-    MaybeTransientTransition, NextStateTransition, RejectBadInitInputs, RejectFatal,
-    RejectTransient,
+    MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
+    MaybeSuccessTransition, MaybeTransientTransition, NextStateTransition,
 };
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
@@ -173,7 +171,7 @@ impl Receiver<UninitializedReceiver> {
     > {
         let directory = match directory.into_url() {
             Ok(url) => url,
-            Err(e) => return MaybeBadInitInputsTransition(Err(RejectBadInitInputs(e))),
+            Err(e) => return MaybeBadInitInputsTransition::bad_init_inputs(e),
         };
 
         let session_context = SessionContext {
@@ -187,10 +185,10 @@ impl Receiver<UninitializedReceiver> {
         };
 
         let event = ReceiverSessionEvent::Created(session_context.clone());
-        MaybeBadInitInputsTransition(Ok(AcceptNextState(
+        MaybeBadInitInputsTransition::success(
             event,
             Receiver { state: ReceiverWithContext { context: session_context } },
-        )))
+        )
     }
 }
 
@@ -232,21 +230,22 @@ impl Receiver<ReceiverWithContext> {
                 // Dir and OHTTP related error are transient
                 // Malformities or invalid responses are considered fatal
                 // TODO: could use granular session event for specific error types
-                let err = match e {
+                match e {
                     Error::ReplyToSender(ref reply_error) => match reply_error {
                         ReplyableError::Implementation(_) =>
-                            MaybeFatalRejection::Transient(RejectTransient(e)),
-                        _ => MaybeFatalRejection::Fatal(RejectFatal(
+                            return MaybeFatalTransitionWithNoResults::transient(e),
+                        _ =>
+                            return MaybeFatalTransitionWithNoResults::fatal(
+                                ReceiverSessionEvent::SessionInvalid(e.to_string()),
+                                e,
+                            ),
+                    },
+                    _ =>
+                        return MaybeFatalTransitionWithNoResults::fatal(
                             ReceiverSessionEvent::SessionInvalid(e.to_string()),
                             e,
-                        )),
-                    },
-                    _ => MaybeFatalRejection::Fatal(RejectFatal(
-                        ReceiverSessionEvent::SessionInvalid(e.to_string()),
-                        e,
-                    )),
+                        ),
                 };
-                return MaybeFatalTransitionWithNoResults::Err(err);
             }
         };
 
@@ -436,9 +435,9 @@ impl Receiver<UncheckedProposal> {
     /// Those receivers call `extract_tx_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
     pub fn assume_interactive_receiver(
         self,
-    ) -> AcceptNextState<ReceiverSessionEvent, Receiver<MaybeInputsOwned>> {
+    ) -> NextStateTransition<ReceiverSessionEvent, Receiver<MaybeInputsOwned>> {
         let inner = self.state.v1.assume_interactive_receiver();
-        AcceptNextState(
+        NextStateTransition::success(
             ReceiverSessionEvent::MaybeInputsOwned(inner.clone()),
             Receiver { state: MaybeInputsOwned { v1: inner, context: self.state.context } },
         )
@@ -664,10 +663,10 @@ impl Receiver<WantsOutputs> {
         self,
     ) -> NextStateTransition<ReceiverSessionEvent, Receiver<WantsInputs>> {
         let inner = self.state.v1.clone().commit_outputs();
-        NextStateTransition(AcceptNextState(
+        NextStateTransition::success(
             ReceiverSessionEvent::WantsInputs(inner.clone()),
             Receiver { state: WantsInputs { v1: inner, context: self.state.context.clone() } },
-        ))
+        )
     }
 
     pub fn apply_wants_inputs(self, v1: v1::WantsInputs) -> ReceiverState {
@@ -720,12 +719,12 @@ impl Receiver<WantsInputs> {
         self,
     ) -> NextStateTransition<ReceiverSessionEvent, Receiver<ProvisionalProposal>> {
         let inner = self.state.v1.clone().commit_inputs();
-        NextStateTransition(AcceptNextState(
+        NextStateTransition::success(
             ReceiverSessionEvent::ProvisionalProposal(inner.clone()),
             Receiver {
                 state: ProvisionalProposal { v1: inner, context: self.state.context.clone() },
             },
-        ))
+        )
     }
 
     pub fn apply_provisional_proposal(self, v1: v1::ProvisionalProposal) -> ReceiverState {
@@ -761,14 +760,13 @@ impl Receiver<ProvisionalProposal> {
             Err(e) => {
                 // v1::finalize_proposal returns a ReplyableError but the only error that can be returned is ImplementationError from the closure
                 // And that is a transient error
-                return Err(RejectTransient(e)).into();
+                return MaybeTransientTransition::transient(e);
             }
         };
-        Ok(AcceptNextState(
+        MaybeTransientTransition::success(
             ReceiverSessionEvent::PayjoinProposal(inner.clone()),
             Receiver { state: PayjoinProposal { v1: inner, context: self.state.context.clone() } },
-        ))
-        .into()
+        )
     }
 
     pub fn apply_payjoin_proposal(self, v1: v1::PayjoinProposal) -> ReceiverState {
@@ -865,27 +863,24 @@ impl Receiver<PayjoinProposal> {
             match res.try_into() {
                 Ok(response_array) => response_array,
                 Err(_) =>
-                    return Err(RejectTransient(Error::V2(
+                    return MaybeSuccessTransition::transient(
                         InternalSessionError::UnexpectedResponseSize(res.len()).into(),
-                    )))
-                    .into(),
+                    ),
             };
         let res = match ohttp_decapsulate(ohttp_context, response_array) {
             Ok(res) => res,
             Err(e) =>
-                return Err(RejectTransient(Error::V2(
+                return MaybeSuccessTransition::transient(
                     InternalSessionError::OhttpEncapsulation(e).into(),
-                )))
-                .into(),
+                ),
         };
         if res.status().is_success() {
-            Ok(AcceptCompleted()).into()
+            MaybeSuccessTransition::success()
         } else {
             // Directory error is transient
-            return Err(RejectTransient(
+            return MaybeSuccessTransition::transient(
                 InternalSessionError::UnexpectedStatusCode(res.status()).into(),
-            ))
-            .into();
+            );
         }
     }
 }

@@ -42,22 +42,22 @@ impl<Event, NextState, CurrentState, Err>
     MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err>
 {
     #[inline]
-    pub fn fatal(event: Event, error: Err) -> Self {
+    pub(crate) fn fatal(event: Event, error: Err) -> Self {
         MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::fatal(event, error))
     }
 
     #[inline]
-    pub fn transient(error: Err) -> Self {
+    pub(crate) fn transient(error: Err) -> Self {
         MaybeFatalTransitionWithNoResults::Err(MaybeFatalRejection::transient(error))
     }
 
     #[inline]
-    pub fn no_results(current_state: CurrentState) -> Self {
+    pub(crate) fn no_results(current_state: CurrentState) -> Self {
         MaybeFatalTransitionWithNoResults::Ok(AcceptWithMaybeNoResults::NoResults(current_state))
     }
 
     #[inline]
-    pub fn success(event: Event, next_state: NextState) -> Self {
+    pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         MaybeFatalTransitionWithNoResults::Ok(AcceptWithMaybeNoResults::Success(AcceptNextState(
             event, next_state,
         )))
@@ -87,17 +87,17 @@ pub enum MaybeFatalTransition<Event, NextState, Err> {
 
 impl<Event, NextState, Err> MaybeFatalTransition<Event, NextState, Err> {
     #[inline]
-    pub fn fatal(event: Event, error: Err) -> Self {
+    pub(crate) fn fatal(event: Event, error: Err) -> Self {
         MaybeFatalTransition::Err(MaybeFatalRejection::fatal(event, error))
     }
 
     #[inline]
-    pub fn transient(error: Err) -> Self {
+    pub(crate) fn transient(error: Err) -> Self {
         MaybeFatalTransition::Err(MaybeFatalRejection::transient(error))
     }
 
     #[inline]
-    pub fn success(event: Event, next_state: NextState) -> Self {
+    pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         MaybeFatalTransition::Ok(AcceptNextState(event, next_state))
     }
 
@@ -116,18 +116,20 @@ impl<Event, NextState, Err> MaybeFatalTransition<Event, NextState, Err> {
 /// A transition that can be transient.
 /// If success it must have a next state and an event to save
 pub struct MaybeTransientTransition<Event, NextState, Err>(
-    pub(crate) Result<AcceptNextState<Event, NextState>, RejectTransient<Err>>,
+    Result<AcceptNextState<Event, NextState>, RejectTransient<Err>>,
 );
 
-impl<Event, NextState, Err> From<Result<AcceptNextState<Event, NextState>, RejectTransient<Err>>>
-    for MaybeTransientTransition<Event, NextState, Err>
-{
-    fn from(value: Result<AcceptNextState<Event, NextState>, RejectTransient<Err>>) -> Self {
-        MaybeTransientTransition(value)
-    }
-}
-
 impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err> {
+    #[inline]
+    pub(crate) fn success(event: Event, next_state: NextState) -> Self {
+        MaybeTransientTransition(Ok(AcceptNextState(event, next_state)))
+    }
+
+    #[inline]
+    pub(crate) fn transient(error: Err) -> Self {
+        MaybeTransientTransition(Err(RejectTransient(error)))
+    }
+
     pub fn save<P>(
         self,
         persister: &P,
@@ -143,21 +145,19 @@ impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err> {
 /// A transition that can be success or transient error
 /// If success there are no events to save or next state
 /// If transient error we can retry this state transition
-pub struct MaybeSuccessTransition<Err>(pub(crate) Result<AcceptCompleted, RejectTransient<Err>>);
-
-impl<Err> From<Result<AcceptCompleted, RejectTransient<Err>>> for MaybeSuccessTransition<Err> {
-    fn from(value: Result<AcceptCompleted, RejectTransient<Err>>) -> Self {
-        MaybeSuccessTransition(value)
-    }
-}
+pub struct MaybeSuccessTransition<Err>(Result<AcceptCompleted, RejectTransient<Err>>);
 
 impl<Err> MaybeSuccessTransition<Err>
 where
     Err: std::error::Error,
 {
-    pub fn success() -> Self { MaybeSuccessTransition(Ok(AcceptCompleted())) }
+    #[inline]
+    pub(crate) fn success() -> Self { MaybeSuccessTransition(Ok(AcceptCompleted())) }
 
-    pub fn transient(error: Err) -> Self { MaybeSuccessTransition(Err(RejectTransient(error))) }
+    #[inline]
+    pub(crate) fn transient(error: Err) -> Self {
+        MaybeSuccessTransition(Err(RejectTransient(error)))
+    }
 
     pub fn save<P>(self, persister: &P) -> Result<(), PersistedError<Err, P::InternalStorageError>>
     where
@@ -168,16 +168,11 @@ where
 }
 
 /// A transition that is always a next state transition
-pub struct NextStateTransition<Event, NextState>(pub(crate) AcceptNextState<Event, NextState>);
-
-impl<Event, NextState> From<AcceptNextState<Event, NextState>>
-    for NextStateTransition<Event, NextState>
-{
-    fn from(value: AcceptNextState<Event, NextState>) -> Self { NextStateTransition(value) }
-}
+pub struct NextStateTransition<Event, NextState>(AcceptNextState<Event, NextState>);
 
 impl<Event, NextState> NextStateTransition<Event, NextState> {
-    pub fn success(event: Event, next_state: NextState) -> Self {
+    #[inline]
+    pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         NextStateTransition(AcceptNextState(event, next_state))
     }
 
@@ -194,23 +189,17 @@ impl<Event, NextState> NextStateTransition<Event, NextState> {
 /// The only thing we can do is reject the session. Since the session doesnt really exist at this point
 /// there is no need to save events or close the session
 pub struct MaybeBadInitInputsTransition<Event, NextState, Err>(
-    pub(crate) Result<AcceptNextState<Event, NextState>, RejectBadInitInputs<Err>>,
+    Result<AcceptNextState<Event, NextState>, RejectBadInitInputs<Err>>,
 );
 
-impl<Event, NextState, Err>
-    From<Result<AcceptNextState<Event, NextState>, RejectBadInitInputs<Err>>>
-    for MaybeBadInitInputsTransition<Event, NextState, Err>
-{
-    fn from(value: Result<AcceptNextState<Event, NextState>, RejectBadInitInputs<Err>>) -> Self {
-        MaybeBadInitInputsTransition(value)
-    }
-}
 impl<Event, NextState, Err> MaybeBadInitInputsTransition<Event, NextState, Err> {
-    pub fn success(event: Event, next_state: NextState) -> Self {
+    #[inline]
+    pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         MaybeBadInitInputsTransition(Ok(AcceptNextState(event, next_state)))
     }
 
-    pub fn bad_init_inputs(error: Err) -> Self {
+    #[inline]
+    pub(crate) fn bad_init_inputs(error: Err) -> Self {
         MaybeBadInitInputsTransition(Err(RejectBadInitInputs(error)))
     }
 
@@ -227,11 +216,10 @@ impl<Event, NextState, Err> MaybeBadInitInputsTransition<Event, NextState, Err> 
 }
 
 /* Accept */
-// TODO: should these be pub?
 /// A transition that marks the progression of a state machine
-pub struct AcceptNextState<Event, NextState>(pub Event, pub NextState);
+pub struct AcceptNextState<Event, NextState>(Event, NextState);
 /// A transition that marks the success of a state machine
-pub struct AcceptCompleted();
+struct AcceptCompleted();
 
 /// A transition that can be success or no results
 pub enum AcceptWithMaybeNoResults<Event, NextState, CurrentState> {
@@ -255,25 +243,9 @@ impl<Event, Err> MaybeFatalRejection<Event, Err> {
     pub fn transient(error: Err) -> Self { MaybeFatalRejection::Transient(RejectTransient(error)) }
 }
 
-pub struct RejectFatal<Event, Err>(pub Event, pub Err);
-pub struct RejectTransient<Err>(pub Err);
-pub struct RejectBadInitInputs<Err>(pub Err);
-
-/// The Err branch always contains the Rejected triple.
-/// This is the same as Accepted except it contains an error.
-/// The receiver is kept in the current state.
-/// Event is the session event type
-/// Err is the error type
-/// CurrentState is the current state type
-pub enum Rejected<Event, Err> {
-    None(),
-    Soft(Event, Err),
-    Fatal(Event, Err),
-}
-
-/// Serializable error types that can be persisted in a session
-/// TODO: see if this can be a ext. trait with a blanket impl for all error types
-pub trait PersistableError: std::error::Error + ToString {}
+pub struct RejectFatal<Event, Err>(Event, Err);
+pub struct RejectTransient<Err>(Err);
+pub struct RejectBadInitInputs<Err>(Err);
 
 // Note: What can API errors actually contain?
 // Its bip77 specific errors, and callback errors generated by application
@@ -386,7 +358,7 @@ pub trait PersistedSession {
     fn close(&self) -> Result<(), Self::InternalStorageError>; // Marks the session as closed, no more updates will be appended
 }
 
-pub(crate) trait InternalPersistedSession: PersistedSession {
+trait InternalPersistedSession: PersistedSession {
     /// Save progression transition where state transition does not return an error
     /// Only returns an error if the storage fails
     fn save_progression_transition<NextState>(
@@ -726,6 +698,53 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_maybe_transient_transition() {
+        let event = InMemoryTestEvent("foo".to_string());
+        let next_state = "Next state".to_string();
+        let test_cases: Vec<
+            TestCase<
+                InMemoryTestState,
+                PersistedError<ReceiverReplayError, std::convert::Infallible>,
+            >,
+        > = vec![
+            // Success
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![event.clone()],
+                    is_closed: false,
+                    error: None,
+                    success: Some(next_state.clone()),
+                },
+                test: Box::new(move |persister| {
+                    MaybeTransientTransition::success(event.clone(), next_state.clone())
+                        .save(persister)
+                }),
+            },
+            // Transient error
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![],
+                    is_closed: false,
+                    error: Some(PersistedError::Transient(ReceiverReplayError::SessionExpired(
+                        UNIX_EPOCH,
+                    ))),
+                    success: None,
+                },
+                test: Box::new(move |persister| {
+                    MaybeTransientTransition::transient(ReceiverReplayError::SessionExpired(
+                        UNIX_EPOCH,
+                    ))
+                    .save(persister)
+                }),
+            },
+        ];
+
+        for test in test_cases {
+            let persister = InMemoryTestPersister::default();
+            do_test(&persister, &test);
+        }
+    }
     #[test]
     fn test_next_state_transition() {
         let event = InMemoryTestEvent("foo".to_string());

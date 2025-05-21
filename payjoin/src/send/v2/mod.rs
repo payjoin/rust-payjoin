@@ -34,8 +34,7 @@ use super::*;
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
 use crate::persist::{
-    AcceptNextState, MaybeBadInitInputsTransition, MaybeFatalTransition,
-    MaybeFatalTransitionWithNoResults, RejectBadInitInputs,
+    MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
 };
 use crate::send::v1;
 use crate::uri::{ShortId, UrlExt};
@@ -81,14 +80,16 @@ impl<'a> SenderBuilder<'a> {
         let v1 = match self.0.build_recommended(min_fee_rate) {
             Ok(inner) => inner,
             Err(e) => {
-                return Err(RejectBadInitInputs(e)).into();
+                return MaybeBadInitInputsTransition::bad_init_inputs(e);
             }
         };
         let sender_with_reply_key =
             SenderWithReplyKey { v1, reply_key: HpkeKeyPair::gen_keypair().0 };
         let sender = Sender { state: sender_with_reply_key.clone() };
-        Ok(AcceptNextState(SenderSessionEvent::CreatedReplyKey(sender_with_reply_key), sender))
-            .into()
+        MaybeBadInitInputsTransition::success(
+            SenderSessionEvent::CreatedReplyKey(sender_with_reply_key),
+            sender,
+        )
     }
 
     /// Offer the receiver contribution to pay for his input.
@@ -124,15 +125,17 @@ impl<'a> SenderBuilder<'a> {
             Ok(inner) => inner,
             Err(e) => {
                 // TODO: need more grandual error handling
-                return Err(RejectBadInitInputs(e)).into();
+                return MaybeBadInitInputsTransition::bad_init_inputs(e);
             }
         };
 
         let sender_with_reply_key =
             SenderWithReplyKey { v1, reply_key: HpkeKeyPair::gen_keypair().0 };
         let sender = Sender { state: sender_with_reply_key.clone() };
-        Ok(AcceptNextState(SenderSessionEvent::CreatedReplyKey(sender_with_reply_key), sender))
-            .into()
+        MaybeBadInitInputsTransition::success(
+            SenderSessionEvent::CreatedReplyKey(sender_with_reply_key),
+            sender,
+        )
     }
 
     /// Perform Payjoin without incentivizing the payee to cooperate.
@@ -150,14 +153,16 @@ impl<'a> SenderBuilder<'a> {
         let v1 = match self.0.build_non_incentivizing(min_fee_rate) {
             Ok(inner) => inner,
             Err(e) => {
-                return Err(RejectBadInitInputs(e)).into();
+                return MaybeBadInitInputsTransition::bad_init_inputs(e);
             }
         };
         let sender_with_reply_key =
             SenderWithReplyKey { v1, reply_key: HpkeKeyPair::gen_keypair().0 };
         let sender = Sender { state: sender_with_reply_key.clone() };
-        Ok(AcceptNextState(SenderSessionEvent::CreatedReplyKey(sender_with_reply_key), sender))
-            .into()
+        MaybeBadInitInputsTransition::success(
+            SenderSessionEvent::CreatedReplyKey(sender_with_reply_key),
+            sender,
+        )
     }
 }
 

@@ -6,6 +6,7 @@ use bitcoin::transaction::Version;
 use bitcoin::Sequence;
 
 use crate::error_codes::ErrorCode;
+use crate::MAX_CONTENT_LENGTH;
 
 /// Error building a Sender from a SenderBuilder.
 ///
@@ -95,6 +96,7 @@ pub struct ValidationError(InternalValidationError);
 pub(crate) enum InternalValidationError {
     Parse,
     Io(std::io::Error),
+    ContentTooLarge,
     Proposal(InternalProposalError),
     #[cfg(feature = "v2")]
     V2Encapsulation(crate::send::v2::EncapsulationError),
@@ -119,6 +121,7 @@ impl fmt::Display for ValidationError {
         match &self.0 {
             Parse => write!(f, "couldn't decode as PSBT or JSON",),
             Io(e) => write!(f, "couldn't read PSBT: {e}"),
+            ContentTooLarge => write!(f, "content is larger than {MAX_CONTENT_LENGTH} bytes"),
             Proposal(e) => write!(f, "proposal PSBT error: {e}"),
             #[cfg(feature = "v2")]
             V2Encapsulation(e) => write!(f, "v2 encapsulation error: {e}"),
@@ -133,6 +136,7 @@ impl std::error::Error for ValidationError {
         match &self.0 {
             Parse => None,
             Io(error) => Some(error),
+            ContentTooLarge => None,
             Proposal(e) => Some(e),
             #[cfg(feature = "v2")]
             V2Encapsulation(e) => Some(e),

@@ -76,3 +76,7 @@ pub(crate) mod error_codes;
 pub use crate::core::error::ImplementationError;
 #[cfg(feature = "_core")]
 pub(crate) use crate::core::version::Version;
+
+/// 4M block size limit with base64 encoding overhead => maximum reasonable size of content-length
+/// 4_000_000 * 4 / 3 fits in u32
+pub const MAX_CONTENT_LENGTH: usize = 4_000_000 * 4 / 3;

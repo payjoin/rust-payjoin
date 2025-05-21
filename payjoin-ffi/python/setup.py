@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import os
-from setuptools import setup, find_packages
+from setuptools import setup
 import toml
 
 # Read version from Cargo.toml
@@ -11,7 +11,7 @@ version = cargo_toml['package']['version']
 
 LONG_DESCRIPTION = """# payjoin
 This repository creates libraries for various programming languages, all using the Rust-based [Payjoin](https://github.com/payjoin/rust-payjoin) 
-as the core implementation of BIP178, sourced from the [Payjoin Dev Kit](https://payjoindevkit.org/).
+as the core implementation of BIP77, sourced from the [Payjoin Dev Kit](https://payjoindevkit.org/).
 
 ## Install the package
 ```shell

@@ -26,7 +26,7 @@ pub use error::{CreateRequestError, EncapsulationError};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
 use serde::{Deserialize, Serialize};
-pub use session::{replay_sender_event_log, SenderReplayError, SessionHistory};
+pub use session::{replay_sender_event_log, SenderReplayError, SenderSessionEvent, SessionHistory};
 use url::Url;
 
 use super::error::BuildSenderError;
@@ -164,19 +164,6 @@ impl<'a> SenderBuilder<'a> {
             sender,
         )
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SenderSessionEvent {
-    /// Sender was created
-    CreatedReplyKey(SenderWithReplyKey),
-    /// Sender POST'd the original PSBT, and waiting to receive a Proposal PSBT using GET context
-    V2GetContext(V2GetContext),
-    /// Sender received a Proposal PSBT
-    ProposalReceived(Psbt),
-    /// Invalid session
-    /// TODO specify error in event
-    SessionInvalid(String),
 }
 
 //TODO: this can just be a wrapper around the state

@@ -11,7 +11,10 @@ use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, Internal
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::{MaybeBadInitInputsTransition, MaybeFatalTransition, NoopPersister};
+use crate::persist::{
+    MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
+    MaybeSuccessTransition, NoopPersister,
+};
 use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
@@ -42,7 +45,11 @@ impl<'a> SenderBuilder<'a> {
         BuildSenderError,
     > {
         let noop_persister = NoopPersister::<crate::send::v2::SenderSessionEvent>::default();
-        let sender = self.0.build_recommended(min_fee_rate).save(&noop_persister).unwrap();
+        let sender = self
+            .0
+            .build_recommended(min_fee_rate)
+            .save(&noop_persister)
+            .expect("Noop does not fail");
 
         let sender_with_reply_key = SenderWithReplyKey(sender);
         let next_state = Sender { state: sender_with_reply_key.clone() };
@@ -58,7 +65,6 @@ pub struct Sender<State> {
     state: State,
 }
 
-// TODO: need to impl partial eq and eqfor sender
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SenderWithReplyKey(pub(crate) v2::Sender<v2::SenderWithReplyKey>);
 
@@ -120,7 +126,7 @@ impl Sender<SenderWithReplyKey> {
             .0
             .process_response(response, post_ctx.0)
             .save(&noop_persister)
-            .expect("Noop doesnt fail");
+            .expect("Noop does not fail");
 
         let next_state = Sender { state: GetContext(res.clone()) };
         MaybeFatalTransition::success(SenderSessionEvent::V2GetContext(GetContext(res)), next_state)
@@ -170,17 +176,21 @@ impl Sender<GetContext> {
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
         finalize_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-    ) -> MaybeFatalTransition<SenderSessionEvent, Sender<FinalizeContext>, FinalizedError> {
+    ) -> MaybeFatalTransitionWithNoResults<
+        SenderSessionEvent,
+        Sender<FinalizeContext>,
+        Sender<GetContext>,
+        FinalizedError,
+    > {
         let state = self.state.0.state();
         let psbt_ctx = PsbtContext { inner: state.psbt_ctx.clone() };
-        // TODO: need a short hand way to create fatal or transient errors.
-        // Match statmes are a pain to write and read.
+
         let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] = match response
             .try_into()
         {
             Ok(response_array) => response_array,
             Err(_) =>
-                return MaybeFatalTransition::fatal(
+                return MaybeFatalTransitionWithNoResults::fatal(
                     SenderSessionEvent::SessionInvalid(format!("Invalid size: {}", response.len())),
                     InternalFinalizedError::InvalidSize.into(),
                 ),
@@ -189,13 +199,15 @@ impl Sender<GetContext> {
         let response = match ohttp_decapsulate(ohttp_ctx, response_array) {
             Ok(response) => response,
             Err(e) =>
-                return MaybeFatalTransition::transient(InternalFinalizedError::Ohttp(e).into()),
+                return MaybeFatalTransitionWithNoResults::transient(
+                    InternalFinalizedError::Ohttp(e).into(),
+                ),
         };
         let body = match response.status() {
             http::StatusCode::OK => Some(response.body().to_vec()),
             http::StatusCode::ACCEPTED => None,
             _ =>
-                return MaybeFatalTransition::transient(
+                return MaybeFatalTransitionWithNoResults::transient(
                     InternalFinalizedError::UnexpectedStatusCode(response.status()).into(),
                 ),
         };
@@ -207,7 +219,7 @@ impl Sender<GetContext> {
             ) {
                 Ok(psbt) => psbt,
                 Err(e) =>
-                    return MaybeFatalTransition::fatal(
+                    return MaybeFatalTransitionWithNoResults::fatal(
                         SenderSessionEvent::SessionInvalid(format!("Hpke error: {}", e)),
                         InternalFinalizedError::Hpke(e).into(),
                     ),
@@ -216,7 +228,7 @@ impl Sender<GetContext> {
             let proposal = match Psbt::deserialize(&psbt) {
                 Ok(proposal) => proposal,
                 Err(e) =>
-                    return MaybeFatalTransition::fatal(
+                    return MaybeFatalTransitionWithNoResults::fatal(
                         SenderSessionEvent::SessionInvalid(format!(
                             "Psbt deserialize error: {}",
                             e
@@ -228,14 +240,15 @@ impl Sender<GetContext> {
             let psbt = match psbt_ctx.process_proposal(proposal) {
                 Ok(psbt) => psbt,
                 Err(e) =>
-                    return MaybeFatalTransition::transient(
+                    return MaybeFatalTransitionWithNoResults::fatal(
+                        SenderSessionEvent::SessionInvalid(format!("Proposal error: {}", e)),
                         InternalFinalizedError::Proposal(e).into(),
                     ),
             };
             let finalized_psbt = match finalize_psbt(&psbt) {
                 Ok(finalized_psbt) => finalized_psbt,
                 Err(e) =>
-                    return MaybeFatalTransition::transient(
+                    return MaybeFatalTransitionWithNoResults::transient(
                         InternalFinalizedError::FinalizePsbt(e).into(),
                     ),
             };
@@ -244,12 +257,12 @@ impl Sender<GetContext> {
                 directory_url: state.endpoint.clone(),
                 psbt: finalized_psbt,
             };
-            MaybeFatalTransition::success(
+            MaybeFatalTransitionWithNoResults::success(
                 SenderSessionEvent::FinalizeContext(next_state.clone()),
                 Sender { state: next_state },
             )
         } else {
-            MaybeFatalTransition::transient(InternalFinalizedError::MissingResponse.into())
+            MaybeFatalTransitionWithNoResults::no_results(self.clone())
         }
     }
 }
@@ -295,16 +308,28 @@ impl Sender<FinalizeContext> {
         self,
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
-    ) -> Result<(), FinalizeResponseError> {
-        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] = response
-            .try_into()
-            .map_err(|_| InternalFinalizeResponseError::InvalidSize(response.len()))?;
+    ) -> MaybeSuccessTransition<FinalizeResponseError> {
+        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
+            match response.try_into() {
+                Ok(response_array) => response_array,
+                Err(_) =>
+                    return MaybeSuccessTransition::transient(
+                        InternalFinalizeResponseError::InvalidSize(response.len()).into(),
+                    ),
+            };
 
-        let response = ohttp_decapsulate(ohttp_ctx, response_array)
-            .map_err(InternalFinalizeResponseError::Ohttp)?;
+        let response = match ohttp_decapsulate(ohttp_ctx, response_array) {
+            Ok(response) => response,
+            Err(e) =>
+                return MaybeSuccessTransition::transient(
+                    InternalFinalizeResponseError::Ohttp(e).into(),
+                ),
+        };
         match response.status() {
-            http::StatusCode::OK | http::StatusCode::ACCEPTED => Ok(()),
-            _ => Err(InternalFinalizeResponseError::UnexpectedStatusCode(response.status()))?,
+            http::StatusCode::OK | http::StatusCode::ACCEPTED => MaybeSuccessTransition::success(),
+            _ => MaybeSuccessTransition::transient(
+                InternalFinalizeResponseError::UnexpectedStatusCode(response.status()).into(),
+            ),
         }
     }
 }

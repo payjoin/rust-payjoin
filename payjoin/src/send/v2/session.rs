@@ -1,7 +1,8 @@
-use bitcoin::ScriptBuf;
+use bitcoin::{Psbt, ScriptBuf};
+use serde::{Deserialize, Serialize};
 use url::Url;
 
-use super::{SenderSessionEvent, SenderState, SenderWithReplyKey};
+use super::{SenderState, SenderWithReplyKey, V2GetContext};
 use crate::persist::PersistedSession;
 use crate::ImplementationError;
 
@@ -28,7 +29,7 @@ where
     let logs = persister.load().map_err(|e| SenderReplayError::PersistenceFailure(Box::new(e)))?;
 
     let mut sender = SenderState::Uninitialized();
-    let mut history = SessionHistory::new(Vec::new());
+    let mut history = SessionHistory::default();
     for log in logs {
         history.events.push(log.clone().into());
         match sender.clone().process_event(log.into()) {
@@ -51,8 +52,6 @@ pub struct SessionHistory {
 }
 
 impl SessionHistory {
-    fn new(events: Vec<SenderSessionEvent>) -> Self { Self { events } }
-
     fn sender_with_reply_key(&self) -> Option<&SenderWithReplyKey> {
         self.events.iter().find_map(|event| match event {
             SenderSessionEvent::CreatedReplyKey(sender_with_reply_key) =>
@@ -68,4 +67,23 @@ impl SessionHistory {
     pub fn endpoint(&self) -> Option<&Url> {
         self.sender_with_reply_key().map(|sender| sender.v1.endpoint())
     }
+
+    pub fn session_invalid(&self) -> Option<String> {
+        self.events.iter().find_map(|event| match event {
+            SenderSessionEvent::SessionInvalid(e) => Some(e.clone()),
+            _ => None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SenderSessionEvent {
+    /// Sender was created
+    CreatedReplyKey(SenderWithReplyKey),
+    /// Sender POST'd the original PSBT, and waiting to receive a Proposal PSBT using GET context
+    V2GetContext(V2GetContext),
+    /// Sender received a Proposal PSBT
+    ProposalReceived(Psbt),
+    /// Invalid session
+    SessionInvalid(String),
 }

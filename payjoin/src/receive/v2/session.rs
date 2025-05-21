@@ -38,7 +38,7 @@ where
     let logs =
         persister.load().map_err(|e| ReceiverReplayError::PersistenceFailure(Box::new(e)))?;
     let mut receiver = ReceiverState::Uninitialized(Receiver { state: UninitializedReceiver {} });
-    let mut history = SessionHistory::new(Vec::new());
+    let mut history = SessionHistory::default();
 
     for log in logs {
         history.events.push(log.clone().into());
@@ -60,14 +60,12 @@ where
     Ok((receiver, history))
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SessionHistory {
     events: Vec<ReceiverSessionEvent>,
 }
 
 impl SessionHistory {
-    fn new(events: Vec<ReceiverSessionEvent>) -> Self { Self { events } }
-
     pub fn pj_uri<'a>(&self) -> Option<PjUri<'a>> {
         self.events.iter().find_map(|event| match event {
             ReceiverSessionEvent::Created(session_context) => {
@@ -109,6 +107,13 @@ impl SessionHistory {
             _ => None,
         })
     }
+
+    pub fn session_invalid(&self) -> Option<String> {
+        self.events.iter().find_map(|event| match event {
+            ReceiverSessionEvent::SessionInvalid(e) => Some(e.clone()),
+            _ => None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -128,7 +133,7 @@ pub enum ReceiverSessionEvent {
     PayjoinProposal(v1::PayjoinProposal),
     /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
     /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
-    /// Reason being in some cases we still want to preserve the error b/c the cause the session to fail but these are terminal states we dont need them to be structured or well typed
+    /// Reason being in some cases we still want to preserve the error b/c we can action on it. For now this is a terminal state and there is nothing to replay and is saved to be displayed.
     /// b/c its a terminal state and there is nothing to replay. So serialization will be lossy and that is fine.
     SessionInvalid(String),
 }

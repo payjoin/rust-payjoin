@@ -171,7 +171,7 @@ mod integration {
 
         use bitcoin::Address;
         use http::StatusCode;
-        use payjoin::persist::{NoopPersister, PersistedSession};
+        use payjoin::persist::NoopPersister;
         use payjoin::receive::v2::{
             PayjoinProposal, Receiver, ReceiverSessionEvent, UncheckedProposal,
             UninitializedReceiver,
@@ -438,8 +438,6 @@ mod integration {
             init_tracing();
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
             let sender_persister = NoopPersister::<SenderSessionEvent>::default();
-            let recv_persister = NoopPersister::<ReceiverSessionEvent>::default();
-            // Receiver creates the payjoin URI
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
             let mut pj_uri =
@@ -751,7 +749,7 @@ mod integration {
     #[cfg(feature = "_multiparty")]
     mod multiparty {
         use bitcoin::ScriptBuf;
-        use payjoin::persist::{NoopPersister, PersistedSession};
+        use payjoin::persist::NoopPersister;
         use payjoin::receive::v2::{Receiver, ReceiverWithContext, UninitializedReceiver};
         use payjoin::send::multiparty::{
             GetContext as MultiPartyGetContext, Sender as MultiPartySender,
@@ -897,13 +895,14 @@ mod integration {
                         .body(body.clone())
                         .send()
                         .await?;
-                    let finalize_ctx = sender_get_ctx
+                    let res = sender_get_ctx
                         .process_response_and_finalize(
                             response.bytes().await?.to_vec().as_slice(),
                             ohttp_response_ctx,
                             |psbt| finalize_psbt(&senders[i], psbt),
                         )
                         .save(&sender_persister)?;
+                    let finalize_ctx = res.success().expect("response should exist").clone();
                     let (Request { url, body, content_type, .. }, ohttp_response_ctx) =
                         finalize_ctx.extract_req(ohttp_relay.to_owned())?;
                     let response = agent
@@ -914,10 +913,12 @@ mod integration {
                         .await?;
                     assert!(response.status().is_success());
 
-                    finalize_ctx.process_response(
-                        response.bytes().await?.to_vec().as_slice(),
-                        ohttp_response_ctx,
-                    )?;
+                    finalize_ctx
+                        .process_response(
+                            response.bytes().await?.to_vec().as_slice(),
+                            ohttp_response_ctx,
+                        )
+                        .save(&sender_persister)?;
                 }
 
                 //**********************

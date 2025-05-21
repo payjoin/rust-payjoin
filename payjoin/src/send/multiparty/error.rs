@@ -48,7 +48,6 @@ pub(crate) enum InternalFinalizedError {
     InvalidSize,
     #[allow(dead_code)]
     FinalizePsbt(ImplementationError),
-    MissingResponse,
     Psbt(PsbtError),
     #[allow(dead_code)]
     UnexpectedStatusCode(http::StatusCode),
@@ -70,7 +69,6 @@ impl std::error::Error for FinalizedError {
             InternalFinalizedError::Hpke(e) => Some(e),
             InternalFinalizedError::InvalidSize => None,
             InternalFinalizedError::FinalizePsbt(_) => None,
-            InternalFinalizedError::MissingResponse => None,
             InternalFinalizedError::Psbt(e) => Some(e),
             InternalFinalizedError::UnexpectedStatusCode(_) => None,
             InternalFinalizedError::Proposal(e) => Some(e),

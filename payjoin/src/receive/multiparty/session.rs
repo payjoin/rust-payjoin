@@ -1,6 +1,8 @@
-use crate::receive::{v1, v2::SessionContext};
-
-use super::{MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal, UncheckedProposal, WantsInputs, WantsOutputs};
+use super::{
+    MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal,
+    UncheckedProposal, WantsInputs, WantsOutputs,
+};
+use crate::receive::v2::SessionContext;
 
 pub enum ReceiverSessionEvent {
     Created(SessionContext),

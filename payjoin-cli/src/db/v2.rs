@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bitcoincore_rpc::jsonrpc::serde_json;
-use payjoin::persist::PersistedSession;
+use payjoin::persist::SessionPersister;
 use payjoin::receive::v2::ReceiverSessionEvent;
 use payjoin::send::v2::SenderSessionEvent;
 use serde::{Deserialize, Serialize};
@@ -50,7 +50,7 @@ impl SenderPersister {
     }
 }
 
-impl PersistedSession for SenderPersister {
+impl SessionPersister for SenderPersister {
     type SessionEvent = SenderSessionEvent;
     type InternalStorageError = crate::db::error::Error;
     fn save_event(
@@ -125,7 +125,7 @@ impl ReceiverPersister {
     }
 }
 
-impl PersistedSession for ReceiverPersister {
+impl SessionPersister for ReceiverPersister {
     type SessionEvent = ReceiverSessionEvent;
     type InternalStorageError = crate::db::error::Error;
 

@@ -5,8 +5,8 @@ pub use session::ReceiverSessionEvent;
 use super::error::InputContributionError;
 use super::{v1, v2, Error, InputPair, ReplyableError};
 use crate::persist::{
-    MaybeBadInitInputsTransition, MaybeFatalTransition,
-    MaybeSuccessTransition, MaybeTransientTransition, NextStateTransition,
+    MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeSuccessTransition,
+    MaybeTransientTransition, NextStateTransition,
 };
 use crate::psbt::merge::merge_unsigned_tx;
 use crate::receive::multiparty::error::{InternalMultipartyError, MultipartyError};
@@ -446,7 +446,7 @@ mod test {
         v1, v2, FinalizedProposal, InternalMultipartyError, MultipartyError,
         UncheckedProposalBuilder, SUPPORTED_VERSIONS,
     };
-    use crate::persist::NoopPersister;
+    use crate::persist::NoopSessionPersister;
     use crate::receive::optional_parameters::Params;
     use crate::receive::v2::test::{SHARED_CONTEXT, SHARED_CONTEXT_TWO};
 
@@ -466,7 +466,7 @@ mod test {
 
     #[test]
     fn test_single_context_multiparty() -> Result<(), BoxError> {
-        let noop_persister = NoopPersister::<ReceiverSessionEvent>::default();
+        let noop_persister = NoopSessionPersister::<ReceiverSessionEvent>::default();
         let proposal_one = v2::UncheckedProposal {
             v1: multiparty_proposals()[0].clone(),
             context: SHARED_CONTEXT.clone(),
@@ -540,7 +540,7 @@ mod test {
     #[test]
     fn finalize_multiparty() -> Result<(), BoxError> {
         use crate::psbt::PsbtExt;
-        let noop_persister = NoopPersister::<ReceiverSessionEvent>::default();
+        let noop_persister = NoopSessionPersister::<ReceiverSessionEvent>::default();
         let proposal_one = v2::UncheckedProposal {
             v1: multiparty_proposals()[0].clone(),
             context: SHARED_CONTEXT.clone(),

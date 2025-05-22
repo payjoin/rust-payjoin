@@ -917,7 +917,7 @@ pub mod test {
     use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, SYMMETRIC};
 
     use super::*;
-    use crate::persist::NoopPersister;
+    use crate::persist::NoopSessionPersister;
 
     pub(crate) static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
         address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
@@ -949,7 +949,7 @@ pub mod test {
 
     #[test]
     fn extract_err_req() -> Result<(), BoxError> {
-        let noop_persister = NoopPersister::default();
+        let noop_persister = NoopSessionPersister::default();
         let receiver = Receiver {
             state: UncheckedProposal {
                 v1: crate::receive::v1::test::unchecked_proposal_from_test_vector(),

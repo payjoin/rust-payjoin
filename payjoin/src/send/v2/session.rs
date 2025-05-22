@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::{SenderState, SenderWithReplyKey, V2GetContext};
-use crate::persist::PersistedSession;
+use crate::persist::SessionPersister;
 use crate::ImplementationError;
 
 #[derive(Debug)]
@@ -22,7 +22,7 @@ pub fn replay_sender_event_log<P>(
     persister: P,
 ) -> Result<(SenderState, SessionHistory), SenderReplayError>
 where
-    P: PersistedSession + Clone,
+    P: SessionPersister + Clone,
     P::SessionEvent: From<SenderSessionEvent> + Clone,
     SenderSessionEvent: From<P::SessionEvent>,
 {

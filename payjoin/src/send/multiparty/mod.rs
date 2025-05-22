@@ -4,6 +4,7 @@ use error::{
     InternalFinalizeResponseError, InternalFinalizedError,
 };
 use serde::{Deserialize, Serialize};
+pub use session::SenderSessionEvent;
 use url::Url;
 
 use super::v2::{self, extract_request, EncapsulationError, HpkeContext};
@@ -13,13 +14,11 @@ use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
     MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
-    MaybeSuccessTransition, NoopPersister,
+    MaybeSuccessTransition, NoopSessionPersister,
 };
 use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
-
-pub use session::SenderSessionEvent;
 
 mod error;
 pub(crate) mod session;
@@ -38,7 +37,7 @@ impl<'a> SenderBuilder<'a> {
         Sender<SenderWithReplyKey>,
         BuildSenderError,
     > {
-        let noop_persister = NoopPersister::<crate::send::v2::SenderSessionEvent>::default();
+        let noop_persister = NoopSessionPersister::<crate::send::v2::SenderSessionEvent>::default();
         let sender = self
             .0
             .build_recommended(min_fee_rate)
@@ -114,7 +113,7 @@ impl Sender<SenderWithReplyKey> {
         response: &[u8],
         post_ctx: PostContext,
     ) -> MaybeFatalTransition<SenderSessionEvent, Sender<GetContext>, EncapsulationError> {
-        let noop_persister = NoopPersister::<crate::send::v2::SenderSessionEvent>::default();
+        let noop_persister = NoopSessionPersister::<crate::send::v2::SenderSessionEvent>::default();
         let res = self
             .state
             .0
@@ -320,7 +319,8 @@ impl Sender<FinalizeContext> {
                 ),
         };
         match response.status() {
-            http::StatusCode::OK | http::StatusCode::ACCEPTED => MaybeSuccessTransition::success(()),
+            http::StatusCode::OK | http::StatusCode::ACCEPTED =>
+                MaybeSuccessTransition::success(()),
             _ => MaybeSuccessTransition::transient(
                 InternalFinalizeResponseError::UnexpectedStatusCode(response.status()).into(),
             ),

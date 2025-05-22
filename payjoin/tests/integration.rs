@@ -171,7 +171,7 @@ mod integration {
 
         use bitcoin::Address;
         use http::StatusCode;
-        use payjoin::persist::NoopPersister;
+        use payjoin::persist::NoopSessionPersister;
         use payjoin::receive::v2::{
             PayjoinProposal, Receiver, ReceiverSessionEvent, UncheckedProposal,
             UninitializedReceiver,
@@ -209,7 +209,7 @@ mod integration {
                 let ohttp_relay = services.ohttp_relay_url();
                 let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")?
                     .assume_checked();
-                let noop_persister = NoopPersister::<ReceiverSessionEvent>::default();
+                let noop_persister = NoopSessionPersister::<ReceiverSessionEvent>::default();
                 let mut bad_initializer = Receiver::<UninitializedReceiver>::create_session(
                     mock_address,
                     directory,
@@ -252,7 +252,7 @@ mod integration {
                 // Inside the Receiver:
                 let address = receiver.get_new_address(None, None)?.assume_checked();
                 // test session with expiry in the past
-                let noop_persister = NoopPersister::<ReceiverSessionEvent>::default();
+                let noop_persister = NoopSessionPersister::<ReceiverSessionEvent>::default();
                 let mut expired_receiver = Receiver::<UninitializedReceiver>::create_session(
                     address.clone(),
                     directory.clone(),
@@ -270,7 +270,7 @@ mod integration {
                 // Inside the Sender:
                 let psbt = build_original_psbt(&sender, &expired_receiver.pj_uri())?;
                 // Test that an expired pj_url errors
-                let noop_persister = NoopPersister::<SenderSessionEvent>::default();
+                let noop_persister = NoopSessionPersister::<SenderSessionEvent>::default();
                 let expired_req_ctx = SenderBuilder::new(psbt, expired_receiver.pj_uri())
                     .build_non_incentivizing(FeeRate::BROADCAST_MIN)
                     .save(&noop_persister)?;
@@ -301,8 +301,8 @@ mod integration {
             async fn do_v2_send_receive(services: &TestServices) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
 
-                let sender_persister = NoopPersister::<SenderSessionEvent>::default();
-                let recv_persister = NoopPersister::<ReceiverSessionEvent>::default();
+                let sender_persister = NoopSessionPersister::<SenderSessionEvent>::default();
+                let recv_persister = NoopSessionPersister::<ReceiverSessionEvent>::default();
                 let agent = services.http_agent();
                 services.wait_for_services_ready().await?;
                 let directory = services.directory_url();
@@ -437,7 +437,7 @@ mod integration {
         fn v2_to_v1() -> Result<(), BoxError> {
             init_tracing();
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
-            let sender_persister = NoopPersister::<SenderSessionEvent>::default();
+            let sender_persister = NoopSessionPersister::<SenderSessionEvent>::default();
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
             let mut pj_uri =
@@ -499,8 +499,8 @@ mod integration {
 
             async fn do_v1_to_v2(services: &TestServices) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
-                let sender_persister = NoopPersister::<SenderSessionEvent>::default();
-                let recv_persister = NoopPersister::<ReceiverSessionEvent>::default();
+                let sender_persister = NoopSessionPersister::<SenderSessionEvent>::default();
+                let recv_persister = NoopSessionPersister::<ReceiverSessionEvent>::default();
                 let agent = services.http_agent();
                 services.wait_for_services_ready().await?;
                 let directory = services.directory_url();
@@ -632,7 +632,7 @@ mod integration {
             custom_inputs: Option<Vec<InputPair>>,
         ) -> Result<Receiver<PayjoinProposal>, BoxError> {
             // Create noop persister to reduce boilerplate
-            let persister = NoopPersister::<ReceiverSessionEvent>::default();
+            let persister = NoopSessionPersister::<ReceiverSessionEvent>::default();
             // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
             let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
@@ -749,7 +749,7 @@ mod integration {
     #[cfg(feature = "_multiparty")]
     mod multiparty {
         use bitcoin::ScriptBuf;
-        use payjoin::persist::NoopPersister;
+        use payjoin::persist::NoopSessionPersister;
         use payjoin::receive::v2::{Receiver, ReceiverWithContext, UninitializedReceiver};
         use payjoin::send::multiparty::{
             GetContext as MultiPartyGetContext, Sender as MultiPartySender,
@@ -780,11 +780,13 @@ mod integration {
 
             async fn do_ns1r(services: &TestServices) -> Result<(), BoxError> {
                 let v2_recv_persister =
-                    NoopPersister::<payjoin::receive::v2::ReceiverSessionEvent>::default();
-                let sender_persister =
-                    NoopPersister::<payjoin::send::multiparty::SenderSessionEvent>::default();
-                let recv_persister =
-                    NoopPersister::<payjoin::receive::multiparty::ReceiverSessionEvent>::default();
+                    NoopSessionPersister::<payjoin::receive::v2::ReceiverSessionEvent>::default();
+                let sender_persister = NoopSessionPersister::<
+                    payjoin::send::multiparty::SenderSessionEvent,
+                >::default();
+                let recv_persister = NoopSessionPersister::<
+                    payjoin::receive::multiparty::ReceiverSessionEvent,
+                >::default();
                 // Anything past 4 senders will hit a max payload size error
                 let num_senders = 4;
                 let (_bitcoind, senders, receiver) =
@@ -985,8 +987,9 @@ mod integration {
                 >,
                 BoxError,
             > {
-                let noop_persister =
-                    NoopPersister::<payjoin::receive::multiparty::ReceiverSessionEvent>::default();
+                let noop_persister = NoopSessionPersister::<
+                    payjoin::receive::multiparty::ReceiverSessionEvent,
+                >::default();
                 // In a ns1r payment, the merged psbt is not broadcastable
                 let proposal = multiparty_proposal
                     .check_broadcast_suitability(None, |_| Ok(true))

@@ -444,16 +444,7 @@ impl App {
                     session = current_state;
                     continue;
                 }
-                Err(e) => match e {
-                    PersistedError::BadInitInputs(e)
-                    | PersistedError::Fatal(e)
-                    | PersistedError::Transient(e) => {
-                        return Err(e.into());
-                    }
-                    PersistedError::Storage(e) => {
-                        return Err(e.into());
-                    }
-                },
+                Err(e) => return Err(e.into()),
             }
         }
     }

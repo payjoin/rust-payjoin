@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Receiver, ReceiverState, SessionContext, UninitializedReceiver};
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::PersistedSession;
+use crate::persist::SessionPersister;
 use crate::receive::v1;
 use crate::receive::v2::{id, subdir};
 use crate::{ImplementationError, PjUri};
@@ -31,7 +31,7 @@ pub fn replay_receiver_event_log<P>(
     persister: P,
 ) -> Result<(ReceiverState, SessionHistory), ReceiverReplayError>
 where
-    P: PersistedSession + Clone,
+    P: SessionPersister + Clone,
     P::SessionEvent: From<ReceiverSessionEvent> + Clone,
     ReceiverSessionEvent: From<P::SessionEvent>,
 {

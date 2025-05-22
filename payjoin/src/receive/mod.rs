@@ -11,7 +11,7 @@
 
 use std::str::FromStr;
 
-use bitcoin::{psbt, AddressType, Psbt, TxIn, TxOut};
+use bitcoin::{psbt, AddressType, OutPoint, Psbt, Sequence, TxIn, TxOut};
 pub(crate) use error::InternalPayloadError;
 pub use error::{
     Error, InputContributionError, JsonReply, OutputSubstitutionError, PayloadError,
@@ -58,6 +58,34 @@ impl InputPair {
         Ok(input_pair)
     }
 
+    /// Constructs a new ['InputPair'] for spending a native SegWit P2WPKH output
+    pub fn new_p2wpkh(
+        txout: TxOut,
+        outpoint: OutPoint,
+        sequence: Option<Sequence>,
+    ) -> Result<Self, PsbtInputError> {
+        if !txout.script_pubkey.is_p2wpkh() {
+            return Err(InternalPsbtInputError::InvalidP2wpkhScriptPubkey.into());
+        }
+
+        let txin = TxIn {
+            previous_output: OutPoint { txid: outpoint.txid, vout: outpoint.vout },
+            script_sig: Default::default(),
+            sequence: sequence.unwrap_or_default(),
+            witness: Default::default(),
+        };
+
+        let psbtin = psbt::Input {
+            witness_utxo: Some(TxOut { value: txout.value, script_pubkey: txout.script_pubkey }),
+            ..psbt::Input::default()
+        };
+        let input_pair = Self { txin, psbtin };
+        let raw = InternalInputPair::from(&input_pair);
+        raw.validate_utxo()?;
+
+        Ok(input_pair)
+    }
+
     pub(crate) fn previous_txout(&self) -> TxOut {
         InternalInputPair::from(self)
             .previous_txout()
@@ -87,4 +115,39 @@ pub(crate) fn parse_payload(
     log::debug!("Received request with params: {params:?}");
 
     Ok((psbt, params))
+}
+
+#[cfg(test)]
+mod tests {
+    use bitcoin::hashes::Hash;
+    use bitcoin::key::WPubkeyHash;
+    use bitcoin::{Amount, ScriptBuf, ScriptHash, Txid};
+    use payjoin_test_utils::{DUMMY20, DUMMY32};
+
+    use super::*;
+    use crate::psbt::InternalPsbtInputError::InvalidP2wpkhScriptPubkey;
+
+    #[test]
+    fn create_p2wpkh_input_pair() {
+        let outpoint = OutPoint { txid: Txid::from_byte_array(DUMMY32), vout: 31 };
+        let sequence = Sequence::from_512_second_intervals(123);
+        let p2wpkh_txout = TxOut {
+            value: Amount::from_sat(12345),
+            script_pubkey: ScriptBuf::new_p2wpkh(&WPubkeyHash::from_byte_array(DUMMY20)),
+        };
+        let p2wpkh_pair =
+            InputPair::new_p2wpkh(p2wpkh_txout.clone(), outpoint, Some(sequence)).unwrap();
+        assert_eq!(p2wpkh_pair.txin.previous_output, outpoint);
+        assert_eq!(p2wpkh_pair.txin.sequence, sequence);
+        assert_eq!(p2wpkh_pair.psbtin.witness_utxo.unwrap(), p2wpkh_txout);
+
+        let p2sh_txout = TxOut {
+            value: Default::default(),
+            script_pubkey: ScriptBuf::new_p2sh(&ScriptHash::all_zeros()),
+        };
+        assert_eq!(
+            InputPair::new_p2wpkh(p2sh_txout, outpoint, Some(sequence)).err().unwrap(),
+            PsbtInputError::from(InvalidP2wpkhScriptPubkey)
+        )
+    }
 }

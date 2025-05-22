@@ -58,7 +58,7 @@ impl SessionContext {
     }
 
     /// The per-session identifier
-    pub fn id(&self) -> ShortId {
+    pub(crate) fn id(&self) -> ShortId {
         sha256::Hash::hash(&self.s.public_key().to_compressed_bytes()).into()
     }
 }

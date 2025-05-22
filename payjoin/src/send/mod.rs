@@ -659,14 +659,13 @@ mod test {
             let proposed_version = Version::non_standard(88);
             proposal.unsigned_tx.version = proposed_version;
 
-            assert_eq!(
-                ctx.process_proposal(proposal).unwrap_err().to_string(),
-                InternalProposalError::VersionsDontMatch {
-                    proposed: proposed_version,
-                    original: original_version
-                }
-                .to_string()
-            );
+            assert!(matches!(
+                ctx.process_proposal(proposal),
+                Err(InternalProposalError::VersionsDontMatch {
+                    proposed,
+                    original
+                }) if proposed == proposed_version && original == original_version
+            ));
             Ok(())
         }
 
@@ -681,14 +680,13 @@ mod test {
             );
             proposal.unsigned_tx.lock_time = proposed_locktime;
 
-            assert_eq!(
-                ctx.process_proposal(proposal).unwrap_err().to_string(),
-                InternalProposalError::LockTimesDontMatch {
-                    proposed: proposed_locktime,
-                    original: original_locktime
-                }
-                .to_string()
-            );
+            assert!(matches!(
+                ctx.process_proposal(proposal),
+                Err(InternalProposalError::LockTimesDontMatch {
+                    proposed,
+                    original
+                }) if proposed == proposed_locktime && original == original_locktime
+            ));
             Ok(())
         }
 
@@ -741,17 +739,17 @@ mod test {
 
             // Change the sequence number of the proposal
             let original_sequence = proposal.unsigned_tx.input.first().unwrap().sequence;
-            let new_sequence = Sequence::from_consensus(original_sequence.to_consensus_u32() - 1);
-            proposal.unsigned_tx.input.get_mut(0).unwrap().sequence = new_sequence;
+            let proposed_sequence =
+                Sequence::from_consensus(original_sequence.to_consensus_u32() - 1);
+            proposal.unsigned_tx.input.get_mut(0).unwrap().sequence = proposed_sequence;
 
-            assert_eq!(
-                ctx.process_proposal(proposal).unwrap_err().to_string(),
-                InternalProposalError::SenderTxinSequenceChanged {
-                    proposed: new_sequence,
-                    original: original_sequence
-                }
-                .to_string()
-            );
+            assert!(matches!(
+                ctx.process_proposal(proposal),
+                Err(InternalProposalError::SenderTxinSequenceChanged {
+                    proposed,
+                    original
+                }) if proposed == proposed_sequence && original == original_sequence
+            ));
             Ok(())
         }
 

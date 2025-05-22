@@ -19,16 +19,10 @@ use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
-mod error;
+pub use session::SenderSessionEvent;
 
-#[derive(Clone, Serialize, Deserialize)]
-pub enum SenderSessionEvent {
-    CreatedReplyKey(SenderWithReplyKey),
-    V2GetContext(GetContext),
-    ProposalReceived(Psbt),
-    FinalizeContext(FinalizeContext),
-    SessionInvalid(String),
-}
+mod error;
+pub(crate) mod session;
 
 #[derive(Clone)]
 pub struct SenderBuilder<'a>(v2::SenderBuilder<'a>);
@@ -308,7 +302,7 @@ impl Sender<FinalizeContext> {
         self,
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
-    ) -> MaybeSuccessTransition<FinalizeResponseError> {
+    ) -> MaybeSuccessTransition<(), FinalizeResponseError> {
         let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
             match response.try_into() {
                 Ok(response_array) => response_array,
@@ -326,7 +320,7 @@ impl Sender<FinalizeContext> {
                 ),
         };
         match response.status() {
-            http::StatusCode::OK | http::StatusCode::ACCEPTED => MaybeSuccessTransition::success(),
+            http::StatusCode::OK | http::StatusCode::ACCEPTED => MaybeSuccessTransition::success(()),
             _ => MaybeSuccessTransition::transient(
                 InternalFinalizeResponseError::UnexpectedStatusCode(response.status()).into(),
             ),

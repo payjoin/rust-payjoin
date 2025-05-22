@@ -783,6 +783,8 @@ mod integration {
                     NoopPersister::<payjoin::receive::v2::ReceiverSessionEvent>::default();
                 let sender_persister =
                     NoopPersister::<payjoin::send::multiparty::SenderSessionEvent>::default();
+                let recv_persister =
+                    NoopPersister::<payjoin::receive::multiparty::ReceiverSessionEvent>::default();
                 // Anything past 4 senders will hit a max payload size error
                 let num_senders = 4;
                 let (_bitcoind, senders, receiver) =
@@ -861,7 +863,7 @@ mod integration {
                     multiparty_proposal
                         .add(proposal.success().expect("proposal should exist").inner())?;
                 }
-                let multiparty_proposal = multiparty_proposal.build()?;
+                let multiparty_proposal = multiparty_proposal.build().save(&recv_persister)?;
                 // Merge and finalize all the receiver inputs
                 let multi_sender_payjoin_proposal =
                     handle_multiparty_proposal(&receiver, multiparty_proposal)?;
@@ -944,7 +946,7 @@ mod integration {
                     finalized_proposals.add(finalized_response.inner())?;
                 }
 
-                let agg_psbt = finalized_proposals.combine()?;
+                let agg_psbt = finalized_proposals.combine().save(&recv_persister)?;
                 // Check resulting transaction and balances
                 let network_fees = agg_psbt.fee()?;
                 let tx = agg_psbt.extract_tx()?;
@@ -974,27 +976,42 @@ mod integration {
 
             fn handle_multiparty_proposal(
                 receiver: &bitcoincore_rpc::Client,
-                multiparty_proposal: payjoin::receive::multiparty::UncheckedProposal,
-            ) -> Result<payjoin::receive::multiparty::PayjoinProposal, BoxError> {
+                multiparty_proposal: payjoin::receive::multiparty::Receiver<
+                    payjoin::receive::multiparty::UncheckedProposal,
+                >,
+            ) -> Result<
+                payjoin::receive::multiparty::Receiver<
+                    payjoin::receive::multiparty::PayjoinProposal,
+                >,
+                BoxError,
+            > {
+                let noop_persister =
+                    NoopPersister::<payjoin::receive::multiparty::ReceiverSessionEvent>::default();
                 // In a ns1r payment, the merged psbt is not broadcastable
-                let proposal =
-                    multiparty_proposal.check_broadcast_suitability(None, |_| Ok(true))?;
-                let proposal = proposal.check_inputs_not_owned(|input| {
-                    let address =
-                        bitcoin::Address::from_script(input, bitcoin::Network::Regtest).unwrap();
-                    Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
-                })?;
+                let proposal = multiparty_proposal
+                    .check_broadcast_suitability(None, |_| Ok(true))
+                    .save(&noop_persister)?;
+                let proposal = proposal
+                    .check_inputs_not_owned(|input| {
+                        let address =
+                            bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
+                                .unwrap();
+                        Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
+                    })
+                    .save(&noop_persister)?;
 
                 let payjoin = proposal
-                    .check_no_inputs_seen_before(|_| Ok(false))?
+                    .check_no_inputs_seen_before(|_| Ok(false))
+                    .save(&noop_persister)?
                     .identify_receiver_outputs(|output_script| {
                         let address =
                             bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
                                 .unwrap();
                         Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
-                    })?;
+                    })
+                    .save(&noop_persister)?;
 
-                let payjoin = payjoin.commit_outputs();
+                let payjoin = payjoin.commit_outputs().save(&noop_persister)?;
                 let selected_inputs = {
                     let mut candidate_inputs = receiver
                         .list_unspent(None, None, None, None, None)
@@ -1008,23 +1025,28 @@ mod integration {
                         candidate_inputs.next().expect("should have one at least input");
                     vec![selected_input]
                 };
-                let payjoin = payjoin.contribute_inputs(selected_inputs)?.commit_inputs();
-                let payjoin = payjoin.finalize_proposal(
-                    |psbt: &Psbt| {
-                        Ok(receiver
-                            .wallet_process_psbt(
-                                &psbt.to_string(),
-                                None,
-                                None,
-                                Some(true), // check that the receiver properly clears keypaths
-                            )
-                            .map(|res: WalletProcessPsbtResult| {
-                                Psbt::from_str(&res.psbt).expect("valid psbt")
-                            })?)
-                    },
-                    Some(FeeRate::BROADCAST_MIN),
-                    FeeRate::from_sat_per_vb_unchecked(2),
-                )?;
+                let payjoin = payjoin
+                    .contribute_inputs(selected_inputs)?
+                    .commit_inputs()
+                    .save(&noop_persister)?;
+                let payjoin = payjoin
+                    .finalize_proposal(
+                        |psbt: &Psbt| {
+                            Ok(receiver
+                                .wallet_process_psbt(
+                                    &psbt.to_string(),
+                                    None,
+                                    None,
+                                    Some(true), // check that the receiver properly clears keypaths
+                                )
+                                .map(|res: WalletProcessPsbtResult| {
+                                    Psbt::from_str(&res.psbt).expect("valid psbt")
+                                })?)
+                        },
+                        Some(FeeRate::BROADCAST_MIN),
+                        FeeRate::from_sat_per_vb_unchecked(2),
+                    )
+                    .save(&noop_persister)?;
                 Ok(payjoin)
             }
 

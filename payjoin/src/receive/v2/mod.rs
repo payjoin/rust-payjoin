@@ -370,7 +370,7 @@ impl Receiver<ReceiverWithContext> {
     /// The per-session identifier
     pub fn id(&self) -> ShortId { id(&self.state.context.s) }
 
-    pub fn apply_unchecked_from_payload(
+    pub(crate) fn apply_unchecked_from_payload(
         self,
         event: v1::UncheckedProposal,
     ) -> Result<ReceiverState, ReceiverReplayError> {
@@ -415,7 +415,14 @@ impl Receiver<UncheckedProposal> {
         let v1 =
             match self.state.v1.clone().check_broadcast_suitability(min_fee_rate, can_broadcast) {
                 Ok(v1) => v1,
-                Err(e) => return MaybeFatalTransition::transient(e),
+                Err(e) => match e {
+                    ReplyableError::Implementation(_) => return MaybeFatalTransition::transient(e),
+                    _ =>
+                        return MaybeFatalTransition::fatal(
+                            ReceiverSessionEvent::SessionInvalid(e.to_string()),
+                            e,
+                        ),
+                },
             };
         MaybeFatalTransition::success(
             ReceiverSessionEvent::MaybeInputsOwned(v1.clone()),
@@ -481,7 +488,7 @@ impl Receiver<UncheckedProposal> {
         }
     }
 
-    pub fn apply_maybe_inputs_owned(self, v1: v1::MaybeInputsOwned) -> ReceiverState {
+    pub(crate) fn apply_maybe_inputs_owned(self, v1: v1::MaybeInputsOwned) -> ReceiverState {
         let new_state =
             Receiver { state: MaybeInputsOwned { v1, context: self.state.context.clone() } };
         ReceiverState::MaybeInputsOwned(new_state)
@@ -528,7 +535,7 @@ impl Receiver<MaybeInputsOwned> {
         )
     }
 
-    pub fn apply_maybe_inputs_seen(self, v1: v1::MaybeInputsSeen) -> ReceiverState {
+    pub(crate) fn apply_maybe_inputs_seen(self, v1: v1::MaybeInputsSeen) -> ReceiverState {
         let new_state =
             Receiver { state: MaybeInputsSeen { v1, context: self.state.context.clone() } };
         ReceiverState::MaybeInputsSeen(new_state)
@@ -572,7 +579,7 @@ impl Receiver<MaybeInputsSeen> {
         )
     }
 
-    pub fn apply_outputs_unknown(self, v1: v1::OutputsUnknown) -> ReceiverState {
+    pub(crate) fn apply_outputs_unknown(self, v1: v1::OutputsUnknown) -> ReceiverState {
         let new_state =
             Receiver { state: OutputsUnknown { v1, context: self.state.context.clone() } };
         ReceiverState::OutputsUnknown(new_state)
@@ -615,7 +622,7 @@ impl Receiver<OutputsUnknown> {
         )
     }
 
-    pub fn apply_wants_outputs(self, v1: v1::WantsOutputs) -> ReceiverState {
+    pub(crate) fn apply_wants_outputs(self, v1: v1::WantsOutputs) -> ReceiverState {
         let new_state =
             Receiver { state: WantsOutputs { v1, context: self.state.context.clone() } };
         ReceiverState::WantsOutputs(new_state)
@@ -669,7 +676,7 @@ impl Receiver<WantsOutputs> {
         )
     }
 
-    pub fn apply_wants_inputs(self, v1: v1::WantsInputs) -> ReceiverState {
+    pub(crate) fn apply_wants_inputs(self, v1: v1::WantsInputs) -> ReceiverState {
         let new_state = Receiver { state: WantsInputs { v1, context: self.state.context.clone() } };
         ReceiverState::WantsInputs(new_state)
     }
@@ -727,7 +734,7 @@ impl Receiver<WantsInputs> {
         )
     }
 
-    pub fn apply_provisional_proposal(self, v1: v1::ProvisionalProposal) -> ReceiverState {
+    pub(crate) fn apply_provisional_proposal(self, v1: v1::ProvisionalProposal) -> ReceiverState {
         let new_state =
             Receiver { state: ProvisionalProposal { v1, context: self.state.context.clone() } };
         ReceiverState::ProvisionalProposal(new_state)
@@ -769,7 +776,7 @@ impl Receiver<ProvisionalProposal> {
         )
     }
 
-    pub fn apply_payjoin_proposal(self, v1: v1::PayjoinProposal) -> ReceiverState {
+    pub(crate) fn apply_payjoin_proposal(self, v1: v1::PayjoinProposal) -> ReceiverState {
         let new_state =
             Receiver { state: PayjoinProposal { v1, context: self.state.context.clone() } };
         ReceiverState::PayjoinProposal(new_state)
@@ -858,7 +865,7 @@ impl Receiver<PayjoinProposal> {
         self,
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
-    ) -> MaybeSuccessTransition<Error> {
+    ) -> MaybeSuccessTransition<(), Error> {
         let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
             match res.try_into() {
                 Ok(response_array) => response_array,
@@ -875,7 +882,7 @@ impl Receiver<PayjoinProposal> {
                 ),
         };
         if res.status().is_success() {
-            MaybeSuccessTransition::success()
+            MaybeSuccessTransition::success(())
         } else {
             // Directory error is transient
             return MaybeSuccessTransition::transient(

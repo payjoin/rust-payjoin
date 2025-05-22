@@ -145,21 +145,21 @@ impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err> {
 /// A transition that can be success or transient error
 /// If success there are no events to save or next state
 /// If transient error we can retry this state transition
-pub struct MaybeSuccessTransition<Err>(Result<AcceptCompleted, RejectTransient<Err>>);
+pub struct MaybeSuccessTransition<SuccessValue, Err>(Result<AcceptCompleted<SuccessValue>, RejectTransient<Err>>);
 
-impl<Err> MaybeSuccessTransition<Err>
+impl<SuccessValue, Err> MaybeSuccessTransition<SuccessValue, Err>
 where
     Err: std::error::Error,
 {
     #[inline]
-    pub(crate) fn success() -> Self { MaybeSuccessTransition(Ok(AcceptCompleted())) }
+    pub(crate) fn success(success_value: SuccessValue) -> Self { MaybeSuccessTransition(Ok(AcceptCompleted(success_value))) }
 
     #[inline]
     pub(crate) fn transient(error: Err) -> Self {
         MaybeSuccessTransition(Err(RejectTransient(error)))
     }
 
-    pub fn save<P>(self, persister: &P) -> Result<(), PersistedError<Err, P::InternalStorageError>>
+    pub fn save<P>(self, persister: &P) -> Result<SuccessValue, PersistedError<Err, P::InternalStorageError>>
     where
         P: PersistedSession,
     {
@@ -219,7 +219,7 @@ impl<Event, NextState, Err> MaybeBadInitInputsTransition<Event, NextState, Err> 
 /// A transition that marks the progression of a state machine
 pub struct AcceptNextState<Event, NextState>(Event, NextState);
 /// A transition that marks the success of a state machine
-struct AcceptCompleted();
+struct AcceptCompleted<SuccessValue>(SuccessValue);
 
 /// A transition that can be success or no results
 pub enum AcceptWithMaybeNoResults<Event, NextState, CurrentState> {
@@ -372,17 +372,17 @@ trait InternalPersistedSession: PersistedSession {
     }
 
     /// Save a transition that can be success or transient error
-    fn save_maybe_success_transition<Err>(
+    fn save_maybe_success_transition<SuccessValue, Err>(
         &self,
-        state_transition: MaybeSuccessTransition<Err>,
-    ) -> Result<(), PersistedError<Err, Self::InternalStorageError>>
+        state_transition: MaybeSuccessTransition<SuccessValue, Err>,
+    ) -> Result<SuccessValue, PersistedError<Err, Self::InternalStorageError>>
     where
         Err: std::error::Error,
     {
         match state_transition.0 {
-            Ok(AcceptCompleted()) => {
+            Ok(AcceptCompleted(success_value)) => {
                 self.close().map_err(|e| PersistedError::Storage(StorageError(e)))?;
-                return Ok(());
+                Ok(success_value)
             }
             Err(RejectTransient(err)) => Err(PersistedError::Transient(err)),
         }
@@ -788,7 +788,7 @@ mod tests {
                     error: None,
                     success: Some(()),
                 },
-                test: Box::new(move |persister| MaybeSuccessTransition::success().save(persister)),
+                test: Box::new(move |persister| MaybeSuccessTransition::success(()).save(persister)),
             },
             // Transient error
             TestCase {

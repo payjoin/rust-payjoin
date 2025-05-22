@@ -336,7 +336,7 @@ impl Sender<SenderWithReplyKey> {
     pub fn endpoint(&self) -> &Url { self.state.v1.endpoint() }
 
     /// Apply already known state and transition to the type state
-    pub fn apply_v2_get_context(self, v2_get_context: V2GetContext) -> SenderState {
+    pub(crate) fn apply_v2_get_context(self, v2_get_context: V2GetContext) -> SenderState {
         let new_state = Sender { state: v2_get_context };
         SenderState::V2GetContext(new_state)
     }
@@ -521,7 +521,7 @@ impl Sender<V2GetContext> {
         MaybeFatalTransitionWithNoResults::success(event, sender)
     }
 
-    pub fn apply_proposal_received(self, proposal: Psbt) -> SenderState {
+    pub(crate) fn apply_proposal_received(self, proposal: Psbt) -> SenderState {
         let new_state = Sender { state: ProposalReceived { proposal } };
         SenderState::ProposalReceived(new_state)
     }

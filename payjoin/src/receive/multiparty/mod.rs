@@ -1,14 +1,20 @@
 use bitcoin::{FeeRate, Psbt};
 use error::IdenticalProposalError;
+pub use session::ReceiverSessionEvent;
 
 use super::error::InputContributionError;
-use super::{v1, v2, Error, InputPair};
+use super::{v1, v2, Error, InputPair, ReplyableError};
+use crate::persist::{
+    MaybeBadInitInputsTransition, MaybeFatalTransition,
+    MaybeSuccessTransition, MaybeTransientTransition, NextStateTransition,
+};
 use crate::psbt::merge::merge_unsigned_tx;
 use crate::receive::multiparty::error::{InternalMultipartyError, MultipartyError};
 use crate::receive::v2::SessionContext;
 use crate::{ImplementationError, Version};
 
 pub(crate) mod error;
+pub(crate) mod session;
 
 const SUPPORTED_VERSIONS: &[Version] = &[Version::Two];
 
@@ -65,159 +71,272 @@ impl UncheckedProposalBuilder {
         Ok(())
     }
 
-    pub fn build(&self) -> Result<UncheckedProposal, MultipartyError> {
+    pub fn build(
+        &self,
+    ) -> MaybeBadInitInputsTransition<
+        ReceiverSessionEvent,
+        Receiver<UncheckedProposal>,
+        MultipartyError,
+    > {
         if self.proposals.len() < 2 {
-            return Err(InternalMultipartyError::NotEnoughProposals.into());
+            return MaybeBadInitInputsTransition::bad_init_inputs(
+                InternalMultipartyError::NotEnoughProposals.into(),
+            );
         }
-        let agg_psbt = self
+        let agg_psbt = match self
             .proposals
             .iter()
             .map(|p| p.v1.psbt.clone())
             .reduce(merge_unsigned_tx)
-            .ok_or(InternalMultipartyError::NotEnoughProposals)?;
+            .ok_or(InternalMultipartyError::NotEnoughProposals)
+        {
+            Ok(agg_psbt) => agg_psbt,
+            Err(e) => return MaybeBadInitInputsTransition::bad_init_inputs(e.into()),
+        };
         let unchecked_proposal = v1::UncheckedProposal {
             psbt: agg_psbt,
             params: self.proposals.first().expect("checked above").v1.params.clone(),
         };
         let contexts = self.proposals.iter().map(|p| p.context.clone()).collect();
-        Ok(UncheckedProposal { v1: unchecked_proposal, contexts })
+        let new_state = UncheckedProposal { v1: unchecked_proposal, contexts };
+
+        // TODO: from here on, we don't need to persist events for the v2::receiver
+        // The v2 session has not been upgraded to a NS1R session. This state transition need to be one that closes the other sessions
+        MaybeBadInitInputsTransition::success(
+            ReceiverSessionEvent::UncheckedProposal(new_state.clone()),
+            Receiver { state: new_state },
+        )
     }
 }
 
+pub struct Receiver<State> {
+    state: State,
+}
+
 /// A multiparty proposal that has been merged by the receiver
+#[derive(Clone)]
 pub struct UncheckedProposal {
     v1: v1::UncheckedProposal,
     contexts: Vec<SessionContext>,
 }
 
-impl UncheckedProposal {
+impl Receiver<UncheckedProposal> {
     pub fn check_broadcast_suitability(
         self,
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
-    ) -> Result<MaybeInputsOwned, Error> {
-        let inner = self.v1.check_broadcast_suitability(min_fee_rate, can_broadcast)?;
-        Ok(MaybeInputsOwned { v1: inner, contexts: self.contexts })
+    ) -> MaybeFatalTransition<ReceiverSessionEvent, Receiver<MaybeInputsOwned>, Error> {
+        let inner = match self.state.v1.check_broadcast_suitability(min_fee_rate, can_broadcast) {
+            Ok(inner) => inner,
+            Err(e) => match e {
+                ReplyableError::Implementation(_) =>
+                    return MaybeFatalTransition::transient(e.into()),
+                _ =>
+                    return MaybeFatalTransition::fatal(
+                        ReceiverSessionEvent::SessionInvalid(e.to_string()),
+                        e.into(),
+                    ),
+            },
+        };
+        let new_state = MaybeInputsOwned { v1: inner, contexts: self.state.contexts };
+        MaybeFatalTransition::success(
+            ReceiverSessionEvent::MaybeInputsOwned(new_state.clone()),
+            Receiver { state: new_state },
+        )
     }
 }
 
+#[derive(Clone)]
 pub struct MaybeInputsOwned {
     v1: v1::MaybeInputsOwned,
     contexts: Vec<SessionContext>,
 }
 
-impl MaybeInputsOwned {
+impl Receiver<MaybeInputsOwned> {
     pub fn check_inputs_not_owned(
         self,
         is_owned: impl Fn(&bitcoin::Script) -> Result<bool, ImplementationError>,
-    ) -> Result<MaybeInputsSeen, Error> {
-        let inner = self.v1.check_inputs_not_owned(is_owned)?;
-        Ok(MaybeInputsSeen { v1: inner, contexts: self.contexts })
+    ) -> MaybeFatalTransition<ReceiverSessionEvent, Receiver<MaybeInputsSeen>, Error> {
+        let inner = match self.state.v1.check_inputs_not_owned(is_owned) {
+            Ok(inner) => inner,
+            Err(e) => match e {
+                ReplyableError::Implementation(_) =>
+                    return MaybeFatalTransition::transient(e.into()),
+                _ =>
+                    return MaybeFatalTransition::fatal(
+                        ReceiverSessionEvent::SessionInvalid(e.to_string()),
+                        e.into(),
+                    ),
+            },
+        };
+        let new_state = MaybeInputsSeen { v1: inner, contexts: self.state.contexts };
+        MaybeFatalTransition::success(
+            ReceiverSessionEvent::MaybeInputsSeen(new_state.clone()),
+            Receiver { state: new_state },
+        )
     }
 }
 
+#[derive(Clone)]
 pub struct MaybeInputsSeen {
     v1: v1::MaybeInputsSeen,
     contexts: Vec<SessionContext>,
 }
 
-impl MaybeInputsSeen {
+impl Receiver<MaybeInputsSeen> {
     pub fn check_no_inputs_seen_before(
         self,
         is_seen: impl Fn(&bitcoin::OutPoint) -> Result<bool, ImplementationError>,
-    ) -> Result<OutputsUnknown, Error> {
-        let inner = self.v1.check_no_inputs_seen_before(is_seen)?;
-        Ok(OutputsUnknown { v1: inner, contexts: self.contexts })
+    ) -> MaybeFatalTransition<ReceiverSessionEvent, Receiver<OutputsUnknown>, Error> {
+        let inner = match self.state.v1.check_no_inputs_seen_before(is_seen) {
+            Ok(inner) => inner,
+            Err(e) => match e {
+                ReplyableError::Implementation(_) =>
+                    return MaybeFatalTransition::transient(e.into()),
+                _ =>
+                    return MaybeFatalTransition::fatal(
+                        ReceiverSessionEvent::SessionInvalid(e.to_string()),
+                        e.into(),
+                    ),
+            },
+        };
+        let new_state = OutputsUnknown { v1: inner, contexts: self.state.contexts };
+        MaybeFatalTransition::success(
+            ReceiverSessionEvent::OutputsUnknown(new_state.clone()),
+            Receiver { state: new_state },
+        )
     }
 }
 
+#[derive(Clone)]
 pub struct OutputsUnknown {
     v1: v1::OutputsUnknown,
     contexts: Vec<SessionContext>,
 }
 
-impl OutputsUnknown {
+impl Receiver<OutputsUnknown> {
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: impl Fn(&bitcoin::Script) -> Result<bool, ImplementationError>,
-    ) -> Result<WantsOutputs, Error> {
-        let inner = self.v1.identify_receiver_outputs(is_receiver_output)?;
-        Ok(WantsOutputs { v1: inner, contexts: self.contexts })
+    ) -> MaybeFatalTransition<ReceiverSessionEvent, Receiver<WantsOutputs>, Error> {
+        let inner = match self.state.v1.identify_receiver_outputs(is_receiver_output) {
+            Ok(inner) => inner,
+            Err(e) => match e {
+                ReplyableError::Implementation(_) =>
+                    return MaybeFatalTransition::transient(e.into()),
+                _ =>
+                    return MaybeFatalTransition::fatal(
+                        ReceiverSessionEvent::SessionInvalid(e.to_string()),
+                        e.into(),
+                    ),
+            },
+        };
+        let new_state = WantsOutputs { v1: inner, contexts: self.state.contexts };
+        MaybeFatalTransition::success(
+            ReceiverSessionEvent::WantsOutputs(new_state.clone()),
+            Receiver { state: new_state },
+        )
     }
 }
 
+#[derive(Clone)]
 pub struct WantsOutputs {
     v1: v1::WantsOutputs,
     contexts: Vec<SessionContext>,
 }
 
-impl WantsOutputs {
-    pub fn commit_outputs(self) -> WantsInputs {
-        let inner = self.v1.commit_outputs();
-        WantsInputs { v1: inner, contexts: self.contexts }
+impl Receiver<WantsOutputs> {
+    pub fn commit_outputs(
+        self,
+    ) -> NextStateTransition<ReceiverSessionEvent, Receiver<WantsInputs>> {
+        let inner = self.state.v1.commit_outputs();
+        let new_state = WantsInputs { v1: inner, contexts: self.state.contexts };
+        NextStateTransition::success(
+            ReceiverSessionEvent::WantsInputs(new_state.clone()),
+            Receiver { state: new_state },
+        )
     }
 }
 
+#[derive(Clone)]
 pub struct WantsInputs {
     v1: v1::WantsInputs,
     contexts: Vec<SessionContext>,
 }
 
-impl WantsInputs {
+impl Receiver<WantsInputs> {
     /// Add the provided list of inputs to the transaction.
     /// Any excess input amount is added to the change_vout output indicated previously.
     pub fn contribute_inputs(
         self,
         inputs: impl IntoIterator<Item = InputPair>,
-    ) -> Result<WantsInputs, InputContributionError> {
-        let inner = self.v1.contribute_inputs(inputs)?;
-        Ok(WantsInputs { v1: inner, contexts: self.contexts })
+    ) -> Result<Receiver<WantsInputs>, InputContributionError> {
+        let inner = self.state.v1.contribute_inputs(inputs)?;
+        let new_state = WantsInputs { v1: inner, contexts: self.state.contexts };
+        Ok(Receiver { state: new_state })
     }
 
     /// Proceed to the proposal finalization step.
     /// Inputs cannot be modified after this function is called.
-    pub fn commit_inputs(self) -> ProvisionalProposal {
-        let inner = self.v1.commit_inputs();
-        ProvisionalProposal { v1: inner, contexts: self.contexts }
+    pub fn commit_inputs(
+        self,
+    ) -> NextStateTransition<ReceiverSessionEvent, Receiver<ProvisionalProposal>> {
+        let inner = self.state.v1.commit_inputs();
+        let new_state = ProvisionalProposal { v1: inner, contexts: self.state.contexts };
+        NextStateTransition::success(
+            ReceiverSessionEvent::ProvisionalProposal(new_state.clone()),
+            Receiver { state: new_state },
+        )
     }
 }
 
+#[derive(Clone)]
 pub struct ProvisionalProposal {
     v1: v1::ProvisionalProposal,
     contexts: Vec<SessionContext>,
 }
 
-impl ProvisionalProposal {
+impl Receiver<ProvisionalProposal> {
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
         min_feerate_sat_per_vb: Option<FeeRate>,
         max_feerate_sat_per_vb: FeeRate,
-    ) -> Result<PayjoinProposal, Error> {
-        let inner = self.v1.finalize_proposal(
+    ) -> MaybeTransientTransition<ReceiverSessionEvent, Receiver<PayjoinProposal>, ReplyableError>
+    {
+        let inner = match self.state.v1.finalize_proposal(
             wallet_process_psbt,
             min_feerate_sat_per_vb,
             Some(max_feerate_sat_per_vb),
-        )?;
-        Ok(PayjoinProposal { v1: inner, contexts: self.contexts })
+        ) {
+            Ok(inner) => inner,
+            Err(e) => return MaybeTransientTransition::transient(e),
+        };
+        let new_state = PayjoinProposal { v1: inner, contexts: self.state.contexts };
+        MaybeTransientTransition::success(
+            ReceiverSessionEvent::PayjoinProposal(new_state.clone()),
+            Receiver { state: new_state },
+        )
     }
 }
 
+#[derive(Clone)]
 pub struct PayjoinProposal {
     v1: v1::PayjoinProposal,
     contexts: Vec<SessionContext>,
 }
 
-impl PayjoinProposal {
+impl Receiver<PayjoinProposal> {
     pub fn sender_iter(&self) -> impl Iterator<Item = v2::PayjoinProposal> {
-        self.contexts
+        self.state
+            .contexts
             .iter()
-            .map(|ctx| v2::PayjoinProposal::new(self.v1.clone(), ctx.clone()))
+            .map(|ctx| v2::PayjoinProposal::new(self.state.v1.clone(), ctx.clone()))
             .collect::<Vec<_>>()
             .into_iter()
     }
 
-    pub fn proposal(&self) -> &v1::PayjoinProposal { &self.v1 }
+    pub fn proposal(&self) -> &v1::PayjoinProposal { &self.state.v1 }
 }
 
 /// A multiparty proposal that is ready to be combined into a single psbt
@@ -270,29 +389,41 @@ impl FinalizedProposal {
         Ok(())
     }
 
-    pub fn combine(self) -> Result<Psbt, MultipartyError> {
+    pub fn combine(self) -> MaybeSuccessTransition<Psbt, MultipartyError> {
         if self.v2_proposals.len() < 2 {
-            return Err(InternalMultipartyError::NotEnoughProposals.into());
+            return MaybeSuccessTransition::transient(
+                InternalMultipartyError::NotEnoughProposals.into(),
+            );
         }
 
         let mut agg_psbt = self.v2_proposals.first().expect("checked above").v1.psbt.clone();
         for proposal in self.v2_proposals.iter().skip(1) {
-            agg_psbt
-                .combine(proposal.v1.psbt.clone())
-                .map_err(InternalMultipartyError::FailedToCombinePsbts)?;
+            match agg_psbt.combine(proposal.v1.psbt.clone()) {
+                Ok(_) => (),
+                Err(e) =>
+                    return MaybeSuccessTransition::transient(
+                        InternalMultipartyError::FailedToCombinePsbts(e).into(),
+                    ),
+            };
         }
 
         // We explicitly call extract_tx to do some fee sanity checks
         // Otherwise you can just read the inputs from the unsigned_tx of the psbt
-        let tx = agg_psbt
-            .clone()
-            .extract_tx()
-            .map_err(|e| InternalMultipartyError::BitcoinExtractTxError(Box::new(e)))?;
+        let tx = match agg_psbt.clone().extract_tx() {
+            Ok(tx) => tx,
+            Err(e) =>
+                return MaybeSuccessTransition::transient(
+                    InternalMultipartyError::BitcoinExtractTxError(Box::new(e)).into(),
+                ),
+        };
+
         if tx.input.iter().any(|input| input.witness.is_empty() && input.script_sig.is_empty()) {
-            return Err(InternalMultipartyError::InputMissingWitnessOrScriptSig.into());
+            return MaybeSuccessTransition::transient(
+                InternalMultipartyError::InputMissingWitnessOrScriptSig.into(),
+            );
         }
 
-        Ok(agg_psbt)
+        MaybeSuccessTransition::success(agg_psbt)
     }
 
     pub fn v2(&self) -> &[v2::UncheckedProposal] { &self.v2_proposals }
@@ -310,10 +441,12 @@ mod test {
     };
 
     use super::error::IdenticalProposalError;
+    use super::session::ReceiverSessionEvent;
     use super::{
         v1, v2, FinalizedProposal, InternalMultipartyError, MultipartyError,
         UncheckedProposalBuilder, SUPPORTED_VERSIONS,
     };
+    use crate::persist::NoopPersister;
     use crate::receive::optional_parameters::Params;
     use crate::receive::v2::test::{SHARED_CONTEXT, SHARED_CONTEXT_TWO};
 
@@ -333,16 +466,17 @@ mod test {
 
     #[test]
     fn test_single_context_multiparty() -> Result<(), BoxError> {
+        let noop_persister = NoopPersister::<ReceiverSessionEvent>::default();
         let proposal_one = v2::UncheckedProposal {
             v1: multiparty_proposals()[0].clone(),
             context: SHARED_CONTEXT.clone(),
         };
         let mut multiparty = UncheckedProposalBuilder::new();
         multiparty.add(proposal_one)?;
-        match multiparty.build() {
+        match multiparty.build().save(&noop_persister) {
             Ok(_) => panic!("multiparty has two identical participants and should error"),
             Err(e) => assert_eq!(
-                e.to_string(),
+                e.api_error().expect("should be api error").to_string(),
                 MultipartyError::from(InternalMultipartyError::NotEnoughProposals).to_string()
             ),
         }
@@ -406,6 +540,7 @@ mod test {
     #[test]
     fn finalize_multiparty() -> Result<(), BoxError> {
         use crate::psbt::PsbtExt;
+        let noop_persister = NoopPersister::<ReceiverSessionEvent>::default();
         let proposal_one = v2::UncheckedProposal {
             v1: multiparty_proposals()[0].clone(),
             context: SHARED_CONTEXT.clone(),
@@ -421,8 +556,12 @@ mod test {
         finalized_multiparty.add(proposal_two)?;
         assert_eq!(finalized_multiparty.v2()[1].type_id(), TypeId::of::<v2::UncheckedProposal>());
 
-        let multiparty_psbt =
-            finalized_multiparty.combine().expect("could not create PSBT from finalized proposal");
+        let multiparty_psbt = match finalized_multiparty.combine().save(&noop_persister) {
+            Ok(multiparty_psbt) => multiparty_psbt,
+            Err(e) => {
+                panic!("could not create PSBT from finalized proposal: {}", e);
+            }
+        };
         assert!(multiparty_psbt.validate_input_utxos().is_ok());
         Ok(())
     }

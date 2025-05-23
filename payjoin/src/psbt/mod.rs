@@ -217,7 +217,7 @@ impl InternalInputPair<'_> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum PrevTxOutError {
     MissingUtxoInformation,
     IndexOutOfBounds { output_count: usize, index: u32 },
@@ -236,7 +236,7 @@ impl fmt::Display for PrevTxOutError {
 
 impl std::error::Error for PrevTxOutError {}
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InternalPsbtInputError {
     PrevTxOut(PrevTxOutError),
     UnequalTxid,
@@ -244,6 +244,7 @@ pub(crate) enum InternalPsbtInputError {
     SegWitTxOutMismatch,
     AddressType(AddressTypeError),
     NoRedeemScript,
+    InvalidP2wpkhScriptPubkey,
 }
 
 impl fmt::Display for InternalPsbtInputError {
@@ -254,6 +255,7 @@ impl fmt::Display for InternalPsbtInputError {
             Self::SegWitTxOutMismatch => write!(f, "transaction output provided in SegWit UTXO field doesn't match the one in non-SegWit UTXO field"),
             Self::AddressType(_) => write!(f, "invalid address type"),
             Self::NoRedeemScript => write!(f, "provided p2sh PSBT input is missing a redeem_script"),
+            Self::InvalidP2wpkhScriptPubkey => write!(f, "provided script pubkey is invalid for P2WPKH")
         }
     }
 }
@@ -266,6 +268,7 @@ impl std::error::Error for InternalPsbtInputError {
             Self::SegWitTxOutMismatch => None,
             Self::AddressType(error) => Some(error),
             Self::NoRedeemScript => None,
+            Self::InvalidP2wpkhScriptPubkey => None,
         }
     }
 }
@@ -278,7 +281,7 @@ impl From<AddressTypeError> for InternalPsbtInputError {
     fn from(value: AddressTypeError) -> Self { Self::AddressType(value) }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PsbtInputError(InternalPsbtInputError);
 
 impl From<InternalPsbtInputError> for PsbtInputError {
@@ -309,7 +312,7 @@ impl std::error::Error for PsbtInputsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { Some(&self.error) }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum AddressTypeError {
     PrevTxOut(PrevTxOutError),
     InvalidScript(FromScriptError),

@@ -1,5 +1,5 @@
 additional_cargo_args = ["--all-features"]
-examine_globs = ["payjoin/src/uri/*.rs", "payjoin/src/receive/**/*.rs"]
+examine_globs = ["payjoin/src/uri/*.rs", "payjoin/src/receive/**/*.rs", "payjoin/src/send/mod.rs"]
 exclude_globs = []
 exclude_re = [
 	"impl Debug",

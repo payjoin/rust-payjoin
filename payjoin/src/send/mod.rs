@@ -450,7 +450,7 @@ mod test {
     use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
     use bitcoin::transaction::Version;
     use bitcoin::{
-        Amount, FeeRate, OutPoint, Script, ScriptBuf, Sequence, Witness, XOnlyPublicKey,
+        Amount, FeeRate, OutPoint, Psbt, Script, ScriptBuf, Sequence, Witness, XOnlyPublicKey,
     };
     use payjoin_test_utils::{
         BoxError, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL,
@@ -499,6 +499,23 @@ mod test {
     }
 
     #[test]
+    fn test_insufficient_fees() -> Result<(), BoxError> {
+        let fee_contribution = determine_fee_contribution(
+            &PARSED_ORIGINAL_PSBT,
+            Script::from_bytes(&<Vec<u8> as FromHex>::from_hex(
+                "0014b60943f60c3ee848828bdace7474a92e81f3fcdd",
+            )?),
+            Some((Amount::from_sat(100000000), None)),
+            false,
+        );
+        assert_eq!(
+            fee_contribution.err(),
+            Some(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution)
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_self_pay_change_index() -> Result<(), BoxError> {
         let script_bytes =
             <Vec<u8> as FromHex>::from_hex("a914774096dbcf486743c22f4347e9b469febe8b677a87")?;
@@ -531,6 +548,8 @@ mod test {
 
     #[test]
     fn test_find_change_index() -> Result<(), BoxError> {
+        // All psbt vectors are modifications on the original psbt from bip78
+        // Starts with the unmodified original psbt
         let script_bytes =
             <Vec<u8> as FromHex>::from_hex("0014b60943f60c3ee848828bdace7474a92e81f3fcdd")?;
         let payee_script = Script::from_bytes(&script_bytes);
@@ -550,6 +569,89 @@ mod test {
             (*fee_contribution.as_ref().expect("Failed to retrieve fees")).unwrap().max_amount,
             Amount::from_sat(1000)
         );
+
+        // Psbt with zero outputs
+        let psbt = Psbt::from_str("cHNidP8BADMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD9////AAAAAAAAAQEgqBvXBQAAAAAXqRTeTh6QYcpZE1sDWtXm1HmQRUNU0IcBBxcWABTHikVyU1WCjVZYB03VJg1fy2mFMAEIawJHMEQCIHxD4Dp16n5HP3a+HLbqVPQCNmfg9EuLwF/2qgH8IyTTAiA/9GPY9ZneASNSROWENE0BDSBfBM7u32f5XXilnqiWNQEhAxWawBqg1YdUxLTYt9NJ7R7fzws2K09rVRBnI6KFj4UWAA==").expect("Could not parse psbt");
+
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            Script::from_bytes(
+                &<Vec<u8> as FromHex>::from_hex("0014908eb2d695cf78e39a621d1561655790d1a8c60f")
+                    .unwrap(),
+            ),
+            Some((Amount::from_sat(1000), None)),
+            true,
+        );
+        assert_eq!(fee_contribution.err(), Some(InternalBuildSenderError::NoOutputs));
+
+        // Psbt with identical outputs
+        let psbt = Psbt::from_str("cHNidP8BAHECAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD9////AugDAAAAAAAAFgAUkI6y1pXPeOOaYh0VYWVXkNGoxg/oAwAAAAAAABYAFJCOstaVz3jjmmIdFWFlV5DRqMYPAAAAAAABASCoG9cFAAAAABepFN5OHpBhylkTWwNa1ebUeZBFQ1TQhwEHFxYAFMeKRXJTVYKNVlgHTdUmDV/LaYUwAQhrAkcwRAIgfEPgOnXqfkc/dr4ctupU9AI2Z+D0S4vAX/aqAfwjJNMCID/0Y9j1md4BI1JE5YQ0TQENIF8Ezu7fZ/ldeKWeqJY1ASEDFZrAGqDVh1TEtNi300ntHt/PCzYrT2tVEGcjooWPhRYAAAA=").expect("Could not parse psbt");
+
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            Script::from_bytes(
+                &<Vec<u8> as FromHex>::from_hex("0014908eb2d695cf78e39a621d1561655790d1a8c60f")
+                    .unwrap(),
+            ),
+            Some((Amount::from_sat(1000), None)),
+            true,
+        );
+        assert_eq!(fee_contribution.err(), Some(InternalBuildSenderError::MultiplePayeeOutputs));
+
+        // Psbt with only one output
+        let psbt = Psbt::from_str("cHNidP8BAFICAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD9////AegDAAAAAAAAFgAUzuUHlfaW6kwW0uvkebUmNEad9f8AAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgAA").expect("Could not parse psbt");
+
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            Script::from_bytes(
+                &<Vec<u8> as FromHex>::from_hex("0014cee50795f696ea4c16d2ebe479b52634469df5ff")
+                    .unwrap(),
+            ),
+            Some((Amount::from_sat(1000), None)),
+            true,
+        );
+        assert_eq!(fee_contribution, Ok(None));
+
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            Script::from_bytes(
+                &<Vec<u8> as FromHex>::from_hex("0014cee50795f696ea4c16d2ebe479b52634469df5ff")
+                    .unwrap(),
+            ),
+            Some((Amount::from_sat(1000), None)),
+            false,
+        );
+        assert_eq!(
+            fee_contribution.err(),
+            Some(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution)
+        );
+
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            payee_script,
+            Some((Amount::from_sat(1000), None)),
+            false,
+        );
+        assert_eq!(fee_contribution.err(), Some(InternalBuildSenderError::MissingPayeeOutput));
+
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            payee_script,
+            Some((Amount::from_sat(1000), None)),
+            true,
+        );
+        assert_eq!(fee_contribution.err(), Some(InternalBuildSenderError::MissingPayeeOutput));
+
+        // Psbt with three total outputs
+        let psbt = Psbt::from_str("cHNidP8BAJACAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD9////A+gDAAAAAAAAFgAUzuUHlfaW6kwW0uvkebUmNEad9f/oAwAAAAAAABYAFNkaW9bjuhIiaGBD9z6Iv2oVj4Vu6AMAAAAAAAAWABTmWPFy/dQaeG34zttTMG90VI8TZgAAAAAAAQEgqBvXBQAAAAAXqRTeTh6QYcpZE1sDWtXm1HmQRUNU0IcBBxcWABTHikVyU1WCjVZYB03VJg1fy2mFMAEIawJHMEQCIHxD4Dp16n5HP3a+HLbqVPQCNmfg9EuLwF/2qgH8IyTTAiA/9GPY9ZneASNSROWENE0BDSBfBM7u32f5XXilnqiWNQEhAxWawBqg1YdUxLTYt9NJ7R7fzws2K09rVRBnI6KFj4UWAAAAAA==").expect("Could not parse psbt");
+
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            payee_script,
+            Some((Amount::from_sat(1000), None)),
+            true,
+        );
+        assert_eq!(fee_contribution.err(), Some(InternalBuildSenderError::AmbiguousChangeOutput));
         Ok(())
     }
 
@@ -580,6 +682,20 @@ mod test {
                 assert_eq!(error, InternalBuildSenderError::PayeeValueNotEqual);
             }
         }
+        Ok(())
+    }
+
+    #[test]
+    fn test_equal_amount_fee_contribution() -> Result<(), BoxError> {
+        let mut ctx = create_psbt_context()?;
+        let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+
+        ctx.fee_contribution = None;
+        proposal.unsigned_tx.output.get_mut(0).unwrap().value =
+            ctx.original_psbt.unsigned_tx.output.get_mut(0).unwrap().value;
+
+        assert!(ctx.process_proposal(proposal).is_ok());
+
         Ok(())
     }
 
@@ -642,6 +758,37 @@ mod test {
             "2",
         );
         assert_eq!(url, Url::parse("http://localhost?v=2")?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_min_feerate_query_param() -> Result<(), BoxError> {
+        let url = serialize_url(
+            Url::parse("http://localhost")?,
+            OutputSubstitution::Enabled,
+            None,
+            FeeRate::from_sat_per_vb(10).expect("Could not parse feerate"),
+            "2",
+        );
+        assert_eq!(url, Url::parse("http://localhost?v=2&minfeerate=10")?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_additional_fee_contribution_query_param() -> Result<(), BoxError> {
+        let url = serialize_url(
+            Url::parse("http://localhost")?,
+            OutputSubstitution::Enabled,
+            Some(AdditionalFeeContribution { max_amount: Amount::from_sat(1000), vout: 0 }),
+            FeeRate::ZERO,
+            "2",
+        );
+        assert_eq!(
+            url,
+            Url::parse(
+                "http://localhost?v=2&additionalfeeoutputindex=0&maxadditionalfeecontribution=1000"
+            )?
+        );
         Ok(())
     }
 

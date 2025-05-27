@@ -1,5 +1,4 @@
-use crate::receive::v2::ReceiverSessionEvent;
-use crate::send::v2::SenderSessionEvent;
+use std::fmt::Display;
 
 /// Notes
 /// Schema:
@@ -17,29 +16,10 @@ use crate::send::v2::SenderSessionEvent;
 /// PayjoinProposal -> process_res() -> () : Success | Reject(Transient) | // Transient bc OHTTP decap could fail or the directory is malfuctioning
 ///
 /// Has fatal errors: process_res(), check_broadcast_suitability(), check_inputs(), check_no_inputs_seen(), identify_receiver_outputs(), finalize_proposal()
-///
-/// Note: once you have validate all possible byzantine inputs then you shouldnt have fatal errors, only transient errors
-/// RejectionType: INfallible, Transient, Fatal
-/// Fatal should mean: we record a reason why and close the session
-///
-
-/// The Ok branch always contains the Accepted tuple.
-/// This contains 1 or more (maybe exactly one?) events
-/// and the Receiver with the state transition applied to it
-/// as private fields
-/// Event is the session event type
-/// NextState is the new state type
-///
-
-/// A transition that can be either fatal or transient or have no results.
-/// If success it must have a next state and an event to save
 
 /// A transition that can result in a state transition, fatal error, transient error, or successfully have no results.
 pub struct MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err>(
-    Result<
-        AcceptWithMaybeNoResults<Event, NextState, CurrentState>,
-        MaybeFatalRejection<Event, Err>,
-    >,
+    Result<AcceptOptionalTransition<Event, NextState, CurrentState>, Rejection<Event, Err>>,
 );
 
 impl<Event, NextState, CurrentState, Err>
@@ -48,25 +28,25 @@ impl<Event, NextState, CurrentState, Err>
     #[inline]
     #[allow(dead_code)]
     pub(crate) fn fatal(event: Event, error: Err) -> Self {
-        MaybeFatalTransitionWithNoResults(Err(MaybeFatalRejection::fatal(event, error)))
+        MaybeFatalTransitionWithNoResults(Err(Rejection::fatal(event, error)))
     }
 
     #[inline]
     #[allow(dead_code)]
     pub(crate) fn transient(error: Err) -> Self {
-        MaybeFatalTransitionWithNoResults(Err(MaybeFatalRejection::transient(error)))
+        MaybeFatalTransitionWithNoResults(Err(Rejection::transient(error)))
     }
 
     #[inline]
     #[allow(dead_code)]
     pub(crate) fn no_results(current_state: CurrentState) -> Self {
-        MaybeFatalTransitionWithNoResults(Ok(AcceptWithMaybeNoResults::NoResults(current_state)))
+        MaybeFatalTransitionWithNoResults(Ok(AcceptOptionalTransition::NoResults(current_state)))
     }
 
     #[inline]
     #[allow(dead_code)]
     pub(crate) fn success(event: Event, next_state: NextState) -> Self {
-        MaybeFatalTransitionWithNoResults(Ok(AcceptWithMaybeNoResults::Success(AcceptNextState(
+        MaybeFatalTransitionWithNoResults(Ok(AcceptOptionalTransition::Success(AcceptNextState(
             event, next_state,
         ))))
     }
@@ -75,7 +55,7 @@ impl<Event, NextState, CurrentState, Err>
         self,
         persister: &P,
     ) -> Result<
-        PersistedSucccessWithMaybeNoResults<NextState, CurrentState>,
+        OptionalTransitionOutcome<NextState, CurrentState>,
         PersistedError<Err, P::InternalStorageError>,
     >
     where
@@ -88,20 +68,20 @@ impl<Event, NextState, CurrentState, Err>
 
 /// A transition that can be either fatal, transient, or a state transition.
 pub struct MaybeFatalTransition<Event, NextState, Err>(
-    Result<AcceptNextState<Event, NextState>, MaybeFatalRejection<Event, Err>>,
+    Result<AcceptNextState<Event, NextState>, Rejection<Event, Err>>,
 );
 
 impl<Event, NextState, Err> MaybeFatalTransition<Event, NextState, Err> {
     #[inline]
     #[allow(dead_code)]
     pub(crate) fn fatal(event: Event, error: Err) -> Self {
-        MaybeFatalTransition(Err(MaybeFatalRejection::fatal(event, error)))
+        MaybeFatalTransition(Err(Rejection::fatal(event, error)))
     }
 
     #[inline]
     #[allow(dead_code)]
     pub(crate) fn transient(error: Err) -> Self {
-        MaybeFatalTransition(Err(MaybeFatalRejection::transient(error)))
+        MaybeFatalTransition(Err(Rejection::transient(error)))
     }
 
     #[inline]
@@ -242,41 +222,69 @@ pub struct AcceptNextState<Event, NextState>(Event, NextState);
 /// Wrapper that marks the success of a state machine with a value that was returned
 struct AcceptCompleted<SuccessValue>(SuccessValue);
 
-/// Wrapper representing a state transition or no results from calling a state transition method
-pub enum AcceptWithMaybeNoResults<Event, NextState, CurrentState> {
+/// Wrapper that represents either a successful state transition or indicates no state change occurred
+pub enum AcceptOptionalTransition<Event, NextState, CurrentState> {
+    /// A state transition that was successful and returned session event to be persisted
     Success(AcceptNextState<Event, NextState>),
+    /// A state transition returned no value. Caller should resume from the current state
     NoResults(CurrentState),
 }
 
-/// Wrapper representing a fatal error or a transient error
-pub enum MaybeFatalRejection<Event, Err> {
+/// Wrapper representing a fatal or transient rejection of a state transition.
+pub enum Rejection<Event, Err> {
     Fatal(RejectFatal<Event, Err>),
     Transient(RejectTransient<Err>),
 }
 
-impl<Event, Err> MaybeFatalRejection<Event, Err> {
+impl<Event, Err> Rejection<Event, Err> {
     #[inline]
     #[allow(dead_code)]
-    pub fn fatal(event: Event, error: Err) -> Self {
-        MaybeFatalRejection::Fatal(RejectFatal(event, error))
-    }
+    pub fn fatal(event: Event, error: Err) -> Self { Rejection::Fatal(RejectFatal(event, error)) }
     #[inline]
     #[allow(dead_code)]
-    pub fn transient(error: Err) -> Self { MaybeFatalRejection::Transient(RejectTransient(error)) }
+    pub fn transient(error: Err) -> Self { Rejection::Transient(RejectTransient(error)) }
 }
 
-/// Wrapper representing a fatal error
+/// Represents a fatal rejection of a state transition.
+/// When this error occurs, the session must be closed and cannot be resumed.
 pub struct RejectFatal<Event, Err>(Event, Err);
-/// Wrapper representing a transient error
+/// Represents a transient rejection of a state transition.
+/// When this error occurs, the session should resume from its current state.
 pub struct RejectTransient<Err>(Err);
-/// Wrapper representing a bad initial inputs to the state machine
+/// Represents a bad initial inputs to the state machine.
+/// When this error occurs, the session cannot be created.
+/// The wrapper contains the error and should be returned to the caller.
 pub struct RejectBadInitInputs<Err>(Err);
 
 /// Error type that represents all possible errors that can be returned when processing a state transition
 #[derive(Debug, Clone)]
 pub struct PersistedError<ApiError: std::error::Error, StorageError: std::error::Error>(
-    pub InternalPersistedError<ApiError, StorageError>,
+    InternalPersistedError<ApiError, StorageError>,
 );
+
+impl<ApiErr, StorageErr> PersistedError<ApiErr, StorageErr>
+where
+    StorageErr: std::error::Error,
+    ApiErr: std::error::Error,
+{
+    #[allow(dead_code)]
+    pub fn storage_error(self) -> Option<StorageError<StorageErr>> {
+        match self.0 {
+            InternalPersistedError::Storage(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn api_error(self) -> Option<ApiErr> {
+        match self.0 {
+            InternalPersistedError::Fatal(e)
+            | InternalPersistedError::BadInitInputs(e)
+            | InternalPersistedError::Transient(e) => Some(e),
+            _ => None,
+        }
+    }
+}
 
 impl<ApiError: std::error::Error, StorageError: std::error::Error>
     From<InternalPersistedError<ApiError, StorageError>>
@@ -303,32 +311,8 @@ impl<ApiError: std::error::Error, StorageError: std::error::Error> std::fmt::Dis
     }
 }
 
-impl<ApiErr, StorageErr> PersistedError<ApiErr, StorageErr>
-where
-    StorageErr: std::error::Error,
-    ApiErr: std::error::Error,
-{
-    #[allow(dead_code)]
-    pub fn storage_error(self) -> Option<StorageError<StorageErr>> {
-        match self.0 {
-            InternalPersistedError::Storage(e) => Some(e),
-            _ => None,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn api_error(self) -> Option<ApiErr> {
-        match self.0 {
-            InternalPersistedError::Fatal(e)
-            | InternalPersistedError::BadInitInputs(e)
-            | InternalPersistedError::Transient(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
-pub enum InternalPersistedError<InternalApiError, StorageErr>
+pub(crate) enum InternalPersistedError<InternalApiError, StorageErr>
 where
     InternalApiError: std::error::Error,
     StorageErr: std::error::Error,
@@ -344,25 +328,24 @@ where
     Storage(StorageError<StorageErr>),
 }
 
+/// Represents a state transition that either progresses to a new state or maintains the current state
 #[derive(Debug, PartialEq)]
-pub enum PersistedSucccessWithMaybeNoResults<NextState, CurrentState> {
-    Success(NextState),
-    NoResults(CurrentState),
+pub enum OptionalTransitionOutcome<NextState, CurrentState> {
+    /// A successful state transition that returned a next state
+    Progress(NextState),
+    /// A state transition returned no value. Caller should resume from the current state
+    Stasis(CurrentState),
 }
 
-impl<NextState, CurrentState> PersistedSucccessWithMaybeNoResults<NextState, CurrentState> {
-    pub fn is_none(&self) -> bool {
-        matches!(self, PersistedSucccessWithMaybeNoResults::NoResults(_))
-    }
+impl<NextState, CurrentState> OptionalTransitionOutcome<NextState, CurrentState> {
+    pub fn is_none(&self) -> bool { matches!(self, OptionalTransitionOutcome::Stasis(_)) }
 
-    pub fn is_success(&self) -> bool {
-        matches!(self, PersistedSucccessWithMaybeNoResults::Success(_))
-    }
+    pub fn is_success(&self) -> bool { matches!(self, OptionalTransitionOutcome::Progress(_)) }
 
     pub fn success(&self) -> Option<&NextState> {
         match self {
-            PersistedSucccessWithMaybeNoResults::Success(next_state) => Some(next_state),
-            PersistedSucccessWithMaybeNoResults::NoResults(_) => None,
+            OptionalTransitionOutcome::Progress(next_state) => Some(next_state),
+            OptionalTransitionOutcome::Stasis(_) => None,
         }
     }
 }
@@ -470,25 +453,25 @@ trait InternalSessionPersister: SessionPersister {
             Err,
         >,
     ) -> Result<
-        PersistedSucccessWithMaybeNoResults<NextState, CurrentState>,
+        OptionalTransitionOutcome<NextState, CurrentState>,
         PersistedError<Err, Self::InternalStorageError>,
     >
     where
         Err: std::error::Error,
     {
         match state_transition.0 {
-            Ok(AcceptWithMaybeNoResults::Success(AcceptNextState(event, next_state))) => {
+            Ok(AcceptOptionalTransition::Success(AcceptNextState(event, next_state))) => {
                 self.save_event(&event)
                     .map_err(|e| InternalPersistedError::Storage(StorageError(e)))?;
-                Ok(PersistedSucccessWithMaybeNoResults::Success(next_state))
+                Ok(OptionalTransitionOutcome::Progress(next_state))
             }
-            Ok(AcceptWithMaybeNoResults::NoResults(current_state)) =>
-                Ok(PersistedSucccessWithMaybeNoResults::NoResults(current_state)),
-            Err(MaybeFatalRejection::Fatal(fatal_rejection)) => {
+            Ok(AcceptOptionalTransition::NoResults(current_state)) =>
+                Ok(OptionalTransitionOutcome::Stasis(current_state)),
+            Err(Rejection::Fatal(fatal_rejection)) => {
                 self.handle_fatal_reject(&fatal_rejection)?;
                 Err(InternalPersistedError::Fatal(fatal_rejection.1).into())
             }
-            Err(MaybeFatalRejection::Transient(RejectTransient(err))) =>
+            Err(Rejection::Transient(RejectTransient(err))) =>
                 Err(InternalPersistedError::Transient(err).into()),
         }
     }
@@ -527,11 +510,11 @@ trait InternalSessionPersister: SessionPersister {
             }
             Err(e) => {
                 match e {
-                    MaybeFatalRejection::Fatal(fatal_rejection) => {
+                    Rejection::Fatal(fatal_rejection) => {
                         self.handle_fatal_reject(&fatal_rejection)?;
                         Err(InternalPersistedError::Fatal(fatal_rejection.1).into())
                     }
-                    MaybeFatalRejection::Transient(RejectTransient(err)) => {
+                    Rejection::Transient(RejectTransient(err)) => {
                         // No event to store for transient errors
                         Err(InternalPersistedError::Transient(err).into())
                     }
@@ -560,19 +543,6 @@ impl<T: SessionPersister> InternalSessionPersister for T {}
 /// This persister cannot be used to replay a session
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NoopPersisterEvent;
-
-impl From<ReceiverSessionEvent> for NoopPersisterEvent {
-    fn from(_event: ReceiverSessionEvent) -> Self { NoopPersisterEvent }
-}
-
-impl From<SenderSessionEvent> for NoopPersisterEvent {
-    fn from(_event: SenderSessionEvent) -> Self { NoopPersisterEvent }
-}
-
-#[cfg(feature = "_multiparty")]
-impl From<crate::send::multiparty::SenderSessionEvent> for NoopPersisterEvent {
-    fn from(_event: crate::send::multiparty::SenderSessionEvent) -> Self { NoopPersisterEvent }
-}
 
 #[derive(Debug, Clone)]
 pub struct NoopSessionPersister<E = NoopPersisterEvent>(std::marker::PhantomData<E>);
@@ -919,7 +889,7 @@ mod tests {
         let next_state = "Next state".to_string();
         let test_cases: Vec<
             TestCase<
-                PersistedSucccessWithMaybeNoResults<InMemoryTestState, InMemoryTestState>,
+                OptionalTransitionOutcome<InMemoryTestState, InMemoryTestState>,
                 PersistedError<InMemoryTestError, std::convert::Infallible>,
             >,
         > = vec![
@@ -929,7 +899,7 @@ mod tests {
                     events: vec![event.clone()],
                     is_closed: false,
                     error: None,
-                    success: Some(PersistedSucccessWithMaybeNoResults::Success(next_state.clone())),
+                    success: Some(OptionalTransitionOutcome::Progress(next_state.clone())),
                 },
                 test: Box::new(move |persister| {
                     MaybeFatalTransitionWithNoResults::success(event.clone(), next_state.clone())
@@ -942,9 +912,7 @@ mod tests {
                     events: vec![],
                     is_closed: false,
                     error: None,
-                    success: Some(PersistedSucccessWithMaybeNoResults::NoResults(
-                        current_state.clone(),
-                    )),
+                    success: Some(OptionalTransitionOutcome::Stasis(current_state.clone())),
                 },
                 test: Box::new(move |persister| {
                     MaybeFatalTransitionWithNoResults::no_results(current_state.clone())
@@ -993,14 +961,12 @@ mod tests {
         let next_state = "Next state".to_string();
         let current_state = "Current state".to_string();
 
-        let success =
-            PersistedSucccessWithMaybeNoResults::<String, String>::Success(next_state.clone());
+        let success = OptionalTransitionOutcome::<String, String>::Progress(next_state.clone());
         assert!(!success.is_none());
         assert!(success.is_success());
         assert_eq!(success.success(), Some(&next_state));
 
-        let no_results =
-            PersistedSucccessWithMaybeNoResults::<String, String>::NoResults(current_state.clone());
+        let no_results = OptionalTransitionOutcome::<String, String>::Stasis(current_state.clone());
         assert!(no_results.is_none());
         assert!(!no_results.is_success());
         assert_eq!(no_results.success(), None);

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::persist::{PersistedError, PersistedSucccessWithMaybeNoResults};
+use payjoin::persist::{AcceptOptionalTransition, OptionalTransitionOutcome};
 use payjoin::receive::v2::{
     replay_receiver_event_log, MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal,
     ProvisionalProposal, Receiver, ReceiverState, ReceiverWithContext, UncheckedProposal,
@@ -246,12 +246,12 @@ impl App {
             let response = post_request(req).await?;
             let res = session.process_response(&response.bytes().await?, ctx).save(persister);
             match res {
-                Ok(PersistedSucccessWithMaybeNoResults::Success(psbt)) => {
+                Ok(OptionalTransitionOutcome::Progress(psbt)) => {
                     println!("Proposal received. Processing...");
                     self.process_pj_response(psbt.psbt().clone())?;
                     return Ok(());
                 }
-                Ok(PersistedSucccessWithMaybeNoResults::NoResults(current_state)) => {
+                Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
                     println!("No response yet.");
                     session = current_state;
                     continue;
@@ -437,10 +437,10 @@ impl App {
                 .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), context)
                 .save(persister);
             match state_transition {
-                Ok(PersistedSucccessWithMaybeNoResults::Success(next_state)) => {
+                Ok(OptionalTransitionOutcome::Progress(next_state)) => {
                     return Ok(next_state);
                 }
-                Ok(PersistedSucccessWithMaybeNoResults::NoResults(current_state)) => {
+                Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
                     session = current_state;
                     continue;
                 }

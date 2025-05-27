@@ -725,9 +725,9 @@ mod integration {
 
         fn handle_directory_proposal(
             receiver: &bitcoincore_rpc::Client,
-            proposal: UncheckedProposal,
+            proposal: Receiver<UncheckedProposal>,
             custom_inputs: Option<Vec<InputPair>>,
-        ) -> Result<PayjoinProposal, BoxError> {
+        ) -> Result<Receiver<PayjoinProposal>, BoxError> {
             // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
             let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
@@ -831,7 +831,7 @@ mod integration {
     mod multiparty {
         use bitcoin::ScriptBuf;
         use payjoin::persist::NoopPersister;
-        use payjoin::receive::v2::{NewReceiver, Receiver};
+        use payjoin::receive::v2::{NewReceiver, Receiver, WithContext};
         use payjoin::send::multiparty::{
             GetContext as MultiPartyGetContext, Sender, SenderBuilder as MultiPartySenderBuilder,
         };
@@ -843,7 +843,7 @@ mod integration {
         use crate::integration::v2::build_sweep_psbt;
 
         struct InnerSenderTestSession {
-            receiver_session: Receiver,
+            receiver_session: Receiver<WithContext>,
             sender_get_ctx: MultiPartyGetContext,
             script_pubkey: ScriptBuf,
         }

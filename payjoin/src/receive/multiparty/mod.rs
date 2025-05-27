@@ -20,9 +20,12 @@ pub struct UncheckedProposalBuilder {
 impl UncheckedProposalBuilder {
     pub fn new() -> Self { Self { proposals: vec![] } }
 
-    pub fn add(&mut self, proposal: v2::UncheckedProposal) -> Result<Self, MultipartyError> {
+    pub fn add(
+        &mut self,
+        proposal: v2::Receiver<v2::UncheckedProposal>,
+    ) -> Result<Self, MultipartyError> {
         self.check_proposal_suitability(&proposal)?;
-        self.proposals.push(proposal);
+        self.proposals.push(proposal.state);
         Ok(Self { proposals: self.proposals.clone() })
     }
 
@@ -209,10 +212,10 @@ pub struct PayjoinProposal {
 }
 
 impl PayjoinProposal {
-    pub fn sender_iter(&self) -> impl Iterator<Item = v2::PayjoinProposal> {
+    pub fn sender_iter(&self) -> impl Iterator<Item = v2::Receiver<v2::PayjoinProposal>> {
         self.contexts
             .iter()
-            .map(|ctx| v2::PayjoinProposal::new(self.v1.clone(), ctx.clone()))
+            .map(|ctx| v2::Receiver::new(v2::PayjoinProposal::new(self.v1.clone(), ctx.clone())))
             .collect::<Vec<_>>()
             .into_iter()
     }
@@ -229,9 +232,12 @@ pub struct FinalizedProposal {
 impl FinalizedProposal {
     pub fn new() -> Self { Self { v2_proposals: vec![] } }
 
-    pub fn add(&mut self, proposal: v2::UncheckedProposal) -> Result<(), MultipartyError> {
+    pub fn add(
+        &mut self,
+        proposal: v2::Receiver<v2::UncheckedProposal>,
+    ) -> Result<(), MultipartyError> {
         self.check_proposal_suitability(&proposal)?;
-        self.v2_proposals.push(proposal);
+        self.v2_proposals.push(proposal.state);
         Ok(())
     }
 
@@ -338,7 +344,7 @@ mod test {
             context: SHARED_CONTEXT.clone(),
         };
         let mut multiparty = UncheckedProposalBuilder::new();
-        multiparty.add(proposal_one)?;
+        multiparty.add(v2::Receiver { state: proposal_one })?;
         match multiparty.build() {
             Ok(_) => panic!("multiparty has two identical participants and should error"),
             Err(e) => assert_eq!(
@@ -359,8 +365,9 @@ mod test {
             v1: multiparty_proposals()[1].clone(),
             context: SHARED_CONTEXT.clone(),
         };
-        let mut multiparty = UncheckedProposalBuilder::new().add(proposal_one.clone())?;
-        match multiparty.add(proposal_two.clone()) {
+        let mut multiparty =
+            UncheckedProposalBuilder::new().add(v2::Receiver { state: proposal_one.clone() })?;
+        match multiparty.add(v2::Receiver { state: proposal_two.clone() }) {
             Ok(_) => panic!("multiparty has two identical contexts and should error"),
             Err(e) => assert_eq!(
                 e.to_string(),
@@ -386,8 +393,9 @@ mod test {
             v1: multiparty_proposals()[0].clone(),
             context: SHARED_CONTEXT_TWO.clone(),
         };
-        let mut multiparty = UncheckedProposalBuilder::new().add(proposal_one.clone())?;
-        match multiparty.add(proposal_two.clone()) {
+        let mut multiparty =
+            UncheckedProposalBuilder::new().add(v2::Receiver { state: proposal_one.clone() })?;
+        match multiparty.add(v2::Receiver { state: proposal_two.clone() }) {
             Ok(_) => panic!("multiparty has two identical psbts and should error"),
             Err(e) => assert_eq!(
                 e.to_string(),
@@ -415,10 +423,10 @@ mod test {
             context: SHARED_CONTEXT_TWO.clone(),
         };
         let mut finalized_multiparty = FinalizedProposal::new();
-        finalized_multiparty.add(proposal_one)?;
+        finalized_multiparty.add(v2::Receiver { state: proposal_one })?;
         assert_eq!(finalized_multiparty.v2()[0].type_id(), TypeId::of::<v2::UncheckedProposal>());
 
-        finalized_multiparty.add(proposal_two)?;
+        finalized_multiparty.add(v2::Receiver { state: proposal_two })?;
         assert_eq!(finalized_multiparty.v2()[1].type_id(), TypeId::of::<v2::UncheckedProposal>());
 
         let multiparty_psbt =

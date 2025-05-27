@@ -61,8 +61,10 @@ impl NewReceiver {
         .map_err(Into::into)
     }
 
-    /// Saves the new [`Receiver`] using the provided persister and returns the storage token.
-    pub fn persist<P: Persister<payjoin::receive::v2::Receiver>>(
+    /// Saves the new [`WithContext`] using the provided persister and returns the storage token.
+    pub fn persist<
+        P: Persister<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>>,
+    >(
         &self,
         persister: &mut P,
     ) -> Result<P::Token, ImplementationError> {
@@ -71,24 +73,26 @@ impl NewReceiver {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct Receiver(payjoin::receive::v2::Receiver);
+pub struct WithContext(payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>);
 
-impl From<Receiver> for payjoin::receive::v2::Receiver {
-    fn from(value: Receiver) -> Self { value.0 }
+impl From<WithContext> for payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext> {
+    fn from(value: WithContext) -> Self { value.0 }
 }
 
-impl From<payjoin::receive::v2::Receiver> for Receiver {
-    fn from(value: payjoin::receive::v2::Receiver) -> Self { Self(value) }
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>> for WithContext {
+    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>) -> Self {
+        Self(value)
+    }
 }
 
-impl Receiver {
-    /// Loads a [`Receiver`] from the provided persister using the storage token.
-    pub fn load<P: Persister<payjoin::receive::v2::Receiver>>(
+impl WithContext {
+    /// Loads a [`Self`] from the provided persister using the storage token.
+    pub fn load<P: Persister<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>>>(
         token: P::Token,
         persister: &P,
     ) -> Result<Self, ImplementationError> {
         let p = persister.load(token).map_err(|e| ImplementationError::from(e.to_string()))?;
-        Ok(Receiver::from(p))
+        Ok(Self(p))
     }
 
     pub fn extract_req(&self, ohttp_relay: String) -> Result<(Request, ClientResponse), Error> {
@@ -105,15 +109,21 @@ impl Receiver {
         body: &[u8],
         ctx: &ClientResponse,
     ) -> Result<Option<UncheckedProposal>, Error> {
-        <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone())
-            .process_res(body, ctx.into())
-            .map(|e| e.map(|o| o.into()))
-            .map_err(Into::into)
+        <Self as Into<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>>>::into(
+            self.clone(),
+        )
+        .process_res(body, ctx.into())
+        .map(|e| e.map(|o| o.into()))
+        .map_err(Into::into)
     }
 
     /// Build a V2 Payjoin URI from the receiver's context
     pub fn pj_uri(&self) -> crate::PjUri {
-        <Self as Into<payjoin::receive::v2::Receiver>>::into(self.clone()).pj_uri().into()
+        <Self as Into<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>>>::into(
+            self.clone(),
+        )
+        .pj_uri()
+        .into()
     }
 
     pub fn to_json(&self) -> Result<String, SerdeJsonError> {
@@ -121,22 +131,34 @@ impl Receiver {
     }
 
     pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
-        serde_json::from_str::<payjoin::receive::v2::Receiver>(json)
-            .map_err(Into::into)
-            .map(Into::into)
+        serde_json::from_str::<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>>(
+            json,
+        )
+        .map_err(Into::into)
+        .map(Into::into)
     }
 
     pub fn key(&self) -> ReceiverToken { self.0.key() }
 }
 
 #[derive(Clone)]
-pub struct UncheckedProposal(payjoin::receive::v2::UncheckedProposal);
+pub struct UncheckedProposal(
+    payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>,
+);
 
-impl From<payjoin::receive::v2::UncheckedProposal> for UncheckedProposal {
-    fn from(value: payjoin::receive::v2::UncheckedProposal) -> Self { Self(value) }
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>>
+    for UncheckedProposal
+{
+    fn from(
+        value: payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>,
+    ) -> Self {
+        Self(value)
+    }
 }
 
-impl From<UncheckedProposal> for payjoin::receive::v2::UncheckedProposal {
+impl From<UncheckedProposal>
+    for payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>
+{
     fn from(value: UncheckedProposal) -> Self { value.0 }
 }
 
@@ -199,10 +221,14 @@ impl UncheckedProposal {
     }
 }
 #[derive(Clone)]
-pub struct MaybeInputsOwned(payjoin::receive::v2::MaybeInputsOwned);
+pub struct MaybeInputsOwned(payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsOwned>);
 
-impl From<payjoin::receive::v2::MaybeInputsOwned> for MaybeInputsOwned {
-    fn from(value: payjoin::receive::v2::MaybeInputsOwned) -> Self { Self(value) }
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsOwned>>
+    for MaybeInputsOwned
+{
+    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsOwned>) -> Self {
+        Self(value)
+    }
 }
 
 impl MaybeInputsOwned {
@@ -219,10 +245,14 @@ impl MaybeInputsOwned {
 }
 
 #[derive(Clone)]
-pub struct MaybeInputsSeen(payjoin::receive::v2::MaybeInputsSeen);
+pub struct MaybeInputsSeen(payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsSeen>);
 
-impl From<payjoin::receive::v2::MaybeInputsSeen> for MaybeInputsSeen {
-    fn from(value: payjoin::receive::v2::MaybeInputsSeen) -> Self { Self(value) }
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsSeen>>
+    for MaybeInputsSeen
+{
+    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsSeen>) -> Self {
+        Self(value)
+    }
 }
 
 impl MaybeInputsSeen {
@@ -243,10 +273,12 @@ impl MaybeInputsSeen {
 /// Only accept PSBTs that send us money.
 /// Identify those outputs with `identify_receiver_outputs()` to proceed
 #[derive(Clone)]
-pub struct OutputsUnknown(payjoin::receive::v2::OutputsUnknown);
+pub struct OutputsUnknown(payjoin::receive::v2::Receiver<payjoin::receive::v2::OutputsUnknown>);
 
-impl From<payjoin::receive::v2::OutputsUnknown> for OutputsUnknown {
-    fn from(value: payjoin::receive::v2::OutputsUnknown) -> Self { Self(value) }
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::OutputsUnknown>> for OutputsUnknown {
+    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::OutputsUnknown>) -> Self {
+        Self(value)
+    }
 }
 
 impl OutputsUnknown {
@@ -263,10 +295,12 @@ impl OutputsUnknown {
     }
 }
 
-pub struct WantsOutputs(payjoin::receive::v2::WantsOutputs);
+pub struct WantsOutputs(payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsOutputs>);
 
-impl From<payjoin::receive::v2::WantsOutputs> for WantsOutputs {
-    fn from(value: payjoin::receive::v2::WantsOutputs) -> Self { Self(value) }
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsOutputs>> for WantsOutputs {
+    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsOutputs>) -> Self {
+        Self(value)
+    }
 }
 
 impl WantsOutputs {
@@ -300,10 +334,12 @@ impl WantsOutputs {
     pub fn commit_outputs(&self) -> WantsInputs { self.0.clone().commit_outputs().into() }
 }
 
-pub struct WantsInputs(payjoin::receive::v2::WantsInputs);
+pub struct WantsInputs(payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsInputs>);
 
-impl From<payjoin::receive::v2::WantsInputs> for WantsInputs {
-    fn from(value: payjoin::receive::v2::WantsInputs) -> Self { Self(value) }
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsInputs>> for WantsInputs {
+    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsInputs>) -> Self {
+        Self(value)
+    }
 }
 impl WantsInputs {
     /// Select receiver input such that the payjoin avoids surveillance.
@@ -364,10 +400,18 @@ impl From<payjoin::receive::InputPair> for InputPair {
     fn from(value: payjoin::receive::InputPair) -> Self { Self(value) }
 }
 
-pub struct ProvisionalProposal(pub payjoin::receive::v2::ProvisionalProposal);
+pub struct ProvisionalProposal(
+    pub payjoin::receive::v2::Receiver<payjoin::receive::v2::ProvisionalProposal>,
+);
 
-impl From<payjoin::receive::v2::ProvisionalProposal> for ProvisionalProposal {
-    fn from(value: payjoin::receive::v2::ProvisionalProposal) -> Self { Self(value) }
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::ProvisionalProposal>>
+    for ProvisionalProposal
+{
+    fn from(
+        value: payjoin::receive::v2::Receiver<payjoin::receive::v2::ProvisionalProposal>,
+    ) -> Self {
+        Self(value)
+    }
 }
 
 impl ProvisionalProposal {
@@ -393,22 +437,31 @@ impl ProvisionalProposal {
 }
 
 #[derive(Clone)]
-pub struct PayjoinProposal(pub payjoin::receive::v2::PayjoinProposal);
+pub struct PayjoinProposal(
+    pub payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>,
+);
 
-impl From<PayjoinProposal> for payjoin::receive::v2::PayjoinProposal {
+impl From<PayjoinProposal>
+    for payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>
+{
     fn from(value: PayjoinProposal) -> Self { value.0 }
 }
 
-impl From<payjoin::receive::v2::PayjoinProposal> for PayjoinProposal {
-    fn from(value: payjoin::receive::v2::PayjoinProposal) -> Self { Self(value) }
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>>
+    for PayjoinProposal
+{
+    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>) -> Self {
+        Self(value)
+    }
 }
 
 impl PayjoinProposal {
     pub fn utxos_to_be_locked(&self) -> Vec<OutPoint> {
         let mut outpoints: Vec<OutPoint> = Vec::new();
-        for o in
-            <PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
-                .utxos_to_be_locked()
+        for o in <PayjoinProposal as Into<
+            payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>,
+        >>::into(self.clone())
+        .utxos_to_be_locked()
         {
             outpoints.push((*o).into());
         }
@@ -416,10 +469,12 @@ impl PayjoinProposal {
     }
 
     pub fn psbt(&self) -> String {
-        <PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
-            .psbt()
-            .clone()
-            .to_string()
+        <PayjoinProposal as Into<
+            payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>,
+        >>::into(self.clone())
+        .psbt()
+        .clone()
+        .to_string()
     }
 
     /// Extract an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
@@ -437,9 +492,11 @@ impl PayjoinProposal {
     ///
     /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or choose to broadcast the original PSBT.
     pub fn process_res(&self, body: &[u8], ohttp_context: &ClientResponse) -> Result<(), Error> {
-        <PayjoinProposal as Into<payjoin::receive::v2::PayjoinProposal>>::into(self.clone())
-            .process_res(body, ohttp_context.into())
-            .map_err(|e| e.into())
+        <PayjoinProposal as Into<
+            payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>,
+        >>::into(self.clone())
+        .process_res(body, ohttp_context.into())
+        .map_err(|e| e.into())
     }
 }
 

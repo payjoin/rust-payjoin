@@ -34,16 +34,16 @@ class InMemoryReceiverPersister(ReceiverPersister):
         super().__init__()
         self.receivers = {}
 
-    def save(self, receiver: Receiver) -> ReceiverToken:
+    def save(self, receiver: WithContext) -> ReceiverToken:
         self.receivers[str(receiver.key())] = receiver.to_json()
 
         return receiver.key()
 
-    def load(self, token: ReceiverToken) -> Receiver:
+    def load(self, token: ReceiverToken) -> WithContext:
         token = str(token)
         if token not in self.receivers.keys():
             raise ValueError(f"Token not found: {token}")
-        return Receiver.from_json(self.receivers[token])
+        return WithContext.from_json(self.receivers[token])
 
 class InMemorySenderPersister(SenderPersister):
     def __init__(self):
@@ -83,7 +83,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             new_receiver = NewReceiver(receiver_address, directory.as_string(), ohttp_keys, None)
             persister = InMemoryReceiverPersister()
             token = new_receiver.persist(persister)
-            session: Receiver = Receiver.load(token, persister)
+            session: WithContext = WithContext.load(token, persister)
             print(f"session: {session.to_json()}")
             # Poll receive request
             ohttp_relay = services.ohttp_relay_url()

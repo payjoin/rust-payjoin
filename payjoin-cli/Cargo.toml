@@ -21,7 +21,8 @@ path = "src/main.rs"
 [features]
 default = ["v2"]
 native-certs = ["reqwest/rustls-tls-native-roots"]
-_danger-local-https = ["rcgen", "reqwest/rustls-tls", "rustls", "hyper-rustls", "payjoin/_danger-local-https", "tokio-rustls"]
+_danger-local-https = ["v1"]
+pki-https = []
 v1 = ["payjoin/v1","hyper", "hyper-util", "http-body-util"]
 v2 = ["payjoin/v2", "payjoin/io"]
 
@@ -34,17 +35,17 @@ config = "0.13.3"
 env_logger = "0.9.0"
 http-body-util = { version = "0.1", optional = true }
 hyper = { version = "1", features = ["http1", "server"], optional = true }
-hyper-rustls = { version = "0.26", optional = true }
+hyper-rustls = { version = "0.26" }
 hyper-util = { version = "0.1", optional = true }
 log = "0.4.7"
-payjoin = { version = "0.23.0", default-features = false }
-rcgen = { version = "0.11.1", optional = true }
-reqwest = { version = "0.12", default-features = false }
-rustls = { version = "0.22.4", optional = true }
+payjoin = { version = "0.23.0", default-features = false, features = ["_danger-local-https", "pki-https"] }
+rcgen = { version = "0.11.1" }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+rustls = { version = "0.22.4" }
 serde = { version = "1.0.160", features = ["derive"] }
 sled = "0.34"
 tokio = { version = "1.38.1", features = ["full"] }
-tokio-rustls = { version = "0.25", features = ["ring"], default-features = false, optional = true }
+tokio-rustls = { version = "0.25", features = ["ring"], default-features = false }
 url = { version = "2.3.1", features = ["serde"] }
 
 [dev-dependencies]

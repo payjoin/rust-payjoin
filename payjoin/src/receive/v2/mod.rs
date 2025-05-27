@@ -653,6 +653,7 @@ pub mod test {
         e: None,
     });
 
+    #[cfg(feature = "_multiparty")]
     pub(crate) static SHARED_CONTEXT_TWO: Lazy<SessionContext> = Lazy::new(|| SessionContext {
         address: Address::from_str("tb1qv7scm7gxs32qg3lnm9kf267kllc63yvdxyh72e")
             .expect("valid address")

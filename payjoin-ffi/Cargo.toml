@@ -7,8 +7,8 @@ exclude = ["tests"]
 
 [features]
 _test-utils = ["payjoin-test-utils", "tokio", "bitcoind"]
-_danger-local-https = ["payjoin/_danger-local-https"]
 uniffi = ["uniffi/cli", "bitcoin-ffi/default"]
+pki-https = []
 
 [lib]
 name = "payjoin_ffi"
@@ -58,3 +58,6 @@ strip = true
 
 [patch.crates-io.payjoin]
 path = "../payjoin"
+
+[patch.crates-io.payjoin-test-utils]
+path = "../payjoin-test-utils"

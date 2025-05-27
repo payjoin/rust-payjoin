@@ -15,7 +15,7 @@ resolver = "2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-_danger-local-https = ["hyper-rustls", "rustls", "tokio-rustls"]
+pki-https = []
 
 [dependencies]
 anyhow = "1.0.71"
@@ -24,14 +24,14 @@ bhttp = { version = "=0.5.1", features = ["http"] }
 futures = "0.3.17"
 http-body-util = "0.1.2"
 hyper = { version = "1", features = ["http1", "server"] }
-hyper-rustls = { version = "0.26", optional = true }
+hyper-rustls = { version = "0.26" }
 hyper-util = { version = "0.1", features = ["tokio"] }
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0"}
-payjoin = { version = "0.23.0", features = ["directory"], default-features = false }
+payjoin = { version = "0.23.0", features = ["directory", "pki-https"], default-features = false }
 redis = { version = "0.23.3", features = ["aio", "tokio-comp"] }
-rustls = { version = "0.22.4", optional = true }
+rustls = { version = "0.22.4" }
 tokio = { version = "1.12.0", features = ["full"] }
-tokio-rustls = { version = "0.25", features = ["ring"], default-features = false, optional = true }
+tokio-rustls = { version = "0.25", features = ["ring"], default-features = false }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 

@@ -70,12 +70,11 @@ macro_rules! check_eq {
     };
 }
 
-macro_rules! ensure {
-    ($cond:expr, $error:ident) => {
-        if !($cond) {
-            return Err(InternalProposalError::$error);
-        }
-    };
+fn ensure<T>(condition: bool, error: T) -> Result<(), T> {
+    if !condition {
+        return Err(error);
+    }
+    Ok(())
 }
 
 impl PsbtContext {
@@ -91,8 +90,11 @@ impl PsbtContext {
     fn check_fees(&self, proposal: &Psbt, contributed_fee: Amount) -> InternalResult<()> {
         let proposed_fee = proposal.fee().map_err(InternalProposalError::Psbt)?;
         let original_fee = self.original_psbt.fee().map_err(InternalProposalError::Psbt)?;
-        ensure!(original_fee <= proposed_fee, AbsoluteFeeDecreased);
-        ensure!(contributed_fee <= proposed_fee - original_fee, PayeeTookContributedFee);
+        ensure(original_fee <= proposed_fee, InternalProposalError::AbsoluteFeeDecreased)?;
+        ensure(
+            contributed_fee <= proposed_fee - original_fee,
+            InternalProposalError::PayeeTookContributedFee,
+        )?;
         let original_weight = self.original_psbt.clone().extract_tx_unchecked_fee_rate().weight();
         let original_fee_rate = original_fee / original_weight;
         let original_spks = self
@@ -122,13 +124,16 @@ impl PsbtContext {
                 }
             },
         )?;
-        ensure!(
+        ensure(
             contributed_fee <= original_fee_rate * additional_input_weight,
-            FeeContributionPaysOutputSizeIncrease
-        );
+            InternalProposalError::FeeContributionPaysOutputSizeIncrease,
+        )?;
         if self.min_fee_rate > FeeRate::ZERO {
             let proposed_weight = proposal.clone().extract_tx_unchecked_fee_rate().weight();
-            ensure!(proposed_fee / proposed_weight >= self.min_fee_rate, FeeRateBelowMinimum);
+            ensure(
+                proposed_fee / proposed_weight >= self.min_fee_rate,
+                InternalProposalError::FeeRateBelowMinimum,
+            )?;
         }
         Ok(())
     }
@@ -152,8 +157,14 @@ impl PsbtContext {
         let mut original_inputs = self.original_psbt.input_pairs().peekable();
 
         for proposed in proposal.input_pairs() {
-            ensure!(proposed.psbtin.bip32_derivation.is_empty(), TxInContainsKeyPaths);
-            ensure!(proposed.psbtin.partial_sigs.is_empty(), ContainsPartialSigs);
+            ensure(
+                proposed.psbtin.bip32_derivation.is_empty(),
+                InternalProposalError::TxInContainsKeyPaths,
+            )?;
+            ensure(
+                proposed.psbtin.partial_sigs.is_empty(),
+                InternalProposalError::ContainsPartialSigs,
+            )?;
             match original_inputs.peek() {
                 // our (sender)
                 Some(original)
@@ -164,14 +175,14 @@ impl PsbtContext {
                         original.txin.sequence,
                         SenderTxinSequenceChanged
                     );
-                    ensure!(
+                    ensure(
                         proposed.psbtin.final_script_sig.is_none(),
-                        SenderTxinContainsFinalScriptSig
-                    );
-                    ensure!(
+                        InternalProposalError::SenderTxinContainsFinalScriptSig,
+                    )?;
+                    ensure(
                         proposed.psbtin.final_script_witness.is_none(),
-                        SenderTxinContainsFinalScriptWitness
-                    );
+                        InternalProposalError::SenderTxinContainsFinalScriptWitness,
+                    )?;
                     original_inputs.next();
                 }
                 // theirs (receiver)
@@ -182,22 +193,25 @@ impl PsbtContext {
                         .next()
                         .ok_or(InternalProposalError::NoInputs)?;
                     // Verify the PSBT input is finalized
-                    ensure!(
+                    ensure(
                         proposed.psbtin.final_script_sig.is_some()
                             || proposed.psbtin.final_script_witness.is_some(),
-                        ReceiverTxinNotFinalized
-                    );
+                        InternalProposalError::ReceiverTxinNotFinalized,
+                    )?;
                     // Verify that non_witness_utxo or witness_utxo are filled in.
-                    ensure!(
+                    ensure(
                         proposed.psbtin.witness_utxo.is_some()
                             || proposed.psbtin.non_witness_utxo.is_some(),
-                        ReceiverTxinMissingUtxoInfo
-                    );
-                    ensure!(proposed.txin.sequence == original.txin.sequence, MixedSequence);
+                        InternalProposalError::ReceiverTxinMissingUtxoInfo,
+                    )?;
+                    ensure(
+                        proposed.txin.sequence == original.txin.sequence,
+                        InternalProposalError::MixedSequence,
+                    )?;
                 }
             }
         }
-        ensure!(original_inputs.peek().is_none(), MissingOrShuffledInputs);
+        ensure(original_inputs.peek().is_none(), InternalProposalError::MissingOrShuffledInputs)?;
         Ok(())
     }
 
@@ -232,7 +246,10 @@ impl PsbtContext {
         for (proposed_txout, proposed_psbtout) in
             proposal.unsigned_tx.output.iter().zip(&proposal.outputs)
         {
-            ensure!(proposed_psbtout.bip32_derivation.is_empty(), TxOutContainsKeyPaths);
+            ensure(
+                proposed_psbtout.bip32_derivation.is_empty(),
+                InternalProposalError::TxOutContainsKeyPaths,
+            )?;
             match (original_outputs.peek(), self.fee_contribution) {
                 // fee output
                 (
@@ -246,7 +263,10 @@ impl PsbtContext {
                 {
                     if proposed_txout.value < original_output.value {
                         contributed_fee = original_output.value - proposed_txout.value;
-                        ensure!(contributed_fee <= max_fee_contrib, FeeContributionExceedsMaximum);
+                        ensure(
+                            contributed_fee <= max_fee_contrib,
+                            InternalProposalError::FeeContributionExceedsMaximum,
+                        )?;
                         // The remaining fee checks are done in later in `check_fees`
                     }
                     original_outputs.next();
@@ -255,19 +275,22 @@ impl PsbtContext {
                 (Some((_original_output_index, original_output)), _)
                     if original_output.script_pubkey == self.payee =>
                 {
-                    ensure!(
+                    ensure(
                         self.output_substitution == OutputSubstitution::Enabled
                             || (proposed_txout.script_pubkey == original_output.script_pubkey
                                 && proposed_txout.value >= original_output.value),
-                        DisallowedOutputSubstitution
-                    );
+                        InternalProposalError::DisallowedOutputSubstitution,
+                    )?;
                     original_outputs.next();
                 }
                 // our output
                 (Some((_original_output_index, original_output)), _)
                     if proposed_txout.script_pubkey == original_output.script_pubkey =>
                 {
-                    ensure!(proposed_txout.value >= original_output.value, OutputValueDecreased);
+                    ensure(
+                        proposed_txout.value >= original_output.value,
+                        InternalProposalError::OutputValueDecreased,
+                    )?;
                     original_outputs.next();
                 }
                 // additional output
@@ -275,7 +298,7 @@ impl PsbtContext {
             }
         }
 
-        ensure!(original_outputs.peek().is_none(), MissingOrShuffledOutputs);
+        ensure(original_outputs.peek().is_none(), InternalProposalError::MissingOrShuffledOutputs)?;
         Ok(contributed_fee)
     }
 }

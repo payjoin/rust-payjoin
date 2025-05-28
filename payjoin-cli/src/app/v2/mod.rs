@@ -9,7 +9,7 @@ use payjoin::receive::v2::{
     WithContext,
 };
 use payjoin::receive::{Error, ReplyableError};
-use payjoin::send::v2::{Sender, SenderBuilder};
+use payjoin::send::v2::{Sender, SenderBuilder, WithReplyKey};
 use payjoin::{ImplementationError, Uri};
 use tokio::sync::watch;
 
@@ -137,7 +137,7 @@ impl AppTrait for App {
 
 impl App {
     #[allow(clippy::incompatible_msrv)]
-    async fn spawn_payjoin_sender(&self, mut req_ctx: Sender) -> Result<()> {
+    async fn spawn_payjoin_sender(&self, mut req_ctx: Sender<WithReplyKey>) -> Result<()> {
         let mut interrupt = self.interrupt.clone();
         tokio::select! {
             res = self.long_poll_post(&mut req_ctx) => {
@@ -200,7 +200,7 @@ impl App {
         Ok(())
     }
 
-    async fn long_poll_post(&self, req_ctx: &mut Sender) -> Result<Psbt> {
+    async fn long_poll_post(&self, req_ctx: &mut Sender<WithReplyKey>) -> Result<Psbt> {
         let ohttp_relay = self.unwrap_relay_or_else_fetch().await?;
 
         match req_ctx.extract_v2(ohttp_relay.clone()) {

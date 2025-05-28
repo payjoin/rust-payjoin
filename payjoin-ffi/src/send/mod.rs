@@ -29,7 +29,7 @@ impl SenderBuilder {
     /// Prepare an HTTP request and request context to process the response
     ///
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
-    /// to create a [`Sender`]
+    /// to create a [`WithReplyKey`]
     pub fn new(psbt: String, uri: PjUri) -> Result<Self, BuildSenderError> {
         let psbt = payjoin::bitcoin::psbt::Psbt::from_str(psbt.as_str())?;
         Ok(payjoin::send::v2::SenderBuilder::new(psbt, uri.into()).into())
@@ -114,7 +114,7 @@ impl From<payjoin::send::v2::NewSender> for NewSender {
 }
 
 impl NewSender {
-    pub fn persist<P: Persister<payjoin::send::v2::Sender>>(
+    pub fn persist<P: Persister<payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>>>(
         &self,
         persister: &mut P,
     ) -> Result<P::Token, ImplementationError> {
@@ -123,18 +123,20 @@ impl NewSender {
 }
 
 #[derive(Clone)]
-pub struct Sender(payjoin::send::v2::Sender);
+pub struct WithReplyKey(payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>);
 
-impl From<payjoin::send::v2::Sender> for Sender {
-    fn from(value: payjoin::send::v2::Sender) -> Self { Self(value) }
+impl From<payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>> for WithReplyKey {
+    fn from(value: payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>) -> Self {
+        Self(value)
+    }
 }
 
-impl From<Sender> for payjoin::send::v2::Sender {
-    fn from(value: Sender) -> Self { value.0 }
+impl From<WithReplyKey> for payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey> {
+    fn from(value: WithReplyKey) -> Self { value.0 }
 }
 
-impl Sender {
-    pub fn load<P: Persister<payjoin::send::v2::Sender>>(
+impl WithReplyKey {
+    pub fn load<P: Persister<payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>>>(
         token: P::Token,
         persister: &P,
     ) -> Result<Self, ImplementationError> {
@@ -164,7 +166,9 @@ impl Sender {
     }
 
     pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
-        serde_json::from_str::<payjoin::send::v2::Sender>(json).map_err(Into::into).map(Into::into)
+        serde_json::from_str::<payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>>(json)
+            .map_err(Into::into)
+            .map(Into::into)
     }
 
     pub fn key(&self) -> SenderToken { self.0.key() }
@@ -190,35 +194,43 @@ impl V1Context {
     }
 }
 
-pub struct V2PostContext(Mutex<Option<payjoin::send::v2::V2PostContext>>);
+pub struct V2PostContext(
+    Mutex<Option<payjoin::send::v2::Sender<payjoin::send::v2::V2PostContext>>>,
+);
 
 impl V2PostContext {
     /// Decodes and validates the response.
     /// Call this method with response from receiver to continue BIP-??? flow. A successful response can either be None if the relay has not response yet or Some(Psbt).
     /// If the response is some valid PSBT you should sign and broadcast.
     pub fn process_response(&self, response: &[u8]) -> Result<V2GetContext, EncapsulationError> {
-        <&V2PostContext as Into<payjoin::send::v2::V2PostContext>>::into(self)
-            .process_response(response)
-            .map(Into::into)
-            .map_err(Into::into)
+        <&V2PostContext as Into<payjoin::send::v2::Sender<payjoin::send::v2::V2PostContext>>>::into(
+            self,
+        )
+        .process_response(response)
+        .map(Into::into)
+        .map_err(Into::into)
     }
 }
 
-impl From<&V2PostContext> for payjoin::send::v2::V2PostContext {
+impl From<&V2PostContext> for payjoin::send::v2::Sender<payjoin::send::v2::V2PostContext> {
     fn from(value: &V2PostContext) -> Self {
         let mut data_guard = value.0.lock().unwrap();
         Option::take(&mut *data_guard).expect("ContextV2 moved out of memory")
     }
 }
 
-impl From<payjoin::send::v2::V2PostContext> for V2PostContext {
-    fn from(value: payjoin::send::v2::V2PostContext) -> Self { Self(Mutex::new(Some(value))) }
+impl From<payjoin::send::v2::Sender<payjoin::send::v2::V2PostContext>> for V2PostContext {
+    fn from(value: payjoin::send::v2::Sender<payjoin::send::v2::V2PostContext>) -> Self {
+        Self(Mutex::new(Some(value)))
+    }
 }
 
-pub struct V2GetContext(payjoin::send::v2::V2GetContext);
+pub struct V2GetContext(payjoin::send::v2::Sender<payjoin::send::v2::V2GetContext>);
 
-impl From<payjoin::send::v2::V2GetContext> for V2GetContext {
-    fn from(value: payjoin::send::v2::V2GetContext) -> Self { Self(value) }
+impl From<payjoin::send::v2::Sender<payjoin::send::v2::V2GetContext>> for V2GetContext {
+    fn from(value: payjoin::send::v2::Sender<payjoin::send::v2::V2GetContext>) -> Self {
+        Self(value)
+    }
 }
 
 impl V2GetContext {

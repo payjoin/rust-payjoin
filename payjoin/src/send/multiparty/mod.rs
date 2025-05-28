@@ -33,7 +33,7 @@ impl<'a> SenderBuilder<'a> {
 pub struct NewSender(v2::NewSender);
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Sender(v2::Sender);
+pub struct Sender(v2::Sender<v2::WithReplyKey>);
 
 impl Sender {
     pub fn extract_v2(
@@ -76,7 +76,7 @@ impl Sender {
             hpke_ctx: HpkeContext::new(rs, &self.0.reply_key),
             ohttp_ctx,
         };
-        Ok((request, PostContext(v2_post_ctx)))
+        Ok((request, PostContext(v2::Sender { state: v2_post_ctx })))
     }
 }
 
@@ -100,7 +100,7 @@ fn serialize_v2_body(
 
 /// Post context is used to process the response from the directory and generate
 /// the GET context which can be used to extract a request for the receiver
-pub struct PostContext(v2::V2PostContext);
+pub struct PostContext(v2::Sender<v2::V2PostContext>);
 
 impl PostContext {
     pub fn process_response(self, response: &[u8]) -> Result<GetContext, EncapsulationError> {
@@ -111,7 +111,7 @@ impl PostContext {
 
 /// Get context is used to extract a request for the receiver. In the multiparty context this is a
 /// merged PSBT with other senders.
-pub struct GetContext(v2::V2GetContext);
+pub struct GetContext(v2::Sender<v2::V2GetContext>);
 
 impl GetContext {
     /// Extract the GET request that will give us the psbt to be finalized

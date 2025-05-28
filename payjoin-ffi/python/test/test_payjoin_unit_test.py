@@ -64,15 +64,15 @@ class InMemorySenderPersister(payjoin.payjoin_ffi.SenderPersister):
     def __init__(self):
         self.senders = {}
 
-    def save(self, sender: payjoin.Sender) -> payjoin.SenderToken:
+    def save(self, sender: payjoin.WithReplyKey) -> payjoin.SenderToken:
         self.senders[str(sender.key())] = sender.to_json()
         return sender.key()
     
-    def load(self, token: payjoin.SenderToken) -> payjoin.Sender:
+    def load(self, token: payjoin.SenderToken) -> payjoin.WithReplyKey:
         token = str(token)
         if token not in self.senders.keys():
             raise ValueError(f"Token not found: {token}")
-        return payjoin.Sender.from_json(self.senders[token])
+        return payjoin.WithReplyKey.from_json(self.senders[token])
     
 class TestSenderPersistence(unittest.TestCase):
     def test_sender_persistence(self):
@@ -93,7 +93,7 @@ class TestSenderPersistence(unittest.TestCase):
         psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA="
         new_sender = payjoin.SenderBuilder(psbt, uri).build_recommended(1000)
         token = new_sender.persist(persister)
-        payjoin.Sender.load(token, persister)
+        payjoin.WithReplyKey.load(token, persister)
             
 if __name__ == "__main__":
     unittest.main()

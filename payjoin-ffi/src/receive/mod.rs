@@ -87,7 +87,8 @@ impl Receiver {
         token: P::Token,
         persister: &P,
     ) -> Result<Self, ImplementationError> {
-        Ok(Receiver::from(persister.load(token).unwrap()))
+        let p = persister.load(token).map_err(|e| ImplementationError::from(e.to_string()))?;
+        Ok(Receiver::from(p))
     }
 
     pub fn extract_req(&self, ohttp_relay: String) -> Result<(Request, ClientResponse), Error> {

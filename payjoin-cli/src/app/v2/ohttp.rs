@@ -5,13 +5,13 @@ use anyhow::{anyhow, Result};
 use super::Config;
 
 #[derive(Debug, Clone)]
-pub struct RelayState {
+pub struct RelayManager {
     selected_relay: Option<payjoin::Url>,
     failed_relays: Vec<payjoin::Url>,
 }
 
-impl RelayState {
-    pub fn new() -> Self { RelayState { selected_relay: None, failed_relays: Vec::new() } }
+impl RelayManager {
+    pub fn new() -> Self { RelayManager { selected_relay: None, failed_relays: Vec::new() } }
 
     pub fn set_selected_relay(&mut self, relay: payjoin::Url) { self.selected_relay = Some(relay); }
 
@@ -24,7 +24,7 @@ impl RelayState {
 
 pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
     config: &Config,
-    relay_state: Arc<Mutex<RelayState>>,
+    relay_manager: Arc<Mutex<RelayManager>>,
 ) -> Result<payjoin::OhttpKeys> {
     if let Some(keys) = config.v2()?.ohttp_keys.clone() {
         println!("Using OHTTP Keys from config");
@@ -32,7 +32,7 @@ pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
     } else {
         println!("Bootstrapping private network transport over Oblivious HTTP");
 
-        fetch_keys(config, relay_state.clone())
+        fetch_keys(config, relay_manager.clone())
             .await
             .and_then(|keys| keys.ok_or_else(|| anyhow::anyhow!("No OHTTP keys found")))
     }
@@ -40,7 +40,7 @@ pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
 
 async fn fetch_keys(
     config: &Config,
-    relay_state: Arc<Mutex<RelayState>>,
+    relay_manager: Arc<Mutex<RelayManager>>,
 ) -> Result<Option<payjoin::OhttpKeys>> {
     use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;
     let payjoin_directory = config.v2()?.pj_directory.clone();
@@ -48,7 +48,7 @@ async fn fetch_keys(
 
     loop {
         let failed_relays =
-            relay_state.lock().expect("Lock should not be poisoned").get_failed_relays();
+            relay_manager.lock().expect("Lock should not be poisoned").get_failed_relays();
 
         let remaining_relays: Vec<_> =
             relays.iter().filter(|r| !failed_relays.contains(r)).cloned().collect();
@@ -63,7 +63,7 @@ async fn fetch_keys(
                 None => return Err(anyhow!("Failed to select from remaining relays")),
             };
 
-        relay_state
+        relay_manager
             .lock()
             .expect("Lock should not be poisoned")
             .set_selected_relay(selected_relay.clone());
@@ -93,7 +93,7 @@ async fn fetch_keys(
             }
             Err(e) => {
                 log::debug!("Failed to connect to relay: {selected_relay}, {e:?}");
-                relay_state
+                relay_manager
                     .lock()
                     .expect("Lock should not be poisoned")
                     .add_failed_relay(selected_relay);
@@ -104,7 +104,7 @@ async fn fetch_keys(
 
 pub(crate) async fn validate_relay(
     config: &Config,
-    relay_state: Arc<Mutex<RelayState>>,
+    relay_manager: Arc<Mutex<RelayManager>>,
 ) -> Result<payjoin::Url> {
     use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;
     let payjoin_directory = config.v2()?.pj_directory.clone();
@@ -116,7 +116,7 @@ pub(crate) async fn validate_relay(
 
     loop {
         let failed_relays =
-            relay_state.lock().expect("Lock should not be poisoned").get_failed_relays();
+            relay_manager.lock().expect("Lock should not be poisoned").get_failed_relays();
 
         let remaining_relays: Vec<_> =
             relays.iter().filter(|r| !failed_relays.contains(r)).cloned().collect();
@@ -131,7 +131,7 @@ pub(crate) async fn validate_relay(
                 None => return Err(anyhow!("Failed to select from remaining relays")),
             };
 
-        relay_state
+        relay_manager
             .lock()
             .expect("Lock should not be poisoned")
             .set_selected_relay(selected_relay.clone());
@@ -146,7 +146,7 @@ pub(crate) async fn validate_relay(
             }
             Err(e) => {
                 log::debug!("Failed to connect to relay: {selected_relay}, {e:?}");
-                relay_state
+                relay_manager
                     .lock()
                     .expect("Lock should not be poisoned")
                     .add_failed_relay(selected_relay);

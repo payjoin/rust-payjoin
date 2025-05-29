@@ -3,7 +3,7 @@ name: Build and Test Python
 on:
   pull_request:
     paths:
-      - payjoin-ffi/python/**
+      - payjoin-ffi/**
 
 jobs:
   build-wheels-and-test:

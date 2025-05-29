@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::persist::{AcceptOptionalTransition, OptionalTransitionOutcome};
+use payjoin::persist::OptionalTransitionOutcome;
 use payjoin::receive::v2::{
     replay_receiver_event_log, MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal,
     ProvisionalProposal, Receiver, ReceiverState, ReceiverWithContext, UncheckedProposal,
@@ -299,12 +299,6 @@ impl App {
         amount: Option<Amount>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        println!("Receive session established");
-        let mut pj_uri = session.pj_uri();
-        pj_uri.amount = amount;
-        println!("Request Payjoin by sharing this Payjoin Uri:");
-        println!("{pj_uri}");
-
         let mut interrupt = self.interrupt.clone();
         let receiver = tokio::select! {
             res = self.long_poll_fallback(session, persister) => res,

@@ -4,6 +4,7 @@ use anyhow::Result;
 use config::builder::DefaultState;
 use config::{ConfigError, File, FileFormat};
 use payjoin::bitcoin::FeeRate;
+use payjoin::core::version::Version;
 use serde::Deserialize;
 use url::Url;
 
@@ -59,12 +60,12 @@ pub struct Config {
 
 impl Config {
     /// Check for multiple version flags and return the highest precedence version
-    fn determine_version(cli: &Cli) -> Result<u8, ConfigError> {
+    fn determine_version(cli: &Cli) -> Result<Version, ConfigError> {
         let mut selected_version = None;
 
         // Check for BIP77 (v2)
         if cli.flags.bip77.unwrap_or(false) {
-            selected_version = Some(2);
+            selected_version = Some(Version::Two);
         }
 
         // Check for BIP78 (v1)
@@ -75,15 +76,15 @@ impl Config {
                         .to_string(),
                 ));
             }
-            selected_version = Some(1);
+            selected_version = Some(Version::One);
         }
 
         // If no version explicitly selected, use default based on available features
         if selected_version.is_none() {
             #[cfg(feature = "v2")]
-            return Ok(2);
+            return Ok(Version::Two);
             #[cfg(all(feature = "v1", not(feature = "v2")))]
-            return Ok(1);
+            return Ok(Version::One);
             #[cfg(not(any(feature = "v1", feature = "v2")))]
             return Err(ConfigError::Message(
                 "No valid version available - must compile with v1 or v2 feature".to_string(),
@@ -101,7 +102,7 @@ impl Config {
         let version = Self::determine_version(cli)?;
 
         match version {
-            1 => {
+            Version::One => {
                 #[cfg(feature = "v1")]
                 {
                     config = add_v1_defaults(config, cli)?;
@@ -111,7 +112,7 @@ impl Config {
                     "BIP78 (v1) selected but v1 feature not enabled".to_string(),
                 ));
             }
-            2 => {
+            Version::Two => {
                 #[cfg(feature = "v2")]
                 {
                     config = add_v2_defaults(config, cli)?;
@@ -121,7 +122,6 @@ impl Config {
                     "BIP77 (v2) selected but v2 feature not enabled".to_string(),
                 ));
             }
-            _ => unreachable!("determine_version() should only return 1 or 2"),
         }
 
         config = handle_subcommands(config, cli)?;
@@ -137,7 +137,7 @@ impl Config {
         };
 
         match version {
-            1 => {
+            Version::One => {
                 #[cfg(feature = "v1")]
                 {
                     match built_config.get::<V1Config>("v1") {
@@ -153,7 +153,7 @@ impl Config {
                     "BIP78 (v1) selected but v1 feature not enabled".to_string(),
                 ));
             }
-            2 => {
+            Version::Two => {
                 #[cfg(feature = "v2")]
                 {
                     match built_config.get::<V2Config>("v2") {
@@ -169,7 +169,6 @@ impl Config {
                     "BIP77 (v2) selected but v2 feature not enabled".to_string(),
                 ));
             }
-            _ => unreachable!("determine_version() should only return 1 or 2"),
         }
 
         if config.version.is_none() {

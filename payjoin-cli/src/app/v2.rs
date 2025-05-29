@@ -377,8 +377,12 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let wallet = self.wallet();
+        let candidate_inputs = wallet.list_unspent()?;
+
+        let selected_input =
+            proposal.try_preserving_privacy(candidate_inputs).unwrap();
         let proposal =
-            proposal.contribute_inputs(wallet.list_unspent()?)?.commit_inputs().save(persister)?;
+            proposal.contribute_inputs(vec![selected_input])?.commit_inputs().save(persister)?;
         self.finalize_proposal(proposal, persister).await
     }
 
@@ -471,25 +475,6 @@ async fn handle_recoverable_error(
     }
 
     to_return
-}
-
-fn try_contributing_inputs(
-    payjoin: Receiver<WantsInputs>,
-    wallet: &BitcoindWallet,
-    persister: &ReceiverPersister,
-) -> Result<Receiver<ProvisionalProposal>, ImplementationError> {
-    let candidate_inputs = wallet.list_unspent()?;
-
-    let selected_input =
-        payjoin.try_preserving_privacy(candidate_inputs).map_err(ImplementationError::from)?;
-
-    let next_state = payjoin
-        .contribute_inputs(vec![selected_input])
-        .map_err(ImplementationError::from)?
-        .commit_inputs()
-        .save(persister)?;
-
-    Ok(next_state)
 }
 
 async fn unwrap_ohttp_keys_or_else_fetch(config: &Config) -> Result<payjoin::OhttpKeys> {

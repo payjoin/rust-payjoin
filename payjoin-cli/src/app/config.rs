@@ -79,19 +79,19 @@ impl Config {
             selected_version = Some(Version::One);
         }
 
-        // If no version explicitly selected, use default based on available features
-        if selected_version.is_none() {
-            #[cfg(feature = "v2")]
-            return Ok(Version::Two);
-            #[cfg(all(feature = "v1", not(feature = "v2")))]
-            return Ok(Version::One);
-            #[cfg(not(any(feature = "v1", feature = "v2")))]
-            return Err(ConfigError::Message(
-                "No valid version available - must compile with v1 or v2 feature".to_string(),
-            ));
-        }
+        if let Some(version) = selected_version {
+            return Ok(version);
+        };
 
-        Ok(selected_version.unwrap())
+        // If no version explicitly selected, use default based on available features
+        #[cfg(feature = "v2")]
+        return Ok(Version::Two);
+        #[cfg(all(feature = "v1", not(feature = "v2")))]
+        return Ok(Version::One);
+        #[cfg(not(any(feature = "v1", feature = "v2")))]
+        return Err(ConfigError::Message(
+            "No valid version available - must compile with v1 or v2 feature".to_string(),
+        ));
     }
 
     pub(crate) fn new(cli: &Cli) -> Result<Self, ConfigError> {

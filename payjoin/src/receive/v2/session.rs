@@ -114,6 +114,20 @@ impl SessionHistory {
             _ => None,
         })
     }
+
+    pub fn original_psbt(&self) -> Option<bitcoin::Psbt> {
+        self.events.iter().find_map(|event| match event {
+            ReceiverSessionEvent::UncheckedProposal(proposal) => Some(proposal.psbt.clone()),
+            _ => None,
+        })
+    }
+
+    pub fn proposed_payjoin_psbt(&self) -> Option<bitcoin::Psbt> {
+        self.events.iter().find_map(|event| match event {
+            ReceiverSessionEvent::PayjoinProposal(proposal) => Some(proposal.psbt().clone()),
+            _ => None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

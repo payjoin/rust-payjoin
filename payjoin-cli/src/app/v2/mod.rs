@@ -5,7 +5,8 @@ use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v2::{
-    NewReceiver, PayjoinProposal, Receiver, UncheckedProposal, WithContext,
+    NewReceiver, PayjoinProposal, ProvisionalProposal, Receiver, UncheckedProposal, WantsInputs,
+    WithContext,
 };
 use payjoin::receive::{Error, ReplyableError};
 use payjoin::send::v2::{Sender, SenderBuilder};
@@ -243,8 +244,8 @@ impl App {
 
     async fn long_poll_fallback(
         &self,
-        session: &mut payjoin::receive::v2::Receiver<WithContext>,
-    ) -> Result<payjoin::receive::v2::Receiver<UncheckedProposal>> {
+        session: &mut Receiver<WithContext>,
+    ) -> Result<Receiver<UncheckedProposal>> {
         let ohttp_relay = self.unwrap_relay_or_else_fetch().await?;
 
         loop {
@@ -263,8 +264,8 @@ impl App {
 
     fn process_v2_proposal(
         &self,
-        proposal: payjoin::receive::v2::Receiver<UncheckedProposal>,
-    ) -> Result<payjoin::receive::v2::Receiver<PayjoinProposal>, Error> {
+        proposal: Receiver<UncheckedProposal>,
+    ) -> Result<Receiver<PayjoinProposal>, Error> {
         let wallet = self.wallet();
 
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
@@ -342,12 +343,9 @@ async fn handle_recoverable_error(
 }
 
 fn try_contributing_inputs(
-    payjoin: payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsInputs>,
+    payjoin: Receiver<WantsInputs>,
     wallet: &BitcoindWallet,
-) -> Result<
-    payjoin::receive::v2::Receiver<payjoin::receive::v2::ProvisionalProposal>,
-    ImplementationError,
-> {
+) -> Result<Receiver<ProvisionalProposal>, ImplementationError> {
     let candidate_inputs = wallet.list_unspent()?;
 
     let selected_input =

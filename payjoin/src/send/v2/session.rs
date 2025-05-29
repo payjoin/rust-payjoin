@@ -52,6 +52,21 @@ pub struct SessionHistory {
 }
 
 impl SessionHistory {
+    pub fn proposed_psbt(&self) -> Option<&Psbt> {
+        self.events.iter().find_map(|event| match event {
+            SenderSessionEvent::ProposalReceived(psbt) => Some(psbt),
+            _ => None,
+        })
+    }
+
+    pub fn original_psbt(&self) -> Option<&Psbt> {
+        self.events.iter().find_map(|event| match event {
+            SenderSessionEvent::CreatedReplyKey(sender_with_reply_key) =>
+                Some(&sender_with_reply_key.v1.psbt),
+            _ => None,
+        })
+    }
+
     fn sender_with_reply_key(&self) -> Option<&SenderWithReplyKey> {
         self.events.iter().find_map(|event| match event {
             SenderSessionEvent::CreatedReplyKey(sender_with_reply_key) =>

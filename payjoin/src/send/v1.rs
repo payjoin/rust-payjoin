@@ -48,6 +48,11 @@ pub struct SenderBuilder<'a> {
     pub(crate) min_fee_rate: FeeRate,
 }
 
+/// We only need to add the weight of the txid: 32, index: 4 and sequence: 4 as rust_bitcoin
+/// already accounts for the scriptsig length when calculating InputWeightPrediction
+/// <https://docs.rs/bitcoin/latest/src/bitcoin/blockdata/transaction.rs.html#1621>
+const NON_WITNESS_INPUT_WEIGHT: bitcoin::Weight = Weight::from_non_witness_data_size(32 + 4 + 4);
+
 impl<'a> SenderBuilder<'a> {
     /// Prepare the context from which to make Sender requests
     ///
@@ -113,9 +118,9 @@ impl<'a> SenderBuilder<'a> {
                 // use cheapest default if mixed input types
                 if input_pair.address_type()? != first_input_pair.address_type()? {
                     input_weight =
-                        bitcoin::transaction::InputWeightPrediction::P2TR_KEY_NON_DEFAULT_SIGHASH.weight()
-                    // Lengths of txid, index and sequence: (32, 4, 4).
-                    + Weight::from_non_witness_data_size(32 + 4 + 4);
+                        bitcoin::transaction::InputWeightPrediction::P2TR_KEY_NON_DEFAULT_SIGHASH
+                            .weight()
+                            + NON_WITNESS_INPUT_WEIGHT;
                     break;
                 }
             }
@@ -287,7 +292,10 @@ impl V1Context {
 #[cfg(test)]
 mod test {
     use bitcoin::FeeRate;
-    use payjoin_test_utils::{BoxError, INVALID_PSBT, PARSED_ORIGINAL_PSBT, PAYJOIN_PROPOSAL};
+    use payjoin_test_utils::{
+        BoxError, INVALID_PSBT, MULTIPARTY_ORIGINAL_PSBT_ONE, PARSED_ORIGINAL_PSBT,
+        PAYJOIN_PROPOSAL,
+    };
 
     use super::*;
     use crate::error_codes::ErrorCode;
@@ -303,6 +311,96 @@ mod test {
         super::V1Context { psbt_context }
     }
 
+    /// This test adds mutation coverage for build_recommended when the outputs are equal to the
+    /// payee scripts forcing build_non_incentivising to run.
+    #[test]
+    fn test_build_recommended_output_is_payee() -> Result<(), BoxError> {
+        let mut psbt = PARSED_ORIGINAL_PSBT.clone();
+        psbt.unsigned_tx.output[0] = TxOut {
+            value: Amount::from_sat(2000000),
+            script_pubkey: ScriptBuf::from_hex("a9141de849f069d274150e3afeae8d72eb5a6b09443087")
+                .unwrap(),
+        };
+        psbt.unsigned_tx.output.push(psbt.unsigned_tx.output[1].clone());
+        psbt.outputs.push(psbt.outputs[1].clone());
+        let sender = SenderBuilder::new(
+            psbt.clone(),
+            Uri::try_from("bitcoin:34R9npMiyq6KY81DeMMBTgUoAeueyKeycZ?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/")
+                .map_err(|e| format!("{e}"))?
+                .assume_checked()
+                .check_pj_supported()
+                .map_err(|e| format!("{e}"))?,
+        )
+        .build_recommended(FeeRate::MIN);
+        assert!(sender.is_ok(), "{:#?}", sender.err());
+        assert_eq!(sender.unwrap().fee_contribution.unwrap().max_amount, Amount::from_sat(0));
+
+        Ok(())
+    }
+
+    /// This test is to make sure that the input_pairs for loop inside of build_recommended
+    /// runs at least once.
+    /// The first branch adds coverage on the for loop and the second branch ensures that the first
+    /// and second input_pair are of different address types.
+    #[test]
+    fn test_build_recommended_multiple_inputs() -> Result<(), BoxError> {
+        let mut psbt = Psbt::from_str(MULTIPARTY_ORIGINAL_PSBT_ONE).unwrap();
+        let original_psbt = PARSED_ORIGINAL_PSBT.clone();
+        psbt.unsigned_tx.input[2] = original_psbt.unsigned_tx.input[0].clone();
+        psbt.inputs[2] = original_psbt.inputs[0].clone();
+        let sender = SenderBuilder::new(
+            psbt.clone(),
+            Uri::try_from("bitcoin:bc1qrmzkzmqcgatutq6nyje8t2qs3mf8t3p0qh3kl2?amount=49.99999890&pjos=0&pj=HTTPS://EXAMPLE.COM/")
+                .map_err(|e| format!("{e}"))?
+                .assume_checked()
+                .check_pj_supported()
+                .map_err(|e| format!("{e}"))?,
+        )
+        .build_recommended(FeeRate::MIN);
+        assert!(sender.is_ok(), "{:#?}", sender.err());
+        assert_eq!(sender.unwrap().fee_contribution.unwrap().max_amount, Amount::from_sat(0));
+
+        let mut psbt = Psbt::from_str(MULTIPARTY_ORIGINAL_PSBT_ONE).unwrap();
+        psbt.unsigned_tx.input.pop();
+        psbt.inputs.pop();
+        let sender = SenderBuilder::new(
+            psbt.clone(),
+            Uri::try_from("bitcoin:bc1qrmzkzmqcgatutq6nyje8t2qs3mf8t3p0qh3kl2?amount=49.99999890&pjos=0&pj=HTTPS://EXAMPLE.COM/")
+                .map_err(|e| format!("{e}"))?
+                .assume_checked()
+                .check_pj_supported()
+                .map_err(|e| format!("{e}"))?,
+        )
+        .build_recommended(FeeRate::from_sat_per_vb(170000000).expect("Could not determine feerate"));
+        assert!(sender.is_ok(), "{:#?}", sender.err());
+        assert_eq!(
+            sender.unwrap().fee_contribution.unwrap().max_amount,
+            Amount::from_sat(9999999822)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_build_recommended_fee_contribution() -> Result<(), BoxError> {
+        let psbt = PARSED_ORIGINAL_PSBT.clone();
+        let sender = SenderBuilder::new(
+            psbt.clone(),
+            Uri::try_from(PJ_URI)
+                .map_err(|e| format!("{e}"))?
+                .assume_checked()
+                .check_pj_supported()
+                .map_err(|e| format!("{e}"))?,
+        )
+        .build_recommended(FeeRate::from_sat_per_vb(2000000).expect("Could not determine feerate"));
+        assert!(sender.is_ok(), "{:#?}", sender.err());
+        assert_eq!(
+            sender.unwrap().fee_contribution.unwrap().max_amount,
+            psbt.unsigned_tx.output[0].value
+        );
+        Ok(())
+    }
+
     #[test]
     fn test_build_recommended() -> Result<(), BoxError> {
         let sender = SenderBuilder::new(
@@ -315,6 +413,8 @@ mod test {
         )
         .build_recommended(FeeRate::MIN);
         assert!(sender.is_ok(), "{:#?}", sender.err());
+        assert_eq!(NON_WITNESS_INPUT_WEIGHT, bitcoin::Weight::from_wu(160));
+        assert_eq!(sender.unwrap().fee_contribution.unwrap().max_amount, Amount::from_sat(0));
         Ok(())
     }
 
@@ -385,6 +485,27 @@ mod test {
                     assert_eq!(
                         e.to_string(),
                         ValidationError::from(InternalValidationError::Parse).to_string()
+                    );
+                }
+                _ => panic!("Unexpected error type"),
+            },
+        }
+    }
+
+    #[test]
+    fn process_response_invalid_buffer_len() {
+        let mut data = PAYJOIN_PROPOSAL.as_bytes().to_vec();
+        data.extend(std::iter::repeat(0).take(MAX_CONTENT_LENGTH + 1));
+
+        let ctx = create_v1_context();
+        let response = ctx.process_response(&data);
+        match response {
+            Ok(_) => panic!("Invalid buffer length should have caused an error"),
+            Err(error) => match error {
+                ResponseError::Validation(e) => {
+                    assert_eq!(
+                        e.to_string(),
+                        ValidationError::from(InternalValidationError::ContentTooLarge).to_string()
                     );
                 }
                 _ => panic!("Unexpected error type"),

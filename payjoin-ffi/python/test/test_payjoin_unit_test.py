@@ -31,22 +31,6 @@ class TestURIs(unittest.TestCase):
                 except Exception as e:
                     self.fail(f"Failed to create a valid Uri for {uri}. Error: {e}")
 
-
-class ScriptOwnershipCallback(payjoin.IsScriptOwned):
-    def __init__(self, value):
-        self.value = value
-
-    def callback(self, script):
-        return self.value
-
-
-class OutputOwnershipCallback(payjoin.IsOutputKnown):
-    def __init__(self, value):
-        self.value = value
-
-    def callback(self, outpoint: payjoin.bitcoin.OutPoint):
-        return False
-
 class InMemoryReceiverPersister(payjoin.payjoin_ffi.ReceiverPersister):
     def __init__(self):
         self.receivers = {}

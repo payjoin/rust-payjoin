@@ -65,7 +65,7 @@ pub struct Cli {
     pub pj_endpoint: Option<Url>,
 
     #[cfg(feature = "v2")]
-    #[arg(long = "ohttp-relays", help = "One or more ohttp relay URLs, comma-separated", value_parser = value_parser!(Url))]
+    #[arg(long = "ohttp-relays", help = "One or more ohttp relay URLs, comma-separated", value_parser = value_parser!(Url), value_delimiter = ',', action = clap::ArgAction::Append)]
     pub ohttp_relays: Option<Vec<Url>>,
 
     #[cfg(feature = "v2")]

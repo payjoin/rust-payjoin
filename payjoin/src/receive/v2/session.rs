@@ -128,6 +128,13 @@ impl SessionHistory {
             _ => None,
         })
     }
+
+    pub fn psbt_with_contributed_inputs(&self) -> Option<bitcoin::Psbt> {
+        self.events.iter().find_map(|event| match event {
+            ReceiverSessionEvent::ProvisionalProposal(proposal) => Some(proposal.payjoin_psbt.clone()),
+            _ => None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

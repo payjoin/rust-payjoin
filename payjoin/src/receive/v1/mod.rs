@@ -391,7 +391,7 @@ fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsInputs {
     original_psbt: Psbt,
-    payjoin_psbt: Psbt,
+    pub(crate) payjoin_psbt: Psbt,
     params: Params,
     change_vout: usize,
 }

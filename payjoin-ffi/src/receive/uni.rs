@@ -47,7 +47,7 @@ impl NewReceiver {
             .map(Into::into)
     }
 
-    /// Saves the new [`Receiver`] using the provided persister and returns the storage token.
+    /// Saves the new [`WithContext`] using the provided persister and returns the storage token.
     pub fn persist(
         &self,
         persister: Arc<dyn ReceiverPersister>,
@@ -65,8 +65,10 @@ impl std::fmt::Display for ReceiverToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) }
 }
 
-impl From<payjoin::receive::v2::Receiver> for ReceiverToken {
-    fn from(value: payjoin::receive::v2::Receiver) -> Self { ReceiverToken(Arc::new(value.into())) }
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>> for ReceiverToken {
+    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>) -> Self {
+        ReceiverToken(Arc::new(value.into()))
+    }
 }
 
 impl From<payjoin::receive::v2::ReceiverToken> for ReceiverToken {
@@ -78,25 +80,25 @@ impl From<ReceiverToken> for payjoin::receive::v2::ReceiverToken {
 }
 
 #[derive(Clone, Debug, uniffi::Object)]
-pub struct Receiver(super::Receiver);
+pub struct WithContext(super::WithContext);
 
-impl From<Receiver> for super::Receiver {
-    fn from(value: Receiver) -> Self { value.0 }
+impl From<WithContext> for super::WithContext {
+    fn from(value: WithContext) -> Self { value.0 }
 }
 
-impl From<super::Receiver> for Receiver {
-    fn from(value: super::Receiver) -> Self { Self(value) }
+impl From<super::WithContext> for WithContext {
+    fn from(value: super::WithContext) -> Self { Self(value) }
 }
 
 #[uniffi::export]
-impl Receiver {
-    /// Loads a [`Receiver`] from the provided persister using the storage token.
+impl WithContext {
+    /// Loads a [`Self`] from the provided persister using the storage token.
     #[uniffi::constructor]
     pub fn load(
         token: Arc<ReceiverToken>,
         persister: Arc<dyn ReceiverPersister>,
     ) -> Result<Self, ImplementationError> {
-        Ok(super::Receiver::from(
+        Ok(super::WithContext::from(
             (*persister.load(token).map_err(|e| ImplementationError::from(e.to_string()))?).clone(),
         )
         .into())
@@ -118,7 +120,7 @@ impl Receiver {
         body: &[u8],
         context: Arc<ClientResponse>,
     ) -> Result<Option<Arc<UncheckedProposal>>, Error> {
-        <Self as Into<super::Receiver>>::into(self.clone())
+        <Self as Into<super::WithContext>>::into(self.clone())
             .process_res(body, context.as_ref())
             .map(|e| e.map(|x| Arc::new(x.into())))
     }
@@ -127,7 +129,7 @@ impl Receiver {
 
     #[uniffi::constructor]
     pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
-        super::Receiver::from_json(json).map(Into::into)
+        super::WithContext::from_json(json).map(Into::into)
     }
 
     pub fn key(&self) -> ReceiverToken { self.0.key().into() }
@@ -466,8 +468,8 @@ impl PayjoinProposal {
 
 #[uniffi::export(with_foreign)]
 pub trait ReceiverPersister: Send + Sync {
-    fn save(&self, receiver: Arc<Receiver>) -> Result<Arc<ReceiverToken>, ForeignError>;
-    fn load(&self, token: Arc<ReceiverToken>) -> Result<Arc<Receiver>, ForeignError>;
+    fn save(&self, receiver: Arc<WithContext>) -> Result<Arc<ReceiverToken>, ForeignError>;
+    fn load(&self, token: Arc<ReceiverToken>) -> Result<Arc<WithContext>, ForeignError>;
 }
 
 /// Adapter for the ReceiverPersister trait to use the save and load callbacks.
@@ -481,20 +483,26 @@ impl CallbackPersisterAdapter {
     }
 }
 
-impl payjoin::persist::Persister<payjoin::receive::v2::Receiver> for CallbackPersisterAdapter {
+impl payjoin::persist::Persister<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>>
+    for CallbackPersisterAdapter
+{
     type Token = ReceiverToken;
     type Error = ForeignError;
 
     fn save(
         &mut self,
-        receiver: payjoin::receive::v2::Receiver,
+        receiver: payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>,
     ) -> Result<Self::Token, Self::Error> {
-        let receiver = Receiver(super::Receiver::from(receiver));
+        let receiver = WithContext(super::WithContext::from(receiver));
         let res = self.callback_persister.save(receiver.into())?;
         Ok((*res).clone())
     }
 
-    fn load(&self, token: Self::Token) -> Result<payjoin::receive::v2::Receiver, Self::Error> {
+    fn load(
+        &self,
+        token: Self::Token,
+    ) -> Result<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>, Self::Error>
+    {
         self.callback_persister.load(token.into()).map(|receiver| (*receiver).clone().0 .0)
     }
 }

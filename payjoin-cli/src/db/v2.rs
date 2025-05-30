@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bitcoincore_rpc::jsonrpc::serde_json;
 use payjoin::persist::{Persister, Value};
-use payjoin::receive::v2::{Receiver, ReceiverToken};
+use payjoin::receive::v2::{Receiver, ReceiverToken, WithContext};
 use payjoin::send::v2::{Sender, SenderToken};
 use sled::Tree;
 use url::Url;
@@ -38,10 +38,13 @@ impl ReceiverPersister {
     pub fn new(db: Arc<Database>) -> Self { Self(db) }
 }
 
-impl Persister<Receiver> for ReceiverPersister {
+impl Persister<Receiver<WithContext>> for ReceiverPersister {
     type Token = ReceiverToken;
     type Error = crate::db::error::Error;
-    fn save(&mut self, value: Receiver) -> std::result::Result<ReceiverToken, Self::Error> {
+    fn save(
+        &mut self,
+        value: Receiver<WithContext>,
+    ) -> std::result::Result<ReceiverToken, Self::Error> {
         let recv_tree = self.0 .0.open_tree("recv_sessions")?;
         let key = value.key();
         let value = serde_json::to_vec(&value).map_err(Error::Serialize)?;
@@ -49,7 +52,7 @@ impl Persister<Receiver> for ReceiverPersister {
         recv_tree.flush()?;
         Ok(key)
     }
-    fn load(&self, key: ReceiverToken) -> std::result::Result<Receiver, Self::Error> {
+    fn load(&self, key: ReceiverToken) -> std::result::Result<Receiver<WithContext>, Self::Error> {
         let recv_tree = self.0 .0.open_tree("recv_sessions")?;
         let value = recv_tree.get(key.as_ref())?.ok_or(Error::NotFound(key.to_string()))?;
         serde_json::from_slice(&value).map_err(Error::Deserialize)
@@ -57,12 +60,13 @@ impl Persister<Receiver> for ReceiverPersister {
 }
 
 impl Database {
-    pub(crate) fn get_recv_sessions(&self) -> Result<Vec<Receiver>> {
+    pub(crate) fn get_recv_sessions(&self) -> Result<Vec<Receiver<WithContext>>> {
         let recv_tree = self.0.open_tree("recv_sessions")?;
         let mut sessions = Vec::new();
         for item in recv_tree.iter() {
             let (_, value) = item?;
-            let session: Receiver = serde_json::from_slice(&value).map_err(Error::Deserialize)?;
+            let session: Receiver<WithContext> =
+                serde_json::from_slice(&value).map_err(Error::Deserialize)?;
             sessions.push(session);
         }
         Ok(sessions)

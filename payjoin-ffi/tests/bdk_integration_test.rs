@@ -219,7 +219,7 @@ mod v2 {
 
     use bdk::wallet::AddressIndex;
     use bitcoin_ffi::{Address, Network};
-    use payjoin_ffi::receive::{NewReceiver, PayjoinProposal, Receiver, UncheckedProposal};
+    use payjoin_ffi::receive::{NewReceiver, PayjoinProposal, UncheckedProposal, WithContext};
     use payjoin_ffi::send::{Sender, SenderBuilder};
     use payjoin_ffi::uri::Uri;
     use payjoin_ffi::{NoopPersister, Request};
@@ -261,7 +261,7 @@ mod v2 {
                 None,
             )?;
             let receiver_token = new_session.persist(&mut NoopPersister)?;
-            let session = Receiver::load(receiver_token, &NoopPersister)?;
+            let session = WithContext::load(receiver_token, &NoopPersister)?;
             let ohttp_relay = services.ohttp_relay_url();
             // Poll receive request
             let (request, client_response) = session.extract_req(ohttp_relay.to_string())?;

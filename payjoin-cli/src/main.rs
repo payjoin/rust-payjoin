@@ -3,7 +3,6 @@ use app::config::Config;
 use app::App as AppTrait;
 use clap::Parser;
 use cli::{Cli, Commands};
-use payjoin::bitcoin::FeeRate;
 
 mod app;
 mod cli;
@@ -59,9 +58,7 @@ async fn main() -> Result<()> {
 
     match &cli.command {
         Commands::Send { bip21, fee_rate } => {
-            let fee = fee_rate
-                .unwrap_or_else(|| FeeRate::from_sat_per_vb(2).unwrap_or(FeeRate::BROADCAST_MIN));
-            app.send_payjoin(bip21, fee).await?;
+            app.send_payjoin(bip21, *fee_rate).await?;
         }
         Commands::Receive { amount, .. } => {
             app.receive_payjoin(*amount).await?;

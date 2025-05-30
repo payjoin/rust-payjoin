@@ -86,8 +86,8 @@ pub enum Commands {
         bip21: String,
 
         /// Fee rate in sat/vB
-        #[arg(short, long = "fee-rate", value_parser = parse_fee_rate_in_sat_per_vb)]
-        fee_rate: Option<FeeRate>,
+        #[arg(required = true, short, long = "fee-rate", value_parser = parse_fee_rate_in_sat_per_vb)]
+        fee_rate: FeeRate,
     },
     /// Receive a payjoin payment
     Receive {

@@ -16,7 +16,7 @@ use tokio::sync::watch;
 use super::config::Config;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
-use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, validate_relay, RelayManager};
+use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, RelayManager};
 use crate::app::{handle_interrupt, http_agent};
 use crate::db::v2::{ReceiverPersister, SenderPersister};
 use crate::db::Database;
@@ -77,8 +77,9 @@ impl AppTrait for App {
 
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
-        let ohttp_keys =
-            unwrap_ohttp_keys_or_else_fetch(&self.config, self.relay_manager.clone()).await?;
+        let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config, self.relay_manager.clone())
+            .await?
+            .ohttp_keys;
         let mut persister = ReceiverPersister::new(self.db.clone());
         let new_receiver = NewReceiver::new(
             address,
@@ -307,7 +308,10 @@ impl App {
             self.relay_manager.lock().expect("Lock should not be poisoned").get_selected_relay();
         let ohttp_relay = match selected_relay {
             Some(relay) => relay,
-            None => validate_relay(&self.config, self.relay_manager.clone()).await?,
+            None =>
+                unwrap_ohttp_keys_or_else_fetch(&self.config, self.relay_manager.clone())
+                    .await?
+                    .relay_url,
         };
         Ok(ohttp_relay)
     }

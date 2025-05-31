@@ -22,6 +22,7 @@ pub mod error {
 ///
 /// * `payjoin_directory`: The payjoin directory from which to fetch the ohttp keys.  This
 ///   directory stores and forwards payjoin client payloads.
+#[cfg(feature = "pki-https")]
 pub async fn fetch_ohttp_keys(
     ohttp_relay: &str,
     payjoin_directory: &str,
@@ -42,7 +43,6 @@ pub async fn fetch_ohttp_keys(
 ///   directory stores and forwards payjoin client payloads.
 ///
 /// * `cert_der`: The DER-encoded certificate to use for local HTTPS connections.
-#[cfg(feature = "_danger-local-https")]
 pub async fn fetch_ohttp_keys_with_cert(
     ohttp_relay: &str,
     payjoin_directory: &str,

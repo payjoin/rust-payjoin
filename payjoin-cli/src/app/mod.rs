@@ -18,7 +18,7 @@ pub(crate) mod v1;
 #[cfg(feature = "v2")]
 pub(crate) mod v2;
 
-#[cfg(feature = "_danger-local-https")]
+#[cfg(not(feature = "pki-https"))]
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
 
 #[async_trait::async_trait]
@@ -55,13 +55,13 @@ pub trait App: Send + Sync {
     }
 }
 
-#[cfg(feature = "_danger-local-https")]
+#[cfg(not(feature = "pki-https"))]
 fn http_agent() -> Result<reqwest::Client> { Ok(http_agent_builder()?.build()?) }
 
-#[cfg(not(feature = "_danger-local-https"))]
+#[cfg(feature = "pki-https")]
 fn http_agent() -> Result<reqwest::Client> { Ok(reqwest::Client::new()) }
 
-#[cfg(feature = "_danger-local-https")]
+#[cfg(not(feature = "pki-https"))]
 fn http_agent_builder() -> Result<reqwest::ClientBuilder> {
     use rustls::pki_types::CertificateDer;
     use rustls::RootCertStore;
@@ -74,7 +74,7 @@ fn http_agent_builder() -> Result<reqwest::ClientBuilder> {
         .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der.as_slice())?))
 }
 
-#[cfg(feature = "_danger-local-https")]
+#[cfg(not(feature = "pki-https"))]
 fn read_local_cert() -> Result<Vec<u8>> {
     let mut local_cert_path = std::env::temp_dir();
     local_cert_path.push(LOCAL_CERT_FILE);

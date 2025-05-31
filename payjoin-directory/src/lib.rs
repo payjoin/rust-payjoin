@@ -37,10 +37,8 @@ const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message"
 
 mod db;
 
-#[cfg(feature = "_danger-local-https")]
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-#[cfg(feature = "_danger-local-https")]
 pub async fn listen_tcp_with_tls_on_free_port(
     db_host: String,
     timeout: Duration,
@@ -56,7 +54,6 @@ pub async fn listen_tcp_with_tls_on_free_port(
 }
 
 // Helper function to avoid code duplication
-#[cfg(feature = "_danger-local-https")]
 async fn listen_tcp_with_tls_on_listener(
     listener: tokio::net::TcpListener,
     db_host: String,
@@ -134,7 +131,6 @@ pub async fn listen_tcp(
     Ok(())
 }
 
-#[cfg(feature = "_danger-local-https")]
 pub async fn listen_tcp_with_tls(
     port: u16,
     db_host: String,
@@ -147,7 +143,6 @@ pub async fn listen_tcp_with_tls(
     listen_tcp_with_tls_on_listener(listener, db_host, timeout, cert_key, ohttp).await
 }
 
-#[cfg(feature = "_danger-local-https")]
 fn init_tls_acceptor(cert_key: (Vec<u8>, Vec<u8>)) -> Result<tokio_rustls::TlsAcceptor> {
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use rustls::ServerConfig;

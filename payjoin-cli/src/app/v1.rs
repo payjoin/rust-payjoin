@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::bitcoin::Amount;
+use futures_util::TryStreamExt;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Buf, Bytes, Incoming};
@@ -17,9 +18,10 @@ use payjoin::bitcoin::FeeRate;
 use payjoin::receive::v1::{PayjoinProposal, UncheckedProposal};
 use payjoin::receive::ReplyableError::{self, Implementation, V1};
 use payjoin::send::v1::SenderBuilder;
-use payjoin::{ImplementationError, Uri, UriExt};
+use payjoin::{ImplementationError, Uri, UriExt, MAX_CONTENT_LENGTH};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
+use tokio_util::io::{StreamReader, SyncIoBridge};
 
 use super::config::Config;
 use super::wallet::BitcoindWallet;
@@ -88,12 +90,26 @@ impl AppTrait for App {
             "Sent fallback transaction hex: {:#}",
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
         );
-        let psbt = ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()).map_err(
-            |e| {
-                log::debug!("Error processing response: {e:?}");
-                anyhow!("Failed to process response {e}")
-            },
-        )?;
+
+        if let Some(content_length) = response.content_length() {
+            if content_length > MAX_CONTENT_LENGTH as u64 {
+                return Err(anyhow!(
+                    "Response content length exceeded the limit of {MAX_CONTENT_LENGTH} bytes"
+                ));
+            }
+        }
+
+        // Pass the response body to process_response without loading it all into memory.
+        // This prevents a maliciously crafted response from causing an unbounded allocation.
+        let stream =
+            response.bytes_stream().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+        let async_reader = StreamReader::new(stream);
+        let mut sync_reader = SyncIoBridge::new(async_reader);
+
+        let psbt = ctx.process_response(&mut sync_reader).map_err(|e| {
+            log::debug!("Error processing response: {e:?}");
+            anyhow!("Failed to process response {}", e)
+        })?;
 
         self.process_pj_response(psbt)?;
         Ok(())

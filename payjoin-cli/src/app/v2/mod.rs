@@ -13,7 +13,7 @@ use tokio::sync::watch;
 use super::config::Config;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
-use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, validate_relay, RelayState};
+use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, validate_relay, RelayManager};
 use crate::app::{handle_interrupt, http_agent};
 use crate::db::v2::{ReceiverPersister, SenderPersister};
 use crate::db::Database;
@@ -26,18 +26,18 @@ pub(crate) struct App {
     db: Arc<Database>,
     wallet: BitcoindWallet,
     interrupt: watch::Receiver<()>,
-    relay_state: Arc<Mutex<RelayState>>,
+    relay_manager: Arc<Mutex<RelayManager>>,
 }
 
 #[async_trait::async_trait]
 impl AppTrait for App {
     fn new(config: Config) -> Result<Self> {
         let db = Arc::new(Database::create(&config.db_path)?);
-        let relay_state = Arc::new(Mutex::new(RelayState::new()));
+        let relay_manager = Arc::new(Mutex::new(RelayManager::new()));
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
         let wallet = BitcoindWallet::new(&config.bitcoind)?;
-        let app = Self { config, db, wallet, interrupt: interrupt_rx, relay_state };
+        let app = Self { config, db, wallet, interrupt: interrupt_rx, relay_manager };
         app.wallet()
             .network()
             .context("Failed to connect to bitcoind. Check config RPC connection.")?;
@@ -75,7 +75,7 @@ impl AppTrait for App {
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
         let ohttp_keys =
-            unwrap_ohttp_keys_or_else_fetch(&self.config, self.relay_state.clone()).await?;
+            unwrap_ohttp_keys_or_else_fetch(&self.config, self.relay_manager.clone()).await?;
         let mut persister = ReceiverPersister::new(self.db.clone());
         let new_receiver = NewReceiver::new(
             address,
@@ -301,10 +301,10 @@ impl App {
 
     async fn unwrap_relay_or_else_fetch(&self) -> Result<payjoin::Url> {
         let selected_relay =
-            self.relay_state.lock().expect("Lock should not be poisoned").get_selected_relay();
+            self.relay_manager.lock().expect("Lock should not be poisoned").get_selected_relay();
         let ohttp_relay = match selected_relay {
             Some(relay) => relay,
-            None => validate_relay(&self.config, self.relay_state.clone()).await?,
+            None => validate_relay(&self.config, self.relay_manager.clone()).await?,
         };
         Ok(ohttp_relay)
     }

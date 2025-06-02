@@ -31,6 +31,7 @@ use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::rand::seq::SliceRandom;
 use bitcoin::secp256k1::rand::{self, Rng};
 use bitcoin::{Amount, FeeRate, OutPoint, Script, TxIn, TxOut, Weight};
+use serde::{Deserialize, Serialize};
 
 use super::error::{
     InputContributionError, InternalInputContributionError, InternalOutputSubstitutionError,
@@ -57,7 +58,7 @@ pub use exclusive::*;
 /// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
 /// that the transaction can be broadcast with check_broadcast_suitability. Otherwise it is safe to
 /// call assume_interactive_receive to proceed with validation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UncheckedProposal {
     pub(crate) psbt: Psbt,
     pub(crate) params: Params,
@@ -128,7 +129,7 @@ impl UncheckedProposal {
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
 /// Call [`Self::check_inputs_not_owned`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MaybeInputsOwned {
     psbt: Psbt,
     params: Params,
@@ -171,7 +172,7 @@ impl MaybeInputsOwned {
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
 /// Call [`Self::check_no_inputs_seen_before`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MaybeInputsSeen {
     psbt: Psbt,
     params: Params,
@@ -203,7 +204,7 @@ impl MaybeInputsSeen {
 ///
 /// Only accept PSBTs that send us money.
 /// Identify those outputs with [`Self::identify_receiver_outputs`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OutputsUnknown {
     psbt: Psbt,
     params: Params,
@@ -255,7 +256,7 @@ impl OutputsUnknown {
 /// A checked proposal that the receiver may substitute or add outputs to
 ///
 /// Call [`Self::commit_outputs`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsOutputs {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,
@@ -388,7 +389,7 @@ fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [
 /// A checked proposal that the receiver may contribute inputs to to make a payjoin
 ///
 /// Call [`Self::commit_inputs`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsInputs {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,
@@ -551,7 +552,7 @@ impl WantsInputs {
 /// sender will accept.
 ///
 /// Call [`Self::finalize_proposal`] to return a finalized [`PayjoinProposal`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProvisionalProposal {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,
@@ -768,7 +769,7 @@ impl ProvisionalProposal {
 
 /// A finalized payjoin proposal, complete with fees and receiver signatures, that the sender
 /// should find acceptable.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PayjoinProposal {
     payjoin_psbt: Psbt,
 }

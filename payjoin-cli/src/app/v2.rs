@@ -379,8 +379,7 @@ impl App {
         let wallet = self.wallet();
         let candidate_inputs = wallet.list_unspent()?;
 
-        let selected_input =
-            proposal.try_preserving_privacy(candidate_inputs).unwrap();
+        let selected_input = proposal.try_preserving_privacy(candidate_inputs).unwrap();
         let proposal =
             proposal.contribute_inputs(vec![selected_input])?.commit_inputs().save(persister)?;
         self.finalize_proposal(proposal, persister).await

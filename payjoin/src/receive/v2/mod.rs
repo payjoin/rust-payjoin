@@ -79,7 +79,7 @@ fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
     sha256::Hash::hash(&pubkey.to_compressed_bytes()).into()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ReceiverState {
     Uninitialized(Receiver<UninitializedReceiver>),
     WithContext(Receiver<ReceiverWithContext>),
@@ -149,12 +149,12 @@ impl ReceiverState {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Receiver<State> {
     state: State,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 /// The receiver is not initialized yet, no session context is available yet
 pub struct UninitializedReceiver {}
 
@@ -387,7 +387,7 @@ impl Receiver<ReceiverWithContext> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UncheckedProposal {
     pub(crate) v1: v1::UncheckedProposal,
     pub(crate) context: SessionContext,
@@ -500,7 +500,7 @@ impl Receiver<UncheckedProposal> {
     pub fn id(&self) -> ShortId { id(&self.state.context.s) }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsOwned {
     v1: v1::MaybeInputsOwned,
     context: SessionContext,
@@ -545,7 +545,7 @@ impl Receiver<MaybeInputsOwned> {
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
 /// Call [`Self::check_no_inputs_seen_before`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsSeen {
     v1: v1::MaybeInputsSeen,
     context: SessionContext,
@@ -590,7 +590,7 @@ impl Receiver<MaybeInputsSeen> {
 ///
 /// Only accept PSBTs that send us money.
 /// Identify those outputs with [`Self::identify_receiver_outputs`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OutputsUnknown {
     v1: v1::OutputsUnknown,
     context: SessionContext,
@@ -631,7 +631,7 @@ impl Receiver<OutputsUnknown> {
 /// A checked proposal that the receiver may substitute or add outputs to
 ///
 /// Call [`Self::commit_outputs`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WantsOutputs {
     v1: v1::WantsOutputs,
     context: SessionContext,
@@ -685,7 +685,7 @@ impl Receiver<WantsOutputs> {
 /// A checked proposal that the receiver may contribute inputs to to make a payjoin
 ///
 /// Call [`Self::commit_inputs`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WantsInputs {
     v1: v1::WantsInputs,
     context: SessionContext,
@@ -744,7 +744,7 @@ impl Receiver<WantsInputs> {
 /// A checked proposal that the receiver may finalize
 ///
 /// Call [`Self::finalize_proposal`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProvisionalProposal {
     v1: v1::ProvisionalProposal,
     context: SessionContext,
@@ -784,7 +784,7 @@ impl Receiver<ProvisionalProposal> {
 }
 /// A finalized payjoin proposal, complete with fees and receiver signatures, that the sender
 /// should find acceptable.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PayjoinProposal {
     v1: v1::PayjoinProposal,
     context: SessionContext,

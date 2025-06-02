@@ -48,3 +48,53 @@ pub enum SessionEvent {
     /// b/c its a terminal state and there is nothing to replay. So serialization will be lossy and that is fine.
     SessionInvalid(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::receive::v1::test::unchecked_proposal_from_test_vector;
+    use crate::receive::v2::test::SHARED_CONTEXT;
+
+    #[test]
+    fn test_session_event_serialization_roundtrip() {
+        let unchecked_proposal = unchecked_proposal_from_test_vector();
+        let maybe_inputs_owned = unchecked_proposal.clone().assume_interactive_receiver();
+        let maybe_inputs_seen = maybe_inputs_owned
+            .clone()
+            .check_inputs_not_owned(|_| Ok(false))
+            .expect("No inputs should be owned");
+        let outputs_unknown = maybe_inputs_seen
+            .clone()
+            .check_no_inputs_seen_before(|_| Ok(false))
+            .expect("No inputs should be seen before");
+        let wants_outputs = outputs_unknown
+            .clone()
+            .identify_receiver_outputs(|_| Ok(true))
+            .expect("Outputs should be identified");
+        let wants_inputs = wants_outputs.clone().commit_outputs();
+        let provisional_proposal = wants_inputs.clone().commit_inputs();
+        let payjoin_proposal = provisional_proposal
+            .clone()
+            .finalize_proposal(|psbt| Ok(psbt.clone()), None, None)
+            .expect("Payjoin proposal should be finalized");
+
+        let test_cases = vec![
+            SessionEvent::Created(SHARED_CONTEXT.clone()),
+            SessionEvent::UncheckedProposal(unchecked_proposal),
+            SessionEvent::MaybeInputsOwned(maybe_inputs_owned),
+            SessionEvent::MaybeInputsSeen(maybe_inputs_seen),
+            SessionEvent::OutputsUnknown(outputs_unknown),
+            SessionEvent::WantsOutputs(wants_outputs),
+            SessionEvent::WantsInputs(wants_inputs),
+            SessionEvent::ProvisionalProposal(provisional_proposal),
+            SessionEvent::PayjoinProposal(payjoin_proposal),
+        ];
+
+        for event in test_cases {
+            let serialized = serde_json::to_string(&event).expect("Serialization should not fail");
+            let deserialized: SessionEvent =
+                serde_json::from_str(&serialized).expect("Deserialization should not fail");
+            assert_eq!(event, deserialized);
+        }
+    }
+}

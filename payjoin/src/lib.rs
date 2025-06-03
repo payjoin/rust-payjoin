@@ -4,7 +4,7 @@
 //!
 //! Supercharge payment batching to save you fees and preserve your privacy.
 //!
-//! This library implements both [BIP 78 Payjoin V1](https://github.com/shesek/bips/blob/master/bip-0078.mediawiki) and [BIP 77 Payjoin V2](https://github.com/bitcoin/bips/blob/master/bip-0077.md).
+//! This library implements both [BIP 78 Payjoin V1](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) and [BIP 77 Payjoin V2](https://github.com/bitcoin/bips/blob/master/bip-0077.md).
 //!
 //! Only the latest BIP 77 Payjoin V2 is enabled by default. To use BIP 78 Payjoin V1, enable the `v1` feature.
 //!

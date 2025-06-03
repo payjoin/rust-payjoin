@@ -69,25 +69,21 @@ impl<Event, NextState, CurrentState, Err>
     MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err>
 {
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn fatal(event: Event, error: Err) -> Self {
         MaybeFatalTransitionWithNoResults(Err(Rejection::fatal(event, error)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn transient(error: Err) -> Self {
         MaybeFatalTransitionWithNoResults(Err(Rejection::transient(error)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn no_results(current_state: CurrentState) -> Self {
         MaybeFatalTransitionWithNoResults(Ok(AcceptOptionalTransition::NoResults(current_state)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         MaybeFatalTransitionWithNoResults(Ok(AcceptOptionalTransition::Success(AcceptNextState(
             event, next_state,
@@ -116,19 +112,16 @@ pub struct MaybeFatalTransition<Event, NextState, Err>(
 
 impl<Event, NextState, Err> MaybeFatalTransition<Event, NextState, Err> {
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn fatal(event: Event, error: Err) -> Self {
         MaybeFatalTransition(Err(Rejection::fatal(event, error)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn transient(error: Err) -> Self {
         MaybeFatalTransition(Err(Rejection::transient(error)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         MaybeFatalTransition(Ok(AcceptNextState(event, next_state)))
     }
@@ -153,13 +146,11 @@ pub struct MaybeTransientTransition<Event, NextState, Err>(
 
 impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err> {
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         MaybeTransientTransition(Ok(AcceptNextState(event, next_state)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn transient(error: Err) -> Self {
         MaybeTransientTransition(Err(RejectTransient(error)))
     }
@@ -188,13 +179,11 @@ where
     Err: std::error::Error,
 {
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn success(success_value: SuccessValue) -> Self {
         MaybeSuccessTransition(Ok(AcceptCompleted(success_value)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn transient(error: Err) -> Self {
         MaybeSuccessTransition(Err(RejectTransient(error)))
     }
@@ -215,7 +204,6 @@ pub struct NextStateTransition<Event, NextState>(AcceptNextState<Event, NextStat
 
 impl<Event, NextState> NextStateTransition<Event, NextState> {
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         NextStateTransition(AcceptNextState(event, next_state))
     }
@@ -237,13 +225,11 @@ pub struct MaybeBadInitInputsTransition<Event, NextState, Err>(
 
 impl<Event, NextState, Err> MaybeBadInitInputsTransition<Event, NextState, Err> {
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         MaybeBadInitInputsTransition(Ok(AcceptNextState(event, next_state)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn bad_init_inputs(error: Err) -> Self {
         MaybeBadInitInputsTransition(Err(RejectBadInitInputs(error)))
     }
@@ -281,10 +267,8 @@ pub enum Rejection<Event, Err> {
 
 impl<Event, Err> Rejection<Event, Err> {
     #[inline]
-    #[allow(dead_code)]
     pub fn fatal(event: Event, error: Err) -> Self { Rejection::Fatal(RejectFatal(event, error)) }
     #[inline]
-    #[allow(dead_code)]
     pub fn transient(error: Err) -> Self { Rejection::Transient(RejectTransient(error)) }
 }
 
@@ -318,7 +302,6 @@ where
         }
     }
 
-    #[allow(dead_code)]
     pub fn api_error(self) -> Option<ApiErr> {
         match self.0 {
             InternalPersistedError::Fatal(e)

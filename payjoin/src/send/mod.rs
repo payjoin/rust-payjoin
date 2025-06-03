@@ -602,7 +602,7 @@ mod test {
             Some((Amount::from_sat(1000), None)),
             true,
         );
-        assert_eq!(fee_contribution.err(), Some(InternalBuildSenderError::NoOutputs));
+        assert_eq!(fee_contribution, Err(InternalBuildSenderError::NoOutputs));
 
         // Psbt with identical receiver outputs
         let mut psbt = PARSED_ORIGINAL_PSBT.clone();
@@ -615,7 +615,7 @@ mod test {
             Some((Amount::from_sat(1000), None)),
             true,
         );
-        assert_eq!(fee_contribution.err(), Some(InternalBuildSenderError::MultiplePayeeOutputs));
+        assert_eq!(fee_contribution, Err(InternalBuildSenderError::MultiplePayeeOutputs));
 
         // Psbt with only one output
         let mut psbt = PARSED_ORIGINAL_PSBT.clone();
@@ -643,8 +643,8 @@ mod test {
             false,
         );
         assert_eq!(
-            fee_contribution.err(),
-            Some(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution)
+            fee_contribution,
+            Err(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution)
         );
 
         let fee_contribution = determine_fee_contribution(
@@ -653,7 +653,7 @@ mod test {
             Some((Amount::from_sat(1000), None)),
             false,
         );
-        assert_eq!(fee_contribution.err(), Some(InternalBuildSenderError::MissingPayeeOutput));
+        assert_eq!(fee_contribution, Err(InternalBuildSenderError::MissingPayeeOutput));
 
         let fee_contribution = determine_fee_contribution(
             &psbt,
@@ -661,7 +661,7 @@ mod test {
             Some((Amount::from_sat(1000), None)),
             true,
         );
-        assert_eq!(fee_contribution.err(), Some(InternalBuildSenderError::MissingPayeeOutput));
+        assert_eq!(fee_contribution, Err(InternalBuildSenderError::MissingPayeeOutput));
 
         // Psbt with three total outputs
         let mut psbt = PARSED_ORIGINAL_PSBT.clone();
@@ -674,7 +674,7 @@ mod test {
             Some((Amount::from_sat(1000), None)),
             true,
         );
-        assert_eq!(fee_contribution.err(), Some(InternalBuildSenderError::AmbiguousChangeOutput));
+        assert_eq!(fee_contribution, Err(InternalBuildSenderError::AmbiguousChangeOutput));
         Ok(())
     }
 

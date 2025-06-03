@@ -24,7 +24,7 @@
 
 ### `payjoin`
 
-The Payjoin Dev Kit `payjoin` library implements both [BIP 78 Payjoin V1](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) and [BIP 77 Payjoin V2](https://github.com/bitcoin/bips/pull/1483).
+The Payjoin Dev Kit `payjoin` library implements both [BIP 78 Payjoin V1](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) and [BIP 77 Payjoin V2](https://github.com/bitcoin/bips/blob/master/bip-0077.md).
 
 ### `payjoin-cli`
 

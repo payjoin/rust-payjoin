@@ -28,50 +28,21 @@ pub mod receive;
 #[cfg(feature = "_core")]
 pub mod send;
 
-#[cfg(feature = "v2")]
-pub mod persist;
-
-#[cfg(feature = "v2")]
-pub(crate) mod hpke;
-#[cfg(feature = "v2")]
-pub use crate::hpke::{HpkeKeyPair, HpkePublicKey};
-#[cfg(feature = "v2")]
-pub(crate) mod ohttp;
-#[cfg(feature = "v2")]
-pub use crate::ohttp::OhttpKeys;
-#[cfg(any(feature = "v2", feature = "directory"))]
-pub(crate) mod bech32;
 #[cfg(feature = "directory")]
 #[cfg_attr(docsrs, doc(cfg(feature = "directory")))]
 pub mod directory;
-
-#[cfg(feature = "_core")]
-pub(crate) mod into_url;
-#[cfg(feature = "io")]
-#[cfg_attr(docsrs, doc(cfg(feature = "io")))]
-pub mod io;
-#[cfg(feature = "_core")]
-pub(crate) mod psbt;
-#[cfg(feature = "_core")]
-mod request;
-#[cfg(feature = "_core")]
-pub use request::*;
-#[cfg(feature = "_core")]
-pub(crate) mod output_substitution;
-#[cfg(feature = "v1")]
-pub use output_substitution::OutputSubstitution;
 #[cfg(feature = "_core")]
 mod uri;
 #[cfg(feature = "_core")]
-pub use into_url::{Error as IntoUrlError, IntoUrl};
+pub(crate) mod psbt;
+
 #[cfg(feature = "_core")]
 pub use uri::{PjParseError, PjUri, Uri, UriExt};
 #[cfg(feature = "_core")]
 pub use url::{ParseError, Url};
 #[cfg(feature = "_core")]
 pub mod core;
-#[cfg(feature = "_core")]
-pub(crate) mod error_codes;
+
 #[cfg(feature = "_core")]
 pub use crate::core::*;
 /// 4M block size limit with base64 encoding overhead => maximum reasonable size of content-length

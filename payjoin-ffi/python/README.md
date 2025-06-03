@@ -10,13 +10,14 @@ Grab the latest release with a simple:
 pip install payjoin
 ```
 
-## Running Unit Tests
-Follow these steps to clone the repository and run the unit tests:
+## Running Tests
+
+Follow these steps to clone the repository and run the tests.
+
 
 ```shell
-
-git clone https://github.com/LtbLightning/payjoin-ffi.git
-cd python
+git clone https://github.com/payjoin/rust-payjoin.git
+cd rust-payjoin/payjoin-ffi/python
 
 # Setup a python virtual environment
 python -m venv venv
@@ -34,42 +35,12 @@ python setup.py bdist_wheel --verbose
 # Force reinstall payjoin
 pip install ./dist/payjoin-<version>.whl --force-reinstall
 
-# Run unit tests
-python -m unittest --verbose test/payjoin_unit_test.py
-
+# Run all tests
+python -m unittest --verbose
 ```
 
-## Running the Integration Test
-
-Before diving into the integration test, you'll need to set up Bitcoin Core on the regtest network. If you don't have Bitcoin Core installed locally, check out [this installation guide](https://learn.saylor.org/mod/page/view.php?id=36347). Alternatively, you can use `Nigiri Bitcoin`, a tool designed to streamline the process of running local instances of Bitcoin and Liquid networks for development and testing. Follow the instructions [here](https://github.com/vulpemventures/nigiri) to install it on your machine.
-
-Now, proceed with the integration test:
-
-```shell
-
-git clone https://github.com/LtbLightning/payjoin-ffi.git
-cd python
-
-# Setup a python virtual environment
-python -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install --requirement requirements.txt --requirement requirements-dev.txt
-
-# Generate the bindings (use the script appropriate for your platform)
-PYBIN="./venv/bin/" bash ./scripts/generate_<platform>.sh
-
-# Build the wheel
-python setup.py bdist_wheel --verbose
-
-# Force reinstall payjoin
-pip install ./dist/payjoin-<version>.whl --force-reinstall
-
-# Run the integration test
-python -m unittest --verbose test/payjoin_integration_test.py
-
-```
+Note that you'll need Docker to run the integration tests. If you get a "Failed to start container" error, ensure the Docker engine is running on your machine.
+You can [filter which tests](https://docs.python.org/3/library/unittest.html#command-line-interface) to run by passing a file or test name as argument.
 
 ## Building the Package
 

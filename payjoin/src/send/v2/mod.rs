@@ -1,7 +1,7 @@
 //! Send BIP 77 Payjoin v2
 //!
 //! This module contains types and methods used to implement sending via [BIP77
-//! Payjoin](https://github.com/bitcoin/bips/pull/1483).
+//! Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md).
 //!
 //! Usage is pretty simple:
 //!

@@ -44,7 +44,7 @@ impl NewReceiver {
     /// A new instance of [`NewReceiver`].
     ///
     /// # References
-    /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/pull/1483)
+    /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md)
     pub fn new(
         address: Address,
         directory: String,

@@ -6,7 +6,7 @@
 
 It enables sending and receiving [BIP 78 Payjoin
 (v1)](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) and [Draft
-BIP 77 Async Payjoin (v2)](https://github.com/bitcoin/bips/pull/1483)
+BIP 77 Async Payjoin (v2)](https://github.com/bitcoin/bips/blob/master/bip-0077.md)
 transactions via `bitcoind`. By default it supports Payjoin v2, which is
 backwards compatible with v1. Enable the `v1` feature to disable Payjoin v2 to
 send and receive using only v1.

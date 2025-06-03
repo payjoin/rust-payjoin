@@ -1,6 +1,6 @@
 # Payjoin Directory
 
-[BIP 77](https://github.com/bitcoin/bips/pull/1483) Async Payjoin (v2)
+[BIP 77](https://github.com/bitcoin/bips/blob/master/bip-0077.md) Async Payjoin (v2)
 peers store and forward HTTP client messages via a directory server in order to
 make asynchronous Payjoin transactions. This is a reference implementation of
 such a server

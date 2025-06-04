@@ -105,8 +105,8 @@ impl ReceiverState {
 
             (
                 ReceiverState::WithContext(state),
-                ReceiverSessionEvent::UncheckedProposal(proposal),
-            ) => Ok(state.apply_unchecked_from_payload(proposal)?),
+                ReceiverSessionEvent::UncheckedProposal((proposal, reply_key)),
+            ) => Ok(state.apply_unchecked_from_payload(proposal, reply_key)?),
 
             (
                 ReceiverState::UncheckedProposal(state),
@@ -251,7 +251,10 @@ impl Receiver<ReceiverWithContext> {
 
         if let Some(proposal) = proposal {
             MaybeFatalTransitionWithNoResults::success(
-                ReceiverSessionEvent::UncheckedProposal(proposal.clone()),
+                ReceiverSessionEvent::UncheckedProposal((
+                    proposal.clone(),
+                    e.clone().expect("e should be Some"),
+                )),
                 Receiver {
                     state: UncheckedProposal {
                         v1: proposal,
@@ -373,6 +376,7 @@ impl Receiver<ReceiverWithContext> {
     pub(crate) fn apply_unchecked_from_payload(
         self,
         event: v1::UncheckedProposal,
+        reply_key: HpkePublicKey,
     ) -> Result<ReceiverState, ReceiverReplayError> {
         if self.state.context.expiry < SystemTime::now() {
             // Session is expired, close the session
@@ -380,7 +384,10 @@ impl Receiver<ReceiverWithContext> {
         }
 
         let new_state = Receiver {
-            state: UncheckedProposal { v1: event, context: self.state.context.clone() },
+            state: UncheckedProposal {
+                v1: event,
+                context: SessionContext { e: Some(reply_key), ..self.state.context.clone() },
+            },
         };
 
         Ok(ReceiverState::UncheckedProposal(new_state))

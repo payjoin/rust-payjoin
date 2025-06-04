@@ -7,7 +7,7 @@ use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
 use crate::receive::v1;
 use crate::receive::v2::{id, subdir};
-use crate::{ImplementationError, PjUri};
+use crate::{HpkePublicKey, ImplementationError, PjUri};
 
 #[derive(Debug)]
 /// Errors that can occur when replaying a receiver event log
@@ -102,7 +102,7 @@ impl SessionHistory {
 
     pub fn fallback_txid(&self) -> Option<bitcoin::Txid> {
         self.events.iter().find_map(|event| match event {
-            ReceiverSessionEvent::UncheckedProposal(proposal) =>
+            ReceiverSessionEvent::UncheckedProposal((proposal, _)) =>
                 Some(proposal.psbt.unsigned_tx.compute_txid()),
             _ => None,
         })
@@ -117,7 +117,7 @@ impl SessionHistory {
 
     pub fn original_psbt(&self) -> Option<bitcoin::Psbt> {
         self.events.iter().find_map(|event| match event {
-            ReceiverSessionEvent::UncheckedProposal(proposal) => Some(proposal.psbt.clone()),
+            ReceiverSessionEvent::UncheckedProposal((proposal, _)) => Some(proposal.psbt.clone()),
             _ => None,
         })
     }
@@ -145,7 +145,7 @@ pub enum ReceiverSessionEvent {
     /// Receiver was created
     Created(SessionContext),
     /// Receiver read a proposal from a directory
-    UncheckedProposal(v1::UncheckedProposal),
+    UncheckedProposal((v1::UncheckedProposal, HpkePublicKey)),
     MaybeInputsOwned(v1::MaybeInputsOwned),
     MaybeInputsSeen(v1::MaybeInputsSeen),
     OutputsUnknown(v1::OutputsUnknown),
@@ -174,6 +174,7 @@ mod tests {
     use crate::receive::v2::{
         PayjoinProposal, ProvisionalProposal, ReceiverWithContext, UncheckedProposal,
     };
+    use crate::HpkeKeyPair;
 
     #[test]
     fn test_receiver_session_event_serialization() {
@@ -187,10 +188,14 @@ mod tests {
     #[test]
     fn test_session_event_serialization_roundtrip() {
         let unchecked_proposal = unchecked_proposal_from_test_vector();
+        let reply_key = HpkeKeyPair::gen_keypair().1;
 
         // Test serialization roundtrip for each session event
         let test_cases = vec![
-            ReceiverSessionEvent::UncheckedProposal(unchecked_proposal.clone()),
+            ReceiverSessionEvent::UncheckedProposal((
+                unchecked_proposal.clone(),
+                reply_key.clone(),
+            )),
             ReceiverSessionEvent::MaybeInputsOwned(maybe_inputs_owned_from_test_vector()),
             ReceiverSessionEvent::MaybeInputsSeen(maybe_inputs_seen_from_test_vector()),
             ReceiverSessionEvent::OutputsUnknown(outputs_unknown_from_test_vector()),
@@ -278,12 +283,16 @@ mod tests {
 
     #[test]
     fn test_replaying_unchecked_proposal() {
-        let session_context = SHARED_CONTEXT.clone();
-
+        let reply_key = HpkeKeyPair::gen_keypair().1;
+        let session_context =
+            SessionContext { e: Some(reply_key.clone()), ..SHARED_CONTEXT.clone() };
         let test = SessionHistoryTest {
             events: vec![
                 ReceiverSessionEvent::Created(session_context.clone()),
-                ReceiverSessionEvent::UncheckedProposal(unchecked_proposal_from_test_vector()),
+                ReceiverSessionEvent::UncheckedProposal((
+                    unchecked_proposal_from_test_vector(),
+                    reply_key.clone(),
+                )),
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 payment_address: Some(session_context.address.clone()),
@@ -307,12 +316,17 @@ mod tests {
 
     #[test]
     fn test_contributed_inputs() {
-        let session_context = SHARED_CONTEXT.clone();
+        let reply_key = HpkeKeyPair::gen_keypair().1;
+        let session_context =
+            SessionContext { e: Some(reply_key.clone()), ..SHARED_CONTEXT.clone() };
 
         let test = SessionHistoryTest {
             events: vec![
                 ReceiverSessionEvent::Created(session_context.clone()),
-                ReceiverSessionEvent::UncheckedProposal(unchecked_proposal_from_test_vector()),
+                ReceiverSessionEvent::UncheckedProposal((
+                    unchecked_proposal_from_test_vector(),
+                    reply_key.clone(),
+                )),
                 ReceiverSessionEvent::MaybeInputsOwned(maybe_inputs_owned_from_test_vector()),
                 ReceiverSessionEvent::MaybeInputsSeen(maybe_inputs_seen_from_test_vector()),
                 ReceiverSessionEvent::OutputsUnknown(outputs_unknown_from_test_vector()),
@@ -350,12 +364,16 @@ mod tests {
 
     #[test]
     fn test_payjoin_proposal() {
-        let session_context = SHARED_CONTEXT.clone();
-
+        let reply_key = HpkeKeyPair::gen_keypair().1;
+        let session_context =
+            SessionContext { e: Some(reply_key.clone()), ..SHARED_CONTEXT.clone() };
         let test = SessionHistoryTest {
             events: vec![
                 ReceiverSessionEvent::Created(session_context.clone()),
-                ReceiverSessionEvent::UncheckedProposal(unchecked_proposal_from_test_vector()),
+                ReceiverSessionEvent::UncheckedProposal((
+                    unchecked_proposal_from_test_vector(),
+                    reply_key.clone(),
+                )),
                 ReceiverSessionEvent::MaybeInputsOwned(maybe_inputs_owned_from_test_vector()),
                 ReceiverSessionEvent::MaybeInputsSeen(maybe_inputs_seen_from_test_vector()),
                 ReceiverSessionEvent::OutputsUnknown(outputs_unknown_from_test_vector()),

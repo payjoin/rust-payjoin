@@ -90,23 +90,6 @@ jobs:
       - name: Setup Docker on macOS
         uses: douglascamata/setup-docker-macos-action@v1.0.0
 
-      - name: "Install Redis"
-        run: |
-          brew update
-          brew install redis
-
-      - name: "Start Redis"
-        run: |
-          redis-server --daemonize yes
-          for i in {1..10}; do
-            if redis-cli ping | grep -q PONG; then
-              echo "Redis is ready"
-              break
-            fi
-            echo "Waiting for Redis..."
-            sleep 1
-          done
-
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
 

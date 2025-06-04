@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::uri::url_ext::ParseReceiverPubkeyParamError;
+use crate::core::uri::url_ext::ParseReceiverPubkeyParamError;
 
 /// Error returned when request could not be created.
 ///

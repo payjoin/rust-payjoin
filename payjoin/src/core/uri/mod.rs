@@ -7,9 +7,9 @@ use url::Url;
 #[cfg(feature = "v2")]
 pub(crate) use crate::directory::ShortId;
 use crate::output_substitution::OutputSubstitution;
-use crate::uri::error::InternalPjParseError;
+use crate::core::uri::error::InternalPjParseError;
 #[cfg(feature = "v2")]
-pub(crate) use crate::uri::url_ext::UrlExt;
+pub(crate) use crate::core::uri::url_ext::UrlExt;
 
 pub mod error;
 #[cfg(feature = "v2")]

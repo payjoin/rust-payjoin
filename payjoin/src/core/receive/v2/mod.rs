@@ -21,7 +21,7 @@ use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::Persister;
 use crate::receive::{parse_payload, InputPair};
-use crate::uri::ShortId;
+use crate::core::uri::ShortId;
 use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
 
 mod error;
@@ -259,7 +259,7 @@ impl Receiver<WithContext> {
 
     /// Build a V2 Payjoin URI from the receiver's context
     pub fn pj_uri<'a>(&self) -> crate::PjUri<'a> {
-        use crate::uri::{PayjoinExtras, UrlExt};
+        use crate::core::uri::{PayjoinExtras, UrlExt};
         let mut pj = subdir(&self.context.directory, &self.context.id()).clone();
         pj.set_receiver_pubkey(self.context.s.public_key().clone());
         pj.set_ohttp(self.context.ohttp_keys.clone());

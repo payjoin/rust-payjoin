@@ -31,7 +31,8 @@ impl std::fmt::Display for ShortId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let id_hrp = bitcoin::bech32::Hrp::parse("ID").unwrap();
         f.write_str(
-            crate::bech32::nochecksum::encode(id_hrp, &self.0)
+            crate::core::bech32::nochecksum::encode(id_hrp, &self.0)
+    
                 .expect("bech32 encoding of short ID must succeed")
                 .strip_prefix("ID1")
                 .expect("human readable part must be ID1"),

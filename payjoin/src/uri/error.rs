@@ -1,3 +1,5 @@
+use std::error::Error;
+use std::fmt;
 use url::ParseError;
 
 #[derive(Debug)]
@@ -25,14 +27,17 @@ impl std::fmt::Display for BadEndpointError {
         match self {
             BadEndpointError::UrlParse(e) => write!(f, "Invalid URL: {e:?}"),
             #[cfg(feature = "v2")]
-            BadEndpointError::LowercaseFragment =>
-                write!(f, "Some or all of the fragment is lowercase"),
+            BadEndpointError::LowercaseFragment => {
+                write!(f, "Some or all of the fragment is lowercase")
+            }
         }
     }
 }
 
 impl From<InternalPjParseError> for PjParseError {
-    fn from(value: InternalPjParseError) -> Self { PjParseError(value) }
+    fn from(value: InternalPjParseError) -> Self {
+        PjParseError(value)
+    }
 }
 
 impl std::fmt::Display for PjParseError {
@@ -50,5 +55,45 @@ impl std::fmt::Display for PjParseError {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }
         }
+    }
+}
+
+impl Error for PjParseError {}
+
+#[derive(Debug)]
+pub struct PayjoinUriError {
+    message: String,
+    source: Option<Box<dyn Error + Send + Sync>>,
+}
+
+impl PayjoinUriError {
+    pub fn new<S: Into<String>>(message: S) -> Self {
+        Self { message: message.into(), source: None }
+    }
+
+    pub fn from_uri_error(error: bitcoin_uri::de::Error<PjParseError>) -> Self {
+        Self { message: format!("Bitcoin URI error: {}", error), source: None }
+    }
+
+    pub fn unsupported_uri() -> Self {
+        Self::new("URI does not support Payjoin (missing 'pj' parameter)")
+    }
+}
+
+impl fmt::Display for PayjoinUriError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Payjoin URI error: {}", self.message)
+    }
+}
+
+impl Error for PayjoinUriError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.source.as_ref().map(|e| e.as_ref() as &(dyn Error + 'static))
+    }
+}
+
+impl From<bitcoin_uri::de::Error<PjParseError>> for PayjoinUriError {
+    fn from(error: bitcoin_uri::de::Error<PjParseError>) -> Self {
+        Self::from_uri_error(error)
     }
 }

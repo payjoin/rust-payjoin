@@ -77,7 +77,7 @@ impl Params {
                                 None
                             }
                         },
-                ("minfeerate", fee_rate) =>
+                ("minfeerate", fee_rate) => {
                     params.min_fee_rate = match fee_rate.parse::<f32>() {
                         Ok(fee_rate_sat_per_vb) => {
                             // TODO Parse with serde when rust-bitcoin supports it
@@ -86,7 +86,8 @@ impl Params {
                             FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64)
                         }
                         Err(_) => return Err(Error::FeeRate),
-                    },
+                    }
+                }
                 ("disableoutputsubstitution", v) =>
                     params.output_substitution = if v == "true" {
                         OutputSubstitution::Disabled

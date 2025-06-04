@@ -27,9 +27,9 @@ use error::{BuildSenderError, InternalBuildSenderError};
 use url::Url;
 
 use super::*;
+use crate::core::request::Request;
 pub use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
-use crate::request::Request;
 use crate::{PjUri, MAX_CONTENT_LENGTH};
 
 /// A builder to construct the properties of a `Sender`.

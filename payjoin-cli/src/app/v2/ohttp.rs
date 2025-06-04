@@ -29,24 +29,30 @@ pub(crate) struct ValidatedOhttpKeys {
 
 pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
     config: &Config,
+    directory: Option<payjoin::Url>,
     relay_manager: Arc<Mutex<RelayManager>>,
 ) -> Result<ValidatedOhttpKeys> {
-    let config_keys = config.v2()?.ohttp_keys.clone();
-    let mut fetched_keys = fetch_ohttp_keys(config, relay_manager).await?;
+    if let Some(ohttp_keys) = config.v2()?.ohttp_keys.clone() {
+        println!("Using OHTTP Keys from config");
+        return Ok(ValidatedOhttpKeys {
+            ohttp_keys,
+            relay_url: config.v2()?.ohttp_relays[0].clone(),
+        });
+    } else {
+        println!("Bootstrapping private network transport over Oblivious HTTP");
+        let fetched_keys = fetch_ohttp_keys(config, directory, relay_manager).await?;
 
-    if let Some(keys) = config_keys {
-        fetched_keys.ohttp_keys = keys;
+        Ok(fetched_keys)
     }
-
-    Ok(fetched_keys)
 }
 
 async fn fetch_ohttp_keys(
     config: &Config,
+    directory: Option<payjoin::Url>,
     relay_manager: Arc<Mutex<RelayManager>>,
 ) -> Result<ValidatedOhttpKeys> {
     use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;
-    let payjoin_directory = config.v2()?.pj_directory.clone();
+    let payjoin_directory = directory.unwrap_or(config.v2()?.pj_directory.clone());
     let relays = config.v2()?.ohttp_relays.clone();
 
     loop {

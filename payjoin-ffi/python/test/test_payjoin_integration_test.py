@@ -50,15 +50,15 @@ class InMemorySenderPersister(SenderPersister):
         super().__init__()
         self.senders = {}
 
-    def save(self, sender: Sender) -> SenderToken:
+    def save(self, sender: WithReplyKey) -> SenderToken:
         self.senders[str(sender.key())] = sender.to_json()
         return sender.key()
 
-    def load(self, token: SenderToken) -> Sender:
+    def load(self, token: SenderToken) -> WithReplyKey:
         token = str(token)
         if token not in self.senders.keys():
             raise ValueError(f"Token not found: {token}")
-        return Sender.from_json(self.senders[token])
+        return WithReplyKey.from_json(self.senders[token])
 
 class TestPayjoin(unittest.IsolatedAsyncioTestCase):
     @classmethod
@@ -106,7 +106,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             new_sender = SenderBuilder(psbt, pj_uri).build_recommended(1000)
             persister = InMemorySenderPersister()
             token = new_sender.persist(persister)
-            req_ctx: Sender = Sender.load(token, persister)
+            req_ctx: WithReplyKey = WithReplyKey.load(token, persister)
             request: RequestV2PostContext = req_ctx.extract_v2(ohttp_relay.as_string())
             response = await agent.post(
                 url=request.request.url.as_string(),

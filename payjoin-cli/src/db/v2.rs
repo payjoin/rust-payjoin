@@ -3,7 +3,7 @@ use std::sync::Arc;
 use bitcoincore_rpc::jsonrpc::serde_json;
 use payjoin::persist::{Persister, Value};
 use payjoin::receive::v2::{Receiver, ReceiverToken, WithContext};
-use payjoin::send::v2::{Sender, SenderToken};
+use payjoin::send::v2::{Sender, SenderToken, WithReplyKey};
 use sled::Tree;
 use url::Url;
 
@@ -14,10 +14,13 @@ impl SenderPersister {
     pub fn new(db: Arc<Database>) -> Self { Self(db) }
 }
 
-impl Persister<Sender> for SenderPersister {
+impl Persister<Sender<WithReplyKey>> for SenderPersister {
     type Token = SenderToken;
     type Error = crate::db::error::Error;
-    fn save(&mut self, value: Sender) -> std::result::Result<SenderToken, Self::Error> {
+    fn save(
+        &mut self,
+        value: Sender<WithReplyKey>,
+    ) -> std::result::Result<SenderToken, Self::Error> {
         let send_tree = self.0 .0.open_tree("send_sessions")?;
         let key = value.key();
         let value = serde_json::to_vec(&value).map_err(Error::Serialize)?;
@@ -26,7 +29,7 @@ impl Persister<Sender> for SenderPersister {
         Ok(key)
     }
 
-    fn load(&self, key: SenderToken) -> std::result::Result<Sender, Self::Error> {
+    fn load(&self, key: SenderToken) -> std::result::Result<Sender<WithReplyKey>, Self::Error> {
         let send_tree = self.0 .0.open_tree("send_sessions")?;
         let value = send_tree.get(key.as_ref())?.ok_or(Error::NotFound(key.to_string()))?;
         serde_json::from_slice(&value).map_err(Error::Deserialize)
@@ -79,21 +82,23 @@ impl Database {
         Ok(())
     }
 
-    pub(crate) fn get_send_sessions(&self) -> Result<Vec<Sender>> {
+    pub(crate) fn get_send_sessions(&self) -> Result<Vec<Sender<WithReplyKey>>> {
         let send_tree: Tree = self.0.open_tree("send_sessions")?;
         let mut sessions = Vec::new();
         for item in send_tree.iter() {
             let (_, value) = item?;
-            let session: Sender = serde_json::from_slice(&value).map_err(Error::Deserialize)?;
+            let session: Sender<WithReplyKey> =
+                serde_json::from_slice(&value).map_err(Error::Deserialize)?;
             sessions.push(session);
         }
         Ok(sessions)
     }
 
-    pub(crate) fn get_send_session(&self, pj_url: &Url) -> Result<Option<Sender>> {
+    pub(crate) fn get_send_session(&self, pj_url: &Url) -> Result<Option<Sender<WithReplyKey>>> {
         let send_tree = self.0.open_tree("send_sessions")?;
         if let Some(val) = send_tree.get(pj_url.as_str())? {
-            let session: Sender = serde_json::from_slice(&val).map_err(Error::Deserialize)?;
+            let session: Sender<WithReplyKey> =
+                serde_json::from_slice(&val).map_err(Error::Deserialize)?;
             Ok(Some(session))
         } else {
             Ok(None)

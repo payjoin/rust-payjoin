@@ -220,7 +220,7 @@ mod v2 {
     use bdk::wallet::AddressIndex;
     use bitcoin_ffi::{Address, Network};
     use payjoin_ffi::receive::{NewReceiver, PayjoinProposal, UncheckedProposal, WithContext};
-    use payjoin_ffi::send::{Sender, SenderBuilder};
+    use payjoin_ffi::send::{WithReplyKey, SenderBuilder};
     use payjoin_ffi::uri::Uri;
     use payjoin_ffi::{NoopPersister, Request};
     use payjoin_test_utils::TestServices;
@@ -288,7 +288,7 @@ mod v2 {
             let new_sender = SenderBuilder::new(psbt.to_string(), pj_uri)?
                 .build_recommended(payjoin::bitcoin::FeeRate::BROADCAST_MIN.to_sat_per_kwu())?;
             let sender_token = new_sender.persist(&mut NoopPersister)?;
-            let req_ctx = Sender::load(sender_token, &NoopPersister)?;
+            let req_ctx = WithReplyKey::load(sender_token, &NoopPersister)?;
             let (request, context) = req_ctx.extract_v2(ohttp_relay.to_owned().into())?;
             let response = agent
                 .post(request.url.as_string())

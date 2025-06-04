@@ -127,18 +127,20 @@ impl NewReceiver {
     }
 }
 
+pub trait ReceiverState {}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Receiver<State> {
+pub struct Receiver<State: ReceiverState> {
     pub(crate) state: State,
 }
 
-impl<State> core::ops::Deref for Receiver<State> {
+impl<State: ReceiverState> core::ops::Deref for Receiver<State> {
     type Target = State;
 
     fn deref(&self) -> &Self::Target { &self.state }
 }
 
-impl<State> core::ops::DerefMut for Receiver<State> {
+impl<State: ReceiverState> core::ops::DerefMut for Receiver<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
 }
 
@@ -146,6 +148,8 @@ impl<State> core::ops::DerefMut for Receiver<State> {
 pub struct WithContext {
     context: SessionContext,
 }
+
+impl ReceiverState for WithContext {}
 
 impl Receiver<WithContext> {
     /// Loads a [`Receiver`] from the provided persister using the storage token.
@@ -281,6 +285,8 @@ pub struct UncheckedProposal {
     pub(crate) context: SessionContext,
 }
 
+impl ReceiverState for UncheckedProposal {}
+
 impl Receiver<UncheckedProposal> {
     /// The Sender's Original PSBT
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
@@ -366,6 +372,8 @@ pub struct MaybeInputsOwned {
     context: SessionContext,
 }
 
+impl ReceiverState for MaybeInputsOwned {}
+
 impl Receiver<MaybeInputsOwned> {
     /// Check that the Original PSBT has no receiver-owned inputs.
     /// Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
@@ -388,6 +396,8 @@ pub struct MaybeInputsSeen {
     v1: v1::MaybeInputsSeen,
     context: SessionContext,
 }
+
+impl ReceiverState for MaybeInputsSeen {}
 
 impl Receiver<MaybeInputsSeen> {
     /// Make sure that the original transaction inputs have never been seen before.
@@ -412,6 +422,8 @@ pub struct OutputsUnknown {
     context: SessionContext,
 }
 
+impl ReceiverState for OutputsUnknown {}
+
 impl Receiver<OutputsUnknown> {
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
@@ -431,6 +443,8 @@ pub struct WantsOutputs {
     v1: v1::WantsOutputs,
     context: SessionContext,
 }
+
+impl ReceiverState for WantsOutputs {}
 
 impl Receiver<WantsOutputs> {
     /// Whether the receiver is allowed to substitute original outputs or not.
@@ -475,6 +489,8 @@ pub struct WantsInputs {
     v1: v1::WantsInputs,
     context: SessionContext,
 }
+
+impl ReceiverState for WantsInputs {}
 
 impl Receiver<WantsInputs> {
     /// Select receiver input such that the payjoin avoids surveillance.
@@ -523,6 +539,8 @@ pub struct ProvisionalProposal {
     context: SessionContext,
 }
 
+impl ReceiverState for ProvisionalProposal {}
+
 impl Receiver<ProvisionalProposal> {
     /// Return a Payjoin Proposal PSBT that the sender will find acceptable.
     ///
@@ -552,6 +570,8 @@ pub struct PayjoinProposal {
     v1: v1::PayjoinProposal,
     context: SessionContext,
 }
+
+impl ReceiverState for PayjoinProposal {}
 
 impl PayjoinProposal {
     #[cfg(feature = "_multiparty")]

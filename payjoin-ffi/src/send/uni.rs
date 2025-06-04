@@ -22,7 +22,7 @@ impl SenderBuilder {
     /// Prepare an HTTP request and request context to process the response
     ///
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
-    /// to create a [`Sender`]
+    /// to create a [`WithReplyKey`]
     #[uniffi::constructor]
     pub fn new(psbt: String, uri: Arc<PjUri>) -> Result<Self, BuildSenderError> {
         super::SenderBuilder::new(psbt, (*uri).clone()).map(Into::into)
@@ -107,24 +107,24 @@ impl NewSender {
 }
 
 #[derive(Clone, uniffi::Object)]
-pub struct Sender(super::Sender);
+pub struct WithReplyKey(super::WithReplyKey);
 
-impl From<super::Sender> for Sender {
-    fn from(value: super::Sender) -> Self { Self(value) }
+impl From<super::WithReplyKey> for WithReplyKey {
+    fn from(value: super::WithReplyKey) -> Self { Self(value) }
 }
 
-impl From<Sender> for super::Sender {
-    fn from(value: Sender) -> Self { value.0 }
+impl From<WithReplyKey> for super::WithReplyKey {
+    fn from(value: WithReplyKey) -> Self { value.0 }
 }
 
 #[uniffi::export]
-impl Sender {
+impl WithReplyKey {
     #[uniffi::constructor]
     pub fn load(
         token: Arc<SenderToken>,
         persister: Arc<dyn SenderPersister>,
     ) -> Result<Self, ImplementationError> {
-        Ok(super::Sender::from(
+        Ok(super::WithReplyKey::from(
             (*persister.load(token).map_err(|e| ImplementationError::from(e.to_string()))?).clone(),
         )
         .into())
@@ -154,7 +154,7 @@ impl Sender {
 
     #[uniffi::constructor]
     pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
-        super::Sender::from_json(json).map(Into::into)
+        super::WithReplyKey::from_json(json).map(Into::into)
     }
 
     pub fn key(&self) -> SenderToken { self.0.key().into() }
@@ -248,8 +248,8 @@ impl V2GetContext {
 
 #[uniffi::export(with_foreign)]
 pub trait SenderPersister: Send + Sync {
-    fn save(&self, sender: Arc<Sender>) -> Result<Arc<SenderToken>, ForeignError>;
-    fn load(&self, token: Arc<SenderToken>) -> Result<Arc<Sender>, ForeignError>;
+    fn save(&self, sender: Arc<WithReplyKey>) -> Result<Arc<SenderToken>, ForeignError>;
+    fn load(&self, token: Arc<SenderToken>) -> Result<Arc<WithReplyKey>, ForeignError>;
 }
 
 // The adapter to use the save and load callbacks
@@ -262,16 +262,24 @@ impl CallbackPersisterAdapter {
 }
 
 // Implement the Persister trait for the adapter
-impl payjoin::persist::Persister<payjoin::send::v2::Sender> for CallbackPersisterAdapter {
+impl payjoin::persist::Persister<payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>>
+    for CallbackPersisterAdapter
+{
     type Token = SenderToken; // Define the token type
     type Error = ForeignError; // Define the error type
 
-    fn save(&mut self, sender: payjoin::send::v2::Sender) -> Result<Self::Token, Self::Error> {
-        let sender = Sender(super::Sender::from(sender));
+    fn save(
+        &mut self,
+        sender: payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>,
+    ) -> Result<Self::Token, Self::Error> {
+        let sender = WithReplyKey(super::WithReplyKey::from(sender));
         self.callback_persister.save(sender.into()).map(|token| (*token).clone())
     }
 
-    fn load(&self, token: Self::Token) -> Result<payjoin::send::v2::Sender, Self::Error> {
+    fn load(
+        &self,
+        token: Self::Token,
+    ) -> Result<payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>, Self::Error> {
         // Use the callback to load the sender
         self.callback_persister.load(token.into()).map(|sender| (*sender).clone().0 .0)
     }
@@ -285,8 +293,10 @@ impl std::fmt::Display for SenderToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) }
 }
 
-impl From<payjoin::send::v2::Sender> for SenderToken {
-    fn from(value: payjoin::send::v2::Sender) -> Self { SenderToken(value.into()) }
+impl From<payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>> for SenderToken {
+    fn from(value: payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>) -> Self {
+        SenderToken(value.into())
+    }
 }
 
 impl From<payjoin::send::v2::SenderToken> for SenderToken {

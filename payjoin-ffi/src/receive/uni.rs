@@ -3,30 +3,176 @@ use std::sync::Arc;
 use super::InputPair;
 use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 use crate::error::ForeignError;
+use crate::receive::error::ReplayError;
 pub use crate::receive::{
     Error, ImplementationError, InputContributionError, JsonReply, OutputSubstitutionError,
     ReplyableError, SelectionError, SerdeJsonError, SessionError,
 };
-use crate::uri::error::IntoUrlError;
 use crate::{ClientResponse, OhttpKeys, OutputSubstitution, Request};
 
 #[derive(Clone, uniffi::Object, serde::Serialize, serde::Deserialize)]
 pub struct ReceiverSessionEvent(super::SessionEvent);
 
-#[derive(Debug, uniffi::Object)]
-pub struct NewReceiver(pub super::NewReceiver);
-
-impl From<NewReceiver> for super::NewReceiver {
-    fn from(value: NewReceiver) -> Self { value.0 }
+impl From<ReceiverSessionEvent> for super::SessionEvent {
+    fn from(value: ReceiverSessionEvent) -> Self { value.0 }
 }
 
-impl From<super::NewReceiver> for NewReceiver {
-    fn from(value: super::NewReceiver) -> Self { Self(value) }
+impl From<super::SessionEvent> for ReceiverSessionEvent {
+    fn from(value: super::SessionEvent) -> Self { ReceiverSessionEvent(value) }
 }
 
 #[uniffi::export]
-impl NewReceiver {
-    /// Creates a new [`NewReceiver`] with the provided parameters.
+impl ReceiverSessionEvent {
+    pub fn to_json(&self) -> Result<String, SerdeJsonError> {
+        serde_json::to_string(&self.0).map_err(Into::into)
+    }
+
+    #[uniffi::constructor]
+    pub fn from_json(json: String) -> Result<Self, SerdeJsonError> {
+        let event: payjoin::receive::v2::SessionEvent = serde_json::from_str(&json)?;
+        Ok(ReceiverSessionEvent(event.into()))
+    }
+}
+
+#[derive(Clone, uniffi::Enum)]
+pub enum ReceiverTypeState {
+    Uninitialized,
+    WithContext { inner: Arc<WithContext> },
+    UncheckedProposal { inner: Arc<UncheckedProposal> },
+    MaybeInputsOwned { inner: Arc<MaybeInputsOwned> },
+    MaybeInputsSeen { inner: Arc<MaybeInputsSeen> },
+    OutputsUnknown { inner: Arc<OutputsUnknown> },
+    WantsOutputs { inner: Arc<WantsOutputs> },
+    WantsInputs { inner: Arc<WantsInputs> },
+    ProvisionalProposal { inner: Arc<ProvisionalProposal> },
+    PayjoinProposal { inner: Arc<PayjoinProposal> },
+    TerminalState,
+}
+
+impl From<super::ReceiverTypeState> for ReceiverTypeState {
+    fn from(value: super::ReceiverTypeState) -> Self {
+        use payjoin::receive::v2::ReceiverTypeState::*;
+        match value.0 {
+            Uninitialized(_) => Self::Uninitialized,
+            WithContext(inner) =>
+                Self::WithContext { inner: Arc::new(super::WithContext::from(inner).into()) },
+            UncheckedProposal(inner) => Self::UncheckedProposal {
+                inner: Arc::new(super::UncheckedProposal::from(inner).into()),
+            },
+            MaybeInputsOwned(inner) => Self::MaybeInputsOwned {
+                inner: Arc::new(super::MaybeInputsOwned::from(inner).into()),
+            },
+            MaybeInputsSeen(inner) => Self::MaybeInputsSeen {
+                inner: Arc::new(super::MaybeInputsSeen::from(inner).into()),
+            },
+            OutputsUnknown(inner) =>
+                Self::OutputsUnknown { inner: Arc::new(super::OutputsUnknown::from(inner).into()) },
+            WantsOutputs(inner) =>
+                Self::WantsOutputs { inner: Arc::new(super::WantsOutputs::from(inner).into()) },
+            WantsInputs(inner) =>
+                Self::WantsInputs { inner: Arc::new(super::WantsInputs::from(inner).into()) },
+            ProvisionalProposal(inner) => Self::ProvisionalProposal {
+                inner: Arc::new(super::ProvisionalProposal::from(inner).into()),
+            },
+            PayjoinProposal(inner) => Self::PayjoinProposal {
+                inner: Arc::new(super::PayjoinProposal::from(inner).into()),
+            },
+            TerminalState => Self::TerminalState,
+        }
+    }
+}
+#[derive(uniffi::Object, Clone)]
+pub struct SessionHistory(super::SessionHistory);
+
+impl From<super::SessionHistory> for SessionHistory {
+    fn from(value: super::SessionHistory) -> Self { Self(value) }
+}
+
+impl From<SessionHistory> for super::SessionHistory {
+    fn from(value: SessionHistory) -> Self { value.0 }
+}
+
+#[derive(uniffi::Object)]
+pub struct TerminalError {
+    error: String,
+    reply: Option<JsonReply>,
+}
+
+#[uniffi::export]
+impl TerminalError {
+    pub fn error(&self) -> String { self.error.clone() }
+
+    pub fn reply(&self) -> Option<Arc<JsonReply>> {
+        self.reply.clone().map(|reply| Arc::new(reply))
+    }
+}
+
+#[uniffi::export]
+impl SessionHistory {
+    /// Receiver session Payjoin URI
+    pub fn pj_uri(&self) -> Option<Arc<crate::PjUri>> {
+        self.0 .0.pj_uri().map(|pj_uri| Arc::new(pj_uri.into()))
+    }
+
+    /// Psbt with receiver contributed inputs
+    pub fn psbt_with_contributed_inputs(&self) -> Option<Arc<crate::Psbt>> {
+        self.0 .0.psbt_with_contributed_inputs().map(|psbt| Arc::new(psbt.into()))
+    }
+
+    /// Terminal error from the session if present
+    pub fn terminal_error(&self) -> Option<Arc<TerminalError>> {
+        self.0 .0.terminal_error().map(|(error, reply)| {
+            Arc::new(TerminalError { error, reply: reply.map(|reply| reply.into()) })
+        })
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct ReplayResult {
+    state: ReceiverTypeState,
+    session_history: SessionHistory,
+}
+
+#[uniffi::export]
+impl ReplayResult {
+    pub fn state(&self) -> ReceiverTypeState { self.state.clone() }
+
+    pub fn session_history(&self) -> SessionHistory { self.session_history.clone() }
+}
+
+#[uniffi::export]
+pub fn replay_receiver_event_log(
+    persister: Arc<dyn JsonReceiverSessionPersister>,
+) -> Result<ReplayResult, ReplayError> {
+    let adapter = CallbackPersisterAdapter::new(persister);
+    let (state, session_history) = super::replay_event_log(&adapter).map_err(ReplayError::from)?;
+    Ok(ReplayResult { state: state.into(), session_history: session_history.into() })
+}
+#[derive(uniffi::Object)]
+pub struct MaybeBadInitInputsTransition(super::InitInputsTransition);
+
+#[uniffi::export]
+impl MaybeBadInitInputsTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<WithContext, ImplementationError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let res = self.0.save(&adapter)?;
+        Ok(res.into())
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct UninitializedReceiver {}
+
+#[uniffi::export]
+impl UninitializedReceiver {
+    #[uniffi::constructor]
+    // TODO: no need for this constructor. `create_session` is the only way to create a receiver.
+    pub fn new() -> Self { Self {} }
+
+    /// Creates a new [`WithContext`] with the provided parameters.
     ///
     /// # Parameters
     /// - `address`: The Bitcoin address for the payjoin session.
@@ -35,51 +181,27 @@ impl NewReceiver {
     /// - `expire_after`: The duration after which the session expires.
     ///
     /// # Returns
-    /// A new instance of [`NewReceiver`].
+    /// A new instance of [`WithContext`].
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md)
-    #[uniffi::constructor]
-    pub fn new(
+    pub fn create_session(
+        &self,
         address: Arc<Address>,
         directory: String,
         ohttp_keys: Arc<OhttpKeys>,
         expire_after: Option<u64>,
-    ) -> Result<Self, IntoUrlError> {
-        super::NewReceiver::new((*address).clone(), directory, (*ohttp_keys).clone(), expire_after)
-            .map(Into::into)
+    ) -> MaybeBadInitInputsTransition {
+        MaybeBadInitInputsTransition(
+            super::UninitializedReceiver::create_session(
+                (*address).clone(),
+                directory,
+                (*ohttp_keys).clone(),
+                expire_after,
+            )
+            .into(),
+        )
     }
-
-    /// Saves the new [`WithContext`] using the provided persister and returns the storage token.
-    pub fn persist(
-        &self,
-        persister: Arc<dyn ReceiverPersister>,
-    ) -> Result<ReceiverToken, ImplementationError> {
-        let mut adapter = CallbackPersisterAdapter::new(persister);
-        self.0.persist(&mut adapter)
-    }
-}
-
-#[derive(Clone, Debug, uniffi::Object)]
-#[uniffi::export(Display)]
-pub struct ReceiverToken(#[allow(dead_code)] Arc<payjoin::receive::v2::ReceiverToken>);
-
-impl std::fmt::Display for ReceiverToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) }
-}
-
-impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>> for ReceiverToken {
-    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>) -> Self {
-        ReceiverToken(Arc::new(value.into()))
-    }
-}
-
-impl From<payjoin::receive::v2::ReceiverToken> for ReceiverToken {
-    fn from(value: payjoin::receive::v2::ReceiverToken) -> Self { ReceiverToken(Arc::new(value)) }
-}
-
-impl From<ReceiverToken> for payjoin::receive::v2::ReceiverToken {
-    fn from(value: ReceiverToken) -> Self { (*value.0).clone() }
 }
 
 #[derive(Clone, Debug, uniffi::Object)]
@@ -93,20 +215,41 @@ impl From<super::WithContext> for WithContext {
     fn from(value: super::WithContext) -> Self { Self(value) }
 }
 
+#[derive(uniffi::Object)]
+pub struct WithContextTransition(super::WithContextTransition);
+
+#[uniffi::export]
+impl WithContextTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<WithContextTransitionOutcome, ImplementationError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let res = self.0.save(&adapter)?;
+        Ok(res.into())
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct WithContextTransitionOutcome(super::WithContextTransitionOutcome);
+
+impl From<super::WithContextTransitionOutcome> for WithContextTransitionOutcome {
+    fn from(value: super::WithContextTransitionOutcome) -> Self { Self(value) }
+}
+
+#[uniffi::export]
+impl WithContextTransitionOutcome {
+    pub fn is_none(&self) -> bool { self.0.is_none() }
+
+    pub fn is_success(&self) -> bool { self.0.is_success() }
+
+    pub fn success(&self) -> Option<Arc<UncheckedProposal>> {
+        self.0.success().map(|p| Arc::new(UncheckedProposal(p.into())))
+    }
+}
+
 #[uniffi::export]
 impl WithContext {
-    /// Loads a [`Self`] from the provided persister using the storage token.
-    #[uniffi::constructor]
-    pub fn load(
-        token: Arc<ReceiverToken>,
-        persister: Arc<dyn ReceiverPersister>,
-    ) -> Result<Self, ImplementationError> {
-        Ok(super::WithContext::from(
-            (*persister.load(token).map_err(|e| ImplementationError::from(e.to_string()))?).clone(),
-        )
-        .into())
-    }
-
     /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
     /// This identifies a session at the payjoin directory server.
     pub fn pj_uri(&self) -> crate::PjUri { self.0.pj_uri() }
@@ -118,14 +261,8 @@ impl WithContext {
     }
 
     ///The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
-    pub fn process_res(
-        &self,
-        body: &[u8],
-        context: Arc<ClientResponse>,
-    ) -> Result<Option<Arc<UncheckedProposal>>, Error> {
-        <Self as Into<super::WithContext>>::into(self.clone())
-            .process_res(body, context.as_ref())
-            .map(|e| e.map(|x| Arc::new(x.into())))
+    pub fn process_res(&self, body: &[u8], context: Arc<ClientResponse>) -> WithContextTransition {
+        WithContextTransition(self.0.process_res(body, &context))
     }
 
     pub fn to_json(&self) -> Result<String, SerdeJsonError> { self.0.to_json() }
@@ -134,8 +271,6 @@ impl WithContext {
     pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
         super::WithContext::from_json(json).map(Into::into)
     }
-
-    pub fn key(&self) -> ReceiverToken { self.0.key().into() }
 }
 
 #[derive(uniffi::Record)]
@@ -161,6 +296,35 @@ impl From<super::UncheckedProposal> for UncheckedProposal {
     fn from(value: super::UncheckedProposal) -> Self { Self(value) }
 }
 
+#[derive(uniffi::Object)]
+pub struct UncheckedProposalTransition(super::UncheckedProposalTransition);
+
+#[uniffi::export]
+impl UncheckedProposalTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<MaybeInputsOwned, ImplementationError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let res = self.0.save(&adapter)?;
+        Ok(res.into())
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct AssumeInteractiveTransition(super::AssumeInteractiveTransition);
+
+#[uniffi::export]
+impl AssumeInteractiveTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<MaybeInputsOwned, ImplementationError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let res = self.0.save(&adapter)?;
+        Ok(res.into())
+    }
+}
 #[uniffi::export]
 impl UncheckedProposal {
     /// The Sender’s Original PSBT
@@ -179,15 +343,15 @@ impl UncheckedProposal {
         &self,
         min_fee_rate: Option<u64>,
         can_broadcast: Arc<dyn CanBroadcast>,
-    ) -> Result<Arc<MaybeInputsOwned>, ReplyableError> {
-        self.0
-            .clone()
-            .check_broadcast_suitability(min_fee_rate, |transaction| {
+    ) -> UncheckedProposalTransition {
+        UncheckedProposalTransition(self.0.check_broadcast_suitability(
+            min_fee_rate,
+            |transaction| {
                 can_broadcast
                     .callback(transaction.to_vec())
                     .map_err(|e| ImplementationError::from(e.to_string()))
-            })
-            .map(|e| Arc::new(e.into()))
+            },
+        ))
     }
 
     /// Call this method if the only way to initiate a Payjoin with this receiver
@@ -195,8 +359,8 @@ impl UncheckedProposal {
     ///
     /// So-called "non-interactive" receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks.
     /// Those receivers call `extract_tx_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
-    pub fn assume_interactive_receiver(&self) -> Arc<MaybeInputsOwned> {
-        Arc::new(self.0.assume_interactive_receiver().into())
+    pub fn assume_interactive_receiver(&self) -> AssumeInteractiveTransition {
+        AssumeInteractiveTransition(self.0.assume_interactive_receiver())
     }
 
     /// Extract an OHTTP Encapsulated HTTP POST request to return
@@ -236,6 +400,21 @@ pub trait IsScriptOwned: Send + Sync {
     fn callback(&self, script: Vec<u8>) -> Result<bool, ForeignError>;
 }
 
+#[derive(uniffi::Object)]
+pub struct MaybeInputsOwnedTransition(super::MaybeInputsOwnedTransition);
+
+#[uniffi::export]
+impl MaybeInputsOwnedTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<MaybeInputsSeen, ImplementationError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let res = self.0.save(&adapter)?;
+        Ok(res.into())
+    }
+}
+
 #[uniffi::export]
 impl MaybeInputsOwned {
     ///Check that the Original PSBT has no receiver-owned inputs. Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
@@ -243,14 +422,10 @@ impl MaybeInputsOwned {
     pub fn check_inputs_not_owned(
         &self,
         is_owned: Arc<dyn IsScriptOwned>,
-    ) -> Result<Arc<MaybeInputsSeen>, ReplyableError> {
-        self.0
-            .check_inputs_not_owned(|input| {
-                is_owned
-                    .callback(input.to_vec())
-                    .map_err(|e| ImplementationError::from(e.to_string()))
-            })
-            .map(|t| Arc::new(t.into()))
+    ) -> MaybeInputsOwnedTransition {
+        MaybeInputsOwnedTransition(self.0.check_inputs_not_owned(|input| {
+            is_owned.callback(input.to_vec()).map_err(|e| ImplementationError::from(e.to_string()))
+        }))
     }
 }
 
@@ -269,21 +444,33 @@ impl From<super::MaybeInputsSeen> for MaybeInputsSeen {
     fn from(value: super::MaybeInputsSeen) -> Self { Self(value) }
 }
 
+#[derive(uniffi::Object)]
+pub struct MaybeInputsSeenTransition(super::MaybeInputsSeenTransition);
+
+#[uniffi::export]
+impl MaybeInputsSeenTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<OutputsUnknown, ImplementationError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let res = self.0.save(&adapter)?;
+        Ok(res.into())
+    }
+}
+
 #[uniffi::export]
 impl MaybeInputsSeen {
     /// Make sure that the original transaction inputs have never been seen before. This prevents probing attacks. This prevents reentrant Payjoin, where a sender proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
     pub fn check_no_inputs_seen_before(
         &self,
         is_known: Arc<dyn IsOutputKnown>,
-    ) -> Result<Arc<OutputsUnknown>, ReplyableError> {
-        self.0
-            .clone()
-            .check_no_inputs_seen_before(|outpoint| {
-                is_known
-                    .callback(outpoint.clone())
-                    .map_err(|e| ImplementationError::from(e.to_string()))
-            })
-            .map(|t| Arc::new(t.into()))
+    ) -> MaybeInputsSeenTransition {
+        MaybeInputsSeenTransition(self.0.clone().check_no_inputs_seen_before(|outpoint| {
+            is_known
+                .callback(outpoint.clone())
+                .map_err(|e| ImplementationError::from(e.to_string()))
+        }))
     }
 }
 
@@ -297,21 +484,33 @@ impl From<super::OutputsUnknown> for OutputsUnknown {
     fn from(value: super::OutputsUnknown) -> Self { Self(value) }
 }
 
+#[derive(uniffi::Object)]
+pub struct OutputsUnknownTransition(super::OutputsUnknownTransition);
+
+#[uniffi::export]
+impl OutputsUnknownTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<WantsOutputs, ImplementationError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let res = self.0.save(&adapter)?;
+        Ok(res.into())
+    }
+}
+
 #[uniffi::export]
 impl OutputsUnknown {
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
         &self,
         is_receiver_output: Arc<dyn IsScriptOwned>,
-    ) -> Result<Arc<WantsOutputs>, ReplyableError> {
-        self.0
-            .clone()
-            .identify_receiver_outputs(|output_script| {
-                is_receiver_output
-                    .callback(output_script.to_vec())
-                    .map_err(|e| ImplementationError::from(e.to_string()))
-            })
-            .map(|t| Arc::new(t.into()))
+    ) -> OutputsUnknownTransition {
+        OutputsUnknownTransition(self.0.clone().identify_receiver_outputs(|output_script| {
+            is_receiver_output
+                .callback(output_script.to_vec())
+                .map_err(|e| ImplementationError::from(e.to_string()))
+        }))
     }
 }
 
@@ -321,6 +520,22 @@ pub struct WantsOutputs(super::WantsOutputs);
 impl From<super::WantsOutputs> for WantsOutputs {
     fn from(value: super::WantsOutputs) -> Self { Self(value) }
 }
+
+#[derive(uniffi::Object)]
+pub struct WantsOutputsTransition(super::WantsOutputsTransition);
+
+#[uniffi::export]
+impl WantsOutputsTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<WantsInputs, ImplementationError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let res = self.0.save(&adapter)?;
+        Ok(res.into())
+    }
+}
+
 #[uniffi::export]
 impl WantsOutputs {
     pub fn output_substitution(&self) -> OutputSubstitution { self.0.output_substitution() }
@@ -335,7 +550,9 @@ impl WantsOutputs {
             .map(|t| Arc::new(t.into()))
     }
 
-    pub fn commit_outputs(&self) -> Arc<WantsInputs> { Arc::new(self.0.commit_outputs().into()) }
+    pub fn commit_outputs(&self) -> WantsOutputsTransition {
+        WantsOutputsTransition(self.0.commit_outputs())
+    }
 
     pub fn substitute_receiver_script(
         &self,
@@ -350,6 +567,21 @@ pub struct WantsInputs(super::WantsInputs);
 
 impl From<super::WantsInputs> for WantsInputs {
     fn from(value: super::WantsInputs) -> Self { Self(value) }
+}
+
+#[derive(uniffi::Object)]
+pub struct WantsInputsTransition(super::WantsInputsTransition);
+
+#[uniffi::export]
+impl WantsInputsTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<ProvisionalProposal, ImplementationError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let res = self.0.save(&adapter)?;
+        Ok(res.into())
+    }
 }
 
 #[uniffi::export]
@@ -388,8 +620,8 @@ impl WantsInputs {
         self.0.contribute_inputs(replacement_inputs).map(|t| Arc::new(t.into()))
     }
 
-    pub fn commit_inputs(&self) -> Arc<ProvisionalProposal> {
-        Arc::new(self.0.commit_inputs().into())
+    pub fn commit_inputs(&self) -> WantsInputsTransition {
+        WantsInputsTransition(self.0.commit_inputs())
     }
 }
 
@@ -400,6 +632,21 @@ impl From<super::ProvisionalProposal> for ProvisionalProposal {
     fn from(value: super::ProvisionalProposal) -> Self { Self(value) }
 }
 
+#[derive(uniffi::Object)]
+pub struct ProvisionalProposalTransition(super::ProvisionalProposalTransition);
+
+#[uniffi::export]
+impl ProvisionalProposalTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<PayjoinProposal, ImplementationError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let res = self.0.save(&adapter)?;
+        Ok(res.into())
+    }
+}
+
 /// A mutable checked proposal that the receiver may contribute inputs to to make a payjoin.
 #[uniffi::export]
 impl ProvisionalProposal {
@@ -408,18 +655,16 @@ impl ProvisionalProposal {
         process_psbt: Arc<dyn ProcessPsbt>,
         min_feerate_sat_per_vb: Option<u64>,
         max_effective_fee_rate_sat_per_vb: Option<u64>,
-    ) -> Result<Arc<PayjoinProposal>, ReplyableError> {
-        self.0
-            .finalize_proposal(
-                |psbt| {
-                    process_psbt
-                        .callback(psbt.to_string())
-                        .map_err(|e| ImplementationError::from(e.to_string()))
-                },
-                min_feerate_sat_per_vb,
-                max_effective_fee_rate_sat_per_vb,
-            )
-            .map(|e| Arc::new(e.into()))
+    ) -> ProvisionalProposalTransition {
+        ProvisionalProposalTransition(self.0.finalize_proposal(
+            |psbt| {
+                process_psbt
+                    .callback(psbt.to_string())
+                    .map_err(|e| ImplementationError::from(e.to_string()))
+            },
+            min_feerate_sat_per_vb,
+            max_effective_fee_rate_sat_per_vb,
+        ))
     }
 }
 
@@ -437,6 +682,21 @@ impl From<PayjoinProposal> for super::PayjoinProposal {
 
 impl From<super::PayjoinProposal> for PayjoinProposal {
     fn from(value: super::PayjoinProposal) -> Self { Self(value) }
+}
+
+#[derive(uniffi::Object)]
+pub struct PayjoinProposalTransition(super::PayjoinProposalTransition);
+
+#[uniffi::export]
+impl PayjoinProposalTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<(), ImplementationError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        self.0.save(&adapter)?;
+        Ok(())
+    }
 }
 
 #[uniffi::export]
@@ -464,48 +724,60 @@ impl PayjoinProposal {
     /// This function decapsulates the response using the provided OHTTP context. If the response status is successful, it indicates that the Payjoin proposal has been accepted. Otherwise, it returns an error with the status code.
     ///
     /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or choose to broadcast the original PSBT.
-    pub fn process_res(&self, body: &[u8], ctx: Arc<ClientResponse>) -> Result<(), Error> {
-        self.0.process_res(body, ctx.as_ref())
+    pub fn process_res(&self, body: &[u8], ctx: Arc<ClientResponse>) -> PayjoinProposalTransition {
+        PayjoinProposalTransition(self.0.process_res(body, ctx.as_ref()))
     }
 }
 
+/// Session persister that should save and load events as JSON strings.
 #[uniffi::export(with_foreign)]
-pub trait ReceiverPersister: Send + Sync {
-    fn save(&self, receiver: Arc<WithContext>) -> Result<Arc<ReceiverToken>, ForeignError>;
-    fn load(&self, token: Arc<ReceiverToken>) -> Result<Arc<WithContext>, ForeignError>;
+pub trait JsonReceiverSessionPersister: Send + Sync {
+    fn save(&self, event: String) -> Result<(), ForeignError>;
+    fn load(&self) -> Result<Vec<String>, ForeignError>;
+    fn close(&self) -> Result<(), ForeignError>;
 }
 
-/// Adapter for the ReceiverPersister trait to use the save and load callbacks.
+/// Adapter for the [JsonReceiverSessionPersister] trait to use the save and load callbacks.
 struct CallbackPersisterAdapter {
-    callback_persister: Arc<dyn ReceiverPersister>,
+    callback_persister: Arc<dyn JsonReceiverSessionPersister>,
 }
 
 impl CallbackPersisterAdapter {
-    pub fn new(callback_persister: Arc<dyn ReceiverPersister>) -> Self {
+    pub fn new(callback_persister: Arc<dyn JsonReceiverSessionPersister>) -> Self {
         Self { callback_persister }
     }
 }
 
-impl payjoin::persist::Persister<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>>
-    for CallbackPersisterAdapter
-{
-    type Token = ReceiverToken;
-    type Error = ForeignError;
+impl payjoin::persist::SessionPersister for CallbackPersisterAdapter {
+    type SessionEvent = payjoin::receive::v2::SessionEvent;
+    type InternalStorageError = ForeignError;
 
-    fn save(
-        &mut self,
-        receiver: payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>,
-    ) -> Result<Self::Token, Self::Error> {
-        let receiver = WithContext(super::WithContext::from(receiver));
-        let res = self.callback_persister.save(receiver.into())?;
-        Ok((*res).clone())
+    fn save_event(&self, event: &Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
+        let super_event: super::SessionEvent = event.clone().into();
+        let uni_event: ReceiverSessionEvent = super_event.into();
+        self.callback_persister
+            .save(uni_event.to_json().map_err(|e| ForeignError::InternalError(e.to_string()))?)
     }
 
     fn load(
         &self,
-        token: Self::Token,
-    ) -> Result<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>, Self::Error>
-    {
-        self.callback_persister.load(token.into()).map(|receiver| (*receiver).clone().0 .0)
+    ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError> {
+        let res = self.callback_persister.load()?;
+        Ok(Box::new(
+            match res
+                .into_iter()
+                .map(|event| {
+                    ReceiverSessionEvent::from_json(event)
+                        .map_err(|e| ForeignError::InternalError(e.to_string()))
+                        .map(|e| e.0.into())
+                })
+                .collect::<Result<Vec<_>, _>>()
+            {
+                Ok(events) => Box::new(events.into_iter()),
+                Err(e) => return Err(e),
+            },
+        ))
     }
+
+    fn close(&self) -> Result<(), Self::InternalStorageError> { self.callback_persister.close() }
 }

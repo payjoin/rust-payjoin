@@ -18,8 +18,6 @@ pub struct RequestError(InternalRequestError);
 
 #[derive(Debug)]
 pub(crate) enum InternalRequestError {
-    /// I/O error while reading the request body
-    Io(std::io::Error),
     /// A required HTTP header is missing from the request
     MissingHeader(&'static str),
     /// The Content-Type header has an invalid value
@@ -43,8 +41,7 @@ impl From<RequestError> for JsonReply {
         use InternalRequestError::*;
 
         match &e.0 {
-            Io(_)
-            | MissingHeader(_)
+            MissingHeader(_)
             | InvalidContentType(_)
             | InvalidContentLength(_)
             | ContentLengthTooLarge(_) =>
@@ -56,7 +53,6 @@ impl From<RequestError> for JsonReply {
 impl fmt::Display for RequestError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
-            InternalRequestError::Io(e) => write!(f, "{e}"),
             InternalRequestError::MissingHeader(header) => write!(f, "Missing header: {header}"),
             InternalRequestError::InvalidContentType(content_type) =>
                 write!(f, "Invalid content type: {content_type}"),
@@ -70,7 +66,6 @@ impl fmt::Display for RequestError {
 impl error::Error for RequestError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self.0 {
-            InternalRequestError::Io(e) => Some(e),
             InternalRequestError::InvalidContentLength(e) => Some(e),
             InternalRequestError::MissingHeader(_) => None,
             InternalRequestError::InvalidContentType(_) => None,

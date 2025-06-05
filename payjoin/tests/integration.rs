@@ -172,10 +172,13 @@ mod integration {
         use bitcoin::Address;
         use http::StatusCode;
         use payjoin::persist::{NoopPersister, NoopSessionPersister};
-        use payjoin::receive::v2::{PayjoinProposal, Receiver, UncheckedProposal};
+        use payjoin::receive::v2::{
+            replay_event_log as replay_receiver_event_log, PayjoinProposal, Receiver,
+            UncheckedProposal,
+        };
         use payjoin::send::v2::{Sender, SenderBuilder};
         use payjoin::{OhttpKeys, PjUri, UriExt};
-        use payjoin_test_utils::{BoxSendSyncError, TestServices};
+        use payjoin_test_utils::{BoxSendSyncError, InMemoryTestPersister, TestServices};
         use reqwest::{Client, Response};
 
         use super::*;
@@ -299,7 +302,7 @@ mod integration {
                 services.wait_for_services_ready().await?;
                 let directory = services.directory_url();
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
-                let noop_persister = NoopSessionPersister::default();
+                let persister = InMemoryTestPersister::default();
                 // **********************
                 // Inside the Receiver:
                 let address = receiver.get_new_address(None, None)?.assume_checked();
@@ -310,7 +313,7 @@ mod integration {
                     ohttp_keys.clone(),
                     None,
                 )
-                .save(&noop_persister)?;
+                .save(&persister)?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
                 let ohttp_relay = services.ohttp_relay_url();
@@ -324,7 +327,7 @@ mod integration {
                 assert!(response.status().is_success(), "error response: {}", response.status());
                 let response_body = session
                     .process_res(response.bytes().await?.to_vec().as_slice(), ctx)
-                    .save(&noop_persister)?;
+                    .save(&persister)?;
                 // No proposal yet since sender has not responded
                 assert!(response_body.is_none());
 
@@ -369,23 +372,28 @@ mod integration {
                 // POST payjoin
                 let outcome = session
                     .process_res(response.bytes().await?.to_vec().as_slice(), ctx)
-                    .save(&noop_persister)?;
-                let mut proposal = outcome.success().expect("proposal should exist").clone();
+                    .save(&persister)?;
+                let proposal = outcome.success().expect("proposal should exist").clone();
 
                 // Generate replyable error
                 let check_broadcast_suitability = || {
                     proposal
                         .clone()
-                        .check_broadcast_suitability(None, |_| Err("mock error".into()))
-                        .save(&noop_persister)
+                        .check_broadcast_suitability(None, |_| Ok(false))
+                        .save(&persister)
                 };
                 let server_error = check_broadcast_suitability()
                     .expect_err("should fail")
                     .api_error()
                     .expect("expected api error");
+                // TODO: this should be replaced by comparing the error itself once the error types impl PartialEq
+                // Issue: https://github.com/payjoin/rust-payjoin/issues/645
+                assert_eq!(server_error.to_string(), "Can't broadcast. PSBT rejected by mempool.");
 
-                let (err_req, err_ctx) =
-                    proposal.clone().extract_err_req(&(&server_error).into(), ohttp_relay)?;
+                let (_, session_history) = replay_receiver_event_log(&persister)?;
+                let (err_req, err_ctx) = session_history
+                    .extract_err_req(ohttp_relay)?
+                    .expect("error request should exist");
                 let err_response = agent
                     .post(err_req.url)
                     .header("Content-Type", err_req.content_type)
@@ -395,7 +403,7 @@ mod integration {
 
                 let err_bytes = err_response.bytes().await?;
                 // Ensure that the error was handled properly
-                assert!(proposal.process_err_res(&err_bytes, err_ctx).is_ok());
+                assert!(payjoin::receive::v2::process_err_res(&err_bytes, err_ctx).is_ok());
 
                 Ok(())
             }

@@ -125,6 +125,22 @@ impl SessionHistory {
             Arc::new(TerminalError { error, reply: reply.map(|reply| reply.into()) })
         })
     }
+
+    /// Extract the error request to be posted on the directory if an error occurred.
+    /// To process the response, use [process_err_res]
+    pub fn extract_err_req(
+        &self,
+        ohttp_relay: String,
+    ) -> Result<Option<RequestResponse>, SessionError> {
+        match self.0 .0.extract_err_req(ohttp_relay) {
+            Ok(Some((request, ctx))) => Ok(Some(RequestResponse {
+                request: request.into(),
+                client_response: Arc::new(ctx.into()),
+            })),
+            Ok(None) => Ok(None),
+            Err(e) => Err(SessionError::from(e)),
+        }
+    }
 }
 
 #[derive(uniffi::Object)]
@@ -362,28 +378,13 @@ impl UncheckedProposal {
     pub fn assume_interactive_receiver(&self) -> AssumeInteractiveTransition {
         AssumeInteractiveTransition(self.0.assume_interactive_receiver())
     }
+}
 
-    /// Extract an OHTTP Encapsulated HTTP POST request to return
-    /// a Receiver Error Response
-    pub fn extract_err_req(
-        &self,
-        err: Arc<JsonReply>,
-        ohttp_relay: String,
-    ) -> Result<RequestResponse, SessionError> {
-        self.0
-            .extract_err_req(&err, ohttp_relay)
-            .map(|(req, ctx)| RequestResponse { request: req, client_response: Arc::new(ctx) })
-    }
-
-    /// Process an OHTTP Encapsulated HTTP POST Error response
-    /// to ensure it has been posted properly
-    pub fn process_err_res(
-        &self,
-        body: &[u8],
-        context: Arc<ClientResponse>,
-    ) -> Result<(), SessionError> {
-        self.0.clone().process_err_res(body, &context)
-    }
+/// Process an OHTTP Encapsulated HTTP POST Error response
+/// to ensure it has been posted properly
+#[uniffi::export]
+pub fn process_err_res(body: &[u8], context: Arc<ClientResponse>) -> Result<(), SessionError> {
+    super::process_err_res(body, &context)
 }
 
 /// Type state to validate that the Original PSBT has no receiver-owned inputs.

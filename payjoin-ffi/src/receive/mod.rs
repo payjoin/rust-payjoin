@@ -363,30 +363,12 @@ impl UncheckedProposal {
             self.0.clone().assume_interactive_receiver(),
         ))))
     }
+}
 
-    /// Extract an OHTTP Encapsulated HTTP POST request to return
-    /// a Receiver Error Response
-    pub fn extract_err_req(
-        &self,
-        err: &JsonReply,
-        ohttp_relay: String,
-    ) -> Result<(Request, ClientResponse), SessionError> {
-        self.0
-            .clone()
-            .extract_err_req(&err.clone().into(), ohttp_relay)
-            .map(|(req, ctx)| (req.into(), ctx.into()))
-            .map_err(Into::into)
-    }
-
-    /// Process an OHTTP Encapsulated HTTP POST Error response
-    /// to ensure it has been posted properly
-    pub fn process_err_res(
-        &self,
-        body: &[u8],
-        context: &ClientResponse,
-    ) -> Result<(), SessionError> {
-        self.0.clone().process_err_res(body, context.into()).map_err(Into::into)
-    }
+/// Process an OHTTP Encapsulated HTTP POST Error response
+/// to ensure it has been posted properly
+pub fn process_err_res(body: &[u8], context: &ClientResponse) -> Result<(), SessionError> {
+    payjoin::receive::v2::process_err_res(body, context.into()).map_err(Into::into)
 }
 #[derive(Clone)]
 pub struct MaybeInputsOwned(payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsOwned>);

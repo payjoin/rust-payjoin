@@ -7,7 +7,7 @@ use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::bitcoin::Amount;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
-use hyper::body::{Buf, Bytes, Incoming};
+use hyper::body::{Bytes, Incoming};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
@@ -279,8 +279,8 @@ impl App {
         let (parts, body) = req.into_parts();
         let headers = Headers(&parts.headers);
         let query_string = parts.uri.query().unwrap_or("");
-        let body = body.collect().await.map_err(|e| Implementation(e.into()))?.aggregate().reader();
-        let proposal = UncheckedProposal::from_request(body, query_string, headers)?;
+        let body = body.collect().await.map_err(|e| Implementation(e.into()))?.to_bytes();
+        let proposal = UncheckedProposal::from_request(&body, query_string, headers)?;
 
         let payjoin_proposal = self.process_v1_proposal(proposal)?;
         let psbt = payjoin_proposal.psbt();

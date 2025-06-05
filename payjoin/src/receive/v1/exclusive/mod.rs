@@ -23,13 +23,13 @@ pub fn build_v1_pj_uri<'a>(
 
 impl UncheckedProposal {
     pub fn from_request(
-        body: impl std::io::Read,
+        body: &[u8],
         query: &str,
         headers: impl Headers,
     ) -> Result<Self, ReplyableError> {
-        let parsed_body = parse_body(headers, body).map_err(ReplyableError::V1)?;
+        let validated_body = validate_body(headers, body).map_err(ReplyableError::V1)?;
 
-        let base64 = String::from_utf8(parsed_body).map_err(InternalPayloadError::Utf8)?;
+        let base64 = String::from_utf8(validated_body).map_err(InternalPayloadError::Utf8)?;
 
         let (psbt, params) = crate::receive::parse_payload(base64, query, SUPPORTED_VERSIONS)
             .map_err(ReplyableError::Payload)?;
@@ -41,10 +41,7 @@ impl UncheckedProposal {
 /// Validate the request headers for a Payjoin request
 ///
 /// [`RequestError`] should only be produced here.
-fn parse_body(
-    headers: impl Headers,
-    mut body: impl std::io::Read,
-) -> Result<Vec<u8>, RequestError> {
+fn validate_body(headers: impl Headers, body: &[u8]) -> Result<Vec<u8>, RequestError> {
     let content_type = headers
         .get_header("content-type")
         .ok_or(InternalRequestError::MissingHeader("Content-Type"))?;
@@ -61,9 +58,7 @@ fn parse_body(
         return Err(InternalRequestError::ContentLengthTooLarge(content_length).into());
     }
 
-    let mut buf = vec![0; content_length];
-    body.read_exact(&mut buf).map_err(InternalRequestError::Io)?;
-    Ok(buf)
+    Ok(body[..content_length].to_vec())
 }
 
 #[cfg(test)]
@@ -99,9 +94,9 @@ mod tests {
         padded_body.resize(MAX_CONTENT_LENGTH + 1, 0);
         let headers = MockHeaders::new(padded_body.len() as u64);
 
-        let parsed_request = parse_body(headers.clone(), padded_body.as_slice());
-        assert!(parsed_request.is_err());
-        match parsed_request {
+        let validated_request = validate_body(headers.clone(), padded_body.as_slice());
+        assert!(validated_request.is_err());
+        match validated_request {
             Ok(_) => panic!("Expected error, got success"),
             Err(error) => {
                 assert_eq!(
@@ -119,8 +114,8 @@ mod tests {
     fn test_from_request() -> Result<(), Box<dyn std::error::Error>> {
         let body = ORIGINAL_PSBT.as_bytes();
         let headers = MockHeaders::new(body.len() as u64);
-        let parsed_request = parse_body(headers.clone(), body);
-        assert!(parsed_request.is_ok());
+        let validated_request = validate_body(headers.clone(), body);
+        assert!(validated_request.is_ok());
 
         let proposal = UncheckedProposal::from_request(body, QUERY_PARAMS, headers)?;
 

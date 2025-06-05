@@ -88,12 +88,10 @@ impl AppTrait for App {
             "Sent fallback transaction hex: {:#}",
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
         );
-        let psbt = ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()).map_err(
-            |e| {
-                log::debug!("Error processing response: {e:?}");
-                anyhow!("Failed to process response {e}")
-            },
-        )?;
+        let psbt = ctx.process_response(&response.bytes().await?).map_err(|e| {
+            log::debug!("Error processing response: {e:?}");
+            anyhow!("Failed to process response {e}")
+        })?;
 
         self.process_pj_response(psbt)?;
         Ok(())

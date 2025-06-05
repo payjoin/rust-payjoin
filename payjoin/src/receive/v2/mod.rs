@@ -182,7 +182,9 @@ impl Receiver<WithContext> {
         body: &[u8],
         context: ohttp::ClientResponse,
     ) -> Result<Option<Receiver<UncheckedProposal>>, Error> {
-        let body = match process_get_res(body, context)? {
+        let body = match process_get_res(body, context)
+            .map_err(InternalSessionError::DirectoryResponse)?
+        {
             Some(body) => body,
             None => return Ok(None),
         };
@@ -344,7 +346,8 @@ impl Receiver<UncheckedProposal> {
         body: &[u8],
         context: ohttp::ClientResponse,
     ) -> Result<(), SessionError> {
-        process_post_res(body, context).map_err(Into::into)
+        process_post_res(body, context)
+            .map_err(|e| InternalSessionError::DirectoryResponse(e).into())
     }
 }
 
@@ -633,7 +636,8 @@ impl Receiver<PayjoinProposal> {
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
     ) -> Result<(), Error> {
-        process_post_res(res, ohttp_context).map_err(Into::into)
+        process_post_res(res, ohttp_context)
+            .map_err(|e| InternalSessionError::DirectoryResponse(e).into())
     }
 }
 

@@ -21,24 +21,6 @@ impl From<InternalSessionError> for Error {
     fn from(e: InternalSessionError) -> Self { V2(e.into()) }
 }
 
-impl From<DirectoryResponseError> for SessionError {
-    fn from(value: DirectoryResponseError) -> Self {
-        match value {
-            DirectoryResponseError::InvalidSize(e) =>
-                InternalSessionError::UnexpectedResponseSize(e),
-            DirectoryResponseError::OhttpDecapsulation(e) =>
-                InternalSessionError::OhttpEncapsulation(e),
-            DirectoryResponseError::UnexpectedStatusCode(e) =>
-                InternalSessionError::UnexpectedStatusCode(e),
-        }
-        .into()
-    }
-}
-
-impl From<DirectoryResponseError> for Error {
-    fn from(value: DirectoryResponseError) -> Self { V2(value.into()) }
-}
-
 #[derive(Debug)]
 pub(crate) enum InternalSessionError {
     /// Url parsing failed
@@ -49,10 +31,8 @@ pub(crate) enum InternalSessionError {
     OhttpEncapsulation(OhttpEncapsulationError),
     /// Hybrid Public Key Encryption failed
     Hpke(HpkeError),
-    /// Unexpected response size
-    UnexpectedResponseSize(usize),
-    /// Unexpected status code
-    UnexpectedStatusCode(http::StatusCode),
+    /// The directory returned a bad response
+    DirectoryResponse(DirectoryResponseError),
 }
 
 impl From<OhttpEncapsulationError> for Error {
@@ -74,13 +54,7 @@ impl fmt::Display for SessionError {
             Expired(expiry) => write!(f, "Session expired at {expiry:?}"),
             OhttpEncapsulation(e) => write!(f, "OHTTP Encapsulation Error: {e}"),
             Hpke(e) => write!(f, "Hpke decryption failed: {e}"),
-            UnexpectedResponseSize(size) => write!(
-                f,
-                "Unexpected response size {}, expected {} bytes",
-                size,
-                crate::directory::ENCAPSULATED_MESSAGE_BYTES
-            ),
-            UnexpectedStatusCode(status) => write!(f, "Unexpected status code: {status}"),
+            DirectoryResponse(e) => write!(f, "Directory response error: {e}"),
         }
     }
 }
@@ -94,8 +68,7 @@ impl error::Error for SessionError {
             Expired(_) => None,
             OhttpEncapsulation(e) => Some(e),
             Hpke(e) => Some(e),
-            UnexpectedResponseSize(_) => None,
-            UnexpectedStatusCode(_) => None,
+            DirectoryResponse(e) => Some(e),
         }
     }
 }

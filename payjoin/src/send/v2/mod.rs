@@ -325,7 +325,8 @@ impl Sender<V2PostContext> {
         self,
         response: &[u8],
     ) -> Result<Sender<V2GetContext>, EncapsulationError> {
-        process_post_res(response, self.state.ohttp_ctx)?;
+        process_post_res(response, self.state.ohttp_ctx)
+            .map_err(InternalEncapsulationError::DirectoryResponse)?;
         Ok(Sender {
             state: V2GetContext {
                 endpoint: self.state.endpoint,
@@ -394,7 +395,9 @@ impl Sender<V2GetContext> {
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
     ) -> Result<Option<Psbt>, ResponseError> {
-        let body = match process_get_res(response, ohttp_ctx)? {
+        let body = match process_get_res(response, ohttp_ctx)
+            .map_err(InternalEncapsulationError::DirectoryResponse)?
+        {
             Some(body) => body,
             None => return Ok(None),
         };

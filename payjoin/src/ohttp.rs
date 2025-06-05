@@ -52,10 +52,40 @@ pub fn ohttp_encapsulate(
     Ok((buffer, ohttp_ctx))
 }
 
+#[derive(Debug)]
 pub enum DirectoryResponseError {
     InvalidSize(usize),
     OhttpDecapsulation(OhttpEncapsulationError),
     UnexpectedStatusCode(http::StatusCode),
+}
+
+impl fmt::Display for DirectoryResponseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use DirectoryResponseError::*;
+
+        match self {
+            OhttpDecapsulation(e) => write!(f, "OHTTP Decapsulation Error: {e}"),
+            InvalidSize(size) => write!(
+                f,
+                "Unexpected response size {}, expected {} bytes",
+                size,
+                crate::directory::ENCAPSULATED_MESSAGE_BYTES
+            ),
+            UnexpectedStatusCode(status) => write!(f, "Unexpected status code: {status}"),
+        }
+    }
+}
+
+impl error::Error for DirectoryResponseError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        use DirectoryResponseError::*;
+
+        match self {
+            OhttpDecapsulation(e) => Some(e),
+            InvalidSize(_) => None,
+            UnexpectedStatusCode(_) => None,
+        }
+    }
 }
 
 pub fn process_get_res(

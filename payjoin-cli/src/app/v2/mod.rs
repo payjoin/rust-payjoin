@@ -234,7 +234,7 @@ impl App {
                 println!("Posting Original PSBT Payload request...");
                 let response = post_request(req).await?;
                 println!("Sent fallback transaction");
-                match v1_ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()) {
+                match v1_ctx.process_response(&response.bytes().await?) {
                     Ok(psbt) => Ok(psbt),
                     Err(re) => {
                         println!("{re}");

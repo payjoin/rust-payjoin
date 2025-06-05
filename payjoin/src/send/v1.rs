@@ -21,8 +21,6 @@
 //! [`bitmask-core`](https://github.com/diba-io/bitmask-core) BDK integration. Bring your own
 //! wallet and http client.
 
-use std::io::{BufRead, BufReader};
-
 use bitcoin::psbt::Psbt;
 use bitcoin::{FeeRate, ScriptBuf, Weight};
 use error::{BuildSenderError, InternalBuildSenderError};
@@ -275,18 +273,12 @@ impl V1Context {
     /// Call this method with response from receiver to continue BIP78 flow. If the response is
     /// valid you will get appropriate PSBT that you should sign and broadcast.
     #[inline]
-    pub fn process_response(
-        self,
-        response: &mut impl std::io::Read,
-    ) -> Result<Psbt, ResponseError> {
-        let mut buf_reader = BufReader::with_capacity(MAX_CONTENT_LENGTH + 1, response);
-        let buffer = buf_reader.fill_buf().map_err(InternalValidationError::Io)?;
-
-        if buffer.len() > MAX_CONTENT_LENGTH {
+    pub fn process_response(self, response: &[u8]) -> Result<Psbt, ResponseError> {
+        if response.len() > MAX_CONTENT_LENGTH {
             return Err(ResponseError::from(InternalValidationError::ContentTooLarge));
         }
 
-        let res_str = std::str::from_utf8(buffer).map_err(|_| InternalValidationError::Parse)?;
+        let res_str = std::str::from_utf8(response).map_err(|_| InternalValidationError::Parse)?;
         let proposal = Psbt::from_str(res_str).map_err(|_| ResponseError::parse(res_str))?;
         self.psbt_context.process_proposal(proposal).map_err(Into::into)
     }
@@ -334,7 +326,7 @@ mod test {
             "message": "This version of payjoin is not supported."
         })
         .to_string();
-        match ctx.process_response(&mut known_json_error.as_bytes()) {
+        match ctx.process_response(known_json_error.as_bytes()) {
             Err(ResponseError::WellKnown(WellKnownError {
                 code: ErrorCode::VersionUnsupported,
                 ..
@@ -348,7 +340,7 @@ mod test {
             "message": "This version of payjoin is not supported."
         })
         .to_string();
-        match ctx.process_response(&mut invalid_json_error.as_bytes()) {
+        match ctx.process_response(invalid_json_error.as_bytes()) {
             Err(ResponseError::Validation(_)) => (),
             _ => panic!("Expected unrecognized JSON error"),
         }
@@ -356,19 +348,15 @@ mod test {
 
     #[test]
     fn process_response_valid() {
-        let mut cursor = std::io::Cursor::new(PAYJOIN_PROPOSAL.as_bytes());
-
         let ctx = create_v1_context();
-        let response = ctx.process_response(&mut cursor);
+        let response = ctx.process_response(PAYJOIN_PROPOSAL.as_bytes());
         assert!(response.is_ok())
     }
 
     #[test]
     fn process_response_invalid_psbt() {
-        let mut cursor = std::io::Cursor::new(INVALID_PSBT.as_bytes());
-
         let ctx = create_v1_context();
-        let response = ctx.process_response(&mut cursor);
+        let response = ctx.process_response(INVALID_PSBT.as_bytes());
         match response {
             Ok(_) => panic!("Invalid PSBT should have caused an error"),
             Err(error) => match error {
@@ -386,11 +374,10 @@ mod test {
     #[test]
     fn process_response_invalid_utf8() {
         // In UTF-8, 0xF0 represents the start of a 4-byte sequence, so 0xF0 by itself is invalid
-        let invalid_utf8 = [0xF0];
-        let mut cursor = std::io::Cursor::new(invalid_utf8);
+        let invalid_utf8 = &[0xF0];
 
         let ctx = create_v1_context();
-        let response = ctx.process_response(&mut cursor);
+        let response = ctx.process_response(invalid_utf8);
         match response {
             Ok(_) => panic!("Invalid UTF-8 should have caused an error"),
             Err(error) => match error {

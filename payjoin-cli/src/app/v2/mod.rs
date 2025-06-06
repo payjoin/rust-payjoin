@@ -16,7 +16,7 @@ use tokio::sync::watch;
 use super::config::Config;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
-use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, validate_relay, RelayManager};
+use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, RelayManager};
 use crate::app::{handle_interrupt, http_agent};
 use crate::db::v2::{ReceiverPersister, SenderPersister};
 use crate::db::Database;
@@ -78,7 +78,9 @@ impl AppTrait for App {
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
         let ohttp_keys =
-            unwrap_ohttp_keys_or_else_fetch(&self.config, self.relay_manager.clone()).await?;
+            unwrap_ohttp_keys_or_else_fetch(&self.config, None, self.relay_manager.clone())
+                .await?
+                .ohttp_keys;
         let mut persister = ReceiverPersister::new(self.db.clone());
         let new_receiver = NewReceiver::new(
             address,
@@ -160,7 +162,9 @@ impl App {
         println!("Receive session established");
         let mut pj_uri = session.pj_uri();
         pj_uri.amount = amount;
-        let ohttp_relay = self.unwrap_relay_or_else_fetch().await?;
+        let ohttp_relay = self
+            .unwrap_relay_or_else_fetch(Some(session.pj_uri().extras.endpoint().clone()))
+            .await?;
 
         println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{pj_uri}");
@@ -201,7 +205,7 @@ impl App {
     }
 
     async fn long_poll_post(&self, req_ctx: &mut Sender<WithReplyKey>) -> Result<Psbt> {
-        let ohttp_relay = self.unwrap_relay_or_else_fetch().await?;
+        let ohttp_relay = self.unwrap_relay_or_else_fetch(Some(req_ctx.endpoint().clone())).await?;
 
         match req_ctx.extract_v2(ohttp_relay.clone()) {
             Ok((req, ctx)) => {
@@ -246,7 +250,9 @@ impl App {
         &self,
         session: &mut Receiver<WithContext>,
     ) -> Result<Receiver<UncheckedProposal>> {
-        let ohttp_relay = self.unwrap_relay_or_else_fetch().await?;
+        let ohttp_relay = self
+            .unwrap_relay_or_else_fetch(Some(session.pj_uri().extras.endpoint().clone()))
+            .await?;
 
         loop {
             let (req, context) = session.extract_req(&ohttp_relay)?;
@@ -302,12 +308,18 @@ impl App {
         Ok(payjoin_proposal)
     }
 
-    async fn unwrap_relay_or_else_fetch(&self) -> Result<payjoin::Url> {
+    async fn unwrap_relay_or_else_fetch(
+        &self,
+        directory: Option<payjoin::Url>,
+    ) -> Result<payjoin::Url> {
         let selected_relay =
             self.relay_manager.lock().expect("Lock should not be poisoned").get_selected_relay();
         let ohttp_relay = match selected_relay {
             Some(relay) => relay,
-            None => validate_relay(&self.config, self.relay_manager.clone()).await?,
+            None =>
+                unwrap_ohttp_keys_or_else_fetch(&self.config, directory, self.relay_manager.clone())
+                    .await?
+                    .relay_url,
         };
         Ok(ohttp_relay)
     }

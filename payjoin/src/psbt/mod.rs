@@ -191,7 +191,7 @@ impl InternalInputPair<'_> {
                 // redeemScript can be extracted from scriptSig for signed P2SH inputs
                 let redeem_script = if let Some(ref script_sig) = self.psbtin.final_script_sig {
                     script_sig.redeem_script()
-                // try the PSBT redeem_script field for unsigned inputs.
+                    // try the PSBT redeem_script field for unsigned inputs.
                 } else {
                     self.psbtin.redeem_script.as_ref().map(|script| script.as_ref())
                 };
@@ -244,9 +244,7 @@ pub(crate) enum InternalPsbtInputError {
     SegWitTxOutMismatch,
     AddressType(AddressTypeError),
     NoRedeemScript,
-    InvalidP2wpkhScriptPubkey,
-    InvalidP2wshScriptPubkey,
-    InvalidP2trScriptPubkey,
+    InvalidScriptPubKey(AddressType),
 }
 
 impl fmt::Display for InternalPsbtInputError {
@@ -257,9 +255,7 @@ impl fmt::Display for InternalPsbtInputError {
             Self::SegWitTxOutMismatch => write!(f, "transaction output provided in SegWit UTXO field doesn't match the one in non-SegWit UTXO field"),
             Self::AddressType(_) => write!(f, "invalid address type"),
             Self::NoRedeemScript => write!(f, "provided p2sh PSBT input is missing a redeem_script"),
-            Self::InvalidP2wpkhScriptPubkey => write!(f, "provided script pubkey is invalid for P2WPKH"),
-            Self::InvalidP2wshScriptPubkey => write!(f, "provided script pubkey is invalid for P2WSH"),
-            Self::InvalidP2trScriptPubkey => write!(f, "provided script pubkey is invalid for P2TR"),
+            Self::InvalidScriptPubKey(e) => write!(f, "provided script was not a valid type of {e}")
         }
     }
 }
@@ -272,9 +268,7 @@ impl std::error::Error for InternalPsbtInputError {
             Self::SegWitTxOutMismatch => None,
             Self::AddressType(error) => Some(error),
             Self::NoRedeemScript => None,
-            Self::InvalidP2wpkhScriptPubkey => None,
-            Self::InvalidP2wshScriptPubkey => None,
-            Self::InvalidP2trScriptPubkey => None,
+            Self::InvalidScriptPubKey(_) => None,
         }
     }
 }

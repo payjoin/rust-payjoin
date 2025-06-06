@@ -1689,6 +1689,7 @@ dependencies = [
  "rcgen",
  "reqwest",
  "rustls 0.22.4",
+ "serde",
  "testcontainers",
  "testcontainers-modules",
  "tokio",

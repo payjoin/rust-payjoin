@@ -15,6 +15,8 @@ pub(crate) enum Error {
     Deserialize(serde_json::Error),
     #[cfg(feature = "v2")]
     NotFound(String),
+    #[cfg(feature = "v2")]
+    TryFromSlice(std::array::TryFromSliceError),
 }
 
 impl fmt::Display for Error {
@@ -27,6 +29,8 @@ impl fmt::Display for Error {
             Error::Deserialize(e) => write!(f, "Deserialization failed: {e}"),
             #[cfg(feature = "v2")]
             Error::NotFound(key) => write!(f, "Key not found: {key}"),
+            #[cfg(feature = "v2")]
+            Error::TryFromSlice(e) => write!(f, "TryFromSlice failed: {e}"),
         }
     }
 }

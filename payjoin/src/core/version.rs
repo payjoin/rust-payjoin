@@ -1,6 +1,6 @@
 use core::fmt;
 
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The Payjoin version
 ///
@@ -16,8 +16,7 @@ use serde::{Serialize, Serializer};
 /// ```
 ///
 /// # Note
-/// - Only [`Serialize`] is implemented for json array serialization in the `unsupported-version` error message,
-///   not [`serde::Deserialize`], as deserialization is not required for this type.
+/// - Both [`Serialize`] and [`Deserialize`] are implemented for json array serialization in the `unsupported-version` error message,
 /// - [`fmt::Display`] and [`fmt::Debug`] output the `u8` representation for compatibility with BIP 78/77
 ///   and to match the expected wire format.
 #[repr(u8)]
@@ -43,5 +42,19 @@ impl Serialize for Version {
         S: Serializer,
     {
         (*self as u8).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Version {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let v = u8::deserialize(deserializer)?;
+        match v {
+            1 => Ok(Version::One),
+            2 => Ok(Version::Two),
+            _ => Err(serde::de::Error::custom("Invalid version")),
+        }
     }
 }

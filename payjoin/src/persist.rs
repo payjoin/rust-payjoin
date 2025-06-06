@@ -613,39 +613,16 @@ impl<E: 'static> SessionPersister for NoopSessionPersister<E> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, RwLock};
-
+    use payjoin_test_utils::{InMemoryTestError, InMemoryTestPersister};
     use serde::{Deserialize, Serialize};
 
     use super::*;
 
     type InMemoryTestState = String;
-    #[derive(Clone, Default)]
-    struct InMemoryTestPersister {
-        inner: Arc<RwLock<InnerStorage>>,
-    }
-
-    #[derive(Clone, Default)]
-    struct InnerStorage {
-        events: Vec<String>,
-        is_closed: bool,
-    }
-
-    #[derive(Debug, Clone, PartialEq)]
-    /// Dummy error type for testing
-    struct InMemoryTestError {}
-
-    impl std::error::Error for InMemoryTestError {}
-
-    impl std::fmt::Display for InMemoryTestError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "InMemoryTestError")
-        }
-    }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct InMemoryTestEvent(String);
-    impl SessionPersister for InMemoryTestPersister {
+    pub struct InMemoryTestEvent(String);
+    impl SessionPersister for InMemoryTestPersister<InMemoryTestState> {
         type InternalStorageError = std::convert::Infallible;
         type SessionEvent = InMemoryTestEvent;
 
@@ -674,7 +651,9 @@ mod tests {
     struct TestCase<SuccessState, ErrorState> {
         // Allow type complexity for the test closure
         #[allow(clippy::type_complexity)]
-        test: Box<dyn Fn(&InMemoryTestPersister) -> Result<SuccessState, ErrorState>>,
+        test: Box<
+            dyn Fn(&InMemoryTestPersister<InMemoryTestState>) -> Result<SuccessState, ErrorState>,
+        >,
         expected_result: ExpectedResult<SuccessState, ErrorState>,
     }
 
@@ -690,7 +669,7 @@ mod tests {
     }
 
     fn do_test<SuccessState: std::fmt::Debug + PartialEq, ErrorState: std::error::Error>(
-        persister: &InMemoryTestPersister,
+        persister: &InMemoryTestPersister<InMemoryTestState>,
         test_case: &TestCase<SuccessState, ErrorState>,
     ) {
         let expected_result = &test_case.expected_result;

@@ -22,6 +22,7 @@ payjoin-directory = { version = "0.0.2", features = ["_danger-local-https"] }
 rcgen = "0.11"
 rustls = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+serde = { version = "1.0.186", features = ["derive"] }
 testcontainers = "0.15.0"
 testcontainers-modules = { version = "0.3.7", features = ["redis"] }
 tokio = { version = "1.38.1", features = ["full"] }

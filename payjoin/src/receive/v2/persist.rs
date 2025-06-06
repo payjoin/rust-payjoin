@@ -165,8 +165,12 @@ pub enum SessionEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::persist::test_utils::InMemoryTestPersister;
     use crate::receive::v1::test::unchecked_proposal_from_test_vector;
     use crate::receive::v2::test::SHARED_CONTEXT;
+    use crate::receive::v2::{
+        PayjoinProposal, ProvisionalProposal, UncheckedProposal, WithContext,
+    };
 
     #[test]
     fn test_session_event_serialization_roundtrip() {
@@ -213,5 +217,183 @@ mod tests {
                 serde_json::from_str(&serialized).expect("Deserialization should not fail");
             assert_eq!(event, deserialized);
         }
+    }
+
+    struct SessionHistoryExpectedOutcome {
+        psbt_with_contributed_inputs: Option<bitcoin::Psbt>,
+    }
+
+    struct SessionHistoryTest {
+        events: Vec<SessionEvent>,
+        expected_session_history: SessionHistoryExpectedOutcome,
+        expected_receiver_state: ReceiverTypeState,
+    }
+
+    fn run_session_history_test(test: SessionHistoryTest) {
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        for event in test.events {
+            persister.save_event(&event).expect("In memory persister shouldn't fail");
+        }
+
+        let (receiver, session_history) =
+            replay_event_log(&persister).expect("In memory persister shouldn't fail");
+        assert_eq!(receiver, test.expected_receiver_state);
+        assert_eq!(
+            session_history.psbt_with_contributed_inputs(),
+            test.expected_session_history.psbt_with_contributed_inputs
+        );
+    }
+
+    #[test]
+    fn test_replaying_session_creation() {
+        let session_context = SHARED_CONTEXT.clone();
+        let test = SessionHistoryTest {
+            events: vec![SessionEvent::Created(session_context.clone())],
+            expected_session_history: SessionHistoryExpectedOutcome {
+                psbt_with_contributed_inputs: None,
+            },
+            expected_receiver_state: ReceiverTypeState::WithContext(Receiver {
+                state: WithContext { context: session_context },
+            }),
+        };
+        run_session_history_test(test);
+    }
+
+    #[test]
+    fn test_replaying_unchecked_proposal() {
+        let session_context = SHARED_CONTEXT.clone();
+
+        let test = SessionHistoryTest {
+            events: vec![
+                SessionEvent::Created(session_context.clone()),
+                SessionEvent::UncheckedProposal((unchecked_proposal_from_test_vector(), None)),
+            ],
+            expected_session_history: SessionHistoryExpectedOutcome {
+                psbt_with_contributed_inputs: None,
+            },
+            expected_receiver_state: ReceiverTypeState::UncheckedProposal(Receiver {
+                state: UncheckedProposal {
+                    v1: unchecked_proposal_from_test_vector(),
+                    context: session_context,
+                },
+            }),
+        };
+        run_session_history_test(test);
+    }
+
+    #[test]
+    fn test_replaying_unchecked_proposal_with_reply_key() {
+        let session_context = SHARED_CONTEXT.clone();
+
+        let test = SessionHistoryTest {
+            events: vec![
+                SessionEvent::Created(session_context.clone()),
+                SessionEvent::UncheckedProposal((
+                    unchecked_proposal_from_test_vector(),
+                    session_context.e.clone(),
+                )),
+            ],
+            expected_session_history: SessionHistoryExpectedOutcome {
+                psbt_with_contributed_inputs: None,
+            },
+            expected_receiver_state: ReceiverTypeState::UncheckedProposal(Receiver {
+                state: UncheckedProposal {
+                    v1: unchecked_proposal_from_test_vector(),
+                    context: session_context,
+                },
+            }),
+        };
+        run_session_history_test(test);
+    }
+
+    #[test]
+    fn test_contributed_inputs() {
+        let session_context = SHARED_CONTEXT.clone();
+        let mut events = vec![];
+
+        let unchecked_proposal = unchecked_proposal_from_test_vector();
+        let maybe_inputs_owned = unchecked_proposal.clone().assume_interactive_receiver();
+        let maybe_inputs_seen = maybe_inputs_owned
+            .clone()
+            .check_inputs_not_owned(|_| Ok(false))
+            .expect("No inputs should be owned");
+        let outputs_unknown = maybe_inputs_seen
+            .clone()
+            .check_no_inputs_seen_before(|_| Ok(false))
+            .expect("No inputs should be seen before");
+        let wants_outputs = outputs_unknown
+            .clone()
+            .identify_receiver_outputs(|_| Ok(true))
+            .expect("Outputs should be identified");
+        let wants_inputs = wants_outputs.clone().commit_outputs();
+        let provisional_proposal = wants_inputs.clone().commit_inputs();
+
+        events.push(SessionEvent::Created(session_context.clone()));
+        events.push(SessionEvent::UncheckedProposal((unchecked_proposal, None)));
+        events.push(SessionEvent::MaybeInputsOwned(maybe_inputs_owned));
+        events.push(SessionEvent::MaybeInputsSeen(maybe_inputs_seen));
+        events.push(SessionEvent::OutputsUnknown(outputs_unknown));
+        events.push(SessionEvent::WantsOutputs(wants_outputs));
+        events.push(SessionEvent::WantsInputs(wants_inputs));
+        events.push(SessionEvent::ProvisionalProposal(provisional_proposal.clone()));
+
+        let test = SessionHistoryTest {
+            events,
+            expected_session_history: SessionHistoryExpectedOutcome {
+                psbt_with_contributed_inputs: Some(provisional_proposal.payjoin_psbt.clone()),
+            },
+            expected_receiver_state: ReceiverTypeState::ProvisionalProposal(Receiver {
+                state: ProvisionalProposal { v1: provisional_proposal, context: session_context },
+            }),
+        };
+        run_session_history_test(test);
+    }
+
+    #[test]
+    fn test_payjoin_proposal() {
+        let session_context = SHARED_CONTEXT.clone();
+        let mut events = vec![];
+
+        let unchecked_proposal = unchecked_proposal_from_test_vector();
+        let maybe_inputs_owned = unchecked_proposal.clone().assume_interactive_receiver();
+        let maybe_inputs_seen = maybe_inputs_owned
+            .clone()
+            .check_inputs_not_owned(|_| Ok(false))
+            .expect("No inputs should be owned");
+        let outputs_unknown = maybe_inputs_seen
+            .clone()
+            .check_no_inputs_seen_before(|_| Ok(false))
+            .expect("No inputs should be seen before");
+        let wants_outputs = outputs_unknown
+            .clone()
+            .identify_receiver_outputs(|_| Ok(true))
+            .expect("Outputs should be identified");
+        let wants_inputs = wants_outputs.clone().commit_outputs();
+        let provisional_proposal = wants_inputs.clone().commit_inputs();
+        let payjoin_proposal = provisional_proposal
+            .clone()
+            .finalize_proposal(|psbt| Ok(psbt.clone()), None, None)
+            .expect("Payjoin proposal should be finalized");
+
+        events.push(SessionEvent::Created(session_context.clone()));
+        events.push(SessionEvent::UncheckedProposal((unchecked_proposal, None)));
+        events.push(SessionEvent::MaybeInputsOwned(maybe_inputs_owned));
+        events.push(SessionEvent::MaybeInputsSeen(maybe_inputs_seen));
+        events.push(SessionEvent::OutputsUnknown(outputs_unknown));
+        events.push(SessionEvent::WantsOutputs(wants_outputs));
+        events.push(SessionEvent::WantsInputs(wants_inputs));
+        events.push(SessionEvent::ProvisionalProposal(provisional_proposal.clone()));
+        events.push(SessionEvent::PayjoinProposal(payjoin_proposal.clone()));
+
+        let test = SessionHistoryTest {
+            events,
+            expected_session_history: SessionHistoryExpectedOutcome {
+                psbt_with_contributed_inputs: Some(provisional_proposal.payjoin_psbt.clone()),
+            },
+            expected_receiver_state: ReceiverTypeState::PayjoinProposal(Receiver {
+                state: PayjoinProposal { v1: payjoin_proposal, context: session_context },
+            }),
+        };
+        run_session_history_test(test);
     }
 }

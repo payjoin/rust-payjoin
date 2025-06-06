@@ -3,7 +3,7 @@ use std::error;
 
 use super::Error::V2;
 use crate::hpke::HpkeError;
-use crate::ohttp::OhttpEncapsulationError;
+use crate::ohttp::{DirectoryResponseError, OhttpEncapsulationError};
 use crate::receive::error::Error;
 
 /// Error that may occur during a v2 session typestate change
@@ -31,10 +31,8 @@ pub(crate) enum InternalSessionError {
     OhttpEncapsulation(OhttpEncapsulationError),
     /// Hybrid Public Key Encryption failed
     Hpke(HpkeError),
-    /// Unexpected response size
-    UnexpectedResponseSize(usize),
-    /// Unexpected status code
-    UnexpectedStatusCode(http::StatusCode),
+    /// The directory returned a bad response
+    DirectoryResponse(DirectoryResponseError),
 }
 
 impl From<OhttpEncapsulationError> for Error {
@@ -56,13 +54,7 @@ impl fmt::Display for SessionError {
             Expired(expiry) => write!(f, "Session expired at {expiry:?}"),
             OhttpEncapsulation(e) => write!(f, "OHTTP Encapsulation Error: {e}"),
             Hpke(e) => write!(f, "Hpke decryption failed: {e}"),
-            UnexpectedResponseSize(size) => write!(
-                f,
-                "Unexpected response size {}, expected {} bytes",
-                size,
-                crate::directory::ENCAPSULATED_MESSAGE_BYTES
-            ),
-            UnexpectedStatusCode(status) => write!(f, "Unexpected status code: {status}"),
+            DirectoryResponse(e) => write!(f, "Directory response error: {e}"),
         }
     }
 }
@@ -76,8 +68,7 @@ impl error::Error for SessionError {
             Expired(_) => None,
             OhttpEncapsulation(e) => Some(e),
             Hpke(e) => Some(e),
-            UnexpectedResponseSize(_) => None,
-            UnexpectedStatusCode(_) => None,
+            DirectoryResponse(e) => Some(e),
         }
     }
 }

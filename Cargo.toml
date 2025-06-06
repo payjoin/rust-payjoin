@@ -3,8 +3,7 @@ members = ["payjoin", "payjoin-cli", "payjoin-directory", "payjoin-test-utils"]
 resolver = "2"
 exclude = ["payjoin-ffi"]
 
-[patch.crates-io.payjoin]
-path = "payjoin"
-
-[patch.crates-io.payjoin-directory]
-path = "payjoin-directory"
+[patch.crates-io]
+payjoin = { path = "payjoin" }
+payjoin-directory = { path = "payjoin-directory" }
+payjoin-test-utils = { path = "payjoin-test-utils" }

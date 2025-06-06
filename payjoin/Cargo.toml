@@ -26,6 +26,7 @@ v2 = ["_core", "hpke", "dep:http", "bhttp", "ohttp", "url/serde", "directory"]
 io = ["v2", "reqwest/rustls-tls"]
 _danger-local-https = ["reqwest/rustls-tls", "rustls"]
 _multiparty = ["v2"]
+_test-utils = []
 
 [dependencies]
 bitcoin = { version = "0.32.5", features = ["base64"] }
@@ -43,7 +44,7 @@ serde_json = { version = "1.0.108", optional = true }
 
 [dev-dependencies]
 bitcoind = { version = "0.36.0", features = ["0_21_2"] }
-payjoin-test-utils = { path = "../payjoin-test-utils" }
+payjoin-test-utils = { version = "0.0.0" }
 once_cell = "1.19.0"
 tokio = { version = "1.38.1", features = ["full"] }
 tracing = "0.1.40"

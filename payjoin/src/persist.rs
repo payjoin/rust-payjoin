@@ -611,25 +611,73 @@ impl<E: 'static> SessionPersister for NoopSessionPersister<E> {
     fn close(&self) -> Result<(), Self::InternalStorageError> { Ok(()) }
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(feature = "_test-utils")]
+pub mod test_utils {
     use std::sync::{Arc, RwLock};
 
+    use crate::persist::SessionPersister;
+
+    #[derive(Clone)]
+    /// In-memory session persister for testing session replays and introspecting session events
+    pub struct InMemoryTestPersister<V> {
+        pub(crate) inner: Arc<RwLock<InnerStorage<V>>>,
+    }
+
+    impl<V> Default for InMemoryTestPersister<V> {
+        fn default() -> Self { Self { inner: Arc::new(RwLock::new(InnerStorage::default())) } }
+    }
+
+    #[derive(Clone)]
+    pub(crate) struct InnerStorage<V> {
+        pub(crate) events: Vec<V>,
+        pub(crate) is_closed: bool,
+    }
+
+    impl<V> Default for InnerStorage<V> {
+        fn default() -> Self { Self { events: vec![], is_closed: false } }
+    }
+
+    impl<V> SessionPersister for InMemoryTestPersister<V>
+    where
+        V: Clone + 'static,
+    {
+        type InternalStorageError = std::convert::Infallible;
+        type SessionEvent = V;
+
+        fn save_event(&self, event: &Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
+            let mut inner = self.inner.write().expect("Lock should not be poisoned");
+            inner.events.push(event.clone());
+            Ok(())
+        }
+
+        fn load(
+            &self,
+        ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError>
+        {
+            let inner = self.inner.read().expect("Lock should not be poisoned");
+            let events = inner.events.clone();
+            Ok(Box::new(events.into_iter()))
+        }
+
+        fn close(&self) -> Result<(), Self::InternalStorageError> {
+            let mut inner = self.inner.write().expect("Lock should not be poisoned");
+            inner.is_closed = true;
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::*;
+    use crate::persist::test_utils::InMemoryTestPersister;
 
     type InMemoryTestState = String;
-    #[derive(Clone, Default)]
-    struct InMemoryTestPersister {
-        inner: Arc<RwLock<InnerStorage>>,
-    }
 
-    #[derive(Clone, Default)]
-    struct InnerStorage {
-        events: Vec<String>,
-        is_closed: bool,
-    }
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct InMemoryTestEvent(String);
 
     #[derive(Debug, Clone, PartialEq)]
     /// Dummy error type for testing
@@ -643,38 +691,12 @@ mod tests {
         }
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct InMemoryTestEvent(String);
-    impl SessionPersister for InMemoryTestPersister {
-        type InternalStorageError = std::convert::Infallible;
-        type SessionEvent = InMemoryTestEvent;
-
-        fn save_event(&self, event: &Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
-            let mut inner = self.inner.write().expect("Lock should not be poisoned");
-            inner.events.push(event.0.clone());
-            Ok(())
-        }
-
-        fn load(
-            &self,
-        ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError>
-        {
-            let inner = self.inner.read().expect("Lock should not be poisoned");
-            let events = inner.events.clone();
-            Ok(Box::new(events.into_iter().map(InMemoryTestEvent)))
-        }
-
-        fn close(&self) -> Result<(), Self::InternalStorageError> {
-            let mut inner = self.inner.write().expect("Lock should not be poisoned");
-            inner.is_closed = true;
-            Ok(())
-        }
-    }
-
     struct TestCase<SuccessState, ErrorState> {
         // Allow type complexity for the test closure
         #[allow(clippy::type_complexity)]
-        test: Box<dyn Fn(&InMemoryTestPersister) -> Result<SuccessState, ErrorState>>,
+        test: Box<
+            dyn Fn(&InMemoryTestPersister<InMemoryTestEvent>) -> Result<SuccessState, ErrorState>,
+        >,
         expected_result: ExpectedResult<SuccessState, ErrorState>,
     }
 
@@ -690,7 +712,7 @@ mod tests {
     }
 
     fn do_test<SuccessState: std::fmt::Debug + PartialEq, ErrorState: std::error::Error>(
-        persister: &InMemoryTestPersister,
+        persister: &InMemoryTestPersister<InMemoryTestEvent>,
         test_case: &TestCase<SuccessState, ErrorState>,
     ) {
         let expected_result = &test_case.expected_result;

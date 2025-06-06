@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use super::{Receiver, WithContext};
 use crate::persist::{self};
-use crate::uri::ShortId;
+use crate::core::uri::ShortId;
 
 /// Opaque key type for the receiver
 #[derive(Debug, Clone, PartialEq, Eq)]

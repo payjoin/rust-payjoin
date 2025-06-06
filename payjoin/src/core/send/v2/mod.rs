@@ -35,7 +35,7 @@ use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
 use crate::persist::Persister;
 use crate::send::v1;
-use crate::uri::{ShortId, UrlExt};
+use crate::core::uri::{ShortId, UrlExt};
 use crate::{HpkeKeyPair, HpkePublicKey, ImplementationError, IntoUrl, OhttpKeys, PjUri, Request};
 
 mod error;
@@ -239,7 +239,7 @@ impl Sender<WithReplyKey> {
 
     pub(crate) fn extract_rs_pubkey(
         &self,
-    ) -> Result<HpkePublicKey, crate::uri::url_ext::ParseReceiverPubkeyParamError> {
+    ) -> Result<HpkePublicKey, crate::core::uri::url_ext::ParseReceiverPubkeyParamError> {
         self.v1.endpoint.receiver_pubkey()
     }
 

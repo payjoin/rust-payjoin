@@ -5,7 +5,7 @@ use bitcoin::psbt::Error as PsbtError;
 use crate::hpke::HpkeError;
 use crate::ohttp::OhttpEncapsulationError;
 use crate::send::InternalProposalError;
-use crate::uri::url_ext::ParseReceiverPubkeyParamError;
+use crate::core::uri::url_ext::ParseReceiverPubkeyParamError;
 use crate::ImplementationError;
 
 #[derive(Debug)]

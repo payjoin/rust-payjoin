@@ -12,7 +12,7 @@ use crate::hpke::decrypt_message_b;
 use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
 use crate::send::v2::V2PostContext;
-use crate::uri::UrlExt;
+use crate::core::uri::UrlExt;
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
 mod error;

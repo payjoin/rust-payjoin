@@ -1,7 +1,7 @@
 use core::fmt;
 use std::error;
 
-use crate::uri::ShortId;
+use crate::core::uri::ShortId;
 use crate::Version;
 
 #[derive(Debug)]

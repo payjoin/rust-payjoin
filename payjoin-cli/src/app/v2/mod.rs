@@ -10,7 +10,8 @@ use payjoin::receive::v2::{
 };
 use payjoin::receive::{Error, ReplyableError};
 use payjoin::send::v2::{Sender, SenderBuilder, WithReplyKey};
-use payjoin::{ImplementationError, Uri};
+use payjoin::Uri;
+use payjoin::core::ImplementationError;
 use tokio::sync::watch;
 
 use super::config::Config;

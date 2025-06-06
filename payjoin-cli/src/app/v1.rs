@@ -7,7 +7,7 @@ use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::bitcoin::Amount;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
-use hyper::body::{Buf, Bytes, Incoming};
+use hyper::body::{Bytes, Incoming};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
@@ -88,12 +88,10 @@ impl AppTrait for App {
             "Sent fallback transaction hex: {:#}",
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
         );
-        let psbt = ctx.process_response(&mut response.bytes().await?.to_vec().as_slice()).map_err(
-            |e| {
-                log::debug!("Error processing response: {e:?}");
-                anyhow!("Failed to process response {e}")
-            },
-        )?;
+        let psbt = ctx.process_response(&response.bytes().await?).map_err(|e| {
+            log::debug!("Error processing response: {e:?}");
+            anyhow!("Failed to process response {e}")
+        })?;
 
         self.process_pj_response(psbt)?;
         Ok(())
@@ -279,8 +277,8 @@ impl App {
         let (parts, body) = req.into_parts();
         let headers = Headers(&parts.headers);
         let query_string = parts.uri.query().unwrap_or("");
-        let body = body.collect().await.map_err(|e| Implementation(e.into()))?.aggregate().reader();
-        let proposal = UncheckedProposal::from_request(body, query_string, headers)?;
+        let body = body.collect().await.map_err(|e| Implementation(e.into()))?.to_bytes();
+        let proposal = UncheckedProposal::from_request(&body, query_string, headers)?;
 
         let payjoin_proposal = self.process_v1_proposal(proposal)?;
         let psbt = payjoin_proposal.psbt();

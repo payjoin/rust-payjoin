@@ -10,7 +10,7 @@ use crate::receive::error::Error;
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
 /// You can only display it.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct SessionError(InternalSessionError);
 
 impl From<InternalSessionError> for SessionError {
@@ -21,7 +21,7 @@ impl From<InternalSessionError> for Error {
     fn from(e: InternalSessionError) -> Self { V2(e.into()) }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InternalSessionError {
     /// Url parsing failed
     ParseUrl(crate::into_url::Error),

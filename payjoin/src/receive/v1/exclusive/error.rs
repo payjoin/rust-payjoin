@@ -13,7 +13,7 @@ use crate::receive::JsonReply;
 ///
 /// The error messages are formatted as JSON strings according to the BIP-78 spec with appropriate
 /// error codes and human-readable messages.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct RequestError(InternalRequestError);
 
 #[derive(Debug)]
@@ -27,6 +27,30 @@ pub(crate) enum InternalRequestError {
     /// The Content-Length value exceeds the maximum allowed size
     ContentLengthTooLarge(usize),
 }
+
+impl PartialEq for InternalRequestError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (InternalRequestError::MissingHeader(s1), InternalRequestError::MissingHeader(s2)) =>
+                s1 == s2,
+            (
+                InternalRequestError::InvalidContentType(s1),
+                InternalRequestError::InvalidContentType(s2),
+            ) => s1 == s2,
+            (
+                InternalRequestError::InvalidContentLength(e1),
+                InternalRequestError::InvalidContentLength(e2),
+            ) => e1 == e2,
+            (
+                InternalRequestError::ContentLengthTooLarge(l1),
+                InternalRequestError::ContentLengthTooLarge(l2),
+            ) => l1 == l2,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for InternalRequestError {}
 
 impl From<InternalRequestError> for RequestError {
     fn from(value: InternalRequestError) -> Self { RequestError(value) }

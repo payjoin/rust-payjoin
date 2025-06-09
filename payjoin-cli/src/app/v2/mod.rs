@@ -361,11 +361,11 @@ fn try_contributing_inputs(
     let candidate_inputs = wallet.list_unspent()?;
 
     let selected_input =
-        payjoin.try_preserving_privacy(candidate_inputs).map_err(ImplementationError::from)?;
+        payjoin.try_preserving_privacy(candidate_inputs).map_err(ImplementationError::new)?;
 
     Ok(payjoin
         .contribute_inputs(vec![selected_input])
-        .map_err(ImplementationError::from)?
+        .map_err(ImplementationError::new)?
         .commit_inputs())
 }
 

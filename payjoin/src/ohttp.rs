@@ -59,6 +59,26 @@ pub enum DirectoryResponseError {
     UnexpectedStatusCode(http::StatusCode),
 }
 
+impl PartialEq for DirectoryResponseError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (DirectoryResponseError::InvalidSize(s1), DirectoryResponseError::InvalidSize(s2)) =>
+                s1 == s2,
+            (
+                DirectoryResponseError::OhttpDecapsulation(_),
+                DirectoryResponseError::OhttpDecapsulation(_),
+            ) => true,
+            (
+                DirectoryResponseError::UnexpectedStatusCode(s1),
+                DirectoryResponseError::UnexpectedStatusCode(s2),
+            ) => s1 == s2,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for DirectoryResponseError {}
+
 impl fmt::Display for DirectoryResponseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use DirectoryResponseError::*;
@@ -149,6 +169,21 @@ pub enum OhttpEncapsulationError {
     Bhttp(bhttp::Error),
     ParseUrl(url::ParseError),
 }
+
+impl PartialEq for OhttpEncapsulationError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (OhttpEncapsulationError::Http(_), OhttpEncapsulationError::Http(_)) => true,
+            (OhttpEncapsulationError::Ohttp(_), OhttpEncapsulationError::Ohttp(_)) => true,
+            (OhttpEncapsulationError::Bhttp(_), OhttpEncapsulationError::Bhttp(_)) => true,
+            (OhttpEncapsulationError::ParseUrl(u1), OhttpEncapsulationError::ParseUrl(u2)) =>
+                u1 == u2,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for OhttpEncapsulationError {}
 
 impl From<http::Error> for OhttpEncapsulationError {
     fn from(value: http::Error) -> Self { Self::Http(value) }
@@ -316,6 +351,20 @@ pub enum ParseOhttpKeysError {
     DecodeBech32(bech32::primitives::decode::CheckedHrpstringError),
     DecodeKeyConfig(ohttp::Error),
 }
+
+impl PartialEq for ParseOhttpKeysError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ParseOhttpKeysError::InvalidFormat, ParseOhttpKeysError::InvalidFormat) => true,
+            (ParseOhttpKeysError::InvalidPublicKey, ParseOhttpKeysError::InvalidPublicKey) => true,
+            (ParseOhttpKeysError::DecodeBech32(e1), ParseOhttpKeysError::DecodeBech32(e2)) =>
+                e1 == e2,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for ParseOhttpKeysError {}
 
 impl std::fmt::Display for ParseOhttpKeysError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

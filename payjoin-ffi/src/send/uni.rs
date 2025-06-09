@@ -185,7 +185,7 @@ impl From<super::V1Context> for V1Context {
 impl V1Context {
     /// Decodes and validates the response.
     /// Call this method with response from receiver to continue BIP78 flow. If the response is valid you will get appropriate PSBT that you should sign and broadcast.
-    pub fn process_response(&self, response: Vec<u8>) -> Result<String, ResponseError> {
+    pub fn process_response(&self, response: &[u8]) -> Result<String, ResponseError> {
         self.0.process_response(response)
     }
 }

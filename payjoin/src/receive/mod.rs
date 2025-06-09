@@ -212,11 +212,11 @@ impl<'a> From<&'a InputPair> for InternalInputPair<'a> {
 
 /// Validate the payload of a Payjoin request for PSBT and Params sanity
 pub(crate) fn parse_payload(
-    base64: String,
+    base64: &str,
     query: &str,
     supported_versions: &'static [Version],
 ) -> Result<(Psbt, Params), PayloadError> {
-    let unchecked_psbt = Psbt::from_str(&base64).map_err(InternalPayloadError::ParsePsbt)?;
+    let unchecked_psbt = Psbt::from_str(base64).map_err(InternalPayloadError::ParsePsbt)?;
 
     let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
     log::debug!("Received original psbt: {psbt:?}");

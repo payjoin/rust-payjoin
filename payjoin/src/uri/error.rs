@@ -3,7 +3,7 @@ use url::ParseError;
 #[derive(Debug)]
 pub struct PjParseError(pub(crate) InternalPjParseError);
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InternalPjParseError {
     BadPjOs,
     DuplicateParams(&'static str),
@@ -13,7 +13,7 @@ pub(crate) enum InternalPjParseError {
     UnsecureEndpoint,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum BadEndpointError {
     UrlParse(ParseError),
     #[cfg(feature = "v2")]

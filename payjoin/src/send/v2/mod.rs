@@ -157,7 +157,7 @@ impl NewSender {
         let sender = Sender {
             state: WithReplyKey { v1: self.v1.clone(), reply_key: self.reply_key.clone() },
         };
-        Ok(persister.save(sender)?)
+        persister.save(sender).map_err(ImplementationError::new)
     }
 }
 
@@ -179,7 +179,7 @@ impl Sender<WithReplyKey> {
         token: P::Token,
         persister: &P,
     ) -> Result<Self, ImplementationError> {
-        persister.load(token).map_err(ImplementationError::from)
+        persister.load(token).map_err(ImplementationError::new)
     }
     /// Extract serialized V1 Request and Context from a Payjoin Proposal
     pub fn extract_v1(&self) -> (Request, v1::V1Context) { self.v1.extract_v1() }

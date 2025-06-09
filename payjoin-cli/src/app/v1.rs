@@ -251,7 +251,7 @@ impl App {
         &self,
         amount: Option<Amount>,
     ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, ReplyableError> {
-        let v1_config = self.config.v1().map_err(|e| Implementation(e.into()))?;
+        let v1_config = self.config.v1().map_err(|e| ReplyableError::Implementation(e.into()))?;
         let address = self.wallet.get_new_address().map_err(|e| Implementation(e.into()))?;
         let uri_string = if let Some(amount) = amount {
             format!(
@@ -277,7 +277,11 @@ impl App {
         let (parts, body) = req.into_parts();
         let headers = Headers(&parts.headers);
         let query_string = parts.uri.query().unwrap_or("");
-        let body = body.collect().await.map_err(|e| Implementation(e.into()))?.to_bytes();
+        let body = body
+            .collect()
+            .await
+            .map_err(|e| Implementation(ImplementationError::new(e)))?
+            .to_bytes();
         let proposal = UncheckedProposal::from_request(&body, query_string, headers)?;
 
         let payjoin_proposal = self.process_v1_proposal(proposal)?;
@@ -346,11 +350,11 @@ fn try_contributing_inputs(
     let candidate_inputs = wallet.list_unspent()?;
 
     let selected_input =
-        payjoin.try_preserving_privacy(candidate_inputs).map_err(ImplementationError::from)?;
+        payjoin.try_preserving_privacy(candidate_inputs).map_err(ImplementationError::new)?;
 
     Ok(payjoin
         .contribute_inputs(vec![selected_input])
-        .map_err(ImplementationError::from)?
+        .map_err(ImplementationError::new)?
         .commit_inputs())
 }
 

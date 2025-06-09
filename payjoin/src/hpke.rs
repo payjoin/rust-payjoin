@@ -269,7 +269,7 @@ fn pad_plaintext(msg: &mut Vec<u8>, padded_length: usize) -> Result<&[u8], HpkeE
 }
 
 /// Error from de/encrypting a v2 Hybrid Public Key Encryption payload.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum HpkeError {
     InvalidPublicKey,
     Hpke(hpke::HpkeError),

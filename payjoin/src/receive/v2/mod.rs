@@ -188,7 +188,7 @@ impl Receiver<WithContext> {
             Some(body) => body,
             None => return Ok(None),
         };
-        match String::from_utf8(body.clone()) {
+        match std::str::from_utf8(&body) {
             // V1 response bodies are utf8 plaintext
             Ok(response) => Ok(Some(Receiver { state: self.extract_proposal_from_v1(response)? })),
             // V2 response bodies are encrypted binary
@@ -208,7 +208,7 @@ impl Receiver<WithContext> {
 
     fn extract_proposal_from_v1(
         &mut self,
-        response: String,
+        response: &str,
     ) -> Result<UncheckedProposal, ReplyableError> {
         self.unchecked_from_payload(response)
     }
@@ -216,20 +216,20 @@ impl Receiver<WithContext> {
     fn extract_proposal_from_v2(&mut self, response: Vec<u8>) -> Result<UncheckedProposal, Error> {
         let (payload_bytes, e) = decrypt_message_a(&response, self.context.s.secret_key().clone())?;
         self.context.e = Some(e);
-        let payload = String::from_utf8(payload_bytes)
+        let payload = std::str::from_utf8(&payload_bytes)
             .map_err(|e| Error::ReplyToSender(InternalPayloadError::Utf8(e).into()))?;
         self.unchecked_from_payload(payload).map_err(Error::ReplyToSender)
     }
 
     fn unchecked_from_payload(
         &mut self,
-        payload: String,
+        payload: &str,
     ) -> Result<UncheckedProposal, ReplyableError> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
         log::trace!("Received query: {query}, base64: {base64}"); // my guess is no \n so default is wrong
-        let (psbt, mut params) = parse_payload(base64.to_string(), query, SUPPORTED_VERSIONS)
-            .map_err(ReplyableError::Payload)?;
+        let (psbt, mut params) =
+            parse_payload(base64, query, SUPPORTED_VERSIONS).map_err(ReplyableError::Payload)?;
 
         // Output substitution must be disabled for V1 sessions in V2 contexts.
         //

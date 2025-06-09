@@ -164,7 +164,7 @@ impl From<InternalPayloadError> for PayloadError {
 #[derive(Debug)]
 pub(crate) enum InternalPayloadError {
     /// The payload is not valid utf-8
-    Utf8(std::string::FromUtf8Error),
+    Utf8(std::str::Utf8Error),
     /// The payload is not a valid PSBT
     ParsePsbt(bitcoin::psbt::PsbtParseError),
     /// Invalid sender parameters

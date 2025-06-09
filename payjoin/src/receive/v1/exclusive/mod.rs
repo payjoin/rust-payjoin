@@ -29,7 +29,7 @@ impl UncheckedProposal {
     ) -> Result<Self, ReplyableError> {
         let validated_body = validate_body(headers, body).map_err(ReplyableError::V1)?;
 
-        let base64 = String::from_utf8(validated_body).map_err(InternalPayloadError::Utf8)?;
+        let base64 = std::str::from_utf8(validated_body).map_err(InternalPayloadError::Utf8)?;
 
         let (psbt, params) = crate::receive::parse_payload(base64, query, SUPPORTED_VERSIONS)
             .map_err(ReplyableError::Payload)?;
@@ -41,7 +41,7 @@ impl UncheckedProposal {
 /// Validate the request headers for a Payjoin request
 ///
 /// [`RequestError`] should only be produced here.
-fn validate_body(headers: impl Headers, body: &[u8]) -> Result<Vec<u8>, RequestError> {
+fn validate_body(headers: impl Headers, body: &[u8]) -> Result<&[u8], RequestError> {
     let content_type = headers
         .get_header("content-type")
         .ok_or(InternalRequestError::MissingHeader("Content-Type"))?;
@@ -58,7 +58,7 @@ fn validate_body(headers: impl Headers, body: &[u8]) -> Result<Vec<u8>, RequestE
         return Err(InternalRequestError::ContentLengthTooLarge(content_length).into());
     }
 
-    Ok(body[..content_length].to_vec())
+    Ok(&body[..content_length])
 }
 
 #[cfg(test)]

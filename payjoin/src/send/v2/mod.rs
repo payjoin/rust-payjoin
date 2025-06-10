@@ -25,7 +25,7 @@ use bitcoin::hashes::{sha256, Hash};
 pub use error::{CreateRequestError, EncapsulationError};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
-pub use persist::{SenderToken, SessionEvent};
+pub use persist::{replay_event_log, ReplayError, SessionEvent, SessionHistory};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -33,10 +33,13 @@ use super::error::BuildSenderError;
 use super::*;
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
-use crate::persist::Persister;
+use crate::persist::{
+    MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeSuccessTransitionWithNoResults,
+};
 use crate::send::v1;
+use crate::send::v2::persist::InternalReplayError;
 use crate::uri::{ShortId, UrlExt};
-use crate::{HpkeKeyPair, HpkePublicKey, ImplementationError, IntoUrl, OhttpKeys, PjUri, Request};
+use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
 
 mod error;
 mod persist;
@@ -68,12 +71,19 @@ impl<'a> SenderBuilder<'a> {
     // The minfeerate parameter is set if the contribution is available in change.
     //
     // This method fails if no recommendation can be made or if the PSBT is malformed.
-    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<NewSender, BuildSenderError> {
-        let sender = NewSender {
-            v1: self.0.build_recommended(min_fee_rate)?,
-            reply_key: HpkeKeyPair::gen_keypair().0,
+    pub fn build_recommended(
+        self,
+        min_fee_rate: FeeRate,
+    ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
+        let v1 = match self.0.build_recommended(min_fee_rate) {
+            Ok(inner) => inner,
+            Err(e) => return MaybeBadInitInputsTransition::bad_init_inputs(e),
         };
-        Ok(sender)
+        let with_reply_key = WithReplyKey { v1, reply_key: HpkeKeyPair::gen_keypair().0 };
+        MaybeBadInitInputsTransition::success(
+            SessionEvent::CreatedReplyKey(with_reply_key.clone()),
+            Sender { state: with_reply_key },
+        )
     }
 
     /// Offer the receiver contribution to pay for his input.
@@ -95,17 +105,22 @@ impl<'a> SenderBuilder<'a> {
         change_index: Option<usize>,
         min_fee_rate: FeeRate,
         clamp_fee_contribution: bool,
-    ) -> Result<NewSender, BuildSenderError> {
-        let sender = NewSender {
-            v1: self.0.build_with_additional_fee(
-                max_fee_contribution,
-                change_index,
-                min_fee_rate,
-                clamp_fee_contribution,
-            )?,
-            reply_key: HpkeKeyPair::gen_keypair().0,
+    ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
+        let v1 = match self.0.build_with_additional_fee(
+            max_fee_contribution,
+            change_index,
+            min_fee_rate,
+            clamp_fee_contribution,
+        ) {
+            Ok(inner) => inner,
+            Err(e) => return MaybeBadInitInputsTransition::bad_init_inputs(e),
         };
-        Ok(sender)
+
+        let with_reply_key = WithReplyKey { v1, reply_key: HpkeKeyPair::gen_keypair().0 };
+        MaybeBadInitInputsTransition::success(
+            SessionEvent::CreatedReplyKey(with_reply_key.clone()),
+            Sender { state: with_reply_key },
+        )
     }
 
     /// Perform Payjoin without incentivizing the payee to cooperate.
@@ -115,18 +130,23 @@ impl<'a> SenderBuilder<'a> {
     pub fn build_non_incentivizing(
         self,
         min_fee_rate: FeeRate,
-    ) -> Result<NewSender, BuildSenderError> {
-        let sender = NewSender {
-            v1: self.0.build_non_incentivizing(min_fee_rate)?,
-            reply_key: HpkeKeyPair::gen_keypair().0,
+    ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
+        let v1 = match self.0.build_non_incentivizing(min_fee_rate) {
+            Ok(inner) => inner,
+            Err(e) => return MaybeBadInitInputsTransition::bad_init_inputs(e),
         };
-        Ok(sender)
+
+        let with_reply_key = WithReplyKey { v1, reply_key: HpkeKeyPair::gen_keypair().0 };
+        MaybeBadInitInputsTransition::success(
+            SessionEvent::CreatedReplyKey(with_reply_key.clone()),
+            Sender { state: with_reply_key },
+        )
     }
 }
 
 pub trait SenderState {}
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sender<State: SenderState> {
     pub(crate) state: State,
 }
@@ -141,23 +161,33 @@ impl<State: SenderState> core::ops::DerefMut for Sender<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
 }
 
-/// A new payjoin sender, which must be persisted before initiating the payjoin flow.
-#[derive(Debug)]
-pub struct NewSender {
-    pub(crate) v1: v1::Sender,
-    pub(crate) reply_key: HpkeSecretKey,
+#[derive(Debug, Clone)]
+pub enum SenderTypeState {
+    Uninitialized(),
+    WithReplyKey(Sender<WithReplyKey>),
+    V2GetContext(Sender<V2GetContext>),
+    ProposalReceived(Psbt),
+    TerminalState,
 }
 
-impl NewSender {
-    /// Saves the new [`Sender`] using the provided persister and returns the storage token.
-    pub fn persist<P: Persister<Sender<WithReplyKey>>>(
-        &self,
-        persister: &mut P,
-    ) -> Result<P::Token, ImplementationError> {
-        let sender = Sender {
-            state: WithReplyKey { v1: self.v1.clone(), reply_key: self.reply_key.clone() },
-        };
-        Ok(persister.save(sender)?)
+impl SenderTypeState {
+    fn process_event(self, event: SessionEvent) -> Result<SenderTypeState, ReplayError> {
+        match (self, event) {
+            (
+                SenderTypeState::Uninitialized(),
+                SessionEvent::CreatedReplyKey(sender_with_reply_key),
+            ) => Ok(SenderTypeState::WithReplyKey(Sender { state: sender_with_reply_key })),
+            (SenderTypeState::WithReplyKey(state), SessionEvent::V2GetContext(v2_get_context)) =>
+                Ok(state.apply_v2_get_context(v2_get_context)),
+            (SenderTypeState::V2GetContext(_state), SessionEvent::ProposalReceived(proposal)) =>
+                Ok(SenderTypeState::ProposalReceived(proposal)),
+            (_, SessionEvent::SessionInvalid(_)) => Ok(SenderTypeState::TerminalState),
+            (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
+                Box::new(current_state),
+                Box::new(event),
+            )
+            .into()),
+        }
     }
 }
 
@@ -174,13 +204,6 @@ pub struct WithReplyKey {
 impl SenderState for WithReplyKey {}
 
 impl Sender<WithReplyKey> {
-    /// Loads a [`Sender`] from the provided persister using the storage token.
-    pub fn load<P: Persister<Sender<WithReplyKey>>>(
-        token: P::Token,
-        persister: &P,
-    ) -> Result<Self, ImplementationError> {
-        persister.load(token).map_err(ImplementationError::from)
-    }
     /// Extract serialized V1 Request and Context from a Payjoin Proposal
     pub fn extract_v1(&self) -> (Request, v1::V1Context) { self.v1.extract_v1() }
 
@@ -191,7 +214,7 @@ impl Sender<WithReplyKey> {
     pub fn extract_v2(
         &self,
         ohttp_relay: impl IntoUrl,
-    ) -> Result<(Request, Sender<V2PostContext>), CreateRequestError> {
+    ) -> Result<(Request, V2PostContext), CreateRequestError> {
         if let Ok(expiry) = self.v1.endpoint.exp() {
             if std::time::SystemTime::now() > expiry {
                 return Err(InternalCreateRequestError::Expired(expiry).into());
@@ -220,21 +243,55 @@ impl Sender<WithReplyKey> {
         let rs = self.extract_rs_pubkey()?;
         Ok((
             request,
-            Sender {
-                state: V2PostContext {
-                    endpoint: self.v1.endpoint.clone(),
-                    psbt_ctx: PsbtContext {
-                        original_psbt: self.v1.psbt.clone(),
-                        output_substitution: self.v1.output_substitution,
-                        fee_contribution: self.v1.fee_contribution,
-                        payee: self.v1.payee.clone(),
-                        min_fee_rate: self.v1.min_fee_rate,
-                    },
-                    hpke_ctx: HpkeContext::new(rs, &self.reply_key),
-                    ohttp_ctx,
+            V2PostContext {
+                endpoint: self.v1.endpoint.clone(),
+                psbt_ctx: PsbtContext {
+                    original_psbt: self.v1.psbt.clone(),
+                    output_substitution: self.v1.output_substitution,
+                    fee_contribution: self.v1.fee_contribution,
+                    payee: self.v1.payee.clone(),
+                    min_fee_rate: self.v1.min_fee_rate,
                 },
+                hpke_ctx: HpkeContext::new(rs, &self.reply_key),
+                ohttp_ctx,
             },
         ))
+    }
+
+    /// Processes the response for the initial POST message from the sender
+    /// client in the v2 Payjoin protocol.
+    ///
+    /// This function decapsulates the response using the provided OHTTP
+    /// context. If the encapsulated response status is successful, it
+    /// indicates that the the Original PSBT been accepted. Otherwise, it
+    /// returns an error with the encapsulated response status code.
+    ///
+    /// After this function is called, the sender can poll for a Proposal PSBT
+    /// from the receiver using the returned [`V2GetContext`].
+    pub fn process_response(
+        self,
+        response: &[u8],
+        post_ctx: V2PostContext,
+    ) -> MaybeFatalTransition<SessionEvent, Sender<V2GetContext>, EncapsulationError> {
+        match process_post_res(response, post_ctx.ohttp_ctx) {
+            Ok(()) => {}
+            Err(e) => {
+                return MaybeFatalTransition::fatal(
+                    SessionEvent::SessionInvalid(e.to_string()),
+                    InternalEncapsulationError::DirectoryResponse(e).into(),
+                );
+            }
+        }
+
+        let v2_get_context = V2GetContext {
+            endpoint: post_ctx.endpoint,
+            psbt_ctx: post_ctx.psbt_ctx,
+            hpke_ctx: post_ctx.hpke_ctx,
+        };
+        MaybeFatalTransition::success(
+            SessionEvent::V2GetContext(v2_get_context.clone()),
+            Sender { state: v2_get_context },
+        )
     }
 
     pub(crate) fn extract_rs_pubkey(
@@ -245,6 +302,10 @@ impl Sender<WithReplyKey> {
 
     /// The endpoint in the Payjoin URI
     pub fn endpoint(&self) -> &Url { self.v1.endpoint() }
+
+    pub(crate) fn apply_v2_get_context(self, v2_get_context: V2GetContext) -> SenderTypeState {
+        SenderTypeState::V2GetContext(Sender { state: v2_get_context })
+    }
 }
 
 pub(crate) fn extract_request(
@@ -308,35 +369,6 @@ pub struct V2PostContext {
     pub(crate) ohttp_ctx: ohttp::ClientResponse,
 }
 
-impl SenderState for V2PostContext {}
-
-impl Sender<V2PostContext> {
-    /// Processes the response for the initial POST message from the sender
-    /// client in the v2 Payjoin protocol.
-    ///
-    /// This function decapsulates the response using the provided OHTTP
-    /// context. If the encapsulated response status is successful, it
-    /// indicates that the the Original PSBT been accepted. Otherwise, it
-    /// returns an error with the encapsulated response status code.
-    ///
-    /// After this function is called, the sender can poll for a Proposal PSBT
-    /// from the receiver using the returned [`V2GetContext`].
-    pub fn process_response(
-        self,
-        response: &[u8],
-    ) -> Result<Sender<V2GetContext>, EncapsulationError> {
-        process_post_res(response, self.state.ohttp_ctx)
-            .map_err(InternalEncapsulationError::DirectoryResponse)?;
-        Ok(Sender {
-            state: V2GetContext {
-                endpoint: self.state.endpoint,
-                psbt_ctx: self.state.psbt_ctx,
-                hpke_ctx: self.state.hpke_ctx,
-            },
-        })
-    }
-}
-
 /// Data required to validate the GET response.
 ///
 /// This type is used to make a BIP77 GET request and process the response.
@@ -394,24 +426,52 @@ impl Sender<V2GetContext> {
         &self,
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
-    ) -> Result<Option<Psbt>, ResponseError> {
-        let body = match process_get_res(response, ohttp_ctx)
-            .map_err(InternalEncapsulationError::DirectoryResponse)?
-        {
-            Some(body) => body,
-            None => return Ok(None),
+    ) -> MaybeSuccessTransitionWithNoResults<SessionEvent, Psbt, Sender<V2GetContext>, ResponseError>
+    {
+        let body = match process_get_res(response, ohttp_ctx) {
+            Ok(Some(body)) => body,
+            Ok(None) => return MaybeSuccessTransitionWithNoResults::no_results(self.clone()),
+            Err(e) =>
+                return MaybeSuccessTransitionWithNoResults::fatal(
+                    SessionEvent::SessionInvalid(e.to_string()),
+                    InternalEncapsulationError::DirectoryResponse(e).into(),
+                ),
         };
-        let psbt = decrypt_message_b(
+        let psbt = match decrypt_message_b(
             &body,
             self.hpke_ctx.receiver.clone(),
             self.hpke_ctx.reply_pair.secret_key().clone(),
-        )
-        .map_err(InternalEncapsulationError::Hpke)?;
+        ) {
+            Ok(psbt) => psbt,
+            Err(e) =>
+                return MaybeSuccessTransitionWithNoResults::fatal(
+                    SessionEvent::SessionInvalid(e.to_string()),
+                    InternalEncapsulationError::Hpke(e).into(),
+                ),
+        };
+        let proposal = match Psbt::deserialize(&psbt) {
+            Ok(proposal) => proposal,
+            Err(e) =>
+                return MaybeSuccessTransitionWithNoResults::fatal(
+                    SessionEvent::SessionInvalid(e.to_string()),
+                    InternalProposalError::Psbt(e).into(),
+                ),
+        };
+        let processed_proposal = match self.psbt_ctx.clone().process_proposal(proposal) {
+            Ok(processed_proposal) => processed_proposal,
+            Err(e) =>
+                return MaybeSuccessTransitionWithNoResults::fatal(
+                    SessionEvent::SessionInvalid(e.to_string()),
+                    e.into(),
+                ),
+        };
 
-        let proposal = Psbt::deserialize(&psbt).map_err(InternalProposalError::Psbt)?;
-        let processed_proposal = self.psbt_ctx.clone().process_proposal(proposal)?;
-        Ok(Some(processed_proposal))
+        MaybeSuccessTransitionWithNoResults::success(
+            processed_proposal.clone(),
+            SessionEvent::ProposalReceived(processed_proposal),
+        )
     }
+    pub fn endpoint(&self) -> &Url { &self.endpoint }
 }
 
 #[cfg(feature = "v2")]
@@ -465,15 +525,6 @@ mod test {
     }
 
     #[test]
-    fn sender_ser_de_roundtrip() -> Result<(), BoxError> {
-        let sender = create_sender_context()?;
-        let serialized = serde_json::to_string(&sender)?;
-        let deserialized = serde_json::from_str(&serialized)?;
-        assert!(sender == deserialized);
-        Ok(())
-    }
-
-    #[test]
     fn test_serialize_v2() -> Result<(), BoxError> {
         let sender = create_sender_context()?;
         let body = serialize_v2_body(
@@ -489,11 +540,6 @@ mod test {
     #[test]
     fn test_extract_v2_success() -> Result<(), BoxError> {
         let sender = create_sender_context()?;
-        assert_eq!(
-            SenderToken::from(sender.clone()).as_ref(),
-            sender.v1.endpoint.as_str().as_bytes(),
-            "SenderToken was malformed"
-        );
         let ohttp_relay = EXAMPLE_URL.clone();
         let result = sender.extract_v2(ohttp_relay);
         let (request, context) = result.expect("Result should be ok");

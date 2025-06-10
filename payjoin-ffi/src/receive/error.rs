@@ -156,4 +156,4 @@ pub struct PsbtInputError(#[from] receive::PsbtInputError);
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
-pub struct ReplayError(#[from] receive::v2::ReplayError);
+pub struct ReceiverReplayError(#[from] receive::v2::ReplayError);

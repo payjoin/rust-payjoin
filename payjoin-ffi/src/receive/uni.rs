@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::InputPair;
 use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 use crate::error::ForeignError;
-use crate::receive::error::{PersistedError, ReplayError};
+use crate::receive::error::{PersistedError, ReceiverReplayError};
 pub use crate::receive::{
     Error, ImplementationError, InputContributionError, JsonReply, OutputSubstitutionError,
     ReplyableError, SelectionError, SerdeJsonError, SessionError,
@@ -159,9 +159,9 @@ impl ReplayResult {
 #[uniffi::export]
 pub fn replay_receiver_event_log(
     persister: Arc<dyn JsonReceiverSessionPersister>,
-) -> Result<ReplayResult, ReplayError> {
+) -> Result<ReplayResult, ReceiverReplayError> {
     let adapter = CallbackPersisterAdapter::new(persister);
-    let (state, session_history) = super::replay_event_log(&adapter).map_err(ReplayError::from)?;
+    let (state, session_history) = super::replay_event_log(&adapter).map_err(ReceiverReplayError::from)?;
     Ok(ReplayResult { state: state.into(), session_history: session_history.into() })
 }
 #[derive(uniffi::Object)]

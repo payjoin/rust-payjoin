@@ -2,7 +2,6 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
-use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::OptionalTransitionOutcome;
 use payjoin::receive::v2::{
@@ -10,7 +9,10 @@ use payjoin::receive::v2::{
     MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal, Receiver,
     ReceiverTypeState, SessionHistory, UncheckedProposal, WantsInputs, WantsOutputs, WithContext,
 };
-use payjoin::send::v2::{Sender, SenderBuilder, WithReplyKey};
+use payjoin::send::v2::{
+    replay_event_log as replay_sender_event_log, Sender, SenderBuilder, SenderTypeState,
+    V2GetContext, WithReplyKey,
+};
 use payjoin::Uri;
 use tokio::sync::watch;
 
@@ -50,6 +52,7 @@ impl AppTrait for App {
 
     fn wallet(&self) -> BitcoindWallet { self.wallet.clone() }
 
+    #[allow(clippy::incompatible_msrv)]
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {
         use payjoin::UriExt;
         let uri =
@@ -57,23 +60,38 @@ impl AppTrait for App {
         let uri = uri.assume_checked();
         let uri = uri.check_pj_supported().map_err(|_| anyhow!("URI does not support Payjoin"))?;
         let url = uri.extras.endpoint();
-        // match bip21 to send_session public_key
-        let req_ctx = match self.db.get_send_session(url)? {
-            Some(send_session) => send_session,
+        // TODO: perhaps we should store pj uri in the session wrapper as to not replay the event log for each session
+        let sender_state = self.db.get_send_session_ids()?.into_iter().find_map(|session_id| {
+            let sender_persister = SenderPersister::from_id(self.db.clone(), session_id).ok()?;
+            let replay_results = replay_sender_event_log(&sender_persister)
+                .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))
+                .ok()?;
+
+            let pj_uri = replay_results.1.endpoint();
+            let sender_state = pj_uri.filter(|uri| uri == &url).map(|_| replay_results.0);
+            sender_state.map(|sender_state| (sender_state, sender_persister))
+        });
+
+        let (sender_state, persister) = match sender_state {
+            Some((sender_state, persister)) => (sender_state, persister),
             None => {
+                let persister = SenderPersister::new(self.db.clone())?;
                 let psbt = self.create_original_psbt(&uri, fee_rate)?;
-                let mut persister = SenderPersister::new(self.db.clone());
-                let new_sender = SenderBuilder::new(psbt, uri.clone())
+                let sender = SenderBuilder::new(psbt, uri.clone())
                     .build_recommended(fee_rate)
-                    .with_context(|| "Failed to build payjoin request")?;
-                let storage_token = new_sender
-                    .persist(&mut persister)
-                    .map_err(|e| anyhow!("Failed to persist sender: {}", e))?;
-                Sender::load(storage_token, &persister)
-                    .map_err(|e| anyhow!("Failed to load sender: {}", e))?
+                    .save(&persister)?;
+
+                (SenderTypeState::WithReplyKey(sender), persister)
             }
         };
-        self.spawn_payjoin_sender(req_ctx).await
+        let mut interrupt = self.interrupt.clone();
+        tokio::select! {
+            _ = self.process_sender_session(sender_state, &persister) => return Ok(()),
+            _ = interrupt.changed() => {
+                println!("Interrupted. Call `send` with the same arguments to resume this session or `resume` to resume all sessions.");
+                return Err(anyhow!("Interrupted"))
+            }
+        }
     }
 
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
@@ -104,9 +122,9 @@ impl AppTrait for App {
     #[allow(clippy::incompatible_msrv)]
     async fn resume_payjoins(&self) -> Result<()> {
         let recv_session_ids = self.db.get_recv_session_ids()?;
-        let send_sessions = self.db.get_send_sessions()?;
+        let send_session_ids = self.db.get_send_session_ids()?;
 
-        if recv_session_ids.is_empty() && send_sessions.is_empty() {
+        if recv_session_ids.is_empty() && send_session_ids.is_empty() {
             println!("No sessions to resume.");
             return Ok(());
         }
@@ -124,9 +142,15 @@ impl AppTrait for App {
             }));
         }
 
-        for session in send_sessions {
+        for session_id in send_session_ids {
+            let sender_persiter = SenderPersister::from_id(self.db.clone(), session_id)?;
+            let sender_state = replay_sender_event_log(&sender_persiter)
+                .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))?
+                .0;
             let self_clone = self.clone();
-            tasks.push(tokio::spawn(async move { self_clone.spawn_payjoin_sender(session).await }));
+            tasks.push(tokio::spawn(async move {
+                self_clone.process_sender_session(sender_state, &sender_persiter).await
+            }));
         }
 
         let mut interrupt = self.interrupt.clone();
@@ -147,58 +171,79 @@ impl AppTrait for App {
 }
 
 impl App {
-    #[allow(clippy::incompatible_msrv)]
-    async fn spawn_payjoin_sender(&self, mut req_ctx: Sender<WithReplyKey>) -> Result<()> {
-        let mut interrupt = self.interrupt.clone();
-        tokio::select! {
-            res = self.long_poll_post(&mut req_ctx) => {
-                self.process_pj_response(res?)?;
-                self.db.clear_send_session(req_ctx.endpoint())?;
+    async fn process_sender_session(
+        &self,
+        session: SenderTypeState,
+        persister: &SenderPersister,
+    ) -> Result<()> {
+        match session {
+            SenderTypeState::WithReplyKey(context) => {
+                // TODO: can we handle the fall back case in `post_original_proposal`. That way we don't have to clone here
+                match self.post_original_proposal(context.clone(), persister).await {
+                    Ok(()) => (),
+                    Err(_) => {
+                        let (req, v1_ctx) = context.extract_v1();
+                        let response = post_request(req).await?;
+                        let psbt = Arc::new(
+                            v1_ctx.process_response(response.bytes().await?.to_vec().as_slice())?,
+                        );
+                        self.process_pj_response((*psbt).clone())?;
+                    }
+                }
+                return Ok(());
             }
-            _ = interrupt.changed() => {
-                println!("Interrupted. Call `send` with the same arguments to resume this session or `resume` to resume all sessions.");
+            SenderTypeState::V2GetContext(context) =>
+                self.get_proposed_payjoin_psbt(context, persister).await?,
+            SenderTypeState::ProposalReceived(proposal) => {
+                self.process_pj_response(proposal.clone())?;
+                return Ok(());
             }
+            _ => return Err(anyhow!("Unexpected sender state")),
         }
         Ok(())
     }
 
-    async fn long_poll_post(&self, req_ctx: &mut Sender<WithReplyKey>) -> Result<Psbt> {
-        let ohttp_relay = self.unwrap_relay_or_else_fetch(Some(req_ctx.endpoint().clone())).await?;
+    async fn post_original_proposal(
+        &self,
+        sender: Sender<WithReplyKey>,
+        persister: &SenderPersister,
+    ) -> Result<()> {
+        let (req, ctx) = sender
+            .extract_v2(self.unwrap_relay_or_else_fetch(Some(sender.endpoint().clone())).await?)?;
+        let response = post_request(req).await?;
+        println!("Posted original proposal...");
+        let sender = sender.process_response(&response.bytes().await?, ctx).save(persister)?;
+        self.get_proposed_payjoin_psbt(sender, persister).await
+    }
 
-        match req_ctx.extract_v2(ohttp_relay.clone()) {
-            Ok((req, ctx)) => {
-                println!("Posting Original PSBT Payload request...");
-                let response = post_request(req).await?;
-                println!("Sent fallback transaction");
-                let v2_ctx = Arc::new(ctx.process_response(&response.bytes().await?)?);
-                loop {
-                    let (req, ohttp_ctx) = v2_ctx.extract_req(&ohttp_relay)?;
-                    let response = post_request(req).await?;
-                    match v2_ctx.process_response(&response.bytes().await?, ohttp_ctx) {
-                        Ok(Some(psbt)) => return Ok(psbt),
-                        Ok(None) => {
-                            println!("No response yet.");
-                        }
-                        Err(re) => {
-                            println!("{re}");
-                            log::debug!("{re:?}");
-                            return Err(anyhow!("Response error").context(re));
-                        }
-                    }
+    async fn get_proposed_payjoin_psbt(
+        &self,
+        sender: Sender<V2GetContext>,
+        persister: &SenderPersister,
+    ) -> Result<()> {
+        let mut session = sender.clone();
+        // Long poll until we get a response
+        loop {
+            let (req, ctx) = session.extract_req(
+                self.unwrap_relay_or_else_fetch(Some(session.endpoint().clone())).await?,
+            )?;
+            let response = post_request(req).await?;
+            let res = session.process_response(&response.bytes().await?, ctx).save(persister);
+            match res {
+                Ok(OptionalTransitionOutcome::Progress(psbt)) => {
+                    println!("Proposal received. Processing...");
+                    self.process_pj_response(psbt.clone())?;
+                    return Ok(());
                 }
-            }
-            Err(_) => {
-                let (req, v1_ctx) = req_ctx.extract_v1();
-                println!("Posting Original PSBT Payload request...");
-                let response = post_request(req).await?;
-                println!("Sent fallback transaction");
-                match v1_ctx.process_response(&response.bytes().await?) {
-                    Ok(psbt) => Ok(psbt),
-                    Err(re) => {
-                        println!("{re}");
-                        log::debug!("{re:?}");
-                        Err(anyhow!("Response error").context(re))
-                    }
+                Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
+                    println!("No response yet.");
+                    session = current_state;
+                    continue;
+                }
+                Err(re) => {
+                    println!("{re}");
+                    log::debug!("{re:?}");
+                    return Err(anyhow!("Response error").context(re));
                 }
             }
         }

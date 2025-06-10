@@ -85,3 +85,9 @@ impl From<send::ResponseError> for ResponseError {
 #[error(transparent)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct WellKnownError(#[from] send::WellKnownError);
+
+/// Error that may occur when the sender session event log is replayed
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+pub struct SenderReplayError(#[from] send::v2::ReplayError);

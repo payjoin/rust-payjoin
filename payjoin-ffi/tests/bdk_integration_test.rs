@@ -220,9 +220,9 @@ mod v2 {
     use bdk::wallet::AddressIndex;
     use bitcoin_ffi::{Address, Network};
     use payjoin_ffi::receive::{PayjoinProposal, UncheckedProposal, UninitializedReceiver};
-    use payjoin_ffi::send::{SenderBuilder, WithReplyKey};
+    use payjoin_ffi::send::SenderBuilder;
     use payjoin_ffi::uri::Uri;
-    use payjoin_ffi::{NoopPersister, NoopSessionPersister, Request};
+    use payjoin_ffi::{NoopSessionPersister, Request};
     use payjoin_test_utils::TestServices;
 
     use super::*;
@@ -255,6 +255,7 @@ mod v2 {
 
             let address = receiver.get_address(AddressIndex::New);
             let recv_session_persister = NoopSessionPersister::default();
+            let sender_session_persister = NoopSessionPersister::default();
             let session = UninitializedReceiver::create_session(
                 Address::new(address.to_string(), Network::Regtest).unwrap(),
                 directory.to_string(),
@@ -287,10 +288,9 @@ mod v2 {
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             println!("\nOriginal sender psbt: {:#?}", psbt.to_string());
 
-            let new_sender = SenderBuilder::new(psbt.to_string(), pj_uri)?
-                .build_recommended(payjoin::bitcoin::FeeRate::BROADCAST_MIN.to_sat_per_kwu())?;
-            let sender_token = new_sender.persist(&mut NoopPersister)?;
-            let req_ctx = WithReplyKey::load(sender_token, &NoopPersister)?;
+            let req_ctx = SenderBuilder::new(psbt.to_string(), pj_uri)?
+                .build_recommended(payjoin::bitcoin::FeeRate::BROADCAST_MIN.to_sat_per_kwu())
+                .save(&sender_session_persister)?;
             let (request, context) = req_ctx.extract_v2(ohttp_relay.to_owned().into())?;
             let response = agent
                 .post(request.url.as_string())
@@ -300,7 +300,9 @@ mod v2 {
                 .await
                 .unwrap();
             assert!(response.status().is_success());
-            let send_ctx = context.process_response(&response.bytes().await?)?;
+            let send_ctx = req_ctx
+                .process_response(&response.bytes().await?, context)
+                .save(&sender_session_persister)?;
 
             // **********************
             // Inside the Receiver:
@@ -343,9 +345,13 @@ mod v2 {
                 .body(body)
                 .send()
                 .await?;
-            let checked_payjoin_proposal_psbt =
-                send_ctx.process_response(&response.bytes().await?, &ohttp_ctx)?.unwrap();
-            let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt.as_str())?;
+            let checked_payjoin_proposal_psbt = send_ctx
+                .process_response(&response.bytes().await?, &ohttp_ctx)
+                .save(&sender_session_persister)?
+                .success()
+                .unwrap();
+            let payjoin_tx =
+                extract_pj_tx(&sender, checked_payjoin_proposal_psbt.serialize_base64().as_str())?;
             blockchain_client.broadcast(payjoin_tx).unwrap();
             Ok(())
         }

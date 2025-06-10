@@ -69,7 +69,6 @@ pub struct MaybeSuccessTransitionWithNoResults<Event, SuccessValue, CurrentState
 impl<Event, SuccessValue, CurrentState, Err>
     MaybeSuccessTransitionWithNoResults<Event, SuccessValue, CurrentState, Err>
 {
-    #[allow(dead_code)]
     #[inline]
     pub(crate) fn fatal(event: Event, error: Err) -> Self {
         MaybeSuccessTransitionWithNoResults(Err(Rejection::fatal(event, error)))
@@ -81,13 +80,11 @@ impl<Event, SuccessValue, CurrentState, Err>
         MaybeSuccessTransitionWithNoResults(Err(Rejection::transient(error)))
     }
 
-    #[allow(dead_code)]
     #[inline]
     pub(crate) fn no_results(current_state: CurrentState) -> Self {
         MaybeSuccessTransitionWithNoResults(Ok(AcceptOptionalTransition::NoResults(current_state)))
     }
 
-    #[allow(dead_code)]
     #[inline]
     pub(crate) fn success(success_value: SuccessValue, event: Event) -> Self {
         MaybeSuccessTransitionWithNoResults(Ok(AcceptOptionalTransition::Success(AcceptNextState(

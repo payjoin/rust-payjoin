@@ -13,7 +13,7 @@ use payjoin::persist::{MaybeFatalTransition, NextStateTransition, SessionPersist
 use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::OhttpKeys;
-use crate::receive::error::{PersistedError, ReplayError};
+use crate::receive::error::{PersistedError, ReceiverReplayError};
 use crate::{ClientResponse, OutputSubstitution, Request};
 
 pub mod error;
@@ -39,13 +39,13 @@ impl From<payjoin::receive::v2::ReceiverTypeState> for ReceiverTypeState {
 
 pub fn replay_event_log<P>(
     persister: &P,
-) -> Result<(ReceiverTypeState, SessionHistory), ReplayError>
+) -> Result<(ReceiverTypeState, SessionHistory), ReceiverReplayError>
 where
     P: SessionPersister,
     P::SessionEvent: Into<payjoin::receive::v2::SessionEvent> + Clone,
 {
     let (state, history) =
-        payjoin::receive::v2::replay_event_log(persister).map_err(ReplayError::from)?;
+        payjoin::receive::v2::replay_event_log(persister).map_err(ReceiverReplayError::from)?;
     Ok((state.into(), history.into()))
 }
 

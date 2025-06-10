@@ -8,7 +8,7 @@ use payjoin::persist::SessionPersister;
 pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::ClientResponse;
 use crate::request::Request;
-use crate::send::error::SenderReplayError;
+use crate::send::error::{SenderPersistedError, SenderReplayError};
 use crate::uri::PjUri;
 
 pub mod error;
@@ -65,19 +65,18 @@ pub struct InitInputsTransition(
 );
 
 impl InitInputsTransition {
-    // TODO: replace this with a PersistedError
-    pub fn save<P>(&self, persister: &P) -> Result<WithReplyKey, ImplementationError>
+    pub fn save<P>(&self, persister: &P) -> Result<WithReplyKey, SenderPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::send::v2::SessionEvent>,
     {
         let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
+            self.0.write().map_err(|_| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Lock poisoned".to_string()))))?;
 
         let value = inner
             .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
+            .ok_or_else(|| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Already saved or moved".to_string()))))?;
 
-        let res = value.save(persister).map_err(|e| ImplementationError::from(e.to_string()))?;
+        let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
         Ok(res.into())
     }
 }
@@ -192,18 +191,18 @@ pub struct WithReplyKeyTransition(
 );
 
 impl WithReplyKeyTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<V2GetContext, ImplementationError>
+    pub fn save<P>(&self, persister: &P) -> Result<V2GetContext, SenderPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::send::v2::SessionEvent>,
     {
         let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
+            self.0.write().map_err(|_| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Lock poisoned".to_string()))))?;
 
         let value = inner
             .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
+            .ok_or_else(|| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Already saved or moved".to_string()))))?;
 
-        let res = value.save(persister).map_err(|e| ImplementationError::from(e.to_string()))?;
+        let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
         Ok(res.into())
     }
 }
@@ -337,19 +336,18 @@ pub struct V2GetContextTransition(
 );
 
 impl V2GetContextTransition {
-    // TODO: replace this with a PersistedError 
-    pub fn save<P>(&self, persister: &P) -> Result<V2GetContextTransitionOutcome, ImplementationError>
+    pub fn save<P>(&self, persister: &P) -> Result<V2GetContextTransitionOutcome, SenderPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::send::v2::SessionEvent>,
     {
         let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
+            self.0.write().map_err(|_| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Lock poisoned".to_string()))))?;
 
         let value = inner
             .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
+            .ok_or_else(|| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Already saved or moved".to_string()))))?;
 
-        let res = value.save(persister).map_err(|e| ImplementationError::from(e.to_string()))?;
+        let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
         Ok(res.into())
     }
 }

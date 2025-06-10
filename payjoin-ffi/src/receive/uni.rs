@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::InputPair;
 use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 use crate::error::ForeignError;
-use crate::receive::error::{PersistedError, ReceiverReplayError};
+use crate::receive::error::{ReceiverPersistedError, ReceiverReplayError};
 pub use crate::receive::{
     Error, ImplementationError, InputContributionError, JsonReply, OutputSubstitutionError,
     ReplyableError, SelectionError, SerdeJsonError, SessionError,
@@ -172,7 +172,7 @@ impl MaybeBadInitInputsTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<WithContext, PersistedError> {
+    ) -> Result<WithContext, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -239,7 +239,7 @@ impl WithContextTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<WithContextTransitionOutcome, PersistedError> {
+    ) -> Result<WithContextTransitionOutcome, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -320,7 +320,7 @@ impl UncheckedProposalTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<MaybeInputsOwned, PersistedError> {
+    ) -> Result<MaybeInputsOwned, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -335,7 +335,7 @@ impl AssumeInteractiveTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<MaybeInputsOwned, PersistedError> {
+    ) -> Result<MaybeInputsOwned, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -409,7 +409,7 @@ impl MaybeInputsOwnedTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<MaybeInputsSeen, PersistedError> {
+    ) -> Result<MaybeInputsSeen, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -453,7 +453,7 @@ impl MaybeInputsSeenTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<OutputsUnknown, PersistedError> {
+    ) -> Result<OutputsUnknown, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -493,7 +493,7 @@ impl OutputsUnknownTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<WantsOutputs, PersistedError> {
+    ) -> Result<WantsOutputs, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -530,7 +530,7 @@ impl WantsOutputsTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<WantsInputs, PersistedError> {
+    ) -> Result<WantsInputs, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -578,7 +578,7 @@ impl WantsInputsTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<ProvisionalProposal, PersistedError> {
+    ) -> Result<ProvisionalProposal, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -641,7 +641,7 @@ impl ProvisionalProposalTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<PayjoinProposal, PersistedError> {
+    ) -> Result<PayjoinProposal, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -693,7 +693,7 @@ impl PayjoinProposalTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<(), PersistedError> {
+    ) -> Result<(), ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         self.0.save(&adapter)?;
         Ok(())

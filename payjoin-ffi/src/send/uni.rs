@@ -3,11 +3,11 @@ use std::sync::{Arc, RwLock};
 use bitcoin_ffi::Psbt;
 
 use crate::{error::ForeignError, Url};
-use crate::send::error::SenderReplayError;
+use crate::send::error::{SenderPersistedError, SenderReplayError};
 pub use crate::send::{
     BuildSenderError, CreateRequestError, EncapsulationError, ResponseError, SerdeJsonError,
 };
-use crate::{ClientResponse, ImplementationError, PjUri, Request};
+use crate::{ClientResponse, PjUri, Request};
 
 #[derive(uniffi::Object, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SenderSessionEvent(super::SessionEvent);
@@ -105,7 +105,7 @@ impl InitInputsTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonSenderSessionPersister>,
-    ) -> Result<WithReplyKey, ImplementationError> {
+    ) -> Result<WithReplyKey, SenderPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -208,7 +208,7 @@ impl WithReplyKeyTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonSenderSessionPersister>,
-    ) -> Result<V2GetContext, ImplementationError> {
+    ) -> Result<V2GetContext, SenderPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -327,7 +327,7 @@ impl V2GetContextTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonSenderSessionPersister>,
-    ) -> Result<V2GetContextTransitionOutcome, ImplementationError> {
+    ) -> Result<V2GetContextTransitionOutcome, SenderPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())

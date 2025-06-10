@@ -13,7 +13,7 @@ use payjoin::persist::{MaybeFatalTransition, NextStateTransition, SessionPersist
 use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::OhttpKeys;
-use crate::receive::error::{PersistedError, ReceiverReplayError};
+use crate::receive::error::{ReceiverPersistedError, ReceiverReplayError};
 use crate::{ClientResponse, OutputSubstitution, Request};
 
 pub mod error;
@@ -71,7 +71,7 @@ pub struct InitInputsTransition(
 );
 
 impl InitInputsTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<WithContext, PersistedError>
+    pub fn save<P>(&self, persister: &P) -> Result<WithContext, ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -82,7 +82,7 @@ impl InitInputsTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| PersistedError::from(e))?;
+        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
         Ok(res.into())
     }
 }
@@ -157,7 +157,7 @@ pub struct WithContextTransition(
 );
 
 impl WithContextTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<WithContextTransitionOutcome, PersistedError>
+    pub fn save<P>(&self, persister: &P) -> Result<WithContextTransitionOutcome, ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -168,7 +168,7 @@ impl WithContextTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| PersistedError::from(e))?;
+        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
         Ok(res.into())
     }
 }
@@ -282,7 +282,7 @@ pub struct UncheckedProposalTransition(
 );
 
 impl UncheckedProposalTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<MaybeInputsOwned, PersistedError>
+    pub fn save<P>(&self, persister: &P) -> Result<MaybeInputsOwned, ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -293,7 +293,7 @@ impl UncheckedProposalTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| PersistedError::from(e))?;
+        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
         Ok(res.into())
     }
 }
@@ -312,7 +312,7 @@ pub struct AssumeInteractiveTransition(
 );
 
 impl AssumeInteractiveTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<MaybeInputsOwned, PersistedError>
+    pub fn save<P>(&self, persister: &P) -> Result<MaybeInputsOwned, ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -324,7 +324,7 @@ impl AssumeInteractiveTransition {
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
         let res = value.save(persister).map_err(|e| {
-            PersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
+            ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
         })?;
         Ok(res.into())
     }
@@ -396,7 +396,7 @@ pub struct MaybeInputsOwnedTransition(
 );
 
 impl MaybeInputsOwnedTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<MaybeInputsSeen, PersistedError>
+    pub fn save<P>(&self, persister: &P) -> Result<MaybeInputsSeen, ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -407,7 +407,7 @@ impl MaybeInputsOwnedTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| PersistedError::from(e))?;
+        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
         Ok(res.into())
     }
 }
@@ -449,7 +449,7 @@ pub struct MaybeInputsSeenTransition(
 );
 
 impl MaybeInputsSeenTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<OutputsUnknown, PersistedError>
+    pub fn save<P>(&self, persister: &P) -> Result<OutputsUnknown, ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -460,7 +460,7 @@ impl MaybeInputsSeenTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| PersistedError::from(e))?;
+        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
         Ok(res.into())
     }
 }
@@ -506,7 +506,7 @@ pub struct OutputsUnknownTransition(
 );
 
 impl OutputsUnknownTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<WantsOutputs, PersistedError>
+    pub fn save<P>(&self, persister: &P) -> Result<WantsOutputs, ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -517,7 +517,7 @@ impl OutputsUnknownTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| PersistedError::from(e))?;
+        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
         Ok(res.into())
     }
 }
@@ -558,7 +558,7 @@ pub struct WantsOutputsTransition(
 );
 
 impl WantsOutputsTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<WantsInputs, PersistedError>
+    pub fn save<P>(&self, persister: &P) -> Result<WantsInputs, ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -569,7 +569,7 @@ impl WantsOutputsTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| PersistedError::Storage(Arc::new(ImplementationError::from(e.to_string()))))?;
+        let res = value.save(persister).map_err(|e| ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string()))))?;
         Ok(res.into())
     }
 }
@@ -629,7 +629,7 @@ pub struct WantsInputsTransition(
 );
 
 impl WantsInputsTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<ProvisionalProposal, PersistedError>
+    pub fn save<P>(&self, persister: &P) -> Result<ProvisionalProposal, ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -640,7 +640,7 @@ impl WantsInputsTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| PersistedError::Storage(Arc::new(ImplementationError::from(e.to_string()))))?;
+        let res = value.save(persister).map_err(|e| ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string()))))?;
         Ok(res.into())
     }
 }
@@ -735,7 +735,7 @@ pub struct ProvisionalProposalTransition(
 );
 
 impl ProvisionalProposalTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<PayjoinProposal, PersistedError>
+    pub fn save<P>(&self, persister: &P) -> Result<PayjoinProposal, ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -746,7 +746,7 @@ impl ProvisionalProposalTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| PersistedError::from(e))?;
+        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
         Ok(res.into())
     }
 }
@@ -795,7 +795,7 @@ pub struct PayjoinProposalTransition(
 );
 
 impl PayjoinProposalTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<(), PersistedError>
+    pub fn save<P>(&self, persister: &P) -> Result<(), ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -806,7 +806,7 @@ impl PayjoinProposalTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        value.save(persister).map_err(|e| PersistedError::from(e))?;
+        value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
         Ok(())
     }
 }

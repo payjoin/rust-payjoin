@@ -54,11 +54,13 @@ impl fmt::Display for RequestError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
             InternalRequestError::MissingHeader(header) => write!(f, "Missing header: {header}"),
-            InternalRequestError::InvalidContentType(content_type) =>
-                write!(f, "Invalid content type: {content_type}"),
+            InternalRequestError::InvalidContentType(content_type) => {
+                write!(f, "Invalid content type: {content_type}")
+            }
             InternalRequestError::InvalidContentLength(e) => write!(f, "{e}"),
-            InternalRequestError::ContentLengthTooLarge(length) =>
-                write!(f, "Content length too large: {length}."),
+            InternalRequestError::ContentLengthTooLarge(length) => {
+                write!(f, "Content length too large: {length}.")
+            }
         }
     }
 }

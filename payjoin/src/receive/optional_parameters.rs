@@ -7,7 +7,7 @@ use log::warn;
 use crate::output_substitution::OutputSubstitution;
 use crate::Version;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub(crate) struct Params {
     // version
     pub v: Version,

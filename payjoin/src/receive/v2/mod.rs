@@ -7,7 +7,7 @@ use bitcoin::psbt::Psbt;
 use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
 pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
-pub use persist::ReceiverToken;
+pub use persist::{ReceiverToken, SessionEvent};
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -34,7 +34,7 @@ const SUPPORTED_VERSIONS: &[Version] = &[Version::One, Version::Two];
 static TWENTY_FOUR_HOURS_DEFAULT_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct SessionContext {
+pub struct SessionContext {
     #[serde(deserialize_with = "deserialize_address_assume_checked")]
     address: Address,
     directory: url::Url,

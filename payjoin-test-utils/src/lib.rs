@@ -27,6 +27,9 @@ use url::Url;
 pub type BoxError = Box<dyn std::error::Error + 'static>;
 pub type BoxSendSyncError = Box<dyn std::error::Error + Send + Sync>;
 
+pub use payjoin::persist::test_utils::InMemoryTestPersister;
+pub use payjoin::persist::SessionPersister;
+
 static INIT_TRACING: OnceCell<()> = OnceCell::new();
 
 pub fn init_tracing() {

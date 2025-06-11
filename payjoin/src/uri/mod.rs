@@ -15,6 +15,8 @@ pub mod error;
 #[cfg(feature = "v2")]
 pub(crate) mod url_ext;
 
+pub use error::PayjoinUriError;
+
 #[derive(Debug, Clone)]
 pub enum MaybePayjoinExtras {
     Supported(PayjoinExtras),
@@ -57,13 +59,11 @@ mod sealed {
 }
 
 pub trait UriExt<'a>: sealed::UriExt {
-    // Error type is boxed to reduce the size of the Result
-    // (See https://rust-lang.github.io/rust-clippy/master/index.html#result_large_err)
-    fn check_pj_supported(self) -> Result<PjUri<'a>, Box<bitcoin_uri::Uri<'a>>>;
+    fn check_pj_supported(self) -> Result<PjUri<'a>, PayjoinUriError>;
 }
 
 impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
-    fn check_pj_supported(self) -> Result<PjUri<'a>, Box<bitcoin_uri::Uri<'a>>> {
+    fn check_pj_supported(self) -> Result<PjUri<'a>, PayjoinUriError> {
         match self.extras {
             MaybePayjoinExtras::Supported(payjoin) => {
                 let mut uri = bitcoin_uri::Uri::with_extras(self.address, payjoin);
@@ -73,14 +73,7 @@ impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
 
                 Ok(uri)
             }
-            MaybePayjoinExtras::Unsupported => {
-                let mut uri = bitcoin_uri::Uri::new(self.address);
-                uri.amount = self.amount;
-                uri.label = self.label;
-                uri.message = self.message;
-
-                Err(Box::new(uri))
-            }
+            MaybePayjoinExtras::Unsupported => Err(PayjoinUriError::unsupported_uri()),
         }
     }
 }
@@ -271,13 +264,20 @@ mod tests {
 
     #[test]
     fn test_unsupported() {
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX";
+        let unchecked = Uri::try_from(uri).unwrap();
+        let parsed = unchecked.require_network(bitcoin::Network::Bitcoin).unwrap();
+
         assert!(
-            !Uri::try_from("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX")
-                .unwrap()
-                .extras
-                .pj_is_supported(),
+            !parsed.extras.pj_is_supported(),
             "Uri expected a failure with missing pj extras, but it succeeded"
         );
+
+        let result = parsed.check_pj_supported();
+        assert!(result.is_err());
+
+        let err = result.err().unwrap();
+        assert!(err.to_string().contains("URI does not support Payjoin"));
     }
 
     #[test]

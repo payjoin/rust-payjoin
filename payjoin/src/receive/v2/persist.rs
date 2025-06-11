@@ -34,7 +34,7 @@ impl persist::Value for Receiver<WithContext> {
 /// Each event can be used to transition the receiver state machine to a new state
 pub enum SessionEvent {
     Created(SessionContext),
-    UncheckedProposal(v1::UncheckedProposal),
+    UncheckedProposal((v1::UncheckedProposal, Option<crate::HpkePublicKey>)),
     MaybeInputsOwned(v1::MaybeInputsOwned),
     MaybeInputsSeen(v1::MaybeInputsSeen),
     OutputsUnknown(v1::OutputsUnknown),
@@ -80,7 +80,11 @@ mod tests {
 
         let test_cases = vec![
             SessionEvent::Created(SHARED_CONTEXT.clone()),
-            SessionEvent::UncheckedProposal(unchecked_proposal),
+            SessionEvent::UncheckedProposal((unchecked_proposal.clone(), None)),
+            SessionEvent::UncheckedProposal((
+                unchecked_proposal,
+                Some(crate::HpkeKeyPair::gen_keypair().1),
+            )),
             SessionEvent::MaybeInputsOwned(maybe_inputs_owned),
             SessionEvent::MaybeInputsSeen(maybe_inputs_seen),
             SessionEvent::OutputsUnknown(outputs_unknown),

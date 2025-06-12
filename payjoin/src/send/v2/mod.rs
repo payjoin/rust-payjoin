@@ -489,6 +489,11 @@ mod test {
     #[test]
     fn test_extract_v2_success() -> Result<(), BoxError> {
         let sender = create_sender_context()?;
+        assert_eq!(
+            SenderToken::from(sender.clone()).as_ref(),
+            sender.v1.endpoint.as_str().as_bytes(),
+            "SenderToken was malformed"
+        );
         let ohttp_relay = EXAMPLE_URL.clone();
         let result = sender.extract_v2(ohttp_relay);
         let (request, context) = result.expect("Result should be ok");

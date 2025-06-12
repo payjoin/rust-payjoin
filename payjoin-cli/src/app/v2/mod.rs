@@ -501,7 +501,7 @@ async fn handle_recoverable_error(
 }
 
 async fn post_request(req: payjoin::Request) -> Result<reqwest::Response> {
-    let http = http_agent()?;
+    let http = http_agent(None)?;
     http.post(req.url)
         .header("Content-Type", req.content_type)
         .body(req.body)

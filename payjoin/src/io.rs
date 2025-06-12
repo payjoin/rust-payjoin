@@ -35,7 +35,7 @@ pub async fn fetch_ohttp_keys(
 ///   directory stores and forwards payjoin client payloads.
 ///
 /// * `cert_der`: The DER-encoded certificate to use for local HTTPS connections.
-#[cfg(feature = "_danger-local-https")]
+#[cfg(feature = "_manual-tls")]
 pub async fn fetch_ohttp_keys_with_cert(
     ohttp_relay: impl IntoUrl,
     payjoin_directory: impl IntoUrl,
@@ -81,7 +81,7 @@ enum InternalErrorInner {
     ParseUrl(crate::into_url::Error),
     Reqwest(reqwest::Error),
     Io(std::io::Error),
-    #[cfg(feature = "_danger-local-https")]
+    #[cfg(feature = "_manual-tls")]
     Rustls(rustls::Error),
     InvalidOhttpKeys(String),
 }
@@ -105,7 +105,7 @@ macro_rules! impl_from_error {
 impl_from_error!(crate::into_url::Error, ParseUrl);
 impl_from_error!(reqwest::Error, Reqwest);
 impl_from_error!(std::io::Error, Io);
-#[cfg(feature = "_danger-local-https")]
+#[cfg(feature = "_manual-tls")]
 impl_from_error!(rustls::Error, Rustls);
 
 impl std::fmt::Display for Error {
@@ -130,7 +130,7 @@ impl std::fmt::Display for InternalErrorInner {
             InvalidOhttpKeys(e) => {
                 write!(f, "Invalid ohttp keys returned from payjoin directory: {e}")
             }
-            #[cfg(feature = "_danger-local-https")]
+            #[cfg(feature = "_manual-tls")]
             Rustls(e) => e.fmt(f),
         }
     }
@@ -154,7 +154,7 @@ impl std::error::Error for InternalErrorInner {
             ParseUrl(e) => Some(e),
             Io(e) => Some(e),
             InvalidOhttpKeys(_) => None,
-            #[cfg(feature = "_danger-local-https")]
+            #[cfg(feature = "_manual-tls")]
             Rustls(e) => Some(e),
         }
     }

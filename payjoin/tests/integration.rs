@@ -1481,7 +1481,9 @@ mod integration {
     struct HeaderMock(HashMap<String, String>);
 
     impl payjoin::receive::v1::Headers for HeaderMock {
-        fn get_header(&self, key: &str) -> Option<&str> { self.0.get(key).map(|e| e.as_str()) }
+        fn get_header(&self, key: &str) -> Option<&str> {
+            self.0.get(key).map(|e| e.as_str())
+        }
     }
 
     impl HeaderMock {

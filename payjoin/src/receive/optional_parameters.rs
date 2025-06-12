@@ -52,21 +52,23 @@ impl Params {
 
         for (key, v) in pairs {
             match (key.borrow(), v.borrow()) {
-                ("v", version) =>
+                ("v", version) => {
                     params.v = match version {
                         "1" => Version::One,
                         "2" => Version::Two,
                         _ => return Err(Error::UnknownVersion { supported_versions }),
-                    },
-                ("additionalfeeoutputindex", index) =>
+                    }
+                }
+                ("additionalfeeoutputindex", index) => {
                     additional_fee_output_index = match index.parse::<usize>() {
                         Ok(index) => Some(index),
                         Err(_error) => {
                             warn!("bad `additionalfeeoutputindex` query value '{index}': {_error}");
                             None
                         }
-                    },
-                ("maxadditionalfeecontribution", fee) =>
+                    }
+                }
+                ("maxadditionalfeecontribution", fee) => {
                     max_additional_fee_contribution =
                         match bitcoin::Amount::from_str_in(fee, bitcoin::Denomination::Satoshi) {
                             Ok(contribution) => Some(contribution),
@@ -76,8 +78,9 @@ impl Params {
                             );
                                 None
                             }
-                        },
-                ("minfeerate", fee_rate) =>
+                        }
+                }
+                ("minfeerate", fee_rate) => {
                     params.min_fee_rate = match fee_rate.parse::<f32>() {
                         Ok(fee_rate_sat_per_vb) => {
                             // TODO Parse with serde when rust-bitcoin supports it
@@ -86,13 +89,15 @@ impl Params {
                             FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64)
                         }
                         Err(_) => return Err(Error::FeeRate),
-                    },
-                ("disableoutputsubstitution", v) =>
+                    }
+                }
+                ("disableoutputsubstitution", v) => {
                     params.output_substitution = if v == "true" {
                         OutputSubstitution::Disabled
                     } else {
                         OutputSubstitution::Enabled
-                    },
+                    }
+                }
                 #[cfg(feature = "_multiparty")]
                 ("optimisticmerge", v) => params.optimistic_merge = v == "true",
                 _ => (),
@@ -100,8 +105,9 @@ impl Params {
         }
 
         match (max_additional_fee_contribution, additional_fee_output_index) {
-            (Some(amount), Some(index)) =>
-                params.additional_fee_contribution = Some((amount, index)),
+            (Some(amount), Some(index)) => {
+                params.additional_fee_contribution = Some((amount, index))
+            }
             (Some(_), None) | (None, Some(_)) => {
                 warn!("only one additional-fee parameter specified: {params:?}");
             }
@@ -129,7 +135,9 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
 }
 
 #[cfg(test)]

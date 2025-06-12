@@ -177,10 +177,12 @@ async fn serve_payjoin_directory(
     let path_segments: Vec<&str> = path.split('/').collect();
     debug!("serve_payjoin_directory: {:?}", &path_segments);
     let mut response = match (parts.method, path_segments.as_slice()) {
-        (Method::POST, ["", ".well-known", "ohttp-gateway"]) =>
-            handle_ohttp_gateway(body, pool, ohttp).await,
-        (Method::GET, ["", ".well-known", "ohttp-gateway"]) =>
-            handle_ohttp_gateway_get(&ohttp, &query).await,
+        (Method::POST, ["", ".well-known", "ohttp-gateway"]) => {
+            handle_ohttp_gateway(body, pool, ohttp).await
+        }
+        (Method::GET, ["", ".well-known", "ohttp-gateway"]) => {
+            handle_ohttp_gateway_get(&ohttp, &query).await
+        }
         (Method::POST, ["", ""]) => handle_ohttp_gateway(body, pool, ohttp).await,
         (Method::GET, ["", "ohttp-keys"]) => get_ohttp_keys(&ohttp).await,
         (Method::POST, ["", id]) => post_fallback_v1(id, query, body, pool).await,
@@ -304,7 +306,9 @@ impl HandlerError {
 }
 
 impl From<hyper::http::Error> for HandlerError {
-    fn from(e: hyper::http::Error) -> Self { HandlerError::InternalServerError(e.into()) }
+    fn from(e: hyper::http::Error) -> Self {
+        HandlerError::InternalServerError(e.into())
+    }
 }
 
 impl From<ShortIdError> for HandlerError {

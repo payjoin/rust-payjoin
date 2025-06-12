@@ -58,7 +58,9 @@ impl AppTrait for App {
         Ok(app)
     }
 
-    fn wallet(&self) -> BitcoindWallet { self.wallet.clone() }
+    fn wallet(&self) -> BitcoindWallet {
+        self.wallet.clone()
+    }
 
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {
         let uri =

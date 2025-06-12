@@ -11,15 +11,25 @@ pub struct RelayManager {
 }
 
 impl RelayManager {
-    pub fn new() -> Self { RelayManager { selected_relay: None, failed_relays: Vec::new() } }
+    pub fn new() -> Self {
+        RelayManager { selected_relay: None, failed_relays: Vec::new() }
+    }
 
-    pub fn set_selected_relay(&mut self, relay: payjoin::Url) { self.selected_relay = Some(relay); }
+    pub fn set_selected_relay(&mut self, relay: payjoin::Url) {
+        self.selected_relay = Some(relay);
+    }
 
-    pub fn get_selected_relay(&self) -> Option<payjoin::Url> { self.selected_relay.clone() }
+    pub fn get_selected_relay(&self) -> Option<payjoin::Url> {
+        self.selected_relay.clone()
+    }
 
-    pub fn add_failed_relay(&mut self, relay: payjoin::Url) { self.failed_relays.push(relay); }
+    pub fn add_failed_relay(&mut self, relay: payjoin::Url) {
+        self.failed_relays.push(relay);
+    }
 
-    pub fn get_failed_relays(&self) -> Vec<payjoin::Url> { self.failed_relays.clone() }
+    pub fn get_failed_relays(&self) -> Vec<payjoin::Url> {
+        self.failed_relays.clone()
+    }
 }
 
 pub(crate) struct ValidatedOhttpKeys {
@@ -95,8 +105,9 @@ async fn fetch_ohttp_keys(
         };
 
         match ohttp_keys {
-            Ok(keys) =>
-                return Ok(ValidatedOhttpKeys { ohttp_keys: keys, relay_url: selected_relay }),
+            Ok(keys) => {
+                return Ok(ValidatedOhttpKeys { ohttp_keys: keys, relay_url: selected_relay })
+            }
             Err(payjoin::io::Error::UnexpectedStatusCode(e)) => {
                 return Err(payjoin::io::Error::UnexpectedStatusCode(e).into());
             }

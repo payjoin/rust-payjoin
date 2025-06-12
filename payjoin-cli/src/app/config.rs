@@ -142,10 +142,11 @@ impl Config {
                 {
                     match built_config.get::<V1Config>("v1") {
                         Ok(v1) => config.version = Some(VersionConfig::V1(v1)),
-                        Err(e) =>
+                        Err(e) => {
                             return Err(ConfigError::Message(format!(
                                 "Valid V1 configuration is required for BIP78 mode: {e}"
-                            ))),
+                            )))
+                        }
                     }
                 }
                 #[cfg(not(feature = "v1"))]
@@ -158,10 +159,11 @@ impl Config {
                 {
                     match built_config.get::<V2Config>("v2") {
                         Ok(v2) => config.version = Some(VersionConfig::V2(v2)),
-                        Err(e) =>
+                        Err(e) => {
                             return Err(ConfigError::Message(format!(
                                 "Valid V2 configuration is required for BIP77 mode: {e}"
-                            ))),
+                            )))
+                        }
                     }
                 }
                 #[cfg(not(feature = "v2"))]

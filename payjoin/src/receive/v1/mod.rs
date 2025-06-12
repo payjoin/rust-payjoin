@@ -266,7 +266,9 @@ pub struct WantsOutputs {
 
 impl WantsOutputs {
     /// Whether the receiver is allowed to substitute original outputs or not.
-    pub fn output_substitution(&self) -> OutputSubstitution { self.params.output_substitution }
+    pub fn output_substitution(&self) -> OutputSubstitution {
+        self.params.output_substitution
+    }
 
     /// Substitute the receiver output script with the provided script.
     pub fn substitute_receiver_script(
@@ -780,7 +782,9 @@ impl PayjoinProposal {
     }
 
     /// The Payjoin Proposal PSBT
-    pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
+    pub fn psbt(&self) -> &Psbt {
+        &self.payjoin_psbt
+    }
 }
 
 #[cfg(test)]

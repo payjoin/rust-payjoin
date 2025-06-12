@@ -41,7 +41,9 @@ impl<'de, V: Value> serde::Deserialize<'de> for NoopToken<V> {
 impl<V: Value> Value for NoopToken<V> {
     type Key = V::Key;
 
-    fn key(&self) -> Self::Key { self.0.key() }
+    fn key(&self) -> Self::Key {
+        self.0.key()
+    }
 }
 
 /// A persister that does nothing but store values in memory
@@ -49,15 +51,21 @@ impl<V: Value> Value for NoopToken<V> {
 pub struct NoopPersister;
 
 impl<V: Value> From<V> for NoopToken<V> {
-    fn from(value: V) -> Self { NoopToken(value) }
+    fn from(value: V) -> Self {
+        NoopToken(value)
+    }
 }
 impl<V: Value> Persister<V> for NoopPersister {
     type Token = NoopToken<V>;
     type Error = std::convert::Infallible;
 
-    fn save(&mut self, value: V) -> Result<Self::Token, Self::Error> { Ok(NoopToken(value)) }
+    fn save(&mut self, value: V) -> Result<Self::Token, Self::Error> {
+        Ok(NoopToken(value))
+    }
 
-    fn load(&self, token: Self::Token) -> Result<V, Self::Error> { Ok(token.0) }
+    fn load(&self, token: Self::Token) -> Result<V, Self::Error> {
+        Ok(token.0)
+    }
 }
 
 /// A transition that can result in a state transition, fatal error, transient error, or successfully have no results.
@@ -282,10 +290,14 @@ pub enum Rejection<Event, Err> {
 impl<Event, Err> Rejection<Event, Err> {
     #[inline]
     #[allow(dead_code)]
-    pub fn fatal(event: Event, error: Err) -> Self { Rejection::Fatal(RejectFatal(event, error)) }
+    pub fn fatal(event: Event, error: Err) -> Self {
+        Rejection::Fatal(RejectFatal(event, error))
+    }
     #[inline]
     #[allow(dead_code)]
-    pub fn transient(error: Err) -> Self { Rejection::Transient(RejectTransient(error)) }
+    pub fn transient(error: Err) -> Self {
+        Rejection::Transient(RejectTransient(error))
+    }
 }
 
 /// Represents a fatal rejection of a state transition.
@@ -333,7 +345,9 @@ impl<ApiError: std::error::Error, StorageError: std::error::Error>
     From<InternalPersistedError<ApiError, StorageError>>
     for PersistedError<ApiError, StorageError>
 {
-    fn from(value: InternalPersistedError<ApiError, StorageError>) -> Self { PersistedError(value) }
+    fn from(value: InternalPersistedError<ApiError, StorageError>) -> Self {
+        PersistedError(value)
+    }
 }
 
 impl<ApiError: std::error::Error, StorageError: std::error::Error> std::error::Error
@@ -381,9 +395,13 @@ pub enum OptionalTransitionOutcome<NextState, CurrentState> {
 }
 
 impl<NextState, CurrentState> OptionalTransitionOutcome<NextState, CurrentState> {
-    pub fn is_none(&self) -> bool { matches!(self, OptionalTransitionOutcome::Stasis(_)) }
+    pub fn is_none(&self) -> bool {
+        matches!(self, OptionalTransitionOutcome::Stasis(_))
+    }
 
-    pub fn is_success(&self) -> bool { matches!(self, OptionalTransitionOutcome::Progress(_)) }
+    pub fn is_success(&self) -> bool {
+        matches!(self, OptionalTransitionOutcome::Progress(_))
+    }
 
     pub fn success(&self) -> Option<&NextState> {
         match self {
@@ -508,14 +526,16 @@ trait InternalSessionPersister: SessionPersister {
                     .map_err(|e| InternalPersistedError::Storage(StorageError(e)))?;
                 Ok(OptionalTransitionOutcome::Progress(next_state))
             }
-            Ok(AcceptOptionalTransition::NoResults(current_state)) =>
-                Ok(OptionalTransitionOutcome::Stasis(current_state)),
+            Ok(AcceptOptionalTransition::NoResults(current_state)) => {
+                Ok(OptionalTransitionOutcome::Stasis(current_state))
+            }
             Err(Rejection::Fatal(fatal_rejection)) => {
                 self.handle_fatal_reject(&fatal_rejection)?;
                 Err(InternalPersistedError::Fatal(fatal_rejection.1).into())
             }
-            Err(Rejection::Transient(RejectTransient(err))) =>
-                Err(InternalPersistedError::Transient(err).into()),
+            Err(Rejection::Transient(RejectTransient(err))) => {
+                Err(InternalPersistedError::Transient(err).into())
+            }
         }
     }
 
@@ -591,7 +611,9 @@ pub struct NoopPersisterEvent;
 pub struct NoopSessionPersister<E = NoopPersisterEvent>(std::marker::PhantomData<E>);
 
 impl<E> Default for NoopSessionPersister<E> {
-    fn default() -> Self { Self(std::marker::PhantomData) }
+    fn default() -> Self {
+        Self(std::marker::PhantomData)
+    }
 }
 
 impl<E: 'static> SessionPersister for NoopSessionPersister<E> {
@@ -608,7 +630,9 @@ impl<E: 'static> SessionPersister for NoopSessionPersister<E> {
         Ok(Box::new(std::iter::empty()))
     }
 
-    fn close(&self) -> Result<(), Self::InternalStorageError> { Ok(()) }
+    fn close(&self) -> Result<(), Self::InternalStorageError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

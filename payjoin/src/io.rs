@@ -161,11 +161,15 @@ impl std::error::Error for InternalErrorInner {
 }
 
 impl From<InternalError> for Error {
-    fn from(value: InternalError) -> Self { Self::Internal(value) }
+    fn from(value: InternalError) -> Self {
+        Self::Internal(value)
+    }
 }
 
 impl From<InternalErrorInner> for Error {
-    fn from(value: InternalErrorInner) -> Self { Self::Internal(InternalError(value)) }
+    fn from(value: InternalErrorInner) -> Self {
+        Self::Internal(InternalError(value))
+    }
 }
 
 #[cfg(test)]

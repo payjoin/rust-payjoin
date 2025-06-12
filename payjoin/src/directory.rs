@@ -23,8 +23,12 @@ pub const ENCAPSULATED_MESSAGE_BYTES: usize = 8192;
 pub struct ShortId(pub [u8; 8]);
 
 impl ShortId {
-    pub fn as_bytes(&self) -> &[u8] { &self.0 }
-    pub fn as_slice(&self) -> &[u8] { &self.0 }
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
 }
 
 impl std::fmt::Display for ShortId {

@@ -22,7 +22,9 @@ mod persist;
 pub struct SenderBuilder<'a>(v2::SenderBuilder<'a>);
 
 impl<'a> SenderBuilder<'a> {
-    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v2::SenderBuilder::new(psbt, uri)) }
+    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self {
+        Self(v2::SenderBuilder::new(psbt, uri))
+    }
 
     pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<NewSender, BuildSenderError> {
         let sender = self.0.build_recommended(min_fee_rate)?;

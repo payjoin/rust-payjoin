@@ -32,7 +32,9 @@ pub(crate) enum InternalBuildSenderError {
 }
 
 impl From<InternalBuildSenderError> for BuildSenderError {
-    fn from(value: InternalBuildSenderError) -> Self { BuildSenderError(value) }
+    fn from(value: InternalBuildSenderError) -> Self {
+        BuildSenderError(value)
+    }
 }
 
 impl From<crate::psbt::AddressTypeError> for BuildSenderError {
@@ -102,7 +104,9 @@ pub(crate) enum InternalValidationError {
 }
 
 impl From<InternalValidationError> for ValidationError {
-    fn from(value: InternalValidationError) -> Self { ValidationError(value) }
+    fn from(value: InternalValidationError) -> Self {
+        ValidationError(value)
+    }
 }
 
 impl From<crate::psbt::AddressTypeError> for ValidationError {
@@ -319,11 +323,15 @@ impl std::error::Error for ResponseError {
 }
 
 impl From<WellKnownError> for ResponseError {
-    fn from(value: WellKnownError) -> Self { Self::WellKnown(value) }
+    fn from(value: WellKnownError) -> Self {
+        Self::WellKnown(value)
+    }
 }
 
 impl From<InternalValidationError> for ResponseError {
-    fn from(value: InternalValidationError) -> Self { Self::Validation(ValidationError(value)) }
+    fn from(value: InternalValidationError) -> Self {
+        Self::Validation(ValidationError(value))
+    }
 }
 
 impl From<InternalProposalError> for ResponseError {

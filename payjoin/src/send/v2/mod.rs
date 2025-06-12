@@ -50,7 +50,9 @@ impl<'a> SenderBuilder<'a> {
     ///
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
     /// to create a [`Sender`]
-    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v1::SenderBuilder::new(psbt, uri)) }
+    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self {
+        Self(v1::SenderBuilder::new(psbt, uri))
+    }
 
     /// Disable output substitution even if the receiver didn't.
     ///
@@ -134,11 +136,15 @@ pub struct Sender<State: SenderState> {
 impl<State: SenderState> core::ops::Deref for Sender<State> {
     type Target = State;
 
-    fn deref(&self) -> &Self::Target { &self.state }
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
 }
 
 impl<State: SenderState> core::ops::DerefMut for Sender<State> {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
 }
 
 /// A new payjoin sender, which must be persisted before initiating the payjoin flow.
@@ -182,7 +188,9 @@ impl Sender<WithReplyKey> {
         persister.load(token).map_err(ImplementationError::from)
     }
     /// Extract serialized V1 Request and Context from a Payjoin Proposal
-    pub fn extract_v1(&self) -> (Request, v1::V1Context) { self.v1.extract_v1() }
+    pub fn extract_v1(&self) -> (Request, v1::V1Context) {
+        self.v1.extract_v1()
+    }
 
     /// Extract serialized Request and Context from a Payjoin Proposal.
     ///
@@ -244,7 +252,9 @@ impl Sender<WithReplyKey> {
     }
 
     /// The endpoint in the Payjoin URI
-    pub fn endpoint(&self) -> &Url { self.v1.endpoint() }
+    pub fn endpoint(&self) -> &Url {
+        self.v1.endpoint()
+    }
 }
 
 pub(crate) fn extract_request(

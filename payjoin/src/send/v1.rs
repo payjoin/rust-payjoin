@@ -255,7 +255,9 @@ impl Sender {
     }
 
     /// The endpoint in the Payjoin URI
-    pub fn endpoint(&self) -> &Url { &self.endpoint }
+    pub fn endpoint(&self) -> &Url {
+        &self.endpoint
+    }
 }
 
 /// Data required to validate the response.

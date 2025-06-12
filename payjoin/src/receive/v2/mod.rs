@@ -139,11 +139,15 @@ pub struct Receiver<State: ReceiverState> {
 impl<State: ReceiverState> core::ops::Deref for Receiver<State> {
     type Target = State;
 
-    fn deref(&self) -> &Self::Target { &self.state }
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
 }
 
 impl<State: ReceiverState> core::ops::DerefMut for Receiver<State> {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -436,7 +440,9 @@ impl ReceiverState for WantsOutputs {}
 
 impl Receiver<WantsOutputs> {
     /// Whether the receiver is allowed to substitute original outputs or not.
-    pub fn output_substitution(&self) -> OutputSubstitution { self.v1.output_substitution() }
+    pub fn output_substitution(&self) -> OutputSubstitution {
+        self.v1.output_substitution()
+    }
 
     /// Substitute the receiver output script with the provided script.
     pub fn substitute_receiver_script(
@@ -571,7 +577,9 @@ impl PayjoinProposal {
 
 impl Receiver<PayjoinProposal> {
     #[cfg(feature = "_multiparty")]
-    pub(crate) fn new(proposal: PayjoinProposal) -> Self { Receiver { state: proposal } }
+    pub(crate) fn new(proposal: PayjoinProposal) -> Self {
+        Receiver { state: proposal }
+    }
 
     /// The UTXOs that would be spent by this Payjoin transaction
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
@@ -579,7 +587,9 @@ impl Receiver<PayjoinProposal> {
     }
 
     /// The Payjoin Proposal PSBT
-    pub fn psbt(&self) -> &Psbt { self.v1.psbt() }
+    pub fn psbt(&self) -> &Psbt {
+        self.v1.psbt()
+    }
 
     /// Extract an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
     pub fn extract_req(

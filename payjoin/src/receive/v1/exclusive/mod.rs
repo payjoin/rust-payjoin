@@ -74,7 +74,9 @@ mod tests {
     }
 
     impl MockHeaders {
-        fn new(length: u64) -> MockHeaders { MockHeaders { length: length.to_string() } }
+        fn new(length: u64) -> MockHeaders {
+            MockHeaders { length: length.to_string() }
+        }
     }
 
     impl Headers for MockHeaders {

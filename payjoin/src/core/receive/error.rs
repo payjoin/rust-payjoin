@@ -344,8 +344,9 @@ impl fmt::Display for SelectionError {
                 f,
                 "Current privacy selection implementation only supports 2-output transactions"
             ),
-            InternalSelectionError::NotFound =>
-                write!(f, "No selection candidates improve privacy"),
+            InternalSelectionError::NotFound => {
+                write!(f, "No selection candidates improve privacy")
+            }
         }
     }
 }
@@ -381,8 +382,9 @@ pub(crate) enum InternalInputContributionError {
 impl fmt::Display for InputContributionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
-            InternalInputContributionError::ValueTooLow =>
-                write!(f, "Total input value is not enough to cover additional output value"),
+            InternalInputContributionError::ValueTooLow => {
+                write!(f, "Total input value is not enough to cover additional output value")
+            }
         }
     }
 }

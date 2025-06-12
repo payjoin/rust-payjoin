@@ -30,8 +30,9 @@ impl fmt::Display for CreateRequestError {
             Hpke(e) => write!(f, "v2 error: {e}"),
             OhttpEncapsulation(e) => write!(f, "v2 error: {e}"),
             ParseReceiverPubkey(e) => write!(f, "cannot parse receiver public key: {e}"),
-            MissingOhttpConfig =>
-                write!(f, "no ohttp configuration with which to make a v2 request available"),
+            MissingOhttpConfig => {
+                write!(f, "no ohttp configuration with which to make a v2 request available")
+            }
             Expired(expiry) => write!(f, "session expired at {expiry:?}"),
         }
     }

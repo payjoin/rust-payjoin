@@ -58,7 +58,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [x] Most checks implemented
 - [x] Documentation
 - [x] Unit test with official test vectors passes
-- [ ] Many unit tests
+- [x] Many unit tests
 - [x] Fee contribution support
 - [x] Example client using bitcoind
 - [x] Tested and works with BTCPayServer
@@ -73,7 +73,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [x] Most checks implemented
 - [x] Documentation
 - [x] Unit test with official test vectors passes
-- [ ] Many unit tests
+- [x] Many unit tests
 - [x] Fee contribution support
 - [x] Example server using bitcoind
 - [x] Tested and works with BTCPayServer
@@ -97,6 +97,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 - [x] Integration tests
 - [ ] Fuzzing
 - [x] Coverage measurement
+- [x] Mutation testing
 
 ## Minimum Supported Rust Version (MSRV)
 

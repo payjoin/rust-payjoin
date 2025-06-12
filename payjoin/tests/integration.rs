@@ -163,7 +163,7 @@ mod integration {
         }
     }
 
-    #[cfg(all(feature = "io", feature = "v2", feature = "_danger-local-https"))]
+    #[cfg(all(feature = "io", feature = "v2", feature = "_manual-tls"))]
     mod v2 {
         use std::sync::Arc;
         use std::time::Duration;

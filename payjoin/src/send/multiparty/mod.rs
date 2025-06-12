@@ -1,7 +1,6 @@
 use bitcoin::{FeeRate, Psbt};
 use error::{
-    CreateRequestError, FinalizeResponseError, FinalizedError, InternalCreateRequestError,
-    InternalFinalizedError,
+    CreateRequestError, FinalizedError, InternalCreateRequestError, InternalFinalizedError,
 };
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -192,7 +191,7 @@ impl FinalizeContext {
         self,
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
-    ) -> Result<(), FinalizeResponseError> {
+    ) -> Result<(), FinalizedError> {
         match process_post_res(response, ohttp_ctx) {
             Ok(()) => Ok(()),
             Err(e) => Err(e.into()),

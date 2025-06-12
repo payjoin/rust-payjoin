@@ -79,33 +79,3 @@ impl std::error::Error for FinalizedError {
         }
     }
 }
-
-#[derive(Debug)]
-pub struct FinalizeResponseError(InternalFinalizeResponseError);
-
-#[derive(Debug)]
-pub(crate) enum InternalFinalizeResponseError {
-    DirectoryResponse(DirectoryResponseError),
-}
-
-impl From<InternalFinalizeResponseError> for FinalizeResponseError {
-    fn from(value: InternalFinalizeResponseError) -> Self { FinalizeResponseError(value) }
-}
-
-impl From<DirectoryResponseError> for FinalizeResponseError {
-    fn from(err: DirectoryResponseError) -> Self {
-        FinalizeResponseError(InternalFinalizeResponseError::DirectoryResponse(err))
-    }
-}
-
-impl Display for FinalizeResponseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{:?}", self.0) }
-}
-
-impl std::error::Error for FinalizeResponseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self.0 {
-            InternalFinalizeResponseError::DirectoryResponse(e) => Some(e),
-        }
-    }
-}

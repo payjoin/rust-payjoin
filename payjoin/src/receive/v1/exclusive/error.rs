@@ -29,11 +29,15 @@ pub(crate) enum InternalRequestError {
 }
 
 impl From<InternalRequestError> for RequestError {
-    fn from(value: InternalRequestError) -> Self { RequestError(value) }
+    fn from(value: InternalRequestError) -> Self {
+        RequestError(value)
+    }
 }
 
 impl From<InternalRequestError> for super::ReplyableError {
-    fn from(e: InternalRequestError) -> Self { super::ReplyableError::V1(e.into()) }
+    fn from(e: InternalRequestError) -> Self {
+        super::ReplyableError::V1(e.into())
+    }
 }
 
 impl From<RequestError> for JsonReply {
@@ -44,8 +48,9 @@ impl From<RequestError> for JsonReply {
             MissingHeader(_)
             | InvalidContentType(_)
             | InvalidContentLength(_)
-            | ContentLengthTooLarge(_) =>
-                JsonReply::new(crate::error_codes::ErrorCode::OriginalPsbtRejected, e),
+            | ContentLengthTooLarge(_) => {
+                JsonReply::new(crate::error_codes::ErrorCode::OriginalPsbtRejected, e)
+            }
         }
     }
 }
@@ -54,11 +59,13 @@ impl fmt::Display for RequestError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
             InternalRequestError::MissingHeader(header) => write!(f, "Missing header: {header}"),
-            InternalRequestError::InvalidContentType(content_type) =>
-                write!(f, "Invalid content type: {content_type}"),
+            InternalRequestError::InvalidContentType(content_type) => {
+                write!(f, "Invalid content type: {content_type}")
+            }
             InternalRequestError::InvalidContentLength(e) => write!(f, "{e}"),
-            InternalRequestError::ContentLengthTooLarge(length) =>
-                write!(f, "Content length too large: {length}."),
+            InternalRequestError::ContentLengthTooLarge(length) => {
+                write!(f, "Content length too large: {length}.")
+            }
         }
     }
 }

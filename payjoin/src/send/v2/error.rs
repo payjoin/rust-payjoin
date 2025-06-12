@@ -30,8 +30,9 @@ impl fmt::Display for CreateRequestError {
             Hpke(e) => write!(f, "v2 error: {e}"),
             OhttpEncapsulation(e) => write!(f, "v2 error: {e}"),
             ParseReceiverPubkey(e) => write!(f, "cannot parse receiver public key: {e}"),
-            MissingOhttpConfig =>
-                write!(f, "no ohttp configuration with which to make a v2 request available"),
+            MissingOhttpConfig => {
+                write!(f, "no ohttp configuration with which to make a v2 request available")
+            }
             Expired(expiry) => write!(f, "session expired at {expiry:?}"),
         }
     }
@@ -53,7 +54,9 @@ impl std::error::Error for CreateRequestError {
 }
 
 impl From<InternalCreateRequestError> for CreateRequestError {
-    fn from(value: InternalCreateRequestError) -> Self { CreateRequestError(value) }
+    fn from(value: InternalCreateRequestError) -> Self {
+        CreateRequestError(value)
+    }
 }
 
 impl From<crate::into_url::Error> for CreateRequestError {
@@ -103,7 +106,9 @@ impl std::error::Error for EncapsulationError {
 }
 
 impl From<InternalEncapsulationError> for EncapsulationError {
-    fn from(value: InternalEncapsulationError) -> Self { EncapsulationError(value) }
+    fn from(value: InternalEncapsulationError) -> Self {
+        EncapsulationError(value)
+    }
 }
 
 impl From<InternalEncapsulationError> for super::ResponseError {

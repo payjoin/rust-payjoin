@@ -26,7 +26,7 @@ use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::{handle_interrupt, http_agent};
 use crate::db::Database;
-#[cfg(feature = "_danger-local-https")]
+#[cfg(feature = "_manual-tls")]
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
 
 struct Headers<'a>(&'a hyper::HeaderMap);
@@ -58,7 +58,9 @@ impl AppTrait for App {
         Ok(app)
     }
 
-    fn wallet(&self) -> BitcoindWallet { self.wallet.clone() }
+    fn wallet(&self) -> BitcoindWallet {
+        self.wallet.clone()
+    }
 
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {
         let uri =
@@ -70,7 +72,7 @@ impl AppTrait for App {
             .build_recommended(fee_rate)
             .with_context(|| "Failed to build payjoin request")?
             .extract_v1();
-        let http = http_agent()?;
+        let http = http_agent(None)?;
         let body = String::from_utf8(req.body.clone()).unwrap();
         println!("Sending fallback request to {}", &req.url);
         let response = http
@@ -151,14 +153,14 @@ impl App {
         let listener = TcpListener::bind(addr).await?;
         let app = self.clone();
 
-        #[cfg(feature = "_danger-local-https")]
+        #[cfg(feature = "_manual-tls")]
         let tls_acceptor = Self::init_tls_acceptor()?;
         while let Ok((stream, _)) = listener.accept().await {
             let app = app.clone();
-            #[cfg(feature = "_danger-local-https")]
+            #[cfg(feature = "_manual-tls")]
             let tls_acceptor = tls_acceptor.clone();
             tokio::spawn(async move {
-                #[cfg(feature = "_danger-local-https")]
+                #[cfg(feature = "_manual-tls")]
                 let stream = match tls_acceptor.accept(stream).await {
                     Ok(tls_stream) => tls_stream,
                     Err(e) => {
@@ -178,7 +180,7 @@ impl App {
         Ok(())
     }
 
-    #[cfg(feature = "_danger-local-https")]
+    #[cfg(feature = "_manual-tls")]
     fn init_tls_acceptor() -> Result<tokio_rustls::TlsAcceptor> {
         use std::io::Write;
 

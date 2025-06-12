@@ -25,7 +25,9 @@ pub struct ServerKeyConfig {
 }
 
 impl From<ServerKeyConfig> for ohttp::Server {
-    fn from(value: ServerKeyConfig) -> Self { value.server }
+    fn from(value: ServerKeyConfig) -> Self {
+        value.server
+    }
 }
 
 /// Generate a new OHTTP server key configuration
@@ -74,7 +76,9 @@ pub fn read_server_config(dir: &Path) -> Result<ServerKeyConfig> {
 /// Get the path to the key configuration file
 /// For now, default to [KEY_ID].ikm.
 /// In the future this might be able to save multiple keys named by KeyId.
-fn key_path(dir: &Path) -> PathBuf { dir.join(format!("{KEY_ID}.ikm")) }
+fn key_path(dir: &Path) -> PathBuf {
+    dir.join(format!("{KEY_ID}.ikm"))
+}
 
 #[cfg(test)]
 mod tests {

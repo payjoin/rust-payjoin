@@ -82,7 +82,9 @@ impl TestServices {
         })
     }
 
-    pub fn cert(&self) -> Vec<u8> { self.cert.serialize_der().expect("Failed to serialize cert") }
+    pub fn cert(&self) -> Vec<u8> {
+        self.cert.serialize_der().expect("Failed to serialize cert")
+    }
 
     pub fn directory_url(&self) -> Url {
         Url::parse(&format!("https://localhost:{}", self.directory.0)).expect("invalid URL")
@@ -105,7 +107,9 @@ impl TestServices {
         self.ohttp_relay.1.take().expect("ohttp relay handle not found")
     }
 
-    pub fn http_agent(&self) -> Arc<Client> { self.http_agent.clone() }
+    pub fn http_agent(&self) -> Arc<Client> {
+        self.http_agent.clone()
+    }
 
     pub async fn wait_for_services_ready(&self) -> Result<(), &'static str> {
         wait_for_service_ready(self.ohttp_relay_url(), self.http_agent()).await?;

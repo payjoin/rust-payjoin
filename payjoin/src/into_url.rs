@@ -20,7 +20,9 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 impl From<ParseError> for Error {
-    fn from(err: ParseError) -> Error { Error::ParseError(err) }
+    fn from(err: ParseError) -> Error {
+        Error::ParseError(err)
+    }
 }
 
 type Result<T> = core::result::Result<T, Error>;
@@ -49,9 +51,13 @@ pub trait IntoUrlSealed {
 }
 
 impl IntoUrlSealed for &Url {
-    fn into_url(self) -> Result<Url> { self.clone().into_url() }
+    fn into_url(self) -> Result<Url> {
+        self.clone().into_url()
+    }
 
-    fn as_str(&self) -> &str { self.as_ref() }
+    fn as_str(&self) -> &str {
+        self.as_ref()
+    }
 }
 
 impl IntoUrlSealed for Url {
@@ -63,25 +69,39 @@ impl IntoUrlSealed for Url {
         }
     }
 
-    fn as_str(&self) -> &str { self.as_ref() }
+    fn as_str(&self) -> &str {
+        self.as_ref()
+    }
 }
 
 impl IntoUrlSealed for &str {
-    fn into_url(self) -> Result<Url> { Url::parse(self)?.into_url() }
+    fn into_url(self) -> Result<Url> {
+        Url::parse(self)?.into_url()
+    }
 
-    fn as_str(&self) -> &str { self }
+    fn as_str(&self) -> &str {
+        self
+    }
 }
 
 impl IntoUrlSealed for &String {
-    fn into_url(self) -> Result<Url> { (&**self).into_url() }
+    fn into_url(self) -> Result<Url> {
+        (&**self).into_url()
+    }
 
-    fn as_str(&self) -> &str { self.as_ref() }
+    fn as_str(&self) -> &str {
+        self.as_ref()
+    }
 }
 
 impl IntoUrlSealed for String {
-    fn into_url(self) -> Result<Url> { (&*self).into_url() }
+    fn into_url(self) -> Result<Url> {
+        (&*self).into_url()
+    }
 
-    fn as_str(&self) -> &str { self.as_ref() }
+    fn as_str(&self) -> &str {
+        self.as_ref()
+    }
 }
 
 #[cfg(test)]

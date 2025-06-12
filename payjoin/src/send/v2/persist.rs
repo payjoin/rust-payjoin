@@ -10,19 +10,27 @@ use crate::persist::Value;
 pub struct SenderToken(pub(crate) Url);
 
 impl Display for SenderToken {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 impl From<Sender<WithReplyKey>> for SenderToken {
-    fn from(sender: Sender<WithReplyKey>) -> Self { SenderToken(sender.endpoint().clone()) }
+    fn from(sender: Sender<WithReplyKey>) -> Self {
+        SenderToken(sender.endpoint().clone())
+    }
 }
 
 impl AsRef<[u8]> for SenderToken {
-    fn as_ref(&self) -> &[u8] { self.0.as_str().as_bytes() }
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_str().as_bytes()
+    }
 }
 
 impl Value for Sender<WithReplyKey> {
     type Key = SenderToken;
 
-    fn key(&self) -> Self::Key { SenderToken(self.endpoint().clone()) }
+    fn key(&self) -> Self::Key {
+        SenderToken(self.endpoint().clone())
+    }
 }

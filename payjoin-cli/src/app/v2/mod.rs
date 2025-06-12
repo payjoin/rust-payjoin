@@ -47,7 +47,9 @@ impl AppTrait for App {
         Ok(app)
     }
 
-    fn wallet(&self) -> BitcoindWallet { self.wallet.clone() }
+    fn wallet(&self) -> BitcoindWallet {
+        self.wallet.clone()
+    }
 
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {
         use payjoin::UriExt;
@@ -316,10 +318,11 @@ impl App {
             self.relay_manager.lock().expect("Lock should not be poisoned").get_selected_relay();
         let ohttp_relay = match selected_relay {
             Some(relay) => relay,
-            None =>
+            None => {
                 unwrap_ohttp_keys_or_else_fetch(&self.config, directory, self.relay_manager.clone())
                     .await?
-                    .relay_url,
+                    .relay_url
+            }
         };
         Ok(ohttp_relay)
     }
@@ -370,7 +373,7 @@ fn try_contributing_inputs(
 }
 
 async fn post_request(req: payjoin::Request) -> Result<reqwest::Response> {
-    let http = http_agent()?;
+    let http = http_agent(None)?;
     http.post(req.url)
         .header("Content-Type", req.content_type)
         .body(req.body)

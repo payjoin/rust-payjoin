@@ -11,7 +11,9 @@ use super::*;
 
 pub(crate) struct SenderPersister(Arc<Database>);
 impl SenderPersister {
-    pub fn new(db: Arc<Database>) -> Self { Self(db) }
+    pub fn new(db: Arc<Database>) -> Self {
+        Self(db)
+    }
 }
 
 impl Persister<Sender<WithReplyKey>> for SenderPersister {
@@ -38,7 +40,9 @@ impl Persister<Sender<WithReplyKey>> for SenderPersister {
 
 pub(crate) struct ReceiverPersister(Arc<Database>);
 impl ReceiverPersister {
-    pub fn new(db: Arc<Database>) -> Self { Self(db) }
+    pub fn new(db: Arc<Database>) -> Self {
+        Self(db)
+    }
 }
 
 impl Persister<Receiver<WithContext>> for ReceiverPersister {

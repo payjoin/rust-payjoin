@@ -16,7 +16,9 @@ pub enum Error {
 }
 
 impl From<ReplyableError> for Error {
-    fn from(e: ReplyableError) -> Self { Error::ReplyToSender(e) }
+    fn from(e: ReplyableError) -> Self {
+        Error::ReplyToSender(e)
+    }
 }
 
 impl fmt::Display for Error {
@@ -138,7 +140,9 @@ impl error::Error for ReplyableError {
 }
 
 impl From<InternalPayloadError> for ReplyableError {
-    fn from(e: InternalPayloadError) -> Self { ReplyableError::Payload(e.into()) }
+    fn from(e: InternalPayloadError) -> Self {
+        ReplyableError::Payload(e.into())
+    }
 }
 
 /// An error that occurs during validation of the original PSBT payload sent by the sender.
@@ -158,7 +162,9 @@ impl From<InternalPayloadError> for ReplyableError {
 pub struct PayloadError(pub(crate) InternalPayloadError);
 
 impl From<InternalPayloadError> for PayloadError {
-    fn from(value: InternalPayloadError) -> Self { PayloadError(value) }
+    fn from(value: InternalPayloadError) -> Self {
+        PayloadError(value)
+    }
 }
 
 #[derive(Debug)]
@@ -221,8 +227,9 @@ impl From<PayloadError> for JsonReply {
                     JsonReply::new(VersionUnsupported, "This version of payjoin is not supported.")
                         .with_extra("supported", supported_versions_json)
                 }
-                super::optional_parameters::Error::FeeRate =>
-                    JsonReply::new(OriginalPsbtRejected, e),
+                super::optional_parameters::Error::FeeRate => {
+                    JsonReply::new(OriginalPsbtRejected, e)
+                }
             },
         }
     }
@@ -310,7 +317,9 @@ impl fmt::Display for OutputSubstitutionError {
 }
 
 impl From<InternalOutputSubstitutionError> for OutputSubstitutionError {
-    fn from(value: InternalOutputSubstitutionError) -> Self { OutputSubstitutionError(value) }
+    fn from(value: InternalOutputSubstitutionError) -> Self {
+        OutputSubstitutionError(value)
+    }
 }
 
 impl std::error::Error for OutputSubstitutionError {
@@ -349,8 +358,9 @@ impl fmt::Display for SelectionError {
                 f,
                 "Current privacy selection implementation only supports 2-output transactions"
             ),
-            InternalSelectionError::NotFound =>
-                write!(f, "No selection candidates improve privacy"),
+            InternalSelectionError::NotFound => {
+                write!(f, "No selection candidates improve privacy")
+            }
         }
     }
 }
@@ -367,7 +377,9 @@ impl error::Error for SelectionError {
     }
 }
 impl From<InternalSelectionError> for SelectionError {
-    fn from(value: InternalSelectionError) -> Self { SelectionError(value) }
+    fn from(value: InternalSelectionError) -> Self {
+        SelectionError(value)
+    }
 }
 
 /// Error that may occur when input contribution fails.
@@ -386,8 +398,9 @@ pub(crate) enum InternalInputContributionError {
 impl fmt::Display for InputContributionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
-            InternalInputContributionError::ValueTooLow =>
-                write!(f, "Total input value is not enough to cover additional output value"),
+            InternalInputContributionError::ValueTooLow => {
+                write!(f, "Total input value is not enough to cover additional output value")
+            }
         }
     }
 }
@@ -401,5 +414,7 @@ impl error::Error for InputContributionError {
 }
 
 impl From<InternalInputContributionError> for InputContributionError {
-    fn from(value: InternalInputContributionError) -> Self { InputContributionError(value) }
+    fn from(value: InternalInputContributionError) -> Self {
+        InputContributionError(value)
+    }
 }

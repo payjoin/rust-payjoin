@@ -17,7 +17,9 @@ impl NewSender {
 impl persist::Value for Sender {
     type Key = SenderToken;
 
-    fn key(&self) -> Self::Key { SenderToken(self.0.endpoint().clone()) }
+    fn key(&self) -> Self::Key {
+        SenderToken(self.0.endpoint().clone())
+    }
 }
 
 impl Sender {

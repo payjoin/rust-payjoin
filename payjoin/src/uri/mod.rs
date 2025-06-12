@@ -40,8 +40,12 @@ pub struct PayjoinExtras {
 }
 
 impl PayjoinExtras {
-    pub fn endpoint(&self) -> &Url { &self.endpoint }
-    pub fn output_substitution(&self) -> OutputSubstitution { self.output_substitution }
+    pub fn endpoint(&self) -> &Url {
+        &self.endpoint
+    }
+    pub fn output_substitution(&self) -> OutputSubstitution {
+        self.output_substitution
+    }
 }
 
 pub type Uri<'a, NetworkValidation> = bitcoin_uri::Uri<'a, NetworkValidation, MaybePayjoinExtras>;
@@ -140,7 +144,9 @@ impl bitcoin_uri::SerializeParams for &PayjoinExtras {
 impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
     type Value = MaybePayjoinExtras;
 
-    fn is_param_known(&self, param: &str) -> bool { matches!(param, "pj" | "pjos") }
+    fn is_param_known(&self, param: &str) -> bool {
+        matches!(param, "pj" | "pjos")
+    }
 
     fn deserialize_temp(
         &mut self,
@@ -370,8 +376,9 @@ mod tests {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://example.com&pjos=0";
         let parsed = Uri::try_from(uri).unwrap();
         match parsed.extras {
-            MaybePayjoinExtras::Supported(extras) =>
-                assert_eq!(extras.output_substitution, OutputSubstitution::Disabled),
+            MaybePayjoinExtras::Supported(extras) => {
+                assert_eq!(extras.output_substitution, OutputSubstitution::Disabled)
+            }
             _ => panic!("Expected Supported PayjoinExtras"),
         }
 
@@ -379,8 +386,9 @@ mod tests {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://example.com&pjos=1";
         let parsed = Uri::try_from(uri).unwrap();
         match parsed.extras {
-            MaybePayjoinExtras::Supported(extras) =>
-                assert_eq!(extras.output_substitution, OutputSubstitution::Enabled),
+            MaybePayjoinExtras::Supported(extras) => {
+                assert_eq!(extras.output_substitution, OutputSubstitution::Enabled)
+            }
             _ => panic!("Expected Supported PayjoinExtras"),
         }
 
@@ -388,8 +396,9 @@ mod tests {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://example.com";
         let parsed = Uri::try_from(uri).unwrap();
         match parsed.extras {
-            MaybePayjoinExtras::Supported(extras) =>
-                assert_eq!(extras.output_substitution, OutputSubstitution::Enabled),
+            MaybePayjoinExtras::Supported(extras) => {
+                assert_eq!(extras.output_substitution, OutputSubstitution::Enabled)
+            }
             _ => panic!("Expected Supported PayjoinExtras"),
         }
     }

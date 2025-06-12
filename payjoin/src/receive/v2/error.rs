@@ -14,11 +14,15 @@ use crate::receive::error::Error;
 pub struct SessionError(InternalSessionError);
 
 impl From<InternalSessionError> for SessionError {
-    fn from(value: InternalSessionError) -> Self { SessionError(value) }
+    fn from(value: InternalSessionError) -> Self {
+        SessionError(value)
+    }
 }
 
 impl From<InternalSessionError> for Error {
-    fn from(e: InternalSessionError) -> Self { V2(e.into()) }
+    fn from(e: InternalSessionError) -> Self {
+        V2(e.into())
+    }
 }
 
 #[derive(Debug)]
@@ -42,7 +46,9 @@ impl From<OhttpEncapsulationError> for Error {
 }
 
 impl From<HpkeError> for Error {
-    fn from(e: HpkeError) -> Self { InternalSessionError::Hpke(e).into() }
+    fn from(e: HpkeError) -> Self {
+        InternalSessionError::Hpke(e).into()
+    }
 }
 
 impl fmt::Display for SessionError {

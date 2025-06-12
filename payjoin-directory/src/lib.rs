@@ -37,10 +37,10 @@ const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message"
 
 mod db;
 
-#[cfg(feature = "_danger-local-https")]
+#[cfg(feature = "_manual-tls")]
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-#[cfg(feature = "_danger-local-https")]
+#[cfg(feature = "_manual-tls")]
 pub async fn listen_tcp_with_tls_on_free_port(
     db_host: String,
     timeout: Duration,
@@ -56,7 +56,7 @@ pub async fn listen_tcp_with_tls_on_free_port(
 }
 
 // Helper function to avoid code duplication
-#[cfg(feature = "_danger-local-https")]
+#[cfg(feature = "_manual-tls")]
 async fn listen_tcp_with_tls_on_listener(
     listener: tokio::net::TcpListener,
     db_host: String,
@@ -134,7 +134,7 @@ pub async fn listen_tcp(
     Ok(())
 }
 
-#[cfg(feature = "_danger-local-https")]
+#[cfg(feature = "_manual-tls")]
 pub async fn listen_tcp_with_tls(
     port: u16,
     db_host: String,
@@ -147,7 +147,7 @@ pub async fn listen_tcp_with_tls(
     listen_tcp_with_tls_on_listener(listener, db_host, timeout, cert_key, ohttp).await
 }
 
-#[cfg(feature = "_danger-local-https")]
+#[cfg(feature = "_manual-tls")]
 fn init_tls_acceptor(cert_key: (Vec<u8>, Vec<u8>)) -> Result<tokio_rustls::TlsAcceptor> {
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use rustls::ServerConfig;
@@ -177,10 +177,12 @@ async fn serve_payjoin_directory(
     let path_segments: Vec<&str> = path.split('/').collect();
     debug!("serve_payjoin_directory: {:?}", &path_segments);
     let mut response = match (parts.method, path_segments.as_slice()) {
-        (Method::POST, ["", ".well-known", "ohttp-gateway"]) =>
-            handle_ohttp_gateway(body, pool, ohttp).await,
-        (Method::GET, ["", ".well-known", "ohttp-gateway"]) =>
-            handle_ohttp_gateway_get(&ohttp, &query).await,
+        (Method::POST, ["", ".well-known", "ohttp-gateway"]) => {
+            handle_ohttp_gateway(body, pool, ohttp).await
+        }
+        (Method::GET, ["", ".well-known", "ohttp-gateway"]) => {
+            handle_ohttp_gateway_get(&ohttp, &query).await
+        }
         (Method::POST, ["", ""]) => handle_ohttp_gateway(body, pool, ohttp).await,
         (Method::GET, ["", "ohttp-keys"]) => get_ohttp_keys(&ohttp).await,
         (Method::POST, ["", id]) => post_fallback_v1(id, query, body, pool).await,
@@ -304,7 +306,9 @@ impl HandlerError {
 }
 
 impl From<hyper::http::Error> for HandlerError {
-    fn from(e: hyper::http::Error) -> Self { HandlerError::InternalServerError(e.into()) }
+    fn from(e: hyper::http::Error) -> Self {
+        HandlerError::InternalServerError(e.into())
+    }
 }
 
 impl From<ShortIdError> for HandlerError {

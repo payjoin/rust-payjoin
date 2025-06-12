@@ -151,19 +151,27 @@ pub enum OhttpEncapsulationError {
 }
 
 impl From<http::Error> for OhttpEncapsulationError {
-    fn from(value: http::Error) -> Self { Self::Http(value) }
+    fn from(value: http::Error) -> Self {
+        Self::Http(value)
+    }
 }
 
 impl From<ohttp::Error> for OhttpEncapsulationError {
-    fn from(value: ohttp::Error) -> Self { Self::Ohttp(value) }
+    fn from(value: ohttp::Error) -> Self {
+        Self::Ohttp(value)
+    }
 }
 
 impl From<bhttp::Error> for OhttpEncapsulationError {
-    fn from(value: bhttp::Error) -> Self { Self::Bhttp(value) }
+    fn from(value: bhttp::Error) -> Self {
+        Self::Bhttp(value)
+    }
 }
 
 impl From<url::ParseError> for OhttpEncapsulationError {
-    fn from(value: url::ParseError) -> Self { Self::ParseUrl(value) }
+    fn from(value: url::ParseError) -> Self {
+        Self::ParseUrl(value)
+    }
 }
 
 impl fmt::Display for OhttpEncapsulationError {
@@ -282,11 +290,15 @@ impl Eq for OhttpKeys {}
 impl Deref for OhttpKeys {
     type Target = ohttp::KeyConfig;
 
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl DerefMut for OhttpKeys {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
 impl<'de> serde::Deserialize<'de> for OhttpKeys {

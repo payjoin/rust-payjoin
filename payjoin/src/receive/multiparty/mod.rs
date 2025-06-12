@@ -18,7 +18,9 @@ pub struct UncheckedProposalBuilder {
 }
 
 impl UncheckedProposalBuilder {
-    pub fn new() -> Self { Self { proposals: vec![] } }
+    pub fn new() -> Self {
+        Self { proposals: vec![] }
+    }
 
     pub fn add(
         &mut self,
@@ -220,7 +222,9 @@ impl PayjoinProposal {
             .into_iter()
     }
 
-    pub fn proposal(&self) -> &v1::PayjoinProposal { &self.v1 }
+    pub fn proposal(&self) -> &v1::PayjoinProposal {
+        &self.v1
+    }
 }
 
 /// A multiparty proposal that is ready to be combined into a single psbt
@@ -230,7 +234,9 @@ pub struct FinalizedProposal {
 }
 
 impl FinalizedProposal {
-    pub fn new() -> Self { Self { v2_proposals: vec![] } }
+    pub fn new() -> Self {
+        Self { v2_proposals: vec![] }
+    }
 
     pub fn add(
         &mut self,
@@ -301,7 +307,9 @@ impl FinalizedProposal {
         Ok(agg_psbt)
     }
 
-    pub fn v2(&self) -> &[v2::UncheckedProposal] { &self.v2_proposals }
+    pub fn v2(&self) -> &[v2::UncheckedProposal] {
+        &self.v2_proposals
+    }
 }
 
 #[cfg(test)]

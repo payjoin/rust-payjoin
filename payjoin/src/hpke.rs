@@ -28,7 +28,9 @@ pub type EncappedKey = <SecpK256HkdfSha256 as hpke::Kem>::EncappedKey;
 pub struct HpkeKeyPair(pub HpkeSecretKey, pub HpkePublicKey);
 
 impl From<HpkeKeyPair> for (HpkeSecretKey, HpkePublicKey) {
-    fn from(value: HpkeKeyPair) -> Self { (value.0, value.1) }
+    fn from(value: HpkeKeyPair) -> Self {
+        (value.0, value.1)
+    }
 }
 
 impl HpkeKeyPair {
@@ -41,8 +43,12 @@ impl HpkeKeyPair {
         let (sk, pk) = <SecpK256HkdfSha256 as hpke::Kem>::gen_keypair(&mut OsRng);
         Self(HpkeSecretKey(sk), HpkePublicKey(pk))
     }
-    pub fn secret_key(&self) -> &HpkeSecretKey { &self.0 }
-    pub fn public_key(&self) -> &HpkePublicKey { &self.1 }
+    pub fn secret_key(&self) -> &HpkeSecretKey {
+        &self.0
+    }
+    pub fn public_key(&self) -> &HpkePublicKey {
+        &self.1
+    }
 }
 
 fn pubkey_from_compressed_bytes(pk_bytes: &[u8]) -> Result<HpkePublicKey, HpkeError> {
@@ -85,7 +91,9 @@ pub struct HpkeSecretKey(pub SecretKey);
 impl Deref for HpkeSecretKey {
     type Target = SecretKey;
 
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl core::fmt::Debug for HpkeSecretKey {
@@ -137,7 +145,9 @@ impl HpkePublicKey {
 impl Deref for HpkePublicKey {
     type Target = PublicKey;
 
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl core::fmt::Debug for HpkePublicKey {
@@ -279,7 +289,9 @@ pub enum HpkeError {
 }
 
 impl From<hpke::HpkeError> for HpkeError {
-    fn from(value: hpke::HpkeError) -> Self { Self::Hpke(value) }
+    fn from(value: hpke::HpkeError) -> Self {
+        Self::Hpke(value)
+    }
 }
 
 impl From<secp256k1::Error> for HpkeError {

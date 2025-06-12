@@ -57,7 +57,9 @@ impl UrlExt for Url {
     }
 
     /// Set the ohttp parameter in the URL fragment
-    fn set_ohttp(&mut self, ohttp: OhttpKeys) { set_param(self, "OH1", &ohttp.to_string()) }
+    fn set_ohttp(&mut self, ohttp: OhttpKeys) {
+        set_param(self, "OH1", &ohttp.to_string())
+    }
 
     /// Retrieve the exp parameter from the URL fragment
     fn exp(&self) -> Result<std::time::SystemTime, ParseExpParamError> {
@@ -179,8 +181,9 @@ impl std::fmt::Display for ParseExpParamError {
             MissingExp => write!(f, "exp is missing"),
             InvalidHrp(h) => write!(f, "incorrect hrp for exp: {h}"),
             DecodeBech32(d) => write!(f, "exp is not valid bech32: {d}"),
-            InvalidExp(i) =>
-                write!(f, "exp param does not contain a bitcoin consensus encoded u32: {i}"),
+            InvalidExp(i) => {
+                write!(f, "exp param does not contain a bitcoin consensus encoded u32: {i}")
+            }
         }
     }
 }
@@ -203,8 +206,9 @@ impl std::fmt::Display for ParseReceiverPubkeyParamError {
             MissingPubkey => write!(f, "receiver public key is missing"),
             InvalidHrp(h) => write!(f, "incorrect hrp for receiver key: {h}"),
             DecodeBech32(e) => write!(f, "receiver public is not valid base64: {e}"),
-            InvalidPubkey(e) =>
-                write!(f, "receiver public key does not represent a valid pubkey: {e}"),
+            InvalidPubkey(e) => {
+                write!(f, "receiver public key does not represent a valid pubkey: {e}")
+            }
         }
     }
 }

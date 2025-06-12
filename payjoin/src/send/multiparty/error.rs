@@ -21,11 +21,15 @@ pub(crate) enum InternalCreateRequestError {
 }
 
 impl From<InternalCreateRequestError> for CreateRequestError {
-    fn from(value: InternalCreateRequestError) -> Self { CreateRequestError(value) }
+    fn from(value: InternalCreateRequestError) -> Self {
+        CreateRequestError(value)
+    }
 }
 
 impl Display for CreateRequestError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{:?}", self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
 }
 
 impl std::error::Error for CreateRequestError {
@@ -54,7 +58,9 @@ pub(crate) enum InternalFinalizedError {
 }
 
 impl From<InternalFinalizedError> for FinalizedError {
-    fn from(value: InternalFinalizedError) -> Self { FinalizedError(value) }
+    fn from(value: InternalFinalizedError) -> Self {
+        FinalizedError(value)
+    }
 }
 
 impl From<DirectoryResponseError> for FinalizedError {
@@ -64,7 +70,9 @@ impl From<DirectoryResponseError> for FinalizedError {
 }
 
 impl Display for FinalizedError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{:?}", self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
 }
 
 impl std::error::Error for FinalizedError {
@@ -89,7 +97,9 @@ pub(crate) enum InternalFinalizeResponseError {
 }
 
 impl From<InternalFinalizeResponseError> for FinalizeResponseError {
-    fn from(value: InternalFinalizeResponseError) -> Self { FinalizeResponseError(value) }
+    fn from(value: InternalFinalizeResponseError) -> Self {
+        FinalizeResponseError(value)
+    }
 }
 
 impl From<DirectoryResponseError> for FinalizeResponseError {
@@ -99,7 +109,9 @@ impl From<DirectoryResponseError> for FinalizeResponseError {
 }
 
 impl Display for FinalizeResponseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{:?}", self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
 }
 
 impl std::error::Error for FinalizeResponseError {

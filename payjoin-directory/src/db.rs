@@ -42,7 +42,9 @@ impl std::error::Error for Error {
 }
 
 impl From<RedisError> for Error {
-    fn from(value: RedisError) -> Self { Error::Redis(value) }
+    fn from(value: RedisError) -> Self {
+        Error::Redis(value)
+    }
 }
 
 pub(crate) type Result<T> = core::result::Result<T, Error>;
@@ -130,11 +132,12 @@ impl DbPool {
                             }
                         }
                     }
-                    None =>
+                    None => {
                         return Err(RedisError::from((
                             ErrorKind::IoError,
                             "PubSub connection closed",
-                        ))),
+                        )))
+                    }
                 }
             }
         };

@@ -20,6 +20,9 @@ pub mod error;
 #[cfg(feature = "uniffi")]
 pub mod uni;
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SessionEvent(payjoin::receive::v2::SessionEvent);
+
 #[derive(Debug)]
 pub struct NewReceiver(payjoin::receive::v2::NewReceiver);
 

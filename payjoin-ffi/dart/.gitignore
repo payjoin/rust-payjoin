@@ -1,0 +1,10 @@
+.dart_tool/
+build/
+pubspec.lock
+doc/api/
+
+.DS_Store
+
+# Auto-generated bindings
+lib/payjoin_ffi.dart
+lib/bitcoin.dart

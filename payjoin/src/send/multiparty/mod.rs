@@ -1,7 +1,7 @@
 use bitcoin::{FeeRate, Psbt};
 use error::{
     CreateRequestError, FinalizeResponseError, FinalizedError, InternalCreateRequestError,
-    InternalFinalizeResponseError, InternalFinalizedError,
+    InternalFinalizedError,
 };
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -9,7 +9,7 @@ use url::Url;
 use super::v2::{self, extract_request, EncapsulationError, HpkeContext};
 use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, InternalResult};
 use crate::hpke::decrypt_message_b;
-use crate::ohttp::ohttp_decapsulate;
+use crate::ohttp::{process_get_res, process_post_res};
 use crate::output_substitution::OutputSubstitution;
 use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
@@ -131,37 +131,25 @@ impl GetContext {
         finalize_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> Result<FinalizeContext, FinalizedError> {
         let psbt_ctx = PsbtContext { inner: self.0.psbt_ctx.clone() };
-        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
-            response.try_into().map_err(|_| InternalFinalizedError::InvalidSize)?;
-
-        let response =
-            ohttp_decapsulate(ohttp_ctx, response_array).map_err(InternalFinalizedError::Ohttp)?;
-        let body = match response.status() {
-            http::StatusCode::OK => Some(response.body().to_vec()),
-            http::StatusCode::ACCEPTED => None,
-            _ => return Err(InternalFinalizedError::UnexpectedStatusCode(response.status()))?,
+        let body = match process_get_res(response, ohttp_ctx)? {
+            Some(body) => body,
+            None => return Err(FinalizedError::from(InternalFinalizedError::MissingResponse)),
         };
-        if let Some(body) = body {
-            let psbt = decrypt_message_b(
-                &body,
-                self.0.hpke_ctx.receiver.clone(),
-                self.0.hpke_ctx.reply_pair.secret_key().clone(),
-            )
-            .map_err(InternalFinalizedError::Hpke)?;
+        let psbt = decrypt_message_b(
+            &body,
+            self.0.hpke_ctx.receiver.clone(),
+            self.0.hpke_ctx.reply_pair.secret_key().clone(),
+        )
+        .map_err(InternalFinalizedError::Hpke)?;
 
-            let proposal = Psbt::deserialize(&psbt).map_err(InternalFinalizedError::Psbt)?;
-            let psbt =
-                psbt_ctx.process_proposal(proposal).map_err(InternalFinalizedError::Proposal)?;
-            let finalized_psbt =
-                finalize_psbt(&psbt).map_err(InternalFinalizedError::FinalizePsbt)?;
-            Ok(FinalizeContext {
-                hpke_ctx: self.0.hpke_ctx.clone(),
-                directory_url: self.0.endpoint.clone(),
-                psbt: finalized_psbt,
-            })
-        } else {
-            Err(InternalFinalizedError::MissingResponse.into())
-        }
+        let proposal = Psbt::deserialize(&psbt).map_err(InternalFinalizedError::Psbt)?;
+        let psbt = psbt_ctx.process_proposal(proposal).map_err(InternalFinalizedError::Proposal)?;
+        let finalized_psbt = finalize_psbt(&psbt).map_err(InternalFinalizedError::FinalizePsbt)?;
+        Ok(FinalizeContext {
+            hpke_ctx: self.0.hpke_ctx.clone(),
+            directory_url: self.0.endpoint.clone(),
+            psbt: finalized_psbt,
+        })
     }
 }
 
@@ -205,15 +193,9 @@ impl FinalizeContext {
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
     ) -> Result<(), FinalizeResponseError> {
-        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] = response
-            .try_into()
-            .map_err(|_| InternalFinalizeResponseError::InvalidSize(response.len()))?;
-
-        let response = ohttp_decapsulate(ohttp_ctx, response_array)
-            .map_err(InternalFinalizeResponseError::Ohttp)?;
-        match response.status() {
-            http::StatusCode::OK | http::StatusCode::ACCEPTED => Ok(()),
-            _ => Err(InternalFinalizeResponseError::UnexpectedStatusCode(response.status()))?,
+        match process_post_res(response, ohttp_ctx) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(e.into()),
         }
     }
 }

@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use bitcoin::psbt::Error as PsbtError;
 
 use crate::hpke::HpkeError;
-use crate::ohttp::OhttpEncapsulationError;
+use crate::ohttp::DirectoryResponseError;
 use crate::send::InternalProposalError;
 use crate::uri::url_ext::ParseReceiverPubkeyParamError;
 use crate::ImplementationError;
@@ -45,19 +45,22 @@ pub struct FinalizedError(InternalFinalizedError);
 #[derive(Debug)]
 pub(crate) enum InternalFinalizedError {
     Hpke(HpkeError),
-    InvalidSize,
     #[allow(dead_code)]
     FinalizePsbt(ImplementationError),
     MissingResponse,
     Psbt(PsbtError),
-    #[allow(dead_code)]
-    UnexpectedStatusCode(http::StatusCode),
+    DirectoryResponse(DirectoryResponseError),
     Proposal(InternalProposalError),
-    Ohttp(OhttpEncapsulationError),
 }
 
 impl From<InternalFinalizedError> for FinalizedError {
     fn from(value: InternalFinalizedError) -> Self { FinalizedError(value) }
+}
+
+impl From<DirectoryResponseError> for FinalizedError {
+    fn from(err: DirectoryResponseError) -> Self {
+        FinalizedError(InternalFinalizedError::DirectoryResponse(err))
+    }
 }
 
 impl Display for FinalizedError {
@@ -68,13 +71,11 @@ impl std::error::Error for FinalizedError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.0 {
             InternalFinalizedError::Hpke(e) => Some(e),
-            InternalFinalizedError::InvalidSize => None,
             InternalFinalizedError::FinalizePsbt(_) => None,
             InternalFinalizedError::MissingResponse => None,
             InternalFinalizedError::Psbt(e) => Some(e),
-            InternalFinalizedError::UnexpectedStatusCode(_) => None,
             InternalFinalizedError::Proposal(e) => Some(e),
-            InternalFinalizedError::Ohttp(e) => Some(e),
+            InternalFinalizedError::DirectoryResponse(e) => Some(e),
         }
     }
 }
@@ -84,15 +85,17 @@ pub struct FinalizeResponseError(InternalFinalizeResponseError);
 
 #[derive(Debug)]
 pub(crate) enum InternalFinalizeResponseError {
-    #[allow(dead_code)]
-    InvalidSize(usize),
-    Ohttp(OhttpEncapsulationError),
-    #[allow(dead_code)]
-    UnexpectedStatusCode(http::StatusCode),
+    DirectoryResponse(DirectoryResponseError),
 }
 
 impl From<InternalFinalizeResponseError> for FinalizeResponseError {
     fn from(value: InternalFinalizeResponseError) -> Self { FinalizeResponseError(value) }
+}
+
+impl From<DirectoryResponseError> for FinalizeResponseError {
+    fn from(err: DirectoryResponseError) -> Self {
+        FinalizeResponseError(InternalFinalizeResponseError::DirectoryResponse(err))
+    }
 }
 
 impl Display for FinalizeResponseError {
@@ -102,9 +105,7 @@ impl Display for FinalizeResponseError {
 impl std::error::Error for FinalizeResponseError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.0 {
-            InternalFinalizeResponseError::InvalidSize(_) => None,
-            InternalFinalizeResponseError::Ohttp(e) => Some(e),
-            InternalFinalizeResponseError::UnexpectedStatusCode(_) => None,
+            InternalFinalizeResponseError::DirectoryResponse(e) => Some(e),
         }
     }
 }

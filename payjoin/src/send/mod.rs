@@ -720,29 +720,6 @@ mod test {
     }
 
     #[test]
-    fn test_output_substitution() -> Result<(), BoxError> {
-        let mut ctx = create_psbt_context()?;
-        let mut proposal = PARSED_PAYJOIN_PROPOSAL.clone();
-
-        ctx.output_substitution = OutputSubstitution::Disabled;
-        assert!(ctx.clone().process_proposal(proposal.clone()).is_ok(),);
-
-        std::mem::swap(
-            &mut ctx.original_psbt.unsigned_tx.output[0].value,
-            &mut proposal.unsigned_tx.output[0].value,
-        );
-
-        ctx.original_psbt.unsigned_tx.output[0].script_pubkey = ctx.payee.clone();
-
-        assert!(matches!(
-            ctx.clone().process_proposal(proposal.clone()).unwrap_err(),
-            InternalProposalError::DisallowedOutputSubstitution
-        ));
-
-        Ok(())
-    }
-
-    #[test]
     fn test_payee_output_value_decreased() -> Result<(), BoxError> {
         let mut ctx = create_psbt_context()?;
         let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
@@ -1118,16 +1095,48 @@ mod test {
         fn test_process_proposal_when_payee_output_has_disallowed_output_substitution(
         ) -> Result<(), BoxError> {
             let mut ctx = create_psbt_context()?;
-            let proposal = PARSED_PAYJOIN_PROPOSAL.clone();
-
-            ctx.original_psbt.unsigned_tx.output.get_mut(0).unwrap().script_pubkey =
-                ctx.payee.clone();
+            let mut proposal = PARSED_PAYJOIN_PROPOSAL.clone();
             ctx.output_substitution = OutputSubstitution::Disabled;
 
+            // When output substitution is disabled ensure that the output value did not decrease
+            assert!(ctx.clone().process_proposal(proposal.clone()).is_ok());
+
+            // When output substitution is disabled still allow increasing the output value
+            proposal.unsigned_tx.output[0].value += Amount::from_sat(182);
+            assert!(ctx.clone().process_proposal(proposal.clone()).is_ok());
+
+            proposal.unsigned_tx.output[0].value -= Amount::from_sat(182);
+            ctx.original_psbt.unsigned_tx.output.get_mut(0).unwrap().script_pubkey =
+                ctx.payee.clone();
+            std::mem::swap(
+                &mut ctx.original_psbt.unsigned_tx.output[0].value,
+                &mut proposal.unsigned_tx.output[0].value,
+            );
             assert_eq!(
                 ctx.process_proposal(proposal).unwrap_err().to_string(),
                 InternalProposalError::DisallowedOutputSubstitution.to_string()
             );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_process_proposal_when_payee_output_has_allowed_output_substitution(
+        ) -> Result<(), BoxError> {
+            let mut ctx = create_psbt_context()?;
+            let mut proposal = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            // Do not make any checks when output substitution is enabled
+            ctx.output_substitution = OutputSubstitution::Enabled;
+            ctx.original_psbt.unsigned_tx.output.get_mut(0).unwrap().script_pubkey =
+                ctx.payee.clone();
+            assert!(ctx.clone().process_proposal(proposal.clone()).is_ok());
+
+            proposal.unsigned_tx.output[0].value += Amount::from_sat(182);
+            assert!(ctx.clone().process_proposal(proposal.clone()).is_ok());
+
+            proposal.unsigned_tx.output[0].value -= Amount::from_sat(364);
+            assert!(ctx.process_proposal(proposal).is_ok());
 
             Ok(())
         }

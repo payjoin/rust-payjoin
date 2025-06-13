@@ -43,7 +43,8 @@ pub(crate) mod v1;
 #[cfg_attr(docsrs, doc(cfg(feature = "v2")))]
 pub mod v2;
 
-/// Helper to construct a pair of (txin, psbtin) with some built-in validation
+/// Helper to construct a pair of ([`TxIn`], [`psbt::Input`]) with some built-in validation.
+///
 /// Use with [`InputPair::new`] to contribute receiver inputs.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InputPair {
@@ -59,6 +60,11 @@ impl InputPair {
         expected_weight: Option<Weight>,
     ) -> Result<Self, PsbtInputError> {
         let raw = InternalInputPair { txin: &txin, psbtin: &psbtin };
+    /// Creates a new InputPair while validating that the passed [`TxIn`] and [`psbt::Input`]
+    /// refer to the same and the correct UTXO.
+    pub fn new(txin: TxIn, psbtin: psbt::Input) -> Result<Self, PsbtInputError> {
+        let input_pair = Self { txin, psbtin };
+        let raw = InternalInputPair::from(&input_pair);
         raw.validate_utxo()?;
 
         let expected_weight = match raw.expected_input_weight() {
@@ -119,7 +125,7 @@ impl InputPair {
         }
     }
 
-    /// Constructs a new ['InputPair'] for spending a legacy P2PKH output
+    /// Constructs a new [`InputPair`] for spending a legacy P2PKH output.
     pub fn new_p2pkh(
         non_witness_utxo: Transaction,
         outpoint: OutPoint,
@@ -132,7 +138,7 @@ impl InputPair {
         Self::new_legacy_input_pair(non_witness_utxo, outpoint, sequence, None)
     }
 
-    /// Constructs a new ['InputPair'] for spending a legacy P2SH output
+    /// Constructs a new [`InputPair`] for spending a legacy P2SH output.
     pub fn new_p2sh(
         non_witness_utxo: Transaction,
         outpoint: OutPoint,
@@ -168,7 +174,7 @@ impl InputPair {
         Self::new(txin, psbtin, expected_weight)
     }
 
-    /// Constructs a new ['InputPair'] for spending a native SegWit P2WPKH output
+    /// Constructs a new [`InputPair`] for spending a native SegWit P2WPKH output.
     pub fn new_p2wpkh(
         txout: TxOut,
         outpoint: OutPoint,
@@ -181,7 +187,7 @@ impl InputPair {
         Self::new_segwit_input_pair(txout, outpoint, sequence, None)
     }
 
-    /// Constructs a new ['InputPair'] for spending a native SegWit P2WSH output
+    /// Constructs a new [`InputPair`] for spending a native SegWit P2WSH output.
     pub fn new_p2wsh(
         txout: TxOut,
         outpoint: OutPoint,
@@ -195,7 +201,7 @@ impl InputPair {
         Self::new_segwit_input_pair(txout, outpoint, sequence, Some(expected_weight))
     }
 
-    /// Constructs a new ['InputPair'] for spending a native SegWit P2TR output
+    /// Constructs a new [`InputPair`] for spending a native SegWit P2TR output.
     pub fn new_p2tr(
         txout: TxOut,
         outpoint: OutPoint,

@@ -105,7 +105,7 @@ pub(crate) struct InternalInputPair<'a> {
 }
 
 impl InternalInputPair<'_> {
-    /// Returns TxOut associated with the input
+    /// Returns the [`TxOut`] associated with the input.
     pub fn previous_txout(&self) -> Result<&TxOut, PrevTxOutError> {
         match (&self.psbtin.non_witness_utxo, &self.psbtin.witness_utxo) {
             (None, None) => Err(PrevTxOutError::MissingUtxoInformation),
@@ -125,6 +125,7 @@ impl InternalInputPair<'_> {
         }
     }
 
+    /// Validates that [`TxIn`] and the applicable UTXO field(s) of the [`psbt::Input`] refer to the same UTXO.
     pub fn validate_utxo(&self) -> Result<(), InternalPsbtInputError> {
         match (&self.psbtin.non_witness_utxo, &self.psbtin.witness_utxo) {
             (None, None) =>
@@ -172,6 +173,7 @@ impl InternalInputPair<'_> {
         }
     }
 
+    /// Returns the scriptPubKey address type of the UTXO this input is pointing to.
     pub fn address_type(&self) -> Result<AddressType, AddressTypeError> {
         let txo = self.previous_txout()?;
         // HACK: Network doesn't matter for our use case of only getting the address type
@@ -181,6 +183,7 @@ impl InternalInputPair<'_> {
             .ok_or(AddressTypeError::UnknownAddressType)
     }
 
+    /// Returns the expected weight of this input based on the address type of the UTXO it is pointing to.
     pub fn expected_input_weight(&self) -> Result<Weight, InputWeightError> {
         use bitcoin::AddressType::*;
 

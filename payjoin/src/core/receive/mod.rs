@@ -38,7 +38,7 @@ pub(crate) mod v1;
 #[cfg_attr(docsrs, doc(cfg(feature = "v2")))]
 pub mod v2;
 
-/// Helper to construct a pair of ([`TxIn`], [`psbt::Input`]) with some built-in validation.
+/// A pair of ([`TxIn`], [`psbt::Input`]) with some built-in validation.
 ///
 /// Use with [`InputPair::new`] to contribute receiver inputs.
 #[derive(Clone, Debug)]

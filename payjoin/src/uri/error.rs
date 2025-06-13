@@ -70,7 +70,7 @@ impl PayjoinUriError {
     }
 
     pub fn from_uri_error(error: bitcoin_uri::de::Error<PjParseError>) -> Self {
-        Self { message: format!("Bitcoin URI error: {}", error), source: None }
+        Self { message: format!("Bitcoin URI error: {error}"), source: None }
     }
 
     pub fn unsupported_uri() -> Self {
@@ -86,7 +86,7 @@ impl fmt::Display for PayjoinUriError {
 
 impl Error for PayjoinUriError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.source.as_ref().map(|e| e.as_ref() as &(dyn Error + 'static))
+        self.source.as_deref()
     }
 }
 

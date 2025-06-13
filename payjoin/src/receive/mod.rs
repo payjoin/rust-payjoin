@@ -47,8 +47,8 @@ pub struct InputPair {
 }
 
 impl InputPair {
-    /// Creates a new InputPair while validating that the passed TxIn and PSBT Input 
-    /// refer to the same and the correct UTXO. 
+    /// Creates a new InputPair while validating that the passed TxIn and PSBT Input
+    /// refer to the same and the correct UTXO.
     pub fn new(txin: TxIn, psbtin: psbt::Input) -> Result<Self, PsbtInputError> {
         let input_pair = Self { txin, psbtin };
         let raw = InternalInputPair::from(&input_pair);

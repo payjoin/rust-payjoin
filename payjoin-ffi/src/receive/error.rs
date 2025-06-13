@@ -59,8 +59,12 @@ impl From<JsonReply> for receive::JsonReply {
     fn from(value: JsonReply) -> Self { value.0 }
 }
 
+impl From<receive::JsonReply> for JsonReply {
+    fn from(value: receive::JsonReply) -> Self { Self(value) }
+}
+
 impl From<ReplyableError> for JsonReply {
-    fn from(value: ReplyableError) -> Self { Self(value.0.into()) }
+    fn from(value: ReplyableError) -> Self { Self((&value.0).into()) }
 }
 
 /// Error that may occur during a v2 session typestate change
@@ -92,3 +96,9 @@ pub struct InputContributionError(#[from] receive::InputContributionError);
 #[error(transparent)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct PsbtInputError(#[from] receive::PsbtInputError);
+
+/// Error that may occur when a receiver event log is replayed
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+pub struct ReplayError(#[from] receive::v2::ReplayError);

@@ -38,7 +38,7 @@ pub(crate) mod v1;
 #[cfg_attr(docsrs, doc(cfg(feature = "v2")))]
 pub mod v2;
 
-/// Helper to construct a pair of (txin, psbtin) with some built-in validation
+/// Helper to construct a pair of (txin, psbtin) with some built-in validation.
 /// Use with [`InputPair::new`] to contribute receiver inputs.
 #[derive(Clone, Debug)]
 pub struct InputPair {
@@ -47,6 +47,8 @@ pub struct InputPair {
 }
 
 impl InputPair {
+    /// Creates a new InputPair while validating that the passed TxIn and PSBT Input 
+    /// refer to the same and the correct UTXO. 
     pub fn new(txin: TxIn, psbtin: psbt::Input) -> Result<Self, PsbtInputError> {
         let input_pair = Self { txin, psbtin };
         let raw = InternalInputPair::from(&input_pair);

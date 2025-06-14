@@ -434,7 +434,7 @@ fn input_pair_from_local_utxo(utxo: LocalUtxo) -> Result<InputPair, BoxError> {
         previous_output: payjoin::bitcoin::OutPoint::from_str(&utxo.outpoint.to_string()).unwrap(),
         ..Default::default()
     };
-    InputPair::new(txin.clone().into(), psbtin.clone().into())
+    InputPair::new(txin.clone().into(), psbtin.clone().into(), None)
         .map_err(|e| format!("Failed to create input pair: {:?}", e).into())
 }
 

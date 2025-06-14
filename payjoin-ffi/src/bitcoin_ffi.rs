@@ -54,3 +54,20 @@ impl From<PsbtInput> for bitcoin::psbt::Input {
         }
     }
 }
+
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct Weight {
+    pub weight_units: u64,
+}
+
+impl From<bitcoin::Weight> for Weight {
+    fn from(weight: bitcoin::Weight) -> Self {
+        Self { weight_units: weight.to_wu() }
+    }
+}
+
+impl From<Weight> for bitcoin::Weight {
+    fn from(weight: Weight) -> Self {
+        bitcoin::Weight::from_wu(weight.weight_units)
+    }
+}

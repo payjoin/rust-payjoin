@@ -1506,7 +1506,7 @@ mod integration {
             previous_output: OutPoint { txid: utxo.txid, vout: utxo.vout },
             ..Default::default()
         };
-        InputPair::new(txin, psbtin).expect("Input pair should be valid")
+        InputPair::new(txin, psbtin, None).expect("Input pair should be valid")
     }
 
     struct HeaderMock(HashMap<String, String>);

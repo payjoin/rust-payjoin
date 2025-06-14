@@ -158,29 +158,29 @@ impl PsbtContext {
 
         for proposed in proposal.input_pairs() {
             ensure(
-                proposed.psbtin.bip32_derivation.is_empty(),
+                proposed.pair.psbtin.bip32_derivation.is_empty(),
                 InternalProposalError::TxInContainsKeyPaths,
             )?;
             ensure(
-                proposed.psbtin.partial_sigs.is_empty(),
+                proposed.pair.psbtin.partial_sigs.is_empty(),
                 InternalProposalError::ContainsPartialSigs,
             )?;
             match original_inputs.peek() {
                 // our (sender)
                 Some(original)
-                    if proposed.txin.previous_output == original.txin.previous_output =>
+                    if proposed.pair.txin.previous_output == original.pair.txin.previous_output =>
                 {
                     check_eq!(
-                        proposed.txin.sequence,
-                        original.txin.sequence,
+                        proposed.pair.txin.sequence,
+                        original.pair.txin.sequence,
                         SenderTxinSequenceChanged
                     );
                     ensure(
-                        proposed.psbtin.final_script_sig.is_none(),
+                        proposed.pair.psbtin.final_script_sig.is_none(),
                         InternalProposalError::SenderTxinContainsFinalScriptSig,
                     )?;
                     ensure(
-                        proposed.psbtin.final_script_witness.is_none(),
+                        proposed.pair.psbtin.final_script_witness.is_none(),
                         InternalProposalError::SenderTxinContainsFinalScriptWitness,
                     )?;
                     original_inputs.next();
@@ -194,18 +194,18 @@ impl PsbtContext {
                         .ok_or(InternalProposalError::NoInputs)?;
                     // Verify the PSBT input is finalized
                     ensure(
-                        proposed.psbtin.final_script_sig.is_some()
-                            || proposed.psbtin.final_script_witness.is_some(),
+                        proposed.pair.psbtin.final_script_sig.is_some()
+                            || proposed.pair.psbtin.final_script_witness.is_some(),
                         InternalProposalError::ReceiverTxinNotFinalized,
                     )?;
                     // Verify that non_witness_utxo or witness_utxo are filled in.
                     ensure(
-                        proposed.psbtin.witness_utxo.is_some()
-                            || proposed.psbtin.non_witness_utxo.is_some(),
+                        proposed.pair.psbtin.witness_utxo.is_some()
+                            || proposed.pair.psbtin.non_witness_utxo.is_some(),
                         InternalProposalError::ReceiverTxinMissingUtxoInfo,
                     )?;
                     ensure(
-                        proposed.txin.sequence == original.txin.sequence,
+                        proposed.pair.txin.sequence == original.pair.txin.sequence,
                         InternalProposalError::MixedSequence,
                     )?;
                 }
@@ -225,12 +225,14 @@ impl PsbtContext {
 
         for (proposed_txin, proposed_psbtin) in proposal_inputs {
             if let Some(original) = original_inputs.peek() {
-                if proposed_txin.previous_output == original.txin.previous_output {
-                    proposed_psbtin.non_witness_utxo = original.psbtin.non_witness_utxo.clone();
-                    proposed_psbtin.witness_utxo = original.psbtin.witness_utxo.clone();
-                    proposed_psbtin.bip32_derivation = original.psbtin.bip32_derivation.clone();
-                    proposed_psbtin.tap_internal_key = original.psbtin.tap_internal_key;
-                    proposed_psbtin.tap_key_origins = original.psbtin.tap_key_origins.clone();
+                if proposed_txin.previous_output == original.pair.txin.previous_output {
+                    proposed_psbtin.non_witness_utxo =
+                        original.pair.psbtin.non_witness_utxo.clone();
+                    proposed_psbtin.witness_utxo = original.pair.psbtin.witness_utxo.clone();
+                    proposed_psbtin.bip32_derivation =
+                        original.pair.psbtin.bip32_derivation.clone();
+                    proposed_psbtin.tap_internal_key = original.pair.psbtin.tap_internal_key;
+                    proposed_psbtin.tap_key_origins = original.pair.psbtin.tap_key_origins.clone();
                     original_inputs.next();
                 }
             }

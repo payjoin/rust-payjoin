@@ -11,16 +11,19 @@
 
 use std::str::FromStr;
 
-use bitcoin::{psbt, AddressType, OutPoint, Psbt, ScriptBuf, Sequence, Transaction, TxIn, TxOut};
+use bitcoin::{
+    psbt, AddressType, OutPoint, Psbt, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Weight,
+};
 pub(crate) use error::InternalPayloadError;
 pub use error::{
     Error, InputContributionError, JsonReply, OutputSubstitutionError, PayloadError,
     ReplyableError, SelectionError,
 };
 use optional_parameters::Params;
+use serde::{Deserialize, Serialize};
 
 pub use crate::psbt::PsbtInputError;
-use crate::psbt::{InternalInputPair, InternalPsbtInputError, PrevTxOutError, PsbtExt};
+use crate::psbt::{InputPairWithWeight, InternalPsbtInputError, PrevTxOutError, PsbtExt};
 use crate::Version;
 
 mod error;
@@ -40,7 +43,7 @@ pub mod v2;
 
 /// Helper to construct a pair of (txin, psbtin) with some built-in validation
 /// Use with [`InputPair::new`] to contribute receiver inputs.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InputPair {
     pub(crate) txin: TxIn,
     pub(crate) psbtin: psbt::Input,
@@ -49,7 +52,7 @@ pub struct InputPair {
 impl InputPair {
     pub fn new(txin: TxIn, psbtin: psbt::Input) -> Result<Self, PsbtInputError> {
         let input_pair = Self { txin, psbtin };
-        let raw = InternalInputPair::from(&input_pair);
+        let raw = InputPairWithWeight::from(&input_pair);
         raw.validate_utxo()?;
         let address_type = raw.address_type().map_err(InternalPsbtInputError::AddressType)?;
         if address_type == AddressType::P2sh && input_pair.psbtin.redeem_script.is_none() {
@@ -79,7 +82,7 @@ impl InputPair {
         };
 
         let input_pair = Self { txin, psbtin };
-        let raw = InternalInputPair::from(&input_pair);
+        let raw = InputPairWithWeight::from(&input_pair);
         raw.validate_utxo()?;
 
         Ok(input_pair)
@@ -152,7 +155,7 @@ impl InputPair {
             ..psbt::Input::default()
         };
         let input_pair = Self { txin, psbtin };
-        let raw = InternalInputPair::from(&input_pair);
+        let raw = InputPairWithWeight::from(&input_pair);
         raw.validate_utxo()?;
 
         Ok(input_pair)
@@ -199,15 +202,21 @@ impl InputPair {
     }
 
     pub(crate) fn previous_txout(&self) -> TxOut {
-        InternalInputPair::from(self)
+        InputPairWithWeight::from(self)
             .previous_txout()
             .expect("UTXO information should have been validated in InputPair::new")
             .clone()
     }
 }
 
-impl<'a> From<&'a InputPair> for InternalInputPair<'a> {
-    fn from(pair: &'a InputPair) -> Self { Self { psbtin: &pair.psbtin, txin: &pair.txin } }
+impl From<&InputPair> for InputPairWithWeight {
+    fn from(pair: &InputPair) -> Self { Self { pair: pair.clone(), weight: Weight::ZERO } }
+}
+
+impl InputPairWithWeight {
+    pub fn from_with_weight(pair: &InputPair, weight: Weight) -> Self {
+        Self { pair: pair.clone(), weight }
+    }
 }
 
 /// Validate the payload of a Payjoin request for PSBT and Params sanity

@@ -180,8 +180,6 @@ pub(crate) enum InternalPayloadError {
     #[allow(dead_code)]
     /// The sender is trying to spend the receiver input
     InputOwned(bitcoin::ScriptBuf),
-    /// The expected input weight cannot be determined
-    InputWeight(crate::psbt::InputWeightError),
     #[allow(dead_code)]
     /// Original PSBT input has been seen before. Only automatic receivers, aka "interactive" in the spec
     /// look out for these to prevent probing attacks.
@@ -208,7 +206,6 @@ impl From<&PayloadError> for JsonReply {
             | MissingPayment
             | OriginalPsbtNotBroadcastable
             | InputOwned(_)
-            | InputWeight(_)
             | InputSeen(_)
             | PsbtBelowFeeRate(_, _) => JsonReply::new(OriginalPsbtRejected, e),
 
@@ -241,7 +238,6 @@ impl fmt::Display for PayloadError {
             MissingPayment => write!(f, "Missing payment."),
             OriginalPsbtNotBroadcastable => write!(f, "Can't broadcast. PSBT rejected by mempool."),
             InputOwned(_) => write!(f, "The receiver rejected the original PSBT."),
-            InputWeight(e) => write!(f, "InputWeight Error: {e}"),
             InputSeen(_) => write!(f, "The receiver rejected the original PSBT."),
             PsbtBelowFeeRate(original_psbt_fee_rate, receiver_min_fee_rate) => write!(
                 f,
@@ -264,7 +260,6 @@ impl std::error::Error for PayloadError {
             SenderParams(e) => Some(e),
             InconsistentPsbt(e) => Some(e),
             PrevTxOut(e) => Some(e),
-            InputWeight(e) => Some(e),
             PsbtBelowFeeRate(_, _) => None,
             FeeTooHigh(_, _) => None,
             MissingPayment => None,

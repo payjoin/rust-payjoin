@@ -690,8 +690,13 @@ impl InputPair {
     pub fn new(
         txin: bitcoin_ffi::TxIn,
         psbtin: crate::bitcoin_ffi::PsbtInput,
+        expected_weight: Option<crate::bitcoin_ffi::Weight>,
     ) -> Result<Self, PsbtInputError> {
-        Ok(Self(payjoin::receive::InputPair::new(txin.into(), psbtin.into())?))
+        Ok(Self(payjoin::receive::InputPair::new(
+            txin.into(),
+            psbtin.into(),
+            expected_weight.map(|w| w.into()),
+        )?))
     }
 }
 

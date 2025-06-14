@@ -11,16 +11,21 @@
 
 use std::str::FromStr;
 
-use bitcoin::{psbt, AddressType, OutPoint, Psbt, ScriptBuf, Sequence, Transaction, TxIn, TxOut};
+use bitcoin::{
+    psbt, AddressType, OutPoint, Psbt, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Weight,
+};
 pub(crate) use error::InternalPayloadError;
 pub use error::{
     Error, InputContributionError, JsonReply, OutputSubstitutionError, PayloadError,
     ReplyableError, SelectionError,
 };
 use optional_parameters::Params;
+use serde::{Deserialize, Serialize};
 
 pub use crate::psbt::PsbtInputError;
-use crate::psbt::{InternalInputPair, InternalPsbtInputError, PrevTxOutError, PsbtExt};
+use crate::psbt::{
+    InputWeightError, InternalInputPair, InternalPsbtInputError, PrevTxOutError, PsbtExt,
+};
 use crate::Version;
 
 mod error;
@@ -40,21 +45,34 @@ pub mod v2;
 
 /// Helper to construct a pair of (txin, psbtin) with some built-in validation
 /// Use with [`InputPair::new`] to contribute receiver inputs.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InputPair {
     pub(crate) txin: TxIn,
     pub(crate) psbtin: psbt::Input,
+    pub(crate) expected_weight: Weight,
 }
 
 impl InputPair {
-    pub fn new(txin: TxIn, psbtin: psbt::Input) -> Result<Self, PsbtInputError> {
-        let input_pair = Self { txin, psbtin };
-        let raw = InternalInputPair::from(&input_pair);
+    pub fn new(
+        txin: TxIn,
+        psbtin: psbt::Input,
+        expected_weight: Option<Weight>,
+    ) -> Result<Self, PsbtInputError> {
+        let raw = InternalInputPair { txin: &txin, psbtin: &psbtin };
         raw.validate_utxo()?;
-        let address_type = raw.address_type().map_err(InternalPsbtInputError::AddressType)?;
-        if address_type == AddressType::P2sh && input_pair.psbtin.redeem_script.is_none() {
-            return Err(InternalPsbtInputError::NoRedeemScript.into());
-        }
+
+        let expected_weight = match raw.expected_input_weight() {
+            Ok(weight) => weight,
+            Err(InputWeightError::NotSupported) =>
+                if let Some(weight) = expected_weight {
+                    weight
+                } else {
+                    return Err(InternalPsbtInputError::from(InputWeightError::NotSupported).into());
+                },
+            Err(e) => return Err(InternalPsbtInputError::from(e).into()),
+        };
+
+        let input_pair = Self { expected_weight, txin, psbtin };
         Ok(input_pair)
     }
 
@@ -78,11 +96,7 @@ impl InputPair {
             ..psbt::Input::default()
         };
 
-        let input_pair = Self { txin, psbtin };
-        let raw = InternalInputPair::from(&input_pair);
-        raw.validate_utxo()?;
-
-        Ok(input_pair)
+        Self::new(txin, psbtin, None)
     }
 
     fn get_txout_for_outpoint(
@@ -138,6 +152,7 @@ impl InputPair {
         outpoint: OutPoint,
         sequence: Option<Sequence>,
         witness_script: Option<ScriptBuf>,
+        expected_weight: Option<Weight>,
     ) -> Result<Self, PsbtInputError> {
         let txin = TxIn {
             previous_output: OutPoint { txid: outpoint.txid, vout: outpoint.vout },
@@ -151,11 +166,8 @@ impl InputPair {
             witness_script,
             ..psbt::Input::default()
         };
-        let input_pair = Self { txin, psbtin };
-        let raw = InternalInputPair::from(&input_pair);
-        raw.validate_utxo()?;
 
-        Ok(input_pair)
+        Self::new(txin, psbtin, expected_weight)
     }
 
     /// Constructs a new ['InputPair'] for spending a native SegWit P2WPKH output
@@ -168,7 +180,7 @@ impl InputPair {
             return Err(InternalPsbtInputError::InvalidScriptPubKey(AddressType::P2wpkh).into());
         }
 
-        Self::new_segwit_input_pair(txout, outpoint, sequence, None)
+        Self::new_segwit_input_pair(txout, outpoint, sequence, None, None)
     }
 
     /// Constructs a new ['InputPair'] for spending a native SegWit P2WSH output
@@ -177,12 +189,19 @@ impl InputPair {
         outpoint: OutPoint,
         witness_script: ScriptBuf,
         sequence: Option<Sequence>,
+        expected_weight: Weight,
     ) -> Result<Self, PsbtInputError> {
         if !txout.script_pubkey.is_p2wsh() {
             return Err(InternalPsbtInputError::InvalidScriptPubKey(AddressType::P2wsh).into());
         }
 
-        Self::new_segwit_input_pair(txout, outpoint, sequence, Some(witness_script))
+        Self::new_segwit_input_pair(
+            txout,
+            outpoint,
+            sequence,
+            Some(witness_script),
+            Some(expected_weight),
+        )
     }
 
     /// Constructs a new ['InputPair'] for spending a native SegWit P2TR output
@@ -195,7 +214,7 @@ impl InputPair {
             return Err(InternalPsbtInputError::InvalidScriptPubKey(AddressType::P2tr).into());
         }
 
-        Self::new_segwit_input_pair(txout, outpoint, sequence, None)
+        Self::new_segwit_input_pair(txout, outpoint, sequence, None, None)
     }
 
     pub(crate) fn previous_txout(&self) -> TxOut {
@@ -237,11 +256,41 @@ mod tests {
     use bitcoin::key::{PublicKey, WPubkeyHash};
     use bitcoin::opcodes::OP_TRUE;
     use bitcoin::secp256k1::Secp256k1;
+    use bitcoin::transaction::InputWeightPrediction;
     use bitcoin::{Amount, PubkeyHash, ScriptBuf, ScriptHash, Txid, WScriptHash, XOnlyPublicKey};
     use payjoin_test_utils::{DUMMY20, DUMMY32};
 
     use super::*;
     use crate::psbt::InternalPsbtInputError::InvalidScriptPubKey;
+
+    // TODO: this is duplicated in a couple places. In these tests, receiver, and the sender.
+    // We should pub(crate) it and moved to a common place.
+    const NON_WITNESS_DATA_WEIGHT: Weight = Weight::from_non_witness_data_size(32 + 4 + 4);
+
+    #[test]
+    fn input_pair_with_expected_weight() {
+        let p2wsh_txout = TxOut {
+            value: Amount::from_sat(123),
+            script_pubkey: ScriptBuf::new_p2wsh(&WScriptHash::from_byte_array(DUMMY32)),
+        };
+        let tx = Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: LockTime::Seconds(Time::MIN),
+            input: vec![],
+            output: vec![p2wsh_txout.clone()],
+        };
+        let expected_satifiability_weight = Weight::from_wu(42);
+
+        let previous_output = OutPoint { txid: tx.compute_txid(), vout: 0 };
+        let input_pair = InputPair::new(
+            TxIn { previous_output, sequence: Sequence::MAX, ..Default::default() },
+            psbt::Input { witness_utxo: Some(p2wsh_txout), ..Default::default() },
+            Some(expected_satifiability_weight),
+        )
+        .unwrap();
+
+        assert_eq!(input_pair.expected_weight, expected_satifiability_weight);
+    }
 
     #[test]
     fn create_p2pkh_input_pair() {
@@ -268,6 +317,10 @@ mod tests {
         assert_eq!(p2pkh_pair.txin.previous_output, outpoint);
         assert_eq!(p2pkh_pair.txin.sequence, sequence);
         assert_eq!(p2pkh_pair.psbtin.non_witness_utxo.unwrap(), utxo);
+        assert_eq!(
+            p2pkh_pair.expected_weight,
+            InputWeightPrediction::P2PKH_COMPRESSED_MAX.weight() + NON_WITNESS_DATA_WEIGHT
+        );
 
         // Failures
         let utxo_with_p2sh = Transaction {
@@ -324,12 +377,12 @@ mod tests {
         let redeem_script = ScriptBuf::new_p2sh(&ScriptHash::from_byte_array(DUMMY20));
 
         let p2sh_pair =
-            InputPair::new_p2sh(utxo.clone(), outpoint, redeem_script.clone(), Some(sequence))
-                .unwrap();
-        assert_eq!(p2sh_pair.txin.previous_output, outpoint);
-        assert_eq!(p2sh_pair.txin.sequence, sequence);
-        assert_eq!(p2sh_pair.psbtin.redeem_script.unwrap(), redeem_script);
-        assert_eq!(p2sh_pair.psbtin.non_witness_utxo.unwrap(), utxo);
+            InputPair::new_p2sh(utxo.clone(), outpoint, redeem_script.clone(), Some(sequence));
+
+        assert_eq!(
+            p2sh_pair.err().unwrap(),
+            PsbtInputError::from(InternalPsbtInputError::from(InputWeightError::NotSupported))
+        );
 
         // Failures
         let utxo_with_p2pkh = Transaction {
@@ -380,6 +433,10 @@ mod tests {
         assert_eq!(p2wpkh_pair.txin.previous_output, outpoint);
         assert_eq!(p2wpkh_pair.txin.sequence, sequence);
         assert_eq!(p2wpkh_pair.psbtin.witness_utxo.unwrap(), p2wpkh_txout);
+        assert_eq!(
+            p2wpkh_pair.expected_weight,
+            InputWeightPrediction::P2WPKH_MAX.weight() + NON_WITNESS_DATA_WEIGHT
+        );
 
         let p2sh_txout = TxOut {
             value: Default::default(),
@@ -399,27 +456,52 @@ mod tests {
             value: Amount::from_sat(12345),
             script_pubkey: ScriptBuf::new_p2wsh(&WScriptHash::from_byte_array(DUMMY32)),
         };
+        let expected_weight = Weight::from_wu(42);
         let witness_script = Builder::new().push_opcode(OP_TRUE).into_script();
         let p2wsh_pair = InputPair::new_p2wsh(
             p2wsh_txout.clone(),
             outpoint,
             witness_script.clone(),
             Some(sequence),
+            expected_weight,
         )
-        .unwrap();
+        .expect("valid params for p2wsh");
+
         assert_eq!(p2wsh_pair.txin.previous_output, outpoint);
         assert_eq!(p2wsh_pair.txin.sequence, sequence);
         assert_eq!(p2wsh_pair.psbtin.witness_utxo.unwrap(), p2wsh_txout);
         assert_eq!(p2wsh_pair.psbtin.witness_script.unwrap(), witness_script);
+        assert_eq!(p2wsh_pair.expected_weight, expected_weight);
+
+        let p2wsh_pair = InputPair::new(
+            TxIn { previous_output: outpoint, sequence, ..Default::default() },
+            psbt::Input {
+                witness_utxo: Some(p2wsh_txout),
+                witness_script: Some(witness_script.clone()),
+                ..Default::default()
+            },
+            None,
+        );
+        // P2wsh is not supported when expected weight is not provided
+        assert_eq!(
+            p2wsh_pair.err().unwrap(),
+            PsbtInputError::from(InternalPsbtInputError::from(InputWeightError::NotSupported))
+        );
 
         let p2sh_txout = TxOut {
             value: Default::default(),
             script_pubkey: ScriptBuf::new_p2sh(&ScriptHash::all_zeros()),
         };
         assert_eq!(
-            InputPair::new_p2wsh(p2sh_txout, outpoint, witness_script, Some(sequence))
-                .err()
-                .unwrap(),
+            InputPair::new_p2wsh(
+                p2sh_txout,
+                outpoint,
+                witness_script,
+                Some(sequence),
+                expected_weight
+            )
+            .err()
+            .unwrap(),
             PsbtInputError::from(InvalidScriptPubKey(AddressType::P2wsh))
         )
     }
@@ -439,6 +521,10 @@ mod tests {
         assert_eq!(p2tr_pair.txin.previous_output, outpoint);
         assert_eq!(p2tr_pair.txin.sequence, sequence);
         assert_eq!(p2tr_pair.psbtin.witness_utxo.unwrap(), p2tr_txout);
+        assert_eq!(
+            p2tr_pair.expected_weight,
+            InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH.weight() + NON_WITNESS_DATA_WEIGHT
+        );
 
         let p2sh_txout = TxOut {
             value: Default::default(),

@@ -238,7 +238,7 @@ def get_inputs(rpc_connection: RpcClient) -> list[InputPair]:
         prev_amount = bitcoinffi.Amount.from_btc(prev_out["value"])
         tx_out = bitcoinffi.TxOut(value=prev_amount, script_pubkey=prev_spk)
         psbt_in = PsbtInput(witness_utxo=tx_out, redeem_script=None, witness_script=None)
-        inputs.append(InputPair(txin=txin, psbtin=psbt_in))
+        inputs.append(InputPair(txin=txin, psbtin=psbt_in, expected_weight=None))
 
     return inputs
 

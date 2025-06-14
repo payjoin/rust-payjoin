@@ -175,5 +175,5 @@ pub fn input_pair_from_list_unspent(
         previous_output: OutPoint { txid: utxo.txid, vout: utxo.vout },
         ..Default::default()
     };
-    InputPair::new(txin, psbtin).expect("Input pair should be valid")
+    InputPair::new(txin, psbtin, None).expect("Input pair should be valid")
 }

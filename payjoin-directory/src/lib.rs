@@ -275,6 +275,20 @@ enum HandlerError {
     BadRequest(anyhow::Error),
 }
 
+impl PartialEq for HandlerError {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (HandlerError::PayloadTooLarge, HandlerError::PayloadTooLarge)
+                | (HandlerError::InternalServerError(_), HandlerError::InternalServerError(_))
+                | (HandlerError::OhttpKeyRejection(_), HandlerError::OhttpKeyRejection(_))
+                | (HandlerError::BadRequest(_), HandlerError::BadRequest(_))
+        )
+    }
+}
+
+impl Eq for HandlerError {}
+
 impl HandlerError {
     fn to_response(&self) -> Response<BoxBody<Bytes, hyper::Error>> {
         let mut res = Response::new(empty());

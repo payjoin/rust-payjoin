@@ -15,6 +15,19 @@ pub enum Error {
     V2(crate::receive::v2::SessionError),
 }
 
+impl PartialEq for Error {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Error::ReplyToSender(_), Error::ReplyToSender(_)) => true,
+            #[cfg(feature = "v2")]
+            (Error::V2(e1), Error::V2(e2)) => e1 == e2,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Error {}
+
 impl From<ReplyableError> for Error {
     fn from(e: ReplyableError) -> Self { Error::ReplyToSender(e) }
 }
@@ -48,7 +61,7 @@ impl error::Error for Error {
 /// 3. Support proper error propagation through the receiver stack
 /// 4. Provide errors according to BIP-78 JSON error specifications for return
 ///    after conversion into [`JsonReply`]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ReplyableError {
     /// Error arising from validation of the original PSBT payload
     Payload(PayloadError),
@@ -59,6 +72,12 @@ pub enum ReplyableError {
     ///
     /// e.g. database errors, network failures, wallet errors
     Implementation(crate::ImplementationError),
+}
+
+impl ReplyableError {
+    pub fn implementation(e: impl error::Error + Send + Sync + 'static) -> Self {
+        ReplyableError::Implementation(crate::ImplementationError::new(e))
+    }
 }
 
 /// The standard format for errors that can be replied as JSON.
@@ -132,7 +151,7 @@ impl error::Error for ReplyableError {
             Self::Payload(e) => e.source(),
             #[cfg(feature = "v1")]
             Self::V1(e) => e.source(),
-            Self::Implementation(e) => Some(e.as_ref()),
+            Self::Implementation(e) => e.source(),
         }
     }
 }
@@ -154,7 +173,7 @@ impl From<InternalPayloadError> for ReplyableError {
 ///
 /// The error messages are formatted as JSON strings suitable for HTTP responses according to the BIP-78 spec,
 /// with appropriate error codes and human-readable messages.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PayloadError(pub(crate) InternalPayloadError);
 
 impl From<InternalPayloadError> for PayloadError {
@@ -195,6 +214,41 @@ pub(crate) enum InternalPayloadError {
     /// Effective receiver feerate exceeds maximum allowed feerate
     FeeTooHigh(bitcoin::FeeRate, bitcoin::FeeRate),
 }
+
+impl PartialEq for InternalPayloadError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (InternalPayloadError::Utf8(u1), InternalPayloadError::Utf8(u2)) => u1 == u2,
+            (InternalPayloadError::ParsePsbt(_), InternalPayloadError::ParsePsbt(_)) => true,
+            (
+                InternalPayloadError::InconsistentPsbt(i1),
+                InternalPayloadError::InconsistentPsbt(i2),
+            ) => i1 == i2,
+            (InternalPayloadError::PrevTxOut(p1), InternalPayloadError::PrevTxOut(p2)) => p1 == p2,
+            (InternalPayloadError::MissingPayment, InternalPayloadError::MissingPayment) => true,
+            (
+                InternalPayloadError::OriginalPsbtNotBroadcastable,
+                InternalPayloadError::OriginalPsbtNotBroadcastable,
+            ) => true,
+            (InternalPayloadError::InputOwned(i1), InternalPayloadError::InputOwned(i2)) =>
+                i1 == i2,
+            (InternalPayloadError::InputWeight(i1), InternalPayloadError::InputWeight(i2)) =>
+                i1 == i2,
+            (InternalPayloadError::InputSeen(i1), InternalPayloadError::InputSeen(i2)) => i1 == i2,
+            (
+                InternalPayloadError::PsbtBelowFeeRate(f1, f2),
+                InternalPayloadError::PsbtBelowFeeRate(f3, f4),
+            ) => f1 == f2 && f3 == f4,
+            (
+                InternalPayloadError::FeeTooHigh(f1, f2),
+                InternalPayloadError::FeeTooHigh(f3, f4),
+            ) => f1 == f2 && f3 == f4,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for InternalPayloadError {}
 
 impl From<PayloadError> for JsonReply {
     fn from(e: PayloadError) -> Self {
@@ -282,7 +336,7 @@ impl std::error::Error for PayloadError {
 #[derive(Debug, PartialEq)]
 pub struct OutputSubstitutionError(InternalOutputSubstitutionError);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InternalOutputSubstitutionError {
     /// Output substitution is disabled and output value was decreased
     DecreasedValueWhenDisabled,
@@ -328,10 +382,10 @@ impl std::error::Error for OutputSubstitutionError {
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
 /// You can only display it.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct SelectionError(InternalSelectionError);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InternalSelectionError {
     /// No candidates available for selection
     Empty,
@@ -374,10 +428,10 @@ impl From<InternalSelectionError> for SelectionError {
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
 /// You can only display it.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct InputContributionError(InternalInputContributionError);
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InternalInputContributionError {
     /// Total input value is not enough to cover additional output value
     ValueTooLow,

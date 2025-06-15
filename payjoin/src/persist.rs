@@ -300,7 +300,7 @@ pub struct RejectTransient<Err>(Err);
 pub struct RejectBadInitInputs<Err>(Err);
 
 /// Error type that represents all possible errors that can be returned when processing a state transition
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersistedError<ApiError: std::error::Error, StorageError: std::error::Error>(
     InternalPersistedError<ApiError, StorageError>,
 );
@@ -354,7 +354,7 @@ impl<ApiError: std::error::Error, StorageError: std::error::Error> std::fmt::Dis
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum InternalPersistedError<InternalApiError, StorageErr>
 where
     InternalApiError: std::error::Error,
@@ -394,7 +394,7 @@ impl<NextState, CurrentState> OptionalTransitionOutcome<NextState, CurrentState>
 }
 
 /// Wrapper representing a storage error that can be returned from an application's storage layer
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageError<Err>(Err);
 
 impl<Err> std::error::Error for StorageError<Err> where Err: std::error::Error {}

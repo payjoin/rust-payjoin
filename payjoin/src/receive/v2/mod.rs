@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
-use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut, Weight};
 pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
 pub use persist::{ReceiverToken, SessionEvent};
@@ -506,6 +506,15 @@ impl Receiver<WantsInputs> {
         inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<Self, InputContributionError> {
         let inner = self.state.v1.contribute_inputs(inputs)?;
+        Ok(Receiver { state: WantsInputs { v1: inner, context: self.state.context } })
+    }
+
+    pub fn contribute_inputs_with_weights(
+        self,
+        inputs: impl IntoIterator<Item = InputPair>,
+        input_weights: impl IntoIterator<Item = Weight>,
+    ) -> Result<Self, InputContributionError> {
+        let inner = self.state.v1.contribute_inputs_with_weights(inputs, input_weights)?;
         Ok(Receiver { state: WantsInputs { v1: inner, context: self.state.context } })
     }
 

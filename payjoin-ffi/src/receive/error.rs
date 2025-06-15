@@ -2,6 +2,9 @@ use std::sync::Arc;
 
 use payjoin::receive;
 
+use crate::uri::error::IntoUrlError;
+use crate::error::ImplementationError;
+
 /// The top-level error type for the payjoin receiver
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -13,6 +16,9 @@ pub enum Error {
     /// V2-specific errors that are infeasable to reply to the sender
     #[error("Unreplyable error: {0}")]
     V2(Arc<SessionError>),
+    /// IntoUrl error
+    #[error("IntoUrl error: {0}")]
+    IntoUrl(Arc<IntoUrlError>),
     /// Catch-all for unhandled error variants
     #[error("An unexpected error occurred")]
     Unexpected,
@@ -26,6 +32,75 @@ impl From<receive::Error> for Error {
             _ => Error::Unexpected,
         }
     }
+}
+
+impl From<ImplementationError> for PersistedError {
+    fn from(value: ImplementationError) -> Self { PersistedError::Storage(Arc::new(value)) }
+}
+
+impl<S> From<payjoin::persist::PersistedError<receive::ReplyableError, S>> for PersistedError
+where
+    S: std::error::Error,
+{
+    fn from(err: payjoin::persist::PersistedError<receive::ReplyableError, S>) -> Self {
+        if let Some(storage_err) = err.storage_error_ref() {
+            return PersistedError::Storage(Arc::new(ImplementationError::from(
+                storage_err.to_string(),
+            )));
+        }
+        if let Some(api_err) = err.api_error() {
+            return PersistedError::Receiver(Error::ReplyToSender(Arc::new(api_err.into())));
+        }
+        PersistedError::Receiver(Error::Unexpected)
+    }
+}
+
+impl<S> From<payjoin::persist::PersistedError<receive::Error, S>> for PersistedError
+where
+    S: std::error::Error,
+{
+    fn from(err: payjoin::persist::PersistedError<receive::Error, S>) -> Self {
+        if let Some(storage_err) = err.storage_error_ref() {
+            return PersistedError::Storage(Arc::new(ImplementationError::from(
+                storage_err.to_string(),
+            )));
+        }
+        if let Some(api_err) = err.api_error() {
+            return PersistedError::Receiver(api_err.into());
+        }
+        PersistedError::Receiver(Error::Unexpected)
+    }
+}
+
+impl<S> From<payjoin::persist::PersistedError<payjoin::IntoUrlError, S>> for PersistedError
+where
+    S: std::error::Error,
+{
+    fn from(err: payjoin::persist::PersistedError<payjoin::IntoUrlError, S>) -> Self {
+        if let Some(storage_err) = err.storage_error_ref() {
+            return PersistedError::Storage(Arc::new(ImplementationError::from(
+                storage_err.to_string(),
+            )));
+        }
+
+        if let Some(api_err) = err.api_error() {
+            return PersistedError::Receiver(Error::IntoUrl(Arc::new(api_err.into())));
+        }
+        PersistedError::Receiver(Error::Unexpected)
+    }
+}
+
+/// Error that may occur when a receiver event log is replayed
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
+pub enum PersistedError {
+    /// Receiver error
+    #[error(transparent)]
+    Receiver(Error),
+    /// Storage error
+    #[error(transparent)]
+    Storage(Arc<ImplementationError>),
 }
 
 /// The replyable error type for the payjoin receiver, representing failures need to be
@@ -59,8 +134,12 @@ impl From<JsonReply> for receive::JsonReply {
     fn from(value: JsonReply) -> Self { value.0 }
 }
 
+impl From<receive::JsonReply> for JsonReply {
+    fn from(value: receive::JsonReply) -> Self { Self(value) }
+}
+
 impl From<ReplyableError> for JsonReply {
-    fn from(value: ReplyableError) -> Self { Self(value.0.into()) }
+    fn from(value: ReplyableError) -> Self { Self((&value.0).into()) }
 }
 
 /// Error that may occur during a v2 session typestate change
@@ -92,3 +171,9 @@ pub struct InputContributionError(#[from] receive::InputContributionError);
 #[error(transparent)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct PsbtInputError(#[from] receive::PsbtInputError);
+
+/// Error that may occur when a receiver event log is replayed
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+pub struct ReplayError(#[from] receive::v2::ReplayError);

@@ -1,4 +1,6 @@
 //! Receive BIP 77 Payjoin v2
+use std::fmt;
+use std::fmt::Debug;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
@@ -7,9 +9,10 @@ use bitcoin::psbt::Psbt;
 use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
 pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
-pub use persist::{ReceiverToken, SessionEvent};
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
+use session::InternalReplayError;
+pub use session::{replay_receiver_event_log, ReplayError, SessionEvent, SessionHistory};
 use url::Url;
 
 use super::error::{Error, InputContributionError};
@@ -21,13 +24,17 @@ use crate::ohttp::{
     ohttp_encapsulate, process_get_res, process_post_res, OhttpEncapsulationError, OhttpKeys,
 };
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::Persister;
+use crate::persist::{
+    MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
+    MaybeSuccessTransition, MaybeTransientTransition, NextStateTransition,
+    OptionalTransitionOutcome, PersistedError, SessionPersister,
+};
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
 use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
 
 mod error;
-mod persist;
+mod session;
 
 const SUPPORTED_VERSIONS: &[Version] = &[Version::One, Version::Two];
 
@@ -78,14 +85,152 @@ fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
     sha256::Hash::hash(&pubkey.to_compressed_bytes()).into()
 }
 
-/// A new payjoin receiver, which must be persisted before initiating the payjoin flow.
-#[derive(Debug)]
-pub struct NewReceiver {
-    context: SessionContext,
+#[derive(Clone, PartialEq)]
+pub enum ReceiverTypeState<P: SessionPersister<SessionEvent = SessionEvent>> {
+    Uninitialized(Receiver<UninitializedReceiver, P>),
+    WithContext(Receiver<WithContext, P>),
+    UncheckedProposal(Receiver<UncheckedProposal, P>),
+    MaybeInputsOwned(Receiver<MaybeInputsOwned, P>),
+    MaybeInputsSeen(Receiver<MaybeInputsSeen, P>),
+    OutputsUnknown(Receiver<OutputsUnknown, P>),
+    WantsOutputs(Receiver<WantsOutputs, P>),
+    WantsInputs(Receiver<WantsInputs, P>),
+    ProvisionalProposal(Receiver<ProvisionalProposal, P>),
+    PayjoinProposal(Receiver<PayjoinProposal, P>),
+    TerminalState,
 }
 
-impl NewReceiver {
-    /// Creates a new [`NewReceiver`] with the provided parameters.
+// The `InvalidStateAndEvent` error variant includes a receiver state and event
+// Since receiver state is generic over the session persister we need to implement manually impl Debug
+// Instead of a trait bound on the generic session persister
+impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> Debug for ReceiverTypeState<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReceiverTypeState::Uninitialized(_) => write!(f, "Uninitialized"),
+            ReceiverTypeState::WithContext(_) => write!(f, "WithContext"),
+            ReceiverTypeState::UncheckedProposal(_) => write!(f, "UncheckedProposal"),
+            ReceiverTypeState::MaybeInputsOwned(_) => write!(f, "MaybeInputsOwned"),
+            ReceiverTypeState::MaybeInputsSeen(_) => write!(f, "MaybeInputsSeen"),
+            ReceiverTypeState::OutputsUnknown(_) => write!(f, "OutputsUnknown"),
+            ReceiverTypeState::WantsOutputs(_) => write!(f, "WantsOutputs"),
+            ReceiverTypeState::WantsInputs(_) => write!(f, "WantsInputs"),
+            ReceiverTypeState::ProvisionalProposal(_) => write!(f, "ProvisionalProposal"),
+            ReceiverTypeState::PayjoinProposal(_) => write!(f, "PayjoinProposal"),
+            ReceiverTypeState::TerminalState => write!(f, "TerminalState"),
+        }
+    }
+}
+
+impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> ReceiverTypeState<P> {
+    fn process_event(self, event: SessionEvent) -> Result<ReceiverTypeState<P>, ReplayError> {
+        match (self, event) {
+            (ReceiverTypeState::Uninitialized(receiver), SessionEvent::Created(context)) =>
+                Ok(receiver.apply_context(context)),
+            (
+                ReceiverTypeState::WithContext(state),
+                SessionEvent::UncheckedProposal((proposal, reply_key)),
+            ) => Ok(state.apply_unchecked_from_payload(proposal, reply_key)?),
+
+            (
+                ReceiverTypeState::UncheckedProposal(state),
+                SessionEvent::MaybeInputsOwned(inputs),
+            ) => Ok(state.apply_maybe_inputs_owned(inputs)),
+
+            (
+                ReceiverTypeState::MaybeInputsOwned(state),
+                SessionEvent::MaybeInputsSeen(maybe_inputs_seen),
+            ) => Ok(state.apply_maybe_inputs_seen(maybe_inputs_seen)),
+
+            (
+                ReceiverTypeState::MaybeInputsSeen(state),
+                SessionEvent::OutputsUnknown(outputs_unknown),
+            ) => Ok(state.apply_outputs_unknown(outputs_unknown)),
+
+            (
+                ReceiverTypeState::OutputsUnknown(state),
+                SessionEvent::WantsOutputs(wants_outputs),
+            ) => Ok(state.apply_wants_outputs(wants_outputs)),
+
+            (ReceiverTypeState::WantsOutputs(state), SessionEvent::WantsInputs(wants_inputs)) =>
+                Ok(state.apply_wants_inputs(wants_inputs)),
+
+            (
+                ReceiverTypeState::WantsInputs(state),
+                SessionEvent::ProvisionalProposal(provisional_proposal),
+            ) => Ok(state.apply_provisional_proposal(provisional_proposal)),
+
+            (
+                ReceiverTypeState::ProvisionalProposal(state),
+                SessionEvent::PayjoinProposal(payjoin_proposal),
+            ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
+            (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiverTypeState::TerminalState),
+            (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
+                format!("{current_state:?}"),
+                Box::new(event),
+            )
+            .into()),
+        }
+    }
+}
+
+pub trait ReceiverState {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Receiver<State: ReceiverState, P: SessionPersister<SessionEvent = SessionEvent>> {
+    pub(crate) state: State,
+    pub(crate) session_persister: P,
+}
+
+impl<State: ReceiverState, P: SessionPersister<SessionEvent = SessionEvent>> core::ops::Deref
+    for Receiver<State, P>
+{
+    type Target = State;
+
+    fn deref(&self) -> &Self::Target { &self.state }
+}
+
+impl<State: ReceiverState, P: SessionPersister<SessionEvent = SessionEvent>> core::ops::DerefMut
+    for Receiver<State, P>
+{
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
+}
+
+/// Extract an OHTTP Encapsulated HTTP POST request to return
+/// a Receiver Error Response
+fn extract_err_req(
+    err: &JsonReply,
+    ohttp_relay: impl IntoUrl,
+    session_context: &SessionContext,
+) -> Result<(Request, ohttp::ClientResponse), SessionError> {
+    if SystemTime::now() > session_context.expiry {
+        return Err(InternalSessionError::Expired(session_context.expiry).into());
+    }
+    let subdir = subdir(&session_context.directory, &session_context.id());
+    let (body, ohttp_ctx) = ohttp_encapsulate(
+        &mut session_context.ohttp_keys.0.clone(),
+        "POST",
+        subdir.as_str(),
+        Some(err.to_json().to_string().as_bytes()),
+    )
+    .map_err(InternalSessionError::OhttpEncapsulation)?;
+    let req = Request::new_v2(&session_context.full_relay_url(ohttp_relay)?, &body);
+    Ok((req, ohttp_ctx))
+}
+
+/// Process an OHTTP Encapsulated HTTP POST Error response
+/// to ensure it has been posted properly
+pub fn process_err_res(body: &[u8], context: ohttp::ClientResponse) -> Result<(), SessionError> {
+    process_post_res(body, context).map_err(|e| InternalSessionError::DirectoryResponse(e).into())
+}
+
+#[derive(Debug, Clone, PartialEq)]
+/// The receiver is not initialized yet, no session context is available yet
+pub struct UninitializedReceiver {}
+
+impl ReceiverState for UninitializedReceiver {}
+
+impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> Receiver<UninitializedReceiver, P> {
+    /// Creates a new [`Receiver<WithContext>`] with the provided parameters.
     ///
     /// # Parameters
     /// - `address`: The Bitcoin address for the payjoin session.
@@ -94,56 +239,49 @@ impl NewReceiver {
     /// - `expire_after`: The duration after which the session expires.
     ///
     /// # Returns
-    /// A new instance of [`NewReceiver`].
+    /// A new instance of [`Receiver<WithContext>`].
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md)
-    pub fn new(
+    pub fn create_session(
         address: Address,
         directory: impl IntoUrl,
         ohttp_keys: OhttpKeys,
         expire_after: Option<Duration>,
-    ) -> Result<Self, IntoUrlError> {
-        let receiver = Self {
-            context: SessionContext {
-                address,
-                directory: directory.into_url()?,
-                subdirectory: None,
-                ohttp_keys,
-                expiry: SystemTime::now()
-                    + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
-                s: HpkeKeyPair::gen_keypair(),
-                e: None,
-            },
+        session_persister: P,
+    ) -> Result<Receiver<WithContext, P>, PersistedError<IntoUrlError, P::InternalStorageError>>
+    {
+        let directory = match directory.into_url() {
+            Ok(url) => url,
+            Err(e) =>
+                return MaybeBadInitInputsTransition::bad_init_inputs(e).save(&session_persister)?,
         };
-        Ok(receiver)
+
+        let session_context = SessionContext {
+            address,
+            directory,
+            subdirectory: None,
+            ohttp_keys,
+            expiry: SystemTime::now() + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
+            s: HpkeKeyPair::gen_keypair(),
+            e: None,
+        };
+        MaybeBadInitInputsTransition::success(
+            SessionEvent::Created(session_context.clone()),
+            Receiver {
+                state: WithContext { context: session_context },
+                session_persister: session_persister.clone(),
+            },
+        )
+        .save(&session_persister)
     }
 
-    /// Saves the new [`Receiver`] using the provided persister and returns the storage token.
-    pub fn persist<P: Persister<Receiver<WithContext>>>(
-        &self,
-        persister: &mut P,
-    ) -> Result<P::Token, ImplementationError> {
-        let receiver = Receiver { state: WithContext { context: self.context.clone() } };
-        Ok(persister.save(receiver)?)
+    pub(crate) fn apply_context(self, context: SessionContext) -> ReceiverTypeState<P> {
+        ReceiverTypeState::WithContext(Receiver {
+            state: WithContext { context },
+            session_persister: self.session_persister.clone(),
+        })
     }
-}
-
-pub trait ReceiverState {}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Receiver<State: ReceiverState> {
-    pub(crate) state: State,
-}
-
-impl<State: ReceiverState> core::ops::Deref for Receiver<State> {
-    type Target = State;
-
-    fn deref(&self) -> &Self::Target { &self.state }
-}
-
-impl<State: ReceiverState> core::ops::DerefMut for Receiver<State> {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -153,14 +291,7 @@ pub struct WithContext {
 
 impl ReceiverState for WithContext {}
 
-impl Receiver<WithContext> {
-    /// Loads a [`Receiver`] from the provided persister using the storage token.
-    pub fn load<P: Persister<Receiver<WithContext>>>(
-        token: P::Token,
-        persister: &P,
-    ) -> Result<Self, ImplementationError> {
-        persister.load(token).map_err(ImplementationError::from)
-    }
+impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> Receiver<WithContext, P> {
     /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
     pub fn extract_req(
         &mut self,
@@ -177,11 +308,61 @@ impl Receiver<WithContext> {
 
     /// The response can either be an UncheckedProposal or an ACCEPTED message
     /// indicating no UncheckedProposal is available yet.
+    // TODO: create type alias for the outcome of this function
+    #[allow(clippy::type_complexity)]
     pub fn process_res(
         &mut self,
         body: &[u8],
         context: ohttp::ClientResponse,
-    ) -> Result<Option<Receiver<UncheckedProposal>>, Error> {
+    ) -> Result<
+        OptionalTransitionOutcome<Receiver<UncheckedProposal, P>, Receiver<WithContext, P>>,
+        PersistedError<Error, P::InternalStorageError>,
+    > {
+        let current_state = self.clone();
+        let proposal = match self.inner_process_res(body, context) {
+            Ok(proposal) => proposal,
+            Err(e) => {
+                // Dir and OHTTP related error are transient
+                // Malformities or invalid responses are considered fatal
+                match e {
+                    Error::ReplyToSender(ReplyableError::Implementation(_)) => {
+                        let res = MaybeFatalTransitionWithNoResults::transient(e)
+                            .save(&self.session_persister);
+                        return res;
+                    }
+                    _ => {
+                        let res = MaybeFatalTransitionWithNoResults::fatal(
+                            // TODO: should json error be None here?
+                            SessionEvent::SessionInvalid(e.to_string(), None),
+                            e,
+                        )
+                        .save(&self.session_persister);
+                        return res;
+                    }
+                };
+            }
+        };
+
+        if let Some(proposal) = proposal {
+            MaybeFatalTransitionWithNoResults::success(
+                SessionEvent::UncheckedProposal((proposal.clone(), self.context.e.clone())),
+                Receiver {
+                    state: UncheckedProposal { v1: proposal, context: self.state.context.clone() },
+                    session_persister: self.session_persister.clone(),
+                },
+            )
+            .save(&self.session_persister)
+        } else {
+            MaybeFatalTransitionWithNoResults::no_results(current_state)
+                .save(&self.session_persister)
+        }
+    }
+
+    fn inner_process_res(
+        &mut self,
+        body: &[u8],
+        context: ohttp::ClientResponse,
+    ) -> Result<Option<v1::UncheckedProposal>, Error> {
         let body = match process_get_res(body, context)
             .map_err(InternalSessionError::DirectoryResponse)?
         {
@@ -190,9 +371,9 @@ impl Receiver<WithContext> {
         };
         match std::str::from_utf8(&body) {
             // V1 response bodies are utf8 plaintext
-            Ok(response) => Ok(Some(Receiver { state: self.extract_proposal_from_v1(response)? })),
+            Ok(response) => Ok(Some(self.extract_proposal_from_v1(response)?)),
             // V2 response bodies are encrypted binary
-            Err(_) => Ok(Some(Receiver { state: self.extract_proposal_from_v2(body)? })),
+            Err(_) => Ok(Some(self.extract_proposal_from_v2(body)?)),
         }
     }
 
@@ -209,11 +390,14 @@ impl Receiver<WithContext> {
     fn extract_proposal_from_v1(
         &mut self,
         response: &str,
-    ) -> Result<UncheckedProposal, ReplyableError> {
+    ) -> Result<v1::UncheckedProposal, ReplyableError> {
         self.unchecked_from_payload(response)
     }
 
-    fn extract_proposal_from_v2(&mut self, response: Vec<u8>) -> Result<UncheckedProposal, Error> {
+    fn extract_proposal_from_v2(
+        &mut self,
+        response: Vec<u8>,
+    ) -> Result<v1::UncheckedProposal, Error> {
         let (payload_bytes, e) = decrypt_message_a(&response, self.context.s.secret_key().clone())?;
         self.context.e = Some(e);
         let payload = std::str::from_utf8(&payload_bytes)
@@ -224,7 +408,7 @@ impl Receiver<WithContext> {
     fn unchecked_from_payload(
         &mut self,
         payload: &str,
-    ) -> Result<UncheckedProposal, ReplyableError> {
+    ) -> Result<v1::UncheckedProposal, ReplyableError> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
         log::trace!("Received query: {query}, base64: {base64}"); // my guess is no \n so default is wrong
@@ -250,7 +434,7 @@ impl Receiver<WithContext> {
         }
 
         let inner = v1::UncheckedProposal { psbt, params };
-        Ok(UncheckedProposal { v1: inner, context: self.context.clone() })
+        Ok(inner)
     }
 
     /// Build a V2 Payjoin URI from the receiver's context
@@ -264,6 +448,24 @@ impl Receiver<WithContext> {
             PayjoinExtras { endpoint: pj, output_substitution: OutputSubstitution::Enabled };
         bitcoin_uri::Uri::with_extras(self.context.address.clone(), extras)
     }
+    pub(crate) fn apply_unchecked_from_payload(
+        self,
+        event: v1::UncheckedProposal,
+        reply_key: Option<HpkePublicKey>,
+    ) -> Result<ReceiverTypeState<P>, InternalReplayError> {
+        // NOTE: this is now missing information here and needs to be checked else where
+        if self.context.expiry < SystemTime::now() {
+            // Session is expired, close the session
+            return Err(InternalReplayError::SessionExpired(self.context.expiry));
+        }
+        Ok(ReceiverTypeState::UncheckedProposal(Receiver {
+            state: UncheckedProposal {
+                v1: event,
+                context: SessionContext { e: reply_key, ..self.context.clone() },
+            },
+            session_persister: self.session_persister.clone(),
+        }))
+    }
 }
 
 /// The sender's original PSBT and optional parameters
@@ -275,7 +477,7 @@ impl Receiver<WithContext> {
 /// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
 /// that the transaction can be broadcast with check_broadcast_suitability. Otherwise it is safe to
 /// call assume_interactive_receive to proceed with validation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UncheckedProposal {
     pub(crate) v1: v1::UncheckedProposal,
     pub(crate) context: SessionContext,
@@ -283,7 +485,7 @@ pub struct UncheckedProposal {
 
 impl ReceiverState for UncheckedProposal {}
 
-impl Receiver<UncheckedProposal> {
+impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> Receiver<UncheckedProposal, P> {
     /// The Sender's Original PSBT
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
         self.v1.extract_tx_to_schedule_broadcast()
@@ -305,9 +507,32 @@ impl Receiver<UncheckedProposal> {
         self,
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
-    ) -> Result<Receiver<MaybeInputsOwned>, ReplyableError> {
-        let inner = self.state.v1.check_broadcast_suitability(min_fee_rate, can_broadcast)?;
-        Ok(Receiver { state: MaybeInputsOwned { v1: inner, context: self.state.context } })
+    ) -> Result<
+        Receiver<MaybeInputsOwned, P>,
+        PersistedError<ReplyableError, P::InternalStorageError>,
+    > {
+        let inner =
+            match self.state.v1.clone().check_broadcast_suitability(min_fee_rate, can_broadcast) {
+                Ok(v1) => v1,
+                Err(e) => match e {
+                    ReplyableError::Implementation(_) =>
+                        return MaybeFatalTransition::transient(e).save(&self.session_persister)?,
+                    _ =>
+                        return MaybeFatalTransition::fatal(
+                            SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                            e,
+                        )
+                        .save(&self.session_persister)?,
+                },
+            };
+        MaybeFatalTransition::success(
+            SessionEvent::MaybeInputsOwned(inner.clone()),
+            Receiver {
+                state: MaybeInputsOwned { v1: inner, context: self.context.clone() },
+                session_persister: self.session_persister.clone(),
+            },
+        )
+        .save(&self.session_persister)
     }
 
     /// Call this method if the only way to initiate a Payjoin with this receiver
@@ -315,46 +540,32 @@ impl Receiver<UncheckedProposal> {
     ///
     /// So-called "non-interactive" receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks.
     /// Those receivers call `extract_tx_to_check_broadcast()` after making those checks downstream.
-    pub fn assume_interactive_receiver(self) -> Receiver<MaybeInputsOwned> {
+    pub fn assume_interactive_receiver(
+        self,
+    ) -> Result<Receiver<MaybeInputsOwned, P>, P::InternalStorageError> {
         let inner = self.state.v1.assume_interactive_receiver();
-        Receiver { state: MaybeInputsOwned { v1: inner, context: self.state.context } }
-    }
-
-    /// Extract an OHTTP Encapsulated HTTP POST request to return
-    /// a Receiver Error Response
-    pub fn extract_err_req(
-        &mut self,
-        err: &JsonReply,
-        ohttp_relay: impl IntoUrl,
-    ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
-        let subdir = subdir(&self.context.directory, &self.context.id());
-        let (body, ohttp_ctx) = ohttp_encapsulate(
-            &mut self.context.ohttp_keys,
-            "POST",
-            subdir.as_str(),
-            Some(err.to_json().to_string().as_bytes()),
+        NextStateTransition::success(
+            SessionEvent::MaybeInputsOwned(inner.clone()),
+            Receiver {
+                state: MaybeInputsOwned { v1: inner, context: self.state.context },
+                session_persister: self.session_persister.clone(),
+            },
         )
-        .map_err(InternalSessionError::OhttpEncapsulation)?;
-        let req = Request::new_v2(&self.context.full_relay_url(ohttp_relay)?, &body);
-        Ok((req, ohttp_ctx))
+        .save(&self.session_persister)
     }
-
-    /// Process an OHTTP Encapsulated HTTP POST Error response
-    /// to ensure it has been posted properly
-    pub fn process_err_res(
-        &mut self,
-        body: &[u8],
-        context: ohttp::ClientResponse,
-    ) -> Result<(), SessionError> {
-        process_post_res(body, context)
-            .map_err(|e| InternalSessionError::DirectoryResponse(e).into())
+    pub(crate) fn apply_maybe_inputs_owned(self, v1: v1::MaybeInputsOwned) -> ReceiverTypeState<P> {
+        let new_state = MaybeInputsOwned { v1, context: self.context.clone() };
+        ReceiverTypeState::MaybeInputsOwned(Receiver {
+            state: new_state,
+            session_persister: self.session_persister.clone(),
+        })
     }
 }
 
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
 /// Call [`Receiver<MaybeInputsOwned>::check_inputs_not_owned`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsOwned {
     v1: v1::MaybeInputsOwned,
     context: SessionContext,
@@ -362,7 +573,7 @@ pub struct MaybeInputsOwned {
 
 impl ReceiverState for MaybeInputsOwned {}
 
-impl Receiver<MaybeInputsOwned> {
+impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> Receiver<MaybeInputsOwned, P> {
     /// Check that the Original PSBT has no receiver-owned inputs.
     /// Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
     ///
@@ -370,16 +581,46 @@ impl Receiver<MaybeInputsOwned> {
     pub fn check_inputs_not_owned(
         self,
         is_owned: impl Fn(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<Receiver<MaybeInputsSeen>, ReplyableError> {
-        let inner = self.state.v1.check_inputs_not_owned(is_owned)?;
-        Ok(Receiver { state: MaybeInputsSeen { v1: inner, context: self.state.context } })
+    ) -> Result<Receiver<MaybeInputsSeen, P>, PersistedError<ReplyableError, P::InternalStorageError>>
+    {
+        let inner = match self.state.v1.clone().check_inputs_not_owned(is_owned) {
+            Ok(inner) => inner,
+            Err(e) => match e {
+                ReplyableError::Implementation(_) => {
+                    return MaybeFatalTransition::transient(e).save(&self.session_persister)?;
+                }
+                _ => {
+                    return MaybeFatalTransition::fatal(
+                        SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                        e,
+                    )
+                    .save(&self.session_persister)?;
+                }
+            },
+        };
+        MaybeFatalTransition::success(
+            SessionEvent::MaybeInputsSeen(inner.clone()),
+            Receiver {
+                state: MaybeInputsSeen { v1: inner, context: self.state.context },
+                session_persister: self.session_persister.clone(),
+            },
+        )
+        .save(&self.session_persister)
+    }
+
+    pub(crate) fn apply_maybe_inputs_seen(self, v1: v1::MaybeInputsSeen) -> ReceiverTypeState<P> {
+        let new_state = MaybeInputsSeen { v1, context: self.context.clone() };
+        ReceiverTypeState::MaybeInputsSeen(Receiver {
+            state: new_state,
+            session_persister: self.session_persister.clone(),
+        })
     }
 }
 
 /// Typestate to validate that the Original PSBT has no inputs that have been seen before.
 ///
 /// Call [`Receiver<MaybeInputsSeen>::check_no_inputs_seen_before`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsSeen {
     v1: v1::MaybeInputsSeen,
     context: SessionContext,
@@ -387,16 +628,46 @@ pub struct MaybeInputsSeen {
 
 impl ReceiverState for MaybeInputsSeen {}
 
-impl Receiver<MaybeInputsSeen> {
+impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> Receiver<MaybeInputsSeen, P> {
     /// Make sure that the original transaction inputs have never been seen before.
     /// This prevents probing attacks. This prevents reentrant Payjoin, where a sender
     /// proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
     pub fn check_no_inputs_seen_before(
         self,
         is_known: impl Fn(&OutPoint) -> Result<bool, ImplementationError>,
-    ) -> Result<Receiver<OutputsUnknown>, ReplyableError> {
-        let inner = self.state.v1.check_no_inputs_seen_before(is_known)?;
-        Ok(Receiver { state: OutputsUnknown { inner, context: self.state.context } })
+    ) -> Result<Receiver<OutputsUnknown, P>, PersistedError<ReplyableError, P::InternalStorageError>>
+    {
+        let inner = match self.state.v1.clone().check_no_inputs_seen_before(is_known) {
+            Ok(inner) => inner,
+            Err(e) => match e {
+                ReplyableError::Implementation(_) => {
+                    return MaybeFatalTransition::transient(e).save(&self.session_persister)?;
+                }
+                _ => {
+                    return MaybeFatalTransition::fatal(
+                        SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                        e,
+                    )
+                    .save(&self.session_persister)?;
+                }
+            },
+        };
+        MaybeFatalTransition::success(
+            SessionEvent::OutputsUnknown(inner.clone()),
+            Receiver {
+                state: OutputsUnknown { inner, context: self.state.context.clone() },
+                session_persister: self.session_persister.clone(),
+            },
+        )
+        .save(&self.session_persister)
+    }
+
+    pub(crate) fn apply_outputs_unknown(self, inner: v1::OutputsUnknown) -> ReceiverTypeState<P> {
+        let new_state = OutputsUnknown { inner, context: self.context.clone() };
+        ReceiverTypeState::OutputsUnknown(Receiver {
+            state: new_state,
+            session_persister: self.session_persister.clone(),
+        })
     }
 }
 
@@ -404,7 +675,7 @@ impl Receiver<MaybeInputsSeen> {
 ///
 /// Only accept PSBTs that send us money.
 /// Identify those outputs with [`Receiver<OutputsUnknown>::identify_receiver_outputs`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OutputsUnknown {
     inner: v1::OutputsUnknown,
     context: SessionContext,
@@ -412,21 +683,51 @@ pub struct OutputsUnknown {
 
 impl ReceiverState for OutputsUnknown {}
 
-impl Receiver<OutputsUnknown> {
+impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> Receiver<OutputsUnknown, P> {
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: impl Fn(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<Receiver<WantsOutputs>, ReplyableError> {
-        let inner = self.state.inner.identify_receiver_outputs(is_receiver_output)?;
-        Ok(Receiver { state: WantsOutputs { v1: inner, context: self.state.context } })
+    ) -> Result<Receiver<WantsOutputs, P>, PersistedError<ReplyableError, P::InternalStorageError>>
+    {
+        let inner = match self.state.inner.clone().identify_receiver_outputs(is_receiver_output) {
+            Ok(inner) => inner,
+            Err(e) => match e {
+                ReplyableError::Implementation(_) => {
+                    return MaybeFatalTransition::transient(e).save(&self.session_persister)?;
+                }
+                _ => {
+                    return MaybeFatalTransition::fatal(
+                        SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                        e,
+                    )
+                    .save(&self.session_persister)?;
+                }
+            },
+        };
+        MaybeFatalTransition::success(
+            SessionEvent::WantsOutputs(inner.clone()),
+            Receiver {
+                state: WantsOutputs { v1: inner, context: self.state.context.clone() },
+                session_persister: self.session_persister.clone(),
+            },
+        )
+        .save(&self.session_persister)
+    }
+
+    pub(crate) fn apply_wants_outputs(self, v1: v1::WantsOutputs) -> ReceiverTypeState<P> {
+        let new_state = WantsOutputs { v1, context: self.context.clone() };
+        ReceiverTypeState::WantsOutputs(Receiver {
+            state: new_state,
+            session_persister: self.session_persister.clone(),
+        })
     }
 }
 
 /// A checked proposal that the receiver may substitute or add outputs to
 ///
 /// Call [`Receiver<WantsOutputs>::commit_outputs`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WantsOutputs {
     v1: v1::WantsOutputs,
     context: SessionContext,
@@ -434,7 +735,7 @@ pub struct WantsOutputs {
 
 impl ReceiverState for WantsOutputs {}
 
-impl Receiver<WantsOutputs> {
+impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> Receiver<WantsOutputs, P> {
     /// Whether the receiver is allowed to substitute original outputs or not.
     pub fn output_substitution(&self) -> OutputSubstitution { self.v1.output_substitution() }
 
@@ -444,7 +745,10 @@ impl Receiver<WantsOutputs> {
         output_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
         let inner = self.state.v1.substitute_receiver_script(output_script)?;
-        Ok(Receiver { state: WantsOutputs { v1: inner, context: self.state.context } })
+        Ok(Receiver {
+            state: WantsOutputs { v1: inner, context: self.state.context },
+            session_persister: self.session_persister.clone(),
+        })
     }
 
     /// Replace **all** receiver outputs with one or more provided outputs.
@@ -458,21 +762,38 @@ impl Receiver<WantsOutputs> {
         drain_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
         let inner = self.state.v1.replace_receiver_outputs(replacement_outputs, drain_script)?;
-        Ok(Receiver { state: WantsOutputs { v1: inner, context: self.state.context } })
+        Ok(Receiver {
+            state: WantsOutputs { v1: inner, context: self.state.context },
+            session_persister: self.session_persister.clone(),
+        })
     }
 
     /// Proceed to the input contribution step.
     /// Outputs cannot be modified after this function is called.
-    pub fn commit_outputs(self) -> Receiver<WantsInputs> {
-        let inner = self.state.v1.commit_outputs();
-        Receiver { state: WantsInputs { v1: inner, context: self.state.context } }
+    pub fn commit_outputs(self) -> Result<Receiver<WantsInputs, P>, P::InternalStorageError> {
+        let inner = self.state.v1.clone().commit_outputs();
+        NextStateTransition::success(
+            SessionEvent::WantsInputs(inner.clone()),
+            Receiver {
+                state: WantsInputs { v1: inner, context: self.state.context.clone() },
+                session_persister: self.session_persister.clone(),
+            },
+        )
+        .save(&self.session_persister)
+    }
+    pub(crate) fn apply_wants_inputs(self, v1: v1::WantsInputs) -> ReceiverTypeState<P> {
+        let new_state = WantsInputs { v1, context: self.context.clone() };
+        ReceiverTypeState::WantsInputs(Receiver {
+            state: new_state,
+            session_persister: self.session_persister.clone(),
+        })
     }
 }
 
 /// A checked proposal that the receiver may contribute inputs to to make a payjoin
 ///
 /// Call [`Receiver<WantsOutputs>::commit_inputs`] to proceed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WantsInputs {
     v1: v1::WantsInputs,
     context: SessionContext,
@@ -480,7 +801,7 @@ pub struct WantsInputs {
 
 impl ReceiverState for WantsInputs {}
 
-impl Receiver<WantsInputs> {
+impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> Receiver<WantsInputs, P> {
     /// Select receiver input such that the payjoin avoids surveillance.
     /// Return the input chosen that has been applied to the Proposal.
     ///
@@ -506,14 +827,37 @@ impl Receiver<WantsInputs> {
         inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<Self, InputContributionError> {
         let inner = self.state.v1.contribute_inputs(inputs)?;
-        Ok(Receiver { state: WantsInputs { v1: inner, context: self.state.context } })
+        Ok(Receiver {
+            state: WantsInputs { v1: inner, context: self.state.context },
+            session_persister: self.session_persister.clone(),
+        })
     }
 
     /// Proceed to the proposal finalization step.
     /// Inputs cannot be modified after this function is called.
-    pub fn commit_inputs(self) -> Receiver<ProvisionalProposal> {
-        let inner = self.state.v1.commit_inputs();
-        Receiver { state: ProvisionalProposal { v1: inner, context: self.state.context } }
+    pub fn commit_inputs(
+        self,
+    ) -> Result<Receiver<ProvisionalProposal, P>, P::InternalStorageError> {
+        let inner = self.state.v1.clone().commit_inputs();
+        NextStateTransition::success(
+            SessionEvent::ProvisionalProposal(inner.clone()),
+            Receiver {
+                state: ProvisionalProposal { v1: inner, context: self.state.context.clone() },
+                session_persister: self.session_persister.clone(),
+            },
+        )
+        .save(&self.session_persister)
+    }
+
+    pub(crate) fn apply_provisional_proposal(
+        self,
+        v1: v1::ProvisionalProposal,
+    ) -> ReceiverTypeState<P> {
+        let new_state = ProvisionalProposal { v1, context: self.context.clone() };
+        ReceiverTypeState::ProvisionalProposal(Receiver {
+            state: new_state,
+            session_persister: self.session_persister.clone(),
+        })
     }
 }
 
@@ -521,7 +865,7 @@ impl Receiver<WantsInputs> {
 /// sender will accept.
 ///
 /// Call [`Receiver<ProvisionalProposal>::finalize_proposal`] to return a finalized [`PayjoinProposal`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProvisionalProposal {
     v1: v1::ProvisionalProposal,
     context: SessionContext,
@@ -529,7 +873,7 @@ pub struct ProvisionalProposal {
 
 impl ReceiverState for ProvisionalProposal {}
 
-impl Receiver<ProvisionalProposal> {
+impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> Receiver<ProvisionalProposal, P> {
     /// Return a Payjoin Proposal PSBT that the sender will find acceptable.
     ///
     /// This attempts to calculate any network fee owed by the receiver, subtract it from their output,
@@ -541,19 +885,42 @@ impl Receiver<ProvisionalProposal> {
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
-    ) -> Result<Receiver<PayjoinProposal>, ReplyableError> {
-        let inner = self.state.v1.finalize_proposal(
+    ) -> Result<Receiver<PayjoinProposal, P>, PersistedError<ReplyableError, P::InternalStorageError>>
+    {
+        let inner = match self.state.v1.clone().finalize_proposal(
             wallet_process_psbt,
             min_fee_rate,
             max_effective_fee_rate,
-        )?;
-        Ok(Receiver { state: PayjoinProposal { v1: inner, context: self.state.context } })
+        ) {
+            Ok(inner) => inner,
+            Err(e) => {
+                // v1::finalize_proposal returns a ReplyableError but the only error that can be returned is ImplementationError from the closure
+                // And that is a transient error
+                return MaybeTransientTransition::transient(e).save(&self.session_persister)?;
+            }
+        };
+        MaybeTransientTransition::success(
+            SessionEvent::PayjoinProposal(inner.clone()),
+            Receiver {
+                state: PayjoinProposal { v1: inner, context: self.state.context.clone() },
+                session_persister: self.session_persister.clone(),
+            },
+        )
+        .save(&self.session_persister)
+    }
+
+    pub(crate) fn apply_payjoin_proposal(self, v1: v1::PayjoinProposal) -> ReceiverTypeState<P> {
+        let new_state = PayjoinProposal { v1, context: self.context.clone() };
+        ReceiverTypeState::PayjoinProposal(Receiver {
+            state: new_state,
+            session_persister: self.session_persister.clone(),
+        })
     }
 }
 
 /// A finalized payjoin proposal, complete with fees and receiver signatures, that the sender
 /// should find acceptable.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PayjoinProposal {
     v1: v1::PayjoinProposal,
     context: SessionContext,
@@ -569,9 +936,11 @@ impl PayjoinProposal {
     }
 }
 
-impl Receiver<PayjoinProposal> {
+impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> Receiver<PayjoinProposal, P> {
     #[cfg(feature = "_multiparty")]
-    pub(crate) fn new(proposal: PayjoinProposal) -> Self { Receiver { state: proposal } }
+    pub(crate) fn new(proposal: PayjoinProposal, session_persister: P) -> Self {
+        Receiver { state: proposal, session_persister }
+    }
 
     /// The UTXOs that would be spent by this Payjoin transaction
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
@@ -635,9 +1004,13 @@ impl Receiver<PayjoinProposal> {
         &self,
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
-    ) -> Result<(), Error> {
-        process_post_res(res, ohttp_context)
+    ) -> Result<(), PersistedError<Error, P::InternalStorageError>> {
+        match process_post_res(res, ohttp_context)
             .map_err(|e| InternalSessionError::DirectoryResponse(e).into())
+        {
+            Ok(_) => Ok(MaybeSuccessTransition::success(()).save(&self.session_persister)?),
+            Err(e) => MaybeSuccessTransition::transient(e).save(&self.session_persister)?,
+        }
     }
 }
 
@@ -661,7 +1034,7 @@ pub mod test {
     use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, SYMMETRIC};
 
     use super::*;
-    use crate::persist::Value;
+    use crate::persist::NoopSessionPersister;
 
     pub(crate) static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
         address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
@@ -692,48 +1065,51 @@ pub mod test {
     });
 
     #[test]
-    fn extract_err_req() -> Result<(), BoxError> {
-        let mut proposal = Receiver {
+    fn test_extract_err_req() -> Result<(), BoxError> {
+        let noop_persister = NoopSessionPersister::default();
+        let receiver = Receiver {
             state: UncheckedProposal {
                 v1: crate::receive::v1::test::unchecked_proposal_from_test_vector(),
                 context: SHARED_CONTEXT.clone(),
             },
+            session_persister: noop_persister,
         };
 
-        let server_error = || {
-            proposal
-                .clone()
-                .check_broadcast_suitability(None, |_| Err("mock error".into()))
-                .expect_err("expected broadcast suitability check to fail")
-        };
+        let server_error =
+            || receiver.clone().check_broadcast_suitability(None, |_| Err("mock error".into()));
 
         let expected_json = serde_json::json!({
             "errorCode": "unavailable",
             "message": "Receiver error"
         });
 
-        let actual_json = JsonReply::from(server_error()).to_json().clone();
-        assert_eq!(actual_json, expected_json);
+        let error = server_error().expect_err("expected error");
+        let res = error.api_error().expect("expected api error");
+        let actual_json = JsonReply::from(&res);
+        assert_eq!(actual_json.to_json(), expected_json);
 
-        let (_req, _ctx) =
-            proposal.clone().extract_err_req(&server_error().into(), &*EXAMPLE_URL)?;
+        let (_req, _ctx) = extract_err_req(&actual_json, &*EXAMPLE_URL, &SHARED_CONTEXT)?;
 
         let internal_error: ReplyableError = InternalPayloadError::MissingPayment.into();
-        let (_req, _ctx) = proposal.extract_err_req(&internal_error.into(), &*EXAMPLE_URL)?;
+        let (_req, _ctx) =
+            extract_err_req(&(&internal_error).into(), &*EXAMPLE_URL, &SHARED_CONTEXT)?;
         Ok(())
     }
 
     #[test]
     fn default_expiry() {
         let now = SystemTime::now();
+        let noop_persister = NoopSessionPersister::default();
 
-        let session = NewReceiver::new(
+        let session = Receiver::create_session(
             SHARED_CONTEXT.address.clone(),
             SHARED_CONTEXT.directory.clone(),
             SHARED_CONTEXT.ohttp_keys.clone(),
             None,
-        );
-        let session_expiry = session.unwrap().context.expiry.duration_since(now).unwrap().as_secs();
+            noop_persister,
+        )
+        .expect("Noop persister shouldn't fail");
+        let session_expiry = session.context.expiry.duration_since(now).unwrap().as_secs();
         let default_expiry = Duration::from_secs(86400);
         if let Some(expected_expiry) = now.checked_add(default_expiry) {
             assert_eq!(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY, default_expiry);
@@ -742,19 +1118,13 @@ pub mod test {
     }
 
     #[test]
-    fn receiver_ser_de_roundtrip() -> Result<(), serde_json::Error> {
-        let session = Receiver { state: WithContext { context: SHARED_CONTEXT.clone() } };
-        let short_id = &session.context.id();
-        assert_eq!(session.key().as_ref(), short_id.as_bytes());
-        let serialized = serde_json::to_string(&session)?;
-        let deserialized: Receiver<WithContext> = serde_json::from_str(&serialized)?;
-        assert_eq!(session, deserialized);
-        Ok(())
-    }
-
-    #[test]
     fn test_v2_pj_uri() {
-        let uri = Receiver { state: WithContext { context: SHARED_CONTEXT.clone() } }.pj_uri();
+        let noop_persister = NoopSessionPersister::default();
+        let receiver = Receiver {
+            state: WithContext { context: SHARED_CONTEXT.clone() },
+            session_persister: noop_persister,
+        };
+        let uri = receiver.pj_uri();
         assert_ne!(uri.extras.endpoint, EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Enabled);
     }

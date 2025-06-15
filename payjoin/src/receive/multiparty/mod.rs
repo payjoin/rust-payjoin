@@ -3,9 +3,10 @@ use error::IdenticalProposalError;
 
 use super::error::InputContributionError;
 use super::{v1, v2, Error, InputPair};
+use crate::persist::NoopSessionPersister;
 use crate::psbt::merge::merge_unsigned_tx;
 use crate::receive::multiparty::error::{InternalMultipartyError, MultipartyError};
-use crate::receive::v2::SessionContext;
+use crate::receive::v2::{SessionContext, SessionEvent};
 use crate::{ImplementationError, Version};
 
 pub(crate) mod error;
@@ -22,7 +23,7 @@ impl UncheckedProposalBuilder {
 
     pub fn add(
         &mut self,
-        proposal: v2::Receiver<v2::UncheckedProposal>,
+        proposal: v2::Receiver<v2::UncheckedProposal, NoopSessionPersister<SessionEvent>>,
     ) -> Result<Self, MultipartyError> {
         self.check_proposal_suitability(&proposal)?;
         self.proposals.push(proposal.state);
@@ -212,10 +213,19 @@ pub struct PayjoinProposal {
 }
 
 impl PayjoinProposal {
-    pub fn sender_iter(&self) -> impl Iterator<Item = v2::Receiver<v2::PayjoinProposal>> {
+    pub fn sender_iter(
+        &self,
+    ) -> impl Iterator<Item = v2::Receiver<v2::PayjoinProposal, NoopSessionPersister<SessionEvent>>>
+    {
+        let persister = NoopSessionPersister::<SessionEvent>::default();
         self.contexts
             .iter()
-            .map(|ctx| v2::Receiver::new(v2::PayjoinProposal::new(self.v1.clone(), ctx.clone())))
+            .map(|ctx| {
+                v2::Receiver::new(
+                    v2::PayjoinProposal::new(self.v1.clone(), ctx.clone()),
+                    persister.clone(),
+                )
+            })
             .collect::<Vec<_>>()
             .into_iter()
     }
@@ -234,7 +244,7 @@ impl FinalizedProposal {
 
     pub fn add(
         &mut self,
-        proposal: v2::Receiver<v2::UncheckedProposal>,
+        proposal: v2::Receiver<v2::UncheckedProposal, NoopSessionPersister<SessionEvent>>,
     ) -> Result<(), MultipartyError> {
         self.check_proposal_suitability(&proposal)?;
         self.v2_proposals.push(proposal.state);
@@ -320,8 +330,10 @@ mod test {
         v1, v2, FinalizedProposal, InternalMultipartyError, MultipartyError,
         UncheckedProposalBuilder, SUPPORTED_VERSIONS,
     };
+    use crate::persist::NoopSessionPersister;
     use crate::receive::optional_parameters::Params;
     use crate::receive::v2::test::{SHARED_CONTEXT, SHARED_CONTEXT_TWO};
+    use crate::receive::v2::SessionEvent;
 
     fn multiparty_proposals() -> Vec<v1::UncheckedProposal> {
         let pairs = url::form_urlencoded::parse("v=2&optimisticmerge=true".as_bytes());
@@ -344,7 +356,8 @@ mod test {
             context: SHARED_CONTEXT.clone(),
         };
         let mut multiparty = UncheckedProposalBuilder::new();
-        multiparty.add(v2::Receiver { state: proposal_one })?;
+        let noop_persister = NoopSessionPersister::<SessionEvent>::default();
+        multiparty.add(v2::Receiver { state: proposal_one, session_persister: noop_persister })?;
         match multiparty.build() {
             Ok(_) => panic!("multiparty has two identical participants and should error"),
             Err(e) => assert_eq!(
@@ -365,9 +378,14 @@ mod test {
             v1: multiparty_proposals()[1].clone(),
             context: SHARED_CONTEXT.clone(),
         };
-        let mut multiparty =
-            UncheckedProposalBuilder::new().add(v2::Receiver { state: proposal_one.clone() })?;
-        match multiparty.add(v2::Receiver { state: proposal_two.clone() }) {
+        let noop_persister = NoopSessionPersister::<SessionEvent>::default();
+        let mut multiparty = UncheckedProposalBuilder::new().add(v2::Receiver {
+            state: proposal_one.clone(),
+            session_persister: noop_persister.clone(),
+        })?;
+        match multiparty
+            .add(v2::Receiver { state: proposal_two.clone(), session_persister: noop_persister })
+        {
             Ok(_) => panic!("multiparty has two identical contexts and should error"),
             Err(e) => assert_eq!(
                 e.to_string(),
@@ -393,9 +411,15 @@ mod test {
             v1: multiparty_proposals()[0].clone(),
             context: SHARED_CONTEXT_TWO.clone(),
         };
-        let mut multiparty =
-            UncheckedProposalBuilder::new().add(v2::Receiver { state: proposal_one.clone() })?;
-        match multiparty.add(v2::Receiver { state: proposal_two.clone() }) {
+        let noop_persister = NoopSessionPersister::<SessionEvent>::default();
+        let mut multiparty = UncheckedProposalBuilder::new().add(v2::Receiver {
+            state: proposal_one.clone(),
+            session_persister: noop_persister.clone(),
+        })?;
+        match multiparty.add(v2::Receiver {
+            state: proposal_two.clone(),
+            session_persister: noop_persister.clone(),
+        }) {
             Ok(_) => panic!("multiparty has two identical psbts and should error"),
             Err(e) => assert_eq!(
                 e.to_string(),
@@ -423,10 +447,13 @@ mod test {
             context: SHARED_CONTEXT_TWO.clone(),
         };
         let mut finalized_multiparty = FinalizedProposal::new();
-        finalized_multiparty.add(v2::Receiver { state: proposal_one })?;
+        let noop_persister = NoopSessionPersister::<SessionEvent>::default();
+        finalized_multiparty
+            .add(v2::Receiver { state: proposal_one, session_persister: noop_persister.clone() })?;
         assert_eq!(finalized_multiparty.v2()[0].type_id(), TypeId::of::<v2::UncheckedProposal>());
 
-        finalized_multiparty.add(v2::Receiver { state: proposal_two })?;
+        finalized_multiparty
+            .add(v2::Receiver { state: proposal_two, session_persister: noop_persister.clone() })?;
         assert_eq!(finalized_multiparty.v2()[1].type_id(), TypeId::of::<v2::UncheckedProposal>());
 
         let multiparty_psbt =

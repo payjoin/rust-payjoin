@@ -21,18 +21,6 @@ pub(crate) enum Error {
     Timeout(tokio::time::error::Elapsed),
 }
 
-impl PartialEq for Error {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Error::Redis(_), Error::Redis(_)) => true,
-            (Error::Timeout(t1), Error::Timeout(t2)) => t1 == t2,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for Error {}
-
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Error::*;

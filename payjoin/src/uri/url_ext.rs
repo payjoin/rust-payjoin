@@ -143,7 +143,7 @@ fn set_param(url: &mut Url, prefix: &str, param: &str) {
 }
 
 #[cfg(feature = "v2")]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum ParseOhttpKeysParamError {
     MissingOhttpKeys,
     InvalidOhttpKeys(crate::ohttp::ParseOhttpKeysError),
@@ -170,20 +170,6 @@ pub(crate) enum ParseExpParamError {
     InvalidExp(bitcoin::consensus::encode::Error),
 }
 
-impl PartialEq for ParseExpParamError {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (ParseExpParamError::MissingExp, ParseExpParamError::MissingExp) => true,
-            (ParseExpParamError::InvalidHrp(h1), ParseExpParamError::InvalidHrp(h2)) => h1 == h2,
-            (ParseExpParamError::DecodeBech32(e1), ParseExpParamError::DecodeBech32(e2)) =>
-                e1 == e2,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for ParseExpParamError {}
-
 #[cfg(feature = "v2")]
 impl std::fmt::Display for ParseExpParamError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -207,28 +193,6 @@ pub(crate) enum ParseReceiverPubkeyParamError {
     DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
     InvalidPubkey(crate::hpke::HpkeError),
 }
-
-impl PartialEq for ParseReceiverPubkeyParamError {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                ParseReceiverPubkeyParamError::MissingPubkey,
-                ParseReceiverPubkeyParamError::MissingPubkey,
-            ) => true,
-            (
-                ParseReceiverPubkeyParamError::InvalidHrp(h1),
-                ParseReceiverPubkeyParamError::InvalidHrp(h2),
-            ) => h1 == h2,
-            (
-                ParseReceiverPubkeyParamError::DecodeBech32(e1),
-                ParseReceiverPubkeyParamError::DecodeBech32(e2),
-            ) => e1 == e2,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for ParseReceiverPubkeyParamError {}
 
 #[cfg(feature = "v2")]
 impl std::fmt::Display for ParseReceiverPubkeyParamError {

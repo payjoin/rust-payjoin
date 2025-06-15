@@ -703,7 +703,7 @@ pub mod test {
         let server_error = || {
             proposal
                 .clone()
-                .check_broadcast_suitability(None, |_| Err("mock error".into()))
+                .check_broadcast_suitability(None, |_| Err(ImplementationError::from("mock error")))
                 .expect_err("expected broadcast suitability check to fail")
         };
 

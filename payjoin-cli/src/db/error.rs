@@ -18,23 +18,6 @@ pub(crate) enum Error {
     NotFound(String),
 }
 
-impl PartialEq for Error {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Error::Sled(_), Error::Sled(_)) => true,
-            #[cfg(feature = "v2")]
-            (Error::Serialize(_), Error::Serialize(_)) => true,
-            #[cfg(feature = "v2")]
-            (Error::Deserialize(_), Error::Deserialize(_)) => true,
-            #[cfg(feature = "v2")]
-            (Error::NotFound(s1), Error::NotFound(s2)) => s1 == s2,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for Error {}
-
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

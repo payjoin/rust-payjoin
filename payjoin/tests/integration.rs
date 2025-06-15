@@ -733,7 +733,7 @@ mod integration {
             let proposal = proposal.check_broadcast_suitability(None, |tx| {
                 Ok(receiver
                     .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
-                    .map_err(|e| ImplementationError::new(e))?
+                    .map_err(ImplementationError::new)?
                     .first()
                     .ok_or(ImplementationError::from("testmempoolaccept should return a result"))?
                     .allowed)
@@ -742,11 +742,11 @@ mod integration {
             // Receive Check 2: receiver can't sign for proposal inputs
             let proposal = proposal.check_inputs_not_owned(|input| {
                 let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
-                    .map_err(|e| ImplementationError::new(e))?;
-                Ok(receiver
+                    .map_err(ImplementationError::new)?;
+                receiver
                     .get_address_info(&address)
                     .map(|info| info.is_mine.unwrap_or(false))
-                    .map_err(|e| ImplementationError::new(e))?)
+                    .map_err(ImplementationError::new)
             })?;
 
             // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
@@ -754,11 +754,12 @@ mod integration {
                 .check_no_inputs_seen_before(|_| Ok(false))?
                 .identify_receiver_outputs(|output_script| {
                     let address =
-                        bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)?;
-                    Ok(receiver
+                        bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
+                            .map_err(ImplementationError::new)?;
+                    receiver
                         .get_address_info(&address)
                         .map(|info| info.is_mine.unwrap_or(false))
-                        .map_err(ImplementationError::new)?)
+                        .map_err(ImplementationError::new)
                 })?;
 
             let payjoin = payjoin.commit_outputs();
@@ -786,7 +787,7 @@ mod integration {
             // Sign and finalize the proposal PSBT
             let payjoin = payjoin.finalize_proposal(
                 |psbt: &Psbt| {
-                    Ok(receiver
+                    receiver
                         .wallet_process_psbt(
                             &psbt.to_string(),
                             None,
@@ -796,7 +797,7 @@ mod integration {
                         .map(|res: WalletProcessPsbtResult| {
                             Psbt::from_str(&res.psbt).expect("psbt should be valid")
                         })
-                        .map_err(ImplementationError::new)?)
+                        .map_err(ImplementationError::new)
                 },
                 Some(FeeRate::BROADCAST_MIN),
                 Some(FeeRate::from_sat_per_vb_unchecked(2)),
@@ -1081,7 +1082,7 @@ mod integration {
                 let payjoin = payjoin.contribute_inputs(selected_inputs)?.commit_inputs();
                 let payjoin = payjoin.finalize_proposal(
                     |psbt: &Psbt| {
-                        Ok(receiver
+                        receiver
                             .wallet_process_psbt(
                                 &psbt.to_string(),
                                 None,
@@ -1091,7 +1092,7 @@ mod integration {
                             .map(|res: WalletProcessPsbtResult| {
                                 Psbt::from_str(&res.psbt).expect("valid psbt")
                             })
-                            .map_err(ImplementationError::new)?)
+                            .map_err(ImplementationError::new)
                     },
                     Some(FeeRate::BROADCAST_MIN),
                     FeeRate::from_sat_per_vb_unchecked(2),
@@ -1368,11 +1369,12 @@ mod integration {
 
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal.check_inputs_not_owned(|input| {
-            let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)?;
-            Ok(receiver
+            let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
+                .map_err(ImplementationError::new)?;
+            receiver
                 .get_address_info(&address)
                 .map(|info| info.is_mine.unwrap_or(false))
-                .map_err(ImplementationError::new)?)
+                .map_err(ImplementationError::new)
         })?;
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
@@ -1380,11 +1382,12 @@ mod integration {
             .check_no_inputs_seen_before(|_| Ok(false))?
             .identify_receiver_outputs(|output_script| {
                 let address =
-                    bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)?;
-                Ok(receiver
+                    bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
+                        .map_err(ImplementationError::new)?;
+                receiver
                     .get_address_info(&address)
                     .map(|info| info.is_mine.unwrap_or(false))
-                    .map_err(ImplementationError::new)?)
+                    .map_err(ImplementationError::new)
             })?;
 
         let payjoin = match custom_outputs {
@@ -1418,7 +1421,7 @@ mod integration {
 
         let payjoin_proposal = payjoin.finalize_proposal(
             |psbt: &Psbt| {
-                Ok(receiver
+                receiver
                     .wallet_process_psbt(
                         &psbt.to_string(),
                         None,
@@ -1428,7 +1431,7 @@ mod integration {
                     .map(|res: WalletProcessPsbtResult| {
                         Psbt::from_str(&res.psbt).expect("psbt should be valid")
                     })
-                    .map_err(ImplementationError::new)?)
+                    .map_err(ImplementationError::new)
             },
             Some(FeeRate::BROADCAST_MIN),
             Some(FeeRate::from_sat_per_vb_unchecked(2)),

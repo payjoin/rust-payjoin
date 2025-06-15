@@ -1,7 +1,5 @@
 use std::{error, fmt};
 
-use crate::receive::OutputSubstitutionError;
-
 #[derive(Debug)]
 pub struct ImplementationError(Box<dyn error::Error + Send + Sync>);
 
@@ -29,36 +27,8 @@ impl From<Box<dyn error::Error + Send + Sync>> for ImplementationError {
     fn from(e: Box<dyn error::Error + Send + Sync>) -> Self { ImplementationError(e) }
 }
 
-impl From<String> for ImplementationError {
-    fn from(e: String) -> Self {
-        let error = Box::<dyn error::Error + Send + Sync>::from(e);
-        ImplementationError::from(error)
-    }
-}
-
 impl From<&str> for ImplementationError {
     fn from(e: &str) -> Self {
-        let error = Box::<dyn error::Error + Send + Sync>::from(e);
-        ImplementationError::from(error)
-    }
-}
-
-impl From<anyhow::Error> for ImplementationError {
-    fn from(e: anyhow::Error) -> Self {
-        let error = Box::<dyn error::Error + Send + Sync>::from(e);
-        ImplementationError::from(error)
-    }
-}
-
-impl From<bitcoin::address::FromScriptError> for ImplementationError {
-    fn from(e: bitcoin::address::FromScriptError) -> Self {
-        let error = Box::<dyn error::Error + Send + Sync>::from(e);
-        ImplementationError::from(error)
-    }
-}
-
-impl From<OutputSubstitutionError> for ImplementationError {
-    fn from(e: OutputSubstitutionError) -> Self {
         let error = Box::<dyn error::Error + Send + Sync>::from(e);
         ImplementationError::from(error)
     }

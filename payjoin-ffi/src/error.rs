@@ -1,3 +1,5 @@
+use std::error;
+
 /// Error arising due to the specific receiver implementation
 ///
 /// e.g. database errors, network failures, wallet errors
@@ -7,7 +9,10 @@
 pub struct ImplementationError(#[from] payjoin::ImplementationError);
 
 impl From<String> for ImplementationError {
-    fn from(value: String) -> Self { Self(value.into()) }
+    fn from(value: String) -> Self {
+        let error = Box::<dyn error::Error + Send + Sync>::from(value);
+        Self(payjoin::ImplementationError::from(error))
+    }
 }
 
 impl From<ImplementationError> for payjoin::ImplementationError {

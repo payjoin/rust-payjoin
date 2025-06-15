@@ -251,8 +251,14 @@ impl App {
         &self,
         amount: Option<Amount>,
     ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, ReplyableError> {
-        let v1_config = self.config.v1().map_err(|e| ReplyableError::Implementation(e.into()))?;
-        let address = self.wallet.get_new_address().map_err(|e| Implementation(e.into()))?;
+        let v1_config = self
+            .config
+            .v1()
+            .map_err(|e| Implementation(ImplementationError::from(e.into_boxed_dyn_error())))?;
+        let address = self
+            .wallet
+            .get_new_address()
+            .map_err(|e| Implementation(ImplementationError::from(e.into_boxed_dyn_error())))?;
         let uri_string = if let Some(amount) = amount {
             format!(
                 "{}?amount={}&pj={}",
@@ -263,8 +269,11 @@ impl App {
         } else {
             format!("{}?pj={}", address.to_qr_uri(), v1_config.pj_endpoint)
         };
-        let uri = Uri::try_from(uri_string.clone())
-            .map_err(|_| Implementation(anyhow!("Could not parse payjoin URI string.").into()))?;
+        let uri = Uri::try_from(uri_string.clone()).map_err(|_| {
+            Implementation(ImplementationError::from(
+                anyhow!("Could not parse payjoin URI string.").into_boxed_dyn_error(),
+            ))
+        })?;
         let _ = uri.assume_checked(); // we just got it from bitcoind above
 
         Ok(Response::new(full(uri_string)))
@@ -304,12 +313,17 @@ impl App {
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // Receive Check 1: Can Broadcast
-        let proposal =
-            proposal.check_broadcast_suitability(None, |tx| Ok(wallet.can_broadcast(tx)?))?;
+        let proposal = proposal.check_broadcast_suitability(None, |tx| {
+            wallet
+                .can_broadcast(tx)
+                .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+        })?;
         log::trace!("check1");
 
         // Receive Check 2: receiver can't sign for proposal inputs
-        let proposal = proposal.check_inputs_not_owned(|input| Ok(wallet.is_mine(input)?))?;
+        let proposal = proposal.check_inputs_not_owned(|input| {
+            wallet.is_mine(input).map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+        })?;
         log::trace!("check2");
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
@@ -317,25 +331,34 @@ impl App {
             .check_no_inputs_seen_before(|input| Ok(self.db.insert_input_seen_before(*input)?))?;
         log::trace!("check3");
 
-        let payjoin = payjoin
-            .identify_receiver_outputs(|output_script| Ok(wallet.is_mine(output_script)?))?;
+        let payjoin = payjoin.identify_receiver_outputs(|output_script| {
+            wallet
+                .is_mine(output_script)
+                .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+        })?;
 
         let payjoin = payjoin
             .substitute_receiver_script(
                 &self
                     .wallet
                     .get_new_address()
-                    .map_err(|e| Implementation(e.into()))?
+                    .map_err(|e| {
+                        Implementation(ImplementationError::from(e.into_boxed_dyn_error()))
+                    })?
                     .script_pubkey(),
             )
-            .map_err(|e| Implementation(e.into()))?
+            .map_err(|e| Implementation(ImplementationError::new(e)))?
             .commit_outputs();
 
         let provisional_payjoin = try_contributing_inputs(payjoin.clone(), &self.wallet)
             .map_err(ReplyableError::Implementation)?;
 
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
-            |psbt| Ok(self.wallet.process_psbt(psbt)?),
+            |psbt| {
+                self.wallet
+                    .process_psbt(psbt)
+                    .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+            },
             None,
             self.config.max_fee_rate,
         )?;
@@ -347,7 +370,8 @@ fn try_contributing_inputs(
     payjoin: payjoin::receive::v1::WantsInputs,
     wallet: &BitcoindWallet,
 ) -> Result<payjoin::receive::v1::ProvisionalProposal, ImplementationError> {
-    let candidate_inputs = wallet.list_unspent()?;
+    let candidate_inputs =
+        wallet.list_unspent().map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
 
     let selected_input =
         payjoin.try_preserving_privacy(candidate_inputs).map_err(ImplementationError::new)?;

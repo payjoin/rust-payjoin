@@ -14,6 +14,17 @@ pub mod error;
 #[cfg(feature = "uniffi")]
 pub mod uni;
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SessionEvent(payjoin::send::v2::SessionEvent);
+
+impl From<SessionEvent> for payjoin::send::v2::SessionEvent {
+    fn from(value: SessionEvent) -> Self { value.0 }
+}
+
+impl From<payjoin::send::v2::SessionEvent> for SessionEvent {
+    fn from(value: payjoin::send::v2::SessionEvent) -> Self { SessionEvent(value) }
+}
+
 ///Builder for sender-side payjoin parameters
 ///
 ///These parameters define how client wants to handle Payjoin.

@@ -52,6 +52,7 @@ pub(crate) struct AdditionalFeeContribution {
 
 /// Data required to validate the response against the original PSBT.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "v2", derive(serde::Serialize, serde::Deserialize, PartialEq, Eq))]
 pub struct PsbtContext {
     original_psbt: Psbt,
     output_substitution: OutputSubstitution,

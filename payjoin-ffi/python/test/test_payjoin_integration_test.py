@@ -1,5 +1,3 @@
-import base64
-from binascii import unhexlify
 import os
 import sys
 import httpx
@@ -15,17 +13,11 @@ sys.path.insert(
     0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 )
 
-import hashlib
 import unittest
 from pprint import *
 from bitcoin import SelectParams
-from bitcoin.core.script import (
-    CScript,
-    OP_0,
-    SignatureHash,
-)
 from bitcoin.wallet import *
-from bitcoin.rpc import Proxy, hexlify_str, JSONRPCError
+from bitcoin.rpc import Proxy
 
 SelectParams("regtest")
 

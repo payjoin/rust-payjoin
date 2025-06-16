@@ -12,8 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-mutants
-          version: "25.0.1"
+          tool: cargo-mutants@25.0.1
       - run: cargo mutants --in-place --no-shuffle
       - uses: actions/upload-artifact@v4
         if: always()

@@ -310,6 +310,22 @@ where
             _ => None,
         }
     }
+
+    pub fn storage_error_ref(&self) -> Option<&StorageErr> {
+        match &self.0 {
+            InternalPersistedError::Storage(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    pub fn api_error_ref(&self) -> Option<&ApiErr> {
+        match &self.0 {
+            InternalPersistedError::Fatal(e)
+            | InternalPersistedError::BadInitInputs(e)
+            | InternalPersistedError::Transient(e) => Some(e),
+            _ => None,
+        }
+    }
 }
 
 impl<ApiError: std::error::Error, StorageError: std::error::Error>

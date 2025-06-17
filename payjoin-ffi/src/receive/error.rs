@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use payjoin::receive;
+use crate::{uri::error::IntoUrlError, error::ImplementationError};
 
 /// The top-level error type for the payjoin receiver
 #[derive(Debug, thiserror::Error)]
@@ -13,6 +14,9 @@ pub enum Error {
     /// V2-specific errors that are infeasable to reply to the sender
     #[error("Unreplyable error: {0}")]
     V2(Arc<SessionError>),
+    /// Error that may occur when converting a some type to a URL
+    #[error("IntoUrl error: {0}")]
+    IntoUrl(Arc<IntoUrlError>),
     /// Catch-all for unhandled error variants
     #[error("An unexpected error occurred")]
     Unexpected,
@@ -27,6 +31,57 @@ impl From<receive::Error> for Error {
         }
     }
 }
+
+/// Error that may occur during state machine transitions
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
+pub enum PersistedError {
+    /// rust-payjoin receiver error
+    #[error(transparent)]
+    Receiver(Error),
+    /// Storage error that could occur at application storage layer
+    #[error(transparent)]
+    Storage(Arc<ImplementationError>),
+}
+
+impl From<ImplementationError> for PersistedError {
+    fn from(value: ImplementationError) -> Self { PersistedError::Storage(Arc::new(value)) }
+}
+
+macro_rules! impl_persisted_error_from {
+    (
+        $api_error_ty:ty,
+        $receiver_arm:expr
+    ) => {
+        impl<S> From<payjoin::persist::PersistedError<$api_error_ty, S>> for PersistedError
+        where
+            S: std::error::Error,
+        {
+            fn from(err: payjoin::persist::PersistedError<$api_error_ty, S>) -> Self {
+                if let Some(storage_err) = err.storage_error_ref() {
+                    return PersistedError::Storage(Arc::new(ImplementationError::from(
+                        storage_err.to_string(),
+                    )));
+                }
+                if let Some(api_err) = err.api_error() {
+                    return PersistedError::Receiver($receiver_arm(api_err));
+                }
+                PersistedError::Receiver(Error::Unexpected)
+            }
+        }
+    };
+}
+
+impl_persisted_error_from!(receive::ReplyableError, |api_err: receive::ReplyableError| {
+    Error::ReplyToSender(Arc::new(api_err.into()))
+});
+
+impl_persisted_error_from!(receive::Error, |api_err: receive::Error| api_err.into());
+
+impl_persisted_error_from!(payjoin::IntoUrlError, |api_err: payjoin::IntoUrlError| Error::IntoUrl(
+    Arc::new(api_err.into())
+));
 
 /// The replyable error type for the payjoin receiver, representing failures need to be
 /// returned to the sender.

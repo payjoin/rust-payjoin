@@ -6,6 +6,30 @@ pub use crate::send::{
 };
 use crate::{ClientResponse, ImplementationError, PjUri, Request};
 
+#[derive(uniffi::Object, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SenderSessionEvent(super::SessionEvent);
+
+impl From<SenderSessionEvent> for super::SessionEvent {
+    fn from(value: SenderSessionEvent) -> Self { value.0 }
+}
+
+impl From<super::SessionEvent> for SenderSessionEvent {
+    fn from(value: super::SessionEvent) -> Self { SenderSessionEvent(value) }
+}
+
+#[uniffi::export]
+impl SenderSessionEvent {
+    pub fn to_json(&self) -> Result<String, SerdeJsonError> {
+        serde_json::to_string(&self.0).map_err(Into::into)
+    }
+
+    #[uniffi::constructor]
+    pub fn from_json(json: String) -> Result<Self, SerdeJsonError> {
+        let event: payjoin::send::v2::SessionEvent = serde_json::from_str(&json)?;
+        Ok(SenderSessionEvent(event.into()))
+    }
+}
+
 #[derive(uniffi::Object)]
 pub struct SenderBuilder(super::SenderBuilder);
 

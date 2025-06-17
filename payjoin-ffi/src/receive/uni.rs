@@ -11,7 +11,7 @@ use crate::uri::error::IntoUrlError;
 use crate::{ClientResponse, OhttpKeys, OutputSubstitution, Request};
 
 #[derive(Clone, uniffi::Object, serde::Serialize, serde::Deserialize)]
-pub struct SessionEvent(super::SessionEvent);
+pub struct ReceiverSessionEvent(super::SessionEvent);
 
 #[derive(Debug, uniffi::Object)]
 pub struct NewReceiver(pub super::NewReceiver);

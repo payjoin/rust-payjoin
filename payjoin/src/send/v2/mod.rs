@@ -25,7 +25,7 @@ use bitcoin::hashes::{sha256, Hash};
 pub use error::{CreateRequestError, EncapsulationError};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
-pub use persist::SenderToken;
+pub use persist::{SenderToken, SessionEvent};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -163,7 +163,7 @@ impl NewSender {
 
 /// A payjoin V2 sender, allowing the construction of a payjoin V2 request
 /// and the resulting [`V2PostContext`].
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WithReplyKey {
     /// The v1 Sender.
     pub(crate) v1: v1::Sender,
@@ -341,7 +341,7 @@ impl Sender<V2PostContext> {
 ///
 /// This type is used to make a BIP77 GET request and process the response.
 /// Call [`Sender<V2GetContext>::process_response`] on it to continue the BIP77 flow.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct V2GetContext {
     /// The endpoint in the Payjoin URI
     pub(crate) endpoint: Url,
@@ -415,7 +415,7 @@ impl Sender<V2GetContext> {
 }
 
 #[cfg(feature = "v2")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct HpkeContext {
     pub(crate) receiver: HpkePublicKey,
     pub(crate) reply_pair: HpkeKeyPair,

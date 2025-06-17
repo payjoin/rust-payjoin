@@ -220,7 +220,7 @@ impl<Event, NextState> NextStateTransition<Event, NextState> {
         NextStateTransition(AcceptNextState(event, next_state))
     }
 
-    pub fn save<P>(self, persister: &P) -> Result<NextState, StorageError<P::InternalStorageError>>
+    pub fn save<P>(self, persister: &P) -> Result<NextState, P::InternalStorageError>
     where
         P: SessionPersister<SessionEvent = Event>,
     {
@@ -311,7 +311,7 @@ where
     ApiErr: std::error::Error,
 {
     #[allow(dead_code)]
-    pub fn storage_error(self) -> Option<StorageError<StorageErr>> {
+    pub fn storage_error(self) -> Option<StorageErr> {
         match self.0 {
             InternalPersistedError::Storage(e) => Some(e),
             _ => None,
@@ -368,7 +368,7 @@ where
     BadInitInputs(InternalApiError),
     /// Error indicating that application failed to save the session event. This should be treated as a transient error
     /// but is represented as a separate error because this error is propagated from the application's storage layer
-    Storage(StorageError<StorageErr>),
+    Storage(StorageErr),
 }
 
 /// Represents a state transition that either progresses to a new state or maintains the current state
@@ -390,21 +390,6 @@ impl<NextState, CurrentState> OptionalTransitionOutcome<NextState, CurrentState>
             OptionalTransitionOutcome::Progress(next_state) => Some(next_state),
             OptionalTransitionOutcome::Stasis(_) => None,
         }
-    }
-}
-
-/// Wrapper representing a storage error that can be returned from an application's storage layer
-#[derive(Debug, Clone)]
-pub struct StorageError<Err>(Err);
-
-impl<Err> std::error::Error for StorageError<Err> where Err: std::error::Error {}
-
-impl<Err> std::fmt::Display for StorageError<Err>
-where
-    Err: std::error::Error,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Storage Error: {self:?}")
     }
 }
 
@@ -439,8 +424,8 @@ trait InternalSessionPersister: SessionPersister {
     fn save_progression_transition<NextState>(
         &self,
         state_transition: NextStateTransition<Self::SessionEvent, NextState>,
-    ) -> Result<NextState, StorageError<Self::InternalStorageError>> {
-        self.save_event(&state_transition.0 .0).map_err(StorageError)?;
+    ) -> Result<NextState, Self::InternalStorageError> {
+        self.save_event(&state_transition.0 .0)?;
         Ok(state_transition.0 .1)
     }
 
@@ -454,7 +439,7 @@ trait InternalSessionPersister: SessionPersister {
     {
         match state_transition.0 {
             Ok(AcceptCompleted(success_value)) => {
-                self.close().map_err(|e| InternalPersistedError::Storage(StorageError(e)))?;
+                self.close().map_err(InternalPersistedError::Storage)?;
                 Ok(success_value)
             }
             Err(RejectTransient(err)) => Err(InternalPersistedError::Transient(err).into()),
@@ -474,8 +459,7 @@ trait InternalSessionPersister: SessionPersister {
     {
         match state_transition.0 {
             Ok(AcceptNextState(event, next_state)) => {
-                self.save_event(&event)
-                    .map_err(|e| InternalPersistedError::Storage(StorageError(e)))?;
+                self.save_event(&event).map_err(InternalPersistedError::Storage)?;
                 Ok(next_state)
             }
             Err(RejectBadInitInputs(err)) => Err(InternalPersistedError::BadInitInputs(err).into()),
@@ -504,8 +488,7 @@ trait InternalSessionPersister: SessionPersister {
     {
         match state_transition.0 {
             Ok(AcceptOptionalTransition::Success(AcceptNextState(event, next_state))) => {
-                self.save_event(&event)
-                    .map_err(|e| InternalPersistedError::Storage(StorageError(e)))?;
+                self.save_event(&event).map_err(InternalPersistedError::Storage)?;
                 Ok(OptionalTransitionOutcome::Progress(next_state))
             }
             Ok(AcceptOptionalTransition::NoResults(current_state)) =>
@@ -529,8 +512,7 @@ trait InternalSessionPersister: SessionPersister {
     {
         match state_transition.0 {
             Ok(AcceptNextState(event, next_state)) => {
-                self.save_event(&event)
-                    .map_err(|e| InternalPersistedError::Storage(StorageError(e)))?;
+                self.save_event(&event).map_err(InternalPersistedError::Storage)?;
                 Ok(next_state)
             }
             Err(RejectTransient(err)) => Err(InternalPersistedError::Transient(err).into()),
@@ -547,8 +529,7 @@ trait InternalSessionPersister: SessionPersister {
     {
         match state_transition.0 {
             Ok(AcceptNextState(event, next_state)) => {
-                self.save_event(&event)
-                    .map_err(|e| InternalPersistedError::Storage(StorageError(e)))?;
+                self.save_event(&event).map_err(InternalPersistedError::Storage)?;
                 Ok(next_state)
             }
             Err(e) => {
@@ -573,10 +554,9 @@ trait InternalSessionPersister: SessionPersister {
     where
         Err: std::error::Error,
     {
-        self.save_event(&fatal_rejection.0)
-            .map_err(|e| InternalPersistedError::Storage(StorageError(e)))?;
+        self.save_event(&fatal_rejection.0).map_err(InternalPersistedError::Storage)?;
         // Session is in a terminal state, close it
-        self.close().map_err(|e| InternalPersistedError::Storage(StorageError(e)))
+        self.close().map_err(InternalPersistedError::Storage)
     }
 }
 
@@ -832,7 +812,7 @@ mod tests {
     fn test_next_state_transition() {
         let event = InMemoryTestEvent("foo".to_string());
         let next_state = "Next state".to_string();
-        let test_cases: Vec<TestCase<InMemoryTestState, StorageError<std::convert::Infallible>>> = vec![
+        let test_cases: Vec<TestCase<InMemoryTestState, std::convert::Infallible>> = vec![
             // Success
             TestCase {
                 expected_result: ExpectedResult {
@@ -1039,7 +1019,7 @@ mod tests {
 
     #[test]
     fn test_persisted_error_helpers() {
-        let storage_err = StorageError(InMemoryTestError {});
+        let storage_err = InMemoryTestError {};
         let api_err = InMemoryTestError {};
 
         // Test Storage error case

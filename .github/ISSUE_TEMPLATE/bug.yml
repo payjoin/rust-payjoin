@@ -1,0 +1,89 @@
+name: Bug report
+description: Submit a new bug report.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## This issue tracker is only for technical issues related to Payjoin Dev Kit.
+
+        ----
+  - type: checkboxes
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search to see if an issue already exists for the bug you encountered.
+      options:
+        - label: I have searched the existing issues
+          required: true
+  - type: textarea
+    id: current-behaviour
+    attributes:
+      label: Current behaviour
+      description: Tell us what went wrong
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behaviour
+    attributes:
+      label: Expected behaviour
+      description: Tell us what you expected to happen
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Tell us how to reproduce your bug. Please attach related screenshots if necessary.
+        * Run-time or compile-time configuration options
+        * Actions taken
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: |
+        Please copy and paste any relevant log output.
+
+        Please be aware that the log might contain personally identifying information.
+    validations:
+      required: false
+  - type: dropdown
+    attributes:
+      label: How did you obtain Payjoin Dev Kit?
+      multiple: false
+      options:
+        - Compiled from source
+        - Pre-built binaries
+        - Package manager
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: pdk-version
+    attributes:
+      label: What version of Payjoin Dev Kit are you using?
+      description:
+        Run `payjoin-cli --version` or `payjoin-directory --version` for the binaries.
+        For the library crates (`payjoin`, `payjoin-test-utils`, and `payjoin-ffi`),
+        check your respective package manager file to see which version you have installed.
+      placeholder: e.g. payjoin-0.23.0 or master@ceef77b
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and version
+      placeholder: e.g. "MacOS Ventura 13.2" or "Ubuntu 22.04 LTS"
+    validations:
+      required: true
+  - type: textarea
+    id: machine-specs
+    attributes:
+      label: Machine specifications
+      description: |
+        What are the specifications of the host machine?
+        e.g. OS/CPU and disk type, network connectivity
+    validations:
+      required: false

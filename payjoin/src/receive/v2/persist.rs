@@ -32,6 +32,7 @@ impl persist::Value for Receiver<WithContext> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 /// Represents a piece of information that the receiver has obtained from the session
 /// Each event can be used to transition the receiver state machine to a new state
+#[allow(clippy::large_enum_variant)]
 pub enum SessionEvent {
     Created(SessionContext),
     UncheckedProposal((v1::UncheckedProposal, Option<crate::HpkePublicKey>)),

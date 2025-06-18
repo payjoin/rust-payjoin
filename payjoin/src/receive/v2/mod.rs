@@ -125,7 +125,7 @@ impl NewReceiver {
         persister: &mut P,
     ) -> Result<P::Token, ImplementationError> {
         let receiver = Receiver { state: WithContext { context: self.context.clone() } };
-        Ok(persister.save(receiver)?)
+        persister.save(receiver).map_err(ImplementationError::new)
     }
 }
 
@@ -159,7 +159,7 @@ impl Receiver<WithContext> {
         token: P::Token,
         persister: &P,
     ) -> Result<Self, ImplementationError> {
-        persister.load(token).map_err(ImplementationError::from)
+        persister.load(token).map_err(ImplementationError::new)
     }
     /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
     pub fn extract_req(
@@ -598,7 +598,7 @@ impl Receiver<PayjoinProposal> {
                 .context
                 .directory
                 .join(&sender_subdir.to_string())
-                .map_err(|e| ReplyableError::Implementation(e.into()))?;
+                .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
             body = encrypt_message_b(payjoin_bytes, &self.context.s, e)?;
             method = "POST";
         } else {
@@ -609,7 +609,7 @@ impl Receiver<PayjoinProposal> {
                 .context
                 .directory
                 .join(&receiver_subdir.to_string())
-                .map_err(|e| ReplyableError::Implementation(e.into()))?;
+                .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
             method = "PUT";
         }
         log::debug!("Payjoin PSBT target: {}", target_resource.as_str());
@@ -703,7 +703,7 @@ pub mod test {
         let server_error = || {
             proposal
                 .clone()
-                .check_broadcast_suitability(None, |_| Err("mock error".into()))
+                .check_broadcast_suitability(None, |_| Err(ImplementationError::from("mock error")))
                 .expect_err("expected broadcast suitability check to fail")
         };
 

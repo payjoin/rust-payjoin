@@ -10,7 +10,7 @@ impl NewSender {
         let sender = Sender(v2::Sender {
             state: v2::WithReplyKey { v1: self.0.v1.clone(), reply_key: self.0.reply_key.clone() },
         });
-        persister.save(sender).map_err(ImplementationError::from)
+        persister.save(sender).map_err(ImplementationError::new)
     }
 }
 
@@ -25,7 +25,7 @@ impl Sender {
         token: P::Token,
         persister: &P,
     ) -> Result<Self, ImplementationError> {
-        let sender = persister.load(token).map_err(ImplementationError::from)?;
+        let sender = persister.load(token).map_err(ImplementationError::new)?;
         Ok(sender)
     }
 }

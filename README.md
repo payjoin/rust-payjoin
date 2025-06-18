@@ -135,40 +135,7 @@ cargo update -p zstd-sys --precise 2.0.8+zstd.1.5.5
 
 ## Contributing
 
-### Commit Messages
-
-The git repository is our source of truth for development history. Therefore the commit history is the most important communication
-artifact we produce. Commit messages must follow [the seven rules in this guide by cbeams](https://cbea.ms/git-commit/#seven-rules).
-
-### Nix Development Shells
-
-Where nix is available (NixOS or
-[otherwise](https://determinate.systems/nix-installer/)), development shells are provided.
-
-The default shell uses rust nightly, and can be activated manually using `nix
-develop` in the project root, or automatically with
-[direnv](https://determinate.systems/posts/nix-direnv/).
-
-To use the minimal supported version, use `nix develop .#msrv`. `.#stable` is
-also provided.
-
-### Testing
-
-We test a few different features combinations in CI. To run all of the combinations locally, have Docker running and run `contrib/test.sh`.
-
-If you are adding a new feature please add tests for it.
-
-### Upgrading dependencies
-
-If your change requires a dependency to be upgraded you must please run `contrib/update-lock-files.sh` before submitting any changes.
-
-### Code Formatting
-
-We use the nightly Rust formatter for this project. Please run `rustfmt` using the nightly toolchain before submitting any changes.
-
-### Linting
-
-We use `clippy` for linting. Please run `contrib/lint.sh` using the nightly toolchain before submitting any changes.
+See [`CONTRIBUTING.md`](.github/CONTRIBUTING.md)
 
 ## License
 

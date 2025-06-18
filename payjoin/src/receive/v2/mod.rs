@@ -7,10 +7,10 @@ use bitcoin::psbt::Psbt;
 use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
 pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
-use persist::InternalReplayError;
-pub use persist::{replay_event_log, ReplayError, SessionEvent, SessionHistory};
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
+use session::InternalReplayError;
+pub use session::{replay_event_log, ReplayError, SessionEvent, SessionHistory};
 use url::Url;
 
 use super::error::{Error, InputContributionError};
@@ -31,7 +31,7 @@ use crate::uri::ShortId;
 use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
 
 mod error;
-mod persist;
+mod session;
 
 const SUPPORTED_VERSIONS: &[Version] = &[Version::One, Version::Two];
 

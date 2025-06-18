@@ -832,6 +832,32 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn test_output_substitution_on_receiver_output() {
+        // This test enforces that the check_outputs cannot contain a mutation wherby the value of
+        // a sender output is compared incorrectly against the value of a receiver output as an
+        // evaluation of the pubkeys are skipped in this particular mutation.
+        let original_psbt = bitcoin::Psbt::from_str("cHNidP8BAHECAAAAAemypjsYbiEMBzt9GgrvGWBfP5zWFNUCt6i/R2LnIeZaAQAAAAD+////AnMQECQBAAAAFgAU4q0+CJt1I5FwDVsIZERGUWbaxP8A4fUFAAAAABYAFDn5Pjk0SjexSjKxKDSlVr0ADS3XAAAAAAABAJoCAAAAAj8BId/QLoIZpTGQ2oxtuUXwj3Q0fDmAdrk7LaBKmAIHAAAAAAD+////Fja+06Fw5HHhU4sKJ+SaxAM4L7v6o7ByAqmlE/9GUUsAAAAAAP7///8CwOEFKgEAAAAWABQCkjb8iNrynnj3YqU/O60O7sCd4QDyBSoBAAAAFgAUyQAmwE3VlSF5XiunLMRxNXz5dlxnAAAAAQEfAPIFKgEAAAAWABTJACbATdWVIXleK6csxHE1fPl2XAEIawJHMEQCIDOo3BNd6cM6eZVHw7unj2jmRSde1nHVUnvp4J9wJSwKAiBD5AiM3jVX0jY0PjnsPfSWhm7+n0P+dSrroR4ZU9EQYgEhAkBbXTxOQfa9o7GFfEwPuFEXAuyyONbI2OU2lcut2lIuAAAA").expect("Could not parse psbt");
+        let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
+        let ctx = crate::send::PsbtContext {
+            original_psbt: original_psbt.clone(),
+            output_substitution: OutputSubstitution::Enabled,
+            fee_contribution: Some(AdditionalFeeContribution {
+                max_amount: bitcoin::Amount::from_sat(182),
+                vout: 0,
+            }),
+            min_fee_rate: FeeRate::ZERO,
+            payee,
+        };
+        // The significant change lies in the proposal whereby the sender output is placed at index
+        // 0 and the sender's output are less than either of the receiver's outputs.  This ensures
+        // that with a mutation the value of the outputs will still be compared correctly even if
+        // the scipt_pubkeys are not evaluated properly.
+        let proposal = bitcoin::Psbt::from_str("cHNidP8BAJACAAAAAemypjsYbiEMBzt9GgrvGWBfP5zWFNUCt6i/R2LnIeZaAQAAAAD+////A4CWmAAAAAAAFgAUd3LTPnZ+hZbcc6jq3GRyj1oRqTdzEBAkAQAAABYAFOKtPgibdSORcA1bCGRERlFm2sT/YUpdBQAAAAAWABRS4ObB4k/hNqSb0EabxBp+8u3mUgAAAAAAAQCaAgAAAAI/ASHf0C6CGaUxkNqMbblF8I90NHw5gHa5Oy2gSpgCBwAAAAAA/v///xY2vtOhcORx4VOLCifkmsQDOC+7+qOwcgKppRP/RlFLAAAAAAD+////AsDhBSoBAAAAFgAUApI2/Ija8p5492KlPzutDu7AneEA8gUqAQAAABYAFMkAJsBN1ZUheV4rpyzEcTV8+XZcZwAAAAEBHwDyBSoBAAAAFgAUyQAmwE3VlSF5XiunLMRxNXz5dlwAAAAA").expect("Could not parse psbt");
+
+        assert!(ctx.process_proposal(proposal).is_ok());
+    }
+
     /// Test the sender's payjoin proposal checklist
     /// See: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-Senders_payjoin_proposal_checklist
     mod bip78_checklist {

@@ -25,8 +25,8 @@ use bitcoin::hashes::{sha256, Hash};
 pub use error::{CreateRequestError, EncapsulationError};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
-pub use persist::{replay_event_log, ReplayError, SessionEvent, SessionHistory};
 use serde::{Deserialize, Serialize};
+pub use session::{replay_event_log, ReplayError, SessionEvent, SessionHistory};
 use url::Url;
 
 use super::error::BuildSenderError;
@@ -37,12 +37,12 @@ use crate::persist::{
     MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeSuccessTransitionWithNoResults,
 };
 use crate::send::v1;
-use crate::send::v2::persist::InternalReplayError;
+use crate::send::v2::session::InternalReplayError;
 use crate::uri::{ShortId, UrlExt};
 use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
 
 mod error;
-mod persist;
+mod session;
 
 /// A builder to construct the properties of a [`Sender`].
 #[derive(Clone)]

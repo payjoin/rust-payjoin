@@ -78,7 +78,7 @@ async fn fetch_ohttp_keys(
             .set_selected_relay(selected_relay.clone());
 
         let ohttp_keys = {
-            #[cfg(feature = "_danger-local-https")]
+            #[cfg(feature = "_manual-tls")]
             {
                 let cert_der = crate::app::read_local_cert()?;
                 payjoin::io::fetch_ohttp_keys_with_cert(
@@ -88,7 +88,7 @@ async fn fetch_ohttp_keys(
                 )
                 .await
             }
-            #[cfg(not(feature = "_danger-local-https"))]
+            #[cfg(not(feature = "_manual-tls"))]
             {
                 payjoin::io::fetch_ohttp_keys(&selected_relay, &payjoin_directory).await
             }

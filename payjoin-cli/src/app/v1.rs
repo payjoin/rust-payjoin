@@ -26,7 +26,7 @@ use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::{handle_interrupt, http_agent};
 use crate::db::Database;
-#[cfg(feature = "_danger-local-https")]
+#[cfg(feature = "_manual-tls")]
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
 
 struct Headers<'a>(&'a hyper::HeaderMap);
@@ -151,14 +151,14 @@ impl App {
         let listener = TcpListener::bind(addr).await?;
         let app = self.clone();
 
-        #[cfg(feature = "_danger-local-https")]
+        #[cfg(feature = "_manual-tls")]
         let tls_acceptor = Self::init_tls_acceptor()?;
         while let Ok((stream, _)) = listener.accept().await {
             let app = app.clone();
-            #[cfg(feature = "_danger-local-https")]
+            #[cfg(feature = "_manual-tls")]
             let tls_acceptor = tls_acceptor.clone();
             tokio::spawn(async move {
-                #[cfg(feature = "_danger-local-https")]
+                #[cfg(feature = "_manual-tls")]
                 let stream = match tls_acceptor.accept(stream).await {
                     Ok(tls_stream) => tls_stream,
                     Err(e) => {
@@ -178,7 +178,7 @@ impl App {
         Ok(())
     }
 
-    #[cfg(feature = "_danger-local-https")]
+    #[cfg(feature = "_manual-tls")]
     fn init_tls_acceptor() -> Result<tokio_rustls::TlsAcceptor> {
         use std::io::Write;
 

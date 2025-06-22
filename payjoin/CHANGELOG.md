@@ -43,7 +43,7 @@
 - encode subdirectory IDs in bech32 and other QR optimizations [#417](https://github.com/payjoin/rust-payjoin/pull/417)
 - Upgrade to bitcoin v0.32.5
 - Work around '#' escaping bug in bip21 crate [#373](https://github.com/payjoin/rust-payjoin/pull/373)
-- Hide `_danger-local-https` feature behind `_` prefix so it doesn't show up in docs [#423](https://github.com/payjoin/rust-payjoin/pull/423)
+- Hide `_manual-tls` feature behind `_` prefix so it doesn't show up in docs [#423](https://github.com/payjoin/rust-payjoin/pull/423)
 
 
 ## 0.20.0

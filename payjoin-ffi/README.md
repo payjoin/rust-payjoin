@@ -39,7 +39,7 @@ The integration tests illustrates and verify integration using bitcoin core and 
 ```shell
 
 # Run the integration test
-cargo test  --package payjoin_ffi --test bdk_integration_test v2_to_v2_full_cycle --features _danger-local-https
+cargo test  --package payjoin_ffi --test bdk_integration_test v2_to_v2_full_cycle --features _manual-tls
 
 
 ```

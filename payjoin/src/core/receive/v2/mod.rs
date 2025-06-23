@@ -916,11 +916,17 @@ pub(crate) fn pj_uri<'a>(
 pub mod test {
     use std::str::FromStr;
 
+    use bitcoin::FeeRate;
     use once_cell::sync::Lazy;
-    use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, SYMMETRIC};
+    use payjoin_test_utils::{
+        BoxError, EXAMPLE_URL, KEM, KEY_ID, PARSED_ORIGINAL_PSBT, QUERY_PARAMS, SYMMETRIC,
+    };
 
     use super::*;
-    use crate::persist::NoopSessionPersister;
+    use crate::persist::{NoopSessionPersister, RejectTransient, Rejection};
+    use crate::receive::optional_parameters::Params;
+    use crate::receive::{v2, ReplyableError};
+    use crate::ImplementationError;
 
     pub(crate) static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
         address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
@@ -950,15 +956,123 @@ pub mod test {
         e: None,
     });
 
+    pub(crate) fn unchecked_proposal_v2_from_test_vector() -> UncheckedProposal {
+        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
+        let params = Params::from_query_pairs(pairs, &[Version::Two])
+            .expect("Test utils query params should not fail");
+        UncheckedProposal {
+            v1: v1::UncheckedProposal { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
+            context: SHARED_CONTEXT.clone(),
+        }
+    }
+
+    #[test]
+    fn test_unchecked_proposal_transient_error() -> Result<(), BoxError> {
+        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
+        let receiver = v2::Receiver { state: unchecked_proposal };
+
+        let unchecked_proposal = receiver.check_broadcast_suitability(Some(FeeRate::MIN), |_| {
+            Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+        });
+
+        match unchecked_proposal {
+            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
+                ReplyableError::Implementation(error),
+            )))) => assert_eq!(
+                error.to_string(),
+                ReplyableError::Implementation("mock error".into()).to_string()
+            ),
+            _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_maybe_inputs_seen_transient_error() -> Result<(), BoxError> {
+        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
+        let receiver = v2::Receiver { state: unchecked_proposal };
+
+        let maybe_inputs_owned = receiver.assume_interactive_receiver();
+        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(|_| {
+            Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+        });
+
+        match maybe_inputs_seen {
+            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
+                ReplyableError::Implementation(error),
+            )))) => assert_eq!(
+                error.to_string(),
+                ReplyableError::Implementation("mock error".into()).to_string()
+            ),
+            _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_outputs_unknown_transient_error() -> Result<(), BoxError> {
+        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
+        let receiver = v2::Receiver { state: unchecked_proposal };
+
+        let maybe_inputs_owned = receiver.assume_interactive_receiver();
+        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(|_| Ok(false));
+        let outputs_unknown = match maybe_inputs_seen.0 {
+            Ok(state) => state.1.check_no_inputs_seen_before(|_| {
+                Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+            }),
+            Err(_) => panic!("Expected Ok, got Err"),
+        };
+
+        match outputs_unknown {
+            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
+                ReplyableError::Implementation(error),
+            )))) => assert_eq!(
+                error.to_string(),
+                ReplyableError::Implementation("mock error".into()).to_string()
+            ),
+            _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_wants_outputs_transient_error() -> Result<(), BoxError> {
+        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
+        let receiver = v2::Receiver { state: unchecked_proposal };
+
+        let maybe_inputs_owned = receiver.assume_interactive_receiver();
+        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(|_| Ok(false));
+        let outputs_unknown = match maybe_inputs_seen.0 {
+            Ok(state) => state.1.check_no_inputs_seen_before(|_| Ok(false)),
+            Err(_) => panic!("Expected Ok, got Err"),
+        };
+        let wants_outputs = match outputs_unknown.0 {
+            Ok(state) => state.1.identify_receiver_outputs(|_| {
+                Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+            }),
+            Err(_) => panic!("Expected Ok, got Err"),
+        };
+
+        match wants_outputs {
+            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
+                ReplyableError::Implementation(error),
+            )))) => assert_eq!(
+                error.to_string(),
+                ReplyableError::Implementation("mock error".into()).to_string()
+            ),
+            _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
+        }
+
+        Ok(())
+    }
+
     #[test]
     fn test_extract_err_req() -> Result<(), BoxError> {
         let noop_persister = NoopSessionPersister::default();
-        let receiver = Receiver {
-            state: UncheckedProposal {
-                v1: crate::receive::v1::test::unchecked_proposal_from_test_vector(),
-                context: SHARED_CONTEXT.clone(),
-            },
-        };
+        let receiver = Receiver { state: unchecked_proposal_v2_from_test_vector() };
 
         let server_error = || {
             receiver
@@ -972,8 +1086,8 @@ pub mod test {
             "message": "Receiver error"
         });
 
-        let error = server_error().expect_err("expected error");
-        let res = error.api_error().expect("expected api error");
+        let error = server_error().expect_err("Server error should be populated with mock error");
+        let res = error.api_error().expect("check_broadcast error should propagate to api error");
         let actual_json = JsonReply::from(&res);
         assert_eq!(actual_json.to_json(), expected_json);
 
@@ -982,6 +1096,41 @@ pub mod test {
         let internal_error: ReplyableError = InternalPayloadError::MissingPayment.into();
         let (_req, _ctx) =
             extract_err_req(&(&internal_error).into(), &*EXAMPLE_URL, &SHARED_CONTEXT)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_extract_err_req_expiry() -> Result<(), BoxError> {
+        let now = SystemTime::now();
+        let noop_persister = NoopSessionPersister::default();
+        let context = SessionContext { expiry: now, ..SHARED_CONTEXT.clone() };
+        let receiver = Receiver {
+            state: UncheckedProposal {
+                v1: crate::receive::v1::test::unchecked_proposal_from_test_vector(),
+                context: context.clone(),
+            },
+        };
+
+        let server_error = || {
+            receiver
+                .clone()
+                .check_broadcast_suitability(None, |_| Err("mock error".into()))
+                .save(&noop_persister)
+        };
+
+        let error = server_error().expect_err("Server error should be populated with mock error");
+        let res = error.api_error().expect("check_broadcast error should propagate to api error");
+        let actual_json = JsonReply::from(&res);
+
+        let expiry = extract_err_req(&actual_json, &*EXAMPLE_URL, &context);
+
+        match expiry {
+            Err(error) => assert_eq!(
+                error.to_string(),
+                SessionError::from(InternalSessionError::Expired(now)).to_string()
+            ),
+            Ok(_) => panic!("Expected session expiry error, got success"),
+        }
         Ok(())
     }
 

@@ -92,7 +92,7 @@ impl<Event, NextState, CurrentState, Err>
 
 /// A transition that can be either fatal, transient, or a state transition.
 pub struct MaybeFatalTransition<Event, NextState, Err>(
-    Result<AcceptNextState<Event, NextState>, Rejection<Event, Err>>,
+    pub(crate) Result<AcceptNextState<Event, NextState>, Rejection<Event, Err>>,
 );
 
 impl<Event, NextState, Err> MaybeFatalTransition<Event, NextState, Err> {
@@ -185,7 +185,7 @@ where
 }
 
 /// A transition that always results in a state transition.
-pub struct NextStateTransition<Event, NextState>(AcceptNextState<Event, NextState>);
+pub struct NextStateTransition<Event, NextState>(pub(crate) AcceptNextState<Event, NextState>);
 
 impl<Event, NextState> NextStateTransition<Event, NextState> {
     #[inline]
@@ -232,7 +232,7 @@ impl<Event, NextState, Err> MaybeBadInitInputsTransition<Event, NextState, Err> 
 }
 
 /// Wrapper that marks the progression of a state machine
-pub struct AcceptNextState<Event, NextState>(Event, NextState);
+pub struct AcceptNextState<Event, NextState>(pub(crate) Event, pub(crate) NextState);
 /// Wrapper that marks the success of a state machine with a value that was returned
 struct AcceptCompleted<SuccessValue>(SuccessValue);
 
@@ -262,11 +262,18 @@ impl<Event, Err> Rejection<Event, Err> {
 pub struct RejectFatal<Event, Err>(Event, Err);
 /// Represents a transient rejection of a state transition.
 /// When this error occurs, the session should resume from its current state.
-pub struct RejectTransient<Err>(Err);
+pub struct RejectTransient<Err>(pub(crate) Err);
 /// Represents a bad initial inputs to the state machine.
 /// When this error occurs, the session cannot be created.
 /// The wrapper contains the error and should be returned to the caller.
 pub struct RejectBadInitInputs<Err>(Err);
+
+impl<Err: std::error::Error> std::fmt::Display for RejectTransient<Err> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let RejectTransient(err) = self;
+        write!(f, "{err}")
+    }
+}
 
 /// Error type that represents all possible errors that can be returned when processing a state transition
 #[derive(Debug, Clone)]

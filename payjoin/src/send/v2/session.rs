@@ -129,7 +129,7 @@ mod tests {
         };
 
         let v2_get_context = V2GetContext {
-            endpoint,
+            endpoint: endpoint.clone(),
             psbt_ctx: PsbtContext {
                 original_psbt: PARSED_ORIGINAL_PSBT.clone(),
                 output_substitution: OutputSubstitution::Enabled,

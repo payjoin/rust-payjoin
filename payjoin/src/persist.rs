@@ -268,6 +268,13 @@ pub struct RejectTransient<Err>(Err);
 /// The wrapper contains the error and should be returned to the caller.
 pub struct RejectBadInitInputs<Err>(Err);
 
+impl<Err: std::error::Error> std::fmt::Display for RejectTransient<Err> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let RejectTransient(err) = self;
+        write!(f, "{err}")
+    }
+}
+
 /// Error type that represents all possible errors that can be returned when processing a state transition
 #[derive(Debug, Clone)]
 pub struct PersistedError<ApiError: std::error::Error, StorageError: std::error::Error>(
@@ -669,10 +676,15 @@ pub mod test_utils {
 
 #[cfg(test)]
 mod tests {
+    use bitcoin::FeeRate;
+    use payjoin_test_utils::BoxError;
     use serde::{Deserialize, Serialize};
 
     use super::*;
     use crate::persist::test_utils::InMemoryTestPersister;
+    use crate::receive::v2::test::unchecked_proposal_v2_from_test_vector;
+    use crate::receive::{v2, ReplyableError};
+    use crate::ImplementationError;
 
     type InMemoryTestState = String;
 
@@ -1113,6 +1125,109 @@ mod tests {
         assert!(no_results.is_none());
         assert!(!no_results.is_success());
         assert_eq!(no_results.success(), None);
+    }
+
+    #[test]
+    fn test_unchecked_proposal_transient_error() -> Result<(), BoxError> {
+        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
+        let receiver = v2::Receiver { state: unchecked_proposal };
+
+        let unchecked_proposal = receiver.check_broadcast_suitability(Some(FeeRate::MIN), |_| {
+            Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+        });
+
+        match unchecked_proposal {
+            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
+                ReplyableError::Implementation(error),
+            )))) => assert_eq!(
+                error.to_string(),
+                ReplyableError::Implementation("mock error".into()).to_string()
+            ),
+            _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_maybe_inputs_seen_transient_error() -> Result<(), BoxError> {
+        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
+        let receiver = v2::Receiver { state: unchecked_proposal };
+
+        let maybe_inputs_owned = receiver.clone().assume_interactive_receiver();
+        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(|_| {
+            Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+        });
+
+        match maybe_inputs_seen {
+            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
+                ReplyableError::Implementation(error),
+            )))) => assert_eq!(
+                error.to_string(),
+                ReplyableError::Implementation("mock error".into()).to_string()
+            ),
+            _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_outputs_unknown_transient_error() -> Result<(), BoxError> {
+        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
+        let receiver = v2::Receiver { state: unchecked_proposal };
+
+        let maybe_inputs_owned = receiver.clone().assume_interactive_receiver();
+        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(|_| Ok(false));
+        let outputs_unknown = match maybe_inputs_seen.0 {
+            Ok(state) => state.1.check_no_inputs_seen_before(|_| {
+                Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+            }),
+            Err(_) => panic!("Expected Ok, got Err"),
+        };
+
+        match outputs_unknown {
+            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
+                ReplyableError::Implementation(error),
+            )))) => assert_eq!(
+                error.to_string(),
+                ReplyableError::Implementation("mock error".into()).to_string()
+            ),
+            _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_wants_outputs_transient_error() -> Result<(), BoxError> {
+        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
+        let receiver = v2::Receiver { state: unchecked_proposal };
+
+        let maybe_inputs_owned = receiver.clone().assume_interactive_receiver();
+        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(|_| Ok(false));
+        let outputs_unknown = match maybe_inputs_seen.0 {
+            Ok(state) => state.1.check_no_inputs_seen_before(|_| Ok(false)),
+            Err(_) => panic!("Expected Ok, got Err"),
+        };
+        let wants_outputs = match outputs_unknown.0 {
+            Ok(state) => state.1.identify_receiver_outputs(|_| {
+                Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+            }),
+            Err(_) => panic!("Expected Ok, got Err"),
+        };
+
+        match wants_outputs {
+            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
+                ReplyableError::Implementation(error),
+            )))) => assert_eq!(
+                error.to_string(),
+                ReplyableError::Implementation("mock error".into()).to_string()
+            ),
+            _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
+        }
+
+        Ok(())
     }
 
     #[test]

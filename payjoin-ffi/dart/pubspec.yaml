@@ -7,3 +7,5 @@ environment:
 
 dependencies:
   ffi: ^2.1.4
+dev_dependencies:
+  test: ^1.26.2

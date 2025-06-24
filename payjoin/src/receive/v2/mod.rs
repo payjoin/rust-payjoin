@@ -83,7 +83,7 @@ fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 }
 
 /// Represents the various states of a Payjoin receiver session during the protocol flow.
-/// Each variant wraps a `Receiver` with a specific state type, except for `TerminalState` which
+/// Each variant wraps a `Receiver` with a specific state type, except for `TerminalFailure` which
 /// indicates the session has ended or is invalid.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReceiverTypeState {
@@ -97,7 +97,7 @@ pub enum ReceiverTypeState {
     WantsInputs(Receiver<WantsInputs>),
     ProvisionalProposal(Receiver<ProvisionalProposal>),
     PayjoinProposal(Receiver<PayjoinProposal>),
-    TerminalState,
+    TerminalFailure,
 }
 
 impl ReceiverTypeState {
@@ -143,7 +143,7 @@ impl ReceiverTypeState {
                 ReceiverTypeState::ProvisionalProposal(state),
                 SessionEvent::PayjoinProposal(payjoin_proposal),
             ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
-            (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiverTypeState::TerminalState),
+            (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiverTypeState::TerminalFailure),
             (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
                 Box::new(current_state),
                 Box::new(event),

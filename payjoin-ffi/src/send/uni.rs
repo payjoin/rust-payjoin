@@ -39,7 +39,7 @@ pub enum SenderTypeState {
     WithReplyKey { inner: Arc<WithReplyKey> },
     V2GetContext { inner: Arc<V2GetContext> },
     ProposalReceived { inner: Arc<Psbt> },
-    TerminalState,
+    TerminalFailure,
 }
 
 impl From<super::SenderTypeState> for SenderTypeState {
@@ -52,7 +52,7 @@ impl From<super::SenderTypeState> for SenderTypeState {
             V2GetContext(inner) =>
                 Self::V2GetContext { inner: Arc::new(super::V2GetContext::from(inner).into()) },
             ProposalReceived(inner) => Self::ProposalReceived { inner: Arc::new(inner.into()) },
-            TerminalState => Self::TerminalState,
+            TerminalFailure => Self::TerminalFailure,
         }
     }
 }

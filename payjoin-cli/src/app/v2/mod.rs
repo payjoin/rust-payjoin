@@ -307,7 +307,7 @@ impl App {
                     self.send_payjoin_proposal(proposal, persister).await,
                 ReceiverTypeState::Uninitialized(_) =>
                     return Err(anyhow!("Uninitialized receiver session")),
-                ReceiverTypeState::TerminalState =>
+                ReceiverTypeState::TerminalFailure =>
                     return Err(anyhow!("Terminal receiver session")),
             }
         };

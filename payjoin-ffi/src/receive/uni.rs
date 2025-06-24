@@ -46,7 +46,7 @@ pub enum ReceiverTypeState {
     WantsInputs { inner: Arc<WantsInputs> },
     ProvisionalProposal { inner: Arc<ProvisionalProposal> },
     PayjoinProposal { inner: Arc<PayjoinProposal> },
-    TerminalState,
+    TerminalFailure,
 }
 
 impl From<super::ReceiverTypeState> for ReceiverTypeState {
@@ -77,7 +77,7 @@ impl From<super::ReceiverTypeState> for ReceiverTypeState {
             PayjoinProposal(inner) => Self::PayjoinProposal {
                 inner: Arc::new(super::PayjoinProposal::from(inner).into()),
             },
-            TerminalState => Self::TerminalState,
+            TerminalFailure => Self::TerminalFailure,
         }
     }
 }

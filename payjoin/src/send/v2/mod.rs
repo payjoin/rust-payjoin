@@ -167,7 +167,7 @@ pub enum SenderTypeState {
     WithReplyKey(Sender<WithReplyKey>),
     V2GetContext(Sender<V2GetContext>),
     ProposalReceived(Psbt),
-    TerminalState,
+    TerminalFailure,
 }
 
 impl SenderTypeState {
@@ -181,7 +181,7 @@ impl SenderTypeState {
                 Ok(state.apply_v2_get_context(v2_get_context)),
             (SenderTypeState::V2GetContext(_state), SessionEvent::ProposalReceived(proposal)) =>
                 Ok(SenderTypeState::ProposalReceived(proposal)),
-            (_, SessionEvent::SessionInvalid(_)) => Ok(SenderTypeState::TerminalState),
+            (_, SessionEvent::SessionInvalid(_)) => Ok(SenderTypeState::TerminalFailure),
             (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
                 Box::new(current_state),
                 Box::new(event),

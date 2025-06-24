@@ -359,15 +359,15 @@ mod v2 {
 
     fn handle_directory_proposal(receiver: Wallet, proposal: UncheckedProposal) -> PayjoinProposal {
         let session_persister = NoopSessionPersister::default();
-        // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
-        let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
-
         // Receive Check 1: Can Broadcast
         let proposal = proposal
             .assume_interactive_receiver()
             .save(&session_persister)
             .expect("Noop Persister should not fail");
         let receiver = Arc::new(receiver);
+        // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
+        let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
+
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal
             .check_inputs_not_owned(|script| is_script_owned(&receiver, script.clone()))

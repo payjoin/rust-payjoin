@@ -343,11 +343,6 @@ impl AssumeInteractiveTransition {
 }
 #[uniffi::export]
 impl UncheckedProposal {
-    /// The Sender’s Original PSBT
-    pub fn extract_tx_to_schedule_broadcast(&self) -> Vec<u8> {
-        self.0.extract_tx_to_schedule_broadcast()
-    }
-
     /// Call after checking that the Original PSBT can be broadcast.
     ///
     /// Receiver MUST check that the Original PSBT from the sender can be broadcast, i.e. testmempoolaccept bitcoind rpc returns { “allowed”: true,.. } for get_transaction_to_check_broadcast() before calling this method.
@@ -418,6 +413,10 @@ impl MaybeInputsOwnedTransition {
 
 #[uniffi::export]
 impl MaybeInputsOwned {
+    /// The Sender’s Original PSBT
+    pub fn extract_tx_to_schedule_broadcast(&self) -> Vec<u8> {
+        self.0.extract_tx_to_schedule_broadcast()
+    }
     ///Check that the Original PSBT has no receiver-owned inputs. Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
     /// An attacker could try to spend receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(

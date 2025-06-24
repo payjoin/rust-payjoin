@@ -342,8 +342,6 @@ impl App {
                 return Err(anyhow!("Interrupted"));
             }
         }?;
-        println!("Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:");
-        println!("{}", serialize_hex(&receiver.extract_tx_to_schedule_broadcast()));
         self.check_proposal(receiver, persister).await
     }
 
@@ -357,6 +355,8 @@ impl App {
             .check_broadcast_suitability(None, |tx| Ok(wallet.can_broadcast(tx)?))
             .save(persister)?;
 
+        println!("Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:");
+        println!("{}", serialize_hex(&proposal.extract_tx_to_schedule_broadcast()));
         self.check_inputs_not_owned(proposal, persister).await
     }
 

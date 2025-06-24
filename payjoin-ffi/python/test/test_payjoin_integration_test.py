@@ -36,20 +36,21 @@ class InMemoryReceiverSessionEventLog(JsonReceiverSessionPersister):
     def close(self):
         self.closed = True
 
-class InMemorySenderPersister(SenderPersister):
-    def __init__(self):
-        super().__init__()
-        self.senders = {}
+class InMemorySenderPersister(JsonSenderSessionPersister):
+    def __init__(self, id):
+        self.id = id
+        self.events = []
+        self.closed = False
 
-    def save(self, sender: WithReplyKey) -> SenderToken:
-        self.senders[str(sender.key())] = sender.to_json()
-        return sender.key()
+    def save(self, event: str):
+        self.events.append(event)
 
-    def load(self, token: SenderToken) -> WithReplyKey:
-        token = str(token)
-        if token not in self.senders.keys():
-            raise ValueError(f"Token not found: {token}")
-        return WithReplyKey.from_json(self.senders[token])
+    def load(self):
+        return self.events
+
+    def close(self):
+        self.closed = True
+
 
 class TestPayjoin(unittest.IsolatedAsyncioTestCase):
     @classmethod
@@ -147,6 +148,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             # **********************
             # Inside the Receiver:
             recv_persister = InMemoryReceiverSessionEventLog(1)
+            sender_persister = InMemorySenderPersister(1)
             session = self.create_receiver_context(receiver_address, directory, ohttp_keys, recv_persister)
             process_response = await self.process_receiver_proposal(ReceiverTypeState.WITH_CONTEXT(session), recv_persister, ohttp_relay)
             print(f"session: {session.to_json()}")
@@ -157,17 +159,14 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             # Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             pj_uri = session.pj_uri()
             psbt = build_sweep_psbt(self.sender, pj_uri)
-            new_sender = SenderBuilder(psbt, pj_uri).build_recommended(1000)
-            persister = InMemorySenderPersister()
-            token = new_sender.persist(persister)
-            req_ctx: WithReplyKey = WithReplyKey.load(token, persister)
+            req_ctx: WithReplyKey = SenderBuilder(psbt, pj_uri).build_recommended(1000).save(sender_persister)
             request: RequestV2PostContext = req_ctx.extract_v2(ohttp_relay.as_string())
             response = await agent.post(
                 url=request.request.url.as_string(),
                 headers={"Content-Type": request.request.content_type},
                 content=request.request.body
             )
-            send_ctx: V2GetContext = request.context.process_response(response.content)
+            send_ctx: V2GetContext = req_ctx.process_response(response.content, request.context).save(sender_persister)
             # POST Original PSBT
 
             # **********************
@@ -197,9 +196,10 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
                 headers={"Content-Type": request.request.content_type},
                 content=request.request.body
             )
-            checked_payjoin_proposal_psbt: Optional[str] = send_ctx.process_response(response.content, request.ohttp_ctx)
+            checked_payjoin_proposal_psbt = send_ctx.process_response(response.content, request.ohttp_ctx).save(sender_persister).success()
+            print(f"checked_payjoin_proposal_psbt: {checked_payjoin_proposal_psbt}")
             self.assertIsNotNone(checked_payjoin_proposal_psbt)
-            payjoin_psbt = json.loads(self.sender.call("walletprocesspsbt", [checked_payjoin_proposal_psbt]))["psbt"]
+            payjoin_psbt = json.loads(self.sender.call("walletprocesspsbt", [checked_payjoin_proposal_psbt.serialize_base64()]))["psbt"]
             final_psbt = json.loads(self.sender.call("finalizepsbt", [payjoin_psbt, json.dumps(False)]))["psbt"]
             payjoin_tx = bitcoinffi.Psbt.deserialize_base64(final_psbt).extract_tx()
             self.sender.call("sendrawtransaction", [json.dumps(payjoin_tx.serialize().hex())])

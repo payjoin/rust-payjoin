@@ -3,6 +3,8 @@ use std::sync::Arc;
 use payjoin::bitcoin::psbt::PsbtParseError;
 use payjoin::send;
 
+use crate::error::ImplementationError;
+
 /// Error building a Sender from a SenderBuilder.
 ///
 /// This error is unrecoverable.
@@ -85,3 +87,86 @@ impl From<send::ResponseError> for ResponseError {
 #[error(transparent)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct WellKnownError(#[from] send::WellKnownError);
+
+/// Error that may occur when the sender session event log is replayed
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+pub struct SenderReplayError(#[from] send::v2::ReplayError);
+
+/// Error that may occur during state machine transitions
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
+pub enum SenderPersistedError {
+    /// rust-payjoin sender Encapsulation error
+    #[error(transparent)]
+    EncapsulationError(Arc<EncapsulationError>),
+    /// rust-payjoin sender response error
+    #[error(transparent)]
+    ResponseError(ResponseError),
+    /// Sender Build error
+    #[error(transparent)]
+    BuildSenderError(Arc<BuildSenderError>),
+    /// Storage error that could occur at application storage layer
+    #[error(transparent)]
+    Storage(Arc<ImplementationError>),
+    /// Unexpected error
+    #[error("An unexpected error occurred")]
+    Unexpected,
+}
+
+impl From<ImplementationError> for SenderPersistedError {
+    fn from(value: ImplementationError) -> Self { SenderPersistedError::Storage(Arc::new(value)) }
+}
+
+impl<S> From<payjoin::persist::PersistedError<send::v2::EncapsulationError, S>> for SenderPersistedError
+where
+    S: std::error::Error,
+{
+    fn from(err: payjoin::persist::PersistedError<send::v2::EncapsulationError, S>) -> Self {
+        if let Some(storage_err) = err.storage_error_ref() {
+            return SenderPersistedError::Storage(Arc::new(ImplementationError::from(
+                storage_err.to_string(),
+            )));
+        }
+        if let Some(api_err) = err.api_error() {
+            return SenderPersistedError::EncapsulationError(Arc::new(api_err.into()));
+        }
+        SenderPersistedError::Unexpected
+    }
+}
+
+impl<S> From<payjoin::persist::PersistedError<send::ResponseError, S>> for SenderPersistedError
+where
+    S: std::error::Error,
+{
+    fn from(err: payjoin::persist::PersistedError<send::ResponseError, S>) -> Self {
+        if let Some(storage_err) = err.storage_error_ref() {
+            return SenderPersistedError::Storage(Arc::new(ImplementationError::from(
+                storage_err.to_string(),
+            )));
+        }
+        if let Some(api_err) = err.api_error() {
+            return SenderPersistedError::ResponseError(api_err.into());
+        }
+        SenderPersistedError::Unexpected
+    }
+}
+
+impl<S> From<payjoin::persist::PersistedError<send::BuildSenderError, S>> for SenderPersistedError
+where
+    S: std::error::Error,
+{
+    fn from(err: payjoin::persist::PersistedError<send::BuildSenderError, S>) -> Self {
+        if let Some(storage_err) = err.storage_error_ref() {
+            return SenderPersistedError::Storage(Arc::new(ImplementationError::from(
+                storage_err.to_string(),
+            )));
+        }
+        if let Some(api_err) = err.api_error() {
+            return SenderPersistedError::BuildSenderError(Arc::new(api_err.into()));
+        }
+        SenderPersistedError::Unexpected
+    }
+}

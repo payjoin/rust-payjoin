@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use payjoin::receive;
-use crate::{uri::error::IntoUrlError, error::ImplementationError};
+
+use crate::error::ImplementationError;
+use crate::uri::error::IntoUrlError;
 
 /// The top-level error type for the payjoin receiver
 #[derive(Debug, thiserror::Error)]
@@ -36,7 +38,7 @@ impl From<receive::Error> for Error {
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
-pub enum PersistedError {
+pub enum ReceiverPersistedError {
     /// rust-payjoin receiver error
     #[error(transparent)]
     Receiver(Error),
@@ -45,8 +47,8 @@ pub enum PersistedError {
     Storage(Arc<ImplementationError>),
 }
 
-impl From<ImplementationError> for PersistedError {
-    fn from(value: ImplementationError) -> Self { PersistedError::Storage(Arc::new(value)) }
+impl From<ImplementationError> for ReceiverPersistedError {
+    fn from(value: ImplementationError) -> Self { ReceiverPersistedError::Storage(Arc::new(value)) }
 }
 
 macro_rules! impl_persisted_error_from {
@@ -54,20 +56,20 @@ macro_rules! impl_persisted_error_from {
         $api_error_ty:ty,
         $receiver_arm:expr
     ) => {
-        impl<S> From<payjoin::persist::PersistedError<$api_error_ty, S>> for PersistedError
+        impl<S> From<payjoin::persist::PersistedError<$api_error_ty, S>> for ReceiverPersistedError
         where
             S: std::error::Error,
         {
             fn from(err: payjoin::persist::PersistedError<$api_error_ty, S>) -> Self {
                 if let Some(storage_err) = err.storage_error_ref() {
-                    return PersistedError::Storage(Arc::new(ImplementationError::from(
+                    return ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(
                         storage_err.to_string(),
                     )));
                 }
                 if let Some(api_err) = err.api_error() {
-                    return PersistedError::Receiver($receiver_arm(api_err));
+                    return ReceiverPersistedError::Receiver($receiver_arm(api_err));
                 }
-                PersistedError::Receiver(Error::Unexpected)
+                ReceiverPersistedError::Receiver(Error::Unexpected)
             }
         }
     };
@@ -156,4 +158,4 @@ pub struct PsbtInputError(#[from] receive::PsbtInputError);
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
-pub struct ReplayError(#[from] receive::v2::ReplayError);
+pub struct ReceiverReplayError(#[from] receive::v2::ReplayError);

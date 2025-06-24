@@ -4,7 +4,7 @@ pub use error::RequestError;
 
 use super::*;
 use crate::into_url::IntoUrl;
-use crate::{Version, MAX_CONTENT_LENGTH};
+use crate::Version;
 
 const SUPPORTED_VERSIONS: &[Version] = &[Version::One];
 
@@ -54,11 +54,15 @@ fn validate_body(headers: impl Headers, body: &[u8]) -> Result<&[u8], RequestErr
         .ok_or(InternalRequestError::MissingHeader("Content-Length"))?
         .parse::<usize>()
         .map_err(InternalRequestError::InvalidContentLength)?;
-    if content_length > MAX_CONTENT_LENGTH {
-        return Err(InternalRequestError::ContentLengthTooLarge(content_length).into());
+    if body.len() != content_length {
+        return Err(InternalRequestError::ContentLengthMismatch {
+            expected: content_length,
+            actual: body.len(),
+        }
+        .into());
     }
 
-    Ok(&body[..content_length])
+    Ok(body)
 }
 
 #[cfg(test)]
@@ -89,21 +93,21 @@ mod tests {
 
     #[test]
     fn test_parse_body() {
-        let mut padded_body = ORIGINAL_PSBT.as_bytes().to_vec();
-        assert_eq!(MAX_CONTENT_LENGTH, 5333333_usize);
-        padded_body.resize(MAX_CONTENT_LENGTH + 1, 0);
-        let headers = MockHeaders::new(padded_body.len() as u64);
+        let body = ORIGINAL_PSBT.as_bytes().to_vec();
+        let headers = MockHeaders::new((body.len() + 1) as u64);
 
-        let validated_request = validate_body(headers.clone(), padded_body.as_slice());
+        let validated_request = validate_body(headers.clone(), body.as_slice());
         assert!(validated_request.is_err());
+
         match validated_request {
             Ok(_) => panic!("Expected error, got success"),
             Err(error) => {
                 assert_eq!(
                     error.to_string(),
-                    RequestError::from(InternalRequestError::ContentLengthTooLarge(
-                        padded_body.len()
-                    ))
+                    RequestError::from(InternalRequestError::ContentLengthMismatch {
+                        expected: body.len() + 1,
+                        actual: body.len(),
+                    })
                     .to_string()
                 );
             }

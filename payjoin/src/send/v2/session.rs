@@ -93,9 +93,10 @@ mod tests {
     use payjoin_test_utils::PARSED_ORIGINAL_PSBT;
 
     use super::*;
+    use crate::output_substitution::OutputSubstitution;
     use crate::send::v2::HpkeContext;
     use crate::send::{v1, PsbtContext};
-    use crate::{HpkeKeyPair, OutputSubstitution};
+    use crate::HpkeKeyPair;
 
     #[test]
     fn test_sender_session_event_serialization_roundtrip() {

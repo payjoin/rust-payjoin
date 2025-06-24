@@ -83,7 +83,7 @@ fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 }
 
 /// Represents the various states of a Payjoin receiver session during the protocol flow.
-/// Each variant wraps a `Receiver` with a specific state type, except for `TerminalFailure` which
+/// Each variant wraps a `Receiver` with a specific state type, except for [`ReceiverTypeState::TerminalFailure`] which
 /// indicates the session has ended or is invalid.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReceiverTypeState {

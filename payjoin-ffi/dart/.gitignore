@@ -5,6 +5,11 @@ doc/api/
 
 .DS_Store
 
+# Auto-generated shared libraries
+*.dylib
+*.so
+*.dll
+
 # Auto-generated bindings
 lib/payjoin_ffi.dart
 lib/bitcoin.dart

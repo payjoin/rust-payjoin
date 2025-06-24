@@ -54,10 +54,6 @@ pub use exclusive::*;
 /// This type is used to process the request. It is returned by
 /// [`UncheckedProposal::from_request()`]
 ///
-/// If you are implementing an interactive payment processor, you should get extract the original
-/// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
-/// that the transaction can be broadcast with check_broadcast_suitability. Otherwise it is safe to
-/// call assume_interactive_receive to proceed with validation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UncheckedProposal {
     pub(crate) psbt: Psbt,
@@ -65,16 +61,11 @@ pub struct UncheckedProposal {
 }
 
 impl UncheckedProposal {
-    /// The Sender's Original PSBT transaction
-    pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
-        self.psbt.clone().extract_tx_unchecked_fee_rate()
-    }
-
     fn psbt_fee_rate(&self) -> Result<FeeRate, InternalPayloadError> {
         let original_psbt_fee = self.psbt.fee().map_err(|e| {
             InternalPayloadError::ParsePsbt(bitcoin::psbt::PsbtParseError::PsbtEncoding(e))
         })?;
-        Ok(original_psbt_fee / self.extract_tx_to_schedule_broadcast().weight())
+        Ok(original_psbt_fee / self.psbt.clone().extract_tx_unchecked_fee_rate().weight())
     }
 
     /// Check that the Original PSBT can be broadcasted.
@@ -129,6 +120,8 @@ impl UncheckedProposal {
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
 /// Call [`Self::check_inputs_not_owned`] to proceed.
+/// If you are implementing an interactive payment processor, you should get extract the original
+/// transaction with extract_tx_to_schedule_broadcast() and schedule
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MaybeInputsOwned {
     psbt: Psbt,
@@ -136,6 +129,10 @@ pub struct MaybeInputsOwned {
 }
 
 impl MaybeInputsOwned {
+    /// The Sender's Original PSBT transaction
+    pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
+        self.psbt.clone().extract_tx_unchecked_fee_rate()
+    }
     /// Check that the Original PSBT has no receiver-owned inputs.
     /// Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
     ///

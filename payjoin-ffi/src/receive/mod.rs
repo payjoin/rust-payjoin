@@ -331,13 +331,6 @@ impl AssumeInteractiveTransition {
 }
 
 impl UncheckedProposal {
-    ///The Sender’s Original PSBT
-    pub fn extract_tx_to_schedule_broadcast(&self) -> Vec<u8> {
-        payjoin::bitcoin::consensus::encode::serialize(
-            &self.0.clone().extract_tx_to_schedule_broadcast(),
-        )
-    }
-
     pub fn check_broadcast_suitability(
         &self,
         min_fee_rate: Option<u64>,
@@ -413,6 +406,12 @@ impl MaybeInputsOwnedTransition {
 }
 
 impl MaybeInputsOwned {
+    ///The Sender’s Original PSBT
+    pub fn extract_tx_to_schedule_broadcast(&self) -> Vec<u8> {
+        payjoin::bitcoin::consensus::encode::serialize(
+            &self.0.clone().extract_tx_to_schedule_broadcast(),
+        )
+    }
     pub fn check_inputs_not_owned(
         &self,
         is_owned: impl Fn(&Vec<u8>) -> Result<bool, ImplementationError>,

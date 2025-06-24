@@ -426,10 +426,6 @@ impl Receiver<WithContext> {
 /// This type is used to process the request. It is returned by
 /// [`Receiver::process_res()`].
 ///
-/// If you are implementing an interactive payment processor, you should get extract the original
-/// transaction with extract_tx_to_schedule_broadcast() and schedule, followed by checking
-/// that the transaction can be broadcast with check_broadcast_suitability. Otherwise it is safe to
-/// call assume_interactive_receive to proceed with validation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UncheckedProposal {
     pub(crate) v1: v1::UncheckedProposal,
@@ -439,11 +435,6 @@ pub struct UncheckedProposal {
 impl ReceiverState for UncheckedProposal {}
 
 impl Receiver<UncheckedProposal> {
-    /// The Sender's Original PSBT
-    pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
-        self.v1.extract_tx_to_schedule_broadcast()
-    }
-
     /// Call after checking that the Original PSBT can be broadcast.
     ///
     /// Receiver MUST check that the Original PSBT from the sender
@@ -504,6 +495,8 @@ impl Receiver<UncheckedProposal> {
 /// Typestate to validate that the Original PSBT has no receiver-owned inputs.
 ///
 /// Call [`Receiver<MaybeInputsOwned>::check_inputs_not_owned`] to proceed.
+/// If you are implementing an interactive payment processor, you should get extract the original
+/// transaction with extract_tx_to_schedule_broadcast() and schedule
 #[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsOwned {
     v1: v1::MaybeInputsOwned,
@@ -513,6 +506,10 @@ pub struct MaybeInputsOwned {
 impl ReceiverState for MaybeInputsOwned {}
 
 impl Receiver<MaybeInputsOwned> {
+    /// The Sender's Original PSBT
+    pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
+        self.v1.extract_tx_to_schedule_broadcast()
+    }
     /// Check that the Original PSBT has no receiver-owned inputs.
     /// Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
     ///

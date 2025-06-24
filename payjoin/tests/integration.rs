@@ -743,8 +743,6 @@ mod integration {
             custom_inputs: Option<Vec<InputPair>>,
         ) -> Result<Receiver<PayjoinProposal>, BoxError> {
             let noop_persister = NoopSessionPersister::default();
-            // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
-            let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
             // Receive Check 1: Can Broadcast
             let proposal = proposal
@@ -758,6 +756,9 @@ mod integration {
                         .allowed)
                 })
                 .save(&noop_persister)?;
+
+            // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
+            let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
             // Receive Check 2: receiver can't sign for proposal inputs
             let proposal = proposal
@@ -1377,9 +1378,6 @@ mod integration {
         drain_script: Option<&bitcoin::Script>,
         custom_inputs: Option<Vec<InputPair>>,
     ) -> Result<payjoin::receive::v1::PayjoinProposal, BoxError> {
-        // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
-        let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
-
         // Receive Check 1: Can Broadcast
         let proposal = proposal.check_broadcast_suitability(None, |tx| {
             Ok(receiver
@@ -1388,6 +1386,8 @@ mod integration {
                 .ok_or(ImplementationError::from("testmempoolaccept should return a result"))?
                 .allowed)
         })?;
+        // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
+        let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal.check_inputs_not_owned(|input| {

@@ -43,7 +43,7 @@ where
         .load()
         .map_err(|e| InternalReplayError::PersistenceFailure(Box::new(e).into()))?;
 
-    let mut sender = SenderTypeState::Uninitialized();
+    let mut sender = SenderTypeState::Uninitialized;
     let mut history = SessionHistory::default();
     for log in logs {
         history.events.push(log.clone().into());

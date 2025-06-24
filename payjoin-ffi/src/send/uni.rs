@@ -46,7 +46,7 @@ impl From<super::SenderTypeState> for SenderTypeState {
     fn from(value: super::SenderTypeState) -> Self {
         use payjoin::send::v2::SenderTypeState::*;
         match value.0 {
-            Uninitialized() => Self::Uninitialized,
+            Uninitialized => Self::Uninitialized,
             WithReplyKey(inner) =>
                 Self::WithReplyKey { inner: Arc::new(super::WithReplyKey::from(inner).into()) },
             V2GetContext(inner) =>

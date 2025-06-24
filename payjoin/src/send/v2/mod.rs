@@ -163,7 +163,7 @@ impl<State: SenderState> core::ops::DerefMut for Sender<State> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SenderTypeState {
-    Uninitialized(),
+    Uninitialized,
     WithReplyKey(Sender<WithReplyKey>),
     V2GetContext(Sender<V2GetContext>),
     ProposalReceived(Psbt),
@@ -174,7 +174,7 @@ impl SenderTypeState {
     fn process_event(self, event: SessionEvent) -> Result<SenderTypeState, ReplayError> {
         match (self, event) {
             (
-                SenderTypeState::Uninitialized(),
+                SenderTypeState::Uninitialized,
                 SessionEvent::CreatedReplyKey(sender_with_reply_key),
             ) => Ok(SenderTypeState::WithReplyKey(Sender { state: sender_with_reply_key })),
             (SenderTypeState::WithReplyKey(state), SessionEvent::V2GetContext(v2_get_context)) =>

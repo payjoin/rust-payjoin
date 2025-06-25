@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use bitcoincore_rpc::bitcoin::Amount;
+use bytes::{BufMut, BytesMut};
+use futures::StreamExt;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
@@ -29,6 +31,11 @@ use crate::db::Database;
 #[cfg(feature = "_danger-local-https")]
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
 
+/// 4M block size limit with base64 encoding overhead => maximum reasonable size of content-length
+/// 4_000_000 * 4 / 3 fits in u32
+const MAX_CONTENT_LENGTH: usize = 4_000_000 * 4 / 3;
+
+#[derive(Clone)]
 struct Headers<'a>(&'a hyper::HeaderMap);
 impl payjoin::receive::v1::Headers for Headers<'_> {
     fn get_header(&self, key: &str) -> Option<&str> {
@@ -88,7 +95,29 @@ impl AppTrait for App {
             "Sent fallback transaction hex: {:#}",
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
         );
-        let psbt = ctx.process_response(&response.bytes().await?).map_err(|e| {
+
+        let expected_length = response
+            .headers()
+            .get("Content-Length")
+            .and_then(|val| val.to_str().ok())
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(MAX_CONTENT_LENGTH);
+
+        if expected_length > MAX_CONTENT_LENGTH {
+            return Err(anyhow!("Response body is too large: {} bytes", expected_length));
+        }
+
+        let mut body_stream = response.bytes_stream();
+        let mut body = BytesMut::with_capacity(expected_length.min(MAX_CONTENT_LENGTH));
+        while let Some(chunk) = body_stream.next().await {
+            let chunk = chunk.map_err(|e| anyhow!("Error reading response body: {}", e))?;
+            if body.len() + chunk.len() > MAX_CONTENT_LENGTH {
+                return Err(anyhow!("Response body exceeds maximum allowed size"));
+            }
+            body.put(chunk);
+        }
+
+        let psbt = ctx.process_response(&body).map_err(|e| {
             log::debug!("Error processing response: {e:?}");
             anyhow!("Failed to process response {e}")
         })?;
@@ -276,9 +305,34 @@ impl App {
     ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, ReplyableError> {
         let (parts, body) = req.into_parts();
         let headers = Headers(&parts.headers);
+
+        let expected_length = headers
+            .0
+            .get("Content-Length")
+            .and_then(|val| val.to_str().ok())
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(MAX_CONTENT_LENGTH);
+
+        if expected_length > MAX_CONTENT_LENGTH {
+            log::error!("Error: Content length exceeds max allowed");
+            return Err(Implementation(
+                anyhow!("Content length too large: {expected_length}").into(),
+            ));
+        }
+
+        let mut body_stream = body.into_data_stream();
+        let mut body = BytesMut::with_capacity(expected_length.min(MAX_CONTENT_LENGTH));
+        while let Some(chunk) = body_stream.next().await {
+            let chunk = chunk.map_err(|e| Implementation(e.into()))?;
+            if body.len() + chunk.len() > MAX_CONTENT_LENGTH {
+                return Err(Implementation(anyhow!("Request body too large").into()));
+            }
+            body.put(chunk);
+        }
+
         let query_string = parts.uri.query().unwrap_or("");
-        let body = body.collect().await.map_err(|e| Implementation(e.into()))?.to_bytes();
-        let proposal = UncheckedProposal::from_request(&body, query_string, headers)?;
+        let body = body.freeze();
+        let proposal = UncheckedProposal::from_request(&body, query_string, headers.clone())?;
 
         let payjoin_proposal = self.process_v1_proposal(proposal)?;
         let psbt = payjoin_proposal.psbt();

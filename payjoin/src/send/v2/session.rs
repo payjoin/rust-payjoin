@@ -78,7 +78,7 @@ impl SessionHistory {
 
     pub fn endpoint(&self) -> Option<&Url> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::V2GetContext(ctx) => Some(&ctx.endpoint),
+            SessionEvent::CreatedReplyKey(proposal) => Some(&proposal.v1.endpoint),
             _ => None,
         })
     }

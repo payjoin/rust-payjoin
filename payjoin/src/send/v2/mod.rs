@@ -161,7 +161,7 @@ impl<State: SenderState> core::ops::DerefMut for Sender<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SenderTypeState {
     Uninitialized(),
     WithReplyKey(Sender<WithReplyKey>),

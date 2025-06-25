@@ -93,13 +93,13 @@ impl From<SessionHistory> for super::SessionHistory {
 }
 
 #[derive(uniffi::Object)]
-pub struct TerminalError {
+pub struct TerminalErr {
     error: String,
     reply: Option<JsonReply>,
 }
 
 #[uniffi::export]
-impl TerminalError {
+impl TerminalErr {
     pub fn error(&self) -> String { self.error.clone() }
 
     pub fn reply(&self) -> Option<Arc<JsonReply>> {
@@ -120,9 +120,9 @@ impl SessionHistory {
     }
 
     /// Terminal error from the session if present
-    pub fn terminal_error(&self) -> Option<Arc<TerminalError>> {
+    pub fn terminal_error(&self) -> Option<Arc<TerminalErr>> {
         self.0 .0.terminal_error().map(|(error, reply)| {
-            Arc::new(TerminalError { error, reply: reply.map(|reply| reply.into()) })
+            Arc::new(TerminalErr { error, reply: reply.map(|reply| reply.into()) })
         })
     }
 

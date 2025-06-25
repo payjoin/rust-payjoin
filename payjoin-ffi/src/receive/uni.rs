@@ -126,6 +126,11 @@ impl SessionHistory {
         })
     }
 
+    /// Fallback transaction from the session if present
+    pub fn fallback_tx(&self) -> Option<Arc<crate::Transaction>> {
+        self.0 .0.fallback_tx().map(|tx| Arc::new(tx.into()))
+    }
+
     /// Extract the error request to be posted on the directory if an error occurred.
     /// To process the response, use [process_err_res]
     pub fn extract_err_req(

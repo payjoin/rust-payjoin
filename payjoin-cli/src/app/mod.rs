@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use bitcoincore_rpc::bitcoin::Amount;
+use futures::{Stream, StreamExt};
+use hyper::body::Bytes;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 use payjoin::{bitcoin, PjUri};
@@ -79,4 +81,23 @@ async fn handle_interrupt(tx: watch::Sender<()>) {
         eprintln!("Error setting up Ctrl-C handler: {e}");
     }
     let _ = tx.send(());
+}
+
+#[allow(dead_code)]
+pub async fn read_limited_body<S, E>(mut stream: S, expected_len: usize) -> Result<Vec<u8>>
+where
+    S: Stream<Item = Result<Bytes, E>> + Unpin,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    let mut body = Vec::with_capacity(expected_len);
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| anyhow!("Error reading body chunk: {}", e))?;
+        if body.len() + chunk.len() > expected_len {
+            return Err(anyhow!("Body exceeds expected size of {expected_len} bytes"));
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    Ok(body)
 }

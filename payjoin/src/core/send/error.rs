@@ -120,10 +120,7 @@ impl fmt::Display for ValidationError {
         match &self.0 {
             Parse => write!(f, "couldn't decode as PSBT or JSON",),
             #[cfg(feature = "v1")]
-            ContentTooLarge => {
-                use crate::MAX_CONTENT_LENGTH;
-                write!(f, "content is larger than {MAX_CONTENT_LENGTH} bytes")
-            }
+            ContentTooLarge => write!(f, "The response body is too large"),
             Proposal(e) => write!(f, "proposal PSBT error: {e}"),
             #[cfg(feature = "v2")]
             V2Encapsulation(e) => write!(f, "v2 encapsulation error: {e}"),

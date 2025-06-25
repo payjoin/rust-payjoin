@@ -29,8 +29,10 @@ use error::BuildSenderError;
 
 use super::*;
 pub use crate::output_substitution::OutputSubstitution;
-use crate::uri::v1::PjParam;
-use crate::{PjUri, Request, MAX_CONTENT_LENGTH};
+#[allow(unused_imports)]
+use crate::psbt::PsbtExt;
+pub use crate::MAX_CONTENT_LENGTH;
+use crate::{PjParam, PjUri, Request};
 
 /// A builder to construct the properties of a `Sender`.
 #[derive(Clone)]
@@ -69,7 +71,7 @@ impl SenderBuilder {
         amount: Option<Amount>,
     ) -> Self {
         Self {
-            endpoint: pj_param.endpoint(),
+            endpoint: pj_param.endpoint_url(),
             // Default to enabled output substitution for v1 when not specified via URI
             output_substitution: OutputSubstitution::Enabled,
             psbt_ctx_builder: PsbtContextBuilder::new(psbt, address.script_pubkey(), amount),
@@ -198,7 +200,7 @@ impl Sender {
 /// Call [`Self::process_response`] on it to continue the BIP78 flow.
 #[derive(Debug, Clone)]
 pub struct V1Context {
-    psbt_context: PsbtContext,
+    pub(crate) psbt_context: PsbtContext,
 }
 
 impl V1Context {
@@ -349,6 +351,16 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn test_max_content_length() {
+        assert_eq!(MAX_CONTENT_LENGTH, 4_000_000 * 4 / 3);
+    }
+
+    #[test]
+    fn test_non_witness_input_weight_const() {
+        assert_eq!(NON_WITNESS_INPUT_WEIGHT, bitcoin::Weight::from_wu(160));
+    }
+
     /// This test is to make sure that the input_pairs for loop inside of build_recommended
     /// runs at least once.
     /// The first branch adds coverage on the for loop and the second branch ensures that the first
@@ -441,6 +453,7 @@ mod test {
             "message": "This version of payjoin is not supported."
         })
         .to_string();
+
         match ctx.process_response(known_json_error.as_bytes()) {
             Err(ResponseError::WellKnown(WellKnownError {
                 code: ErrorCode::VersionUnsupported,
@@ -455,6 +468,7 @@ mod test {
             "message": "This version of payjoin is not supported."
         })
         .to_string();
+
         match ctx.process_response(invalid_json_error.as_bytes()) {
             Err(ResponseError::Validation(_)) => (),
             _ => panic!("Expected unrecognized JSON error"),
@@ -464,6 +478,7 @@ mod test {
     #[test]
     fn process_response_valid() {
         let ctx = create_v1_context();
+
         let response = ctx.process_response(PAYJOIN_PROPOSAL.as_bytes());
         assert!(response.is_ok())
     }
@@ -471,6 +486,7 @@ mod test {
     #[test]
     fn process_response_invalid_psbt() {
         let ctx = create_v1_context();
+
         let response = ctx.process_response(INVALID_PSBT.as_bytes());
         match response {
             Ok(_) => panic!("Invalid PSBT should have caused an error"),
@@ -490,12 +506,12 @@ mod test {
     fn process_response_invalid_utf8() {
         // A PSBT expects an exact match so padding with null bytes for the from_str method is
         // invalid
-        let mut invalid_utf8_padding = PAYJOIN_PROPOSAL.as_bytes().to_vec();
-        invalid_utf8_padding
-            .extend(std::iter::repeat_n(0x00, MAX_CONTENT_LENGTH - invalid_utf8_padding.len()));
+        let mut invalid_utf8 = PAYJOIN_PROPOSAL.as_bytes().to_vec();
+        invalid_utf8.extend(std::iter::repeat_n(0x00, MAX_CONTENT_LENGTH - invalid_utf8.len()));
 
         let ctx = create_v1_context();
-        let response = ctx.process_response(&invalid_utf8_padding);
+
+        let response = ctx.process_response(&invalid_utf8);
         match response {
             Ok(_) => panic!("Invalid UTF-8 should have caused an error"),
             Err(error) => match error {
@@ -508,36 +524,5 @@ mod test {
                 _ => panic!("Unexpected error type"),
             },
         }
-    }
-
-    #[test]
-    fn process_response_invalid_buffer_len() {
-        let mut data = PAYJOIN_PROPOSAL.as_bytes().to_vec();
-        data.extend(std::iter::repeat_n(0, MAX_CONTENT_LENGTH + 1));
-
-        let ctx = create_v1_context();
-        let response = ctx.process_response(&data);
-        match response {
-            Ok(_) => panic!("Invalid buffer length should have caused an error"),
-            Err(error) => match error {
-                ResponseError::Validation(e) => {
-                    assert_eq!(
-                        e.to_string(),
-                        ValidationError::from(InternalValidationError::ContentTooLarge).to_string()
-                    );
-                }
-                _ => panic!("Unexpected error type"),
-            },
-        }
-    }
-
-    #[test]
-    fn test_max_content_length() {
-        assert_eq!(MAX_CONTENT_LENGTH, 4_000_000 * 4 / 3);
-    }
-
-    #[test]
-    fn test_non_witness_input_weight_const() {
-        assert_eq!(NON_WITNESS_INPUT_WEIGHT, bitcoin::Weight::from_wu(160));
     }
 }

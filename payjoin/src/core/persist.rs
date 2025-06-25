@@ -8,7 +8,7 @@ impl<Event, SuccessValue, CurrentState, Err>
     MaybeSuccessTransitionWithNoResults<Event, SuccessValue, CurrentState, Err>
 {
     #[inline]
-    pub(crate) fn fatal(event: Event, error: Err) -> Self {
+    pub(crate) fn fatal(event: impl IntoIterator<Item = Event>, error: Err) -> Self {
         MaybeSuccessTransitionWithNoResults(Err(Rejection::fatal(event, error)))
     }
 
@@ -54,7 +54,7 @@ impl<Event, NextState, CurrentState, Err>
     MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err>
 {
     #[inline]
-    pub(crate) fn fatal(event: Event, error: Err) -> Self {
+    pub(crate) fn fatal(event: impl IntoIterator<Item = Event>, error: Err) -> Self {
         MaybeFatalTransitionWithNoResults(Err(Rejection::fatal(event, error)))
     }
 
@@ -97,7 +97,7 @@ pub struct MaybeFatalTransition<Event, NextState, Err>(
 
 impl<Event, NextState, Err> MaybeFatalTransition<Event, NextState, Err> {
     #[inline]
-    pub(crate) fn fatal(event: Event, error: Err) -> Self {
+    pub(crate) fn fatal(event: impl IntoIterator<Item = Event>, error: Err) -> Self {
         MaybeFatalTransition(Err(Rejection::fatal(event, error)))
     }
 
@@ -252,14 +252,16 @@ pub enum Rejection<Event, Err> {
 
 impl<Event, Err> Rejection<Event, Err> {
     #[inline]
-    pub fn fatal(event: Event, error: Err) -> Self { Rejection::Fatal(RejectFatal(event, error)) }
+    pub fn fatal(event: impl IntoIterator<Item = Event>, error: Err) -> Self {
+        Rejection::Fatal(RejectFatal(event.into_iter().collect(), error))
+    }
     #[inline]
     pub fn transient(error: Err) -> Self { Rejection::Transient(RejectTransient(error)) }
 }
 
 /// Represents a fatal rejection of a state transition.
 /// When this error occurs, the session must be closed and cannot be resumed.
-pub struct RejectFatal<Event, Err>(Event, Err);
+pub struct RejectFatal<Event, Err>(Vec<Event>, Err);
 /// Represents a transient rejection of a state transition.
 /// When this error occurs, the session should resume from its current state.
 pub struct RejectTransient<Err>(Err);
@@ -574,7 +576,9 @@ trait InternalSessionPersister: SessionPersister {
     where
         Err: std::error::Error,
     {
-        self.save_event(&fatal_rejection.0).map_err(InternalPersistedError::Storage)?;
+        for event in fatal_rejection.0.iter() {
+            self.save_event(event).map_err(InternalPersistedError::Storage)?;
+        }
         // Session is in a terminal state, close it
         self.close().map_err(InternalPersistedError::Storage)
     }
@@ -934,7 +938,7 @@ mod tests {
                     success: None,
                 },
                 test: Box::new(move |persister| {
-                    MaybeFatalTransition::fatal(error_event.clone(), InMemoryTestError {})
+                    MaybeFatalTransition::fatal([error_event.clone()], InMemoryTestError {})
                         .save(persister)
                 }),
             },
@@ -1010,7 +1014,7 @@ mod tests {
                 },
                 test: Box::new(move |persister| {
                     MaybeSuccessTransitionWithNoResults::fatal(
-                        error_event.clone(),
+                        [error_event.clone()],
                         InMemoryTestError {},
                     )
                     .save(persister)
@@ -1085,7 +1089,7 @@ mod tests {
                 },
                 test: Box::new(move |persister| {
                     MaybeFatalTransitionWithNoResults::fatal(
-                        error_event.clone(),
+                        [error_event.clone()],
                         InMemoryTestError {},
                     )
                     .save(persister)

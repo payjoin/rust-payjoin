@@ -103,9 +103,16 @@ impl SessionHistory {
     }
 
     /// Terminal error from the session if present
-    pub fn terminal_error(&self) -> Option<(String, Option<JsonReply>)> {
+    pub fn terminal_error(&self) -> Option<String> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::SessionInvalid(err_str, reply) => Some((err_str.clone(), reply.clone())),
+            SessionEvent::SessionInvalid(err_str) => Some(err_str.clone()),
+            _ => None,
+        })
+    }
+
+    pub fn json_reply(&self) -> Option<JsonReply> {
+        self.events.iter().find_map(|event| match event {
+            SessionEvent::JsonReply(json_reply) => Some(json_reply.clone()),
             _ => None,
         })
     }
@@ -120,8 +127,8 @@ impl SessionHistory {
             Some(session_context) => session_context,
             None => return Ok(None),
         };
-        let json_reply = match self.terminal_error() {
-            Some((_, Some(json_reply))) => json_reply,
+        let json_reply = match self.json_reply() {
+            Some(json_reply) => json_reply,
             _ => return Ok(None),
         };
         let (req, ctx) = extract_err_req(&json_reply, ohttp_relay, session_context)?;
@@ -153,7 +160,8 @@ pub enum SessionEvent {
     /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
     /// Reason being in some cases we still want to preserve the error b/c we can action on it. For now this is a terminal state and there is nothing to replay and is saved to be displayed.
     /// b/c its a terminal state and there is nothing to replay. So serialization will be lossy and that is fine.
-    SessionInvalid(String, Option<JsonReply>),
+    SessionInvalid(String),
+    JsonReply(JsonReply),
 }
 
 #[cfg(test)]

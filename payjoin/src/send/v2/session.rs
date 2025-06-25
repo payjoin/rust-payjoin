@@ -67,6 +67,15 @@ pub struct SessionHistory {
 }
 
 impl SessionHistory {
+    /// Fallback transaction from the session if present
+    pub fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+        self.events.iter().find_map(|event| match event {
+            SessionEvent::CreatedReplyKey(proposal) =>
+                Some(proposal.v1.psbt.clone().extract_tx_unchecked_fee_rate()),
+            _ => None,
+        })
+    }
+
     pub fn endpoint(&self) -> Option<&Url> {
         self.events.iter().find_map(|event| match event {
             SessionEvent::V2GetContext(ctx) => Some(&ctx.endpoint),

@@ -94,7 +94,6 @@ pub struct ValidationError(InternalValidationError);
 pub(crate) enum InternalValidationError {
     #[cfg(feature = "v1")]
     Parse,
-    #[cfg(feature = "v1")]
     ContentTooLarge,
     Proposal(InternalProposalError),
     #[cfg(feature = "v2")]
@@ -120,11 +119,7 @@ impl fmt::Display for ValidationError {
         match &self.0 {
             #[cfg(feature = "v1")]
             Parse => write!(f, "couldn't decode as PSBT or JSON",),
-            #[cfg(feature = "v1")]
-            ContentTooLarge => {
-                use crate::MAX_CONTENT_LENGTH;
-                write!(f, "content is larger than {MAX_CONTENT_LENGTH} bytes")
-            }
+            ContentTooLarge => write!(f, "The response body is too large"),
             Proposal(e) => write!(f, "proposal PSBT error: {e}"),
             #[cfg(feature = "v2")]
             V2Encapsulation(e) => write!(f, "v2 encapsulation error: {e}"),
@@ -139,7 +134,6 @@ impl std::error::Error for ValidationError {
         match &self.0 {
             #[cfg(feature = "v1")]
             Parse => None,
-            #[cfg(feature = "v1")]
             ContentTooLarge => None,
             Proposal(e) => Some(e),
             #[cfg(feature = "v2")]

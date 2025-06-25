@@ -103,9 +103,14 @@ mod tests {
 
     use super::*;
     use crate::output_substitution::OutputSubstitution;
-    use crate::send::v2::HpkeContext;
+    use crate::persist::test_utils::InMemoryTestPersister;
+    use crate::send::v1::SenderBuilder;
+    use crate::send::v2::{HpkeContext, Sender};
     use crate::send::{v1, PsbtContext};
-    use crate::HpkeKeyPair;
+    use crate::{HpkeKeyPair, Uri, UriExt};
+
+    const PJ_URI: &str =
+        "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/";
 
     #[test]
     fn test_sender_session_event_serialization_roundtrip() {
@@ -148,5 +153,58 @@ mod tests {
                 serde_json::from_str(&serialized).expect("Should deserialize");
             assert_eq!(event, deserialized);
         }
+    }
+
+    struct SessionHistoryExpectedOutcome {
+        fallback_tx: Option<bitcoin::Transaction>,
+        endpoint: Option<Url>,
+    }
+
+    struct SessionHistoryTest {
+        events: Vec<SessionEvent>,
+        expected_session_history: SessionHistoryExpectedOutcome,
+        expected_sender_state: SenderTypeState,
+    }
+
+    fn run_session_history_test(test: SessionHistoryTest) {
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        for event in test.events {
+            persister.save_event(&event).expect("In memory persister shouldn't fail");
+        }
+
+        let (sender, session_history) =
+            replay_event_log(&persister).expect("In memory persister shouldn't fail");
+        assert_eq!(sender, test.expected_sender_state);
+        assert_eq!(session_history.fallback_tx(), test.expected_session_history.fallback_tx);
+        assert_eq!(session_history.endpoint().cloned(), test.expected_session_history.endpoint);
+    }
+
+    #[test]
+    fn test_sender_session_history_with_reply_key_event() {
+        let psbt = PARSED_ORIGINAL_PSBT.clone();
+        let sender = SenderBuilder::new(
+            psbt.clone(),
+            Uri::try_from(PJ_URI)
+                .expect("Valid uri")
+                .assume_checked()
+                .check_pj_supported()
+                .expect("Payjoin to be supported"),
+        )
+        .build_recommended(FeeRate::BROADCAST_MIN)
+        .unwrap();
+        let reply_key = HpkeKeyPair::gen_keypair();
+        let endpoint = sender.endpoint().clone();
+        let fallback_tx = sender.psbt.clone().extract_tx_unchecked_fee_rate();
+        let with_reply_key = WithReplyKey { v1: sender, reply_key: reply_key.0 };
+        let sender = Sender { state: with_reply_key.clone() };
+        let test = SessionHistoryTest {
+            events: vec![SessionEvent::CreatedReplyKey(with_reply_key)],
+            expected_session_history: SessionHistoryExpectedOutcome {
+                fallback_tx: Some(fallback_tx),
+                endpoint: Some(endpoint),
+            },
+            expected_sender_state: SenderTypeState::WithReplyKey(sender),
+        };
+        run_session_history_test(test);
     }
 }

@@ -83,7 +83,7 @@ impl SessionHistory {
     pub fn pj_uri<'a>(&self) -> Option<PjUri<'a>> {
         self.events.iter().find_map(|event| match event {
             SessionEvent::Created(session_context) => {
-                // TODO this code was copied from ReceiverWithContext::pj_uri. Should be deduped
+                // TODO this code was copied from ReceiverInitialized::pj_uri. Should be deduped
                 use crate::uri::{PayjoinExtras, UrlExt};
                 let id = session_context.id();
                 let mut pj = subdir(&session_context.directory, &id).clone();
@@ -178,7 +178,7 @@ mod tests {
     use crate::receive::v1::test::unchecked_proposal_from_test_vector;
     use crate::receive::v2::test::SHARED_CONTEXT;
     use crate::receive::v2::{
-        MaybeInputsOwned, PayjoinProposal, ProvisionalProposal, UncheckedProposal, WithContext,
+        Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal, UncheckedProposal,
     };
 
     #[test]
@@ -264,8 +264,8 @@ mod tests {
                 psbt_with_contributed_inputs: None,
                 fallback_tx: None,
             },
-            expected_receiver_state: ReceiverTypeState::WithContext(Receiver {
-                state: WithContext { context: session_context },
+            expected_receiver_state: ReceiverTypeState::Initialized(Receiver {
+                state: Initialized { context: session_context },
             }),
         };
         run_session_history_test(test);

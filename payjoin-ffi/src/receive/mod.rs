@@ -62,7 +62,7 @@ pub struct InitInputsTransition(
             Option<
                 payjoin::persist::MaybeBadInitInputsTransition<
                     payjoin::receive::v2::SessionEvent,
-                    payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>,
+                    payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>,
                     payjoin::IntoUrlError,
                 >,
             >,
@@ -71,7 +71,7 @@ pub struct InitInputsTransition(
 );
 
 impl InitInputsTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<WithContext, ReceiverPersistedError>
+    pub fn save<P>(&self, persister: &P) -> Result<Initialized, ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -98,7 +98,7 @@ impl From<UninitializedReceiver>
 }
 
 impl UninitializedReceiver {
-    /// Creates a new [`WithContext`] with the provided parameters.
+    /// Creates a new [`Initialized`] with the provided parameters.
     ///
     /// # Parameters
     /// - `address`: The Bitcoin address for the payjoin session.
@@ -107,7 +107,7 @@ impl UninitializedReceiver {
     /// - `expire_after`: The duration after which the session expires.
     ///
     /// # Returns
-    /// A new instance of [`WithContext`].
+    /// A new instance of [`Initialized`].
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md)
@@ -129,26 +129,26 @@ impl UninitializedReceiver {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct WithContext(payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>);
+pub struct Initialized(payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>);
 
-impl From<WithContext> for payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext> {
-    fn from(value: WithContext) -> Self { value.0 }
+impl From<Initialized> for payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized> {
+    fn from(value: Initialized) -> Self { value.0 }
 }
 
-impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>> for WithContext {
-    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>) -> Self {
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>> for Initialized {
+    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>) -> Self {
         Self(value)
     }
 }
 
-pub struct WithContextTransition(
+pub struct InitializedTransition(
     Arc<
         RwLock<
             Option<
                 payjoin::persist::MaybeFatalTransitionWithNoResults<
                     payjoin::receive::v2::SessionEvent,
                     payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>,
-                    payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>,
+                    payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>,
                     payjoin::receive::Error,
                 >,
             >,
@@ -156,8 +156,8 @@ pub struct WithContextTransition(
     >,
 );
 
-impl WithContextTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<WithContextTransitionOutcome, ReceiverPersistedError>
+impl InitializedTransition {
+    pub fn save<P>(&self, persister: &P) -> Result<InitializedTransitionOutcome, ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -173,14 +173,14 @@ impl WithContextTransition {
     }
 }
 
-pub struct WithContextTransitionOutcome(
+pub struct InitializedTransitionOutcome(
     payjoin::persist::OptionalTransitionOutcome<
         payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>,
-        payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>,
+        payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>,
     >,
 );
 
-impl WithContextTransitionOutcome {
+impl InitializedTransitionOutcome {
     pub fn is_none(&self) -> bool { self.0.is_none() }
 
     pub fn is_success(&self) -> bool { self.0.is_success() }
@@ -194,21 +194,21 @@ impl
     From<
         payjoin::persist::OptionalTransitionOutcome<
             payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>,
-            payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>,
+            payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>,
         >,
-    > for WithContextTransitionOutcome
+    > for InitializedTransitionOutcome
 {
     fn from(
         value: payjoin::persist::OptionalTransitionOutcome<
             payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>,
-            payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>,
+            payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>,
         >,
     ) -> Self {
         Self(value)
     }
 }
 
-impl WithContext {
+impl Initialized {
     pub fn extract_req(&self, ohttp_relay: String) -> Result<(Request, ClientResponse), Error> {
         self.0
             .clone()
@@ -218,15 +218,15 @@ impl WithContext {
     }
 
     ///The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
-    pub fn process_res(&self, body: &[u8], ctx: &ClientResponse) -> WithContextTransition {
-        WithContextTransition(Arc::new(RwLock::new(Some(
+    pub fn process_res(&self, body: &[u8], ctx: &ClientResponse) -> InitializedTransition {
+        InitializedTransition(Arc::new(RwLock::new(Some(
             self.0.clone().process_res(body, ctx.into()),
         ))))
     }
 
     /// Build a V2 Payjoin URI from the receiver's context
     pub fn pj_uri(&self) -> crate::PjUri {
-        <Self as Into<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>>>::into(
+        <Self as Into<payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>>>::into(
             self.clone(),
         )
         .pj_uri()
@@ -238,7 +238,7 @@ impl WithContext {
     }
 
     pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
-        serde_json::from_str::<payjoin::receive::v2::Receiver<payjoin::receive::v2::WithContext>>(
+        serde_json::from_str::<payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>>(
             json,
         )
         .map_err(Into::into)

@@ -88,7 +88,7 @@ fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReceiverTypeState {
     Uninitialized(Receiver<UninitializedReceiver>),
-    WithContext(Receiver<WithContext>),
+    Initialized(Receiver<Initialized>),
     UncheckedProposal(Receiver<UncheckedProposal>),
     MaybeInputsOwned(Receiver<MaybeInputsOwned>),
     MaybeInputsSeen(Receiver<MaybeInputsSeen>),
@@ -104,10 +104,10 @@ impl ReceiverTypeState {
     fn process_event(self, event: SessionEvent) -> Result<ReceiverTypeState, ReplayError> {
         match (self, event) {
             (ReceiverTypeState::Uninitialized(_), SessionEvent::Created(context)) =>
-                Ok(ReceiverTypeState::WithContext(Receiver { state: WithContext { context } })),
+                Ok(ReceiverTypeState::Initialized(Receiver { state: Initialized { context } })),
 
             (
-                ReceiverTypeState::WithContext(state),
+                ReceiverTypeState::Initialized(state),
                 SessionEvent::UncheckedProposal((proposal, reply_key)),
             ) => Ok(state.apply_unchecked_from_payload(proposal, reply_key)?),
 
@@ -205,7 +205,7 @@ pub struct UninitializedReceiver {}
 impl ReceiverState for UninitializedReceiver {}
 
 impl Receiver<UninitializedReceiver> {
-    /// Creates a new [`Receiver<WithContext>`] with the provided parameters.
+    /// Creates a new [`Receiver<Initialized>`] with the provided parameters.
     ///
     /// # Parameters
     /// - `address`: The Bitcoin address for the payjoin session.
@@ -214,7 +214,7 @@ impl Receiver<UninitializedReceiver> {
     /// - `expire_after`: The duration after which the session expires.
     ///
     /// # Returns
-    /// A new instance of [`Receiver<WithContext>`].
+    /// A new instance of [`Receiver<Initialized>`].
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md)
@@ -223,7 +223,7 @@ impl Receiver<UninitializedReceiver> {
         directory: impl IntoUrl,
         ohttp_keys: OhttpKeys,
         expire_after: Option<Duration>,
-    ) -> MaybeBadInitInputsTransition<SessionEvent, Receiver<WithContext>, IntoUrlError> {
+    ) -> MaybeBadInitInputsTransition<SessionEvent, Receiver<Initialized>, IntoUrlError> {
         let directory = match directory.into_url() {
             Ok(url) => url,
             Err(e) => return MaybeBadInitInputsTransition::bad_init_inputs(e),
@@ -240,19 +240,19 @@ impl Receiver<UninitializedReceiver> {
         };
         MaybeBadInitInputsTransition::success(
             SessionEvent::Created(session_context.clone()),
-            Receiver { state: WithContext { context: session_context } },
+            Receiver { state: Initialized { context: session_context } },
         )
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WithContext {
+pub struct Initialized {
     context: SessionContext,
 }
 
-impl ReceiverState for WithContext {}
+impl ReceiverState for Initialized {}
 
-impl Receiver<WithContext> {
+impl Receiver<Initialized> {
     /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
     pub fn extract_req(
         &mut self,
@@ -276,7 +276,7 @@ impl Receiver<WithContext> {
     ) -> MaybeFatalTransitionWithNoResults<
         SessionEvent,
         Receiver<UncheckedProposal>,
-        Receiver<WithContext>,
+        Receiver<Initialized>,
         Error,
     > {
         let current_state = self.clone();
@@ -1004,7 +1004,7 @@ pub mod test {
 
     #[test]
     fn test_v2_pj_uri() {
-        let uri = Receiver { state: WithContext { context: SHARED_CONTEXT.clone() } }.pj_uri();
+        let uri = Receiver { state: Initialized { context: SHARED_CONTEXT.clone() } }.pj_uri();
         assert_ne!(uri.extras.endpoint, EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Enabled);
     }

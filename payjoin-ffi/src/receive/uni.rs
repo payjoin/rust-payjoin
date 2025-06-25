@@ -37,7 +37,7 @@ impl ReceiverSessionEvent {
 #[derive(Clone, uniffi::Enum)]
 pub enum ReceiverTypeState {
     Uninitialized,
-    WithContext { inner: Arc<WithContext> },
+    Initialized { inner: Arc<Initialized> },
     UncheckedProposal { inner: Arc<UncheckedProposal> },
     MaybeInputsOwned { inner: Arc<MaybeInputsOwned> },
     MaybeInputsSeen { inner: Arc<MaybeInputsSeen> },
@@ -54,8 +54,8 @@ impl From<super::ReceiverTypeState> for ReceiverTypeState {
         use payjoin::receive::v2::ReceiverTypeState::*;
         match value.0 {
             Uninitialized(_) => Self::Uninitialized,
-            WithContext(inner) =>
-                Self::WithContext { inner: Arc::new(super::WithContext::from(inner).into()) },
+            Initialized(inner) =>
+                Self::Initialized { inner: Arc::new(super::Initialized::from(inner).into()) },
             UncheckedProposal(inner) => Self::UncheckedProposal {
                 inner: Arc::new(super::UncheckedProposal::from(inner).into()),
             },
@@ -177,7 +177,7 @@ impl MaybeBadInitInputsTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<WithContext, ReceiverPersistedError> {
+    ) -> Result<Initialized, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -193,7 +193,7 @@ impl UninitializedReceiver {
     // TODO: no need for this constructor. `create_session` is the only way to create a receiver.
     pub fn new() -> Self { Self {} }
 
-    /// Creates a new [`WithContext`] with the provided parameters.
+    /// Creates a new [`Initialized`] with the provided parameters.
     ///
     /// # Parameters
     /// - `address`: The Bitcoin address for the payjoin session.
@@ -202,7 +202,7 @@ impl UninitializedReceiver {
     /// - `expire_after`: The duration after which the session expires.
     ///
     /// # Returns
-    /// A new instance of [`WithContext`].
+    /// A new instance of [`Initialized`].
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md)
@@ -226,25 +226,25 @@ impl UninitializedReceiver {
 }
 
 #[derive(Clone, Debug, uniffi::Object)]
-pub struct WithContext(super::WithContext);
+pub struct Initialized(super::Initialized);
 
-impl From<WithContext> for super::WithContext {
-    fn from(value: WithContext) -> Self { value.0 }
+impl From<Initialized> for super::Initialized {
+    fn from(value: Initialized) -> Self { value.0 }
 }
 
-impl From<super::WithContext> for WithContext {
-    fn from(value: super::WithContext) -> Self { Self(value) }
+impl From<super::Initialized> for Initialized {
+    fn from(value: super::Initialized) -> Self { Self(value) }
 }
 
 #[derive(uniffi::Object)]
-pub struct WithContextTransition(super::WithContextTransition);
+pub struct InitializedTransition(super::InitializedTransition);
 
 #[uniffi::export]
-impl WithContextTransition {
+impl InitializedTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<WithContextTransitionOutcome, ReceiverPersistedError> {
+    ) -> Result<InitializedTransitionOutcome, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -252,14 +252,14 @@ impl WithContextTransition {
 }
 
 #[derive(uniffi::Object)]
-pub struct WithContextTransitionOutcome(super::WithContextTransitionOutcome);
+pub struct InitializedTransitionOutcome(super::InitializedTransitionOutcome);
 
-impl From<super::WithContextTransitionOutcome> for WithContextTransitionOutcome {
-    fn from(value: super::WithContextTransitionOutcome) -> Self { Self(value) }
+impl From<super::InitializedTransitionOutcome> for InitializedTransitionOutcome {
+    fn from(value: super::InitializedTransitionOutcome) -> Self { Self(value) }
 }
 
 #[uniffi::export]
-impl WithContextTransitionOutcome {
+impl InitializedTransitionOutcome {
     pub fn is_none(&self) -> bool { self.0.is_none() }
 
     pub fn is_success(&self) -> bool { self.0.is_success() }
@@ -270,7 +270,7 @@ impl WithContextTransitionOutcome {
 }
 
 #[uniffi::export]
-impl WithContext {
+impl Initialized {
     /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
     /// This identifies a session at the payjoin directory server.
     pub fn pj_uri(&self) -> crate::PjUri { self.0.pj_uri() }
@@ -282,15 +282,15 @@ impl WithContext {
     }
 
     ///The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
-    pub fn process_res(&self, body: &[u8], context: Arc<ClientResponse>) -> WithContextTransition {
-        WithContextTransition(self.0.process_res(body, &context))
+    pub fn process_res(&self, body: &[u8], context: Arc<ClientResponse>) -> InitializedTransition {
+        InitializedTransition(self.0.process_res(body, &context))
     }
 
     pub fn to_json(&self) -> Result<String, SerdeJsonError> { self.0.to_json() }
 
     #[uniffi::constructor]
     pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
-        super::WithContext::from_json(json).map(Into::into)
+        super::Initialized::from_json(json).map(Into::into)
     }
 }
 

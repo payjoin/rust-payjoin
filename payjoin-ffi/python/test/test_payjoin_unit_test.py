@@ -57,7 +57,7 @@ class TestReceiverPersistence(unittest.TestCase):
             None
         ).save(persister)
         result = payjoin.payjoin_ffi.replay_receiver_event_log(persister)
-        self.assertTrue(result.state().is_WITH_CONTEXT())
+        self.assertTrue(result.state().is_INITIALIZED())
 
 class InMemorySenderPersister(payjoin.payjoin_ffi.JsonSenderSessionPersister):
     def __init__(self, id):

@@ -175,7 +175,12 @@ impl Database {
         let recv_tree = self.0.open_tree("recv_sessions")?;
         let mut session_ids = Vec::new();
         for item in recv_tree.iter() {
-            let (key, _) = item?;
+            let (key, value) = item?;
+            let wrapper: SessionWrapper<ReceiverSessionEvent> =
+                serde_json::from_slice(&value).map_err(Error::Deserialize)?;
+            if wrapper.completed_at.is_some() {
+                continue;
+            }
             session_ids.push(SessionId::new(u64::from_be_bytes(
                 key.as_ref().try_into().map_err(Error::TryFromSlice)?,
             )));
@@ -187,8 +192,15 @@ impl Database {
         let send_tree = self.0.open_tree("send_sessions")?;
         let mut session_ids = Vec::new();
         for item in send_tree.iter() {
-            let (key, _) = item?;
-            session_ids.push(SessionId::new(u64::from_be_bytes(key.as_ref().try_into().unwrap())));
+            let (key, value) = item?;
+            let wrapper: SessionWrapper<SenderSessionEvent> =
+                serde_json::from_slice(&value).map_err(Error::Deserialize)?;
+            if wrapper.completed_at.is_some() {
+                continue;
+            }
+            session_ids.push(SessionId::new(u64::from_be_bytes(
+                key.as_ref().try_into().map_err(Error::TryFromSlice)?,
+            )));
         }
         Ok(session_ids)
     }

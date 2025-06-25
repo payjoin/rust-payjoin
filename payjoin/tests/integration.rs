@@ -100,7 +100,8 @@ mod integration {
             // **********************
             // Inside the Sender:
             // Sender checks, signs, finalizes, extracts, and broadcasts
-            let checked_payjoin_proposal_psbt = ctx.process_response(response.as_bytes())?;
+            let response_body = response.as_bytes();
+            let checked_payjoin_proposal_psbt = ctx.process_response(response_body)?;
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
 
@@ -1215,7 +1216,8 @@ mod integration {
             // **********************
             // Inside the Sender:
             // Sender checks, signs, finalizes, extracts, and broadcasts
-            let checked_payjoin_proposal_psbt = ctx.process_response(response.as_bytes())?;
+            let response_body = response.as_bytes();
+            let checked_payjoin_proposal_psbt = ctx.process_response(response_body)?;
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
 
@@ -1301,7 +1303,8 @@ mod integration {
             // **********************
             // Inside the Sender:
             // Sender checks, signs, finalizes, extracts, and broadcasts
-            let checked_payjoin_proposal_psbt = ctx.process_response(response.as_bytes())?;
+            let response_body = response.as_bytes();
+            let checked_payjoin_proposal_psbt = ctx.process_response(response_body)?;
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
 

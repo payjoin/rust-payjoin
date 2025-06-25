@@ -5,7 +5,7 @@ use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 use crate::error::ForeignError;
 use crate::receive::error::{ReceiverPersistedError, ReceiverReplayError};
 pub use crate::receive::{
-    Error, ImplementationError, InputContributionError, JsonReply, OutputSubstitutionError,
+    ImplementationError, InputContributionError, JsonReply, OutputSubstitutionError, ReceiverError,
     ReplyableError, SelectionError, SerdeJsonError, SessionError,
 };
 use crate::{ClientResponse, OhttpKeys, OutputSubstitution, Request};
@@ -166,7 +166,8 @@ pub fn replay_receiver_event_log(
     persister: Arc<dyn JsonReceiverSessionPersister>,
 ) -> Result<ReplayResult, ReceiverReplayError> {
     let adapter = CallbackPersisterAdapter::new(persister);
-    let (state, session_history) = super::replay_event_log(&adapter).map_err(ReceiverReplayError::from)?;
+    let (state, session_history) =
+        super::replay_event_log(&adapter).map_err(ReceiverReplayError::from)?;
     Ok(ReplayResult { state: state.into(), session_history: session_history.into() })
 }
 #[derive(uniffi::Object)]
@@ -275,7 +276,7 @@ impl Initialized {
     /// This identifies a session at the payjoin directory server.
     pub fn pj_uri(&self) -> crate::PjUri { self.0.pj_uri() }
 
-    pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestResponse, Error> {
+    pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestResponse, ReceiverError> {
         self.0
             .extract_req(ohttp_relay)
             .map(|(request, ctx)| RequestResponse { request, client_response: Arc::new(ctx) })
@@ -719,7 +720,7 @@ impl PayjoinProposal {
     pub fn psbt(&self) -> String { self.0.psbt() }
 
     /// Extract an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
-    pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestResponse, Error> {
+    pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestResponse, ReceiverError> {
         let (req, res) = self.0.extract_req(ohttp_relay)?;
         Ok(RequestResponse { request: req, client_response: Arc::new(res) })
     }

@@ -30,7 +30,7 @@ use super::*;
 pub use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
 use crate::request::Request;
-use crate::{PjUri, MAX_CONTENT_LENGTH};
+use crate::PjUri;
 
 /// A builder to construct the properties of a `Sender`.
 #[derive(Clone)]
@@ -278,9 +278,19 @@ impl V1Context {
     /// Call this method with response from receiver to continue BIP78 flow. If the response is
     /// valid you will get appropriate PSBT that you should sign and broadcast.
     #[inline]
-    pub fn process_response(self, response: &[u8]) -> Result<Psbt, ResponseError> {
-        if response.len() > MAX_CONTENT_LENGTH {
-            return Err(ResponseError::from(InternalValidationError::ContentTooLarge));
+    pub fn process_response(
+        self,
+        response: &[u8],
+        content_length: Option<usize>,
+    ) -> Result<Psbt, ResponseError> {
+        if let Some(expected_len) = content_length {
+            if response.len() != expected_len {
+                return Err(InternalValidationError::ContentLengthMismatch {
+                    expected: expected_len,
+                    actual: response.len(),
+                }
+                .into());
+            }
         }
 
         let res_str = std::str::from_utf8(response).map_err(|_| InternalValidationError::Parse)?;
@@ -426,7 +436,9 @@ mod test {
             "message": "This version of payjoin is not supported."
         })
         .to_string();
-        match ctx.process_response(known_json_error.as_bytes()) {
+
+        let content_length = Some(known_json_error.len());
+        match ctx.process_response(known_json_error.as_bytes(), content_length) {
             Err(ResponseError::WellKnown(WellKnownError {
                 code: ErrorCode::VersionUnsupported,
                 ..
@@ -440,7 +452,9 @@ mod test {
             "message": "This version of payjoin is not supported."
         })
         .to_string();
-        match ctx.process_response(invalid_json_error.as_bytes()) {
+
+        let content_length = Some(invalid_json_error.len());
+        match ctx.process_response(invalid_json_error.as_bytes(), content_length) {
             Err(ResponseError::Validation(_)) => (),
             _ => panic!("Expected unrecognized JSON error"),
         }
@@ -449,14 +463,20 @@ mod test {
     #[test]
     fn process_response_valid() {
         let ctx = create_v1_context();
-        let response = ctx.process_response(PAYJOIN_PROPOSAL.as_bytes());
+        let body = PAYJOIN_PROPOSAL.as_bytes();
+
+        let content_length = Some(body.len());
+        let response = ctx.process_response(PAYJOIN_PROPOSAL.as_bytes(), content_length);
         assert!(response.is_ok())
     }
 
     #[test]
     fn process_response_invalid_psbt() {
         let ctx = create_v1_context();
-        let response = ctx.process_response(INVALID_PSBT.as_bytes());
+        let body = INVALID_PSBT.as_bytes();
+
+        let content_length = Some(body.len());
+        let response = ctx.process_response(INVALID_PSBT.as_bytes(), content_length);
         match response {
             Ok(_) => panic!("Invalid PSBT should have caused an error"),
             Err(error) => match error {
@@ -477,7 +497,9 @@ mod test {
         let invalid_utf8 = &[0xF0];
 
         let ctx = create_v1_context();
-        let response = ctx.process_response(invalid_utf8);
+
+        let content_length = Some(invalid_utf8.len());
+        let response = ctx.process_response(invalid_utf8, content_length);
         match response {
             Ok(_) => panic!("Invalid UTF-8 should have caused an error"),
             Err(error) => match error {
@@ -494,18 +516,22 @@ mod test {
 
     #[test]
     fn process_response_invalid_buffer_len() {
-        let mut data = PAYJOIN_PROPOSAL.as_bytes().to_vec();
-        data.extend(std::iter::repeat(0).take(MAX_CONTENT_LENGTH + 1));
+        let data = PAYJOIN_PROPOSAL.as_bytes().to_vec();
+        let bad_content_length = data.len() + 10;
 
         let ctx = create_v1_context();
-        let response = ctx.process_response(&data);
+        let response = ctx.process_response(&data, Some(bad_content_length));
         match response {
             Ok(_) => panic!("Invalid buffer length should have caused an error"),
             Err(error) => match error {
                 ResponseError::Validation(e) => {
                     assert_eq!(
                         e.to_string(),
-                        ValidationError::from(InternalValidationError::ContentTooLarge).to_string()
+                        ValidationError::from(InternalValidationError::ContentLengthMismatch {
+                            expected: bad_content_length,
+                            actual: data.len()
+                        })
+                        .to_string()
                     );
                 }
                 _ => panic!("Unexpected error type"),

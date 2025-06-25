@@ -184,9 +184,16 @@ impl App {
                     Err(_) => {
                         let (req, v1_ctx) = context.extract_v1();
                         let response = post_request(req).await?;
-                        let psbt = Arc::new(
-                            v1_ctx.process_response(response.bytes().await?.to_vec().as_slice())?,
-                        );
+                        let content_length = response
+                            .headers()
+                            .get("content-length")
+                            .and_then(|val| val.to_str().ok())
+                            .and_then(|s| s.parse::<usize>().ok());
+
+                        let psbt = Arc::new(v1_ctx.process_response(
+                            response.bytes().await?.to_vec().as_slice(),
+                            content_length,
+                        )?);
                         self.process_pj_response((*psbt).clone())?;
                     }
                 }

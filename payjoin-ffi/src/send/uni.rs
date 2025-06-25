@@ -70,8 +70,13 @@ impl From<SenderSessionHistory> for super::SessionHistory {
 
 #[uniffi::export]
 impl SenderSessionHistory {
-    pub fn endpoints(&self) -> Option<Arc<Url>> {
+    pub fn endpoint(&self) -> Option<Arc<Url>> {
         self.0.0.endpoint().map(|url| Arc::new(url.clone().into()))
+    }
+
+    /// Fallback transaction from the session if present
+    pub fn fallback_tx(&self) -> Option<Arc<crate::Transaction>> {
+        self.0.0.fallback_tx().map(|tx| Arc::new(tx.into()))
     }
 }
 

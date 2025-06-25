@@ -26,7 +26,7 @@ use url::Url;
 
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
-use crate::{Request, Version, MAX_CONTENT_LENGTH};
+use crate::{Request, Version};
 
 // See usize casts
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -718,10 +718,6 @@ impl V1Context {
     /// valid you will get appropriate PSBT that you should sign and broadcast.
     #[inline]
     pub fn process_response(self, response: &[u8]) -> Result<Psbt, ResponseError> {
-        if response.len() > MAX_CONTENT_LENGTH {
-            return Err(ResponseError::from(InternalValidationError::ContentTooLarge));
-        }
-
         let res_str = std::str::from_utf8(response).map_err(|_| InternalValidationError::Parse)?;
         let proposal = Psbt::from_str(res_str).map_err(|_| ResponseError::parse(res_str))?;
         self.psbt_context.process_proposal(proposal).map_err(Into::into)

@@ -390,14 +390,7 @@ impl Receiver<Initialized> {
 
     /// Build a V2 Payjoin URI from the receiver's context
     pub fn pj_uri<'a>(&self) -> crate::PjUri<'a> {
-        use crate::uri::{PayjoinExtras, UrlExt};
-        let mut pj = subdir(&self.context.directory, &self.context.id()).clone();
-        pj.set_receiver_pubkey(self.context.s.public_key().clone());
-        pj.set_ohttp(self.context.ohttp_keys.clone());
-        pj.set_exp(self.context.expiry);
-        let extras =
-            PayjoinExtras { endpoint: pj, output_substitution: OutputSubstitution::Enabled };
-        bitcoin_uri::Uri::with_extras(self.context.address.clone(), extras)
+        pj_uri(&self.context, OutputSubstitution::Enabled)
     }
 
     pub(crate) fn apply_unchecked_from_payload(
@@ -906,6 +899,21 @@ fn subdir(directory: &Url, id: &ShortId) -> Url {
         path_segments.push(&id.to_string());
     }
     url
+}
+
+/// Gets the Payjoin URI from a session context
+pub(crate) fn pj_uri<'a>(
+    session_context: &SessionContext,
+    output_substitution: OutputSubstitution,
+) -> crate::PjUri<'a> {
+    use crate::uri::{PayjoinExtras, UrlExt};
+    let id = session_context.id();
+    let mut pj = subdir(&session_context.directory, &id).clone();
+    pj.set_receiver_pubkey(session_context.s.public_key().clone());
+    pj.set_ohttp(session_context.ohttp_keys.clone());
+    pj.set_exp(session_context.expiry);
+    let extras = PayjoinExtras { endpoint: pj, output_substitution };
+    bitcoin_uri::Uri::with_extras(session_context.address.clone(), extras)
 }
 
 #[cfg(test)]

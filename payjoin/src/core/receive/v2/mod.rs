@@ -281,19 +281,11 @@ impl Receiver<Initialized> {
         let current_state = self.clone();
         let proposal = match self.inner_process_res(body, context) {
             Ok(proposal) => proposal,
-            Err(e) => {
-                // Dir and OHTTP related error are transient
-                // Malformities or invalid responses are considered fatal
-                match e {
-                    Error::ReplyToSender(ReplyableError::Implementation(_)) =>
-                        return MaybeFatalTransitionWithNoResults::transient(e),
-                    _ =>
-                        return MaybeFatalTransitionWithNoResults::fatal(
-                            SessionEvent::SessionInvalid(e.to_string(), None),
-                            e,
-                        ),
-                };
-            }
+            Err(e) =>
+                return MaybeFatalTransitionWithNoResults::fatal(
+                    SessionEvent::SessionInvalid(e.to_string(), None),
+                    e,
+                ),
         };
 
         if let Some(proposal) = proposal {

@@ -45,7 +45,7 @@ impl<Event, SuccessValue, CurrentState, Err>
         persister.save_maybe_no_results_success_transition(self)
     }
 }
-/// A transition that can result in a state transition, fatal error, transient error, or successfully have no results.
+/// A transition that can result in a state transition, fatal error, or successfully have no results.
 pub struct MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err>(
     Result<AcceptOptionalTransition<Event, NextState, CurrentState>, Rejection<Event, Err>>,
 );
@@ -56,11 +56,6 @@ impl<Event, NextState, CurrentState, Err>
     #[inline]
     pub(crate) fn fatal(event: Event, error: Err) -> Self {
         MaybeFatalTransitionWithNoResults(Err(Rejection::fatal(event, error)))
-    }
-
-    #[inline]
-    pub(crate) fn transient(error: Err) -> Self {
-        MaybeFatalTransitionWithNoResults(Err(Rejection::transient(error)))
     }
 
     #[inline]
@@ -1066,19 +1061,6 @@ mod tests {
                 },
                 test: Box::new(move |persister| {
                     MaybeFatalTransitionWithNoResults::no_results(current_state.clone())
-                        .save(persister)
-                }),
-            },
-            // Transient error
-            TestCase {
-                expected_result: ExpectedResult {
-                    events: vec![],
-                    is_closed: false,
-                    error: Some(InternalPersistedError::Transient(InMemoryTestError {}).into()),
-                    success: None,
-                },
-                test: Box::new(move |persister| {
-                    MaybeFatalTransitionWithNoResults::transient(InMemoryTestError {})
                         .save(persister)
                 }),
             },

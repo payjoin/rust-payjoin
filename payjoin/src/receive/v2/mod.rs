@@ -102,7 +102,7 @@ pub enum ReceiverTypeState {
 
 impl ReceiverTypeState {
     fn process_event(self, event: SessionEvent) -> Result<ReceiverTypeState, ReplayError> {
-        match (self, event) {
+        match (self.clone(), event) {
             (ReceiverTypeState::Uninitialized(_), SessionEvent::Created(context)) =>
                 Ok(ReceiverTypeState::Initialized(Receiver { state: Initialized { context } })),
 
@@ -143,7 +143,9 @@ impl ReceiverTypeState {
                 ReceiverTypeState::ProvisionalProposal(state),
                 SessionEvent::PayjoinProposal(payjoin_proposal),
             ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
-            (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiverTypeState::TerminalFailure),
+            // JsonReply is a purely informational event, it does not change the state
+            (_, SessionEvent::JsonReply(_)) => Ok(self),
+            (_, SessionEvent::SessionInvalid(_)) => Ok(ReceiverTypeState::TerminalFailure),
             (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
                 Box::new(current_state),
                 Box::new(event),
@@ -290,7 +292,7 @@ impl Receiver<Initialized> {
                         return MaybeFatalTransitionWithNoResults::transient(e),
                     _ =>
                         return MaybeFatalTransitionWithNoResults::fatal(
-                            SessionEvent::SessionInvalid(e.to_string(), None),
+                            [SessionEvent::SessionInvalid(e.to_string())],
                             e,
                         ),
                 };
@@ -459,7 +461,10 @@ impl Receiver<UncheckedProposal> {
                     ReplyableError::Implementation(_) => return MaybeFatalTransition::transient(e),
                     _ =>
                         return MaybeFatalTransition::fatal(
-                            SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                            [
+                                SessionEvent::JsonReply(JsonReply::from(&e)),
+                                SessionEvent::SessionInvalid(e.to_string()),
+                            ],
                             e,
                         ),
                 },
@@ -526,7 +531,10 @@ impl Receiver<MaybeInputsOwned> {
                 }
                 _ => {
                     return MaybeFatalTransition::fatal(
-                        SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                        [
+                            SessionEvent::JsonReply(JsonReply::from(&e)),
+                            SessionEvent::SessionInvalid(e.to_string()),
+                        ],
                         e,
                     );
                 }
@@ -572,7 +580,10 @@ impl Receiver<MaybeInputsSeen> {
                 }
                 _ => {
                     return MaybeFatalTransition::fatal(
-                        SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                        [
+                            SessionEvent::JsonReply(JsonReply::from(&e)),
+                            SessionEvent::SessionInvalid(e.to_string()),
+                        ],
                         e,
                     );
                 }
@@ -617,7 +628,10 @@ impl Receiver<OutputsUnknown> {
                 }
                 _ => {
                     return MaybeFatalTransition::fatal(
-                        SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                        [
+                            SessionEvent::JsonReply(JsonReply::from(&e)),
+                            SessionEvent::SessionInvalid(e.to_string()),
+                        ],
                         e,
                     );
                 }

@@ -277,7 +277,7 @@ impl Sender<WithReplyKey> {
             Ok(()) => {}
             Err(e) => {
                 return MaybeFatalTransition::fatal(
-                    SessionEvent::SessionInvalid(e.to_string()),
+                    [SessionEvent::SessionInvalid(e.to_string())],
                     InternalEncapsulationError::DirectoryResponse(e).into(),
                 );
             }
@@ -433,7 +433,7 @@ impl Sender<V2GetContext> {
             Ok(None) => return MaybeSuccessTransitionWithNoResults::no_results(self.clone()),
             Err(e) =>
                 return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::SessionInvalid(e.to_string()),
+                    [SessionEvent::SessionInvalid(e.to_string())],
                     InternalEncapsulationError::DirectoryResponse(e).into(),
                 ),
         };
@@ -445,7 +445,7 @@ impl Sender<V2GetContext> {
             Ok(psbt) => psbt,
             Err(e) =>
                 return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::SessionInvalid(e.to_string()),
+                    [SessionEvent::SessionInvalid(e.to_string())],
                     InternalEncapsulationError::Hpke(e).into(),
                 ),
         };
@@ -453,7 +453,7 @@ impl Sender<V2GetContext> {
             Ok(proposal) => proposal,
             Err(e) =>
                 return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::SessionInvalid(e.to_string()),
+                    [SessionEvent::SessionInvalid(e.to_string())],
                     InternalProposalError::Psbt(e).into(),
                 ),
         };
@@ -461,7 +461,7 @@ impl Sender<V2GetContext> {
             Ok(processed_proposal) => processed_proposal,
             Err(e) =>
                 return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::SessionInvalid(e.to_string()),
+                    [SessionEvent::SessionInvalid(e.to_string())],
                     e.into(),
                 ),
         };

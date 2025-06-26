@@ -10,8 +10,8 @@ use payjoin::receive::v2::{
     Receiver, SessionHistory, UncheckedProposal, WantsInputs, WantsOutputs,
 };
 use payjoin::send::v2::{
-    replay_event_log as replay_sender_event_log, Sender, SenderBuilder, SenderTypeState,
-    V2GetContext, WithReplyKey,
+    replay_event_log as replay_sender_event_log, SendSession, Sender, SenderBuilder, V2GetContext,
+    WithReplyKey,
 };
 use payjoin::Uri;
 use tokio::sync::watch;
@@ -81,7 +81,7 @@ impl AppTrait for App {
                     .build_recommended(fee_rate)
                     .save(&persister)?;
 
-                (SenderTypeState::WithReplyKey(sender), persister)
+                (SendSession::WithReplyKey(sender), persister)
             }
         };
         let mut interrupt = self.interrupt.clone();
@@ -173,11 +173,11 @@ impl AppTrait for App {
 impl App {
     async fn process_sender_session(
         &self,
-        session: SenderTypeState,
+        session: SendSession,
         persister: &SenderPersister,
     ) -> Result<()> {
         match session {
-            SenderTypeState::WithReplyKey(context) => {
+            SendSession::WithReplyKey(context) => {
                 // TODO: can we handle the fall back case in `post_original_proposal`. That way we don't have to clone here
                 match self.post_original_proposal(context.clone(), persister).await {
                     Ok(()) => (),
@@ -192,9 +192,9 @@ impl App {
                 }
                 return Ok(());
             }
-            SenderTypeState::V2GetContext(context) =>
+            SendSession::V2GetContext(context) =>
                 self.get_proposed_payjoin_psbt(context, persister).await?,
-            SenderTypeState::ProposalReceived(proposal) => {
+            SendSession::ProposalReceived(proposal) => {
                 self.process_pj_response(proposal.clone())?;
                 return Ok(());
             }

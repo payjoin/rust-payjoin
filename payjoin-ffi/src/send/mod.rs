@@ -27,13 +27,13 @@ impl From<payjoin::send::v2::SessionEvent> for SessionEvent {
 }
 
 #[derive(Debug, Clone)]
-pub struct SenderTypeState(payjoin::send::v2::SenderTypeState);
+pub struct SendSession(payjoin::send::v2::SendSession);
 
-impl From<payjoin::send::v2::SenderTypeState> for SenderTypeState {
-    fn from(value: payjoin::send::v2::SenderTypeState) -> Self { Self(value) }
+impl From<payjoin::send::v2::SendSession> for SendSession {
+    fn from(value: payjoin::send::v2::SendSession) -> Self { Self(value) }
 }
 
-pub fn replay_event_log<P>(persister: &P) -> Result<(SenderTypeState, SessionHistory), SenderReplayError>
+pub fn replay_event_log<P>(persister: &P) -> Result<(SendSession, SessionHistory), SenderReplayError>
 where
     P: SessionPersister + Clone,
     P::SessionEvent: Into<payjoin::send::v2::SessionEvent> + Clone,

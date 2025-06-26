@@ -34,7 +34,7 @@ impl SenderSessionEvent {
 }
 
 #[derive(Clone, uniffi::Enum)]
-pub enum SenderTypeState {
+pub enum SendSession {
     Uninitialized,
     WithReplyKey { inner: Arc<WithReplyKey> },
     V2GetContext { inner: Arc<V2GetContext> },
@@ -42,9 +42,9 @@ pub enum SenderTypeState {
     TerminalFailure,
 }
 
-impl From<super::SenderTypeState> for SenderTypeState {
-    fn from(value: super::SenderTypeState) -> Self {
-        use payjoin::send::v2::SenderTypeState::*;
+impl From<super::SendSession> for SendSession {
+    fn from(value: super::SendSession) -> Self {
+        use payjoin::send::v2::SendSession::*;
         match value.0 {
             Uninitialized => Self::Uninitialized,
             WithReplyKey(inner) =>
@@ -82,13 +82,13 @@ impl SenderSessionHistory {
 
 #[derive(uniffi::Object)]
 pub struct SenderReplayResult {
-    state: SenderTypeState,
+    state: SendSession,
     session_history: SenderSessionHistory,
 }
 
 #[uniffi::export]
 impl SenderReplayResult {
-    pub fn state(&self) -> SenderTypeState { self.state.clone() }
+    pub fn state(&self) -> SendSession { self.state.clone() }
 
     pub fn session_history(&self) -> SenderSessionHistory { self.session_history.clone() }
 }

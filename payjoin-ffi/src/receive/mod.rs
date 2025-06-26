@@ -31,15 +31,15 @@ impl From<SessionEvent> for payjoin::receive::v2::SessionEvent {
     fn from(event: SessionEvent) -> Self { event.0 }
 }
 
-pub struct ReceiverTypeState(pub payjoin::receive::v2::ReceiverTypeState);
+pub struct ReceiveSession(pub payjoin::receive::v2::ReceiveSession);
 
-impl From<payjoin::receive::v2::ReceiverTypeState> for ReceiverTypeState {
-    fn from(value: payjoin::receive::v2::ReceiverTypeState) -> Self { Self(value) }
+impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
+    fn from(value: payjoin::receive::v2::ReceiveSession) -> Self { Self(value) }
 }
 
 pub fn replay_event_log<P>(
     persister: &P,
-) -> Result<(ReceiverTypeState, SessionHistory), ReceiverReplayError>
+) -> Result<(ReceiveSession, SessionHistory), ReceiverReplayError>
 where
     P: SessionPersister,
     P::SessionEvent: Into<payjoin::receive::v2::SessionEvent> + Clone,

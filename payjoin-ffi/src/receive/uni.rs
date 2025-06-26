@@ -35,7 +35,7 @@ impl ReceiverSessionEvent {
 }
 
 #[derive(Clone, uniffi::Enum)]
-pub enum ReceiverTypeState {
+pub enum ReceiveSession {
     Uninitialized,
     Initialized { inner: Arc<Initialized> },
     UncheckedProposal { inner: Arc<UncheckedProposal> },
@@ -49,9 +49,9 @@ pub enum ReceiverTypeState {
     TerminalFailure,
 }
 
-impl From<super::ReceiverTypeState> for ReceiverTypeState {
-    fn from(value: super::ReceiverTypeState) -> Self {
-        use payjoin::receive::v2::ReceiverTypeState::*;
+impl From<super::ReceiveSession> for ReceiveSession {
+    fn from(value: super::ReceiveSession) -> Self {
+        use payjoin::receive::v2::ReceiveSession::*;
         match value.0 {
             Uninitialized(_) => Self::Uninitialized,
             Initialized(inner) =>
@@ -150,13 +150,13 @@ impl SessionHistory {
 
 #[derive(uniffi::Object)]
 pub struct ReplayResult {
-    state: ReceiverTypeState,
+    state: ReceiveSession,
     session_history: SessionHistory,
 }
 
 #[uniffi::export]
 impl ReplayResult {
-    pub fn state(&self) -> ReceiverTypeState { self.state.clone() }
+    pub fn state(&self) -> ReceiveSession { self.state.clone() }
 
     pub fn session_history(&self) -> SessionHistory { self.session_history.clone() }
 }

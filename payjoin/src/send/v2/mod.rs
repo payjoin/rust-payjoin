@@ -144,20 +144,20 @@ impl<'a> SenderBuilder<'a> {
     }
 }
 
-pub trait SenderState {}
+pub trait State {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Sender<State: SenderState> {
+pub struct Sender<State> {
     pub(crate) state: State,
 }
 
-impl<State: SenderState> core::ops::Deref for Sender<State> {
+impl<State> core::ops::Deref for Sender<State> {
     type Target = State;
 
     fn deref(&self) -> &Self::Target { &self.state }
 }
 
-impl<State: SenderState> core::ops::DerefMut for Sender<State> {
+impl<State> core::ops::DerefMut for Sender<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
 }
 
@@ -201,7 +201,7 @@ pub struct WithReplyKey {
     pub(crate) reply_key: HpkeSecretKey,
 }
 
-impl SenderState for WithReplyKey {}
+impl State for WithReplyKey {}
 
 impl Sender<WithReplyKey> {
     /// Extract serialized V1 Request and Context from a Payjoin Proposal
@@ -381,7 +381,7 @@ pub struct V2GetContext {
     pub(crate) hpke_ctx: HpkeContext,
 }
 
-impl SenderState for V2GetContext {}
+impl State for V2GetContext {}
 
 impl Sender<V2GetContext> {
     /// Extract an OHTTP Encapsulated HTTP GET request for the Proposal PSBT

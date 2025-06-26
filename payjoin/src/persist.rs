@@ -59,11 +59,6 @@ impl<Event, NextState, CurrentState, Err>
     }
 
     #[inline]
-    pub(crate) fn transient(error: Err) -> Self {
-        MaybeFatalTransitionWithNoResults(Err(Rejection::transient(error)))
-    }
-
-    #[inline]
     pub(crate) fn no_results(current_state: CurrentState) -> Self {
         MaybeFatalTransitionWithNoResults(Ok(AcceptOptionalTransition::NoResults(current_state)))
     }
@@ -1071,19 +1066,6 @@ mod tests {
                 },
                 test: Box::new(move |persister| {
                     MaybeFatalTransitionWithNoResults::no_results(current_state.clone())
-                        .save(persister)
-                }),
-            },
-            // Transient error
-            TestCase {
-                expected_result: ExpectedResult {
-                    events: vec![],
-                    is_closed: false,
-                    error: Some(InternalPersistedError::Transient(InMemoryTestError {}).into()),
-                    success: None,
-                },
-                test: Box::new(move |persister| {
-                    MaybeFatalTransitionWithNoResults::transient(InMemoryTestError {})
                         .save(persister)
                 }),
             },

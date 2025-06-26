@@ -39,20 +39,20 @@ pub enum SenderTypeState {
     WithReplyKey { inner: Arc<WithReplyKey> },
     V2GetContext { inner: Arc<V2GetContext> },
     ProposalReceived { inner: Arc<Psbt> },
-    TerminalState,
+    TerminalFailure,
 }
 
 impl From<super::SenderTypeState> for SenderTypeState {
     fn from(value: super::SenderTypeState) -> Self {
         use payjoin::send::v2::SenderTypeState::*;
         match value.0 {
-            Uninitialized() => Self::Uninitialized,
+            Uninitialized => Self::Uninitialized,
             WithReplyKey(inner) =>
                 Self::WithReplyKey { inner: Arc::new(super::WithReplyKey::from(inner).into()) },
             V2GetContext(inner) =>
                 Self::V2GetContext { inner: Arc::new(super::V2GetContext::from(inner).into()) },
             ProposalReceived(inner) => Self::ProposalReceived { inner: Arc::new(inner.into()) },
-            TerminalState => Self::TerminalState,
+            TerminalFailure => Self::TerminalFailure,
         }
     }
 }

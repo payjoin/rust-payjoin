@@ -61,7 +61,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         cls.sender = cls.env.get_sender()
 
     async def process_receiver_proposal(self, receiver: ReceiverTypeState, recv_persister: InMemoryReceiverSessionEventLog, ohttp_relay: Url) -> Optional[ReceiverTypeState]:
-        if receiver.is_WITH_CONTEXT():
+        if receiver.is_INITIALIZED():
             res = await self.retrieve_receiver_proposal(receiver.inner, recv_persister, ohttp_relay)
             if res is None:
                 return None
@@ -87,11 +87,11 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         raise Exception(f"Unknown receiver state: {receiver}")
             
             
-    def create_receiver_context(self, receiver_address: bitcoinffi.Address, directory: Url, ohttp_keys: OhttpKeys, recv_persister: InMemoryReceiverSessionEventLog) -> WithContext:
+    def create_receiver_context(self, receiver_address: bitcoinffi.Address, directory: Url, ohttp_keys: OhttpKeys, recv_persister: InMemoryReceiverSessionEventLog) -> Initialized:
         receiver = UninitializedReceiver().create_session(address=receiver_address, directory=directory.as_string(), ohttp_keys=ohttp_keys, expire_after=None).save(recv_persister)
         return receiver
     
-    async def retrieve_receiver_proposal(self, receiver: WithContext, recv_persister: InMemoryReceiverSessionEventLog, ohttp_relay: Url):
+    async def retrieve_receiver_proposal(self, receiver: Initialized, recv_persister: InMemoryReceiverSessionEventLog, ohttp_relay: Url):
         agent = httpx.AsyncClient()
         request: RequestResponse = receiver.extract_req(ohttp_relay.as_string())
         response = await agent.post(
@@ -150,7 +150,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             recv_persister = InMemoryReceiverSessionEventLog(1)
             sender_persister = InMemorySenderPersister(1)
             session = self.create_receiver_context(receiver_address, directory, ohttp_keys, recv_persister)
-            process_response = await self.process_receiver_proposal(ReceiverTypeState.WITH_CONTEXT(session), recv_persister, ohttp_relay)
+            process_response = await self.process_receiver_proposal(ReceiverTypeState.INITIALIZED(session), recv_persister, ohttp_relay)
             print(f"session: {session.to_json()}")
             self.assertIsNone(process_response)
 
@@ -173,7 +173,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             # Inside the Receiver:
 
             # GET fallback psbt
-            payjoin_proposal = await self.process_receiver_proposal(ReceiverTypeState.WITH_CONTEXT(session), recv_persister, ohttp_relay)
+            payjoin_proposal = await self.process_receiver_proposal(ReceiverTypeState.INITIALIZED(session), recv_persister, ohttp_relay)
             self.assertIsNotNone(payjoin_proposal)
             self.assertEqual(payjoin_proposal.is_PAYJOIN_PROPOSAL(), True)
 

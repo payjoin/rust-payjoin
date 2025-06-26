@@ -860,7 +860,7 @@ mod integration {
     mod multiparty {
         use bitcoin::ScriptBuf;
         use payjoin::persist::NoopSessionPersister;
-        use payjoin::receive::v2::{Receiver, WithContext};
+        use payjoin::receive::v2::{Initialized, Receiver};
         use payjoin::send::multiparty::{
             GetContext as MultiPartyGetContext, SenderBuilder as MultiPartySenderBuilder,
         };
@@ -872,7 +872,7 @@ mod integration {
         use crate::integration::v2::build_sweep_psbt;
 
         struct InnerSenderTestSession {
-            receiver_session: Receiver<WithContext>,
+            receiver_session: Receiver<Initialized>,
             sender_get_ctx: MultiPartyGetContext,
             script_pubkey: ScriptBuf,
         }

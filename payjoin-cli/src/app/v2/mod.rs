@@ -5,9 +5,9 @@ use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::OptionalTransitionOutcome;
 use payjoin::receive::v2::{
-    process_err_res, replay_event_log as replay_receiver_event_log, MaybeInputsOwned,
+    process_err_res, replay_event_log as replay_receiver_event_log, Initialized, MaybeInputsOwned,
     MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal, Receiver,
-    ReceiverTypeState, SessionHistory, UncheckedProposal, WantsInputs, WantsOutputs, WithContext,
+    ReceiverTypeState, SessionHistory, UncheckedProposal, WantsInputs, WantsOutputs,
 };
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, Sender, SenderBuilder, SenderTypeState,
@@ -114,7 +114,7 @@ impl AppTrait for App {
         println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{}", pj_uri);
 
-        self.process_receiver_session(ReceiverTypeState::WithContext(session.clone()), &persister)
+        self.process_receiver_session(ReceiverTypeState::Initialized(session.clone()), &persister)
             .await?;
         Ok(())
     }
@@ -251,7 +251,7 @@ impl App {
 
     async fn long_poll_fallback(
         &self,
-        session: Receiver<WithContext>,
+        session: Receiver<Initialized>,
         persister: &ReceiverPersister,
     ) -> Result<Receiver<UncheckedProposal>> {
         let ohttp_relay = self
@@ -287,7 +287,7 @@ impl App {
     ) -> Result<()> {
         let res = {
             match session {
-                ReceiverTypeState::WithContext(proposal) =>
+                ReceiverTypeState::Initialized(proposal) =>
                     self.read_from_directory(proposal, persister).await,
                 ReceiverTypeState::UncheckedProposal(proposal) =>
                     self.check_proposal(proposal, persister).await,
@@ -307,7 +307,7 @@ impl App {
                     self.send_payjoin_proposal(proposal, persister).await,
                 ReceiverTypeState::Uninitialized(_) =>
                     return Err(anyhow!("Uninitialized receiver session")),
-                ReceiverTypeState::TerminalState =>
+                ReceiverTypeState::TerminalFailure =>
                     return Err(anyhow!("Terminal receiver session")),
             }
         };
@@ -331,7 +331,7 @@ impl App {
     #[allow(clippy::incompatible_msrv)]
     async fn read_from_directory(
         &self,
-        session: Receiver<WithContext>,
+        session: Receiver<Initialized>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let mut interrupt = self.interrupt.clone();

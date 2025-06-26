@@ -83,12 +83,12 @@ fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 }
 
 /// Represents the various states of a Payjoin receiver session during the protocol flow.
-/// Each variant wraps a `Receiver` with a specific state type, except for `TerminalState` which
+/// Each variant wraps a `Receiver` with a specific state type, except for [`ReceiverTypeState::TerminalFailure`] which
 /// indicates the session has ended or is invalid.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReceiverTypeState {
     Uninitialized(Receiver<UninitializedReceiver>),
-    WithContext(Receiver<WithContext>),
+    Initialized(Receiver<Initialized>),
     UncheckedProposal(Receiver<UncheckedProposal>),
     MaybeInputsOwned(Receiver<MaybeInputsOwned>),
     MaybeInputsSeen(Receiver<MaybeInputsSeen>),
@@ -97,17 +97,17 @@ pub enum ReceiverTypeState {
     WantsInputs(Receiver<WantsInputs>),
     ProvisionalProposal(Receiver<ProvisionalProposal>),
     PayjoinProposal(Receiver<PayjoinProposal>),
-    TerminalState,
+    TerminalFailure,
 }
 
 impl ReceiverTypeState {
     fn process_event(self, event: SessionEvent) -> Result<ReceiverTypeState, ReplayError> {
         match (self, event) {
             (ReceiverTypeState::Uninitialized(_), SessionEvent::Created(context)) =>
-                Ok(ReceiverTypeState::WithContext(Receiver { state: WithContext { context } })),
+                Ok(ReceiverTypeState::Initialized(Receiver { state: Initialized { context } })),
 
             (
-                ReceiverTypeState::WithContext(state),
+                ReceiverTypeState::Initialized(state),
                 SessionEvent::UncheckedProposal((proposal, reply_key)),
             ) => Ok(state.apply_unchecked_from_payload(proposal, reply_key)?),
 
@@ -143,7 +143,7 @@ impl ReceiverTypeState {
                 ReceiverTypeState::ProvisionalProposal(state),
                 SessionEvent::PayjoinProposal(payjoin_proposal),
             ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
-            (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiverTypeState::TerminalState),
+            (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiverTypeState::TerminalFailure),
             (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
                 Box::new(current_state),
                 Box::new(event),
@@ -153,20 +153,20 @@ impl ReceiverTypeState {
     }
 }
 
-pub trait ReceiverState {}
+pub trait State {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Receiver<State: ReceiverState> {
+pub struct Receiver<State> {
     pub(crate) state: State,
 }
 
-impl<State: ReceiverState> core::ops::Deref for Receiver<State> {
+impl<State> core::ops::Deref for Receiver<State> {
     type Target = State;
 
     fn deref(&self) -> &Self::Target { &self.state }
 }
 
-impl<State: ReceiverState> core::ops::DerefMut for Receiver<State> {
+impl<State> core::ops::DerefMut for Receiver<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
 }
 
@@ -202,10 +202,10 @@ pub fn process_err_res(body: &[u8], context: ohttp::ClientResponse) -> Result<()
 /// The receiver is not initialized yet, no session context is available yet
 pub struct UninitializedReceiver {}
 
-impl ReceiverState for UninitializedReceiver {}
+impl State for UninitializedReceiver {}
 
 impl Receiver<UninitializedReceiver> {
-    /// Creates a new [`Receiver<WithContext>`] with the provided parameters.
+    /// Creates a new [`Receiver<Initialized>`] with the provided parameters.
     ///
     /// # Parameters
     /// - `address`: The Bitcoin address for the payjoin session.
@@ -214,7 +214,7 @@ impl Receiver<UninitializedReceiver> {
     /// - `expire_after`: The duration after which the session expires.
     ///
     /// # Returns
-    /// A new instance of [`Receiver<WithContext>`].
+    /// A new instance of [`Receiver<Initialized>`].
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md)
@@ -223,7 +223,7 @@ impl Receiver<UninitializedReceiver> {
         directory: impl IntoUrl,
         ohttp_keys: OhttpKeys,
         expire_after: Option<Duration>,
-    ) -> MaybeBadInitInputsTransition<SessionEvent, Receiver<WithContext>, IntoUrlError> {
+    ) -> MaybeBadInitInputsTransition<SessionEvent, Receiver<Initialized>, IntoUrlError> {
         let directory = match directory.into_url() {
             Ok(url) => url,
             Err(e) => return MaybeBadInitInputsTransition::bad_init_inputs(e),
@@ -240,19 +240,19 @@ impl Receiver<UninitializedReceiver> {
         };
         MaybeBadInitInputsTransition::success(
             SessionEvent::Created(session_context.clone()),
-            Receiver { state: WithContext { context: session_context } },
+            Receiver { state: Initialized { context: session_context } },
         )
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WithContext {
+pub struct Initialized {
     context: SessionContext,
 }
 
-impl ReceiverState for WithContext {}
+impl State for Initialized {}
 
-impl Receiver<WithContext> {
+impl Receiver<Initialized> {
     /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
     pub fn extract_req(
         &mut self,
@@ -276,7 +276,7 @@ impl Receiver<WithContext> {
     ) -> MaybeFatalTransitionWithNoResults<
         SessionEvent,
         Receiver<UncheckedProposal>,
-        Receiver<WithContext>,
+        Receiver<Initialized>,
         Error,
     > {
         let current_state = self.clone();
@@ -432,7 +432,7 @@ pub struct UncheckedProposal {
     pub(crate) context: SessionContext,
 }
 
-impl ReceiverState for UncheckedProposal {}
+impl State for UncheckedProposal {}
 
 impl Receiver<UncheckedProposal> {
     /// Call after checking that the Original PSBT can be broadcast.
@@ -503,7 +503,7 @@ pub struct MaybeInputsOwned {
     context: SessionContext,
 }
 
-impl ReceiverState for MaybeInputsOwned {}
+impl State for MaybeInputsOwned {}
 
 impl Receiver<MaybeInputsOwned> {
     /// The Sender's Original PSBT
@@ -554,7 +554,7 @@ pub struct MaybeInputsSeen {
     context: SessionContext,
 }
 
-impl ReceiverState for MaybeInputsSeen {}
+impl State for MaybeInputsSeen {}
 
 impl Receiver<MaybeInputsSeen> {
     /// Make sure that the original transaction inputs have never been seen before.
@@ -601,7 +601,7 @@ pub struct OutputsUnknown {
     context: SessionContext,
 }
 
-impl ReceiverState for OutputsUnknown {}
+impl State for OutputsUnknown {}
 
 impl Receiver<OutputsUnknown> {
     /// Find which outputs belong to the receiver
@@ -645,7 +645,7 @@ pub struct WantsOutputs {
     context: SessionContext,
 }
 
-impl ReceiverState for WantsOutputs {}
+impl State for WantsOutputs {}
 
 impl Receiver<WantsOutputs> {
     /// Whether the receiver is allowed to substitute original outputs or not.
@@ -699,7 +699,7 @@ pub struct WantsInputs {
     context: SessionContext,
 }
 
-impl ReceiverState for WantsInputs {}
+impl State for WantsInputs {}
 
 impl Receiver<WantsInputs> {
     /// Select receiver input such that the payjoin avoids surveillance.
@@ -762,7 +762,7 @@ pub struct ProvisionalProposal {
     context: SessionContext,
 }
 
-impl ReceiverState for ProvisionalProposal {}
+impl State for ProvisionalProposal {}
 
 impl Receiver<ProvisionalProposal> {
     /// Return a Payjoin Proposal PSBT that the sender will find acceptable.
@@ -810,7 +810,7 @@ pub struct PayjoinProposal {
     context: SessionContext,
 }
 
-impl ReceiverState for PayjoinProposal {}
+impl State for PayjoinProposal {}
 
 impl PayjoinProposal {
     #[cfg(feature = "_multiparty")]
@@ -1004,7 +1004,7 @@ pub mod test {
 
     #[test]
     fn test_v2_pj_uri() {
-        let uri = Receiver { state: WithContext { context: SHARED_CONTEXT.clone() } }.pj_uri();
+        let uri = Receiver { state: Initialized { context: SHARED_CONTEXT.clone() } }.pj_uri();
         assert_ne!(uri.extras.endpoint, EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Enabled);
     }

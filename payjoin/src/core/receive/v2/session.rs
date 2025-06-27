@@ -110,7 +110,7 @@ impl SessionHistory {
         })
     }
 
-    /// Extract the error request to be posted on the directory if an error occurred.
+    /// Construct the error request to be posted on the directory if an error occurred.
     /// To process the response, use [crate::receive::v2::process_err_res]
     pub fn extract_err_req(
         &self,

@@ -222,12 +222,12 @@ impl WithReplyKeyTransition {
 
 #[uniffi::export]
 impl WithReplyKey {
-    pub fn extract_v1(&self) -> RequestV1Context {
-        let (req, ctx) = self.0.extract_v1();
+    pub fn create_v1_post_request(&self) -> RequestV1Context {
+        let (req, ctx) = self.0.create_v1_post_request();
         RequestV1Context { request: req, context: Arc::new(ctx.into()) }
     }
 
-    /// Extract serialized Request and Context from a Payjoin Proposal.
+    /// Construct serialized Request and Context from a Payjoin Proposal.
     ///
     /// Important: This request must not be retried or reused on failure.
     /// Retransmitting the same ciphertext breaks OHTTP privacy properties.
@@ -236,11 +236,11 @@ impl WithReplyKey {
     ///
     /// This method requires the `rs` pubkey to be extracted from the endpoint
     /// and has no fallback to v1.
-    pub fn extract_v2(
+    pub fn create_v2_post_request(
         &self,
         ohttp_relay_url: String,
     ) -> Result<RequestV2PostContext, CreateRequestError> {
-        match self.0.extract_v2(ohttp_relay_url) {
+        match self.0.create_v2_post_request(ohttp_relay_url) {
             Ok((req, ctx)) =>
                 Ok(RequestV2PostContext { request: req, context: Arc::new(ctx.into()) }),
             Err(e) => Err(e),
@@ -344,12 +344,12 @@ impl From<super::V2GetContext> for V2GetContext {
 
 #[uniffi::export]
 impl V2GetContext {
-    pub fn extract_req(
+    pub fn create_poll_request(
         &self,
         ohttp_relay: String,
     ) -> Result<RequestOhttpContext, CreateRequestError> {
         self.0
-            .extract_req(ohttp_relay)
+            .create_poll_request(ohttp_relay)
             .map(|(request, ctx)| RequestOhttpContext { request, ohttp_ctx: Arc::new(ctx) })
     }
 

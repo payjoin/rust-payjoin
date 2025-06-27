@@ -129,7 +129,7 @@ impl SessionHistory {
         self.0 .0.fallback_tx().map(|tx| Arc::new(tx.into()))
     }
 
-    /// Extract the error request to be posted on the directory if an error occurred.
+    /// Construct the error request to be posted on the directory if an error occurred.
     /// To process the response, use [process_err_res]
     pub fn extract_err_req(
         &self,
@@ -267,19 +267,26 @@ impl InitializedTransitionOutcome {
 
 #[uniffi::export]
 impl Initialized {
-    /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver subdirectory.
+    /// The contents of the `&pj=` query parameter including the base64url-encoded public key receiver mailbox.
     /// This identifies a session at the payjoin directory server.
     pub fn pj_uri(&self) -> crate::PjUri { self.0.pj_uri() }
 
-    pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestResponse, ReceiverError> {
+    pub fn create_poll_request(
+        &self,
+        ohttp_relay: String,
+    ) -> Result<RequestResponse, ReceiverError> {
         self.0
-            .extract_req(ohttp_relay)
+            .create_poll_request(ohttp_relay)
             .map(|(request, ctx)| RequestResponse { request, client_response: Arc::new(ctx) })
     }
 
     ///The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
-    pub fn process_res(&self, body: &[u8], context: Arc<ClientResponse>) -> InitializedTransition {
-        InitializedTransition(self.0.process_res(body, &context))
+    pub fn process_response(
+        &self,
+        body: &[u8],
+        context: Arc<ClientResponse>,
+    ) -> InitializedTransition {
+        InitializedTransition(self.0.process_response(body, &context))
     }
 }
 
@@ -707,19 +714,22 @@ impl PayjoinProposal {
 
     pub fn psbt(&self) -> String { self.0.psbt() }
 
-    /// Extract an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
-    pub fn extract_req(&self, ohttp_relay: String) -> Result<RequestResponse, ReceiverError> {
-        let (req, res) = self.0.extract_req(ohttp_relay)?;
+    /// Construct an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
+    pub fn create_post_request(
+        &self,
+        ohttp_relay: String,
+    ) -> Result<RequestResponse, ReceiverError> {
+        let (req, res) = self.0.create_post_request(ohttp_relay)?;
         Ok(RequestResponse { request: req, client_response: Arc::new(res) })
     }
 
-    ///Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
+    /// Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
     ///
     /// This function decapsulates the response using the provided OHTTP context. If the response status is successful, it indicates that the Payjoin proposal has been accepted. Otherwise, it returns an error with the status code.
     ///
     /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or choose to broadcast the original PSBT.
     pub fn process_res(&self, body: &[u8], ctx: Arc<ClientResponse>) -> PayjoinProposalTransition {
-        PayjoinProposalTransition(self.0.process_res(body, ctx.as_ref()))
+        PayjoinProposalTransition(self.0.process_response(body, ctx.as_ref()))
     }
 }
 

@@ -257,8 +257,8 @@ async fn handle_v2(
     let path_segments: Vec<&str> = path.split('/').collect();
     debug!("handle_v2: {:?}", &path_segments);
     match (parts.method, path_segments.as_slice()) {
-        (Method::POST, &["", id]) => post_subdir(id, body, pool).await,
-        (Method::GET, &["", id]) => get_subdir(id, pool).await,
+        (Method::POST, &["", id]) => post_mailbox(id, body, pool).await,
+        (Method::GET, &["", id]) => get_mailbox(id, pool).await,
         (Method::PUT, &["", id]) => put_payjoin_v1(id, body, pool).await,
         _ => Ok(not_found()),
     }
@@ -371,7 +371,7 @@ impl From<hyper::http::Error> for HandlerError {
 
 impl From<ShortIdError> for HandlerError {
     fn from(_: ShortIdError) -> Self {
-        HandlerError::BadRequest(anyhow::anyhow!("subdirectory ID must be 13 bech32 characters"))
+        HandlerError::BadRequest(anyhow::anyhow!("mailbox ID must be 13 bech32 characters"))
     }
 }
 
@@ -443,13 +443,13 @@ async fn put_payjoin_v1(
     }
 }
 
-async fn post_subdir(
+async fn post_mailbox(
     id: &str,
     body: BoxBody<Bytes, hyper::Error>,
     pool: DbPool,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
     let none_response = Response::builder().status(StatusCode::OK).body(empty())?;
-    trace!("post_subdir");
+    trace!("post_mailbox");
 
     let id = ShortId::from_str(id)?;
 
@@ -465,11 +465,11 @@ async fn post_subdir(
     }
 }
 
-async fn get_subdir(
+async fn get_mailbox(
     id: &str,
     pool: DbPool,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-    trace!("get_subdir");
+    trace!("get_mailbox");
     let id = ShortId::from_str(id)?;
     let timeout_response = Response::builder().status(StatusCode::ACCEPTED).body(empty())?;
     handle_peek(pool.peek_default(&id).await, timeout_response)

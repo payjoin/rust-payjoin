@@ -86,6 +86,7 @@ fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 /// Each variant wraps a `Receiver` with a specific state type, except for [`ReceiverTypeState::TerminalFailure`] which
 /// indicates the session has ended or is invalid.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum ReceiverTypeState {
     Uninitialized(Receiver<UninitializedReceiver>),
     Initialized(Receiver<Initialized>),

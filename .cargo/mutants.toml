@@ -1,15 +1,24 @@
 additional_cargo_args = ["--all-features"]
-examine_globs = ["payjoin/src/uri/*.rs", "payjoin/src/receive/**/*.rs", "payjoin/src/send/**/*.rs"]
+examine_globs = [
+    "payjoin/src/lib.rs",           
+    "payjoin/src/uri/*.rs", 
+    "payjoin/src/receive/**/*.rs", 
+    "payjoin/src/send/**/*.rs"
+]
 exclude_globs = []
 exclude_re = [
 	"impl Debug",
 	"impl Display",
 	"deserialize",
 	"Iterator",
-	".*Error",
+	
+	# ".*Error",  
 
 	# ---------------------Crate-specific exculsions---------------------
 	# Receive
 	# src/receive/v1/mod.rs
         "interleave_shuffle", # Replacing index += 1 with index *= 1 in a loop causes a timeout due to an infinite loop
+        
+        # URI Error exclusions (specific patterns to avoid infinite loops while testing error logic)
+        "PayjoinUriError::new",  # Constructor methods that are straightforward
 ]

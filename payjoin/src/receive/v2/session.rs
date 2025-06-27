@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::{ReceiveSession, Receiver, SessionContext, UninitializedReceiver};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
-use crate::receive::v2::{extract_err_req, subdir, SessionError};
+use crate::receive::v2::{extract_err_req, SessionError};
 use crate::receive::{v1, JsonReply};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
@@ -79,20 +79,8 @@ impl SessionHistory {
     /// Receiver session Payjoin URI
     pub fn pj_uri<'a>(&self) -> Option<PjUri<'a>> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::Created(session_context) => {
-                // TODO this code was copied from ReceiverInitialized::pj_uri. Should be deduped
-                use crate::uri::{PayjoinExtras, UrlExt};
-                let id = session_context.id();
-                let mut pj = subdir(&session_context.directory, &id).clone();
-                pj.set_receiver_pubkey(session_context.s.public_key().clone());
-                pj.set_ohttp(session_context.ohttp_keys.clone());
-                pj.set_exp(session_context.expiry);
-                let extras = PayjoinExtras {
-                    endpoint: pj,
-                    output_substitution: OutputSubstitution::Disabled,
-                };
-                Some(bitcoin_uri::Uri::with_extras(session_context.address.clone(), extras))
-            }
+            SessionEvent::Created(session_context) =>
+                Some(crate::receive::v2::pj_uri(session_context, OutputSubstitution::Disabled)),
             _ => None,
         })
     }

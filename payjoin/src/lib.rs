@@ -65,7 +65,7 @@ mod uri;
 #[cfg(feature = "_core")]
 pub use into_url::{Error as IntoUrlError, IntoUrl};
 #[cfg(feature = "_core")]
-pub use uri::{PjParseError, PjUri, Uri, UriExt};
+pub use uri::{PayjoinUri, PayjoinUriError, PjParseError, PjUri, Uri, UriExt, ValidatedPayjoinUri};
 #[cfg(feature = "_core")]
 pub use url::{ParseError, Url};
 #[cfg(feature = "_core")]

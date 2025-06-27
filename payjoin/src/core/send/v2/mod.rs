@@ -138,7 +138,7 @@ impl<'a> SenderBuilder<'a> {
         // V2 senders may always ignore the receiver's `pjos` output substitution preference,
         // because all communications with the receiver are end-to-end authenticated.
         if self.0.output_substitution == OutputSubstitution::Enabled {
-            v1.output_substitution = OutputSubstitution::Enabled;
+            v1.psbt_ctx.output_substitution = OutputSubstitution::Enabled;
         }
 
         let with_reply_key = WithReplyKey { v1, reply_key: HpkeKeyPair::gen_keypair().0 };
@@ -241,10 +241,10 @@ impl Sender<WithReplyKey> {
             .ohttp()
             .map_err(|_| InternalCreateRequestError::MissingOhttpConfig)?;
         let body = serialize_v2_body(
-            &self.v1.psbt,
-            self.v1.output_substitution,
-            self.v1.fee_contribution,
-            self.v1.min_fee_rate,
+            &self.v1.psbt_ctx.original_psbt,
+            self.v1.psbt_ctx.output_substitution,
+            self.v1.psbt_ctx.fee_contribution,
+            self.v1.psbt_ctx.min_fee_rate,
         )?;
         let (request, ohttp_ctx) = extract_request(
             ohttp_relay,
@@ -259,13 +259,7 @@ impl Sender<WithReplyKey> {
             request,
             V2PostContext {
                 endpoint: self.v1.endpoint.clone(),
-                psbt_ctx: PsbtContext {
-                    original_psbt: self.v1.psbt.clone(),
-                    output_substitution: self.v1.output_substitution,
-                    fee_contribution: self.v1.fee_contribution,
-                    payee: self.v1.payee.clone(),
-                    min_fee_rate: self.v1.min_fee_rate,
-                },
+                psbt_ctx: self.v1.psbt_ctx.clone(),
                 hpke_ctx: HpkeContext::new(rs, &self.reply_key),
                 ohttp_ctx,
             },
@@ -522,12 +516,14 @@ mod test {
         let mut sender = super::Sender {
             state: super::WithReplyKey {
                 v1: v1::Sender {
-                    psbt: PARSED_ORIGINAL_PSBT.clone(),
                     endpoint,
-                    output_substitution: OutputSubstitution::Enabled,
-                    fee_contribution: None,
-                    min_fee_rate: FeeRate::ZERO,
-                    payee: ScriptBuf::from(vec![0x00]),
+                    psbt_ctx: PsbtContext {
+                        original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+                        output_substitution: OutputSubstitution::Enabled,
+                        fee_contribution: None,
+                        min_fee_rate: FeeRate::ZERO,
+                        payee: ScriptBuf::from(vec![0x00]),
+                    },
                 },
                 reply_key: HpkeKeyPair::gen_keypair().0,
             },
@@ -545,10 +541,10 @@ mod test {
     fn test_serialize_v2() -> Result<(), BoxError> {
         let sender = create_sender_context()?;
         let body = serialize_v2_body(
-            &sender.v1.psbt,
-            sender.v1.output_substitution,
-            sender.v1.fee_contribution,
-            sender.v1.min_fee_rate,
+            &sender.v1.psbt_ctx.original_psbt,
+            sender.v1.psbt_ctx.output_substitution,
+            sender.v1.psbt_ctx.fee_contribution,
+            sender.v1.psbt_ctx.min_fee_rate,
         );
         assert_eq!(body.as_ref().unwrap(), &<Vec<u8> as FromHex>::from_hex(SERIALIZED_BODY_V2)?,);
         Ok(())
@@ -566,7 +562,7 @@ mod test {
             format!("{}{}", EXAMPLE_URL.clone(), sender.v1.endpoint.join("/")?)
         );
         assert_eq!(context.endpoint, sender.v1.endpoint);
-        assert_eq!(context.psbt_ctx.original_psbt, sender.v1.psbt);
+        assert_eq!(context.psbt_ctx.original_psbt, sender.v1.psbt_ctx.original_psbt);
         Ok(())
     }
 
@@ -649,29 +645,30 @@ mod test {
             .expect("sender should succeed");
         // v2 senders may always override the receiver's `pjos` parameter to enable output
         // substitution
-        assert_eq!(req_ctx.v1.output_substitution, OutputSubstitution::Enabled);
-        assert_eq!(&req_ctx.v1.payee, &address.script_pubkey());
-        let fee_contribution = req_ctx.v1.fee_contribution.expect("sender should contribute fees");
+        assert_eq!(req_ctx.v1.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
+        assert_eq!(&req_ctx.v1.psbt_ctx.payee, &address.script_pubkey());
+        let fee_contribution =
+            req_ctx.v1.psbt_ctx.fee_contribution.expect("sender should contribute fees");
         assert_eq!(fee_contribution.max_amount, Amount::from_sat(91));
         assert_eq!(fee_contribution.vout, 0);
-        assert_eq!(req_ctx.v1.min_fee_rate, FeeRate::from_sat_per_kwu(250));
+        assert_eq!(req_ctx.v1.psbt_ctx.min_fee_rate, FeeRate::from_sat_per_kwu(250));
         // ensure that the other builder methods also enable output substitution
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_non_incentivizing(FeeRate::BROADCAST_MIN)
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
-        assert_eq!(req_ctx.v1.output_substitution, OutputSubstitution::Enabled);
+        assert_eq!(req_ctx.v1.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_with_additional_fee(Amount::ZERO, Some(0), FeeRate::BROADCAST_MIN, false)
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
-        assert_eq!(req_ctx.v1.output_substitution, OutputSubstitution::Enabled);
+        assert_eq!(req_ctx.v1.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
         // ensure that a v2 sender may still disable output substitution if they prefer.
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
             .always_disable_output_substitution()
             .build_recommended(FeeRate::BROADCAST_MIN)
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
-        assert_eq!(req_ctx.v1.output_substitution, OutputSubstitution::Disabled);
+        assert_eq!(req_ctx.v1.psbt_ctx.output_substitution, OutputSubstitution::Disabled);
     }
 }

@@ -71,7 +71,7 @@ impl SessionHistory {
     pub fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
         self.events.iter().find_map(|event| match event {
             SessionEvent::CreatedReplyKey(proposal) =>
-                Some(proposal.v1.psbt.clone().extract_tx_unchecked_fee_rate()),
+                Some(proposal.v1.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate()),
             _ => None,
         })
     }
@@ -118,12 +118,14 @@ mod tests {
         let keypair = HpkeKeyPair::gen_keypair();
         let sender_with_reply_key = WithReplyKey {
             v1: v1::Sender {
-                psbt: PARSED_ORIGINAL_PSBT.clone(),
                 endpoint: endpoint.clone(),
-                output_substitution: OutputSubstitution::Enabled,
-                fee_contribution: None,
-                min_fee_rate: FeeRate::ZERO,
-                payee: ScriptBuf::from(vec![0x00]),
+                psbt_ctx: PsbtContext {
+                    original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+                    output_substitution: OutputSubstitution::Enabled,
+                    fee_contribution: None,
+                    min_fee_rate: FeeRate::ZERO,
+                    payee: ScriptBuf::from(vec![0x00]),
+                },
             },
             reply_key: keypair.0.clone(),
         };
@@ -194,7 +196,7 @@ mod tests {
         .unwrap();
         let reply_key = HpkeKeyPair::gen_keypair();
         let endpoint = sender.endpoint().clone();
-        let fallback_tx = sender.psbt.clone().extract_tx_unchecked_fee_rate();
+        let fallback_tx = sender.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
         let with_reply_key = WithReplyKey { v1: sender, reply_key: reply_key.0 };
         let sender = Sender { state: with_reply_key.clone() };
         let test = SessionHistoryTest {

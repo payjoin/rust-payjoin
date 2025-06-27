@@ -56,10 +56,10 @@ impl Sender {
             .ohttp()
             .map_err(|_| InternalCreateRequestError::MissingOhttpConfig)?;
         let body = serialize_v2_body(
-            &self.0.v1.psbt,
-            self.0.v1.output_substitution,
-            self.0.v1.fee_contribution,
-            self.0.v1.min_fee_rate,
+            &self.0.v1.psbt_ctx.original_psbt,
+            self.0.v1.psbt_ctx.output_substitution,
+            self.0.v1.psbt_ctx.fee_contribution,
+            self.0.v1.psbt_ctx.min_fee_rate,
         )?;
         let (request, ohttp_ctx) = extract_request(
             ohttp_relay,
@@ -72,13 +72,7 @@ impl Sender {
         .map_err(InternalCreateRequestError::V2CreateRequest)?;
         let v2_post_ctx = V2PostContext {
             endpoint: self.0.endpoint().clone(),
-            psbt_ctx: crate::send::PsbtContext {
-                original_psbt: self.0.v1.psbt.clone(),
-                output_substitution: self.0.v1.output_substitution,
-                fee_contribution: self.0.v1.fee_contribution,
-                payee: self.0.v1.payee.clone(),
-                min_fee_rate: self.0.v1.min_fee_rate,
-            },
+            psbt_ctx: self.0.v1.psbt_ctx.clone(),
             hpke_ctx: HpkeContext::new(rs, &self.0.reply_key),
             ohttp_ctx,
         };

@@ -22,7 +22,7 @@
 //! wallet and http client.
 
 use bitcoin::psbt::Psbt;
-use bitcoin::{FeeRate, ScriptBuf, Weight};
+use bitcoin::{FeeRate, Weight};
 use error::{BuildSenderError, InternalBuildSenderError};
 use url::Url;
 
@@ -205,32 +205,27 @@ impl<'a> SenderBuilder<'a> {
         clear_unneeded_fields(&mut psbt);
 
         Ok(Sender {
-            psbt,
             endpoint,
-            output_substitution,
-            fee_contribution,
-            payee,
-            min_fee_rate: self.min_fee_rate,
+            psbt_ctx: PsbtContext {
+                original_psbt: psbt,
+                output_substitution,
+                fee_contribution,
+                payee,
+                min_fee_rate: self.min_fee_rate,
+            },
         })
     }
 }
 
 /// A payjoin V1 sender, allowing the construction of a payjoin V1 request
 /// and the resulting `V1Context`
-#[derive(Clone, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "v2", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "v2", derive(PartialEq, Eq, serde::Serialize, serde::Deserialize))]
 pub struct Sender {
-    /// The original PSBT.
-    pub(crate) psbt: Psbt,
     /// The endpoint in the Payjoin URI
     pub(crate) endpoint: Url,
-    /// Whether the receiver is allowed to substitute original outputs.
-    pub(crate) output_substitution: OutputSubstitution,
-    /// (maxadditionalfeecontribution, additionalfeeoutputindex)
-    pub(crate) fee_contribution: Option<AdditionalFeeContribution>,
-    pub(crate) min_fee_rate: FeeRate,
-    /// Script of the person being paid
-    pub(crate) payee: ScriptBuf,
+    /// The original PSBT.
+    pub(crate) psbt_ctx: PsbtContext,
 }
 
 impl Sender {
@@ -238,21 +233,21 @@ impl Sender {
     pub fn create_v1_post_request(&self) -> (Request, V1Context) {
         let url = serialize_url(
             self.endpoint.clone(),
-            self.output_substitution,
-            self.fee_contribution,
-            self.min_fee_rate,
+            self.psbt_ctx.output_substitution,
+            self.psbt_ctx.fee_contribution,
+            self.psbt_ctx.min_fee_rate,
             "1", // payjoin version
         );
-        let body = self.psbt.to_string().as_bytes().to_vec();
+        let body = self.psbt_ctx.original_psbt.to_string().as_bytes().to_vec();
         (
             Request::new_v1(&url, &body),
             V1Context {
                 psbt_context: PsbtContext {
-                    original_psbt: self.psbt.clone(),
-                    output_substitution: self.output_substitution,
-                    fee_contribution: self.fee_contribution,
-                    payee: self.payee.clone(),
-                    min_fee_rate: self.min_fee_rate,
+                    original_psbt: self.psbt_ctx.original_psbt.clone(),
+                    output_substitution: self.psbt_ctx.output_substitution,
+                    fee_contribution: self.psbt_ctx.fee_contribution,
+                    payee: self.psbt_ctx.payee.clone(),
+                    min_fee_rate: self.psbt_ctx.min_fee_rate,
                 },
             },
         )
@@ -340,7 +335,10 @@ mod test {
         )
         .build_recommended(FeeRate::MIN);
         assert!(sender.is_ok(), "{:#?}", sender.err());
-        assert_eq!(sender.unwrap().fee_contribution.unwrap().max_amount, Amount::from_sat(0));
+        assert_eq!(
+            sender.unwrap().psbt_ctx.fee_contribution.unwrap().max_amount,
+            Amount::from_sat(0)
+        );
 
         Ok(())
     }
@@ -365,7 +363,10 @@ mod test {
         )
         .build_recommended(FeeRate::MIN);
         assert!(sender.is_ok(), "{:#?}", sender.err());
-        assert_eq!(sender.unwrap().fee_contribution.unwrap().max_amount, Amount::from_sat(0));
+        assert_eq!(
+            sender.unwrap().psbt_ctx.fee_contribution.unwrap().max_amount,
+            Amount::from_sat(0)
+        );
 
         let mut psbt = Psbt::from_str(MULTIPARTY_ORIGINAL_PSBT_ONE).unwrap();
         psbt.unsigned_tx.input.pop();
@@ -381,7 +382,7 @@ mod test {
         .build_recommended(FeeRate::from_sat_per_vb(170000000).expect("Could not determine feerate"));
         assert!(sender.is_ok(), "{:#?}", sender.err());
         assert_eq!(
-            sender.unwrap().fee_contribution.unwrap().max_amount,
+            sender.unwrap().psbt_ctx.fee_contribution.unwrap().max_amount,
             Amount::from_sat(9999999822)
         );
 
@@ -396,12 +397,13 @@ mod test {
                 FeeRate::from_sat_per_vb(2000000).expect("Could not determine feerate"),
             )
             .expect("sender should succeed");
-        assert_eq!(sender.output_substitution, OutputSubstitution::Disabled);
-        assert_eq!(&sender.payee, &pj_uri().address.script_pubkey());
-        let fee_contribution = sender.fee_contribution.expect("sender should contribute fees");
+        assert_eq!(sender.psbt_ctx.output_substitution, OutputSubstitution::Disabled);
+        assert_eq!(&sender.psbt_ctx.payee, &pj_uri().address.script_pubkey());
+        let fee_contribution =
+            sender.psbt_ctx.fee_contribution.expect("sender should contribute fees");
         assert_eq!(fee_contribution.max_amount, psbt.unsigned_tx.output[0].value);
         assert_eq!(fee_contribution.vout, 0);
-        assert_eq!(sender.min_fee_rate, FeeRate::from_sat_per_kwu(500000000));
+        assert_eq!(sender.psbt_ctx.min_fee_rate, FeeRate::from_sat_per_kwu(500000000));
     }
 
     #[test]
@@ -409,19 +411,20 @@ mod test {
         let sender = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri())
             .build_recommended(FeeRate::BROADCAST_MIN)
             .expect("sender should succeed");
-        assert_eq!(sender.output_substitution, OutputSubstitution::Disabled);
-        assert_eq!(&sender.payee, &pj_uri().address.script_pubkey());
-        let fee_contribution = sender.fee_contribution.expect("sender should contribute fees");
+        assert_eq!(sender.psbt_ctx.output_substitution, OutputSubstitution::Disabled);
+        assert_eq!(&sender.psbt_ctx.payee, &pj_uri().address.script_pubkey());
+        let fee_contribution =
+            sender.psbt_ctx.fee_contribution.expect("sender should contribute fees");
         assert_eq!(fee_contribution.max_amount, Amount::from_sat(91));
         assert_eq!(fee_contribution.vout, 0);
-        assert_eq!(sender.min_fee_rate, FeeRate::from_sat_per_kwu(250));
+        assert_eq!(sender.psbt_ctx.min_fee_rate, FeeRate::from_sat_per_kwu(250));
         // Ensure the receiver's output substitution preference is respected either way
         let mut pj_uri = pj_uri();
         pj_uri.extras.output_substitution = OutputSubstitution::Enabled;
         let sender = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
             .build_recommended(FeeRate::from_sat_per_vb_unchecked(1))
             .expect("sender should succeed");
-        assert_eq!(sender.output_substitution, OutputSubstitution::Enabled);
+        assert_eq!(sender.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
     }
 
     #[test]

@@ -144,25 +144,29 @@ impl<'a> SenderBuilder<'a> {
     }
 }
 
-pub trait SenderState {}
+pub trait State {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Sender<State: SenderState> {
+pub struct Sender<State> {
     pub(crate) state: State,
 }
 
-impl<State: SenderState> core::ops::Deref for Sender<State> {
+impl<State> core::ops::Deref for Sender<State> {
     type Target = State;
 
     fn deref(&self) -> &Self::Target { &self.state }
 }
 
-impl<State: SenderState> core::ops::DerefMut for Sender<State> {
+impl<State> core::ops::DerefMut for Sender<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
 }
 
+/// Represents the various states of a Payjoin send session during the protocol flow.
+///
+/// This provides type erasure for the send session state, allowing the session to be replayed
+/// and the state to be updated with the next event over a uniform interface.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SenderTypeState {
+pub enum SendSession {
     Uninitialized,
     WithReplyKey(Sender<WithReplyKey>),
     V2GetContext(Sender<V2GetContext>),
@@ -170,18 +174,16 @@ pub enum SenderTypeState {
     TerminalFailure,
 }
 
-impl SenderTypeState {
-    fn process_event(self, event: SessionEvent) -> Result<SenderTypeState, ReplayError> {
+impl SendSession {
+    fn process_event(self, event: SessionEvent) -> Result<SendSession, ReplayError> {
         match (self, event) {
-            (
-                SenderTypeState::Uninitialized,
-                SessionEvent::CreatedReplyKey(sender_with_reply_key),
-            ) => Ok(SenderTypeState::WithReplyKey(Sender { state: sender_with_reply_key })),
-            (SenderTypeState::WithReplyKey(state), SessionEvent::V2GetContext(v2_get_context)) =>
+            (SendSession::Uninitialized, SessionEvent::CreatedReplyKey(sender_with_reply_key)) =>
+                Ok(SendSession::WithReplyKey(Sender { state: sender_with_reply_key })),
+            (SendSession::WithReplyKey(state), SessionEvent::V2GetContext(v2_get_context)) =>
                 Ok(state.apply_v2_get_context(v2_get_context)),
-            (SenderTypeState::V2GetContext(_state), SessionEvent::ProposalReceived(proposal)) =>
-                Ok(SenderTypeState::ProposalReceived(proposal)),
-            (_, SessionEvent::SessionInvalid(_)) => Ok(SenderTypeState::TerminalFailure),
+            (SendSession::V2GetContext(_state), SessionEvent::ProposalReceived(proposal)) =>
+                Ok(SendSession::ProposalReceived(proposal)),
+            (_, SessionEvent::SessionInvalid(_)) => Ok(SendSession::TerminalFailure),
             (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
                 Box::new(current_state),
                 Box::new(event),
@@ -201,7 +203,7 @@ pub struct WithReplyKey {
     pub(crate) reply_key: HpkeSecretKey,
 }
 
-impl SenderState for WithReplyKey {}
+impl State for WithReplyKey {}
 
 impl Sender<WithReplyKey> {
     /// Extract serialized V1 Request and Context from a Payjoin Proposal
@@ -303,8 +305,8 @@ impl Sender<WithReplyKey> {
     /// The endpoint in the Payjoin URI
     pub fn endpoint(&self) -> &Url { self.v1.endpoint() }
 
-    pub(crate) fn apply_v2_get_context(self, v2_get_context: V2GetContext) -> SenderTypeState {
-        SenderTypeState::V2GetContext(Sender { state: v2_get_context })
+    pub(crate) fn apply_v2_get_context(self, v2_get_context: V2GetContext) -> SendSession {
+        SendSession::V2GetContext(Sender { state: v2_get_context })
     }
 }
 
@@ -381,7 +383,7 @@ pub struct V2GetContext {
     pub(crate) hpke_ctx: HpkeContext,
 }
 
-impl SenderState for V2GetContext {}
+impl State for V2GetContext {}
 
 impl Sender<V2GetContext> {
     /// Extract an OHTTP Encapsulated HTTP GET request for the Proposal PSBT

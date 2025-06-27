@@ -2,7 +2,7 @@ use url::Url;
 
 use super::WithReplyKey;
 use crate::persist::SessionPersister;
-use crate::send::v2::{SenderTypeState, V2GetContext};
+use crate::send::v2::{SendSession, V2GetContext};
 use crate::ImplementationError;
 /// Errors that can occur when replaying a sender event log
 #[derive(Debug)]
@@ -29,12 +29,12 @@ impl From<InternalReplayError> for ReplayError {
 #[derive(Debug)]
 pub(crate) enum InternalReplayError {
     /// Invalid combination of state and event
-    InvalidStateAndEvent(Box<SenderTypeState>, Box<SessionEvent>),
+    InvalidStateAndEvent(Box<SendSession>, Box<SessionEvent>),
     /// Application storage error
     PersistenceFailure(ImplementationError),
 }
 
-pub fn replay_event_log<P>(persister: &P) -> Result<(SenderTypeState, SessionHistory), ReplayError>
+pub fn replay_event_log<P>(persister: &P) -> Result<(SendSession, SessionHistory), ReplayError>
 where
     P: SessionPersister + Clone,
     P::SessionEvent: Into<SessionEvent> + Clone,
@@ -43,7 +43,7 @@ where
         .load()
         .map_err(|e| InternalReplayError::PersistenceFailure(Box::new(e).into()))?;
 
-    let mut sender = SenderTypeState::Uninitialized;
+    let mut sender = SendSession::Uninitialized;
     let mut history = SessionHistory::default();
     for log in logs {
         history.events.push(log.clone().into());
@@ -163,7 +163,7 @@ mod tests {
     struct SessionHistoryTest {
         events: Vec<SessionEvent>,
         expected_session_history: SessionHistoryExpectedOutcome,
-        expected_sender_state: SenderTypeState,
+        expected_sender_state: SendSession,
     }
 
     fn run_session_history_test(test: SessionHistoryTest) {
@@ -203,7 +203,7 @@ mod tests {
                 fallback_tx: Some(fallback_tx),
                 endpoint: Some(endpoint),
             },
-            expected_sender_state: SenderTypeState::WithReplyKey(sender),
+            expected_sender_state: SendSession::WithReplyKey(sender),
         };
         run_session_history_test(test);
     }

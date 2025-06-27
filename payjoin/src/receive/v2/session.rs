@@ -2,7 +2,7 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use super::{Receiver, ReceiverTypeState, SessionContext, UninitializedReceiver};
+use super::{ReceiveSession, Receiver, SessionContext, UninitializedReceiver};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
 use crate::receive::v2::{extract_err_req, subdir, SessionError};
@@ -37,16 +37,14 @@ pub(crate) enum InternalReplayError {
     /// Session expired
     SessionExpired(SystemTime),
     /// Invalid combination of state and event
-    InvalidStateAndEvent(Box<ReceiverTypeState>, Box<SessionEvent>),
+    InvalidStateAndEvent(Box<ReceiveSession>, Box<SessionEvent>),
     /// Application storage error
     PersistenceFailure(ImplementationError),
 }
 
-/// Replay a receiver event log to get the receiver in its current state [ReceiverTypeState]
+/// Replay a receiver event log to get the receiver in its current state [ReceiveSession]
 /// and a session history [SessionHistory]
-pub fn replay_event_log<P>(
-    persister: &P,
-) -> Result<(ReceiverTypeState, SessionHistory), ReplayError>
+pub fn replay_event_log<P>(persister: &P) -> Result<(ReceiveSession, SessionHistory), ReplayError>
 where
     P: SessionPersister,
     P::SessionEvent: Into<SessionEvent> + Clone,
@@ -54,8 +52,7 @@ where
     let logs = persister
         .load()
         .map_err(|e| InternalReplayError::PersistenceFailure(Box::new(e).into()))?;
-    let mut receiver =
-        ReceiverTypeState::Uninitialized(Receiver { state: UninitializedReceiver {} });
+    let mut receiver = ReceiveSession::Uninitialized(Receiver { state: UninitializedReceiver {} });
     let mut history = SessionHistory::default();
 
     for event in logs {
@@ -236,7 +233,7 @@ mod tests {
     struct SessionHistoryTest {
         events: Vec<SessionEvent>,
         expected_session_history: SessionHistoryExpectedOutcome,
-        expected_receiver_state: ReceiverTypeState,
+        expected_receiver_state: ReceiveSession,
     }
 
     fn run_session_history_test(test: SessionHistoryTest) {
@@ -264,7 +261,7 @@ mod tests {
                 psbt_with_contributed_inputs: None,
                 fallback_tx: None,
             },
-            expected_receiver_state: ReceiverTypeState::Initialized(Receiver {
+            expected_receiver_state: ReceiveSession::Initialized(Receiver {
                 state: Initialized { context: session_context },
             }),
         };
@@ -284,7 +281,7 @@ mod tests {
                 psbt_with_contributed_inputs: None,
                 fallback_tx: None,
             },
-            expected_receiver_state: ReceiverTypeState::UncheckedProposal(Receiver {
+            expected_receiver_state: ReceiveSession::UncheckedProposal(Receiver {
                 state: UncheckedProposal {
                     v1: unchecked_proposal_from_test_vector(),
                     context: session_context,
@@ -310,7 +307,7 @@ mod tests {
                 psbt_with_contributed_inputs: None,
                 fallback_tx: None,
             },
-            expected_receiver_state: ReceiverTypeState::UncheckedProposal(Receiver {
+            expected_receiver_state: ReceiveSession::UncheckedProposal(Receiver {
                 state: UncheckedProposal {
                     v1: unchecked_proposal_from_test_vector(),
                     context: session_context,
@@ -338,7 +335,7 @@ mod tests {
                 psbt_with_contributed_inputs: None,
                 fallback_tx: Some(expected_fallback),
             },
-            expected_receiver_state: ReceiverTypeState::MaybeInputsOwned(Receiver {
+            expected_receiver_state: ReceiveSession::MaybeInputsOwned(Receiver {
                 state: MaybeInputsOwned { v1: maybe_inputs_owned, context: session_context },
             }),
         };
@@ -383,7 +380,7 @@ mod tests {
                 psbt_with_contributed_inputs: Some(provisional_proposal.payjoin_psbt.clone()),
                 fallback_tx: Some(expected_fallback),
             },
-            expected_receiver_state: ReceiverTypeState::ProvisionalProposal(Receiver {
+            expected_receiver_state: ReceiveSession::ProvisionalProposal(Receiver {
                 state: ProvisionalProposal { v1: provisional_proposal, context: session_context },
             }),
         };
@@ -433,7 +430,7 @@ mod tests {
                 psbt_with_contributed_inputs: Some(provisional_proposal.payjoin_psbt.clone()),
                 fallback_tx: Some(expected_fallback),
             },
-            expected_receiver_state: ReceiverTypeState::PayjoinProposal(Receiver {
+            expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {
                 state: PayjoinProposal { v1: payjoin_proposal, context: session_context },
             }),
         };

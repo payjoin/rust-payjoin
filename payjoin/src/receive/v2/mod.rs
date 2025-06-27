@@ -83,10 +83,13 @@ fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 }
 
 /// Represents the various states of a Payjoin receiver session during the protocol flow.
-/// Each variant wraps a `Receiver` with a specific state type, except for [`ReceiverTypeState::TerminalFailure`] which
-/// indicates the session has ended or is invalid.
+/// Each variant wraps a `Receiver` with a specific state type, except for [`ReceiveSession::Uninitialized`] which
+/// has no context yet and [`ReceiveSession::TerminalFailure`] which indicates the session has ended or is invalid.
+///
+/// This provides type erasure for the receive session state, allowing for the session to be replayed
+/// and the state to be updated with the next event over a uniform interface.
 #[derive(Debug, Clone, PartialEq)]
-pub enum ReceiverTypeState {
+pub enum ReceiveSession {
     Uninitialized(Receiver<UninitializedReceiver>),
     Initialized(Receiver<Initialized>),
     UncheckedProposal(Receiver<UncheckedProposal>),
@@ -100,50 +103,46 @@ pub enum ReceiverTypeState {
     TerminalFailure,
 }
 
-impl ReceiverTypeState {
-    fn process_event(self, event: SessionEvent) -> Result<ReceiverTypeState, ReplayError> {
+impl ReceiveSession {
+    fn process_event(self, event: SessionEvent) -> Result<ReceiveSession, ReplayError> {
         match (self, event) {
-            (ReceiverTypeState::Uninitialized(_), SessionEvent::Created(context)) =>
-                Ok(ReceiverTypeState::Initialized(Receiver { state: Initialized { context } })),
+            (ReceiveSession::Uninitialized(_), SessionEvent::Created(context)) =>
+                Ok(ReceiveSession::Initialized(Receiver { state: Initialized { context } })),
 
             (
-                ReceiverTypeState::Initialized(state),
+                ReceiveSession::Initialized(state),
                 SessionEvent::UncheckedProposal((proposal, reply_key)),
             ) => Ok(state.apply_unchecked_from_payload(proposal, reply_key)?),
 
-            (
-                ReceiverTypeState::UncheckedProposal(state),
-                SessionEvent::MaybeInputsOwned(inputs),
-            ) => Ok(state.apply_maybe_inputs_owned(inputs)),
+            (ReceiveSession::UncheckedProposal(state), SessionEvent::MaybeInputsOwned(inputs)) =>
+                Ok(state.apply_maybe_inputs_owned(inputs)),
 
             (
-                ReceiverTypeState::MaybeInputsOwned(state),
+                ReceiveSession::MaybeInputsOwned(state),
                 SessionEvent::MaybeInputsSeen(maybe_inputs_seen),
             ) => Ok(state.apply_maybe_inputs_seen(maybe_inputs_seen)),
 
             (
-                ReceiverTypeState::MaybeInputsSeen(state),
+                ReceiveSession::MaybeInputsSeen(state),
                 SessionEvent::OutputsUnknown(outputs_unknown),
             ) => Ok(state.apply_outputs_unknown(outputs_unknown)),
 
-            (
-                ReceiverTypeState::OutputsUnknown(state),
-                SessionEvent::WantsOutputs(wants_outputs),
-            ) => Ok(state.apply_wants_outputs(wants_outputs)),
+            (ReceiveSession::OutputsUnknown(state), SessionEvent::WantsOutputs(wants_outputs)) =>
+                Ok(state.apply_wants_outputs(wants_outputs)),
 
-            (ReceiverTypeState::WantsOutputs(state), SessionEvent::WantsInputs(wants_inputs)) =>
+            (ReceiveSession::WantsOutputs(state), SessionEvent::WantsInputs(wants_inputs)) =>
                 Ok(state.apply_wants_inputs(wants_inputs)),
 
             (
-                ReceiverTypeState::WantsInputs(state),
+                ReceiveSession::WantsInputs(state),
                 SessionEvent::ProvisionalProposal(provisional_proposal),
             ) => Ok(state.apply_provisional_proposal(provisional_proposal)),
 
             (
-                ReceiverTypeState::ProvisionalProposal(state),
+                ReceiveSession::ProvisionalProposal(state),
                 SessionEvent::PayjoinProposal(payjoin_proposal),
             ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
-            (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiverTypeState::TerminalFailure),
+            (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiveSession::TerminalFailure),
             (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
                 Box::new(current_state),
                 Box::new(event),
@@ -404,7 +403,7 @@ impl Receiver<Initialized> {
         self,
         event: v1::UncheckedProposal,
         reply_key: Option<HpkePublicKey>,
-    ) -> Result<ReceiverTypeState, InternalReplayError> {
+    ) -> Result<ReceiveSession, InternalReplayError> {
         if self.state.context.expiry < SystemTime::now() {
             // Session is expired, close the session
             return Err(InternalReplayError::SessionExpired(self.state.context.expiry));
@@ -417,7 +416,7 @@ impl Receiver<Initialized> {
             },
         };
 
-        Ok(ReceiverTypeState::UncheckedProposal(new_state))
+        Ok(ReceiveSession::UncheckedProposal(new_state))
     }
 }
 
@@ -485,10 +484,10 @@ impl Receiver<UncheckedProposal> {
         )
     }
 
-    pub(crate) fn apply_maybe_inputs_owned(self, v1: v1::MaybeInputsOwned) -> ReceiverTypeState {
+    pub(crate) fn apply_maybe_inputs_owned(self, v1: v1::MaybeInputsOwned) -> ReceiveSession {
         let new_state =
             Receiver { state: MaybeInputsOwned { v1, context: self.state.context.clone() } };
-        ReceiverTypeState::MaybeInputsOwned(new_state)
+        ReceiveSession::MaybeInputsOwned(new_state)
     }
 }
 
@@ -538,10 +537,10 @@ impl Receiver<MaybeInputsOwned> {
         )
     }
 
-    pub(crate) fn apply_maybe_inputs_seen(self, v1: v1::MaybeInputsSeen) -> ReceiverTypeState {
+    pub(crate) fn apply_maybe_inputs_seen(self, v1: v1::MaybeInputsSeen) -> ReceiveSession {
         let new_state =
             Receiver { state: MaybeInputsSeen { v1, context: self.state.context.clone() } };
-        ReceiverTypeState::MaybeInputsSeen(new_state)
+        ReceiveSession::MaybeInputsSeen(new_state)
     }
 }
 
@@ -584,10 +583,10 @@ impl Receiver<MaybeInputsSeen> {
         )
     }
 
-    pub(crate) fn apply_outputs_unknown(self, inner: v1::OutputsUnknown) -> ReceiverTypeState {
+    pub(crate) fn apply_outputs_unknown(self, inner: v1::OutputsUnknown) -> ReceiveSession {
         let new_state =
             Receiver { state: OutputsUnknown { inner, context: self.state.context.clone() } };
-        ReceiverTypeState::OutputsUnknown(new_state)
+        ReceiveSession::OutputsUnknown(new_state)
     }
 }
 
@@ -629,10 +628,10 @@ impl Receiver<OutputsUnknown> {
         )
     }
 
-    pub(crate) fn apply_wants_outputs(self, v1: v1::WantsOutputs) -> ReceiverTypeState {
+    pub(crate) fn apply_wants_outputs(self, v1: v1::WantsOutputs) -> ReceiveSession {
         let new_state =
             Receiver { state: WantsOutputs { v1, context: self.state.context.clone() } };
-        ReceiverTypeState::WantsOutputs(new_state)
+        ReceiveSession::WantsOutputs(new_state)
     }
 }
 
@@ -684,9 +683,9 @@ impl Receiver<WantsOutputs> {
         )
     }
 
-    pub(crate) fn apply_wants_inputs(self, v1: v1::WantsInputs) -> ReceiverTypeState {
+    pub(crate) fn apply_wants_inputs(self, v1: v1::WantsInputs) -> ReceiveSession {
         let new_state = Receiver { state: WantsInputs { v1, context: self.state.context.clone() } };
-        ReceiverTypeState::WantsInputs(new_state)
+        ReceiveSession::WantsInputs(new_state)
     }
 }
 
@@ -742,13 +741,10 @@ impl Receiver<WantsInputs> {
         )
     }
 
-    pub(crate) fn apply_provisional_proposal(
-        self,
-        v1: v1::ProvisionalProposal,
-    ) -> ReceiverTypeState {
+    pub(crate) fn apply_provisional_proposal(self, v1: v1::ProvisionalProposal) -> ReceiveSession {
         let new_state =
             Receiver { state: ProvisionalProposal { v1, context: self.state.context.clone() } };
-        ReceiverTypeState::ProvisionalProposal(new_state)
+        ReceiveSession::ProvisionalProposal(new_state)
     }
 }
 
@@ -795,10 +791,10 @@ impl Receiver<ProvisionalProposal> {
         )
     }
 
-    pub(crate) fn apply_payjoin_proposal(self, v1: v1::PayjoinProposal) -> ReceiverTypeState {
+    pub(crate) fn apply_payjoin_proposal(self, v1: v1::PayjoinProposal) -> ReceiveSession {
         let new_state =
             Receiver { state: PayjoinProposal { v1, context: self.state.context.clone() } };
-        ReceiverTypeState::PayjoinProposal(new_state)
+        ReceiveSession::PayjoinProposal(new_state)
     }
 }
 

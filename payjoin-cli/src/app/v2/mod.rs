@@ -6,12 +6,12 @@ use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::OptionalTransitionOutcome;
 use payjoin::receive::v2::{
     process_err_res, replay_event_log as replay_receiver_event_log, Initialized, MaybeInputsOwned,
-    MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal, Receiver,
-    ReceiverTypeState, SessionHistory, UncheckedProposal, WantsInputs, WantsOutputs,
+    MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal, ReceiveSession,
+    Receiver, SessionHistory, UncheckedProposal, WantsInputs, WantsOutputs,
 };
 use payjoin::send::v2::{
-    replay_event_log as replay_sender_event_log, Sender, SenderBuilder, SenderTypeState,
-    V2GetContext, WithReplyKey,
+    replay_event_log as replay_sender_event_log, SendSession, Sender, SenderBuilder, V2GetContext,
+    WithReplyKey,
 };
 use payjoin::Uri;
 use tokio::sync::watch;
@@ -81,7 +81,7 @@ impl AppTrait for App {
                     .build_recommended(fee_rate)
                     .save(&persister)?;
 
-                (SenderTypeState::WithReplyKey(sender), persister)
+                (SendSession::WithReplyKey(sender), persister)
             }
         };
         let mut interrupt = self.interrupt.clone();
@@ -114,7 +114,7 @@ impl AppTrait for App {
         println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{}", pj_uri);
 
-        self.process_receiver_session(ReceiverTypeState::Initialized(session.clone()), &persister)
+        self.process_receiver_session(ReceiveSession::Initialized(session.clone()), &persister)
             .await?;
         Ok(())
     }
@@ -173,11 +173,11 @@ impl AppTrait for App {
 impl App {
     async fn process_sender_session(
         &self,
-        session: SenderTypeState,
+        session: SendSession,
         persister: &SenderPersister,
     ) -> Result<()> {
         match session {
-            SenderTypeState::WithReplyKey(context) => {
+            SendSession::WithReplyKey(context) => {
                 // TODO: can we handle the fall back case in `post_original_proposal`. That way we don't have to clone here
                 match self.post_original_proposal(context.clone(), persister).await {
                     Ok(()) => (),
@@ -192,9 +192,9 @@ impl App {
                 }
                 return Ok(());
             }
-            SenderTypeState::V2GetContext(context) =>
+            SendSession::V2GetContext(context) =>
                 self.get_proposed_payjoin_psbt(context, persister).await?,
-            SenderTypeState::ProposalReceived(proposal) => {
+            SendSession::ProposalReceived(proposal) => {
                 self.process_pj_response(proposal.clone())?;
                 return Ok(());
             }
@@ -282,32 +282,32 @@ impl App {
 
     async fn process_receiver_session(
         &self,
-        session: ReceiverTypeState,
+        session: ReceiveSession,
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let res = {
             match session {
-                ReceiverTypeState::Initialized(proposal) =>
+                ReceiveSession::Initialized(proposal) =>
                     self.read_from_directory(proposal, persister).await,
-                ReceiverTypeState::UncheckedProposal(proposal) =>
+                ReceiveSession::UncheckedProposal(proposal) =>
                     self.check_proposal(proposal, persister).await,
-                ReceiverTypeState::MaybeInputsOwned(proposal) =>
+                ReceiveSession::MaybeInputsOwned(proposal) =>
                     self.check_inputs_not_owned(proposal, persister).await,
-                ReceiverTypeState::MaybeInputsSeen(proposal) =>
+                ReceiveSession::MaybeInputsSeen(proposal) =>
                     self.check_no_inputs_seen_before(proposal, persister).await,
-                ReceiverTypeState::OutputsUnknown(proposal) =>
+                ReceiveSession::OutputsUnknown(proposal) =>
                     self.identify_receiver_outputs(proposal, persister).await,
-                ReceiverTypeState::WantsOutputs(proposal) =>
+                ReceiveSession::WantsOutputs(proposal) =>
                     self.commit_outputs(proposal, persister).await,
-                ReceiverTypeState::WantsInputs(proposal) =>
+                ReceiveSession::WantsInputs(proposal) =>
                     self.contribute_inputs(proposal, persister).await,
-                ReceiverTypeState::ProvisionalProposal(proposal) =>
+                ReceiveSession::ProvisionalProposal(proposal) =>
                     self.finalize_proposal(proposal, persister).await,
-                ReceiverTypeState::PayjoinProposal(proposal) =>
+                ReceiveSession::PayjoinProposal(proposal) =>
                     self.send_payjoin_proposal(proposal, persister).await,
-                ReceiverTypeState::Uninitialized(_) =>
+                ReceiveSession::Uninitialized(_) =>
                     return Err(anyhow!("Uninitialized receiver session")),
-                ReceiverTypeState::TerminalFailure =>
+                ReceiveSession::TerminalFailure =>
                     return Err(anyhow!("Terminal receiver session")),
             }
         };

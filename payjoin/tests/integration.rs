@@ -88,7 +88,7 @@ mod integration {
             debug!("Original psbt: {psbt:#?}");
             let (req, ctx) = SenderBuilder::new(psbt, uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
-                .extract_v1();
+                .create_v1_post_request();
             let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************
@@ -153,7 +153,7 @@ mod integration {
             debug!("Original psbt: {psbt:#?}");
             let (req, _ctx) = SenderBuilder::new(psbt, uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
-                .extract_v1();
+                .create_v1_post_request();
             let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************
@@ -213,7 +213,7 @@ mod integration {
                 let mut bad_initializer =
                     Receiver::create_session(mock_address, directory, bad_ohttp_keys, None)
                         .save(&noop_persister)?;
-                let (req, _ctx) = bad_initializer.extract_req(&ohttp_relay)?;
+                let (req, _ctx) = bad_initializer.create_poll_request(&ohttp_relay)?;
                 agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -257,7 +257,7 @@ mod integration {
                     Some(Duration::from_secs(0)),
                 )
                 .save(&recv_noop_persister)?;
-                match expired_receiver.extract_req(&ohttp_relay) {
+                match expired_receiver.create_poll_request(&ohttp_relay) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
                     _ => panic!("Expired receive session should error"),
@@ -271,7 +271,7 @@ mod integration {
                     .build_non_incentivizing(FeeRate::BROADCAST_MIN)
                     .save(&send_noop_persister)?;
 
-                match expired_req_ctx.extract_v2(ohttp_relay) {
+                match expired_req_ctx.create_v2_post_request(ohttp_relay) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
                     _ => panic!("Expired send session should error"),
@@ -316,7 +316,7 @@ mod integration {
                 println!("session: {:#?}", &session);
                 // Poll receive request
                 let ohttp_relay = services.ohttp_relay_url();
-                let (req, ctx) = session.extract_req(&ohttp_relay)?;
+                let (req, ctx) = session.create_poll_request(&ohttp_relay)?;
                 let response = agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -325,7 +325,7 @@ mod integration {
                     .await?;
                 assert!(response.status().is_success(), "error response: {}", response.status());
                 let response_body = session
-                    .process_res(response.bytes().await?.to_vec().as_slice(), ctx)
+                    .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
                     .save(&persister)?;
                 // No proposal yet since sender has not responded
                 assert!(response_body.is_none());
@@ -343,7 +343,7 @@ mod integration {
                     .build_recommended(FeeRate::BROADCAST_MIN)
                     .save(&sender_persister)?;
                 let (Request { url, body, content_type, .. }, _send_ctx) =
-                    req_ctx.extract_v2(ohttp_relay.to_owned())?;
+                    req_ctx.create_v2_post_request(ohttp_relay.to_owned())?;
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -358,7 +358,7 @@ mod integration {
                 // Inside the Receiver:
 
                 // GET fallback psbt
-                let (req, ctx) = session.extract_req(&ohttp_relay)?;
+                let (req, ctx) = session.create_poll_request(&ohttp_relay)?;
                 let response = agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -367,7 +367,7 @@ mod integration {
                     .await?;
                 // POST payjoin
                 let outcome = session
-                    .process_res(response.bytes().await?.to_vec().as_slice(), ctx)
+                    .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
                     .save(&persister)?;
                 let proposal = outcome.success().expect("proposal should exist").clone();
 
@@ -442,7 +442,7 @@ mod integration {
                 println!("session: {:#?}", &session);
                 // Poll receive request
                 let ohttp_relay = services.ohttp_relay_url();
-                let (req, ctx) = session.extract_req(&ohttp_relay)?;
+                let (req, ctx) = session.create_poll_request(&ohttp_relay)?;
                 let response = agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -451,7 +451,7 @@ mod integration {
                     .await?;
                 assert!(response.status().is_success(), "error response: {}", response.status());
                 let response_body = session
-                    .process_res(response.bytes().await?.to_vec().as_slice(), ctx)
+                    .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
                     .save(&recv_persister)?;
                 // No proposal yet since sender has not responded
                 assert!(response_body.is_none());
@@ -469,7 +469,7 @@ mod integration {
                     .build_recommended(FeeRate::BROADCAST_MIN)
                     .save(&send_persister)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
-                    req_ctx.extract_v2(ohttp_relay.to_owned())?;
+                    req_ctx.create_v2_post_request(ohttp_relay.to_owned())?;
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -487,7 +487,7 @@ mod integration {
                 // Inside the Receiver:
 
                 // GET fallback psbt
-                let (req, ctx) = session.extract_req(&ohttp_relay)?;
+                let (req, ctx) = session.create_poll_request(&ohttp_relay)?;
                 let response = agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -496,11 +496,11 @@ mod integration {
                     .await?;
                 // POST payjoin
                 let outcome = session
-                    .process_res(response.bytes().await?.to_vec().as_slice(), ctx)
+                    .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
                     .save(&recv_persister)?;
                 let proposal = outcome.success().expect("proposal should exist").clone();
                 let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None)?;
-                let (req, ctx) = payjoin_proposal.extract_req(&ohttp_relay)?;
+                let (req, ctx) = payjoin_proposal.create_post_request(&ohttp_relay)?;
                 let response = agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -508,15 +508,15 @@ mod integration {
                     .send()
                     .await?;
                 payjoin_proposal
-                    .process_res(&response.bytes().await?, ctx)
+                    .process_response(&response.bytes().await?, ctx)
                     .save(&recv_persister)?;
 
                 // **********************
                 // Inside the Sender:
-                // Sender checks, signs, finalizes, extracts, and broadcasts
+                // Sender checks, signs, finalizes, constructs, and broadcasts
                 // Replay post fallback to get the response
                 let (Request { url, body, content_type, .. }, ohttp_ctx) =
-                    send_ctx.extract_req(ohttp_relay.to_owned())?;
+                    send_ctx.create_poll_request(ohttp_relay.to_owned())?;
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -573,7 +573,7 @@ mod integration {
             let req_ctx = SenderBuilder::new(psbt, pj_uri)
                 .build_recommended(FeeRate::BROADCAST_MIN)
                 .save(&send_persister)?;
-            let (req, ctx) = req_ctx.extract_v1();
+            let (req, ctx) = req_ctx.create_v1_post_request();
             let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************
@@ -584,7 +584,7 @@ mod integration {
 
             // **********************
             // Inside the Sender:
-            // Sender checks, signs, finalizes, extracts, and broadcasts
+            // Sender checks, signs, finalizes, constructs, and broadcasts
             let checked_payjoin_proposal_psbt = ctx.process_response(response.as_bytes())?;
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
@@ -638,7 +638,8 @@ mod integration {
                 let req_ctx = SenderBuilder::new(psbt, pj_uri)
                     .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)
                     .save(&send_persister)?;
-                let (Request { url, body, content_type, .. }, send_ctx) = req_ctx.extract_v1();
+                let (Request { url, body, content_type, .. }, send_ctx) =
+                    req_ctx.create_v1_post_request();
                 log::info!("send fallback v1 to offline receiver fail");
                 let res = agent
                     .post(url.clone())
@@ -657,7 +658,7 @@ mod integration {
                 let receiver_loop = tokio::task::spawn(async move {
                     let agent_clone = agent_clone.clone();
                     let proposal = loop {
-                        let (req, ctx) = session.extract_req(&ohttp_relay)?;
+                        let (req, ctx) = session.create_poll_request(&ohttp_relay)?;
                         let response = agent_clone
                             .post(req.url)
                             .header("Content-Type", req.content_type)
@@ -668,7 +669,7 @@ mod integration {
                         if response.status() == 200 {
                             let proposal = session
                                 .clone()
-                                .process_res(response.bytes().await?.to_vec().as_slice(), ctx)
+                                .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
                                 .save(&recv_persister)?;
                             if let Some(unchecked_proposal) = proposal.success() {
                                 break unchecked_proposal.clone();
@@ -687,7 +688,7 @@ mod integration {
                             .map_err(|e| e.to_string())?;
                     // Respond with payjoin psbt within the time window the sender is willing to wait
                     // this response would be returned as http response to the sender
-                    let (req, ctx) = payjoin_proposal.extract_req(&ohttp_relay)?;
+                    let (req, ctx) = payjoin_proposal.create_post_request(&ohttp_relay)?;
                     let response = agent_clone
                         .post(req.url)
                         .header("Content-Type", req.content_type)
@@ -695,7 +696,7 @@ mod integration {
                         .send()
                         .await?;
                     payjoin_proposal
-                        .process_res(&response.bytes().await?, ctx)
+                        .process_response(&response.bytes().await?, ctx)
                         .save(&recv_persister)
                         .map_err(|e| e.to_string())?;
                     Ok::<_, BoxSendSyncError>(())
@@ -906,7 +907,7 @@ mod integration {
                 // **********************
                 // Inside the Senders + Receiver:
                 // G enerate N different addresses and set up the receiver sessions
-                // Senders will generate a sweep psbt and send PSBT to receiver subdir
+                // Senders will generate a sweep psbt and send PSBT to receiver mailbox
                 for sender in senders.iter() {
                     let address = receiver.get_new_address(None, None)?.assume_checked();
                     let receiver_session = Receiver::create_session(
@@ -921,7 +922,7 @@ mod integration {
                     let req_ctx = MultiPartySenderBuilder::new(psbt.clone(), pj_uri.clone())
                         .build_recommended(FeeRate::BROADCAST_MIN)?;
                     let (Request { url, body, content_type, .. }, send_post_ctx) =
-                        req_ctx.extract_v2(ohttp_relay.to_owned())?;
+                        req_ctx.create_v2_post_request(ohttp_relay.to_owned())?;
                     let response = agent
                         .post(url.clone())
                         .header("Content-Type", content_type)
@@ -948,7 +949,7 @@ mod integration {
                     payjoin::receive::multiparty::UncheckedProposalBuilder::new();
                 for sender_sesssion in inner_sender_test_sessions.iter() {
                     let mut receiver_session = sender_sesssion.receiver_session.clone();
-                    let (req, reciever_ctx) = receiver_session.extract_req(&ohttp_relay)?;
+                    let (req, reciever_ctx) = receiver_session.create_poll_request(&ohttp_relay)?;
                     let response = agent
                         .post(req.url)
                         .header("Content-Type", req.content_type)
@@ -958,7 +959,7 @@ mod integration {
                     assert!(response.status().is_success());
                     let res = response.bytes().await?.to_vec();
                     let proposal = receiver_session
-                        .process_res(&res, reciever_ctx)
+                        .process_response(&res, reciever_ctx)
                         .save(&recv_persister)?
                         .success()
                         .expect("proposal should exist")
@@ -972,7 +973,7 @@ mod integration {
 
                 // Send the payjoin proposals to the senders
                 for mut proposal in multi_sender_payjoin_proposal.sender_iter() {
-                    let (req, ctx) = proposal.extract_req(&ohttp_relay)?;
+                    let (req, ctx) = proposal.create_post_request(&ohttp_relay)?;
                     let response = agent
                         .post(req.url)
                         .header("Content-Type", req.content_type)
@@ -982,7 +983,7 @@ mod integration {
 
                     assert!(response.status().is_success());
                     let res = response.bytes().await?.to_vec();
-                    proposal.process_res(&res, ctx).save(&recv_persister)?;
+                    proposal.process_response(&res, ctx).save(&recv_persister)?;
                 }
 
                 // **********************
@@ -990,7 +991,7 @@ mod integration {
                 for (i, sender_sesssion) in inner_sender_test_sessions.iter().enumerate() {
                     let sender_get_ctx = &sender_sesssion.sender_get_ctx;
                     let (Request { url, body, content_type, .. }, ohttp_response_ctx) =
-                        sender_get_ctx.extract_req(ohttp_relay.to_owned())?;
+                        sender_get_ctx.create_poll_request(ohttp_relay.to_owned())?;
                     let response = agent
                         .post(url.clone())
                         .header("Content-Type", content_type)
@@ -1022,7 +1023,7 @@ mod integration {
                     payjoin::receive::multiparty::FinalizedProposal::new();
                 for sender_sesssion in inner_sender_test_sessions.iter() {
                     let mut receiver_session = sender_sesssion.receiver_session.clone();
-                    let (req, reciever_ctx) = receiver_session.extract_req(&ohttp_relay)?;
+                    let (req, reciever_ctx) = receiver_session.create_poll_request(&ohttp_relay)?;
                     let response = agent
                         .post(req.url)
                         .header("Content-Type", req.content_type)
@@ -1032,7 +1033,7 @@ mod integration {
                     assert!(response.status().is_success());
 
                     let finalized_response = receiver_session
-                        .process_res(response.bytes().await?.to_vec().as_slice(), reciever_ctx)
+                        .process_response(response.bytes().await?.to_vec().as_slice(), reciever_ctx)
                         .save(&recv_persister)?
                         .success()
                         .expect("proposal should exist")
@@ -1183,7 +1184,7 @@ mod integration {
             let max_additional_fee = Amount::from_sat(1000);
             let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)
                 .build_with_additional_fee(max_additional_fee, None, FeeRate::ZERO, false)?
-                .extract_v1();
+                .create_v1_post_request();
             let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************
@@ -1260,7 +1261,7 @@ mod integration {
             log::debug!("Original psbt: {psbt:#?}");
             let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
-                .extract_v1();
+                .create_v1_post_request();
             let headers = HeaderMock::new(&req.body, req.content_type);
 
             // **********************

@@ -211,10 +211,12 @@ pub struct WithReplyKey {
 impl State for WithReplyKey {}
 
 impl Sender<WithReplyKey> {
-    /// Extract serialized V1 Request and Context from a Payjoin Proposal.
-    pub fn extract_v1(&self) -> (Request, v1::V1Context) { self.v1.extract_v1() }
+    /// Construct serialized V1 Request and Context from a Payjoin Proposal
+    pub fn create_v1_post_request(&self) -> (Request, v1::V1Context) {
+        self.v1.create_v1_post_request()
+    }
 
-    /// Extract serialized Request and Context from a Payjoin Proposal.
+    /// Construct serialized Request and Context from a Payjoin Proposal.
     ///
     /// Important: This request must not be retried or reused on failure.
     /// Retransmitting the same ciphertext breaks OHTTP privacy properties.
@@ -223,7 +225,7 @@ impl Sender<WithReplyKey> {
     ///
     /// This method requires the `rs` pubkey to be extracted from the endpoint
     /// and has no fallback to v1.
-    pub fn extract_v2(
+    pub fn create_v2_post_request(
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, V2PostContext), CreateRequestError> {
@@ -396,18 +398,18 @@ pub struct V2GetContext {
 impl State for V2GetContext {}
 
 impl Sender<V2GetContext> {
-    /// Extract an OHTTP Encapsulated HTTP GET request for the Proposal PSBT
-    pub fn extract_req(
+    /// Construct an OHTTP Encapsulated HTTP GET request for the Proposal PSBT
+    pub fn create_poll_request(
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
         let base_url = self.endpoint.clone();
 
-        // TODO unify with receiver's fn subdir_path_from_pubkey
+        // TODO unify with receiver's fn short_id_from_pubkey
         let hash = sha256::Hash::hash(&self.hpke_ctx.reply_pair.public_key().to_compressed_bytes());
-        let subdir: ShortId = hash.into();
+        let mailbox: ShortId = hash.into();
         let url = base_url
-            .join(&subdir.to_string())
+            .join(&mailbox.to_string())
             .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
         let body = encrypt_message_a(
             Vec::new(),
@@ -556,7 +558,7 @@ mod test {
     fn test_extract_v2_success() -> Result<(), BoxError> {
         let sender = create_sender_context()?;
         let ohttp_relay = EXAMPLE_URL.clone();
-        let result = sender.extract_v2(ohttp_relay);
+        let result = sender.create_v2_post_request(ohttp_relay);
         let (request, context) = result.expect("Result should be ok");
         assert!(!request.body.is_empty(), "Request body should not be empty");
         assert_eq!(
@@ -578,7 +580,7 @@ mod test {
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
         ));
         let ohttp_relay = EXAMPLE_URL.clone();
-        let result = sender.extract_v2(ohttp_relay);
+        let result = sender.create_v2_post_request(ohttp_relay);
         assert!(result.is_err(), "Extract v2 expected receiver pubkey error, but it succeeded");
 
         match result {
@@ -596,7 +598,7 @@ mod test {
         sender.v1.endpoint.set_exp(SystemTime::now() + Duration::from_secs(60));
         sender.v1.endpoint.set_receiver_pubkey(HpkeKeyPair::gen_keypair().1);
         let ohttp_relay = EXAMPLE_URL.clone();
-        let result = sender.extract_v2(ohttp_relay);
+        let result = sender.create_v2_post_request(ohttp_relay);
         assert!(result.is_err(), "Extract v2 expected missing ohttp error, but it succeeded");
 
         match result {
@@ -613,7 +615,7 @@ mod test {
         let exp_time = std::time::SystemTime::now();
         sender.v1.endpoint.set_exp(exp_time);
         let ohttp_relay = EXAMPLE_URL.clone();
-        let result = sender.extract_v2(ohttp_relay);
+        let result = sender.create_v2_post_request(ohttp_relay);
         assert!(result.is_err(), "Extract v2 expected expiry error, but it succeeded");
 
         match result {

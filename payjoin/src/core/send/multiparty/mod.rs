@@ -42,7 +42,7 @@ impl Sender {
     /// Retransmitting the same ciphertext breaks OHTTP privacy properties.
     /// The specific concern is that the relay can see that a request is being retried,
     /// which leaks that it's all the same request.
-    pub fn extract_v2(
+    pub fn create_v2_post_request(
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, PostContext), CreateRequestError> {
@@ -127,12 +127,12 @@ pub struct PostContext(v2::V2PostContext);
 pub struct GetContext(v2::Sender<v2::V2GetContext>);
 
 impl GetContext {
-    /// Extract the GET request that will give us the psbt to be finalized
-    pub fn extract_req(
+    /// Construct the GET request that will give us the psbt to be finalized
+    pub fn create_poll_request(
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), crate::send::v2::CreateRequestError> {
-        self.0.extract_req(ohttp_relay)
+        self.0.create_poll_request(ohttp_relay)
     }
 
     /// Process the response from the directory. Provide a closure to finalize the inputs

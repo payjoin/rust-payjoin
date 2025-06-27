@@ -234,8 +234,8 @@ pub struct Sender {
 }
 
 impl Sender {
-    /// Extract serialized V1 Request and Context from a Payjoin Proposal
-    pub fn extract_v1(&self) -> (Request, V1Context) {
+    /// Construct serialized V1 Request and Context from a Payjoin Proposal
+    pub fn create_v1_post_request(&self) -> (Request, V1Context) {
         let url = serialize_url(
             self.endpoint.clone(),
             self.output_substitution,

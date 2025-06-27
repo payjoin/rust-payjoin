@@ -261,7 +261,7 @@ impl V1Context {
     /// Call this method with response from receiver to continue BIP78 flow. If the response is valid you will get appropriate PSBT that you should sign and broadcast.
     pub fn process_response(&self, response: &[u8]) -> Result<String, ResponseError> {
         <payjoin::send::v1::V1Context as Clone>::clone(&self.0.clone())
-            .process_response(response)
+            .process_response(response, None)
             .map(|e| e.to_string())
             .map_err(Into::into)
     }

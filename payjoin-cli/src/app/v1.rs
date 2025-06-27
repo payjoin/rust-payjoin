@@ -29,6 +29,11 @@ use crate::db::Database;
 #[cfg(feature = "_danger-local-https")]
 pub const LOCAL_CERT_FILE: &str = "localhost.der";
 
+/// 4M block size limit with base64 encoding overhead => maximum reasonable size of content-length
+/// 4_000_000 * 4 / 3 fits in u32
+pub const MAX_CONTENT_LENGTH: usize = 4_000_000 * 4 / 3;
+
+#[derive(Clone)]
 struct Headers<'a>(&'a hyper::HeaderMap);
 impl payjoin::receive::v1::Headers for Headers<'_> {
     fn get_header(&self, key: &str) -> Option<&str> {
@@ -88,7 +93,19 @@ impl AppTrait for App {
             "Sent fallback transaction hex: {:#}",
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
         );
-        let psbt = ctx.process_response(&response.bytes().await?).map_err(|e| {
+
+        let content_length = response
+            .headers()
+            .get("content-length")
+            .and_then(|val| val.to_str().ok())
+            .and_then(|s| s.parse::<usize>().ok());
+
+        if content_length.unwrap() > MAX_CONTENT_LENGTH {
+            log::debug!("Error in the size of content length");
+            return Err(anyhow!("Response body is too large: {:?} bytes", content_length));
+        }
+
+        let psbt = ctx.process_response(&response.bytes().await?, content_length).map_err(|e| {
             log::debug!("Error processing response: {e:?}");
             anyhow!("Failed to process response {e}")
         })?;
@@ -276,9 +293,24 @@ impl App {
     ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, ReplyableError> {
         let (parts, body) = req.into_parts();
         let headers = Headers(&parts.headers);
+
+        let content_length = headers
+            .0
+            .get("content-length")
+            .and_then(|val| val.to_str().ok())
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap();
+
+        if content_length > MAX_CONTENT_LENGTH {
+            log::error!("Error in the size of content length");
+            return Err(Implementation(
+                anyhow!("Content length too large: {content_length}").into(),
+            ));
+        };
+
         let query_string = parts.uri.query().unwrap_or("");
         let body = body.collect().await.map_err(|e| Implementation(e.into()))?.to_bytes();
-        let proposal = UncheckedProposal::from_request(&body, query_string, headers)?;
+        let proposal = UncheckedProposal::from_request(&body, query_string, headers.clone())?;
 
         let payjoin_proposal = self.process_v1_proposal(proposal)?;
         let psbt = payjoin_proposal.psbt();

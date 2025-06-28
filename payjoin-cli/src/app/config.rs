@@ -4,7 +4,7 @@ use anyhow::Result;
 use config::builder::DefaultState;
 use config::{ConfigError, File, FileFormat};
 use payjoin::bitcoin::FeeRate;
-use payjoin::core::version::Version;
+use payjoin::Version;
 use serde::Deserialize;
 use url::Url;
 

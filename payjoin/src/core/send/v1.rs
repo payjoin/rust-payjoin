@@ -29,8 +29,7 @@ use url::Url;
 use super::*;
 pub use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
-use crate::request::Request;
-use crate::{PjUri, MAX_CONTENT_LENGTH};
+use crate::{PjUri, Request, MAX_CONTENT_LENGTH};
 
 /// A builder to construct the properties of a `Sender`.
 #[derive(Clone)]

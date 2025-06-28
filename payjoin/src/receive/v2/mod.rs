@@ -281,19 +281,11 @@ impl Receiver<Initialized> {
         let current_state = self.clone();
         let proposal = match self.inner_process_res(body, context) {
             Ok(proposal) => proposal,
-            Err(e) => {
-                // Dir and OHTTP related error are transient
-                // Malformities or invalid responses are considered fatal
-                match e {
-                    Error::ReplyToSender(ReplyableError::Implementation(_)) =>
-                        return MaybeFatalTransitionWithNoResults::transient(e),
-                    _ =>
-                        return MaybeFatalTransitionWithNoResults::fatal(
-                            SessionEvent::SessionInvalid(e.to_string(), None),
-                            e,
-                        ),
-                };
-            }
+            Err(e) =>
+                return MaybeFatalTransitionWithNoResults::fatal(
+                    SessionEvent::SessionInvalid(e.to_string(), None),
+                    e,
+                ),
         };
 
         if let Some(proposal) = proposal {
@@ -917,10 +909,13 @@ pub mod test {
     use std::str::FromStr;
 
     use once_cell::sync::Lazy;
-    use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, SYMMETRIC};
+    use payjoin_test_utils::{
+        BoxError, EXAMPLE_URL, KEM, KEY_ID, PARSED_ORIGINAL_PSBT, QUERY_PARAMS, SYMMETRIC,
+    };
 
     use super::*;
     use crate::persist::NoopSessionPersister;
+    use crate::receive::optional_parameters::Params;
 
     pub(crate) static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
         address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
@@ -949,6 +944,16 @@ pub mod test {
         s: HpkeKeyPair::gen_keypair(),
         e: None,
     });
+
+    pub(crate) fn unchecked_proposal_v2_from_test_vector() -> UncheckedProposal {
+        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
+        let params = Params::from_query_pairs(pairs, &[Version::Two])
+            .expect("Could not parse params from query pairs");
+        UncheckedProposal {
+            v1: v1::UncheckedProposal { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
+            context: SHARED_CONTEXT.clone(),
+        }
+    }
 
     #[test]
     fn test_extract_err_req() -> Result<(), BoxError> {
@@ -982,6 +987,49 @@ pub mod test {
         let internal_error: ReplyableError = InternalPayloadError::MissingPayment.into();
         let (_req, _ctx) =
             extract_err_req(&(&internal_error).into(), &*EXAMPLE_URL, &SHARED_CONTEXT)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_extract_err_req_expiry() -> Result<(), BoxError> {
+        let now = SystemTime::now();
+        let noop_persister = NoopSessionPersister::default();
+        let context = SessionContext {
+            address: SHARED_CONTEXT.address.clone(),
+            directory: SHARED_CONTEXT.directory.clone(),
+            subdirectory: SHARED_CONTEXT.subdirectory.clone(),
+            ohttp_keys: SHARED_CONTEXT.ohttp_keys.clone(),
+            expiry: now,
+            s: SHARED_CONTEXT.s.clone(),
+            e: None,
+        };
+        let receiver = Receiver {
+            state: UncheckedProposal {
+                v1: crate::receive::v1::test::unchecked_proposal_from_test_vector(),
+                context: context.clone(),
+            },
+        };
+
+        let server_error = || {
+            receiver
+                .clone()
+                .check_broadcast_suitability(None, |_| Err("mock error".into()))
+                .save(&noop_persister)
+        };
+
+        let error = server_error().expect_err("expected error");
+        let res = error.api_error().expect("expected api error");
+        let actual_json = JsonReply::from(&res);
+
+        let expiry = extract_err_req(&actual_json, &*EXAMPLE_URL, &context);
+
+        match expiry {
+            Err(error) => assert_eq!(
+                error.to_string(),
+                SessionError::from(InternalSessionError::Expired(now)).to_string()
+            ),
+            Ok(_) => panic!("Expected session expiry error, got success"),
+        }
         Ok(())
     }
 

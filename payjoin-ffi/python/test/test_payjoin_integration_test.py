@@ -93,13 +93,13 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
     
     async def retrieve_receiver_proposal(self, receiver: Initialized, recv_persister: InMemoryReceiverSessionEventLog, ohttp_relay: Url):
         agent = httpx.AsyncClient()
-        request: RequestResponse = receiver.extract_req(ohttp_relay.as_string())
+        request: RequestResponse = receiver.create_poll_request(ohttp_relay.as_string())
         response = await agent.post(
             url=request.request.url.as_string(),
             headers={"Content-Type": request.request.content_type},
             content=request.request.body
         )
-        res = receiver.process_res(response.content, request.client_response).save(recv_persister)
+        res = receiver.process_response(response.content, request.client_response).save(recv_persister)
         if res.is_none():
             return None
         proposal = res.success()
@@ -160,7 +160,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             pj_uri = session.pj_uri()
             psbt = build_sweep_psbt(self.sender, pj_uri)
             req_ctx: WithReplyKey = SenderBuilder(psbt, pj_uri).build_recommended(1000).save(sender_persister)
-            request: RequestV2PostContext = req_ctx.extract_v2(ohttp_relay.as_string())
+            request: RequestV2PostContext = req_ctx.create_v2_post_request(ohttp_relay.as_string())
             response = await agent.post(
                 url=request.request.url.as_string(),
                 headers={"Content-Type": request.request.content_type},
@@ -178,7 +178,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(payjoin_proposal.is_PAYJOIN_PROPOSAL(), True)
 
             payjoin_proposal = payjoin_proposal.inner
-            request: RequestResponse = payjoin_proposal.extract_req(ohttp_relay.as_string())
+            request: RequestResponse = payjoin_proposal.create_post_request(ohttp_relay.as_string())
             response = await agent.post(
                 url=request.request.url.as_string(),
                 headers={"Content-Type": request.request.content_type},
@@ -188,9 +188,9 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
 
             # **********************
             # Inside the Sender:
-            # Sender checks, signs, finalizes, extracts, and broadcasts
+            # Sender checks, signs, finalizes, constructs, and broadcasts
             # Replay post fallback to get the response
-            request: RequestOhttpContext = send_ctx.extract_req(ohttp_relay.as_string())
+            request: RequestOhttpContext = send_ctx.create_poll_request(ohttp_relay.as_string())
             response = await agent.post(
                 url=request.request.url.as_string(),
                 headers={"Content-Type": request.request.content_type},

@@ -208,17 +208,17 @@ impl WithReplyKeyTransition {
 }
 
 impl WithReplyKey {
-    pub fn extract_v1(&self) -> (Request, V1Context) {
-        let (req, ctx) = self.0.clone().extract_v1();
+    pub fn create_v1_post_request(&self) -> (Request, V1Context) {
+        let (req, ctx) = self.0.clone().create_v1_post_request();
         (req.into(), ctx.into())
     }
 
-    /// Extract serialized Request and Context from a Payjoin Proposal.
-    pub fn extract_v2(
+    /// Construct serialized Request and Context from a Payjoin Proposal.
+    pub fn create_v2_post_request(
         &self,
         ohttp_relay: String,
     ) -> Result<(Request, V2PostContext), CreateRequestError> {
-        match self.0.extract_v2(ohttp_relay) {
+        match self.0.create_v2_post_request(ohttp_relay) {
             Ok((req, ctx)) => Ok((req.into(), ctx.into())),
             Err(e) => Err(e.into()),
         }
@@ -353,12 +353,12 @@ impl V2GetContextTransition {
 }
 
 impl V2GetContext {
-    pub fn extract_req(
+    pub fn create_poll_request(
         &self,
         ohttp_relay: String,
     ) -> Result<(Request, ClientResponse), CreateRequestError> {
         self.0
-            .extract_req(ohttp_relay)
+            .create_poll_request(ohttp_relay)
             .map(|(req, ctx)| (req.into(), ctx.into()))
             .map_err(|e| e.into())
     }

@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime};
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
+use bitcoin_uri::Uri;
 pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
 use serde::de::Deserializer;
@@ -909,7 +910,7 @@ pub(crate) fn pj_uri<'a>(
     pj.set_ohttp(session_context.ohttp_keys.clone());
     pj.set_exp(session_context.expiry);
     let extras = PayjoinExtras { endpoint: pj, output_substitution };
-    bitcoin_uri::Uri::with_extras(session_context.address.clone(), extras)
+    Uri::with_extras(session_context.address.clone(), extras)
 }
 
 #[cfg(test)]

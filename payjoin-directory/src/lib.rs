@@ -284,7 +284,7 @@ async fn handle_directory_home_path() -> Result<Response<BoxBody<Bytes, hyper::E
         body {
             background-color: #0f0f0f;
             color: #eaeaea;
-            font-family: 'Courier New', Courier, monospace;
+            font-family:  Manrope, sans-serif;
             padding: 2rem;
             display: flex;
             justify-content: center;
@@ -300,18 +300,26 @@ async fn handle_directory_home_path() -> Result<Response<BoxBody<Bytes, hyper::E
             text-align: center;
         }
         h1 {
-            color: #00aaff;
+            color: black;
+            background-color: #C71585;
             margin-bottom: 1rem;
+            padding: 0.5rem;
+            border-radius: 4px;
         }
         p {
             color: #ccc;
+        }
+        a{
+            color: #F75394;
+            text-decoration: none;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Payjoin Directory</h1>
-        <p>this is a directory used to facilitate asynchronous payments between supporting Bitcoin wallets.</p>
+        <p>This is a mailbox for payjoin transactions, which is used to facilitate asynchronous payments between supporting Bitcoin wallets.</p>
+        <p>Learn more about how the mailbox works here <a href="https://payjoin.org/docs/how-it-works/payjoin-v2-bip-77">Payjoin V2</a></p>
     </div>
 </body>
 </html>

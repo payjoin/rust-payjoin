@@ -902,6 +902,8 @@ pub(crate) fn pj_uri<'a>(
     session_context: &SessionContext,
     output_substitution: OutputSubstitution,
 ) -> crate::PjUri<'a> {
+    use bitcoin_uri::Uri;
+
     use crate::uri::{PayjoinExtras, UrlExt};
     let id = session_context.id();
     let mut pj = subdir(&session_context.directory, &id).clone();
@@ -909,7 +911,7 @@ pub(crate) fn pj_uri<'a>(
     pj.set_ohttp(session_context.ohttp_keys.clone());
     pj.set_exp(session_context.expiry);
     let extras = PayjoinExtras { endpoint: pj, output_substitution };
-    bitcoin_uri::Uri::with_extras(session_context.address.clone(), extras)
+    Uri::with_extras(session_context.address.clone(), extras)
 }
 
 #[cfg(test)]

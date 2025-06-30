@@ -8,6 +8,7 @@ use crate::persist::SessionPersister;
 use crate::receive::v2::{extract_err_req, SessionError};
 use crate::receive::{v1, JsonReply};
 use crate::{ImplementationError, IntoUrl, PjUri, Request, Version};
+use crate::{ImplementationError, IntoUrl, PjUri, Request, Version};
 
 /// Errors that can occur when replaying a receiver event log
 #[derive(Debug)]
@@ -78,16 +79,11 @@ pub struct SessionHistory {
 impl SessionHistory {
     /// Receiver session Payjoin URI
     pub fn pj_uri<'a>(&self) -> Option<PjUri<'a>> {
-        // Find the session context from Created event
         let session_context = self.events.iter().find_map(|event| match event {
             SessionEvent::Created(session_context) => Some(session_context),
             _ => None,
         })?;
-
-        // Default to enabled output substitution
         let mut output_substitution = OutputSubstitution::Enabled;
-
-        // Check if there's an UncheckedProposal event to determine version
         for event in &self.events {
             if let SessionEvent::UncheckedProposal((unchecked_proposal, _)) = event {
                 // If version is v1, disable output substitution
@@ -97,8 +93,6 @@ impl SessionHistory {
                 break;
             }
         }
-
-        // Generate the URI with the appropriate output substitution setting
         Some(crate::receive::v2::pj_uri(session_context, output_substitution))
     }
 

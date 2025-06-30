@@ -23,6 +23,13 @@
 //! 21](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki) request URI.
 //!
 //! [reference implementation](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli)
+//!
+//! OHTTP Privacy Warning
+//! Encapsulated requests whether GET or POST—**must not be retried or reused**.
+//! Retransmitting the same ciphertext (including via automatic retries) breaks the unlinkability and privacy guarantees of OHTTP,
+//! as it allows the relay to correlate requests by comparing ciphertexts.
+//! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
+//! but request reuse makes correlation trivial for the relay.
 
 use std::cmp::{max, min};
 use std::collections::BTreeMap;

@@ -232,18 +232,6 @@ impl Initialized {
         .pj_uri()
         .into()
     }
-
-    pub fn to_json(&self) -> Result<String, SerdeJsonError> {
-        serde_json::to_string(&self.0).map_err(Into::into)
-    }
-
-    pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
-        serde_json::from_str::<payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>>(
-            json,
-        )
-        .map_err(Into::into)
-        .map(Into::into)
-    }
 }
 
 #[derive(Clone)]

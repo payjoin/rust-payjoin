@@ -254,13 +254,6 @@ impl WithReplyKey {
         let post_ctx = guard.take().expect("Value should not be taken");
         WithReplyKeyTransition(self.0.process_response(response, post_ctx.into()))
     }
-
-    pub fn to_json(&self) -> Result<String, SerdeJsonError> { self.0.to_json() }
-
-    #[uniffi::constructor]
-    pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
-        super::WithReplyKey::from_json(json).map(Into::into)
-    }
 }
 
 #[derive(uniffi::Record)]

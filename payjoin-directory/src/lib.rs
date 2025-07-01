@@ -15,10 +15,11 @@ use tracing::{debug, error, trace, warn};
 pub use crate::db::DbPool;
 pub mod key_config;
 pub use crate::key_config::*;
-
+use crate::metrics::Metrics;
 pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
 pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
+pub const DEFAULT_METRIC_PORT: u16 = 9090;
 
 const CHACHA20_POLY1305_NONCE_LEN: usize = 32; // chacha20poly1305 n_k
 const POLY1305_TAG_SIZE: usize = 16;
@@ -31,6 +32,8 @@ const V1_REJECT_RES_JSON: &str =
 const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message": "V2 receiver offline. V1 sends require synchronous communications."}}"#;
 
 mod db;
+
+pub mod metrics;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -56,6 +59,7 @@ fn init_tls_acceptor(cert_key: (Vec<u8>, Vec<u8>)) -> Result<tokio_rustls::TlsAc
 pub struct Service {
     pool: DbPool,
     ohttp: ohttp::Server,
+    metrics: Metrics,
 }
 
 impl hyper::service::Service<Request<Incoming>> for Service {
@@ -67,13 +71,16 @@ impl hyper::service::Service<Request<Incoming>> for Service {
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         let pool = self.pool.clone();
         let ohttp = self.ohttp.clone();
-        let this = Service::new(pool, ohttp);
+        let metrics = self.metrics.clone();
+        let this = Service::new(pool, ohttp, metrics);
         Box::pin(async move { this.serve_request(req).await })
     }
 }
 
 impl Service {
-    pub fn new(pool: DbPool, ohttp: ohttp::Server) -> Self { Self { pool, ohttp } }
+    pub fn new(pool: DbPool, ohttp: ohttp::Server, metrics: Metrics) -> Self {
+        Self { pool, ohttp, metrics }
+    }
 
     #[cfg(feature = "_manual-tls")]
     pub async fn serve_tls(
@@ -88,6 +95,7 @@ impl Service {
             let tls_acceptor = tls_acceptor.clone();
             let service = self.clone();
             tokio::spawn(async move {
+                service.metrics.record_connection();
                 let tls_stream = match tls_acceptor.accept(stream).await {
                     Ok(tls_stream) => tls_stream,
                     Err(e) => {
@@ -112,6 +120,7 @@ impl Service {
             let io = TokioIo::new(stream);
             let service = self.clone();
             tokio::spawn(async move {
+                service.metrics.record_connection();
                 if let Err(err) =
                     http1::Builder::new().serve_connection(io, service).with_upgrades().await
                 {
@@ -143,6 +152,7 @@ impl Service {
             (Method::POST, ["", id]) => self.post_fallback_v1(id, query, body).await,
             (Method::GET, ["", "health"]) => health_check().await,
             (Method::GET, ["", ""]) => handle_directory_home_path().await,
+            (Method::GET, ["", "metrics"]) => Ok(self.handle_metrics().await),
             _ => Ok(not_found()),
         }
         .unwrap_or_else(|e| e.to_response());
@@ -349,6 +359,24 @@ impl Service {
 
         res
     }
+    async fn handle_metrics(&self) -> Response<BoxBody<Bytes, hyper::Error>> {
+        match self.metrics.generate_metrics() {
+            Ok(metrics_data) => {
+                let mut response = Response::new(full(metrics_data));
+                response.headers_mut().insert(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("text/plain; version=0.0.4; charset=utf-8"),
+                );
+                response
+            }
+            Err(e) => {
+                error!("failed to generate metrics: {}", e);
+                let mut response = Response::new(full("Error generating metrics"));
+                *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                response
+            }
+        }
+    }
 }
 
 fn handle_peek(
@@ -490,4 +518,23 @@ fn empty() -> BoxBody<Bytes, hyper::Error> {
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into()).map_err(|never| match never {}).boxed()
+}
+
+pub async fn serve_metrics_tcp(
+    service: Service,
+    listener: tokio::net::TcpListener,
+) -> Result<(), BoxError> {
+    while let Ok((stream, _)) = listener.accept().await {
+        let io = TokioIo::new(stream);
+        let service = service.clone();
+        tokio::spawn(async move {
+            if let Err(err) =
+                http1::Builder::new().serve_connection(io, service).with_upgrades().await
+            {
+                error!("Error serving connection: {:?}", err);
+            }
+        });
+    }
+
+    Ok(())
 }

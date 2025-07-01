@@ -318,8 +318,8 @@ async fn handle_directory_home_path() -> Result<Response<BoxBody<Bytes, hyper::E
 <body>
     <div class="container">
         <h1>Payjoin Directory</h1>
-        <p>This is a mailbox for payjoin transactions, which is used to facilitate asynchronous payments between supporting Bitcoin wallets.</p>
-        <p>Learn more about how the mailbox works here <a href="https://payjoin.org/docs/how-it-works/payjoin-v2-bip-77">Payjoin V2</a></p>
+        <p>The Payjoin Directory provides a rendezvous point for sender and receiver to meet. The directory stores Payjoin payloads to support asynchronous communication.</p>
+        <p>Learn more about how asynchronous payjoin works here: <a href="https://payjoin.org/docs/how-it-works/payjoin-v2-bip-77">Payjoin V2</a></p>
     </div>
 </body>
 </html>

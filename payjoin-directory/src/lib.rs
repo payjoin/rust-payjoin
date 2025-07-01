@@ -185,6 +185,7 @@ async fn serve_payjoin_directory(
         (Method::GET, ["", "ohttp-keys"]) => get_ohttp_keys(&ohttp).await,
         (Method::POST, ["", id]) => post_fallback_v1(id, query, body, pool).await,
         (Method::GET, ["", "health"]) => health_check().await,
+        (Method::GET, ["", ""]) => handle_directory_home_path().await,
         _ => Ok(not_found()),
     }
     .unwrap_or_else(|e| e.to_response());
@@ -265,6 +266,67 @@ async fn handle_v2(
 
 async fn health_check() -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
     Ok(Response::new(empty()))
+}
+
+async fn handle_directory_home_path() -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError>
+{
+    let mut res = Response::new(empty());
+    *res.status_mut() = StatusCode::OK;
+    res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/html"));
+
+    let html = r#"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Payjoin Directory</title>
+    <style>
+        body {
+            background-color: #0f0f0f;
+            color: #eaeaea;
+            font-family:  Manrope, sans-serif;
+            padding: 2rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .container {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 2rem;
+            box-shadow: 0 0 10px rgba(0, 170, 255, 0.2);
+            text-align: center;
+        }
+        h1 {
+            color: black;
+            background-color: #C71585;
+            margin-bottom: 1rem;
+            padding: 0.5rem;
+            border-radius: 4px;
+        }
+        p {
+            color: #ccc;
+        }
+        a{
+            color: #F75394;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Payjoin Directory</h1>
+        <p>The Payjoin Directory provides a rendezvous point for sender and receiver to meet. The directory stores Payjoin payloads to support asynchronous communication.</p>
+        <p>Learn more about how asynchronous payjoin works here: <a href="https://payjoin.org/docs/how-it-works/payjoin-v2-bip-77">Payjoin V2</a></p>
+    </div>
+</body>
+</html>
+"#;
+
+    *res.body_mut() = full(html);
+    Ok(res)
 }
 
 #[derive(Debug)]

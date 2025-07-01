@@ -9,7 +9,7 @@ use crate::uri::error::IntoUrlError;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
-pub enum Error {
+pub enum ReceiverError {
     /// Errors that can be replied to the sender
     #[error("Replyable error: {0}")]
     ReplyToSender(Arc<ReplyableError>),
@@ -24,12 +24,14 @@ pub enum Error {
     Unexpected,
 }
 
-impl From<receive::Error> for Error {
+impl From<receive::Error> for ReceiverError {
     fn from(value: receive::Error) -> Self {
+        use ReceiverError::*;
+
         match value {
-            receive::Error::ReplyToSender(e) => Error::ReplyToSender(Arc::new(ReplyableError(e))),
-            receive::Error::V2(e) => Error::V2(Arc::new(SessionError(e))),
-            _ => Error::Unexpected,
+            receive::Error::ReplyToSender(e) => ReplyToSender(Arc::new(ReplyableError(e))),
+            receive::Error::V2(e) => V2(Arc::new(SessionError(e))),
+            _ => Unexpected,
         }
     }
 }
@@ -41,7 +43,7 @@ impl From<receive::Error> for Error {
 pub enum ReceiverPersistedError {
     /// rust-payjoin receiver error
     #[error(transparent)]
-    Receiver(Error),
+    Receiver(ReceiverError),
     /// Storage error that could occur at application storage layer
     #[error(transparent)]
     Storage(Arc<ImplementationError>),
@@ -69,21 +71,21 @@ macro_rules! impl_persisted_error_from {
                 if let Some(api_err) = err.api_error() {
                     return ReceiverPersistedError::Receiver($receiver_arm(api_err));
                 }
-                ReceiverPersistedError::Receiver(Error::Unexpected)
+                ReceiverPersistedError::Receiver(ReceiverError::Unexpected)
             }
         }
     };
 }
 
 impl_persisted_error_from!(receive::ReplyableError, |api_err: receive::ReplyableError| {
-    Error::ReplyToSender(Arc::new(api_err.into()))
+    ReceiverError::ReplyToSender(Arc::new(api_err.into()))
 });
 
 impl_persisted_error_from!(receive::Error, |api_err: receive::Error| api_err.into());
 
-impl_persisted_error_from!(payjoin::IntoUrlError, |api_err: payjoin::IntoUrlError| Error::IntoUrl(
-    Arc::new(api_err.into())
-));
+impl_persisted_error_from!(payjoin::IntoUrlError, |api_err: payjoin::IntoUrlError| {
+    ReceiverError::IntoUrl(Arc::new(api_err.into()))
+});
 
 /// The replyable error type for the payjoin receiver, representing failures need to be
 /// returned to the sender.

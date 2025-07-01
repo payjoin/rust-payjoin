@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 pub use error::{
-    Error, InputContributionError, JsonReply, OutputSubstitutionError, PsbtInputError,
+    InputContributionError, JsonReply, OutputSubstitutionError, PsbtInputError, ReceiverError,
     ReplyableError, SelectionError, SessionError,
 };
 use payjoin::bitcoin::psbt::Psbt;
@@ -157,7 +157,10 @@ pub struct InitializedTransition(
 );
 
 impl InitializedTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<InitializedTransitionOutcome, ReceiverPersistedError>
+    pub fn save<P>(
+        &self,
+        persister: &P,
+    ) -> Result<InitializedTransitionOutcome, ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -209,7 +212,10 @@ impl
 }
 
 impl Initialized {
-    pub fn extract_req(&self, ohttp_relay: String) -> Result<(Request, ClientResponse), Error> {
+    pub fn extract_req(
+        &self,
+        ohttp_relay: String,
+    ) -> Result<(Request, ClientResponse), ReceiverError> {
         self.0
             .clone()
             .extract_req(ohttp_relay)
@@ -568,7 +574,9 @@ impl WantsOutputsTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string()))))?;
+        let res = value.save(persister).map_err(|e| {
+            ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
+        })?;
         Ok(res.into())
     }
 }
@@ -639,7 +647,9 @@ impl WantsInputsTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string()))))?;
+        let res = value.save(persister).map_err(|e| {
+            ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
+        })?;
         Ok(res.into())
     }
 }
@@ -833,7 +843,10 @@ impl PayjoinProposal {
     }
 
     /// Extract an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
-    pub fn extract_req(&self, ohttp_relay: String) -> Result<(Request, ClientResponse), Error> {
+    pub fn extract_req(
+        &self,
+        ohttp_relay: String,
+    ) -> Result<(Request, ClientResponse), ReceiverError> {
         self.0
             .clone()
             .extract_req(ohttp_relay)

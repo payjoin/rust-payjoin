@@ -33,7 +33,9 @@ impl From<payjoin::send::v2::SendSession> for SendSession {
     fn from(value: payjoin::send::v2::SendSession) -> Self { Self(value) }
 }
 
-pub fn replay_event_log<P>(persister: &P) -> Result<(SendSession, SessionHistory), SenderReplayError>
+pub fn replay_event_log<P>(
+    persister: &P,
+) -> Result<(SendSession, SessionHistory), SenderReplayError>
 where
     P: SessionPersister + Clone,
     P::SessionEvent: Into<payjoin::send::v2::SessionEvent> + Clone,
@@ -69,12 +71,17 @@ impl InitInputsTransition {
     where
         P: SessionPersister<SessionEvent = payjoin::send::v2::SessionEvent>,
     {
-        let mut inner =
-            self.0.write().map_err(|_| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Lock poisoned".to_string()))))?;
+        let mut inner = self.0.write().map_err(|_| {
+            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
+                "Lock poisoned".to_string(),
+            )))
+        })?;
 
-        let value = inner
-            .take()
-            .ok_or_else(|| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Already saved or moved".to_string()))))?;
+        let value = inner.take().ok_or_else(|| {
+            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
+                "Already saved or moved".to_string(),
+            )))
+        })?;
 
         let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
         Ok(res.into())
@@ -195,12 +202,17 @@ impl WithReplyKeyTransition {
     where
         P: SessionPersister<SessionEvent = payjoin::send::v2::SessionEvent>,
     {
-        let mut inner =
-            self.0.write().map_err(|_| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Lock poisoned".to_string()))))?;
+        let mut inner = self.0.write().map_err(|_| {
+            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
+                "Lock poisoned".to_string(),
+            )))
+        })?;
 
-        let value = inner
-            .take()
-            .ok_or_else(|| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Already saved or moved".to_string()))))?;
+        let value = inner.take().ok_or_else(|| {
+            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
+                "Already saved or moved".to_string(),
+            )))
+        })?;
 
         let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
         Ok(res.into())
@@ -287,9 +299,7 @@ impl V2GetContextTransitionOutcome {
 
     pub fn is_success(&self) -> bool { self.0.is_success() }
 
-    pub fn success(&self) -> Option<Psbt> {
-        self.0.success().map(|r| r.clone().into())
-    }
+    pub fn success(&self) -> Option<Psbt> { self.0.success().map(|r| r.clone().into()) }
 }
 
 impl
@@ -326,16 +336,24 @@ pub struct V2GetContextTransition(
 );
 
 impl V2GetContextTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<V2GetContextTransitionOutcome, SenderPersistedError>
+    pub fn save<P>(
+        &self,
+        persister: &P,
+    ) -> Result<V2GetContextTransitionOutcome, SenderPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::send::v2::SessionEvent>,
     {
-        let mut inner =
-            self.0.write().map_err(|_| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Lock poisoned".to_string()))))?;
+        let mut inner = self.0.write().map_err(|_| {
+            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
+                "Lock poisoned".to_string(),
+            )))
+        })?;
 
-        let value = inner
-            .take()
-            .ok_or_else(|| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Already saved or moved".to_string()))))?;
+        let value = inner.take().ok_or_else(|| {
+            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
+                "Already saved or moved".to_string(),
+            )))
+        })?;
 
         let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
         Ok(res.into())

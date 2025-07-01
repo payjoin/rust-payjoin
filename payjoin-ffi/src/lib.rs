@@ -12,7 +12,7 @@ pub mod send;
 pub mod test_utils;
 pub mod uri;
 
-pub use payjoin::persist::{NoopSessionPersister};
+pub use payjoin::persist::NoopSessionPersister;
 
 pub use crate::bitcoin_ffi::*;
 pub use crate::ohttp::*;

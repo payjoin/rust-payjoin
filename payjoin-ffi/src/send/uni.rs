@@ -2,12 +2,12 @@ use std::sync::{Arc, RwLock};
 
 use bitcoin_ffi::Psbt;
 
-use crate::{error::ForeignError, Url};
+use crate::error::ForeignError;
 use crate::send::error::{SenderPersistedError, SenderReplayError};
 pub use crate::send::{
     BuildSenderError, CreateRequestError, EncapsulationError, ResponseError, SerdeJsonError,
 };
-use crate::{ClientResponse, PjUri, Request};
+use crate::{ClientResponse, PjUri, Request, Url};
 
 #[derive(uniffi::Object, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SenderSessionEvent(super::SessionEvent);
@@ -71,12 +71,12 @@ impl From<SenderSessionHistory> for super::SessionHistory {
 #[uniffi::export]
 impl SenderSessionHistory {
     pub fn endpoint(&self) -> Option<Arc<Url>> {
-        self.0.0.endpoint().map(|url| Arc::new(url.clone().into()))
+        self.0 .0.endpoint().map(|url| Arc::new(url.clone().into()))
     }
 
     /// Fallback transaction from the session if present
     pub fn fallback_tx(&self) -> Option<Arc<crate::Transaction>> {
-        self.0.0.fallback_tx().map(|tx| Arc::new(tx.into()))
+        self.0 .0.fallback_tx().map(|tx| Arc::new(tx.into()))
     }
 }
 
@@ -98,7 +98,8 @@ pub fn replay_sender_event_log(
     persister: Arc<dyn JsonSenderSessionPersister>,
 ) -> Result<SenderReplayResult, SenderReplayError> {
     let adapter = CallbackPersisterAdapter::new(persister);
-    let (state, session_history) = super::replay_event_log(&adapter).map_err(SenderReplayError::from)?;
+    let (state, session_history) =
+        super::replay_event_log(&adapter).map_err(SenderReplayError::from)?;
     Ok(SenderReplayResult { state: state.into(), session_history: session_history.into() })
 }
 
@@ -312,9 +313,7 @@ impl V2GetContextTransitionOutcome {
 
     pub fn is_success(&self) -> bool { self.0.is_success() }
 
-    pub fn success(&self) -> Option<Arc<Psbt>> {
-        self.0.success().map(|p| p.into())
-    }
+    pub fn success(&self) -> Option<Arc<Psbt>> { self.0.success().map(|p| p.into()) }
 }
 
 #[derive(uniffi::Object)]

@@ -1,3 +1,29 @@
+
+## [0.24.0]
+
+### Session Persister
+
+- Update to payjoin-0.24.0
+- Replace PersisterTrait with SessionPersister Trait [#750](https://github.com/payjoin/rust-payjoin/pull/750) [#789](https://github.com/payjoin/rust-payjoin/pull/789)
+- 0.24 name audit [#803](https://github.com/payjoin/rust-payjoin/pull/803), [#810](https://github.com/payjoin/rust-payjoin/pull/810)
+- Sender Session Events [#777](https://github.com/payjoin/rust-payjoin/pull/777)
+- Receiver Session Events [#760](https://github.com/payjoin/rust-payjoin/pull/760)
+- Replace Persister with SessionPersister for v2 Sender [#789](https://github.com/payjoin/rust-payjoin/pull/789)
+- Expose fallback tx off receiver session history [#799](https://github.com/payjoin/rust-payjoin/pull/799)
+- Sender session history fallback [#805](https://github.com/payjoin/rust-payjoin/pull/805)
+- Remove storage error wrapper [#781](https://github.com/payjoin/rust-payjoin/pull/781)
+- Move extract_fallback_tx to MaybeInputsOwned [#801](https://github.com/payjoin/rust-payjoin/pull/801)
+
+### Misc.
+
+- Fix setup.py BIP number typo in description [#709](https://github.com/payjoin/rust-payjoin/pull/709)
+- Remove unused Python callback classes [#725](https://github.com/payjoin/rust-payjoin/pull/725)
+- README fixes [#732](https://github.com/payjoin/rust-payjoin/pull/732)
+- Update links to reference BIP-77 document [#733](https://github.com/payjoin/rust-payjoin/pull/733)
+- Remove unused imports in python int. tests [#779](https://github.com/payjoin/rust-payjoin/pull/779)
+- Propagate error on loading Receiver [#720](https://github.com/payjoin/rust-payjoin/pull/720)
+- Upgrade setuptools [#704](https://github.com/payjoin/rust-payjoin/pull/704)
+
 ## [0.23.0]
 
 - Update to payjoin-0.23.0

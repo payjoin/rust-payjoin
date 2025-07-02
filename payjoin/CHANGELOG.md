@@ -1,5 +1,51 @@
 # Payjoin Changelog
 
+## 0.24.0
+
+Introduce the Session Event Log for Session Replay
+
+Selected Improvements:
+
+### Introduce Granualar event-based session log for replay
+
+- Alter receiver session as_ref assert and persist::Value import for ReceiverToken (#658)
+- Add SessionPersister trait (#716)
+- Sender generic over typestate (#728)
+- Make Receiver generic over its typestate (#719)
+- Receiver Session Events (#760)
+- Export `InMemoryTestPersister` under `_test-utils` (#761)
+- Capture hpke reply key in session event (#762)
+- Sender Session Events (#777)
+- Replace Persister with SessionPersister for v2 Sender (#789)
+- Persistence follow ups (#638)
+- Expose fallback tx off receiver session history (#799)
+- Sender session history fallback (#805)
+- 0.24 name audit (#803, #810)
+
+
+### Better ergonomics
+
+- Introduce constructors for SegWit input pairs (#712)
+- Introduce constructors for legacy input pairs (#753)
+
+
+### Organize for readability
+
+- Update README title and add logo & badges (#665)
+- Move persist sub module to root module (#656)
+- Remove rust docs reference to non-existent method (#655)
+- Introduce Payjoin version enum (#668)
+- Use IntoUrl for ohttp_relay argument (#692)
+- Dedupe ImplementationError (#669)
+- Clean up re-exports (#746)
+
+
+### Various Operational improvements
+
+- Randomly pad OHTTP requests (#715)
+- Limit response sizes for v1 (#586)
+
+
 ## 0.23.0
 
 - Make features additive [#430](https://github.com/payjoin/rust-payjoin/pull/430) [#466](https://github.com/payjoin/rust-payjoin/pull/466) [#501](https://github.com/payjoin/rust-payjoin/pull/501) [#518](https://github.com/payjoin/rust-payjoin/pull/518) 

@@ -214,6 +214,10 @@ impl WithReplyKey {
     }
 
     /// Extract serialized Request and Context from a Payjoin Proposal.
+    ///
+    /// Important: This request must not be retried or reused on failure.
+    /// Retransmitting the same ciphertext breaks OHTTP privacy properties.
+    /// The specific concern is that the relay can see that a request is being retried.
     pub fn extract_v2(
         &self,
         ohttp_relay: String,
@@ -235,16 +239,6 @@ impl WithReplyKey {
         WithReplyKeyTransition(Arc::new(RwLock::new(Some(
             self.clone().0.process_response(response, post_ctx.into()),
         ))))
-    }
-
-    pub fn to_json(&self) -> Result<String, SerdeJsonError> {
-        serde_json::to_string(&self.0).map_err(Into::into)
-    }
-
-    pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
-        serde_json::from_str::<payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>>(json)
-            .map_err(Into::into)
-            .map(Into::into)
     }
 }
 

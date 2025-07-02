@@ -20,6 +20,13 @@
 //! [`nolooking`](https://github.com/chaincase-app/nolooking) for LND, or
 //! [`bitmask-core`](https://github.com/diba-io/bitmask-core) BDK integration. Bring your own
 //! wallet and http client.
+//!
+//! OHTTP Privacy Warning
+//! Encapsulated requests whether GET or POST—**must not be retried or reused**.
+//! Retransmitting the same ciphertext (including via automatic retries) breaks the unlinkability and privacy guarantees of OHTTP,
+//! as it allows the relay to correlate requests by comparing ciphertexts.
+//! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
+//! but request reuse makes correlation trivial for the relay.
 
 use bitcoin::hashes::{sha256, Hash};
 pub use error::{CreateRequestError, EncapsulationError};
@@ -206,10 +213,15 @@ pub struct WithReplyKey {
 impl State for WithReplyKey {}
 
 impl Sender<WithReplyKey> {
-    /// Extract serialized V1 Request and Context from a Payjoin Proposal
+    /// Extract serialized V1 Request and Context from a Payjoin Proposal.
     pub fn extract_v1(&self) -> (Request, v1::V1Context) { self.v1.extract_v1() }
 
     /// Extract serialized Request and Context from a Payjoin Proposal.
+    ///
+    /// Important: This request must not be retried or reused on failure.
+    /// Retransmitting the same ciphertext breaks OHTTP privacy properties.
+    /// The specific concern is that the relay can see that a request is being retried,
+    /// which leaks that it's all the same request.
     ///
     /// This method requires the `rs` pubkey to be extracted from the endpoint
     /// and has no fallback to v1.

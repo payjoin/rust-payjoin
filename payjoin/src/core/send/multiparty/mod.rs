@@ -38,6 +38,10 @@ impl<'a> SenderBuilder<'a> {
 pub struct Sender(v2::Sender<v2::WithReplyKey>);
 
 impl Sender {
+    /// Important: This request must not be retried or reused on failure.
+    /// Retransmitting the same ciphertext breaks OHTTP privacy properties.
+    /// The specific concern is that the relay can see that a request is being retried,
+    /// which leaks that it's all the same request.
     pub fn extract_v2(
         &self,
         ohttp_relay: impl IntoUrl,

@@ -229,6 +229,11 @@ impl WithReplyKey {
 
     /// Extract serialized Request and Context from a Payjoin Proposal.
     ///
+    /// Important: This request must not be retried or reused on failure.
+    /// Retransmitting the same ciphertext breaks OHTTP privacy properties.
+    /// The specific concern is that the relay can see that a request is being retried,
+    /// which leaks that it's all the same request.
+    ///
     /// This method requires the `rs` pubkey to be extracted from the endpoint
     /// and has no fallback to v1.
     pub fn extract_v2(
@@ -253,13 +258,6 @@ impl WithReplyKey {
         let mut guard = post_ctx.0.write().expect("Lock should not be poisoned");
         let post_ctx = guard.take().expect("Value should not be taken");
         WithReplyKeyTransition(self.0.process_response(response, post_ctx.into()))
-    }
-
-    pub fn to_json(&self) -> Result<String, SerdeJsonError> { self.0.to_json() }
-
-    #[uniffi::constructor]
-    pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
-        super::WithReplyKey::from_json(json).map(Into::into)
     }
 }
 

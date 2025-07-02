@@ -1,5 +1,11 @@
 # payjoin-directory Changelog
 
+## 0.0.3
+
+- Update links to reference BIP-77 document [#733](https://github.com/payjoin/rust-payjoin/pull/733)
+- Fix uninline format clippy violations [#667](https://github.com/payjoin/rust-payjoin/pull/667)
+- Serve a page on / for payjoin-directory [#824](https://github.com/payjoin/rust-payjoin/pull/824)
+
 ## 0.0.2
 
 - Do not log ERROR on directory validation errors [#628](https://github.com/payjoin/rust-payjoin/pull/628)

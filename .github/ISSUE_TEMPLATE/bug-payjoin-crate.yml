@@ -1,0 +1,83 @@
+name: payjoin crate bug report
+description: Submit a new bug report for the payjoin crate
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## This issue tracker is only for technical issues related to the [payjoin](https://github.com/payjoin/rust-payjoin/tree/master/payjoin) crate.
+
+        ## Bugs for all other crates should [this template](./bug-general.yml).
+
+        ----
+  - type: checkboxes
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search to see if an issue already exists for the bug you encountered.
+      options:
+        - label: I have searched the existing issues
+          required: true
+  - type: checkboxes
+    attributes:
+      label: Are you using payjoin-ffi?
+      options:
+        - label: Yes I am
+          required: false
+  - type: dropdown
+    attributes:
+      label: If so, which host language?
+      multiple: false
+      options:
+        - python
+        - other
+    validations:
+      required: false
+  - type: textarea
+    id: features
+    attributes:
+      label: Did you enable any features on the crate?
+      description: e.g. `v2`
+    validations:
+      required: false
+  - type: input
+    id: pdk-version
+    attributes:
+      label: What version of the payjoin crate are you using?
+      description: Check your respective package manager file to see which version you have installed.
+      placeholder: e.g. payjoin-0.23.0 or master@ceef77b
+    validations:
+      required: true
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current behavior
+      description: Tell us what went wrong
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: Tell us what you expected to happen
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Tell us how to reproduce your bug. Please attach related screenshots if necessary.
+        * Run-time or compile-time configuration options
+        * Actions taken
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: |
+        Please copy and paste any relevant log output. This can be enabled by prefixing `RUST_LOG=debug cargo run ...`
+
+        Please be aware that the log might contain personally identifying information.
+    validations:
+      required: false

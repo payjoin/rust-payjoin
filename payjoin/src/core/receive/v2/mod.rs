@@ -16,6 +16,13 @@
 //! See the typestate and function documentation on how to proceed through the receiver protocol
 //! flow.
 //!
+//! OHTTP Privacy Warning
+//! Encapsulated requests whether GET or POST—**must not be retried or reused**.
+//! Retransmitting the same ciphertext (including via automatic retries) breaks the unlinkability and privacy guarantees of OHTTP,
+//! as it allows the relay to correlate requests by comparing ciphertexts.
+//! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
+//! but request reuse makes correlation trivial for the relay.
+//!
 //! For more information on Payjoin v2, see [BIP 77: Async Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md).
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};

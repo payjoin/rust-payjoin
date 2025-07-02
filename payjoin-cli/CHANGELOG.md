@@ -1,5 +1,18 @@
 # payjoin-cli Changelog
 
+## 0.2.0
+
+- Support sender and receiver being generic over their typestate ([#728](https://github.com/payjoin/rust-payjoin/pull/728), [#719](https://github.com/payjoin/rust-payjoin/pull/719))
+- Remove existing persistence strategy and replace with new SessionPersister trait ([#789](https://github.com/payjoin/rust-payjoin/pull/789), [#750](https://github.com/payjoin/rust-payjoin/pull/750))
+- Update references to BIP-77 ([#733](https://github.com/payjoin/rust-payjoin/pull/733))
+- Rename RelayState to RelayManager for clarity ([#727](https://github.com/payjoin/rust-payjoin/pull/727))
+- Refactor config to use proc macros over builder ([#703](https://github.com/payjoin/rust-payjoin/pull/703))
+- Create fallback ohttp-relay logic for payjoin-cli ([#607](https://github.com/payjoin/rust-payjoin/pull/607))
+- Separate v2 cli logic into mod and ohttp components ([#714](https://github.com/payjoin/rust-payjoin/pull/714))
+- Update Nigiri instructions ([#691](https://github.com/payjoin/rust-payjoin/pull/691), [#682](https://github.com/payjoin/rust-payjoin/pull/682))
+- Dedupe ImplementationError ([#669](https://github.com/payjoin/rust-payjoin/pull/669))
+- Add Quick Start, Configuration, Reference to CLI README ([#624](https://github.com/payjoin/rust-payjoin/pull/624))
+
 ## 0.1.0
 
 - Bump payjoin to 0.23.0 with stable wire protocol

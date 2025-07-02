@@ -405,7 +405,7 @@ impl Receiver<Initialized> {
         let new_state = Receiver {
             state: UncheckedProposal {
                 v1: event,
-                context: SessionContext { e: reply_key, ..self.state.context.clone() },
+                context: SessionContext { e: reply_key, ..self.state.context },
             },
         };
 
@@ -478,8 +478,7 @@ impl Receiver<UncheckedProposal> {
     }
 
     pub(crate) fn apply_maybe_inputs_owned(self, v1: v1::MaybeInputsOwned) -> ReceiveSession {
-        let new_state =
-            Receiver { state: MaybeInputsOwned { v1, context: self.state.context.clone() } };
+        let new_state = Receiver { state: MaybeInputsOwned { v1, context: self.state.context } };
         ReceiveSession::MaybeInputsOwned(new_state)
     }
 }
@@ -531,8 +530,7 @@ impl Receiver<MaybeInputsOwned> {
     }
 
     pub(crate) fn apply_maybe_inputs_seen(self, v1: v1::MaybeInputsSeen) -> ReceiveSession {
-        let new_state =
-            Receiver { state: MaybeInputsSeen { v1, context: self.state.context.clone() } };
+        let new_state = Receiver { state: MaybeInputsSeen { v1, context: self.state.context } };
         ReceiveSession::MaybeInputsSeen(new_state)
     }
 }
@@ -572,13 +570,12 @@ impl Receiver<MaybeInputsSeen> {
         };
         MaybeFatalTransition::success(
             SessionEvent::OutputsUnknown(inner.clone()),
-            Receiver { state: OutputsUnknown { inner, context: self.state.context.clone() } },
+            Receiver { state: OutputsUnknown { inner, context: self.state.context } },
         )
     }
 
     pub(crate) fn apply_outputs_unknown(self, inner: v1::OutputsUnknown) -> ReceiveSession {
-        let new_state =
-            Receiver { state: OutputsUnknown { inner, context: self.state.context.clone() } };
+        let new_state = Receiver { state: OutputsUnknown { inner, context: self.state.context } };
         ReceiveSession::OutputsUnknown(new_state)
     }
 }
@@ -617,13 +614,12 @@ impl Receiver<OutputsUnknown> {
         };
         MaybeFatalTransition::success(
             SessionEvent::WantsOutputs(inner.clone()),
-            Receiver { state: WantsOutputs { v1: inner, context: self.state.context.clone() } },
+            Receiver { state: WantsOutputs { v1: inner, context: self.state.context } },
         )
     }
 
     pub(crate) fn apply_wants_outputs(self, v1: v1::WantsOutputs) -> ReceiveSession {
-        let new_state =
-            Receiver { state: WantsOutputs { v1, context: self.state.context.clone() } };
+        let new_state = Receiver { state: WantsOutputs { v1, context: self.state.context } };
         ReceiveSession::WantsOutputs(new_state)
     }
 }
@@ -672,12 +668,12 @@ impl Receiver<WantsOutputs> {
         let inner = self.state.v1.clone().commit_outputs();
         NextStateTransition::success(
             SessionEvent::WantsInputs(inner.clone()),
-            Receiver { state: WantsInputs { v1: inner, context: self.state.context.clone() } },
+            Receiver { state: WantsInputs { v1: inner, context: self.state.context } },
         )
     }
 
     pub(crate) fn apply_wants_inputs(self, v1: v1::WantsInputs) -> ReceiveSession {
-        let new_state = Receiver { state: WantsInputs { v1, context: self.state.context.clone() } };
+        let new_state = Receiver { state: WantsInputs { v1, context: self.state.context } };
         ReceiveSession::WantsInputs(new_state)
     }
 }
@@ -728,15 +724,12 @@ impl Receiver<WantsInputs> {
         let inner = self.state.v1.clone().commit_inputs();
         NextStateTransition::success(
             SessionEvent::ProvisionalProposal(inner.clone()),
-            Receiver {
-                state: ProvisionalProposal { v1: inner, context: self.state.context.clone() },
-            },
+            Receiver { state: ProvisionalProposal { v1: inner, context: self.state.context } },
         )
     }
 
     pub(crate) fn apply_provisional_proposal(self, v1: v1::ProvisionalProposal) -> ReceiveSession {
-        let new_state =
-            Receiver { state: ProvisionalProposal { v1, context: self.state.context.clone() } };
+        let new_state = Receiver { state: ProvisionalProposal { v1, context: self.state.context } };
         ReceiveSession::ProvisionalProposal(new_state)
     }
 }
@@ -780,13 +773,12 @@ impl Receiver<ProvisionalProposal> {
         };
         MaybeTransientTransition::success(
             SessionEvent::PayjoinProposal(inner.clone()),
-            Receiver { state: PayjoinProposal { v1: inner, context: self.state.context.clone() } },
+            Receiver { state: PayjoinProposal { v1: inner, context: self.state.context } },
         )
     }
 
     pub(crate) fn apply_payjoin_proposal(self, v1: v1::PayjoinProposal) -> ReceiveSession {
-        let new_state =
-            Receiver { state: PayjoinProposal { v1, context: self.state.context.clone() } };
+        let new_state = Receiver { state: PayjoinProposal { v1, context: self.state.context } };
         ReceiveSession::PayjoinProposal(new_state)
     }
 }
@@ -904,7 +896,7 @@ pub(crate) fn pj_uri<'a>(
 ) -> crate::PjUri<'a> {
     use crate::uri::{PayjoinExtras, UrlExt};
     let id = session_context.id();
-    let mut pj = subdir(&session_context.directory, &id).clone();
+    let mut pj = subdir(&session_context.directory, &id);
     pj.set_receiver_pubkey(session_context.s.public_key().clone());
     pj.set_ohttp(session_context.ohttp_keys.clone());
     pj.set_exp(session_context.expiry);

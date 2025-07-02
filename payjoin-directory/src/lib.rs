@@ -20,7 +20,7 @@ use tracing::{debug, error, trace, warn};
 use crate::db::DbPool;
 pub mod key_config;
 pub use crate::key_config::*;
-
+//use crate::metrics::{generate_metrics, record_connection, MetricsCollector};
 pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
 pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
@@ -37,8 +37,16 @@ const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message"
 
 mod db;
 
+pub mod metrics;
+
 #[cfg(feature = "_danger-local-https")]
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+//Dedicated metrics server
+pub async fn listen_metrics_server(port: u16) -> Result<(), BoxError> {
+    let _bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
+    Ok(())
+}
 
 #[cfg(feature = "_danger-local-https")]
 pub async fn listen_tcp_with_tls_on_free_port(

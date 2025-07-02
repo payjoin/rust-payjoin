@@ -59,3 +59,4 @@ strip = true
 [patch.crates-io]
 payjoin = { path = "../payjoin" }
 payjoin-test-utils = { path = "../payjoin-test-utils" }
+payjoin-directory = { path = "../payjoin-directory" }

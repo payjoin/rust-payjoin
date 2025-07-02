@@ -75,15 +75,7 @@ impl<'a> SenderBuilder<'a> {
         self,
         min_fee_rate: FeeRate,
     ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
-        let v1 = match self.0.build_recommended(min_fee_rate) {
-            Ok(inner) => inner,
-            Err(e) => return MaybeBadInitInputsTransition::bad_init_inputs(e),
-        };
-        let with_reply_key = WithReplyKey { v1, reply_key: HpkeKeyPair::gen_keypair().0 };
-        MaybeBadInitInputsTransition::success(
-            SessionEvent::CreatedReplyKey(with_reply_key.clone()),
-            Sender { state: with_reply_key },
-        )
+        self.v2_sender_from_v1(self.0.clone().build_recommended(min_fee_rate))
     }
 
     /// Offer the receiver contribution to pay for his input.
@@ -106,21 +98,12 @@ impl<'a> SenderBuilder<'a> {
         min_fee_rate: FeeRate,
         clamp_fee_contribution: bool,
     ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
-        let v1 = match self.0.build_with_additional_fee(
+        self.v2_sender_from_v1(self.0.clone().build_with_additional_fee(
             max_fee_contribution,
             change_index,
             min_fee_rate,
             clamp_fee_contribution,
-        ) {
-            Ok(inner) => inner,
-            Err(e) => return MaybeBadInitInputsTransition::bad_init_inputs(e),
-        };
-
-        let with_reply_key = WithReplyKey { v1, reply_key: HpkeKeyPair::gen_keypair().0 };
-        MaybeBadInitInputsTransition::success(
-            SessionEvent::CreatedReplyKey(with_reply_key.clone()),
-            Sender { state: with_reply_key },
-        )
+        ))
     }
 
     /// Perform Payjoin without incentivizing the payee to cooperate.
@@ -131,10 +114,25 @@ impl<'a> SenderBuilder<'a> {
         self,
         min_fee_rate: FeeRate,
     ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
-        let v1 = match self.0.build_non_incentivizing(min_fee_rate) {
+        self.v2_sender_from_v1(self.0.clone().build_non_incentivizing(min_fee_rate))
+    }
+
+    /// Helper function that takes a V1 sender build result and wraps it in a V2 Sender,
+    /// returning the appropriate state transition.
+    fn v2_sender_from_v1(
+        &self,
+        v1_result: Result<v1::Sender, BuildSenderError>,
+    ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
+        let mut v1 = match v1_result {
             Ok(inner) => inner,
             Err(e) => return MaybeBadInitInputsTransition::bad_init_inputs(e),
         };
+
+        // V2 senders may always ignore the receiver's `pjos` output substitution preference,
+        // because all communications with the receiver are end-to-end authenticated.
+        if self.0.output_substitution == OutputSubstitution::Enabled {
+            v1.output_substitution = OutputSubstitution::Enabled;
+        }
 
         let with_reply_key = WithReplyKey { v1, reply_key: HpkeKeyPair::gen_keypair().0 };
         MaybeBadInitInputsTransition::success(
@@ -495,9 +493,12 @@ mod test {
     use std::time::{Duration, SystemTime};
 
     use bitcoin::hex::FromHex;
+    use bitcoin::Address;
     use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, PARSED_ORIGINAL_PSBT, SYMMETRIC};
 
     use super::*;
+    use crate::persist::NoopSessionPersister;
+    use crate::receive::v2::Receiver;
     use crate::OhttpKeys;
 
     const SERIALIZED_BODY_V2: &str = "63484e696450384241484d43414141414159386e757447674a647959475857694245623435486f65396c5747626b78682f36624e694f4a6443447544414141414141442b2f2f2f2f41747956754155414141414146366b554865684a38476e536442554f4f7636756a584c72576d734a5244434867495165414141414141415871525233514a62627a30686e513849765130667074476e2b766f746e656f66544141414141414542494b6762317755414141414146366b55336b34656b47484b57524e6241317256357452356b455644564e4348415163584667415578347046636c4e56676f31575741644e3153594e583874706854414243477343527a424541694238512b41366465702b527a393276687932366c5430416a5a6e3450524c6938426639716f422f434d6b30774967502f526a3250575a3367456a556b546c6844524e415130675877544f3774396e2b563134705a366f6c6a554249514d566d7341616f4e5748564d5330324c6654536530653338384c4e697450613155515a794f6968592b464667414241425941464562324769753663344b4f35595730706677336c4770396a4d55554141413d0a763d32";
@@ -613,5 +614,50 @@ mod test {
             ),
         }
         Ok(())
+    }
+
+    #[test]
+    fn test_v2_sender_builder() {
+        let address = Address::from_str("2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7")
+            .expect("valid address")
+            .assume_checked();
+        let directory = EXAMPLE_URL.clone();
+        let ohttp_keys = OhttpKeys(
+            ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
+        );
+        let pj_uri = Receiver::create_session(address.clone(), directory, ohttp_keys, None)
+            .save(&NoopSessionPersister::default())
+            .expect("receiver should succeed")
+            .pj_uri();
+        let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .save(&NoopSessionPersister::default())
+            .expect("sender should succeed");
+        // v2 senders may always override the receiver's `pjos` parameter to enable output
+        // substitution
+        assert_eq!(req_ctx.v1.output_substitution, OutputSubstitution::Enabled);
+        assert_eq!(&req_ctx.v1.payee, &address.script_pubkey());
+        let fee_contribution = req_ctx.v1.fee_contribution.expect("sender should contribute fees");
+        assert_eq!(fee_contribution.max_amount, Amount::from_sat(91));
+        assert_eq!(fee_contribution.vout, 0);
+        assert_eq!(req_ctx.v1.min_fee_rate, FeeRate::from_sat_per_kwu(250));
+        // ensure that the other builder methods also enable output substitution
+        let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
+            .build_non_incentivizing(FeeRate::BROADCAST_MIN)
+            .save(&NoopSessionPersister::default())
+            .expect("sender should succeed");
+        assert_eq!(req_ctx.v1.output_substitution, OutputSubstitution::Enabled);
+        let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
+            .build_with_additional_fee(Amount::ZERO, Some(0), FeeRate::BROADCAST_MIN, false)
+            .save(&NoopSessionPersister::default())
+            .expect("sender should succeed");
+        assert_eq!(req_ctx.v1.output_substitution, OutputSubstitution::Enabled);
+        // ensure that a v2 sender may still disable output substitution if they prefer.
+        let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
+            .always_disable_output_substitution()
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .save(&NoopSessionPersister::default())
+            .expect("sender should succeed");
+        assert_eq!(req_ctx.v1.output_substitution, OutputSubstitution::Disabled);
     }
 }

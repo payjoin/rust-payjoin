@@ -195,7 +195,7 @@ impl App {
             SendSession::V2GetContext(context) =>
                 self.get_proposed_payjoin_psbt(context, persister).await?,
             SendSession::ProposalReceived(proposal) => {
-                self.process_pj_response(proposal.clone())?;
+                self.process_pj_response(proposal)?;
                 return Ok(());
             }
             _ => return Err(anyhow!("Unexpected sender state")),
@@ -232,7 +232,7 @@ impl App {
             match res {
                 Ok(OptionalTransitionOutcome::Progress(psbt)) => {
                     println!("Proposal received. Processing...");
-                    self.process_pj_response(psbt.clone())?;
+                    self.process_pj_response(psbt)?;
                     return Ok(());
                 }
                 Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
@@ -446,7 +446,7 @@ impl App {
         proposal.process_res(&res.bytes().await?, ohttp_ctx).save(persister)?;
         println!(
             "Response successful. Watch mempool for successful Payjoin. TXID: {}",
-            payjoin_psbt.extract_tx_unchecked_fee_rate().clone().compute_txid()
+            payjoin_psbt.extract_tx_unchecked_fee_rate().compute_txid()
         );
         Ok(())
     }

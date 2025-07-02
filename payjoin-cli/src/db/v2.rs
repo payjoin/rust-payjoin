@@ -42,11 +42,11 @@ impl SenderPersister {
         send_tree.insert(id.as_ref(), value.as_slice())?;
         send_tree.flush()?;
 
-        Ok(Self { db: db.clone(), session_id: id })
+        Ok(Self { db, session_id: id })
     }
 
     pub fn from_id(db: Arc<Database>, id: SessionId) -> crate::db::Result<Self> {
-        Ok(Self { db: db.clone(), session_id: id })
+        Ok(Self { db, session_id: id })
     }
 }
 
@@ -112,11 +112,11 @@ impl ReceiverPersister {
         recv_tree.insert(id.as_ref(), value.as_slice())?;
         recv_tree.flush()?;
 
-        Ok(Self { db: db.clone(), session_id: id })
+        Ok(Self { db, session_id: id })
     }
 
     pub fn from_id(db: Arc<Database>, id: SessionId) -> crate::db::Result<Self> {
-        Ok(Self { db: db.clone(), session_id: id })
+        Ok(Self { db, session_id: id })
     }
 }
 

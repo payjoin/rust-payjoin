@@ -76,7 +76,7 @@ impl InitInputsTransition {
             .take()
             .ok_or_else(|| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Already saved or moved".to_string()))))?;
 
-        let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
+        let res = value.save(persister).map_err(SenderPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -202,7 +202,7 @@ impl WithReplyKeyTransition {
             .take()
             .ok_or_else(|| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Already saved or moved".to_string()))))?;
 
-        let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
+        let res = value.save(persister).map_err(SenderPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -341,7 +341,7 @@ impl V2GetContextTransition {
             .take()
             .ok_or_else(|| SenderPersistedError::Storage(Arc::new(ImplementationError::from("Already saved or moved".to_string()))))?;
 
-        let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
+        let res = value.save(persister).map_err(SenderPersistedError::from)?;
         Ok(res.into())
     }
 }

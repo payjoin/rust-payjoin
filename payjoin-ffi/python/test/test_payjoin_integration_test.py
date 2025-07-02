@@ -151,7 +151,6 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             sender_persister = InMemorySenderPersister(1)
             session = self.create_receiver_context(receiver_address, directory, ohttp_keys, recv_persister)
             process_response = await self.process_receiver_proposal(ReceiveSession.INITIALIZED(session), recv_persister, ohttp_relay)
-            print(f"session: {session.to_json()}")
             self.assertIsNone(process_response)
 
             # **********************

@@ -236,16 +236,6 @@ impl WithReplyKey {
             self.clone().0.process_response(response, post_ctx.into()),
         ))))
     }
-
-    pub fn to_json(&self) -> Result<String, SerdeJsonError> {
-        serde_json::to_string(&self.0).map_err(Into::into)
-    }
-
-    pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
-        serde_json::from_str::<payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>>(json)
-            .map_err(Into::into)
-            .map(Into::into)
-    }
 }
 
 /// Data required for validation of response.

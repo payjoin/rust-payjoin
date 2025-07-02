@@ -286,13 +286,6 @@ impl Initialized {
     pub fn process_res(&self, body: &[u8], context: Arc<ClientResponse>) -> InitializedTransition {
         InitializedTransition(self.0.process_res(body, &context))
     }
-
-    pub fn to_json(&self) -> Result<String, SerdeJsonError> { self.0.to_json() }
-
-    #[uniffi::constructor]
-    pub fn from_json(json: &str) -> Result<Self, SerdeJsonError> {
-        super::Initialized::from_json(json).map(Into::into)
-    }
 }
 
 #[derive(uniffi::Record)]

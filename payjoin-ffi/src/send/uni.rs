@@ -229,6 +229,11 @@ impl WithReplyKey {
 
     /// Extract serialized Request and Context from a Payjoin Proposal.
     ///
+    /// Important: This request must not be retried or reused on failure.
+    /// Retransmitting the same ciphertext breaks OHTTP privacy properties.
+    /// The specific concern is that the relay can see that a request is being retried,
+    /// which leaks that it's all the same request.
+    ///
     /// This method requires the `rs` pubkey to be extracted from the endpoint
     /// and has no fallback to v1.
     pub fn extract_v2(

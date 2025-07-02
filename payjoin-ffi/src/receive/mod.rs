@@ -82,7 +82,7 @@ impl InitInputsTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -171,7 +171,7 @@ impl InitializedTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -287,7 +287,7 @@ impl UncheckedProposalTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -394,7 +394,7 @@ impl MaybeInputsOwnedTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -453,7 +453,7 @@ impl MaybeInputsSeenTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -510,7 +510,7 @@ impl OutputsUnknownTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -743,7 +743,7 @@ impl ProvisionalProposalTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -803,7 +803,7 @@ impl PayjoinProposalTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(())
     }
 }

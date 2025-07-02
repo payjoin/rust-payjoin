@@ -83,7 +83,7 @@ impl InitInputsTransition {
             )))
         })?;
 
-        let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
+        let res = value.save(persister).map_err(SenderPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -214,7 +214,7 @@ impl WithReplyKeyTransition {
             )))
         })?;
 
-        let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
+        let res = value.save(persister).map_err(SenderPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -359,7 +359,7 @@ impl V2GetContextTransition {
             )))
         })?;
 
-        let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
+        let res = value.save(persister).map_err(SenderPersistedError::from)?;
         Ok(res.into())
     }
 }

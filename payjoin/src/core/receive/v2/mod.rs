@@ -389,7 +389,7 @@ impl Receiver<Initialized> {
 
     /// Build a V2 Payjoin URI from the receiver's context
     pub fn pj_uri<'a>(&self) -> crate::PjUri<'a> {
-        pj_uri(&self.context, OutputSubstitution::Enabled)
+        pj_uri(&self.context, OutputSubstitution::Disabled)
     }
 
     pub(crate) fn apply_unchecked_from_payload(
@@ -1010,6 +1010,6 @@ pub mod test {
     fn test_v2_pj_uri() {
         let uri = Receiver { state: Initialized { context: SHARED_CONTEXT.clone() } }.pj_uri();
         assert_ne!(uri.extras.endpoint, EXAMPLE_URL.clone());
-        assert_eq!(uri.extras.output_substitution, OutputSubstitution::Enabled);
+        assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
     }
 }

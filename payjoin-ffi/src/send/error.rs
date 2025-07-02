@@ -120,7 +120,8 @@ impl From<ImplementationError> for SenderPersistedError {
     fn from(value: ImplementationError) -> Self { SenderPersistedError::Storage(Arc::new(value)) }
 }
 
-impl<S> From<payjoin::persist::PersistedError<send::v2::EncapsulationError, S>> for SenderPersistedError
+impl<S> From<payjoin::persist::PersistedError<send::v2::EncapsulationError, S>>
+    for SenderPersistedError
 where
     S: std::error::Error,
 {

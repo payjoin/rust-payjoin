@@ -15,11 +15,6 @@ sys.path.insert(
 
 import unittest
 from pprint import *
-from bitcoin import SelectParams
-from bitcoin.wallet import *
-from bitcoin.rpc import Proxy
-
-SelectParams("regtest")
 
 class InMemoryReceiverSessionEventLog(JsonReceiverSessionPersister):
     def __init__(self, id):
@@ -215,7 +210,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             print("Caught:", e)
             raise
 
-def build_sweep_psbt(sender: Proxy, pj_uri: PjUri) -> bitcoinffi.Psbt:
+def build_sweep_psbt(sender: RpcClient, pj_uri: PjUri) -> bitcoinffi.Psbt:
     outputs = {}
     outputs[pj_uri.address()] = 50
     psbt = json.loads(sender.call(
@@ -227,7 +222,7 @@ def build_sweep_psbt(sender: Proxy, pj_uri: PjUri) -> bitcoinffi.Psbt:
         ]))["psbt"]
     return json.loads(sender.call("walletprocesspsbt", [psbt, json.dumps(True), json.dumps("ALL"), json.dumps(False)]))["psbt"]
 
-def get_inputs(rpc_connection: Proxy) -> list[InputPair]:
+def get_inputs(rpc_connection: RpcClient) -> list[InputPair]:
     utxos = json.loads(rpc_connection.call("listunspent", []))
     inputs = []
     for utxo in utxos[:1]:
@@ -248,7 +243,7 @@ def get_inputs(rpc_connection: Proxy) -> list[InputPair]:
     return inputs
 
 class MempoolAcceptanceCallback(CanBroadcast):
-    def __init__(self, connection: Proxy):
+    def __init__(self, connection: RpcClient):
         self.connection = connection
 
     def callback(self, tx):
@@ -262,7 +257,7 @@ class MempoolAcceptanceCallback(CanBroadcast):
             return None      
 
 class IsScriptOwnedCallback(IsScriptOwned):
-    def __init__(self, connection: Proxy):
+    def __init__(self, connection: RpcClient):
         self.connection = connection
 
     def callback(self, script):
@@ -274,14 +269,14 @@ class IsScriptOwnedCallback(IsScriptOwned):
             return None
 
 class CheckInputsNotSeenCallback(IsOutputKnown):
-    def __init__(self, connection: Proxy):
+    def __init__(self, connection: RpcClient):
         self.connection = connection
 
     def callback(self, _outpoint):
         return False
 
 class ProcessPsbtCallback(ProcessPsbt):
-    def __init__(self, connection: Proxy):
+    def __init__(self, connection: RpcClient):
         self.connection = connection
 
     def callback(self, psbt: str):

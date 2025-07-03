@@ -70,7 +70,7 @@ fn is_valid_shortid(id: &str) -> bool {
     false
 }
 
-///Dynamic path segments such as the ShortID shoudn't be recorded as unique path
+///Dynamic path segments such as shortID should not  be recorded as unique path
 /// This function group similar paths together to prevent metrics explosion
 fn path_normalizer(path: &str) -> String {
     let path_segments: Vec<&str> = path.split('/').collect();

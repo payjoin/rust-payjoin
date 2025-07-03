@@ -1,0 +1,40 @@
+name: Build and Test Dart
+on:
+  pull_request:
+    paths:
+      - payjoin-ffi/**
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: payjoin-ffi/dart
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+
+      - name: Generate bindings and binaries
+        run: |
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            bash ./scripts/generate_macos.sh
+          else
+            bash ./scripts/generate_linux.sh
+          fi
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Run tests
+        run: dart test

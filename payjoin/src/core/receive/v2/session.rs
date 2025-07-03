@@ -158,6 +158,8 @@ pub enum SessionEvent {
 
 #[cfg(test)]
 mod tests {
+    use payjoin_test_utils::{BoxError, EXAMPLE_URL};
+
     use super::*;
     use crate::persist::test_utils::InMemoryTestPersister;
     use crate::receive::v1::test::unchecked_proposal_from_test_vector;
@@ -224,24 +226,24 @@ mod tests {
         expected_receiver_state: ReceiveSession,
     }
 
-    fn run_session_history_test(test: SessionHistoryTest) {
+    fn run_session_history_test(test: SessionHistoryTest) -> Result<(), BoxError> {
         let persister = InMemoryTestPersister::<SessionEvent>::default();
         for event in test.events {
-            persister.save_event(&event).expect("In memory persister shouldn't fail");
+            persister.save_event(&event)?;
         }
 
-        let (receiver, session_history) =
-            replay_event_log(&persister).expect("In memory persister shouldn't fail");
+        let (receiver, session_history) = replay_event_log(&persister)?;
         assert_eq!(receiver, test.expected_receiver_state);
         assert_eq!(
             session_history.psbt_with_contributed_inputs(),
             test.expected_session_history.psbt_with_contributed_inputs
         );
         assert_eq!(session_history.fallback_tx(), test.expected_session_history.fallback_tx);
+        Ok(())
     }
 
     #[test]
-    fn test_replaying_session_creation() {
+    fn test_replaying_session_creation() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
         let test = SessionHistoryTest {
             events: vec![SessionEvent::Created(session_context.clone())],
@@ -253,11 +255,11 @@ mod tests {
                 state: Initialized { context: session_context },
             }),
         };
-        run_session_history_test(test);
+        run_session_history_test(test)
     }
 
     #[test]
-    fn test_replaying_unchecked_proposal() {
+    fn test_replaying_unchecked_proposal() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
 
         let test = SessionHistoryTest {
@@ -276,11 +278,40 @@ mod tests {
                 },
             }),
         };
-        run_session_history_test(test);
+        run_session_history_test(test)
     }
 
     #[test]
-    fn test_replaying_unchecked_proposal_with_reply_key() {
+    fn test_replaying_unchecked_proposal_expiry() {
+        let now = SystemTime::now();
+        let context = SessionContext { expiry: now, ..SHARED_CONTEXT.clone() };
+
+        let test = SessionHistoryTest {
+            events: vec![
+                SessionEvent::Created(context.clone()),
+                SessionEvent::UncheckedProposal((unchecked_proposal_from_test_vector(), None)),
+            ],
+            expected_session_history: SessionHistoryExpectedOutcome {
+                psbt_with_contributed_inputs: None,
+                fallback_tx: None,
+            },
+            expected_receiver_state: ReceiveSession::UncheckedProposal(Receiver {
+                state: UncheckedProposal { v1: unchecked_proposal_from_test_vector(), context },
+            }),
+        };
+        let session_history = run_session_history_test(test);
+
+        match session_history {
+            Err(error) => assert_eq!(
+                error.to_string(),
+                ReplayError::from(InternalReplayError::SessionExpired(now)).to_string()
+            ),
+            Ok(_) => panic!("Expected session expiry error, got success"),
+        }
+    }
+
+    #[test]
+    fn test_replaying_unchecked_proposal_with_reply_key() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
 
         let test = SessionHistoryTest {
@@ -302,11 +333,11 @@ mod tests {
                 },
             }),
         };
-        run_session_history_test(test);
+        run_session_history_test(test)
     }
 
     #[test]
-    fn getting_fallback_tx() {
+    fn getting_fallback_tx() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
         let unchecked_proposal = unchecked_proposal_from_test_vector();
@@ -327,11 +358,11 @@ mod tests {
                 state: MaybeInputsOwned { v1: maybe_inputs_owned, context: session_context },
             }),
         };
-        run_session_history_test(test);
+        run_session_history_test(test)
     }
 
     #[test]
-    fn test_contributed_inputs() {
+    fn test_contributed_inputs() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
 
@@ -372,11 +403,11 @@ mod tests {
                 state: ProvisionalProposal { v1: provisional_proposal, context: session_context },
             }),
         };
-        run_session_history_test(test);
+        run_session_history_test(test)
     }
 
     #[test]
-    fn test_payjoin_proposal() {
+    fn test_payjoin_proposal() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
 
@@ -422,6 +453,20 @@ mod tests {
                 state: PayjoinProposal { v1: payjoin_proposal, context: session_context },
             }),
         };
-        run_session_history_test(test);
+        run_session_history_test(test)
+    }
+
+    #[test]
+    fn test_session_history_uri() -> Result<(), BoxError> {
+        let session_context = SHARED_CONTEXT.clone();
+        let events = vec![SessionEvent::Created(session_context.clone())];
+
+        let uri =
+            SessionHistory { events }.pj_uri().expect("SHARED_CONTEXT should contain valid uri");
+
+        assert_ne!(uri.extras.endpoint, EXAMPLE_URL.clone());
+        assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
+
+        Ok(())
     }
 }

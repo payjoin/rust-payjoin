@@ -1,4 +1,5 @@
 additional_cargo_args = ["--all-features"]
+gitignore = true
 examine_globs = ["payjoin/src/core/uri/*.rs", "payjoin/src/core/receive/**/*.rs", "payjoin/src/core/send/**/*.rs"]
 exclude_globs = []
 exclude_re = [
@@ -12,4 +13,13 @@ exclude_re = [
 	# Receive
 	# src/receive/v1/mod.rs
         "interleave_shuffle", # Replacing index += 1 with index *= 1 in a loop causes a timeout due to an infinite loop
+	"replace > with >= in ProvisionalProposal::apply_fee", # allowing 2 code blocks in this function to run when the additional fee = 0 does nothing
+	"replace < with <= in PsbtContext::check_outputs", # allowing the subtraction of 2 equal values always resulting in a contrib_fee of 0
+	"replace > with >= in PsbtContext::check_fees", # checking if the feerate is below the minimum when the minimum is allowed to be zero does nothing
+	"replace > with >= in Sender<WithReplyKey>::extract_v2", # checking if the system time is equal to the expiry is difficult to reasonably test
+	"replace < with <= in Receiver<Initialized>::apply_unchecked_from_payload", # checking if the system time is equal to the expiry is difficult to reasonably test 
+	"replace > with >= in Receiver<Initialized>::extract_req", # checking if the system time is equal to the expiry is difficult to reasonably test
+	"replace > with >= in extract_err_req", # checking if the system time is equal to the expiry is difficult to reasonably test
+	"replace < with <= in SenderBuilder<'a>::build_recommended", # clamping the fee contribution when the fee equals to the recommended fee does not do anything
+	"replace match guard with true in PsbtContext::check_outputs", # This non-deterministic mutation has a possible test to catch it
 ]

@@ -9,7 +9,7 @@ use std::fmt;
 use bitcoin::address::FromScriptError;
 use bitcoin::psbt::Psbt;
 use bitcoin::transaction::InputWeightPrediction;
-use bitcoin::{bip32, psbt, Address, AddressType, Network, TxIn, TxOut, Weight};
+use bitcoin::{bip32, psbt, Address, AddressType, Network, TapSighashType, TxIn, TxOut, Weight};
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum InconsistentPsbt {
@@ -230,7 +230,24 @@ impl InternalInputPair<'_> {
                         .ok_or(InputWeightError::NotSupported)?;
                     Ok(iwp)
                 },
-            P2tr => Ok(InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH),
+            P2tr => {
+                // Script spends can't be predicted, so we don't support those
+                if !self.psbtin.tap_scripts.is_empty()
+                    || !self.psbtin.tap_script_sigs.is_empty()
+                    || self.psbtin.tap_merkle_root.is_some()
+                {
+                    return Err(InputWeightError::NotSupported);
+                }
+
+                match self.psbtin.tap_key_sig {
+                    None => Err(InputWeightError::NotSupported),
+                    Some(signature) => match signature.sighash_type {
+                        TapSighashType::Default =>
+                            Ok(InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH),
+                        _ => Ok(InputWeightPrediction::P2TR_KEY_NON_DEFAULT_SIGHASH),
+                    },
+                }
+            }
             _ => Err(AddressTypeError::UnknownAddressType.into()),
         }?;
 
@@ -406,4 +423,138 @@ impl std::error::Error for InputWeightError {
 }
 impl From<AddressTypeError> for InputWeightError {
     fn from(value: AddressTypeError) -> Self { Self::AddressType(value) }
+}
+
+#[cfg(test)]
+mod tests {
+    use bitcoin::key::Secp256k1;
+    use bitcoin::taproot::{ControlBlock, LeafVersion};
+    use bitcoin::{psbt, secp256k1, taproot, PublicKey, ScriptBuf, TapNodeHash, XOnlyPublicKey};
+
+    use super::*;
+    use crate::core::psbt::InternalInputPair;
+    use crate::receive::InputPair;
+
+    /// Lengths of txid, index and sequence: (32, 4, 4)
+    const TXID_INDEX_SEQUENCE_WEIGHT: Weight = Weight::from_non_witness_data_size(32 + 4 + 4);
+
+    #[test]
+    fn expected_weight_for_p2tr() {
+        let pubkey_string = "0347ff3dacd07a1f43805ec6808e801505a6e18245178609972a68afbc2777ff2b";
+        let pubkey = pubkey_string.parse::<PublicKey>().expect("valid pubkey");
+        let xonly_pubkey = XOnlyPublicKey::from(pubkey.inner);
+        let p2tr_utxo = TxOut {
+            value: Default::default(),
+            script_pubkey: ScriptBuf::new_p2tr(&Secp256k1::new(), xonly_pubkey, None),
+        };
+        let default_sighash_pair = InputPair {
+            txin: Default::default(),
+            psbtin: psbt::Input {
+                tap_key_sig: Some(
+                    taproot::Signature::from_slice(
+                        &[0; secp256k1::constants::SCHNORR_SIGNATURE_SIZE],
+                    )
+                    .unwrap(),
+                ),
+                witness_utxo: Some(p2tr_utxo.clone()),
+                ..Default::default()
+            },
+            expected_weight: Weight::from_wu(0),
+        };
+        assert_eq!(
+            InternalInputPair::from(&default_sighash_pair).expected_input_weight().unwrap(),
+            InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH.weight() + TXID_INDEX_SEQUENCE_WEIGHT
+        );
+
+        // Add a sighash byte
+        let mut sig_bytes = [0; secp256k1::constants::SCHNORR_SIGNATURE_SIZE + 1];
+        sig_bytes[sig_bytes.len() - 1] = 1;
+        let non_default_sighash_pair = InputPair {
+            txin: Default::default(),
+            psbtin: psbt::Input {
+                tap_key_sig: Some(taproot::Signature::from_slice(&sig_bytes).unwrap()),
+                witness_utxo: Some(p2tr_utxo),
+                ..Default::default()
+            },
+            expected_weight: Weight::from_wu(0),
+        };
+        assert_eq!(
+            InternalInputPair::from(&non_default_sighash_pair).expected_input_weight().unwrap(),
+            InputWeightPrediction::P2TR_KEY_NON_DEFAULT_SIGHASH.weight()
+                + TXID_INDEX_SEQUENCE_WEIGHT
+        );
+    }
+
+    #[test]
+    fn not_supported_p2tr_expected_weights() {
+        let pubkey_string = "0347ff3dacd07a1f43805ec6808e801505a6e18245178609972a68afbc2777ff2b";
+        let pubkey = pubkey_string.parse::<PublicKey>().expect("valid pubkey");
+        let xonly_pubkey = XOnlyPublicKey::from(pubkey.inner);
+        let p2tr_script = ScriptBuf::new_p2tr(&Secp256k1::new(), xonly_pubkey.clone(), None);
+        let p2tr_utxo = TxOut { value: Default::default(), script_pubkey: p2tr_script.clone() };
+
+        let mut tap_scripts = BTreeMap::new();
+        let leaf_version: u8 = 0xC0;
+        let mut control_block_vec = Vec::with_capacity(33);
+        control_block_vec.push(leaf_version);
+        control_block_vec.extend_from_slice(&xonly_pubkey.serialize());
+        let control_block = ControlBlock::decode(control_block_vec.as_slice()).unwrap();
+        tap_scripts
+            .insert(control_block.clone(), (p2tr_script.clone(), control_block.leaf_version));
+
+        let pair_with_tapscripts = InputPair {
+            txin: Default::default(),
+            psbtin: psbt::Input {
+                tap_scripts,
+                witness_utxo: Some(p2tr_utxo.clone()),
+                ..Default::default()
+            },
+            expected_weight: Weight::from_wu(0),
+        };
+        assert_eq!(
+            InternalInputPair::from(&pair_with_tapscripts).expected_input_weight().err().unwrap(),
+            InputWeightError::NotSupported
+        );
+
+        let mut tap_script_sigs = BTreeMap::new();
+        tap_script_sigs.insert(
+            (xonly_pubkey.clone(), p2tr_script.tapscript_leaf_hash()),
+            taproot::Signature::from_slice(&[0; secp256k1::constants::SCHNORR_SIGNATURE_SIZE])
+                .unwrap(),
+        );
+        let pair_with_tap_script_sigs = InputPair {
+            txin: Default::default(),
+            psbtin: psbt::Input {
+                tap_script_sigs,
+                witness_utxo: Some(p2tr_utxo.clone()),
+                ..Default::default()
+            },
+            expected_weight: Weight::from_wu(0),
+        };
+        assert_eq!(
+            InternalInputPair::from(&pair_with_tap_script_sigs)
+                .expected_input_weight()
+                .err()
+                .unwrap(),
+            InputWeightError::NotSupported
+        );
+
+        let tap_merkle_root = TapNodeHash::from_script(&p2tr_script, LeafVersion::TapScript);
+        let pair_with_tap_merkle_root = InputPair {
+            txin: Default::default(),
+            psbtin: psbt::Input {
+                tap_merkle_root: Some(tap_merkle_root),
+                witness_utxo: Some(p2tr_utxo.clone()),
+                ..Default::default()
+            },
+            expected_weight: Weight::from_wu(0),
+        };
+        assert_eq!(
+            InternalInputPair::from(&pair_with_tap_merkle_root)
+                .expected_input_weight()
+                .err()
+                .unwrap(),
+            InputWeightError::NotSupported
+        );
+    }
 }

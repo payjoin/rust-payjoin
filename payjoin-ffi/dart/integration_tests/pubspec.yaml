@@ -1,0 +1,33 @@
+name: payjoin_dart_integration_tests
+description: Integration tests for Dart Payjoin FFI bindings
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  ffi: ^2.1.0
+  payjoin_dart:
+    path: /Users/mac/Dev/rust-payjoin-1/payjoin-ffi/dart
+  
+  crypto: ^3.0.5
+  convert: ^3.1.1
+  
+  mocktail: ^1.0.4
+  
+  dio: ^5.7.0
+  
+dev_dependencies:
+  json_rpc_2: ^4.0.0
+  
+  test: ^1.25.8
+  
+  json_annotation: ^4.9.0
+  json_serializable: ^6.8.0
+  
+  build_runner: ^2.4.12
+  
+  uuid: ^4.5.1
+  
+  lints: ^6.0.0

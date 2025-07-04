@@ -303,16 +303,24 @@ async fn handle_v2(
     req: Request<BoxBody<Bytes, hyper::Error>>,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
     let path = req.uri().path().to_string();
+    let method = req.method().clone();
     let (parts, body) = req.into_parts();
+
+    let metrics_collector = MetricsCollector::new(method.clone(), path.clone());
 
     let path_segments: Vec<&str> = path.split('/').collect();
     debug!("handle_v2: {:?}", &path_segments);
-    match (parts.method, path_segments.as_slice()) {
+    let mut response = match (parts.method, path_segments.as_slice()) {
         (Method::POST, &["", id]) => post_subdir(id, body, pool).await,
         (Method::GET, &["", id]) => get_subdir(id, pool).await,
         (Method::PUT, &["", id]) => put_payjoin_v1(id, body, pool).await,
         _ => Ok(not_found()),
     }
+    .unwrap_or_else(|e| e.to_response());
+
+    metrics_collector.record_response(response.status());
+    response.headers_mut().insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+    Ok(response)
 }
 
 async fn health_check() -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {

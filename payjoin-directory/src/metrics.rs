@@ -43,7 +43,8 @@ impl Metrics {
     }
 }
 
-///avoids calling METRICS.<metric> everywhere
+/// Returns a reference to the global `Metrics` instance.
+/// Useful when working extensively with metrics throughout the codebase
 pub fn metrics() -> &'static Metrics { &METRICS }
 
 /// Records HTTP request with method, status and path as labels

@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 set -e
 
+LOCKFILE="Cargo.lock"
+LOCKFILE_BAK="cargo.lock.bak"
+LOCKFILE_LOCK=".cargo.lock.flock"
+
+# Acquire file lock to prevent concurrent modification
+exec 9>"$LOCKFILE_LOCK"
+flock 9
+
+# Backup original lockfile
+if [ -f "$LOCKFILE" ]; then
+    cp "$LOCKFILE" "$LOCKFILE_BAK"
+fi
+
+# Restore the original lockfile on exit
+trap 'if [ -f "$LOCKFILE_BAK" ]; then mv "$LOCKFILE_BAK" "$LOCKFILE"; fi; flock -u 9' EXIT
+
 DEPS="recent minimal"
 CRATES="payjoin payjoin-cli payjoin-directory payjoin-ffi"
 

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use bitcoin::bech32::Hrp;
@@ -43,7 +44,6 @@ impl UrlExt for Url {
 
         set_param(
             self,
-            "RK1",
             &crate::bech32::nochecksum::encode(rk_hrp, &pubkey.to_compressed_bytes())
                 .expect("encoding compressed pubkey bytes should never fail"),
         )
@@ -57,7 +57,7 @@ impl UrlExt for Url {
     }
 
     /// Set the ohttp parameter in the URL fragment
-    fn set_ohttp(&mut self, ohttp: OhttpKeys) { set_param(self, "OH1", &ohttp.to_string()) }
+    fn set_ohttp(&mut self, ohttp: OhttpKeys) { set_param(self, &ohttp.to_string()) }
 
     /// Retrieve the exp parameter from the URL fragment
     fn exp(&self) -> Result<std::time::SystemTime, ParseExpParamError> {
@@ -94,7 +94,7 @@ impl UrlExt for Url {
         let exp_str = crate::bech32::nochecksum::encode(ex_hrp, &buf)
             .expect("encoding u32 timestamp should never fail");
 
-        set_param(self, "EX1", &exp_str)
+        set_param(self, &exp_str)
     }
 }
 
@@ -140,28 +140,41 @@ where
     None
 }
 
-fn set_param(url: &mut Url, prefix: &str, param: &str) {
+/// Set a URL fragment parameter, inserting it or replacing it depending on
+/// whether a parameter with the same bech32 HRP is already present.
+///
+/// Parameters are sorted lexicographically by prefix.
+fn set_param(url: &mut Url, new_param: &str) {
     let fragment = url.fragment().unwrap_or("");
-    let mut fragment = fragment.to_string();
 
-    if !fragment.contains('-') {
-        fragment = fragment.replace("+", "-");
+    // See above for `-` vs `+` backwards compatibility
+    let mut delim = '-';
+    if !fragment.contains(delim) {
+        delim = '+';
     }
 
-    if let Some(start) = fragment.find(prefix) {
-        let end = fragment[start..].find('-').map_or(fragment.len(), |i| start + i + 1);
-        fragment.replace_range(start..end, "");
-        if fragment.ends_with('-') {
-            fragment.pop();
-        }
-    }
+    // In case of an invalid fragment parameter the following will still attempt
+    // to retain the existing data
+    let mut params = fragment
+        .split(delim)
+        .filter(|param| !param.is_empty())
+        .map(|param| {
+            let key = param.split('1').next().unwrap_or(param);
+            (key, param)
+        })
+        .collect::<BTreeMap<&str, &str>>();
 
-    if !fragment.is_empty() {
-        fragment.push('-');
-    }
-    fragment.push_str(param);
+    // TODO: change param to Option(&str) to allow deletion?
+    let key = new_param.split('1').next().unwrap_or(new_param);
+    params.insert(key, new_param);
 
-    url.set_fragment(if fragment.is_empty() { None } else { Some(&fragment) });
+    if params.is_empty() {
+        url.set_fragment(None)
+    } else {
+        // Can we avoid intermediate allocation of Vec, intersperse() exists but not in MSRV
+        let fragment = params.values().copied().collect::<Vec<_>>().join("-");
+        url.set_fragment(Some(&fragment));
+    }
 }
 
 #[derive(Debug)]
@@ -413,7 +426,31 @@ mod tests {
         endpoint.set_exp(pjuri.extras.endpoint.exp().unwrap());
         assert_eq!(
             endpoint.fragment(),
+            Some("EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
+        );
+    }
+
+    #[test]
+    fn test_fragment_lexicographical_order() {
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
+                   &pjos=0&pj=HTTPS://EXAMPLE.COM/\
+                   %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-EX1C4UC6ES";
+        let pjuri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
+
+        let mut endpoint = pjuri.extras.endpoint().clone();
+        assert!(endpoint.ohttp().is_ok());
+        assert!(endpoint.exp().is_ok());
+
+        assert_eq!(
+            endpoint.fragment(),
             Some("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-EX1C4UC6ES")
+        );
+
+        // Upon setting any value, the order should be normalized to lexicographical
+        endpoint.set_exp(pjuri.extras.endpoint.exp().unwrap());
+        assert_eq!(
+            endpoint.fragment(),
+            Some("EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
         );
     }
 }

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use bitcoin::bech32::Hrp;
@@ -114,7 +115,24 @@ where
     F: Fn(&str) -> Option<T>,
 {
     if let Some(fragment) = url.fragment() {
-        for param in fragment.split('+') {
+        let mut delim = '-';
+
+        // For backwards compatibility, also accept `+` as a
+        // fragment parameter delimiter. This was previously
+        // specified, but may be interpreted as ` ` by some
+        // URI parsoing libraries. Therefore if `-` is missing,
+        // assume the URI was generated following the older
+        // version of the spec.
+        if !fragment.contains(delim) {
+            delim = '+';
+        }
+
+        // The spec says these MUST be ordered lexicographically.
+        // However, this was a late spec change, and only matters
+        // for privacy reasons (fingerprinting implementations).
+        // To maintain compatibility, we don't care about the order
+        // of the parameters.
+        for param in fragment.split(delim) {
             if param.starts_with(prefix) {
                 return parse(param);
             }
@@ -125,21 +143,32 @@ where
 
 fn set_param(url: &mut Url, prefix: &str, param: &str) {
     let fragment = url.fragment().unwrap_or("");
-    let mut fragment = fragment.to_string();
-    if let Some(start) = fragment.find(prefix) {
-        let end = fragment[start..].find('+').map_or(fragment.len(), |i| start + i);
-        fragment.replace_range(start..end, "");
-        if fragment.ends_with('+') {
-            fragment.pop();
-        }
+
+    // See above for `-` vs `+` backwards compatibility
+    let mut delim = '-';
+    if !fragment.contains(delim) {
+        delim = '+';
     }
 
-    if !fragment.is_empty() {
-        fragment.push('+');
-    }
-    fragment.push_str(param);
+    // In case of an invalid fragment parameter the following will still attempt
+    // to retain the existing data
+    let l = prefix.len();
+    let mut params = fragment
+        .split(delim)
+        .filter(|p| !p.is_empty())
+        .map(|p| (if p.len() >= l { &p[0..l] } else { p }, p))
+        .collect::<BTreeMap<&str, &str>>();
 
-    url.set_fragment(if fragment.is_empty() { None } else { Some(&fragment) });
+    // TODO: change param to Option(&str) to allow deletion?
+    params.insert(prefix, param);
+
+    if params.is_empty() {
+        url.set_fragment(None)
+    } else {
+        // Can we avoid intermediate allocation of Vec, intersperse() exists but not in MSRV
+        let fragment = params.values().copied().collect::<Vec<_>>().join("-");
+        url.set_fragment(Some(&fragment));
+    }
 }
 
 #[cfg(feature = "v2")]
@@ -373,5 +402,55 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    #[test]
+    fn test_fragment_delimeter_backwards_compatibility() {
+        // ensure + is still accepted as a delimiter
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
+                   &pjos=0&pj=HTTPS://EXAMPLE.COM/\
+                   %23EX1C4UC6ES+OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
+        let pjuri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
+
+        let mut endpoint = pjuri.extras.endpoint().clone();
+        assert!(endpoint.ohttp().is_ok());
+        assert!(endpoint.exp().is_ok());
+
+        // Before setting the delimiter should be preserved
+        assert_eq!(
+            endpoint.fragment(),
+            Some("EX1C4UC6ES+OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
+        );
+
+        // Upon setting any value, the delimiter should be normalized to `-`
+        endpoint.set_exp(pjuri.extras.endpoint.exp().unwrap());
+        assert_eq!(
+            endpoint.fragment(),
+            Some("EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
+        );
+    }
+
+    #[test]
+    fn test_fragment_lexicographical_order() {
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
+                   &pjos=0&pj=HTTPS://EXAMPLE.COM/\
+                   %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-EX1C4UC6ES";
+        let pjuri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
+
+        let mut endpoint = pjuri.extras.endpoint().clone();
+        assert!(endpoint.ohttp().is_ok());
+        assert!(endpoint.exp().is_ok());
+
+        assert_eq!(
+            endpoint.fragment(),
+            Some("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-EX1C4UC6ES")
+        );
+
+        // Upon setting any value, the order should be normalized to lexicographical
+        endpoint.set_exp(pjuri.extras.endpoint.exp().unwrap());
+        assert_eq!(
+            endpoint.fragment(),
+            Some("EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
+        );
     }
 }

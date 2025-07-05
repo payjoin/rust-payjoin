@@ -127,7 +127,7 @@ fn set_param(url: &mut Url, prefix: &str, param: &str) {
     let fragment = url.fragment().unwrap_or("");
     let mut fragment = fragment.to_string();
     if let Some(start) = fragment.find(prefix) {
-        let end = fragment[start..].find('+').map_or(fragment.len(), |i| start + i);
+        let end = fragment[start..].find('-').map_or(fragment.len(), |i| start + i + 1);
         fragment.replace_range(start..end, "");
         if fragment.ends_with('+') {
             fragment.pop();

@@ -23,10 +23,11 @@ pub(crate) trait UrlExt {
 impl UrlExt for Url {
     /// Retrieve the receiver's public key from the URL fragment
     fn receiver_pubkey(&self) -> Result<HpkePublicKey, ParseReceiverPubkeyParamError> {
-        let value = get_param(self, "RK1", |v| Some(v.to_owned()))
+        let value = get_param(self, "RK1")
+            .map_err(ParseReceiverPubkeyParamError::InvalidFragment)?
             .ok_or(ParseReceiverPubkeyParamError::MissingPubkey)?;
 
-        let (hrp, bytes) = crate::bech32::nochecksum::decode(&value)
+        let (hrp, bytes) = crate::bech32::nochecksum::decode(value)
             .map_err(ParseReceiverPubkeyParamError::DecodeBech32)?;
 
         let rk_hrp: Hrp = Hrp::parse("RK").unwrap();
@@ -51,9 +52,10 @@ impl UrlExt for Url {
 
     /// Retrieve the ohttp parameter from the URL fragment
     fn ohttp(&self) -> Result<OhttpKeys, ParseOhttpKeysParamError> {
-        let value = get_param(self, "OH1", |v| Some(v.to_owned()))
+        let value = get_param(self, "OH1")
+            .map_err(ParseOhttpKeysParamError::InvalidFragment)?
             .ok_or(ParseOhttpKeysParamError::MissingOhttpKeys)?;
-        OhttpKeys::from_str(&value).map_err(ParseOhttpKeysParamError::InvalidOhttpKeys)
+        OhttpKeys::from_str(value).map_err(ParseOhttpKeysParamError::InvalidOhttpKeys)
     }
 
     /// Set the ohttp parameter in the URL fragment
@@ -61,11 +63,12 @@ impl UrlExt for Url {
 
     /// Retrieve the exp parameter from the URL fragment
     fn exp(&self) -> Result<std::time::SystemTime, ParseExpParamError> {
-        let value =
-            get_param(self, "EX1", |v| Some(v.to_owned())).ok_or(ParseExpParamError::MissingExp)?;
+        let value = get_param(self, "EX1")
+            .map_err(ParseExpParamError::InvalidFragment)?
+            .ok_or(ParseExpParamError::MissingExp)?;
 
         let (hrp, bytes) =
-            crate::bech32::nochecksum::decode(&value).map_err(ParseExpParamError::DecodeBech32)?;
+            crate::bech32::nochecksum::decode(value).map_err(ParseExpParamError::DecodeBech32)?;
 
         let ex_hrp: Hrp = Hrp::parse("EX").unwrap();
         if hrp != ex_hrp {
@@ -109,22 +112,63 @@ pub fn parse_with_fragment(endpoint: &str) -> Result<Url, BadEndpointError> {
     Ok(url)
 }
 
-fn get_param<F, T>(url: &Url, prefix: &str, parse: F) -> Option<T>
-where
-    F: Fn(&str) -> Option<T>,
-{
-    if let Some(fragment) = url.fragment() {
-        let mut delim = '-';
+#[derive(Debug)]
+pub(crate) enum ParseFragmentError {
+    InvalidChar(char),
+    AmbiguousDelimiter,
+}
 
-        // For backwards compatibility, also accept `+` as a
-        // fragment parameter delimiter. This was previously
-        // specified, but may be interpreted as ` ` by some
-        // URI parsoing libraries. Therefore if `-` is missing,
-        // assume the URI was generated following the older
-        // version of the spec.
-        if !fragment.contains(delim) {
-            delim = '+';
+impl std::error::Error for ParseFragmentError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
+}
+
+impl std::fmt::Display for ParseFragmentError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ParseFragmentError::*;
+
+        match &self {
+            InvalidChar(c) => write!(f, "invalid character: {c} (must be uppercase)"),
+            AmbiguousDelimiter => write!(f, "ambiguous fragment delimiter (both + and - found)"),
         }
+    }
+}
+
+fn check_fragment_delimiter(fragment: &str) -> Result<char, ParseFragmentError> {
+    // For backwards compatibility, also accept `+` as a
+    // fragment parameter delimiter. This was previously
+    // specified, but may be interpreted as ` ` by some
+    // URI parsoing libraries. Therefore if `-` is missing,
+    // assume the URI was generated following the older
+    // version of the spec.
+
+    let has_dash = fragment.contains('-');
+    let has_plus = fragment.contains('+');
+
+    // Even though fragment is a &str, it should be ascii so bytes() correspond
+    // to chars(), except that it's easier to check that they are in range
+    for c in fragment.bytes() {
+        // These character ranges are more permissive than uppercase bech32, but
+        // also more restrictive than bech32 in general since lowercase is not
+        // allowed
+        if !(b'0'..b'9' + 1).contains(&c)
+            && !(b'A'..b'Z' + 1).contains(&c)
+            && c != b'-'
+            && c != b'+'
+        {
+            return Err(ParseFragmentError::InvalidChar(c.into()));
+        }
+    }
+
+    match (has_dash, has_plus) {
+        (true, true) => Err(ParseFragmentError::AmbiguousDelimiter),
+        (false, true) => Ok('+'),
+        _ => Ok('-'),
+    }
+}
+
+fn get_param<'a>(url: &'a Url, prefix: &str) -> Result<Option<&'a str>, ParseFragmentError> {
+    if let Some(fragment) = url.fragment() {
+        let delim = check_fragment_delimiter(fragment)?;
 
         // The spec says these MUST be ordered lexicographically.
         // However, this was a late spec change, and only matters
@@ -133,11 +177,11 @@ where
         // of the parameters.
         for param in fragment.split(delim) {
             if param.starts_with(prefix) {
-                return parse(param);
+                return Ok(Some(param));
             }
         }
     }
-    None
+    Ok(None)
 }
 
 /// Set a URL fragment parameter, inserting it or replacing it depending on
@@ -146,12 +190,8 @@ where
 /// Parameters are sorted lexicographically by prefix.
 fn set_param(url: &mut Url, new_param: &str) {
     let fragment = url.fragment().unwrap_or("");
-
-    // See above for `-` vs `+` backwards compatibility
-    let mut delim = '-';
-    if !fragment.contains(delim) {
-        delim = '+';
-    }
+    let delim = check_fragment_delimiter(fragment)
+        .expect("set_param must be called on a URL with a valid fragment");
 
     // In case of an invalid fragment parameter the following will still attempt
     // to retain the existing data
@@ -181,6 +221,7 @@ fn set_param(url: &mut Url, new_param: &str) {
 pub(crate) enum ParseOhttpKeysParamError {
     MissingOhttpKeys,
     InvalidOhttpKeys(crate::ohttp::ParseOhttpKeysError),
+    InvalidFragment(ParseFragmentError),
 }
 
 impl std::fmt::Display for ParseOhttpKeysParamError {
@@ -190,6 +231,7 @@ impl std::fmt::Display for ParseOhttpKeysParamError {
         match &self {
             MissingOhttpKeys => write!(f, "ohttp keys are missing"),
             InvalidOhttpKeys(o) => write!(f, "invalid ohttp keys: {o}"),
+            InvalidFragment(e) => write!(f, "invalid URL fragment: {e}"),
         }
     }
 }
@@ -200,6 +242,7 @@ pub(crate) enum ParseExpParamError {
     InvalidHrp(bitcoin::bech32::Hrp),
     DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
     InvalidExp(bitcoin::consensus::encode::Error),
+    InvalidFragment(ParseFragmentError),
 }
 
 impl std::fmt::Display for ParseExpParamError {
@@ -212,17 +255,18 @@ impl std::fmt::Display for ParseExpParamError {
             DecodeBech32(d) => write!(f, "exp is not valid bech32: {d}"),
             InvalidExp(i) =>
                 write!(f, "exp param does not contain a bitcoin consensus encoded u32: {i}"),
+            InvalidFragment(e) => write!(f, "invalid URL fragment: {e}"),
         }
     }
 }
 
-#[cfg(feature = "v2")]
 #[derive(Debug)]
 pub(crate) enum ParseReceiverPubkeyParamError {
     MissingPubkey,
     InvalidHrp(bitcoin::bech32::Hrp),
     DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
     InvalidPubkey(crate::hpke::HpkeError),
+    InvalidFragment(ParseFragmentError),
 }
 
 impl std::fmt::Display for ParseReceiverPubkeyParamError {
@@ -235,6 +279,7 @@ impl std::fmt::Display for ParseReceiverPubkeyParamError {
             DecodeBech32(e) => write!(f, "receiver public is not valid base64: {e}"),
             InvalidPubkey(e) =>
                 write!(f, "receiver public key does not represent a valid pubkey: {e}"),
+            InvalidFragment(e) => write!(f, "invalid URL fragment: {e}"),
         }
     }
 }
@@ -248,6 +293,7 @@ impl std::error::Error for ParseReceiverPubkeyParamError {
             InvalidHrp(_) => None,
             DecodeBech32(error) => Some(error),
             InvalidPubkey(error) => Some(error),
+            InvalidFragment(error) => Some(error),
         }
     }
 }
@@ -287,7 +333,7 @@ mod tests {
                 .unwrap();
         assert!(matches!(
             invalid_ohttp_url.ohttp(),
-            Err(ParseOhttpKeysParamError::InvalidOhttpKeys(_))
+            Err(ParseOhttpKeysParamError::InvalidFragment(_))
         ));
     }
 
@@ -308,9 +354,16 @@ mod tests {
         let missing_exp_url = EXAMPLE_URL.clone();
         assert!(matches!(missing_exp_url.exp(), Err(ParseExpParamError::MissingExp)));
 
-        let invalid_bech32_exp_url =
+        let invalid_fragment_exp_url =
             Url::parse("http://example.com?pj=https://test-payjoin-url#EX1invalid_bech_32")
                 .unwrap();
+        assert!(matches!(
+            invalid_fragment_exp_url.exp(),
+            Err(ParseExpParamError::InvalidFragment(_))
+        ));
+
+        let invalid_bech32_exp_url =
+            Url::parse("http://example.com?pj=https://test-payjoin-url#EX1INVALIDBECH32").unwrap();
         assert!(matches!(invalid_bech32_exp_url.exp(), Err(ParseExpParamError::DecodeBech32(_))));
 
         // Since the HRP is everything to the left of the right-most separator, the invalid url in
@@ -333,9 +386,16 @@ mod tests {
             Err(ParseReceiverPubkeyParamError::MissingPubkey)
         ));
 
-        let invalid_bech32_receiver_pubkey_url =
+        let invalid_fragment_receiver_pubkey_url =
             Url::parse("http://example.com?pj=https://test-payjoin-url#RK1invalid_bech_32")
                 .unwrap();
+        assert!(matches!(
+            invalid_fragment_receiver_pubkey_url.receiver_pubkey(),
+            Err(ParseReceiverPubkeyParamError::InvalidFragment(_))
+        ));
+
+        let invalid_bech32_receiver_pubkey_url =
+            Url::parse("http://example.com?pj=https://test-payjoin-url#RK1INVALIDBECH32").unwrap();
         assert!(matches!(
             invalid_bech32_receiver_pubkey_url.receiver_pubkey(),
             Err(ParseReceiverPubkeyParamError::DecodeBech32(_))

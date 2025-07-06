@@ -142,14 +142,12 @@ fn set_param(url: &mut Url, prefix: &str, param: &str) {
     url.set_fragment(if fragment.is_empty() { None } else { Some(&fragment) });
 }
 
-#[cfg(feature = "v2")]
 #[derive(Debug)]
 pub(crate) enum ParseOhttpKeysParamError {
     MissingOhttpKeys,
     InvalidOhttpKeys(crate::ohttp::ParseOhttpKeysError),
 }
 
-#[cfg(feature = "v2")]
 impl std::fmt::Display for ParseOhttpKeysParamError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use ParseOhttpKeysParamError::*;
@@ -161,7 +159,6 @@ impl std::fmt::Display for ParseOhttpKeysParamError {
     }
 }
 
-#[cfg(feature = "v2")]
 #[derive(Debug)]
 pub(crate) enum ParseExpParamError {
     MissingExp,
@@ -170,7 +167,6 @@ pub(crate) enum ParseExpParamError {
     InvalidExp(bitcoin::consensus::encode::Error),
 }
 
-#[cfg(feature = "v2")]
 impl std::fmt::Display for ParseExpParamError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use ParseExpParamError::*;
@@ -194,7 +190,6 @@ pub(crate) enum ParseReceiverPubkeyParamError {
     InvalidPubkey(crate::hpke::HpkeError),
 }
 
-#[cfg(feature = "v2")]
 impl std::fmt::Display for ParseReceiverPubkeyParamError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         use ParseReceiverPubkeyParamError::*;
@@ -209,7 +204,6 @@ impl std::fmt::Display for ParseReceiverPubkeyParamError {
     }
 }
 
-#[cfg(feature = "v2")]
 impl std::error::Error for ParseReceiverPubkeyParamError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         use ParseReceiverPubkeyParamError::*;

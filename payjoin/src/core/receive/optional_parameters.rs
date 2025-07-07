@@ -36,35 +36,27 @@ impl Default for Params {
 }
 
 impl Params {
-    /// when only one parameter is present rather than failing the entire payjoin process.
+    /// Warn when only one parameter is present rather than failing the entire payjoin process.
     ///
-    /// This  allows for graceful degradation and doesn't halt the payjoin process
-    /// due to incomplete optional parameters, while still alerting about the suboptimal
+    /// This allows for graceful degradation and doesn't halt the payjoin process
+    /// due to incomplete optional parameters, while still alerting about the unusual
     /// configuration that prevents fee adjustment capability.
-    ///
-    /// # Arguments
-    /// * `max_additional_fee_contribution` - Optional maximum fee contribution amount
-    /// * `additional_fee_output_index` - Optional index of output to adjust for fees
-    /// * `
     fn handle_additonal_fee_param(
+        &mut self,
         max_additional_fee_contribution: Option<bitcoin::Amount>,
         additional_fee_output_index: Option<usize>,
-        params: &mut Params,
     ) {
         match (max_additional_fee_contribution, additional_fee_output_index) {
             (Some(amount), Some(index)) => {
-                params.additional_fee_contribution = Some((amount, index));
+                self.additional_fee_contribution = Some((amount, index));
             }
             (Some(_), None) | (None, Some(_)) => {
-                warn!(
-                    "Only one additional-fee parameter specified, proceeding without fee adjustment capability. \
-                     Both maxadditionalfeecontribution and additionalfeeoutputindex must be present for receiver \
-                     to alter sender's output: {params:?}"
-                );
+                warn!("Only one additional fee parameter specified, proceeding without fee adjustment capability. Both maxadditionalfeecontribution and additionalfeeoutputindex must be present for receiver to alter sender's output: {self:?}");
             }
             (None, None) => (), // Neither parameter provided, normal case
         }
     }
+
     pub fn from_query_pairs<K, V, I>(
         pairs: I,
         supported_versions: &'static [Version],
@@ -128,10 +120,9 @@ impl Params {
             }
         }
 
-        Self::handle_additonal_fee_param(
+        params.handle_additonal_fee_param(
             max_additional_fee_contribution,
             additional_fee_output_index,
-            &mut params,
         );
 
         log::debug!("parsed optional parameters: {params:?}");

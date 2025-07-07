@@ -151,7 +151,6 @@ impl InputPair {
         txout: TxOut,
         outpoint: OutPoint,
         sequence: Option<Sequence>,
-        witness_script: Option<ScriptBuf>,
         expected_weight: Option<Weight>,
     ) -> Result<Self, PsbtInputError> {
         let txin = TxIn {
@@ -163,7 +162,6 @@ impl InputPair {
 
         let psbtin = psbt::Input {
             witness_utxo: Some(TxOut { value: txout.value, script_pubkey: txout.script_pubkey }),
-            witness_script,
             ..psbt::Input::default()
         };
 
@@ -180,14 +178,13 @@ impl InputPair {
             return Err(InternalPsbtInputError::InvalidScriptPubKey(AddressType::P2wpkh).into());
         }
 
-        Self::new_segwit_input_pair(txout, outpoint, sequence, None, None)
+        Self::new_segwit_input_pair(txout, outpoint, sequence, None)
     }
 
     /// Constructs a new ['InputPair'] for spending a native SegWit P2WSH output
     pub fn new_p2wsh(
         txout: TxOut,
         outpoint: OutPoint,
-        witness_script: ScriptBuf,
         sequence: Option<Sequence>,
         expected_weight: Weight,
     ) -> Result<Self, PsbtInputError> {
@@ -195,13 +192,7 @@ impl InputPair {
             return Err(InternalPsbtInputError::InvalidScriptPubKey(AddressType::P2wsh).into());
         }
 
-        Self::new_segwit_input_pair(
-            txout,
-            outpoint,
-            sequence,
-            Some(witness_script),
-            Some(expected_weight),
-        )
+        Self::new_segwit_input_pair(txout, outpoint, sequence, Some(expected_weight))
     }
 
     /// Constructs a new ['InputPair'] for spending a native SegWit P2TR output
@@ -214,7 +205,7 @@ impl InputPair {
             return Err(InternalPsbtInputError::InvalidScriptPubKey(AddressType::P2tr).into());
         }
 
-        Self::new_segwit_input_pair(txout, outpoint, sequence, None, None)
+        Self::new_segwit_input_pair(txout, outpoint, sequence, None)
     }
 
     pub(crate) fn previous_txout(&self) -> TxOut {
@@ -251,10 +242,8 @@ pub(crate) fn parse_payload(
 #[cfg(test)]
 mod tests {
     use bitcoin::absolute::{LockTime, Time};
-    use bitcoin::blockdata::script::Builder;
     use bitcoin::hashes::Hash;
     use bitcoin::key::{PublicKey, WPubkeyHash};
-    use bitcoin::opcodes::OP_TRUE;
     use bitcoin::secp256k1::Secp256k1;
     use bitcoin::transaction::InputWeightPrediction;
     use bitcoin::{Amount, PubkeyHash, ScriptBuf, ScriptHash, Txid, WScriptHash, XOnlyPublicKey};
@@ -457,29 +446,18 @@ mod tests {
             script_pubkey: ScriptBuf::new_p2wsh(&WScriptHash::from_byte_array(DUMMY32)),
         };
         let expected_weight = Weight::from_wu(42);
-        let witness_script = Builder::new().push_opcode(OP_TRUE).into_script();
-        let p2wsh_pair = InputPair::new_p2wsh(
-            p2wsh_txout.clone(),
-            outpoint,
-            witness_script.clone(),
-            Some(sequence),
-            expected_weight,
-        )
-        .expect("valid params for p2wsh");
+        let p2wsh_pair =
+            InputPair::new_p2wsh(p2wsh_txout.clone(), outpoint, Some(sequence), expected_weight)
+                .expect("valid params for p2wsh");
 
         assert_eq!(p2wsh_pair.txin.previous_output, outpoint);
         assert_eq!(p2wsh_pair.txin.sequence, sequence);
         assert_eq!(p2wsh_pair.psbtin.witness_utxo.unwrap(), p2wsh_txout);
-        assert_eq!(p2wsh_pair.psbtin.witness_script.unwrap(), witness_script);
         assert_eq!(p2wsh_pair.expected_weight, expected_weight);
 
         let p2wsh_pair = InputPair::new(
             TxIn { previous_output: outpoint, sequence, ..Default::default() },
-            psbt::Input {
-                witness_utxo: Some(p2wsh_txout),
-                witness_script: Some(witness_script.clone()),
-                ..Default::default()
-            },
+            psbt::Input { witness_utxo: Some(p2wsh_txout), ..Default::default() },
             None,
         );
         // P2wsh is not supported when expected weight is not provided
@@ -493,15 +471,9 @@ mod tests {
             script_pubkey: ScriptBuf::new_p2sh(&ScriptHash::all_zeros()),
         };
         assert_eq!(
-            InputPair::new_p2wsh(
-                p2sh_txout,
-                outpoint,
-                witness_script,
-                Some(sequence),
-                expected_weight
-            )
-            .err()
-            .unwrap(),
+            InputPair::new_p2wsh(p2sh_txout, outpoint, Some(sequence), expected_weight)
+                .err()
+                .unwrap(),
             PsbtInputError::from(InvalidScriptPubKey(AddressType::P2wsh))
         )
     }

@@ -56,6 +56,7 @@ impl From<payjoin::receive::v2::SessionHistory> for SessionHistory {
     fn from(value: payjoin::receive::v2::SessionHistory) -> Self { Self(value) }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct InitInputsTransition(
     Arc<
         RwLock<
@@ -141,6 +142,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>> for
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct InitializedTransition(
     Arc<
         RwLock<
@@ -261,6 +263,7 @@ impl From<UncheckedProposal>
     fn from(value: UncheckedProposal) -> Self { value.0 }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct UncheckedProposalTransition(
     Arc<
         RwLock<
@@ -292,6 +295,7 @@ impl UncheckedProposalTransition {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct AssumeInteractiveTransition(
     Arc<
         RwLock<
@@ -368,6 +372,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsOwned>
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct MaybeInputsOwnedTransition(
     Arc<
         RwLock<
@@ -427,6 +432,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsSeen>>
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct MaybeInputsSeenTransition(
     Arc<
         RwLock<
@@ -484,6 +490,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::OutputsUnknown>> 
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct OutputsUnknownTransition(
     Arc<
         RwLock<
@@ -537,6 +544,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsOutputs>> fo
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct WantsOutputsTransition(
     Arc<
         RwLock<
@@ -610,6 +618,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsInputs>> for
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct WantsInputsTransition(
     Arc<
         RwLock<
@@ -717,6 +726,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::ProvisionalPropos
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct ProvisionalProposalTransition(
     Arc<
         RwLock<

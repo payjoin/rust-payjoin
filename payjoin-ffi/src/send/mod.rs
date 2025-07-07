@@ -52,6 +52,7 @@ impl From<payjoin::send::v2::SessionHistory> for SessionHistory {
     fn from(value: payjoin::send::v2::SessionHistory) -> Self { Self(value) }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct InitInputsTransition(
     Arc<
         RwLock<
@@ -183,6 +184,7 @@ impl From<WithReplyKey> for payjoin::send::v2::Sender<payjoin::send::v2::WithRep
     fn from(value: WithReplyKey) -> Self { value.0 }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct WithReplyKeyTransition(
     Arc<
         RwLock<
@@ -324,6 +326,7 @@ impl
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct V2GetContextTransition(
     Arc<
         RwLock<

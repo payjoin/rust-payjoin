@@ -27,7 +27,7 @@ impl From<payjoin::send::v2::SessionEvent> for SessionEvent {
 }
 
 #[derive(Debug, Clone)]
-pub struct SendSession(payjoin::send::v2::SendSession);
+pub struct SendSession(pub payjoin::send::v2::SendSession);
 
 impl From<payjoin::send::v2::SendSession> for SendSession {
     fn from(value: payjoin::send::v2::SendSession) -> Self { Self(value) }

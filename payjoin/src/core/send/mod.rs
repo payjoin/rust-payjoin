@@ -543,6 +543,15 @@ mod test {
             fee_contribution.err(),
             Some(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution)
         );
+        let fee_contribution = determine_fee_contribution(
+            &PARSED_ORIGINAL_PSBT,
+            Script::from_bytes(&<Vec<u8> as FromHex>::from_hex(
+                "0014b60943f60c3ee848828bdace7474a92e81f3fcdd",
+            )?),
+            Some((Amount::from_sat(95983068), None)),
+            false,
+        );
+        assert!(fee_contribution.is_ok());
         Ok(())
     }
 

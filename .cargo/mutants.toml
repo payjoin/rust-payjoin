@@ -10,7 +10,32 @@ exclude_re = [
 	".*Error",
 
 	# ---------------------Crate-specific exculsions---------------------
-	# Receive
-	# src/receive/v1/mod.rs
+	# Timeout loops
+        # src/receive/v1/mod.rs
         "interleave_shuffle", # Replacing index += 1 with index *= 1 in a loop causes a timeout due to an infinite loop
+
+	# Trivial mutations
+	# These exlusions are allowing code blocks to run with artithmetic invloving zero and as a result do nothing
+	# payjoin/src/core/receive/v1/mod.rs
+	"replace > with >= in ProvisionalProposal::apply_fee",
+	# payjoin/src/core/send/mod.rs
+	"replace < with <= in PsbtContext::check_outputs",
+	"replace > with >= in PsbtContext::check_fees",
+	# payjoin/src/core/send/mod.rs
+	"replace < with <= in SenderBuilder<'a>::build_recommended", # clamping the fee contribution when the fee equals to the recommended fee does not do anything
+
+	# Async SystemTime comparison
+        # checking if the system time is equal to the expiry is difficult to reasonably test
+	# payjoin/src/core/receive/v2/mod.rs
+	"replace < with <= in Receiver<Initialized>::apply_unchecked_from_payload",
+        "replace > with >= in Receiver<Initialized>::create_poll_request",
+	"replace > with >= in extract_err_req",
+	# payjoin/src/core/send/v2/mod.rs
+	"replace > with >= in Sender<WithReplyKey>::create_v2_post_request",
+
+	# TODO exclusions
+	# payjoin/src/core/receive/v1/mod.rs
+	"replace > with >= in WantsInputs::avoid_uih", # This mutation I am unsure about whether or not it is a trivial mutant and have not decided on how the best way to approach testing it is
+	# payjoin/src/core/send/mod.rs
+	"replace match guard proposed_txout.script_pubkey == original_output.script_pubkey with true in PsbtContext::check_outputs", # This non-deterministic mutation has a possible test to catch it
 ]

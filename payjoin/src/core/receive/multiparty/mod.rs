@@ -366,6 +366,23 @@ mod test {
     }
 
     #[test]
+    fn test_build_multiparty() -> Result<(), BoxError> {
+        let proposal_one = v2::UncheckedProposal {
+            v1: multiparty_proposals()[0].clone(),
+            context: SHARED_CONTEXT.clone(),
+        };
+        let proposal_two = v2::UncheckedProposal {
+            v1: multiparty_proposals()[1].clone(),
+            context: SHARED_CONTEXT_TWO.clone(),
+        };
+        let mut multiparty = UncheckedProposalBuilder::new();
+        multiparty.add(v2::Receiver { state: proposal_one })?;
+        multiparty.add(v2::Receiver { state: proposal_two })?;
+        assert!(multiparty.build().is_ok());
+        Ok(())
+    }
+
+    #[test]
     fn test_duplicate_context_multiparty() -> Result<(), BoxError> {
         let proposal_one = v2::UncheckedProposal {
             v1: multiparty_proposals()[0].clone(),

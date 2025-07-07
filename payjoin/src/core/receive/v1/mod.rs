@@ -973,19 +973,25 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn unchecked_proposal_below_min_fee() {
+    fn unchecked_proposal_min_fee() {
         let proposal = unchecked_proposal_from_test_vector();
+
+        let min_fee_rate = proposal.psbt_fee_rate().expect("Feerate calculation should not fail");
+        let _ = proposal
+            .clone()
+            .check_broadcast_suitability(Some(min_fee_rate), |_| Ok(true))
+            .expect("Broadcast suitability check with appropriate min_fee_rate should succeed");
+        assert_eq!(proposal.clone().psbt_fee_rate().unwrap(), min_fee_rate);
+
         let min_fee_rate = FeeRate::MAX;
-        match proposal.clone().check_broadcast_suitability(Some(min_fee_rate), |_| Ok(true)) {
-            Err(ReplyableError::Payload(PayloadError(InternalPayloadError::PsbtBelowFeeRate(
-                proposal_rate,
-                min_rate,
-            )))) => {
-                assert_eq!(proposal_rate, proposal.clone().psbt_fee_rate().unwrap());
-                assert_eq!(min_rate, min_fee_rate);
-            },
-            _ => panic!("Broadcast suitability check should fail due to being below the min fee rate or unexpected error type"),
-        };
+        let expected_err = ReplyableError::Payload(PayloadError(
+            InternalPayloadError::PsbtBelowFeeRate(proposal.psbt_fee_rate().unwrap(), min_fee_rate),
+        ));
+        let proposal_below_min_fee = proposal
+            .clone()
+            .check_broadcast_suitability(Some(min_fee_rate), |_| Ok(true))
+            .expect_err("Broadcast suitability with min_fee_rate below minimum should fail");
+        assert_eq!(proposal_below_min_fee.to_string(), expected_err.to_string());
     }
 
     #[test]
@@ -1194,6 +1200,17 @@ pub(crate) mod test {
             .script_pubkey;
 
         let output_value =
+            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value;
+        let outputs = vec![TxOut { value: output_value, script_pubkey: script_pubkey.clone() }];
+        let unchanged_amount =
+            wants_outputs.clone().replace_receiver_outputs(outputs, script_pubkey.as_script());
+        assert!(
+            unchanged_amount.is_ok(),
+            "Not touching the receiver output amount is always allowed"
+        );
+        assert_ne!(wants_outputs.payjoin_psbt, unchanged_amount.unwrap().payjoin_psbt);
+
+        let output_value =
             wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value
                 + Amount::ONE_SAT;
         let outputs = vec![TxOut { value: output_value, script_pubkey: script_pubkey.clone() }];
@@ -1201,7 +1218,7 @@ pub(crate) mod test {
             wants_outputs.clone().replace_receiver_outputs(outputs, script_pubkey.as_script());
         assert!(
             increased_amount.is_ok(),
-            "Increasing the receiver output amount should always be allowed"
+            "Increasing the receiver output amount is always allowed"
         );
         assert_ne!(wants_outputs.payjoin_psbt, increased_amount.unwrap().payjoin_psbt);
 

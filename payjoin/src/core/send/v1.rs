@@ -350,11 +350,14 @@ mod test {
 
     #[test]
     fn process_response_invalid_utf8() {
-        // In UTF-8, 0xF0 represents the start of a 4-byte sequence, so 0xF0 by itself is invalid
-        let invalid_utf8 = &[0xF0];
+        // A PSBT expects an exact match so padding with null bytes for the from_str method is
+        // invalid
+        let mut invalid_utf8_padding = PAYJOIN_PROPOSAL.as_bytes().to_vec();
+        invalid_utf8_padding
+            .extend(std::iter::repeat(0x00).take(MAX_CONTENT_LENGTH - invalid_utf8_padding.len()));
 
         let ctx = create_v1_context();
-        let response = ctx.process_response(invalid_utf8);
+        let response = ctx.process_response(&invalid_utf8_padding);
         match response {
             Ok(_) => panic!("Invalid UTF-8 should have caused an error"),
             Err(error) => match error {
@@ -388,5 +391,10 @@ mod test {
                 _ => panic!("Unexpected error type"),
             },
         }
+    }
+
+    #[test]
+    fn test_non_witness_input_weight_const() {
+        assert_eq!(NON_WITNESS_INPUT_WEIGHT, bitcoin::Weight::from_wu(160));
     }
 }

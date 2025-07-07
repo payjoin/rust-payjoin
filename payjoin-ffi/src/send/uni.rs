@@ -98,8 +98,7 @@ pub fn replay_sender_event_log(
     persister: Arc<dyn JsonSenderSessionPersister>,
 ) -> Result<SenderReplayResult, SenderReplayError> {
     let adapter = CallbackPersisterAdapter::new(persister);
-    let (state, session_history) =
-        super::replay_event_log(&adapter).map_err(SenderReplayError::from)?;
+    let (state, session_history) = super::replay_event_log(&adapter)?;
     Ok(SenderReplayResult { state: state.into(), session_history: session_history.into() })
 }
 
@@ -258,7 +257,7 @@ impl WithReplyKey {
     ) -> WithReplyKeyTransition {
         let mut guard = post_ctx.0.write().expect("Lock should not be poisoned");
         let post_ctx = guard.take().expect("Value should not be taken");
-        WithReplyKeyTransition(self.0.process_response(response, post_ctx.into()))
+        WithReplyKeyTransition(self.0.process_response(response, post_ctx))
     }
 }
 

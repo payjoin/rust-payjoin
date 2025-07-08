@@ -7,7 +7,7 @@ Our mission is to provide developers with cross-language libraries that seamless
 With a commitment to collaboration and interoperability, this repository strives to foster a more inclusive and diverse ecosystem around Payjoin, contributing to the wider adoption of privacy-focused practices within the Bitcoin community. Join us in our mission to build a more private and secure future for Bitcoin transactions through Payjoin!
 
 **Current Status:**
-This project is in the pre-alpha stage and currently in the design phase. The first language bindings available will be for Python, followed by Swift and Kotlin. Our ultimate goal is to provide Payjoin implementations for Android, iOS, Java, React, Python Native, Flutter, C#, and Golang.
+This project is in the pre-alpha stage and currently in the design phase. The first language bindings available will be for Python, followed by Swift and Kotlin. Our ultimate goal is to provide Payjoin implementations for Android, iOS, Java, Python, React Native, Flutter, C#, and Golang.
 
 ## Supported Target Languages and Platforms
 

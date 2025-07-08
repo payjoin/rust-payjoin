@@ -50,6 +50,19 @@ jobs:
       - run: rustup component add rustfmt --toolchain nightly-x86_64-unknown-linux-gnu
       - name: "Run formatting check"
         run: cd payjoin-ffi && cargo fmt --all -- --check
+  
+  Lint-FFI:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repo"
+        uses: actions/checkout@v4
+      - name: "Install nightly toolchain"
+        uses: dtolnay/rust-toolchain@nightly
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+      - run: rustup component add clippy --toolchain nightly-x86_64-unknown-linux-gnu
+      - name: "Run linting check"
+        run: cd payjoin-ffi && bash contrib/lint.sh
 
   Lint:
     runs-on: ubuntu-latest

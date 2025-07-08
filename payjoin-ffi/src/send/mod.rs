@@ -27,7 +27,7 @@ impl From<payjoin::send::v2::SessionEvent> for SessionEvent {
 }
 
 #[derive(Debug, Clone)]
-pub struct SendSession(payjoin::send::v2::SendSession);
+pub struct SendSession(pub payjoin::send::v2::SendSession);
 
 impl From<payjoin::send::v2::SendSession> for SendSession {
     fn from(value: payjoin::send::v2::SendSession) -> Self { Self(value) }
@@ -52,6 +52,7 @@ impl From<payjoin::send::v2::SessionHistory> for SessionHistory {
     fn from(value: payjoin::send::v2::SessionHistory) -> Self { Self(value) }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct InitInputsTransition(
     Arc<
         RwLock<
@@ -83,7 +84,7 @@ impl InitInputsTransition {
             )))
         })?;
 
-        let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
+        let res = value.save(persister).map_err(SenderPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -183,6 +184,7 @@ impl From<WithReplyKey> for payjoin::send::v2::Sender<payjoin::send::v2::WithRep
     fn from(value: WithReplyKey) -> Self { value.0 }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct WithReplyKeyTransition(
     Arc<
         RwLock<
@@ -214,7 +216,7 @@ impl WithReplyKeyTransition {
             )))
         })?;
 
-        let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
+        let res = value.save(persister).map_err(SenderPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -324,6 +326,7 @@ impl
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct V2GetContextTransition(
     Arc<
         RwLock<
@@ -359,7 +362,7 @@ impl V2GetContextTransition {
             )))
         })?;
 
-        let res = value.save(persister).map_err(|e| SenderPersistedError::from(e))?;
+        let res = value.save(persister).map_err(SenderPersistedError::from)?;
         Ok(res.into())
     }
 }

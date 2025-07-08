@@ -102,9 +102,7 @@ pub struct TerminalErr {
 impl TerminalErr {
     pub fn error(&self) -> String { self.error.clone() }
 
-    pub fn reply(&self) -> Option<Arc<JsonReply>> {
-        self.reply.clone().map(|reply| Arc::new(reply))
-    }
+    pub fn reply(&self) -> Option<Arc<JsonReply>> { self.reply.clone().map(Arc::new) }
 }
 
 #[uniffi::export]
@@ -166,8 +164,7 @@ pub fn replay_receiver_event_log(
     persister: Arc<dyn JsonReceiverSessionPersister>,
 ) -> Result<ReplayResult, ReceiverReplayError> {
     let adapter = CallbackPersisterAdapter::new(persister);
-    let (state, session_history) =
-        super::replay_event_log(&adapter).map_err(ReceiverReplayError::from)?;
+    let (state, session_history) = super::replay_event_log(&adapter)?;
     Ok(ReplayResult { state: state.into(), session_history: session_history.into() })
 }
 #[derive(uniffi::Object)]
@@ -190,6 +187,7 @@ pub struct UninitializedReceiver {}
 
 #[uniffi::export]
 impl UninitializedReceiver {
+    #[allow(clippy::new_without_default)]
     #[uniffi::constructor]
     // TODO: no need for this constructor. `create_session` is the only way to create a receiver.
     pub fn new() -> Self { Self {} }
@@ -214,15 +212,12 @@ impl UninitializedReceiver {
         ohttp_keys: Arc<OhttpKeys>,
         expire_after: Option<u64>,
     ) -> MaybeBadInitInputsTransition {
-        MaybeBadInitInputsTransition(
-            super::UninitializedReceiver::create_session(
-                (*address).clone(),
-                directory,
-                (*ohttp_keys).clone(),
-                expire_after,
-            )
-            .into(),
-        )
+        MaybeBadInitInputsTransition(super::UninitializedReceiver::create_session(
+            (*address).clone(),
+            directory,
+            (*ohttp_keys).clone(),
+            expire_after,
+        ))
     }
 }
 
@@ -266,7 +261,7 @@ impl InitializedTransitionOutcome {
     pub fn is_success(&self) -> bool { self.0.is_success() }
 
     pub fn success(&self) -> Option<Arc<UncheckedProposal>> {
-        self.0.success().map(|p| Arc::new(UncheckedProposal(p.into())))
+        self.0.success().map(|p| Arc::new(UncheckedProposal(p)))
     }
 }
 

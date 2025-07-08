@@ -56,6 +56,7 @@ impl From<payjoin::receive::v2::SessionHistory> for SessionHistory {
     fn from(value: payjoin::receive::v2::SessionHistory) -> Self { Self(value) }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct InitInputsTransition(
     Arc<
         RwLock<
@@ -82,7 +83,7 @@ impl InitInputsTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -141,6 +142,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>> for
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct InitializedTransition(
     Arc<
         RwLock<
@@ -171,7 +173,7 @@ impl InitializedTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -261,6 +263,7 @@ impl From<UncheckedProposal>
     fn from(value: UncheckedProposal) -> Self { value.0 }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct UncheckedProposalTransition(
     Arc<
         RwLock<
@@ -287,11 +290,12 @@ impl UncheckedProposalTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct AssumeInteractiveTransition(
     Arc<
         RwLock<
@@ -368,6 +372,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsOwned>
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct MaybeInputsOwnedTransition(
     Arc<
         RwLock<
@@ -394,7 +399,7 @@ impl MaybeInputsOwnedTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -427,6 +432,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsSeen>>
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct MaybeInputsSeenTransition(
     Arc<
         RwLock<
@@ -453,7 +459,7 @@ impl MaybeInputsSeenTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -484,6 +490,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::OutputsUnknown>> 
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct OutputsUnknownTransition(
     Arc<
         RwLock<
@@ -510,7 +517,7 @@ impl OutputsUnknownTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -537,6 +544,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsOutputs>> fo
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct WantsOutputsTransition(
     Arc<
         RwLock<
@@ -610,6 +618,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsInputs>> for
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct WantsInputsTransition(
     Arc<
         RwLock<
@@ -717,6 +726,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::ProvisionalPropos
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct ProvisionalProposalTransition(
     Arc<
         RwLock<
@@ -743,7 +753,7 @@ impl ProvisionalProposalTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
@@ -803,7 +813,7 @@ impl PayjoinProposalTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        value.save(persister).map_err(|e| ReceiverPersistedError::from(e))?;
+        value.save(persister).map_err(ReceiverPersistedError::from)?;
         Ok(())
     }
 }

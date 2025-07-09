@@ -4,18 +4,25 @@ Welcome to the Python language bindings for the [Payjoin Dev Kit](https://payjoi
 
 ## Install from PyPI
 
-Grab the latest release with a simple:
+To grab the latest release:
 
-```shell
+```sh
 pip install payjoin
 ```
 
-## Running Tests
+## Building the Package
 
-Follow these steps to clone the repository and run the tests.
+If you have [nix](https://nixos.org/download/) installed, you can simply run:
 
+```sh
+nix develop .#python
+```
 
-```shell
+This will get you up and running with a shell containing the dependencies you need.
+
+Otherwise, follow these steps to clone the repository and build the package:
+
+```sh
 git clone https://github.com/payjoin/rust-payjoin.git
 cd rust-payjoin/payjoin-ffi/python
 
@@ -23,7 +30,11 @@ cd rust-payjoin/payjoin-ffi/python
 python -m venv venv
 source venv/bin/activate
 
-# Generate the bindings (use the script appropriate for your platform)
+# Install dependencies
+# NOTE: requirements-dev.txt only needed when running tests
+pip install --requirement requirements.txt --requirement requirements-dev.txt
+
+# Generate the bindings (use the script appropriate for your platform (linux or macos))
 PYBIN="./venv/bin/" bash ./scripts/generate_<platform>.sh
 
 # Build the wheel
@@ -31,25 +42,21 @@ python setup.py bdist_wheel --verbose
 
 # Force reinstall payjoin
 pip install ./dist/payjoin-<version>.whl --force-reinstall
+```
 
+If all goes well, you should be able to run the Python interpreter and import `payjoin`:
+
+```sh
+python
+import payjoin
+```
+
+## Running Tests
+
+```sh
 # Run all tests
 python -m unittest --verbose
 ```
 
 Note that you'll need Docker to run the integration tests. If you get a "Failed to start container" error, ensure the Docker engine is running on your machine.
 You can [filter which tests](https://docs.python.org/3/library/unittest.html#command-line-interface) to run by passing a file or test name as argument.
-
-## Building the Package
-
-```shell
-# Setup a python virtual environment
-python -m venv venv
-source venv/bin/activate
-
-# Generate the bindings (use the script appropriate for your platform)
-PYBIN="./venv/bin/" bash ./scripts/generate_<platform>.sh
-
-# Build the wheel
-python setup.py --verbose bdist_wheel
-
-```

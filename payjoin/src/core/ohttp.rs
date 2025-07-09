@@ -322,7 +322,7 @@ impl std::fmt::Display for ParseOhttpKeysError {
         match self {
             ParseOhttpKeysError::InvalidFormat => write!(f, "Invalid format"),
             ParseOhttpKeysError::InvalidPublicKey => write!(f, "Invalid public key"),
-            ParseOhttpKeysError::DecodeBech32(e) => write!(f, "Failed to decode base64: {e}"),
+            ParseOhttpKeysError::DecodeBech32(e) => write!(f, "Failed to decode bech32: {e}"),
             ParseOhttpKeysError::DecodeKeyConfig(e) => write!(f, "Failed to decode KeyConfig: {e}"),
         }
     }

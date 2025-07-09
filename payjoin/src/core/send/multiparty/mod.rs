@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::v2::{self, extract_request, EncapsulationError, HpkeContext};
-use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, InternalResult};
+use super::{serialize_url, AdditionalFeeContribution, BuildSenderError};
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::{process_get_res, process_post_res};
 use crate::output_substitution::OutputSubstitution;
@@ -137,7 +137,7 @@ impl GetContext {
         ohttp_ctx: ohttp::ClientResponse,
         finalize_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> Result<FinalizeContext, FinalizedError> {
-        let psbt_ctx = PsbtContext { inner: self.0.psbt_ctx.clone() };
+        let psbt_ctx = self.0.psbt_ctx.clone();
         let body = match process_get_res(response, ohttp_ctx)? {
             Some(body) => body,
             None => return Err(FinalizedError::from(InternalFinalizedError::MissingResponse)),
@@ -150,7 +150,8 @@ impl GetContext {
         .map_err(InternalFinalizedError::Hpke)?;
 
         let proposal = Psbt::deserialize(&psbt).map_err(InternalFinalizedError::Psbt)?;
-        let psbt = psbt_ctx.process_proposal(proposal).map_err(InternalFinalizedError::Proposal)?;
+        let psbt =
+            process_proposal(psbt_ctx, proposal).map_err(InternalFinalizedError::Proposal)?;
         let finalized_psbt = finalize_psbt(&psbt).map_err(InternalFinalizedError::FinalizePsbt)?;
         Ok(FinalizeContext {
             hpke_ctx: self.0.hpke_ctx.clone(),
@@ -207,21 +208,17 @@ impl FinalizeContext {
     }
 }
 
-pub(crate) struct PsbtContext {
-    inner: crate::send::PsbtContext,
-}
-
-impl PsbtContext {
-    fn process_proposal(self, mut proposal: Psbt) -> InternalResult<Psbt> {
-        // TODO(armins) add multiparty check fees modeled after crate::send::PsbtContext::check_fees
-        // The problem with this is that some of the inputs will be missing witness_utxo or non_witness_utxo field in the psbt so the default psbt.fee() will fail
-        // Similarly we need to implement a check for the inputs. It would be useful to have all the checks as crate::send::PsbtContext::check_inputs
-        // However that method expects the receiver to have provided witness for their inputs. In a ns1r the receiver will not sign any inputs of the optimistic merged psbt
-        self.inner.basic_checks(&proposal)?;
-        self.inner.check_outputs(&proposal)?;
-        self.inner.restore_original_utxos(&mut proposal)?;
-        Ok(proposal)
-    }
+/// The same as `crate::send::PsbtContext::process_proposal` but without checking receiver input finalization
+fn process_proposal(
+    psbt_ctx: crate::send::PsbtContext,
+    mut proposal: Psbt,
+) -> crate::send::InternalResult<Psbt> {
+    psbt_ctx.basic_checks(&proposal)?;
+    psbt_ctx.check_inputs(&proposal, false)?;
+    let contributed_fee = psbt_ctx.check_outputs(&proposal)?;
+    psbt_ctx.restore_original_utxos(&mut proposal)?;
+    psbt_ctx.check_fees(&proposal, contributed_fee)?;
+    Ok(proposal)
 }
 
 fn append_optimisitic_merge_query_param(url: &mut Url) {

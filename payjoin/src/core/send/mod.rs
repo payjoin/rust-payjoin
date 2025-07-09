@@ -88,7 +88,7 @@ fn ensure<T>(condition: bool, error: T) -> Result<(), T> {
 impl PsbtContext {
     fn process_proposal(self, mut proposal: Psbt) -> InternalResult<Psbt> {
         self.basic_checks(&proposal)?;
-        self.check_inputs(&proposal)?;
+        self.check_inputs(&proposal, true)?;
         let contributed_fee = self.check_outputs(&proposal)?;
         self.restore_original_utxos(&mut proposal)?;
         self.check_fees(&proposal, contributed_fee)?;
@@ -161,7 +161,11 @@ impl PsbtContext {
         Ok(())
     }
 
-    fn check_inputs(&self, proposal: &Psbt) -> InternalResult<()> {
+    fn check_inputs(
+        &self,
+        proposal: &Psbt,
+        ensure_receiver_input_finalized: bool,
+    ) -> InternalResult<()> {
         let mut original_inputs = self.original_psbt.input_pairs().peekable();
 
         for proposed in proposal.input_pairs() {
@@ -200,12 +204,14 @@ impl PsbtContext {
                         .input_pairs()
                         .next()
                         .ok_or(InternalProposalError::NoInputs)?;
-                    // Verify the PSBT input is finalized
-                    ensure(
-                        proposed.psbtin.final_script_sig.is_some()
-                            || proposed.psbtin.final_script_witness.is_some(),
-                        InternalProposalError::ReceiverTxinNotFinalized,
-                    )?;
+                    if ensure_receiver_input_finalized {
+                        // Verify the PSBT input is finalized
+                        ensure(
+                            proposed.psbtin.final_script_sig.is_some()
+                                || proposed.psbtin.final_script_witness.is_some(),
+                            InternalProposalError::ReceiverTxinNotFinalized,
+                        )?;
+                    }
                     // Verify that non_witness_utxo or witness_utxo are filled in.
                     ensure(
                         proposed.psbtin.witness_utxo.is_some()

@@ -1,12 +1,11 @@
 #[cfg(feature = "_danger-local-https")]
 mod e2e {
-    use std::env;
-    use std::path::PathBuf;
     use std::process::{ExitStatus, Stdio};
 
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
     use payjoin_test_utils::{init_bitcoind_sender_receiver, BoxError};
+    use tempfile::tempdir;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::process::Command;
 
@@ -17,31 +16,15 @@ mod e2e {
         child.wait().await
     }
 
-    struct CleanupGuard {
-        paths: Vec<PathBuf>,
-    }
-
-    impl Drop for CleanupGuard {
-        fn drop(&mut self) {
-            for path in &self.paths {
-                cleanup_temp_file(path);
-            }
-        }
-    }
-
     const RECEIVE_SATS: &str = "54321";
 
     #[cfg(feature = "v1")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn send_receive_payjoin_v1() -> Result<(), BoxError> {
         let (bitcoind, _sender, _receiver) = init_bitcoind_sender_receiver(None, None)?;
-        let temp_dir = env::temp_dir();
-        let receiver_db_path = temp_dir.join("receiver_db");
-        let sender_db_path = temp_dir.join("sender_db");
-        let _cleanup_guard =
-            CleanupGuard { paths: vec![receiver_db_path.clone(), sender_db_path.clone()] };
-        let receiver_db_path_clone = receiver_db_path.clone();
-        let sender_db_path_clone = sender_db_path.clone();
+        let temp_dir = tempdir()?;
+        let receiver_db_path = temp_dir.path().join("receiver_db");
+        let sender_db_path = temp_dir.path().join("sender_db");
         let port = find_free_port()?;
 
         let payjoin_sent = tokio::spawn(async move {
@@ -58,7 +41,7 @@ mod e2e {
                 .arg("--cookie-file")
                 .arg(cookie_file)
                 .arg("--db-path")
-                .arg(&receiver_db_path_clone)
+                .arg(&receiver_db_path)
                 .arg("receive")
                 .arg(RECEIVE_SATS)
                 .arg("--port")
@@ -100,7 +83,7 @@ mod e2e {
                 .arg("--cookie-file")
                 .arg(cookie_file)
                 .arg("--db-path")
-                .arg(&sender_db_path_clone)
+                .arg(&sender_db_path)
                 .arg("send")
                 .arg(&bip21)
                 .arg("--fee-rate")
@@ -157,41 +140,33 @@ mod e2e {
     #[cfg(feature = "v2")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn send_receive_payjoin_v2() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use std::path::PathBuf;
-
         use payjoin_test_utils::{init_tracing, TestServices};
+        use tempfile::TempDir;
         use tokio::process::{Child, ChildStdout};
 
         type Result<T> = std::result::Result<T, BoxError>;
 
         init_tracing();
         let mut services = TestServices::initialize().await?;
-        let temp_dir = env::temp_dir();
-        let receiver_db_path = temp_dir.join("receiver_db");
-        let sender_db_path = temp_dir.join("sender_db");
-        let _cleanup_guard =
-            CleanupGuard { paths: vec![receiver_db_path.clone(), sender_db_path.clone()] };
+        let temp_dir = tempdir()?;
 
         let result = tokio::select! {
             res = services.take_ohttp_relay_handle() => Err(format!("Ohttp relay is long running: {res:?}").into()),
             res = services.take_directory_handle() => Err(format!("Directory server is long running: {res:?}").into()),
-            res = send_receive_cli_async(&services, receiver_db_path.clone(), sender_db_path.clone()) => res,
+            res = send_receive_cli_async(&services, &temp_dir) => res,
         };
 
         assert!(result.is_ok(), "send_receive failed: {:#?}", result.unwrap_err());
 
-        async fn send_receive_cli_async(
-            services: &TestServices,
-            receiver_db_path: PathBuf,
-            sender_db_path: PathBuf,
-        ) -> Result<()> {
+        async fn send_receive_cli_async(services: &TestServices, temp_dir: &TempDir) -> Result<()> {
+            let receiver_db_path = temp_dir.path().join("receiver_db");
+            let sender_db_path = temp_dir.path().join("sender_db");
             let (bitcoind, _sender, _receiver) = init_bitcoind_sender_receiver(None, None)?;
-            let temp_dir = env::temp_dir();
-            let cert_path = temp_dir.join("localhost.der");
+            let cert_path = std::env::temp_dir().join("localhost.der");
             tokio::fs::write(&cert_path, services.cert()).await?;
             services.wait_for_services_ready().await?;
             let ohttp_keys = services.fetch_ohttp_keys().await?;
-            let ohttp_keys_path = temp_dir.join("ohttp_keys");
+            let ohttp_keys_path = temp_dir.path().join("ohttp_keys");
             tokio::fs::write(&ohttp_keys_path, ohttp_keys.encode()?).await?;
 
             let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
@@ -418,11 +393,5 @@ mod e2e {
         }
 
         Ok(())
-    }
-
-    fn cleanup_temp_file(path: &std::path::Path) {
-        if let Err(e) = std::fs::remove_dir_all(path) {
-            eprintln!("Failed to remove {path:?}: {e}");
-        }
     }
 }

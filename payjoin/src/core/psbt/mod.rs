@@ -209,7 +209,21 @@ impl InternalInputPair<'_> {
                 }
             }
             P2wpkh => Ok(InputWeightPrediction::P2WPKH_MAX),
-            P2wsh => Err(InputWeightError::NotSupported),
+            P2wsh => {
+                if !self.txin.witness.is_empty() {
+                    return Ok(self.txin.segwit_weight());
+                }
+                return self
+                    .psbtin
+                    .final_script_witness
+                    .as_ref()
+                    .filter(|w| !w.is_empty())
+                    .map(|w| {
+                        Weight::from_non_witness_data_size(self.txin.base_size() as u64)
+                            + Weight::from_witness_data_size(w.size() as u64)
+                    })
+                    .ok_or(InputWeightError::NotSupported);
+            }
             P2tr => Ok(InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH),
             _ => Err(AddressTypeError::UnknownAddressType.into()),
         }?;
@@ -248,6 +262,8 @@ pub(crate) enum InternalPsbtInputError {
     AddressType(AddressTypeError),
     InvalidScriptPubKey(AddressType),
     WeightError(InputWeightError),
+    /// Weight was provided but can be calculated from available information
+    ProvidedUnnecessaryWeight,
 }
 
 impl fmt::Display for InternalPsbtInputError {
@@ -259,6 +275,7 @@ impl fmt::Display for InternalPsbtInputError {
             Self::AddressType(_) => write!(f, "invalid address type"),
             Self::InvalidScriptPubKey(e) => write!(f, "provided script was not a valid type of {e}"),
             Self::WeightError(e) => write!(f, "{e}"),
+            Self::ProvidedUnnecessaryWeight => write!(f, "weight was provided but can be calculated from available information"),
         }
     }
 }
@@ -272,6 +289,7 @@ impl std::error::Error for InternalPsbtInputError {
             Self::AddressType(error) => Some(error),
             Self::InvalidScriptPubKey(_) => None,
             Self::WeightError(error) => Some(error),
+            Self::ProvidedUnnecessaryWeight => None,
         }
     }
 }

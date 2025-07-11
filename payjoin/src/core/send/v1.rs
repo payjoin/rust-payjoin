@@ -305,6 +305,14 @@ mod test {
     const PJ_URI: &str =
         "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/";
 
+    fn pj_uri<'a>() -> PjUri<'a> {
+        Uri::try_from(PJ_URI)
+            .expect("uri should succeed")
+            .assume_checked()
+            .check_pj_supported()
+            .expect("uri should support payjoin")
+    }
+
     fn create_v1_context() -> super::V1Context {
         let psbt_context = create_psbt_context().expect("failed to create context");
         super::V1Context { psbt_context }
@@ -381,40 +389,39 @@ mod test {
     }
 
     #[test]
-    fn test_build_recommended_fee_contribution() -> Result<(), BoxError> {
+    fn test_build_recommended_max_fee_contribution() {
         let psbt = PARSED_ORIGINAL_PSBT.clone();
-        let sender = SenderBuilder::new(
-            psbt.clone(),
-            Uri::try_from(PJ_URI)
-                .map_err(|e| format!("{e}"))?
-                .assume_checked()
-                .check_pj_supported()
-                .map_err(|e| format!("{e}"))?,
-        )
-        .build_recommended(FeeRate::from_sat_per_vb(2000000).expect("Could not determine feerate"));
-        assert!(sender.is_ok(), "{:#?}", sender.err());
-        assert_eq!(
-            sender.unwrap().fee_contribution.unwrap().max_amount,
-            psbt.unsigned_tx.output[0].value
-        );
-        Ok(())
+        let sender = SenderBuilder::new(psbt.clone(), pj_uri())
+            .build_recommended(
+                FeeRate::from_sat_per_vb(2000000).expect("Could not determine feerate"),
+            )
+            .expect("sender should succeed");
+        assert_eq!(sender.output_substitution, OutputSubstitution::Disabled);
+        assert_eq!(&sender.payee, &pj_uri().address.script_pubkey());
+        let fee_contribution = sender.fee_contribution.expect("sender should contribute fees");
+        assert_eq!(fee_contribution.max_amount, psbt.unsigned_tx.output[0].value);
+        assert_eq!(fee_contribution.vout, 0);
+        assert_eq!(sender.min_fee_rate, FeeRate::from_sat_per_kwu(500000000));
     }
 
     #[test]
-    fn test_build_recommended() -> Result<(), BoxError> {
-        let sender = SenderBuilder::new(
-            PARSED_ORIGINAL_PSBT.clone(),
-            Uri::try_from(PJ_URI)
-                .map_err(|e| format!("{e}"))?
-                .assume_checked()
-                .check_pj_supported()
-                .map_err(|e| format!("{e}"))?,
-        )
-        .build_recommended(FeeRate::MIN);
-        assert!(sender.is_ok(), "{:#?}", sender.err());
-        assert_eq!(NON_WITNESS_INPUT_WEIGHT, bitcoin::Weight::from_wu(160));
-        assert_eq!(sender.unwrap().fee_contribution.unwrap().max_amount, Amount::from_sat(0));
-        Ok(())
+    fn test_build_recommended() {
+        let sender = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri())
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .expect("sender should succeed");
+        assert_eq!(sender.output_substitution, OutputSubstitution::Disabled);
+        assert_eq!(&sender.payee, &pj_uri().address.script_pubkey());
+        let fee_contribution = sender.fee_contribution.expect("sender should contribute fees");
+        assert_eq!(fee_contribution.max_amount, Amount::from_sat(91));
+        assert_eq!(fee_contribution.vout, 0);
+        assert_eq!(sender.min_fee_rate, FeeRate::from_sat_per_kwu(250));
+        // Ensure the receiver's output substitution preference is respected either way
+        let mut pj_uri = pj_uri();
+        pj_uri.extras.output_substitution = OutputSubstitution::Enabled;
+        let sender = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
+            .build_recommended(FeeRate::from_sat_per_vb_unchecked(1))
+            .expect("sender should succeed");
+        assert_eq!(sender.output_substitution, OutputSubstitution::Enabled);
     }
 
     #[test]

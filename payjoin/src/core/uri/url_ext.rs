@@ -465,7 +465,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fragment_delimeter_backwards_compatibility() {
+    fn test_fragment_delimiter_backwards_compatibility() {
         // ensure + is still accepted as a delimiter
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
                    &pjos=0&pj=HTTPS://EXAMPLE.COM/\
@@ -512,5 +512,16 @@ mod tests {
             endpoint.fragment(),
             Some("EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
         );
+    }
+
+    #[test]
+    fn test_fragment_mixed_delimiter() {
+        // mixing current and deprecated delimiters should fail
+        let fragment = "23RK1QG2RH36X9ZWRK\
+7UWCCQE0WD8T89XKK2W55KTK9UHSZLEG8Q2TGEGG-OH1QYP87E2AVMDKXDTU6R25WCPQ5ZUF02XHNPA65JMD8ZA2W4YRQN6UUWG+EX1XPK8Y6Q";
+        assert!(matches!(
+            check_fragment_delimiter(fragment),
+            Err(ParseFragmentError::AmbiguousDelimiter)
+        ));
     }
 }

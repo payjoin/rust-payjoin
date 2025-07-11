@@ -182,7 +182,7 @@ impl App {
                 match self.post_original_proposal(context.clone(), persister).await {
                     Ok(()) => (),
                     Err(_) => {
-                        let (req, v1_ctx) = context.extract_v1();
+                        let (req, v1_ctx) = context.create_v1_post_request();
                         let response = post_request(req).await?;
                         let psbt = Arc::new(
                             v1_ctx.process_response(response.bytes().await?.to_vec().as_slice())?,
@@ -208,8 +208,9 @@ impl App {
         sender: Sender<WithReplyKey>,
         persister: &SenderPersister,
     ) -> Result<()> {
-        let (req, ctx) = sender
-            .extract_v2(self.unwrap_relay_or_else_fetch(Some(sender.endpoint().clone())).await?)?;
+        let (req, ctx) = sender.create_v2_post_request(
+            self.unwrap_relay_or_else_fetch(Some(sender.endpoint().clone())).await?,
+        )?;
         let response = post_request(req).await?;
         println!("Posted original proposal...");
         let sender = sender.process_response(&response.bytes().await?, ctx).save(persister)?;
@@ -224,7 +225,7 @@ impl App {
         let mut session = sender.clone();
         // Long poll until we get a response
         loop {
-            let (req, ctx) = session.extract_req(
+            let (req, ctx) = session.create_poll_request(
                 self.unwrap_relay_or_else_fetch(Some(session.endpoint().clone())).await?,
             )?;
             let response = post_request(req).await?;
@@ -260,11 +261,11 @@ impl App {
 
         let mut session = session;
         loop {
-            let (req, context) = session.extract_req(&ohttp_relay)?;
+            let (req, context) = session.create_poll_request(&ohttp_relay)?;
             println!("Polling receive request...");
             let ohttp_response = post_request(req).await?;
             let state_transition = session
-                .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), context)
+                .process_response(ohttp_response.bytes().await?.to_vec().as_slice(), context)
                 .save(persister);
             match state_transition {
                 Ok(OptionalTransitionOutcome::Progress(next_state)) => {
@@ -439,11 +440,11 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let (req, ohttp_ctx) = proposal
-            .extract_req(&self.unwrap_relay_or_else_fetch(None).await?)
+            .create_post_request(&self.unwrap_relay_or_else_fetch(None).await?)
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         let res = post_request(req).await?;
         let payjoin_psbt = proposal.psbt().clone();
-        proposal.process_res(&res.bytes().await?, ohttp_ctx).save(persister)?;
+        proposal.process_response(&res.bytes().await?, ohttp_ctx).save(persister)?;
         println!(
             "Response successful. Watch mempool for successful Payjoin. TXID: {}",
             payjoin_psbt.extract_tx_unchecked_fee_rate().compute_txid()

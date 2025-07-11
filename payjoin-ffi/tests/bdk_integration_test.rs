@@ -265,7 +265,8 @@ mod v2 {
             .save(&recv_session_persister)?;
             let ohttp_relay = services.ohttp_relay_url();
             // Poll receive request
-            let (request, client_response) = session.extract_req(ohttp_relay.to_string())?;
+            let (request, client_response) =
+                session.create_poll_request(ohttp_relay.to_string())?;
             let response = agent
                 .post(request.url.as_string())
                 .header("Content-Type", request.content_type)
@@ -274,7 +275,7 @@ mod v2 {
                 .await?;
             assert!(response.status().is_success());
             let response_body = session
-                .process_res(&response.bytes().await?, &client_response)
+                .process_response(&response.bytes().await?, &client_response)
                 .save(&recv_session_persister)
                 .unwrap();
             // No proposal yet since sender has not responded
@@ -291,7 +292,8 @@ mod v2 {
             let req_ctx = SenderBuilder::new(psbt.to_string(), pj_uri)?
                 .build_recommended(payjoin::bitcoin::FeeRate::BROADCAST_MIN.to_sat_per_kwu())
                 .save(&sender_session_persister)?;
-            let (request, context) = req_ctx.extract_v2(ohttp_relay.to_owned().into())?;
+            let (request, context) =
+                req_ctx.create_v2_post_request(ohttp_relay.to_owned().into())?;
             let response = agent
                 .post(request.url.as_string())
                 .header("Content-Type", request.content_type)
@@ -308,7 +310,8 @@ mod v2 {
             // Inside the Receiver:
 
             // GET fallback psbt
-            let (request, client_response) = session.extract_req(ohttp_relay.to_string())?;
+            let (request, client_response) =
+                session.create_poll_request(ohttp_relay.to_string())?;
             let response = agent
                 .post(request.url.as_string())
                 .header("Content-Type", request.content_type)
@@ -316,13 +319,13 @@ mod v2 {
                 .send()
                 .await?;
             let proposal = session
-                .process_res(&response.bytes().await?, &client_response)
+                .process_response(&response.bytes().await?, &client_response)
                 .save(&recv_session_persister)?
                 .success()
                 .expect("proposal should exist");
             let payjoin_proposal = handle_directory_proposal(receiver, proposal);
             let (request, client_response) =
-                payjoin_proposal.extract_req(ohttp_relay.to_string())?;
+                payjoin_proposal.create_post_request(ohttp_relay.to_string())?;
             let response = agent
                 .post(request.url.as_string())
                 .header("Content-Type", request.content_type)
@@ -330,15 +333,15 @@ mod v2 {
                 .send()
                 .await?;
             payjoin_proposal
-                .process_res(&response.bytes().await?, &client_response)
+                .process_response(&response.bytes().await?, &client_response)
                 .save(&recv_session_persister)?;
 
             // **********************
             // Inside the Sender:
-            // Sender checks, signs, finalizes, extracts, and broadcasts
+            // Sender checks, signs, finalizes, constructs, and broadcasts
             // Replay post fallback to get the response
             let (Request { url, body, content_type, .. }, ohttp_ctx) =
-                send_ctx.extract_req(ohttp_relay.to_string())?;
+                send_ctx.create_poll_request(ohttp_relay.to_string())?;
             let response = agent
                 .post(url.as_string())
                 .header("Content-Type", content_type)

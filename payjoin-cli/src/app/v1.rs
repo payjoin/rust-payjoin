@@ -69,7 +69,7 @@ impl AppTrait for App {
         let (req, ctx) = SenderBuilder::new(psbt, uri.clone())
             .build_recommended(fee_rate)
             .with_context(|| "Failed to build payjoin request")?
-            .extract_v1();
+            .create_v1_post_request();
         let http = http_agent()?;
         let body = String::from_utf8(req.body.clone()).unwrap();
         println!("Sending fallback request to {}", &req.url);

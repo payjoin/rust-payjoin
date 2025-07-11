@@ -60,7 +60,9 @@ impl<'a> SenderBuilder<'a> {
     ///
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
     /// to create a [`Sender`]
-    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v1::SenderBuilder::new(psbt, uri)) }
+    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self {
+        Self(v1::SenderBuilder::new(psbt, uri))
+    }
 
     /// Disable output substitution even if the receiver didn't.
     ///
@@ -161,11 +163,15 @@ pub struct Sender<State> {
 impl<State> core::ops::Deref for Sender<State> {
     type Target = State;
 
-    fn deref(&self) -> &Self::Target { &self.state }
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
 }
 
 impl<State> core::ops::DerefMut for Sender<State> {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
 }
 
 /// Represents the various states of a Payjoin send session during the protocol flow.
@@ -184,12 +190,15 @@ pub enum SendSession {
 impl SendSession {
     fn process_event(self, event: SessionEvent) -> Result<SendSession, ReplayError> {
         match (self, event) {
-            (SendSession::Uninitialized, SessionEvent::CreatedReplyKey(sender_with_reply_key)) =>
-                Ok(SendSession::WithReplyKey(Sender { state: sender_with_reply_key })),
-            (SendSession::WithReplyKey(state), SessionEvent::V2GetContext(v2_get_context)) =>
-                Ok(state.apply_v2_get_context(v2_get_context)),
-            (SendSession::V2GetContext(_state), SessionEvent::ProposalReceived(proposal)) =>
-                Ok(SendSession::ProposalReceived(proposal)),
+            (SendSession::Uninitialized, SessionEvent::CreatedReplyKey(sender_with_reply_key)) => {
+                Ok(SendSession::WithReplyKey(Sender { state: sender_with_reply_key }))
+            }
+            (SendSession::WithReplyKey(state), SessionEvent::V2GetContext(v2_get_context)) => {
+                Ok(state.apply_v2_get_context(v2_get_context))
+            }
+            (SendSession::V2GetContext(_state), SessionEvent::ProposalReceived(proposal)) => {
+                Ok(SendSession::ProposalReceived(proposal))
+            }
             (_, SessionEvent::SessionInvalid(_)) => Ok(SendSession::TerminalFailure),
             (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
                 Box::new(current_state),
@@ -214,7 +223,9 @@ impl State for WithReplyKey {}
 
 impl Sender<WithReplyKey> {
     /// Extract serialized V1 Request and Context from a Payjoin Proposal.
-    pub fn extract_v1(&self) -> (Request, v1::V1Context) { self.v1.extract_v1() }
+    pub fn extract_v1(&self) -> (Request, v1::V1Context) {
+        self.v1.extract_v1()
+    }
 
     /// Extract serialized Request and Context from a Payjoin Proposal.
     ///
@@ -315,7 +326,9 @@ impl Sender<WithReplyKey> {
     }
 
     /// The endpoint in the Payjoin URI
-    pub fn endpoint(&self) -> &Url { self.v1.endpoint() }
+    pub fn endpoint(&self) -> &Url {
+        self.v1.endpoint()
+    }
 
     pub(crate) fn apply_v2_get_context(self, v2_get_context: V2GetContext) -> SendSession {
         SendSession::V2GetContext(Sender { state: v2_get_context })
@@ -445,11 +458,12 @@ impl Sender<V2GetContext> {
         let body = match process_get_res(response, ohttp_ctx) {
             Ok(Some(body)) => body,
             Ok(None) => return MaybeSuccessTransitionWithNoResults::no_results(self.clone()),
-            Err(e) =>
+            Err(e) => {
                 return MaybeSuccessTransitionWithNoResults::fatal(
                     SessionEvent::SessionInvalid(e.to_string()),
                     InternalEncapsulationError::DirectoryResponse(e).into(),
-                ),
+                )
+            }
         };
         let psbt = match decrypt_message_b(
             &body,
@@ -457,27 +471,30 @@ impl Sender<V2GetContext> {
             self.hpke_ctx.reply_pair.secret_key().clone(),
         ) {
             Ok(psbt) => psbt,
-            Err(e) =>
+            Err(e) => {
                 return MaybeSuccessTransitionWithNoResults::fatal(
                     SessionEvent::SessionInvalid(e.to_string()),
                     InternalEncapsulationError::Hpke(e).into(),
-                ),
+                )
+            }
         };
         let proposal = match Psbt::deserialize(&psbt) {
             Ok(proposal) => proposal,
-            Err(e) =>
+            Err(e) => {
                 return MaybeSuccessTransitionWithNoResults::fatal(
                     SessionEvent::SessionInvalid(e.to_string()),
                     InternalProposalError::Psbt(e).into(),
-                ),
+                )
+            }
         };
         let processed_proposal = match self.psbt_ctx.clone().process_proposal(proposal) {
             Ok(processed_proposal) => processed_proposal,
-            Err(e) =>
+            Err(e) => {
                 return MaybeSuccessTransitionWithNoResults::fatal(
                     SessionEvent::SessionInvalid(e.to_string()),
                     e.into(),
-                ),
+                )
+            }
         };
 
         MaybeSuccessTransitionWithNoResults::success(
@@ -485,7 +502,9 @@ impl Sender<V2GetContext> {
             SessionEvent::ProposalReceived(processed_proposal),
         )
     }
-    pub fn endpoint(&self) -> &Url { &self.endpoint }
+    pub fn endpoint(&self) -> &Url {
+        &self.endpoint
+    }
 }
 
 #[cfg(feature = "v2")]

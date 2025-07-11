@@ -774,7 +774,7 @@ impl ProvisionalProposal {
             self.0.clone().finalize_proposal(
                 |pre_processed| {
                     let psbt = process_psbt(pre_processed.to_string())?;
-                    Ok(Psbt::from_str(&psbt)?)
+                    Ok(Psbt::from_str(&psbt).map_err(payjoin::ImplementationError::new)?)
                 },
                 min_feerate_sat_per_vb.and_then(FeeRate::from_sat_per_vb),
                 max_effective_fee_rate_sat_per_vb.and_then(FeeRate::from_sat_per_vb),

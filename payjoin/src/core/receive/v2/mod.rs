@@ -131,16 +131,18 @@ pub enum ReceiveSession {
 impl ReceiveSession {
     fn process_event(self, event: SessionEvent) -> Result<ReceiveSession, ReplayError> {
         match (self, event) {
-            (ReceiveSession::Uninitialized(_), SessionEvent::Created(context)) =>
-                Ok(ReceiveSession::Initialized(Receiver { state: Initialized { context } })),
+            (ReceiveSession::Uninitialized(_), SessionEvent::Created(context)) => {
+                Ok(ReceiveSession::Initialized(Receiver { state: Initialized { context } }))
+            }
 
             (
                 ReceiveSession::Initialized(state),
                 SessionEvent::UncheckedProposal((proposal, reply_key)),
             ) => Ok(state.apply_unchecked_from_payload(proposal, reply_key)?),
 
-            (ReceiveSession::UncheckedProposal(state), SessionEvent::MaybeInputsOwned(inputs)) =>
-                Ok(state.apply_maybe_inputs_owned(inputs)),
+            (ReceiveSession::UncheckedProposal(state), SessionEvent::MaybeInputsOwned(inputs)) => {
+                Ok(state.apply_maybe_inputs_owned(inputs))
+            }
 
             (
                 ReceiveSession::MaybeInputsOwned(state),
@@ -152,11 +154,13 @@ impl ReceiveSession {
                 SessionEvent::OutputsUnknown(outputs_unknown),
             ) => Ok(state.apply_outputs_unknown(outputs_unknown)),
 
-            (ReceiveSession::OutputsUnknown(state), SessionEvent::WantsOutputs(wants_outputs)) =>
-                Ok(state.apply_wants_outputs(wants_outputs)),
+            (ReceiveSession::OutputsUnknown(state), SessionEvent::WantsOutputs(wants_outputs)) => {
+                Ok(state.apply_wants_outputs(wants_outputs))
+            }
 
-            (ReceiveSession::WantsOutputs(state), SessionEvent::WantsInputs(wants_inputs)) =>
-                Ok(state.apply_wants_inputs(wants_inputs)),
+            (ReceiveSession::WantsOutputs(state), SessionEvent::WantsInputs(wants_inputs)) => {
+                Ok(state.apply_wants_inputs(wants_inputs))
+            }
 
             (
                 ReceiveSession::WantsInputs(state),
@@ -207,11 +211,15 @@ pub struct Receiver<State> {
 impl<State> core::ops::Deref for Receiver<State> {
     type Target = State;
 
-    fn deref(&self) -> &Self::Target { &self.state }
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
 }
 
 impl<State> core::ops::DerefMut for Receiver<State> {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
 }
 
 /// Extract an OHTTP Encapsulated HTTP POST request to return
@@ -324,11 +332,12 @@ impl Receiver<Initialized> {
         let current_state = self.clone();
         let proposal = match self.inner_process_res(body, context) {
             Ok(proposal) => proposal,
-            Err(e) =>
+            Err(e) => {
                 return MaybeFatalTransitionWithNoResults::fatal(
                     SessionEvent::SessionInvalid(e.to_string(), None),
                     e,
-                ),
+                )
+            }
         };
 
         if let Some(proposal) = proposal {
@@ -495,11 +504,12 @@ impl Receiver<UncheckedProposal> {
                 Ok(v1) => v1,
                 Err(e) => match e {
                     ReplyableError::Implementation(_) => return MaybeFatalTransition::transient(e),
-                    _ =>
+                    _ => {
                         return MaybeFatalTransition::fatal(
                             SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
                             e,
-                        ),
+                        )
+                    }
                 },
             };
         MaybeFatalTransition::success(
@@ -713,7 +723,9 @@ impl State for WantsOutputs {}
 /// Call [`Receiver<WantsOutputs>::commit_outputs`] to proceed.
 impl Receiver<WantsOutputs> {
     /// Whether the receiver is allowed to substitute original outputs or not.
-    pub fn output_substitution(&self) -> OutputSubstitution { self.v1.output_substitution() }
+    pub fn output_substitution(&self) -> OutputSubstitution {
+        self.v1.output_substitution()
+    }
 
     /// Substitute the receiver output script with the provided script.
     pub fn substitute_receiver_script(
@@ -905,7 +917,9 @@ impl PayjoinProposal {
 /// should find acceptable.
 impl Receiver<PayjoinProposal> {
     #[cfg(feature = "_multiparty")]
-    pub(crate) fn new(proposal: PayjoinProposal) -> Self { Receiver { state: proposal } }
+    pub(crate) fn new(proposal: PayjoinProposal) -> Self {
+        Receiver { state: proposal }
+    }
 
     /// The UTXOs that would be spent by this Payjoin transaction.
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
@@ -913,7 +927,9 @@ impl Receiver<PayjoinProposal> {
     }
 
     /// The Payjoin Proposal PSBT.
-    pub fn psbt(&self) -> &Psbt { self.v1.psbt() }
+    pub fn psbt(&self) -> &Psbt {
+        self.v1.psbt()
+    }
 
     /// Extract an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
     pub fn extract_req(
@@ -932,7 +948,7 @@ impl Receiver<PayjoinProposal> {
                 .context
                 .directory
                 .join(&sender_subdir.to_string())
-                .map_err(|e| ReplyableError::Implementation(e.into()))?;
+                .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
             body = encrypt_message_b(payjoin_bytes, &self.context.s, e)?;
             method = "POST";
         } else {
@@ -943,7 +959,7 @@ impl Receiver<PayjoinProposal> {
                 .context
                 .directory
                 .join(&receiver_subdir.to_string())
-                .map_err(|e| ReplyableError::Implementation(e.into()))?;
+                .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
             method = "PUT";
         }
         log::debug!("Payjoin PSBT target: {}", target_resource.as_str());
@@ -1066,7 +1082,7 @@ pub mod test {
         let receiver = v2::Receiver { state: unchecked_proposal };
 
         let unchecked_proposal = receiver.check_broadcast_suitability(Some(FeeRate::MIN), |_| {
-            Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+            Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
         });
 
         match unchecked_proposal {
@@ -1089,7 +1105,7 @@ pub mod test {
 
         let maybe_inputs_owned = receiver.assume_interactive_receiver();
         let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(|_| {
-            Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+            Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
         });
 
         match maybe_inputs_seen {
@@ -1114,7 +1130,7 @@ pub mod test {
         let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(|_| Ok(false));
         let outputs_unknown = match maybe_inputs_seen.0 {
             Ok(state) => state.1.check_no_inputs_seen_before(|_| {
-                Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+                Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
             }),
             Err(_) => panic!("Expected Ok, got Err"),
         };
@@ -1145,7 +1161,7 @@ pub mod test {
         };
         let wants_outputs = match outputs_unknown.0 {
             Ok(state) => state.1.identify_receiver_outputs(|_| {
-                Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+                Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
             }),
             Err(_) => panic!("Expected Ok, got Err"),
         };

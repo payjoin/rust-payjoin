@@ -132,7 +132,7 @@ impl error::Error for ReplyableError {
             Self::Payload(e) => e.source(),
             #[cfg(feature = "v1")]
             Self::V1(e) => e.source(),
-            Self::Implementation(e) => Some(e.as_ref()),
+            Self::Implementation(e) => e.source(),
         }
     }
 }
@@ -277,7 +277,7 @@ impl std::error::Error for PayloadError {
 #[derive(Debug, PartialEq)]
 pub struct OutputSubstitutionError(InternalOutputSubstitutionError);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InternalOutputSubstitutionError {
     /// Output substitution is disabled and output value was decreased
     DecreasedValueWhenDisabled,
@@ -323,10 +323,10 @@ impl std::error::Error for OutputSubstitutionError {
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
 /// You can only display it.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct SelectionError(InternalSelectionError);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InternalSelectionError {
     /// No candidates available for selection
     Empty,
@@ -369,10 +369,10 @@ impl From<InternalSelectionError> for SelectionError {
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
 /// You can only display it.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct InputContributionError(InternalInputContributionError);
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InternalInputContributionError {
     /// Total input value is not enough to cover additional output value
     ValueTooLow,

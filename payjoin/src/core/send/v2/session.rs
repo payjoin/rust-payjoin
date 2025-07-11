@@ -23,7 +23,9 @@ impl std::fmt::Display for ReplayError {
 impl std::error::Error for ReplayError {}
 
 impl From<InternalReplayError> for ReplayError {
-    fn from(e: InternalReplayError) -> Self { ReplayError(e) }
+    fn from(e: InternalReplayError) -> Self {
+        ReplayError(e)
+    }
 }
 
 #[derive(Debug)]
@@ -41,7 +43,7 @@ where
 {
     let logs = persister
         .load()
-        .map_err(|e| InternalReplayError::PersistenceFailure(Box::new(e).into()))?;
+        .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
 
     let mut sender = SendSession::Uninitialized;
     let mut history = SessionHistory::default();
@@ -50,9 +52,9 @@ where
         match sender.clone().process_event(log.into()) {
             Ok(next_sender) => sender = next_sender,
             Err(_e) => {
-                persister
-                    .close()
-                    .map_err(|e| InternalReplayError::PersistenceFailure(Box::new(e)))?;
+                persister.close().map_err(|e| {
+                    InternalReplayError::PersistenceFailure(ImplementationError::new(e))
+                })?;
                 break;
             }
         }
@@ -70,8 +72,9 @@ impl SessionHistory {
     /// Fallback transaction from the session if present
     pub fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::CreatedReplyKey(proposal) =>
-                Some(proposal.v1.psbt.clone().extract_tx_unchecked_fee_rate()),
+            SessionEvent::CreatedReplyKey(proposal) => {
+                Some(proposal.v1.psbt.clone().extract_tx_unchecked_fee_rate())
+            }
             _ => None,
         })
     }

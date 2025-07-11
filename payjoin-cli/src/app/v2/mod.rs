@@ -50,7 +50,9 @@ impl AppTrait for App {
         Ok(app)
     }
 
-    fn wallet(&self) -> BitcoindWallet { self.wallet.clone() }
+    fn wallet(&self) -> BitcoindWallet {
+        self.wallet.clone()
+    }
 
     #[allow(clippy::incompatible_msrv)]
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {
@@ -192,8 +194,9 @@ impl App {
                 }
                 return Ok(());
             }
-            SendSession::V2GetContext(context) =>
-                self.get_proposed_payjoin_psbt(context, persister).await?,
+            SendSession::V2GetContext(context) => {
+                self.get_proposed_payjoin_psbt(context, persister).await?
+            }
             SendSession::ProposalReceived(proposal) => {
                 self.process_pj_response(proposal)?;
                 return Ok(());
@@ -287,28 +290,39 @@ impl App {
     ) -> Result<()> {
         let res = {
             match session {
-                ReceiveSession::Initialized(proposal) =>
-                    self.read_from_directory(proposal, persister).await,
-                ReceiveSession::UncheckedProposal(proposal) =>
-                    self.check_proposal(proposal, persister).await,
-                ReceiveSession::MaybeInputsOwned(proposal) =>
-                    self.check_inputs_not_owned(proposal, persister).await,
-                ReceiveSession::MaybeInputsSeen(proposal) =>
-                    self.check_no_inputs_seen_before(proposal, persister).await,
-                ReceiveSession::OutputsUnknown(proposal) =>
-                    self.identify_receiver_outputs(proposal, persister).await,
-                ReceiveSession::WantsOutputs(proposal) =>
-                    self.commit_outputs(proposal, persister).await,
-                ReceiveSession::WantsInputs(proposal) =>
-                    self.contribute_inputs(proposal, persister).await,
-                ReceiveSession::ProvisionalProposal(proposal) =>
-                    self.finalize_proposal(proposal, persister).await,
-                ReceiveSession::PayjoinProposal(proposal) =>
-                    self.send_payjoin_proposal(proposal, persister).await,
-                ReceiveSession::Uninitialized(_) =>
-                    return Err(anyhow!("Uninitialized receiver session")),
-                ReceiveSession::TerminalFailure =>
-                    return Err(anyhow!("Terminal receiver session")),
+                ReceiveSession::Initialized(proposal) => {
+                    self.read_from_directory(proposal, persister).await
+                }
+                ReceiveSession::UncheckedProposal(proposal) => {
+                    self.check_proposal(proposal, persister).await
+                }
+                ReceiveSession::MaybeInputsOwned(proposal) => {
+                    self.check_inputs_not_owned(proposal, persister).await
+                }
+                ReceiveSession::MaybeInputsSeen(proposal) => {
+                    self.check_no_inputs_seen_before(proposal, persister).await
+                }
+                ReceiveSession::OutputsUnknown(proposal) => {
+                    self.identify_receiver_outputs(proposal, persister).await
+                }
+                ReceiveSession::WantsOutputs(proposal) => {
+                    self.commit_outputs(proposal, persister).await
+                }
+                ReceiveSession::WantsInputs(proposal) => {
+                    self.contribute_inputs(proposal, persister).await
+                }
+                ReceiveSession::ProvisionalProposal(proposal) => {
+                    self.finalize_proposal(proposal, persister).await
+                }
+                ReceiveSession::PayjoinProposal(proposal) => {
+                    self.send_payjoin_proposal(proposal, persister).await
+                }
+                ReceiveSession::Uninitialized(_) => {
+                    return Err(anyhow!("Uninitialized receiver session"))
+                }
+                ReceiveSession::TerminalFailure => {
+                    return Err(anyhow!("Terminal receiver session"))
+                }
             }
         };
 
@@ -459,10 +473,11 @@ impl App {
             self.relay_manager.lock().expect("Lock should not be poisoned").get_selected_relay();
         let ohttp_relay = match selected_relay {
             Some(relay) => relay,
-            None =>
+            None => {
                 unwrap_ohttp_keys_or_else_fetch(&self.config, directory, self.relay_manager.clone())
                     .await?
-                    .relay_url,
+                    .relay_url
+            }
         };
         Ok(ohttp_relay)
     }

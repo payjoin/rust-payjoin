@@ -29,7 +29,9 @@ impl std::fmt::Display for ReplayError {
 impl std::error::Error for ReplayError {}
 
 impl From<InternalReplayError> for ReplayError {
-    fn from(e: InternalReplayError) -> Self { ReplayError(e) }
+    fn from(e: InternalReplayError) -> Self {
+        ReplayError(e)
+    }
 }
 
 #[derive(Debug)]
@@ -51,7 +53,7 @@ where
 {
     let logs = persister
         .load()
-        .map_err(|e| InternalReplayError::PersistenceFailure(Box::new(e).into()))?;
+        .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
     let mut receiver = ReceiveSession::Uninitialized(Receiver { state: UninitializedReceiver {} });
     let mut history = SessionHistory::default();
 
@@ -59,7 +61,10 @@ where
         history.events.push(event.clone().into());
         receiver = receiver.process_event(event.into()).map_err(|e| {
             if let Err(storage_err) = persister.close() {
-                return InternalReplayError::PersistenceFailure(Box::new(storage_err)).into();
+                return InternalReplayError::PersistenceFailure(ImplementationError::new(
+                    storage_err,
+                ))
+                .into();
             }
             e
         })?;
@@ -79,8 +84,9 @@ impl SessionHistory {
     /// Receiver session Payjoin URI
     pub fn pj_uri<'a>(&self) -> Option<PjUri<'a>> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::Created(session_context) =>
-                Some(crate::receive::v2::pj_uri(session_context, OutputSubstitution::Disabled)),
+            SessionEvent::Created(session_context) => {
+                Some(crate::receive::v2::pj_uri(session_context, OutputSubstitution::Disabled))
+            }
             _ => None,
         })
     }
@@ -88,8 +94,9 @@ impl SessionHistory {
     /// Fallback transaction from the session if present
     pub fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::MaybeInputsOwned(proposal) =>
-                Some(proposal.extract_tx_to_schedule_broadcast()),
+            SessionEvent::MaybeInputsOwned(proposal) => {
+                Some(proposal.extract_tx_to_schedule_broadcast())
+            }
             _ => None,
         })
     }

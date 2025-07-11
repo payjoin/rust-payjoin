@@ -2,6 +2,7 @@ use std::fmt;
 
 #[cfg(feature = "v2")]
 use bitcoincore_rpc::jsonrpc::serde_json;
+use payjoin::ImplementationError;
 use sled::Error as SledError;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
@@ -39,4 +40,8 @@ impl std::error::Error for Error {}
 
 impl From<SledError> for Error {
     fn from(error: SledError) -> Self { Error::Sled(error) }
+}
+
+impl From<Error> for ImplementationError {
+    fn from(error: Error) -> Self { ImplementationError::new(error) }
 }

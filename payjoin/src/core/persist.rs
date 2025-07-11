@@ -271,7 +271,7 @@ impl<Err: std::error::Error> std::fmt::Display for RejectTransient<Err> {
 }
 
 /// Error type that represents all possible errors that can be returned when processing a state transition
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersistedError<ApiError: std::error::Error, StorageError: std::error::Error>(
     InternalPersistedError<ApiError, StorageError>,
 );
@@ -340,7 +340,7 @@ impl<ApiError: std::error::Error, StorageError: std::error::Error> std::fmt::Dis
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum InternalPersistedError<InternalApiError, StorageErr>
 where
     InternalApiError: std::error::Error,

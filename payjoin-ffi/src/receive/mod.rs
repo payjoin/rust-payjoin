@@ -847,7 +847,7 @@ impl ProvisionalProposal {
         ProvisionalProposalTransition(Arc::new(RwLock::new(Some(
             self.0.clone().finalize_proposal(|pre_processed| {
                 let psbt = process_psbt(pre_processed.to_string())?;
-                Ok(Psbt::from_str(&psbt)?)
+                Ok(Psbt::from_str(&psbt).map_err(ImplementationError::new)?)
             }),
         ))))
     }

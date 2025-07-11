@@ -971,7 +971,7 @@ impl Receiver<PayjoinProposal> {
                 .context
                 .directory
                 .join(&sender_mailbox.to_string())
-                .map_err(|e| ReplyableError::Implementation(e.into()))?;
+                .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
             body = encrypt_message_b(payjoin_bytes, &self.context.s, e)?;
             method = "POST";
         } else {
@@ -982,7 +982,7 @@ impl Receiver<PayjoinProposal> {
                 .context
                 .directory
                 .join(&receiver_mailbox.to_string())
-                .map_err(|e| ReplyableError::Implementation(e.into()))?;
+                .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
             method = "PUT";
         }
         log::debug!("Payjoin PSBT target: {}", target_resource.as_str());
@@ -1105,7 +1105,7 @@ pub mod test {
         let receiver = v2::Receiver { state: unchecked_proposal };
 
         let unchecked_proposal = receiver.check_broadcast_suitability(Some(FeeRate::MIN), |_| {
-            Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+            Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
         });
 
         match unchecked_proposal {
@@ -1128,7 +1128,7 @@ pub mod test {
 
         let maybe_inputs_owned = receiver.assume_interactive_receiver();
         let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(|_| {
-            Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+            Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
         });
 
         match maybe_inputs_seen {
@@ -1153,7 +1153,7 @@ pub mod test {
         let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(|_| Ok(false));
         let outputs_unknown = match maybe_inputs_seen.0 {
             Ok(state) => state.1.check_no_inputs_seen_before(|_| {
-                Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+                Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
             }),
             Err(_) => panic!("Expected Ok, got Err"),
         };
@@ -1184,7 +1184,7 @@ pub mod test {
         };
         let wants_outputs = match outputs_unknown.0 {
             Ok(state) => state.1.identify_receiver_outputs(|_| {
-                Err(ImplementationError::from(ReplyableError::Implementation("mock error".into())))
+                Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
             }),
             Err(_) => panic!("Expected Ok, got Err"),
         };

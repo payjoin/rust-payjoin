@@ -93,6 +93,52 @@
             "payjoin-directory" = "";
           };
 
+        # Python-specific configuration
+        pythonVersion = pkgs.python3;
+        pythonEnv = pythonVersion.withPackages (ps: with ps; [
+          virtualenv
+          pip
+        ]);
+
+        # Determine platform for generate script
+        supportedPlatforms = {
+          "x86_64-linux" = "linux";
+          "aarch64-linux" = "linux";
+          "x86_64-darwin" = "macos";
+          "aarch64-darwin" = "macos";
+        };
+        platform = supportedPlatforms.${system} or (throw "Unsupported platform: ${system}. Supported platforms: ${builtins.concatStringsSep ", " (builtins.attrNames supportedPlatforms)}");
+
+        # Python devShell
+        pythonDevShell = pkgs.mkShell {
+          name = "python-dev";
+          buildInputs = with pkgs; [
+            pythonEnv
+            bash
+          ];
+
+          # Environment variables and shell hook
+          shellHook = ''
+            export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath [pkgs.openssl]}:$LD_LIBRARY_PATH
+            cd payjoin-ffi/python
+            # Create and activate virtual environment
+            python -m venv venv
+            source venv/bin/activate
+            # Install dependencies, allowing PyPI fetches for version mismatches
+            pip install --requirement requirements.txt --requirement requirements-dev.txt
+            # Generate bindings, setting PYBIN to the venv's python binary
+            export PYBIN=./venv/bin/python
+            bash ./scripts/generate_${platform}.sh
+            # Set CARGO_TOML_PATH for setup.py
+            export CARGO_TOML_PATH=${./.}/Cargo.toml
+            # Build the wheel
+            python setup.py bdist_wheel --verbose
+
+            # Install payjoin
+            pip install ./dist/payjoin-*.whl
+          '';
+        };
+
         devShells = builtins.mapAttrs (_name: craneLib:
           craneLib.devShell {
             packages = with pkgs; [
@@ -115,7 +161,10 @@
             // args);
       in {
         packages = packages;
-        devShells = devShells // {default = devShells.nightly;};
+        devShells = devShells // {
+          default = devShells.nightly;
+          python = pythonDevShell;
+        };
         formatter = pkgs.alejandra;
         checks =
           packages

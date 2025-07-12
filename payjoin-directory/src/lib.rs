@@ -20,10 +20,11 @@ use tracing::{debug, error, trace, warn};
 use crate::db::DbPool;
 pub mod key_config;
 pub use crate::key_config::*;
-
+use crate::metrics::{generate_metrics, record_connection};
 pub const DEFAULT_DIR_PORT: u16 = 8080;
 pub const DEFAULT_DB_HOST: &str = "localhost:6379";
 pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
+pub const DEFAULT_METRIC_PORT: u16 = 9090;
 
 const CHACHA20_POLY1305_NONCE_LEN: usize = 32; // chacha20poly1305 n_k
 const POLY1305_TAG_SIZE: usize = 16;
@@ -37,8 +38,49 @@ const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message"
 
 mod db;
 
+pub mod metrics;
+
 #[cfg(feature = "_danger-local-https")]
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+//Dedicated metrics server
+pub async fn listen_metrics_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
+    let listener = TcpListener::bind(bind_addr).await?;
+    println!("Metrics server listening on {bind_addr}");
+
+    while let Ok((stream, _)) = listener.accept().await {
+        let io = TokioIo::new(stream);
+        tokio::spawn(async move {
+            if let Err(err) = http1::Builder::new()
+                .serve_connection(io, service_fn(serve_metrics))
+                .with_upgrades()
+                .await
+            {
+                error!("Error serving metrics connection: {:?}", err);
+            }
+        });
+    }
+
+    Ok(())
+}
+
+async fn serve_metrics(req: Request<Incoming>) -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
+    let path = req.uri().path();
+    let method = req.method().clone();
+
+    let response = match (method, path) {
+        (Method::GET, "/metrics") => handle_metrics(),
+        (Method::GET, "/health") => Response::new(full("OK")),
+        _ => {
+            let mut response = Response::new(full("NOT_FOUND"));
+            *response.status_mut() = StatusCode::NOT_FOUND;
+            response
+        }
+    };
+
+    Ok(response)
+}
 
 #[cfg(feature = "_danger-local-https")]
 pub async fn listen_tcp_with_tls_on_free_port(
@@ -70,6 +112,7 @@ async fn listen_tcp_with_tls_on_listener(
     // Spawn the connection handling loop in a separate task
     let handle = tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
+            record_connection();
             let pool = pool.clone();
             let ohttp = ohttp.clone();
             let tls_acceptor = tls_acceptor.clone();
@@ -112,6 +155,7 @@ pub async fn listen_tcp(
     let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
     let listener = TcpListener::bind(bind_addr).await?;
     while let Ok((stream, _)) = listener.accept().await {
+        record_connection();
         let pool = pool.clone();
         let ohttp = ohttp.clone();
         let io = TokioIo::new(stream);
@@ -256,12 +300,15 @@ async fn handle_v2(
 
     let path_segments: Vec<&str> = path.split('/').collect();
     debug!("handle_v2: {:?}", &path_segments);
-    match (parts.method, path_segments.as_slice()) {
+    let response = match (parts.method, path_segments.as_slice()) {
         (Method::POST, &["", id]) => post_subdir(id, body, pool).await,
         (Method::GET, &["", id]) => get_subdir(id, pool).await,
         (Method::PUT, &["", id]) => put_payjoin_v1(id, body, pool).await,
         _ => Ok(not_found()),
     }
+    .unwrap_or_else(|e| e.to_response());
+
+    Ok(response)
 }
 
 async fn health_check() -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
@@ -327,6 +374,25 @@ async fn handle_directory_home_path() -> Result<Response<BoxBody<Bytes, hyper::E
 
     *res.body_mut() = full(html);
     Ok(res)
+}
+
+fn handle_metrics() -> Response<BoxBody<Bytes, hyper::Error>> {
+    match generate_metrics() {
+        Ok(metrics_data) => {
+            let mut response = Response::new(full(metrics_data));
+            response.headers_mut().insert(
+                CONTENT_TYPE,
+                HeaderValue::from_static("text/plain; version=0.0.4; charset=utf-8"),
+            );
+            response
+        }
+        Err(e) => {
+            error!("failed to generate metrics: {}", e);
+            let mut response = Response::new(full("Error generating metrics"));
+            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            response
+        }
+    }
 }
 
 #[derive(Debug)]

@@ -138,7 +138,7 @@ for inspiration.
 
 ### Asynchronous Operation
 
-Sender and receiver state is saved to a database in the directory from which `payjoin-cli` is run, called `payjoin.sled`. Once a send or receive session is started, it may resume using the `resume` argument if prior payjoin sessions have not yet complete.
+Sender and receiver state is saved to a database in the directory from which `payjoin-cli` is run, called `payjoin.sqlite`. Once a send or receive session is started, it may resume using the `resume` argument if prior payjoin sessions have not yet complete.
 
 ## Usage
 

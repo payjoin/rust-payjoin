@@ -134,7 +134,6 @@ impl ReceiverPersister {
         let id = SessionId::generate();
         let conn = db.get_connection()?;
 
-        // Create a new session
         conn.execute(
             "INSERT INTO sessions (session_id, session_type, completed_at) VALUES (?1, ?2, ?3)",
             params![id.as_ref(), "receiver", Option::<i64>::None],

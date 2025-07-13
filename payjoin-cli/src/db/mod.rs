@@ -28,7 +28,6 @@ impl Database {
     }
 
     fn init_schema(conn: &Connection) -> Result<()> {
-      
         conn.execute(
             "CREATE TABLE IF NOT EXISTS sessions (
                 session_id BLOB PRIMARY KEY,
@@ -38,7 +37,6 @@ impl Database {
             [],
         )?;
 
-        
         conn.execute(
             "CREATE TABLE IF NOT EXISTS session_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,7 +48,6 @@ impl Database {
             [],
         )?;
 
-      
         conn.execute(
             "CREATE TABLE IF NOT EXISTS inputs_seen (
                 input_hash BLOB PRIMARY KEY,
@@ -66,7 +63,6 @@ impl Database {
         Ok(self.pool.get()?)
     }
 
-    
     pub(crate) fn insert_input_seen_before(&self, input: OutPoint) -> Result<bool> {
         let conn = self.get_connection()?;
         let key = serialize(&input);

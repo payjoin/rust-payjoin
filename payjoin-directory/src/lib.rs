@@ -15,7 +15,7 @@ use hyper_util::rt::TokioIo;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::db::DbPool;
 pub mod key_config;
@@ -47,7 +47,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 pub async fn listen_metrics_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
     let listener = TcpListener::bind(bind_addr).await?;
-    println!("Metrics server listening on {bind_addr}");
+    info!("Metrics server listening on{}", bind_addr);
 
     while let Ok((stream, _)) = listener.accept().await {
         let io = TokioIo::new(stream);

@@ -64,15 +64,13 @@ impl InputPair {
         let raw = InternalInputPair { txin: &txin, psbtin: &psbtin };
         raw.validate_utxo()?;
 
-        let expected_weight = match raw.expected_input_weight() {
-            Ok(weight) => weight,
-            Err(InputWeightError::NotSupported) =>
-                if let Some(weight) = expected_weight {
-                    weight
-                } else {
-                    return Err(InternalPsbtInputError::from(InputWeightError::NotSupported).into());
-                },
-            Err(e) => return Err(InternalPsbtInputError::from(e).into()),
+        let expected_weight = match (raw.expected_input_weight(), expected_weight) {
+            (Ok(_), Some(_)) => {
+                return Err(InternalPsbtInputError::ProvidedUnnecessaryWeight.into());
+            }
+            (Ok(weight), None) => weight,
+            (Err(InputWeightError::NotSupported), Some(expected_weight)) => expected_weight,
+            (Err(e), _) => return Err(InternalPsbtInputError::from(e).into()),
         };
 
         let input_pair = Self { expected_weight, txin, psbtin };
@@ -249,7 +247,9 @@ mod tests {
     use bitcoin::key::{PublicKey, WPubkeyHash};
     use bitcoin::secp256k1::Secp256k1;
     use bitcoin::transaction::InputWeightPrediction;
-    use bitcoin::{Amount, PubkeyHash, ScriptBuf, ScriptHash, Txid, WScriptHash, XOnlyPublicKey};
+    use bitcoin::{
+        witness, Amount, PubkeyHash, ScriptBuf, ScriptHash, Txid, WScriptHash, XOnlyPublicKey,
+    };
     use payjoin_test_utils::{DUMMY20, DUMMY32};
 
     use super::*;
@@ -460,7 +460,7 @@ mod tests {
 
         let p2wsh_pair = InputPair::new(
             TxIn { previous_output: outpoint, sequence, ..Default::default() },
-            psbt::Input { witness_utxo: Some(p2wsh_txout), ..Default::default() },
+            psbt::Input { witness_utxo: Some(p2wsh_txout.clone()), ..Default::default() },
             None,
         );
         // P2wsh is not supported when expected weight is not provided
@@ -478,7 +478,39 @@ mod tests {
                 .err()
                 .unwrap(),
             PsbtInputError::from(InvalidScriptPubKey(AddressType::P2wsh))
-        )
+        );
+
+        let mut dummy_witness = witness::Witness::new();
+        dummy_witness.push(DUMMY32);
+        let txin = TxIn {
+            previous_output: outpoint,
+            witness: dummy_witness.clone(),
+            ..Default::default()
+        };
+        let input_weight = Weight::from_non_witness_data_size(txin.base_size() as u64)
+            + Weight::from_witness_data_size(dummy_witness.size() as u64);
+
+        // Add the witness straight to the txin
+        let psbtin = psbt::Input { witness_utxo: Some(p2wsh_txout.clone()), ..Default::default() };
+        let p2wsh_pair = InputPair::new(txin, psbtin, None).expect("witness is provided for p2wsh");
+        assert_eq!(p2wsh_pair.expected_weight, input_weight);
+        // Same check but add the witness to the psbtin
+        let txin = TxIn { previous_output: outpoint, ..Default::default() };
+        let psbtin = psbt::Input {
+            witness_utxo: Some(p2wsh_txout),
+            final_script_witness: Some(dummy_witness),
+            ..Default::default()
+        };
+        let p2wsh_pair = InputPair::new(txin.clone(), psbtin.clone(), None)
+            .expect("witness is provided for p2wsh");
+        assert_eq!(p2wsh_pair.expected_weight, input_weight);
+
+        // Should error out if expected weight is provided and witness is provided
+        let p2wsh_pair = InputPair::new(txin, psbtin, Some(expected_weight));
+        assert_eq!(
+            p2wsh_pair.err().unwrap(),
+            PsbtInputError::from(InternalPsbtInputError::ProvidedUnnecessaryWeight)
+        );
     }
 
     #[test]

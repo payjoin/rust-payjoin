@@ -209,7 +209,27 @@ impl InternalInputPair<'_> {
                 }
             }
             P2wpkh => Ok(InputWeightPrediction::P2WPKH_MAX),
-            P2wsh => Err(InputWeightError::NotSupported),
+            P2wsh =>
+                if !self.txin.witness.is_empty() {
+                    Ok(InputWeightPrediction::new(
+                        0,
+                        self.txin.witness.iter().map(|el| el.len()).collect::<Vec<_>>(),
+                    ))
+                } else {
+                    let iwp = self
+                        .psbtin
+                        .final_script_witness
+                        .as_ref()
+                        .filter(|w| !w.is_empty())
+                        .map(|w| {
+                            InputWeightPrediction::new(
+                                0,
+                                w.iter().map(|el| el.len()).collect::<Vec<_>>(),
+                            )
+                        })
+                        .ok_or(InputWeightError::NotSupported)?;
+                    Ok(iwp)
+                },
             P2tr => Ok(InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH),
             _ => Err(AddressTypeError::UnknownAddressType.into()),
         }?;
@@ -248,6 +268,8 @@ pub(crate) enum InternalPsbtInputError {
     AddressType(AddressTypeError),
     InvalidScriptPubKey(AddressType),
     WeightError(InputWeightError),
+    /// Weight was provided but can be calculated from available information
+    ProvidedUnnecessaryWeight,
 }
 
 impl fmt::Display for InternalPsbtInputError {
@@ -259,6 +281,7 @@ impl fmt::Display for InternalPsbtInputError {
             Self::AddressType(_) => write!(f, "invalid address type"),
             Self::InvalidScriptPubKey(e) => write!(f, "provided script was not a valid type of {e}"),
             Self::WeightError(e) => write!(f, "{e}"),
+            Self::ProvidedUnnecessaryWeight => write!(f, "weight was provided but can be calculated from available information"),
         }
     }
 }
@@ -272,6 +295,7 @@ impl std::error::Error for InternalPsbtInputError {
             Self::AddressType(error) => Some(error),
             Self::InvalidScriptPubKey(_) => None,
             Self::WeightError(error) => Some(error),
+            Self::ProvidedUnnecessaryWeight => None,
         }
     }
 }

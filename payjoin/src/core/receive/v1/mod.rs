@@ -1303,13 +1303,13 @@ pub(crate) mod test {
         let input_pair_1 = InputPair::new(
             TxIn { previous_output: ot1, sequence: Sequence::MAX, ..Default::default() },
             Input { witness_utxo: Some(txout.clone()), ..Default::default() },
-            Some(Weight::from_wu(777)),
+            None,
         )
         .unwrap();
         let input_pair_2 = InputPair::new(
             TxIn { previous_output: ot2, sequence: Sequence::MAX, ..Default::default() },
             Input { witness_utxo: Some(txout), ..Default::default() },
-            Some(Weight::from_wu(777)),
+            None,
         )
         .unwrap();
 

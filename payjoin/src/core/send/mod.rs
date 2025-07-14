@@ -26,6 +26,7 @@ use url::Url;
 
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
+use crate::Version;
 
 // See usize casts
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -457,10 +458,10 @@ fn serialize_url(
     output_substitution: OutputSubstitution,
     fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
-    version: &str,
+    version: Version,
 ) -> Url {
     let mut url = endpoint;
-    url.query_pairs_mut().append_pair("v", version);
+    url.query_pairs_mut().append_pair("v", &version.to_string());
     if output_substitution == OutputSubstitution::Disabled {
         url.query_pairs_mut().append_pair("disableoutputsubstitution", "true");
     }
@@ -485,7 +486,6 @@ mod test {
     use bitcoin::ecdsa::Signature;
     use bitcoin::hex::FromHex;
     use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
-    use bitcoin::transaction::Version;
     use bitcoin::{
         Amount, FeeRate, OutPoint, Script, ScriptBuf, Sequence, Witness, XOnlyPublicKey,
     };
@@ -495,9 +495,7 @@ mod test {
     };
     use url::Url;
 
-    use super::{
-        check_single_payee, clear_unneeded_fields, determine_fee_contribution, serialize_url,
-    };
+    use super::*;
     use crate::output_substitution::OutputSubstitution;
     use crate::psbt::PsbtExt;
     use crate::send::{AdditionalFeeContribution, InternalBuildSenderError, InternalProposalError};
@@ -799,7 +797,7 @@ mod test {
             OutputSubstitution::Disabled,
             None,
             FeeRate::ZERO,
-            "2",
+            Version::Two,
         );
         assert_eq!(url, Url::parse("http://localhost?v=2&disableoutputsubstitution=true")?);
 
@@ -808,7 +806,7 @@ mod test {
             OutputSubstitution::Enabled,
             None,
             FeeRate::ZERO,
-            "2",
+            Version::Two,
         );
         assert_eq!(url, Url::parse("http://localhost?v=2")?);
         Ok(())
@@ -821,7 +819,7 @@ mod test {
             OutputSubstitution::Enabled,
             None,
             FeeRate::from_sat_per_vb(10).expect("Could not parse feerate"),
-            "2",
+            Version::Two,
         );
         assert_eq!(url, Url::parse("http://localhost?v=2&minfeerate=10")?);
         Ok(())
@@ -834,7 +832,7 @@ mod test {
             OutputSubstitution::Enabled,
             Some(AdditionalFeeContribution { max_amount: Amount::from_sat(1000), vout: 0 }),
             FeeRate::ZERO,
-            "2",
+            Version::Two,
         );
         assert_eq!(
             url,
@@ -856,7 +854,7 @@ mod test {
             let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
 
             let original_version = ctx.original_psbt.unsigned_tx.version;
-            let proposed_version = Version::non_standard(88);
+            let proposed_version = bitcoin::transaction::Version::non_standard(88);
             proposal.unsigned_tx.version = proposed_version;
 
             assert!(matches!(

@@ -236,7 +236,7 @@ impl Sender {
             self.psbt_ctx.output_substitution,
             self.psbt_ctx.fee_contribution,
             self.psbt_ctx.min_fee_rate,
-            "1", // payjoin version
+            Version::One,
         );
         let body = self.psbt_ctx.original_psbt.to_string().as_bytes().to_vec();
         (

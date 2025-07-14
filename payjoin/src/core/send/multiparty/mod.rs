@@ -13,7 +13,7 @@ use crate::output_substitution::OutputSubstitution;
 use crate::persist::NoopSessionPersister;
 use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
-use crate::{ImplementationError, IntoUrl, PjUri, Request};
+use crate::{ImplementationError, IntoUrl, PjUri, Request, Version};
 
 mod error;
 
@@ -105,7 +105,7 @@ fn serialize_v2_body(
         output_substitution,
         fee_contribution,
         min_fee_rate,
-        "2",
+        Version::Two,
     );
     append_optimisitic_merge_query_param(&mut url);
     let base64 = psbt.to_string();
@@ -231,6 +231,7 @@ mod test {
     use payjoin_test_utils::BoxError;
     use url::Url;
 
+    use super::*;
     use crate::output_substitution::OutputSubstitution;
     use crate::send::multiparty::append_optimisitic_merge_query_param;
     use crate::send::serialize_url;
@@ -242,7 +243,7 @@ mod test {
             OutputSubstitution::Enabled,
             None,
             FeeRate::ZERO,
-            "2",
+            Version::Two,
         );
         append_optimisitic_merge_query_param(&mut url);
         assert_eq!(url, Url::parse("http://localhost?v=2&optimisticmerge=true")?);
@@ -252,7 +253,7 @@ mod test {
             OutputSubstitution::Enabled,
             None,
             FeeRate::ZERO,
-            "2",
+            Version::Two,
         );
         assert_eq!(url, Url::parse("http://localhost?v=2")?);
 

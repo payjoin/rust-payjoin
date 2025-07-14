@@ -353,13 +353,8 @@ pub(crate) fn serialize_v2_body(
     // Grug say localhost base be discarded anyway. no big brain needed.
     let base_url = Url::parse("http://localhost").expect("invalid URL");
 
-    let placeholder_url = serialize_url(
-        base_url,
-        output_substitution,
-        fee_contribution,
-        min_fee_rate,
-        "2", // payjoin version
-    );
+    let placeholder_url =
+        serialize_url(base_url, output_substitution, fee_contribution, min_fee_rate, Version::Two);
     let query_params = placeholder_url.query().unwrap_or_default();
     let base64 = psbt.to_string();
     Ok(format!("{base64}\n{query_params}").into_bytes())

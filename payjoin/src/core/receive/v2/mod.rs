@@ -67,7 +67,7 @@ pub struct SessionContext {
     #[serde(deserialize_with = "deserialize_address_assume_checked")]
     address: Address,
     directory: url::Url,
-    subdirectory: Option<url::Url>,
+    mailbox: Option<url::Url>,
     ohttp_keys: OhttpKeys,
     expiry: SystemTime,
     s: HpkeKeyPair,
@@ -103,7 +103,7 @@ where
     Ok(address.assume_checked())
 }
 
-fn subdir_path_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
+fn short_id_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
     sha256::Hash::hash(&pubkey.to_compressed_bytes()).into()
 }
 
@@ -214,7 +214,7 @@ impl<State> core::ops::DerefMut for Receiver<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
 }
 
-/// Extract an OHTTP Encapsulated HTTP POST request to return
+/// Construct an OHTTP Encapsulated HTTP POST request to return
 /// a Receiver Error Response
 fn extract_err_req(
     err: &JsonReply,
@@ -224,11 +224,11 @@ fn extract_err_req(
     if SystemTime::now() > session_context.expiry {
         return Err(InternalSessionError::Expired(session_context.expiry).into());
     }
-    let subdir = subdir(&session_context.directory, &session_context.id());
+    let mailbox = mailbox_endpoint(&session_context.directory, &session_context.id());
     let (body, ohttp_ctx) = ohttp_encapsulate(
         &mut session_context.ohttp_keys.0.clone(),
         "POST",
-        subdir.as_str(),
+        mailbox.as_str(),
         Some(err.to_json().to_string().as_bytes()),
     )
     .map_err(InternalSessionError::OhttpEncapsulation)?;
@@ -274,7 +274,7 @@ impl Receiver<UninitializedReceiver> {
         let session_context = SessionContext {
             address,
             directory,
-            subdirectory: None,
+            mailbox: None,
             ohttp_keys,
             expiry: SystemTime::now() + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
             s: HpkeKeyPair::gen_keypair(),
@@ -295,8 +295,8 @@ pub struct Initialized {
 impl State for Initialized {}
 
 impl Receiver<Initialized> {
-    /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
-    pub fn extract_req(
+    /// construct an OHTTP Encapsulated HTTP GET request for the Original PSBT
+    pub fn create_poll_request(
         &mut self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), Error> {
@@ -311,7 +311,7 @@ impl Receiver<Initialized> {
 
     /// The response can either be an UncheckedProposal or an ACCEPTED message
     /// indicating no UncheckedProposal is available yet.
-    pub fn process_res(
+    pub fn process_response(
         &mut self,
         body: &[u8],
         context: ohttp::ClientResponse,
@@ -368,7 +368,7 @@ impl Receiver<Initialized> {
         ([u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES], ohttp::ClientResponse),
         OhttpEncapsulationError,
     > {
-        let fallback_target = subdir(&self.context.directory, &self.context.id());
+        let fallback_target = mailbox_endpoint(&self.context.directory, &self.context.id());
         ohttp_encapsulate(&mut self.context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
 
@@ -448,6 +448,11 @@ impl Receiver<Initialized> {
     }
 }
 
+/// The sender's original PSBT and optional parameters
+///
+/// This type is used to process the request. It is returned by
+/// [`Receiver::process_response()`].
+///
 #[derive(Debug, Clone, PartialEq)]
 pub struct UncheckedProposal {
     pub(crate) v1: v1::UncheckedProposal,
@@ -887,7 +892,7 @@ impl State for PayjoinProposal {}
 
 impl PayjoinProposal {
     #[cfg(feature = "_multiparty")]
-    // TODO hack to get multi party working. A better solution would be to allow extract_req to be separate from the rest of the v2 context
+    // TODO hack to get multi party working. A better solution would be to allow create_poll_request to be separate from the rest of the v2 context
     pub(crate) fn new(v1: v1::PayjoinProposal, context: SessionContext) -> Self {
         Self { v1, context }
     }
@@ -907,8 +912,8 @@ impl Receiver<PayjoinProposal> {
     /// The Payjoin Proposal PSBT.
     pub fn psbt(&self) -> &Psbt { self.v1.psbt() }
 
-    /// Extract an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
-    pub fn extract_req(
+    /// Construct an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
+    pub fn create_post_request(
         &mut self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), Error> {
@@ -919,22 +924,22 @@ impl Receiver<PayjoinProposal> {
         if let Some(e) = &self.context.e {
             // Prepare v2 payload
             let payjoin_bytes = self.v1.psbt().serialize();
-            let sender_subdir = subdir_path_from_pubkey(e);
+            let sender_mailbox = short_id_from_pubkey(e);
             target_resource = self
                 .context
                 .directory
-                .join(&sender_subdir.to_string())
+                .join(&sender_mailbox.to_string())
                 .map_err(|e| ReplyableError::Implementation(e.into()))?;
             body = encrypt_message_b(payjoin_bytes, &self.context.s, e)?;
             method = "POST";
         } else {
             // Prepare v2 wrapped and backwards-compatible v1 payload
             body = self.v1.psbt().to_string().as_bytes().to_vec();
-            let receiver_subdir = subdir_path_from_pubkey(self.context.s.public_key());
+            let receiver_mailbox = short_id_from_pubkey(self.context.s.public_key());
             target_resource = self
                 .context
                 .directory
-                .join(&receiver_subdir.to_string())
+                .join(&receiver_mailbox.to_string())
                 .map_err(|e| ReplyableError::Implementation(e.into()))?;
             method = "PUT";
         }
@@ -957,7 +962,7 @@ impl Receiver<PayjoinProposal> {
     ///
     /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or
     /// choose to broadcast the original PSBT.
-    pub fn process_res(
+    pub fn process_response(
         &self,
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
@@ -971,9 +976,9 @@ impl Receiver<PayjoinProposal> {
     }
 }
 
-/// The subdirectory for this Payjoin receiver session.
+/// Derive a mailbox endpoint on a directory given a [`ShortId`].
 /// It consists of a directory URL and the session ShortID in the path.
-fn subdir(directory: &Url, id: &ShortId) -> Url {
+fn mailbox_endpoint(directory: &Url, id: &ShortId) -> Url {
     let mut url = directory.clone();
     {
         let mut path_segments =
@@ -990,7 +995,7 @@ pub(crate) fn pj_uri<'a>(
 ) -> crate::PjUri<'a> {
     use crate::uri::{PayjoinExtras, UrlExt};
     let id = session_context.id();
-    let mut pj = subdir(&session_context.directory, &id);
+    let mut pj = mailbox_endpoint(&session_context.directory, &id).clone();
     pj.set_receiver_pubkey(session_context.s.public_key().clone());
     pj.set_ohttp(session_context.ohttp_keys.clone());
     pj.set_exp(session_context.expiry);
@@ -1019,7 +1024,7 @@ pub mod test {
             .expect("valid address")
             .assume_checked(),
         directory: EXAMPLE_URL.clone(),
-        subdirectory: None,
+        mailbox: None,
         ohttp_keys: OhttpKeys(
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
         ),
@@ -1033,7 +1038,7 @@ pub mod test {
             .expect("valid address")
             .assume_checked(),
         directory: EXAMPLE_URL.clone(),
-        subdirectory: None,
+        mailbox: None,
         ohttp_keys: OhttpKeys(
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
         ),

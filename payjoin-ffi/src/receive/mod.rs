@@ -214,21 +214,22 @@ impl
 }
 
 impl Initialized {
-    pub fn extract_req(
+    /// Construct an OHTTP encapsulated GET request, polling the mailbox for the Original PSBT
+    pub fn create_poll_request(
         &self,
         ohttp_relay: String,
     ) -> Result<(Request, ClientResponse), ReceiverError> {
         self.0
             .clone()
-            .extract_req(ohttp_relay)
+            .create_poll_request(ohttp_relay)
             .map(|(req, ctx)| (req.into(), ctx.into()))
             .map_err(Into::into)
     }
 
-    ///The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
-    pub fn process_res(&self, body: &[u8], ctx: &ClientResponse) -> InitializedTransition {
+    /// The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
+    pub fn process_response(&self, body: &[u8], ctx: &ClientResponse) -> InitializedTransition {
         InitializedTransition(Arc::new(RwLock::new(Some(
-            self.0.clone().process_res(body, ctx.into()),
+            self.0.clone().process_response(body, ctx.into()),
         ))))
     }
 
@@ -845,30 +846,30 @@ impl PayjoinProposal {
         .to_string()
     }
 
-    /// Extract an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
-    pub fn extract_req(
+    /// Construct an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
+    pub fn create_post_request(
         &self,
         ohttp_relay: String,
     ) -> Result<(Request, ClientResponse), ReceiverError> {
         self.0
             .clone()
-            .extract_req(ohttp_relay)
+            .create_post_request(ohttp_relay)
             .map_err(Into::into)
             .map(|(req, ctx)| (req.into(), ctx.into()))
     }
 
-    ///Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
+    /// Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
     ///
     /// This function decapsulates the response using the provided OHTTP context. If the response status is successful, it indicates that the Payjoin proposal has been accepted. Otherwise, it returns an error with the status code.
     ///
     /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or choose to broadcast the original PSBT.
-    pub fn process_res(
+    pub fn process_response(
         &self,
         body: &[u8],
         ohttp_context: &ClientResponse,
     ) -> PayjoinProposalTransition {
         PayjoinProposalTransition(Arc::new(RwLock::new(Some(
-            self.0.clone().process_res(body, ohttp_context.into()),
+            self.0.clone().process_response(body, ohttp_context.into()),
         ))))
     }
 }

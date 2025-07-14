@@ -46,6 +46,7 @@ sled = "0.34"
 tokio = { version = "1.38.1", features = ["full"] }
 tokio-rustls = { version = "0.25", features = ["ring"], default-features = false, optional = true }
 url = { version = "2.3.1", features = ["serde"] }
+dirs = "5.0.1"
 
 [dev-dependencies]
 nix = "0.26.4"

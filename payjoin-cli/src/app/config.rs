@@ -94,7 +94,10 @@ impl Config {
         ));
     }
 
-    pub(crate) fn new(cli: &Cli) -> Result<Self, ConfigError> {
+    pub(crate) fn new(
+        cli: &Cli,
+        config_path: Option<std::path::PathBuf>,
+    ) -> Result<Self, ConfigError> {
         let mut config = config::Config::builder();
         config = add_bitcoind_defaults(config, cli)?;
         config = add_common_defaults(config, cli)?;
@@ -125,7 +128,11 @@ impl Config {
         }
 
         config = handle_subcommands(config, cli)?;
-        config = config.add_source(File::new("config.toml", FileFormat::Toml).required(false));
+        if let Some(path) = config_path {
+            config = config.add_source(File::from(path).format(FileFormat::Toml).required(true));
+        } else {
+            config = config.add_source(File::new("config.toml", FileFormat::Toml).required(false));
+        }
 
         let built_config = config.build()?;
 

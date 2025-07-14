@@ -43,7 +43,7 @@ pub mod metrics;
 #[cfg(feature = "_danger-local-https")]
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-//Dedicated metrics server
+/// Serve Prometheus metrics, listening on the given port.
 pub async fn listen_metrics_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
     let listener = TcpListener::bind(bind_addr).await?;
@@ -300,15 +300,12 @@ async fn handle_v2(
 
     let path_segments: Vec<&str> = path.split('/').collect();
     debug!("handle_v2: {:?}", &path_segments);
-    let response = match (parts.method, path_segments.as_slice()) {
+    match (parts.method, path_segments.as_slice()) {
         (Method::POST, &["", id]) => post_subdir(id, body, pool).await,
         (Method::GET, &["", id]) => get_subdir(id, pool).await,
         (Method::PUT, &["", id]) => put_payjoin_v1(id, body, pool).await,
         _ => Ok(not_found()),
     }
-    .unwrap_or_else(|e| e.to_response());
-
-    Ok(response)
 }
 
 async fn health_check() -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {

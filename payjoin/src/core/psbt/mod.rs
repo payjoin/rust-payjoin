@@ -11,6 +11,8 @@ use bitcoin::psbt::Psbt;
 use bitcoin::transaction::InputWeightPrediction;
 use bitcoin::{bip32, psbt, Address, AddressType, Network, TxIn, TxOut, Weight};
 
+use crate::NON_WITNESS_INPUT_WEIGHT;
+
 #[derive(Debug, PartialEq)]
 pub(crate) enum InconsistentPsbt {
     UnequalInputCounts { tx_ins: usize, psbt_ins: usize },
@@ -214,8 +216,7 @@ impl InternalInputPair<'_> {
             _ => Err(AddressTypeError::UnknownAddressType.into()),
         }?;
 
-        // Lengths of txid, index and sequence: (32, 4, 4).
-        let input_weight = iwp.weight() + Weight::from_non_witness_data_size(32 + 4 + 4);
+        let input_weight = iwp.weight() + NON_WITNESS_INPUT_WEIGHT;
         Ok(input_weight)
     }
 }

@@ -254,10 +254,7 @@ mod tests {
 
     use super::*;
     use crate::psbt::InternalPsbtInputError::InvalidScriptPubKey;
-
-    // TODO: this is duplicated in a couple places. In these tests, receiver, and the sender.
-    // We should pub(crate) it and moved to a common place.
-    const NON_WITNESS_DATA_WEIGHT: Weight = Weight::from_non_witness_data_size(32 + 4 + 4);
+    use crate::NON_WITNESS_INPUT_WEIGHT;
 
     #[test]
     fn input_pair_with_expected_weight() {
@@ -311,7 +308,7 @@ mod tests {
         assert_eq!(p2pkh_pair.psbtin.non_witness_utxo.unwrap(), utxo);
         assert_eq!(
             p2pkh_pair.expected_weight,
-            InputWeightPrediction::P2PKH_COMPRESSED_MAX.weight() + NON_WITNESS_DATA_WEIGHT
+            InputWeightPrediction::P2PKH_COMPRESSED_MAX.weight() + NON_WITNESS_INPUT_WEIGHT
         );
 
         // Failures
@@ -427,7 +424,7 @@ mod tests {
         assert_eq!(p2wpkh_pair.psbtin.witness_utxo.unwrap(), p2wpkh_txout);
         assert_eq!(
             p2wpkh_pair.expected_weight,
-            InputWeightPrediction::P2WPKH_MAX.weight() + NON_WITNESS_DATA_WEIGHT
+            InputWeightPrediction::P2WPKH_MAX.weight() + NON_WITNESS_INPUT_WEIGHT
         );
 
         let p2sh_txout = TxOut {
@@ -498,7 +495,7 @@ mod tests {
         assert_eq!(p2tr_pair.psbtin.witness_utxo.unwrap(), p2tr_txout);
         assert_eq!(
             p2tr_pair.expected_weight,
-            InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH.weight() + NON_WITNESS_DATA_WEIGHT
+            InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH.weight() + NON_WITNESS_INPUT_WEIGHT
         );
 
         let p2sh_txout = TxOut {

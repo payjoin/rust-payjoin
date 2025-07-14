@@ -55,4 +55,10 @@ mod tests {
         let metrics_recorded = generate_metrics().expect("Failed to generate metrics");
         assert!(metrics_recorded.contains("connections_total"));
     }
+
+    #[test]
+    fn does_not_error_on_empty_metrics() {
+        let metrics_recorded = generate_metrics().expect("Failed to generate metrics");
+        assert!(metrics_recorded.is_empty());
+    }
 }

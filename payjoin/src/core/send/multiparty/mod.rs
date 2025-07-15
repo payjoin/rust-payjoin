@@ -18,10 +18,10 @@ use crate::{ImplementationError, IntoUrl, PjUri, Request, Version};
 mod error;
 
 #[derive(Clone)]
-pub struct SenderBuilder<'a>(v2::SenderBuilder<'a>);
+pub struct SenderBuilder(v2::SenderBuilder);
 
-impl<'a> SenderBuilder<'a> {
-    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v2::SenderBuilder::new(psbt, uri)) }
+impl SenderBuilder {
+    pub fn new(psbt: Psbt, uri: PjUri) -> Self { Self(v2::SenderBuilder::new(psbt, uri)) }
 
     pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, BuildSenderError> {
         let noop_persister = NoopSessionPersister::default();
@@ -56,10 +56,10 @@ impl Sender {
             .ohttp()
             .map_err(|_| InternalCreateRequestError::MissingOhttpConfig)?;
         let body = serialize_v2_body(
-            &self.0.v1.psbt_ctx.original_psbt,
-            self.0.v1.psbt_ctx.output_substitution,
-            self.0.v1.psbt_ctx.fee_contribution,
-            self.0.v1.psbt_ctx.min_fee_rate,
+            &self.0.state.psbt_ctx.original_psbt,
+            self.0.state.psbt_ctx.output_substitution,
+            self.0.state.psbt_ctx.fee_contribution,
+            self.0.state.psbt_ctx.min_fee_rate,
         )?;
         let (request, ohttp_ctx) = extract_request(
             ohttp_relay,
@@ -72,7 +72,7 @@ impl Sender {
         .map_err(InternalCreateRequestError::V2CreateRequest)?;
         let v2_post_ctx = V2PostContext {
             endpoint: self.0.endpoint().clone(),
-            psbt_ctx: self.0.v1.psbt_ctx.clone(),
+            psbt_ctx: self.0.state.psbt_ctx.clone(),
             hpke_ctx: HpkeContext::new(rs, &self.0.reply_key),
             ohttp_ctx,
         };

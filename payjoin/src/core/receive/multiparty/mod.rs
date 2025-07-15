@@ -179,9 +179,25 @@ impl WantsInputs {
 
     /// Proceed to the proposal finalization step.
     /// Inputs cannot be modified after this function is called.
-    pub fn commit_inputs(self) -> ProvisionalProposal {
+    pub fn commit_inputs(self) -> WantsFeeRange {
         let inner = self.v1.commit_inputs();
-        ProvisionalProposal { v1: inner, contexts: self.contexts }
+        WantsFeeRange { v1: inner, contexts: self.contexts }
+    }
+}
+
+pub struct WantsFeeRange {
+    v1: v1::WantsFeeRange,
+    contexts: Vec<SessionContext>,
+}
+
+impl WantsFeeRange {
+    pub fn apply_fee_range(
+        self,
+        min_fee_rate: Option<FeeRate>,
+        max_effective_fee_rate: Option<FeeRate>,
+    ) -> Result<ProvisionalProposal, Error> {
+        let inner = self.v1.apply_fee_range(min_fee_rate, max_effective_fee_rate)?;
+        Ok(ProvisionalProposal { v1: inner, contexts: self.contexts })
     }
 }
 
@@ -194,14 +210,8 @@ impl ProvisionalProposal {
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-        min_feerate_sat_per_vb: Option<FeeRate>,
-        max_feerate_sat_per_vb: FeeRate,
     ) -> Result<PayjoinProposal, Error> {
-        let inner = self.v1.finalize_proposal(
-            wallet_process_psbt,
-            min_feerate_sat_per_vb,
-            Some(max_feerate_sat_per_vb),
-        )?;
+        let inner = self.v1.finalize_proposal(wallet_process_psbt)?;
         Ok(PayjoinProposal { v1: inner, contexts: self.contexts })
     }
 }

@@ -147,6 +147,7 @@ pub enum SessionEvent {
     OutputsUnknown(v1::OutputsUnknown),
     WantsOutputs(v1::WantsOutputs),
     WantsInputs(v1::WantsInputs),
+    WantsFeeRange(v1::WantsFeeRange),
     ProvisionalProposal(v1::ProvisionalProposal),
     PayjoinProposal(v1::PayjoinProposal),
     /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
@@ -185,10 +186,11 @@ mod tests {
             .identify_receiver_outputs(|_| Ok(true))
             .expect("Outputs should be identified");
         let wants_inputs = wants_outputs.clone().commit_outputs();
-        let provisional_proposal = wants_inputs.clone().commit_inputs();
+        let wants_fee_range = wants_inputs.clone().commit_inputs();
+        let provisional_proposal = wants_fee_range.clone().apply_fee_range(None, None).unwrap();
         let payjoin_proposal = provisional_proposal
             .clone()
-            .finalize_proposal(|psbt| Ok(psbt.clone()), None, None)
+            .finalize_proposal(|psbt| Ok(psbt.clone()))
             .expect("Payjoin proposal should be finalized");
 
         let test_cases = vec![
@@ -381,7 +383,11 @@ mod tests {
             .identify_receiver_outputs(|_| Ok(true))
             .expect("Outputs should be identified");
         let wants_inputs = wants_outputs.clone().commit_outputs();
-        let provisional_proposal = wants_inputs.clone().commit_inputs();
+        let wants_fee_range = wants_inputs.clone().commit_inputs();
+        let provisional_proposal = wants_fee_range
+            .clone()
+            .apply_fee_range(None, None)
+            .expect("Contributed inputs should be valid");
         let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
 
         events.push(SessionEvent::Created(session_context.clone()));
@@ -391,6 +397,7 @@ mod tests {
         events.push(SessionEvent::OutputsUnknown(outputs_unknown));
         events.push(SessionEvent::WantsOutputs(wants_outputs));
         events.push(SessionEvent::WantsInputs(wants_inputs));
+        events.push(SessionEvent::WantsFeeRange(wants_fee_range));
         events.push(SessionEvent::ProvisionalProposal(provisional_proposal.clone()));
 
         let test = SessionHistoryTest {
@@ -426,10 +433,14 @@ mod tests {
             .identify_receiver_outputs(|_| Ok(true))
             .expect("Outputs should be identified");
         let wants_inputs = wants_outputs.clone().commit_outputs();
-        let provisional_proposal = wants_inputs.clone().commit_inputs();
+        let wants_fee_range = wants_inputs.clone().commit_inputs();
+        let provisional_proposal = wants_fee_range
+            .clone()
+            .apply_fee_range(None, None)
+            .expect("Contributed inputs should be valid");
         let payjoin_proposal = provisional_proposal
             .clone()
-            .finalize_proposal(|psbt| Ok(psbt.clone()), None, None)
+            .finalize_proposal(|psbt| Ok(psbt.clone()))
             .expect("Payjoin proposal should be finalized");
         let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
 
@@ -440,6 +451,7 @@ mod tests {
         events.push(SessionEvent::OutputsUnknown(outputs_unknown));
         events.push(SessionEvent::WantsOutputs(wants_outputs));
         events.push(SessionEvent::WantsInputs(wants_inputs));
+        events.push(SessionEvent::WantsFeeRange(wants_fee_range));
         events.push(SessionEvent::ProvisionalProposal(provisional_proposal.clone()));
         events.push(SessionEvent::PayjoinProposal(payjoin_proposal.clone()));
 

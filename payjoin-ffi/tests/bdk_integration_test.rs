@@ -408,10 +408,13 @@ mod v2 {
             .unwrap()
             .commit_inputs()
             .save(&session_persister)
+            .expect("Noop Persister should not fail")
+            .apply_fee_range(Some(10), Some(100))
+            .save(&session_persister)
             .expect("Noop Persister should not fail");
 
         let payjoin_proposal = provisional_proposal
-            .finalize_proposal(|psbt| process_psbt(&receiver, psbt), Some(10), Some(100))
+            .finalize_proposal(|psbt| process_psbt(&receiver, psbt))
             .save(&session_persister)
             .unwrap();
         payjoin_proposal

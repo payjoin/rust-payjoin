@@ -807,24 +807,27 @@ mod integration {
                 .commit_inputs()
                 .save(&noop_persister)?;
 
-            // Sign and finalize the proposal PSBT
             let payjoin = payjoin
-                .finalize_proposal(
-                    |psbt: &Psbt| {
-                        Ok(receiver
-                            .wallet_process_psbt(
-                                &psbt.to_string(),
-                                None,
-                                None,
-                                Some(true), // check that the receiver properly clears keypaths
-                            )
-                            .map(|res: WalletProcessPsbtResult| {
-                                Psbt::from_str(&res.psbt).expect("psbt should be valid")
-                            })?)
-                    },
+                .apply_fee_range(
                     Some(FeeRate::BROADCAST_MIN),
                     Some(FeeRate::from_sat_per_vb_unchecked(2)),
                 )
+                .save(&noop_persister)?;
+
+            // Sign and finalize the proposal PSBT
+            let payjoin = payjoin
+                .finalize_proposal(|psbt: &Psbt| {
+                    Ok(receiver
+                        .wallet_process_psbt(
+                            &psbt.to_string(),
+                            None,
+                            None,
+                            Some(true), // check that the receiver properly clears keypaths
+                        )
+                        .map(|res: WalletProcessPsbtResult| {
+                            Psbt::from_str(&res.psbt).expect("psbt should be valid")
+                        })?)
+                })
                 .save(&noop_persister)?;
             Ok(payjoin)
         }
@@ -1106,22 +1109,22 @@ mod integration {
                     vec![selected_input]
                 };
                 let payjoin = payjoin.contribute_inputs(selected_inputs)?.commit_inputs();
-                let payjoin = payjoin.finalize_proposal(
-                    |psbt: &Psbt| {
-                        Ok(receiver
-                            .wallet_process_psbt(
-                                &psbt.to_string(),
-                                None,
-                                None,
-                                Some(true), // check that the receiver properly clears keypaths
-                            )
-                            .map(|res: WalletProcessPsbtResult| {
-                                Psbt::from_str(&res.psbt).expect("valid psbt")
-                            })?)
-                    },
+                let payjoin = payjoin.apply_fee_range(
                     Some(FeeRate::BROADCAST_MIN),
-                    FeeRate::from_sat_per_vb_unchecked(2),
+                    Some(FeeRate::from_sat_per_vb_unchecked(2)),
                 )?;
+                let payjoin = payjoin.finalize_proposal(|psbt: &Psbt| {
+                    Ok(receiver
+                        .wallet_process_psbt(
+                            &psbt.to_string(),
+                            None,
+                            None,
+                            Some(true), // check that the receiver properly clears keypaths
+                        )
+                        .map(|res: WalletProcessPsbtResult| {
+                            Psbt::from_str(&res.psbt).expect("valid psbt")
+                        })?)
+                })?;
                 Ok(payjoin)
             }
 
@@ -1433,23 +1436,23 @@ mod integration {
             .contribute_inputs(inputs)
             .map_err(|e| format!("Failed to contribute inputs: {e:?}"))?
             .commit_inputs();
-
-        let payjoin_proposal = payjoin.finalize_proposal(
-            |psbt: &Psbt| {
-                Ok(receiver
-                    .wallet_process_psbt(
-                        &psbt.to_string(),
-                        None,
-                        None,
-                        Some(true), // check that the receiver properly clears keypaths
-                    )
-                    .map(|res: WalletProcessPsbtResult| {
-                        Psbt::from_str(&res.psbt).expect("psbt should be valid")
-                    })?)
-            },
+        let payjoin = payjoin.apply_fee_range(
             Some(FeeRate::BROADCAST_MIN),
             Some(FeeRate::from_sat_per_vb_unchecked(2)),
         )?;
+
+        let payjoin_proposal = payjoin.finalize_proposal(|psbt: &Psbt| {
+            Ok(receiver
+                .wallet_process_psbt(
+                    &psbt.to_string(),
+                    None,
+                    None,
+                    Some(true), // check that the receiver properly clears keypaths
+                )
+                .map(|res: WalletProcessPsbtResult| {
+                    Psbt::from_str(&res.psbt).expect("psbt should be valid")
+                })?)
+        })?;
         Ok(payjoin_proposal)
     }
 

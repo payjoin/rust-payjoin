@@ -120,6 +120,11 @@ impl SessionHistory {
         self.0 .0.psbt_with_contributed_inputs().map(|psbt| Arc::new(psbt.into()))
     }
 
+    /// Psbt With fee contributions applied
+    pub fn psbt_ready_for_signing(&self) -> Option<Arc<crate::Psbt>> {
+        self.0 .0.psbt_ready_for_signing().map(|psbt| Arc::new(psbt.into()))
+    }
+
     /// Terminal error from the session if present
     pub fn terminal_error(&self) -> Option<Arc<TerminalErr>> {
         self.0 .0.terminal_error().map(|(error, reply)| {

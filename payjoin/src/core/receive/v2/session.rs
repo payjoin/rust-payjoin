@@ -102,6 +102,14 @@ impl SessionHistory {
         })
     }
 
+    /// Psbt with fee contributions applied
+    pub fn psbt_ready_for_signing(&self) -> Option<bitcoin::Psbt> {
+        self.events.iter().find_map(|event| match event {
+            SessionEvent::ProvisionalProposal(proposal) => Some(proposal.payjoin_psbt.clone()),
+            _ => None,
+        })
+    }
+
     /// Terminal error from the session if present
     pub fn terminal_error(&self) -> Option<(String, Option<JsonReply>)> {
         self.events.iter().find_map(|event| match event {
@@ -219,6 +227,7 @@ mod tests {
 
     struct SessionHistoryExpectedOutcome {
         psbt_with_contributed_inputs: Option<bitcoin::Psbt>,
+        psbt_with_fee_contributions: Option<bitcoin::Psbt>,
         fallback_tx: Option<bitcoin::Transaction>,
     }
 
@@ -240,6 +249,10 @@ mod tests {
             session_history.psbt_with_contributed_inputs(),
             test.expected_session_history.psbt_with_contributed_inputs
         );
+        assert_eq!(
+            session_history.psbt_ready_for_signing(),
+            test.expected_session_history.psbt_with_fee_contributions
+        );
         assert_eq!(session_history.fallback_tx(), test.expected_session_history.fallback_tx);
         Ok(())
     }
@@ -251,6 +264,7 @@ mod tests {
             events: vec![SessionEvent::Created(session_context.clone())],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_contributed_inputs: None,
+                psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::Initialized(Receiver {
@@ -271,6 +285,7 @@ mod tests {
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_contributed_inputs: None,
+                psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedProposal(Receiver {
@@ -295,6 +310,7 @@ mod tests {
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_contributed_inputs: None,
+                psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedProposal(Receiver {
@@ -326,6 +342,7 @@ mod tests {
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_contributed_inputs: None,
+                psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedProposal(Receiver {
@@ -354,6 +371,7 @@ mod tests {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_contributed_inputs: None,
+                psbt_with_fee_contributions: None,
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::MaybeInputsOwned(Receiver {
@@ -404,6 +422,7 @@ mod tests {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_contributed_inputs: Some(provisional_proposal.payjoin_psbt.clone()),
+                psbt_with_fee_contributions: Some(provisional_proposal.payjoin_psbt.clone()),
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::ProvisionalProposal(Receiver {
@@ -459,6 +478,7 @@ mod tests {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_contributed_inputs: Some(provisional_proposal.payjoin_psbt.clone()),
+                psbt_with_fee_contributions: Some(provisional_proposal.payjoin_psbt.clone()),
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {

@@ -94,14 +94,6 @@ impl SessionHistory {
         })
     }
 
-    /// Psbt with receiver contributed inputs
-    pub fn psbt_with_contributed_inputs(&self) -> Option<bitcoin::Psbt> {
-        self.events.iter().find_map(|event| match event {
-            SessionEvent::ProvisionalProposal(proposal) => Some(proposal.payjoin_psbt.clone()),
-            _ => None,
-        })
-    }
-
     /// Psbt with fee contributions applied
     pub fn psbt_ready_for_signing(&self) -> Option<bitcoin::Psbt> {
         self.events.iter().find_map(|event| match event {
@@ -226,7 +218,6 @@ mod tests {
     }
 
     struct SessionHistoryExpectedOutcome {
-        psbt_with_contributed_inputs: Option<bitcoin::Psbt>,
         psbt_with_fee_contributions: Option<bitcoin::Psbt>,
         fallback_tx: Option<bitcoin::Transaction>,
     }
@@ -246,10 +237,6 @@ mod tests {
         let (receiver, session_history) = replay_event_log(&persister)?;
         assert_eq!(receiver, test.expected_receiver_state);
         assert_eq!(
-            session_history.psbt_with_contributed_inputs(),
-            test.expected_session_history.psbt_with_contributed_inputs
-        );
-        assert_eq!(
             session_history.psbt_ready_for_signing(),
             test.expected_session_history.psbt_with_fee_contributions
         );
@@ -263,7 +250,6 @@ mod tests {
         let test = SessionHistoryTest {
             events: vec![SessionEvent::Created(session_context.clone())],
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_contributed_inputs: None,
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
@@ -284,7 +270,6 @@ mod tests {
                 SessionEvent::UncheckedProposal((unchecked_proposal_from_test_vector(), None)),
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_contributed_inputs: None,
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
@@ -309,7 +294,6 @@ mod tests {
                 SessionEvent::UncheckedProposal((unchecked_proposal_from_test_vector(), None)),
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_contributed_inputs: None,
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
@@ -341,7 +325,6 @@ mod tests {
                 )),
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_contributed_inputs: None,
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
@@ -370,7 +353,6 @@ mod tests {
         let test = SessionHistoryTest {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_contributed_inputs: None,
                 psbt_with_fee_contributions: None,
                 fallback_tx: Some(expected_fallback),
             },
@@ -421,7 +403,6 @@ mod tests {
         let test = SessionHistoryTest {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_contributed_inputs: Some(provisional_proposal.payjoin_psbt.clone()),
                 psbt_with_fee_contributions: Some(provisional_proposal.payjoin_psbt.clone()),
                 fallback_tx: Some(expected_fallback),
             },
@@ -477,7 +458,6 @@ mod tests {
         let test = SessionHistoryTest {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_contributed_inputs: Some(provisional_proposal.payjoin_psbt.clone()),
                 psbt_with_fee_contributions: Some(provisional_proposal.payjoin_psbt.clone()),
                 fallback_tx: Some(expected_fallback),
             },

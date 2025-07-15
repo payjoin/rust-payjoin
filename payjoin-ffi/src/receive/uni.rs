@@ -115,11 +115,6 @@ impl SessionHistory {
         self.0 .0.pj_uri().map(|pj_uri| Arc::new(pj_uri.into()))
     }
 
-    /// Psbt with receiver contributed inputs
-    pub fn psbt_with_contributed_inputs(&self) -> Option<Arc<crate::Psbt>> {
-        self.0 .0.psbt_with_contributed_inputs().map(|psbt| Arc::new(psbt.into()))
-    }
-
     /// Psbt With fee contributions applied
     pub fn psbt_ready_for_signing(&self) -> Option<Arc<crate::Psbt>> {
         self.0 .0.psbt_ready_for_signing().map(|psbt| Arc::new(psbt.into()))

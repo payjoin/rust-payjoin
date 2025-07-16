@@ -54,18 +54,24 @@ impl fmt::Display for MultipartyError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
             InternalMultipartyError::NotEnoughProposals => write!(f, "Not enough proposals"),
-            InternalMultipartyError::IdenticalProposals(e) =>
-                write!(f, "More than one identical participant: {e}"),
-            InternalMultipartyError::ProposalVersionNotSupported(v) =>
-                write!(f, "Proposal version not supported: {v}"),
-            InternalMultipartyError::OptimisticMergeNotSupported =>
-                write!(f, "Optimistic merge not supported"),
-            InternalMultipartyError::BitcoinExtractTxError(e) =>
-                write!(f, "Bitcoin extract tx error: {e:?}"),
-            InternalMultipartyError::InputMissingWitnessOrScriptSig =>
-                write!(f, "Input in Finalized Proposal is missing witness or script_sig"),
-            InternalMultipartyError::FailedToCombinePsbts(e) =>
-                write!(f, "Failed to combine psbts: {e:?}"),
+            InternalMultipartyError::IdenticalProposals(e) => {
+                write!(f, "More than one identical participant: {e}")
+            }
+            InternalMultipartyError::ProposalVersionNotSupported(v) => {
+                write!(f, "Proposal version not supported: {v}")
+            }
+            InternalMultipartyError::OptimisticMergeNotSupported => {
+                write!(f, "Optimistic merge not supported")
+            }
+            InternalMultipartyError::BitcoinExtractTxError(e) => {
+                write!(f, "Bitcoin extract tx error: {e:?}")
+            }
+            InternalMultipartyError::InputMissingWitnessOrScriptSig => {
+                write!(f, "Input in Finalized Proposal is missing witness or script_sig")
+            }
+            InternalMultipartyError::FailedToCombinePsbts(e) => {
+                write!(f, "Failed to combine psbts: {e:?}")
+            }
         }
     }
 }

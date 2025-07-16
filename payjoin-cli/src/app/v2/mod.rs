@@ -367,8 +367,9 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let wallet = self.wallet();
-        let proposal =
-            proposal.check_inputs_not_owned(|input| Ok(wallet.is_mine(input)?)).save(persister)?;
+        let proposal = proposal
+            .check_inputs_not_owned(&mut |input| Ok(wallet.is_mine(input)?))
+            .save(persister)?;
         self.check_no_inputs_seen_before(proposal, persister).await
     }
 
@@ -378,7 +379,9 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let proposal = proposal
-            .check_no_inputs_seen_before(|input| Ok(self.db.insert_input_seen_before(*input)?))
+            .check_no_inputs_seen_before(&mut |input| {
+                Ok(self.db.insert_input_seen_before(*input)?)
+            })
             .save(persister)?;
         self.identify_receiver_outputs(proposal, persister).await
     }
@@ -390,7 +393,7 @@ impl App {
     ) -> Result<()> {
         let wallet = self.wallet();
         let proposal = proposal
-            .identify_receiver_outputs(|output_script| Ok(wallet.is_mine(output_script)?))
+            .identify_receiver_outputs(&mut |output_script| Ok(wallet.is_mine(output_script)?))
             .save(persister)?;
         self.commit_outputs(proposal, persister).await
     }

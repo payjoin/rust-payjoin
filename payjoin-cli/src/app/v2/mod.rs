@@ -374,7 +374,7 @@ impl App {
     ) -> Result<()> {
         let wallet = self.wallet();
         let proposal = proposal
-            .check_inputs_not_owned(|input| {
+            .check_inputs_not_owned(&mut |input| {
                 wallet
                     .is_mine(input)
                     .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
@@ -389,7 +389,9 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let proposal = proposal
-            .check_no_inputs_seen_before(|input| Ok(self.db.insert_input_seen_before(*input)?))
+            .check_no_inputs_seen_before(&mut |input| {
+                Ok(self.db.insert_input_seen_before(*input)?)
+            })
             .save(persister)?;
         self.identify_receiver_outputs(proposal, persister).await
     }
@@ -401,7 +403,7 @@ impl App {
     ) -> Result<()> {
         let wallet = self.wallet();
         let proposal = proposal
-            .identify_receiver_outputs(|output_script| {
+            .identify_receiver_outputs(&mut |output_script| {
                 wallet
                     .is_mine(output_script)
                     .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))

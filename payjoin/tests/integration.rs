@@ -763,7 +763,7 @@ mod integration {
 
             // Receive Check 2: receiver can't sign for proposal inputs
             let proposal = proposal
-                .check_inputs_not_owned(|input| {
+                .check_inputs_not_owned(&mut |input| {
                     let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
                         .map_err(ImplementationError::new)?;
                     receiver
@@ -775,9 +775,9 @@ mod integration {
 
             // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
             let payjoin = proposal
-                .check_no_inputs_seen_before(|_| Ok(false))
+                .check_no_inputs_seen_before(&mut |_| Ok(false))
                 .save(&noop_persister)?
-                .identify_receiver_outputs(|output_script| {
+                .identify_receiver_outputs(&mut |output_script| {
                     let address =
                         bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
                             .map_err(ImplementationError::new)?;

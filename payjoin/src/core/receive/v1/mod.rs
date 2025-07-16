@@ -141,8 +141,8 @@ impl UncheckedProposal {
 /// Call [`Self::check_inputs_not_owned`] to proceed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MaybeInputsOwned {
-    psbt: Psbt,
-    params: Params,
+    pub(crate) psbt: Psbt,
+    pub(crate) params: Params,
 }
 
 impl MaybeInputsOwned {
@@ -160,8 +160,9 @@ impl MaybeInputsOwned {
     /// An attacker can try to spend the receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         self,
-        is_owned: impl Fn(&Script) -> Result<bool, ImplementationError>,
+        is_owned: impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<MaybeInputsSeen, ReplyableError> {
+        let mut is_owned = is_owned;
         let mut err: Result<(), ReplyableError> = Ok(());
         if let Some(e) = self
             .psbt
@@ -206,8 +207,9 @@ impl MaybeInputsSeen {
     ///    original proposal PSBT of the current, new payjoin.
     pub fn check_no_inputs_seen_before(
         self,
-        is_known: impl Fn(&OutPoint) -> Result<bool, ImplementationError>,
+        is_known: impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<OutputsUnknown, ReplyableError> {
+        let mut is_known = is_known;
         self.psbt.input_pairs().try_for_each(|input| {
             match is_known(&input.txin.previous_output) {
                 Ok(false) => Ok::<(), ReplyableError>(()),
@@ -248,8 +250,9 @@ impl OutputsUnknown {
     /// outputs.
     pub fn identify_receiver_outputs(
         self,
-        is_receiver_output: impl Fn(&Script) -> Result<bool, ImplementationError>,
+        is_receiver_output: impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<WantsOutputs, ReplyableError> {
+        let mut is_receiver_output = is_receiver_output;
         let owned_vouts: Vec<usize> = self
             .psbt
             .unsigned_tx
@@ -899,6 +902,13 @@ pub(crate) mod test {
         UncheckedProposal { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
     }
 
+    pub(crate) fn maybe_inputs_owned_from_test_vector() -> MaybeInputsOwned {
+        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
+        let params = Params::from_query_pairs(pairs, &[Version::One])
+            .expect("Could not parse params from query pairs");
+        MaybeInputsOwned { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
+    }
+
     fn wants_outputs_from_test_vector(proposal: UncheckedProposal) -> WantsOutputs {
         proposal
             .assume_interactive_receiver()
@@ -923,6 +933,35 @@ pub(crate) mod test {
             .commit_inputs()
             .apply_fee_range(None, None)
             .expect("Contributed inputs should allow for valid fee contributions")
+    }
+
+    #[test]
+    fn test_mutable_receiver_state_closures() {
+        let mut call_count = 0;
+        let maybe_inputs_owned = maybe_inputs_owned_from_test_vector();
+
+        fn mock_callback(call_count: &mut usize, ret: bool) -> Result<bool, ImplementationError> {
+            *call_count += 1;
+            Ok(ret)
+        }
+
+        let maybe_inputs_seen =
+            maybe_inputs_owned.check_inputs_not_owned(|_| mock_callback(&mut call_count, false));
+        assert_eq!(call_count, 1);
+
+        let outputs_unknown = maybe_inputs_seen
+            .map_err(|_| "Check inputs owned closure failed".to_string())
+            .expect("Next receiver state should be accessible")
+            .check_no_inputs_seen_before(|_| mock_callback(&mut call_count, false));
+        assert_eq!(call_count, 2);
+
+        let _wants_outputs = outputs_unknown
+            .map_err(|_| "Check no inputs seen closure failed".to_string())
+            .expect("Next receiver state should be accessible")
+            .identify_receiver_outputs(|_| mock_callback(&mut call_count, true));
+        // there are 2 receiver outputs so we should expect this callback to run twice incrementing
+        // call count twice
+        assert_eq!(call_count, 4);
     }
 
     #[test]

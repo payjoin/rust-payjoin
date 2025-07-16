@@ -12,13 +12,20 @@ jobs:
           - 1.63.0 # MSRV
           - stable
           - nightly
+    env:
+      # Override the value from the rust-toolchain file
+      # This is necessary because even though the correct toolchain
+      # is explicitly specified for the rust-toolchain action,
+      # rustup honors the rust-toolchain file over the default
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
     steps:
       - name: "Checkout repo"
         uses: actions/checkout@v4
       - name: "Install ${{ matrix.rust }} toolchain"
-        # https://github.com/dtolnay/rust-toolchain?tab=readme-ov-file#inputs
         uses: dtolnay/rust-toolchain@master
         with:
+          # The toolchain must be specified manually, as this action ignores the rust-toolchain override
+          # https://github.com/dtolnay/rust-toolchain?tab=readme-ov-file#inputs
           toolchain: ${{ matrix.rust }}
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
@@ -85,11 +92,17 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+    env:
+      # Override the value from the rust-toolchain file
+      # This is necessary because even though the correct toolchain
+      # is explicitly specified for the rust-toolchain action,
+      # rustup honors the rust-toolchain file over the default
+      RUSTUP_TOOLCHAIN: stable
     steps:
       - name: "Checkout repo"
         uses: actions/checkout@v4
       - name: "Install toolchain"
-        # https://github.com/dtolnay/rust-toolchain
+        # rust-cache usage with stable Rust is most effective, as a cache is tied to the Rust version
         uses: dtolnay/rust-toolchain@stable
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2

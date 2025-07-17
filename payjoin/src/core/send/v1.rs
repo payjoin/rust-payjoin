@@ -414,6 +414,7 @@ mod test {
         let fee_contribution = sender.fee_contribution.expect("sender should contribute fees");
         assert_eq!(fee_contribution.max_amount, Amount::from_sat(91));
         assert_eq!(fee_contribution.vout, 0);
+        assert_eq!(NON_WITNESS_INPUT_WEIGHT, bitcoin::Weight::from_wu(160));
         assert_eq!(sender.min_fee_rate, FeeRate::from_sat_per_kwu(250));
         // Ensure the receiver's output substitution preference is respected either way
         let mut pj_uri = pj_uri();
@@ -480,10 +481,12 @@ mod test {
     #[test]
     fn process_response_invalid_utf8() {
         // In UTF-8, 0xF0 represents the start of a 4-byte sequence, so 0xF0 by itself is invalid
-        let invalid_utf8 = &[0xF0];
+        let mut invalid_utf8_padding = PAYJOIN_PROPOSAL.as_bytes().to_vec();
+        invalid_utf8_padding
+            .extend(std::iter::repeat(0).take(MAX_CONTENT_LENGTH - invalid_utf8_padding.len()));
 
         let ctx = create_v1_context();
-        let response = ctx.process_response(invalid_utf8);
+        let response = ctx.process_response(&invalid_utf8_padding);
         match response {
             Ok(_) => panic!("Invalid UTF-8 should have caused an error"),
             Err(error) => match error {

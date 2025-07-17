@@ -47,7 +47,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 pub async fn listen_metrics_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
     let listener = TcpListener::bind(bind_addr).await?;
-    info!("Metrics server listening on{}", bind_addr);
+    info!("Metrics server listening on {}", bind_addr);
 
     while let Ok((stream, _)) = listener.accept().await {
         let io = TokioIo::new(stream);

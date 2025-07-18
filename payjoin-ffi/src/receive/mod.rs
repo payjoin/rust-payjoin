@@ -626,7 +626,7 @@ pub struct WantsInputsTransition(
             Option<
                 payjoin::persist::NextStateTransition<
                     payjoin::receive::v2::SessionEvent,
-                    payjoin::receive::v2::Receiver<payjoin::receive::v2::ProvisionalProposal>,
+                    payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsFeeRange>,
                 >,
             >,
         >,
@@ -634,7 +634,7 @@ pub struct WantsInputsTransition(
 );
 
 impl WantsInputsTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<ProvisionalProposal, ReceiverPersistedError>
+    pub fn save<P>(&self, persister: &P) -> Result<WantsFeeRange, ReceiverPersistedError>
     where
         P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
     {
@@ -718,6 +718,81 @@ impl From<payjoin::receive::InputPair> for InputPair {
     fn from(value: payjoin::receive::InputPair) -> Self { Self(value) }
 }
 
+#[allow(clippy::type_complexity)]
+pub struct WantsFeeRangeTransition(
+    Arc<
+        RwLock<
+            Option<
+                payjoin::persist::MaybeFatalTransition<
+                    payjoin::receive::v2::SessionEvent,
+                    payjoin::receive::v2::Receiver<payjoin::receive::v2::ProvisionalProposal>,
+                    payjoin::receive::ReplyableError,
+                >,
+            >,
+        >,
+    >,
+);
+
+impl WantsFeeRangeTransition {
+    pub fn save<P>(&self, persister: &P) -> Result<ProvisionalProposal, ReceiverPersistedError>
+    where
+        P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
+    {
+        let mut inner =
+            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
+
+        let value = inner
+            .take()
+            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
+
+        let res = value.save(persister).map_err(|e| {
+            ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
+        })?;
+        Ok(res.into())
+    }
+}
+
+pub struct WantsFeeRange(payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsFeeRange>);
+
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsFeeRange>> for WantsFeeRange {
+    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsFeeRange>) -> Self {
+        Self(value)
+    }
+}
+
+impl WantsFeeRange {
+    /// Applies additional fee contribution now that the receiver has contributed inputs
+    /// and may have added new outputs.
+    ///
+    /// How much the receiver ends up paying for fees depends on how much the sender stated they
+    /// were willing to pay in the parameters of the original proposal. For additional
+    /// inputs, fees will be subtracted from the sender's outputs as much as possible until we hit
+    /// the limit the sender specified in the Payjoin parameters. Any remaining fees for the new inputs
+    /// will be then subtracted from the change output of the receiver.
+    /// Fees for additional outputs are always subtracted from the receiver's outputs.
+    ///
+    /// `max_effective_fee_rate` is the maximum effective fee rate that the receiver is
+    /// willing to pay for their own input/output contributions. A `max_effective_fee_rate`
+    /// of zero indicates that the receiver is not willing to pay any additional
+    /// fees. Errors if the final effective fee rate exceeds `max_effective_fee_rate`.
+    ///
+    /// If not provided, `min_fee_rate_sat_per_vb` and `max_effective_fee_rate_sat_per_vb` default to the
+    /// minimum possible relay fee.
+    ///
+    /// The minimum effective fee limit is the highest of the minimum limit set by the sender in
+    /// the original proposal parameters and the limit passed in the `min_fee_rate_sat_per_vb` parameter.
+    pub fn apply_fee_range(
+        &self,
+        min_fee_rate_sat_per_vb: Option<u64>,
+        max_effective_fee_rate_sat_per_vb: Option<u64>,
+    ) -> WantsFeeRangeTransition {
+        WantsFeeRangeTransition(Arc::new(RwLock::new(Some(self.0.clone().apply_fee_range(
+            min_fee_rate_sat_per_vb.and_then(FeeRate::from_sat_per_vb),
+            max_effective_fee_rate_sat_per_vb.and_then(FeeRate::from_sat_per_vb),
+        )))))
+    }
+}
+
 pub struct ProvisionalProposal(
     pub payjoin::receive::v2::Receiver<payjoin::receive::v2::ProvisionalProposal>,
 );
@@ -768,18 +843,12 @@ impl ProvisionalProposal {
     pub fn finalize_proposal(
         &self,
         process_psbt: impl Fn(String) -> Result<String, ImplementationError>,
-        min_feerate_sat_per_vb: Option<u64>,
-        max_effective_fee_rate_sat_per_vb: Option<u64>,
     ) -> ProvisionalProposalTransition {
         ProvisionalProposalTransition(Arc::new(RwLock::new(Some(
-            self.0.clone().finalize_proposal(
-                |pre_processed| {
-                    let psbt = process_psbt(pre_processed.to_string())?;
-                    Ok(Psbt::from_str(&psbt)?)
-                },
-                min_feerate_sat_per_vb.and_then(FeeRate::from_sat_per_vb),
-                max_effective_fee_rate_sat_per_vb.and_then(FeeRate::from_sat_per_vb),
-            ),
+            self.0.clone().finalize_proposal(|pre_processed| {
+                let psbt = process_psbt(pre_processed.to_string())?;
+                Ok(Psbt::from_str(&psbt)?)
+            }),
         ))))
     }
 }

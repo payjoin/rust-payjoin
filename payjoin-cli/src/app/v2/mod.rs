@@ -7,7 +7,7 @@ use payjoin::persist::OptionalTransitionOutcome;
 use payjoin::receive::v2::{
     process_err_res, replay_event_log as replay_receiver_event_log, Initialized, MaybeInputsOwned,
     MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal, ReceiveSession,
-    Receiver, SessionHistory, UncheckedProposal, WantsInputs, WantsOutputs,
+    Receiver, SessionHistory, UncheckedProposal, WantsFeeRange, WantsInputs, WantsOutputs,
 };
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, SendSession, Sender, SenderBuilder, V2GetContext,
@@ -302,6 +302,8 @@ impl App {
                     self.commit_outputs(proposal, persister).await,
                 ReceiveSession::WantsInputs(proposal) =>
                     self.contribute_inputs(proposal, persister).await,
+                ReceiveSession::WantsFeeRange(proposal) =>
+                    self.apply_fee_range(proposal, persister).await,
                 ReceiveSession::ProvisionalProposal(proposal) =>
                     self.finalize_proposal(proposal, persister).await,
                 ReceiveSession::PayjoinProposal(proposal) =>
@@ -415,6 +417,15 @@ impl App {
         let selected_input = proposal.try_preserving_privacy(candidate_inputs)?;
         let proposal =
             proposal.contribute_inputs(vec![selected_input])?.commit_inputs().save(persister)?;
+        self.apply_fee_range(proposal, persister).await
+    }
+
+    async fn apply_fee_range(
+        &self,
+        proposal: Receiver<WantsFeeRange>,
+        persister: &ReceiverPersister,
+    ) -> Result<()> {
+        let proposal = proposal.apply_fee_range(None, self.config.max_fee_rate).save(persister)?;
         self.finalize_proposal(proposal, persister).await
     }
 
@@ -424,13 +435,8 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let wallet = self.wallet();
-        let proposal = proposal
-            .finalize_proposal(
-                |psbt| Ok(wallet.process_psbt(psbt)?),
-                None,
-                self.config.max_fee_rate,
-            )
-            .save(persister)?;
+        let proposal =
+            proposal.finalize_proposal(|psbt| Ok(wallet.process_psbt(psbt)?)).save(persister)?;
         self.send_payjoin_proposal(proposal, persister).await
     }
 

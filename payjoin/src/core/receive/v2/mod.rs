@@ -123,6 +123,7 @@ pub enum ReceiveSession {
     OutputsUnknown(Receiver<OutputsUnknown>),
     WantsOutputs(Receiver<WantsOutputs>),
     WantsInputs(Receiver<WantsInputs>),
+    WantsFeeRange(Receiver<WantsFeeRange>),
     ProvisionalProposal(Receiver<ProvisionalProposal>),
     PayjoinProposal(Receiver<PayjoinProposal>),
     TerminalFailure,
@@ -158,8 +159,11 @@ impl ReceiveSession {
             (ReceiveSession::WantsOutputs(state), SessionEvent::WantsInputs(wants_inputs)) =>
                 Ok(state.apply_wants_inputs(wants_inputs)),
 
+            (ReceiveSession::WantsInputs(state), SessionEvent::WantsFeeRange(wants_fee_range)) =>
+                Ok(state.apply_wants_fee_range(wants_fee_range)),
+
             (
-                ReceiveSession::WantsInputs(state),
+                ReceiveSession::WantsFeeRange(state),
                 SessionEvent::ProvisionalProposal(provisional_proposal),
             ) => Ok(state.apply_provisional_proposal(provisional_proposal)),
 
@@ -167,6 +171,7 @@ impl ReceiveSession {
                 ReceiveSession::ProvisionalProposal(state),
                 SessionEvent::PayjoinProposal(payjoin_proposal),
             ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
+
             (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiveSession::TerminalFailure),
             (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
                 Box::new(current_state),
@@ -804,11 +809,68 @@ impl Receiver<WantsInputs> {
     /// Commits the inputs as final, and moves on to the next typestate.
     ///
     /// Inputs cannot be modified after this function is called.
-    pub fn commit_inputs(self) -> NextStateTransition<SessionEvent, Receiver<ProvisionalProposal>> {
+    pub fn commit_inputs(self) -> NextStateTransition<SessionEvent, Receiver<WantsFeeRange>> {
         let inner = self.state.v1.clone().commit_inputs();
         NextStateTransition::success(
+            SessionEvent::WantsFeeRange(inner.clone()),
+            Receiver { state: WantsFeeRange { v1: inner, context: self.state.context } },
+        )
+    }
+
+    pub(crate) fn apply_wants_fee_range(self, v1: v1::WantsFeeRange) -> ReceiveSession {
+        let new_state = Receiver { state: WantsFeeRange { v1, context: self.state.context } };
+        ReceiveSession::WantsFeeRange(new_state)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WantsFeeRange {
+    v1: v1::WantsFeeRange,
+    context: SessionContext,
+}
+
+impl State for WantsFeeRange {}
+
+impl Receiver<WantsFeeRange> {
+    /// Applies additional fee contribution now that the receiver has contributed inputs
+    /// and may have added new outputs.
+    ///
+    /// How much the receiver ends up paying for fees depends on how much the sender stated they
+    /// were willing to pay in the parameters of the original proposal. For additional
+    /// inputs, fees will be subtracted from the sender's outputs as much as possible until we hit
+    /// the limit the sender specified in the Payjoin parameters. Any remaining fees for the new inputs
+    /// will be then subtracted from the change output of the receiver.
+    /// Fees for additional outputs are always subtracted from the receiver's outputs.
+    ///
+    /// `max_effective_fee_rate` is the maximum effective fee rate that the receiver is
+    /// willing to pay for their own input/output contributions. A `max_effective_fee_rate`
+    /// of zero indicates that the receiver is not willing to pay any additional
+    /// fees. Errors if the final effective fee rate exceeds `max_effective_fee_rate`.
+    ///
+    /// If not provided, `min_fee_rate` and `max_effective_fee_rate` default to the
+    /// minimum possible relay fee.
+    ///
+    /// The minimum effective fee limit is the highest of the minimum limit set by the sender in
+    /// the original proposal parameters and the limit passed in the `min_fee_rate` parameter.
+    pub fn apply_fee_range(
+        self,
+        min_fee_rate: Option<FeeRate>,
+        max_effective_fee_rate: Option<FeeRate>,
+    ) -> MaybeFatalTransition<SessionEvent, Receiver<ProvisionalProposal>, ReplyableError> {
+        let inner = match self.state.v1.apply_fee_range(min_fee_rate, max_effective_fee_rate) {
+            Ok(inner) => inner,
+            Err(e) => {
+                return MaybeFatalTransition::fatal(
+                    SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                    e,
+                );
+            }
+        };
+        MaybeFatalTransition::success(
             SessionEvent::ProvisionalProposal(inner.clone()),
-            Receiver { state: ProvisionalProposal { v1: inner, context: self.state.context } },
+            Receiver {
+                state: ProvisionalProposal { v1: inner, context: self.state.context.clone() },
+            },
         )
     }
 
@@ -835,34 +897,14 @@ impl Receiver<ProvisionalProposal> {
     /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
     /// they re-sign the transaction and broadcast it to the network.
     ///
-    /// Finalization consists of multiple steps:
-    ///   1. Apply additional fees to pay for increased weight from any new inputs and/or outputs.
-    ///   2. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
-    ///   3. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
-    ///
-    /// How much the receiver ends up paying for fees depends on how much the sender stated they
-    /// were willing to pay in the parameters of the original proposal. For additional
-    /// inputs, fees will be subtracted from the sender's outputs as much as possible until we hit
-    /// the limit the sender specified in the Payjoin parameters. Any remaining fees for the new inputs
-    /// will be then subtracted from the change output of the receiver.
-    ///
-    /// Fees for additional outputs are always subtracted from the receiver's outputs.
-    ///
-    /// The minimum effective fee limit is the highest of the minimum limit set by the sender in
-    /// the original proposal parameters and the limit passed in the `min_fee_rate` parameter.
-    ///
-    /// Errors if the final effective fee rate exceeds `max_effective_fee_rate`.
+    /// Finalization consists of two steps:
+    ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
+    ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-        min_fee_rate: Option<FeeRate>,
-        max_effective_fee_rate: Option<FeeRate>,
     ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, ReplyableError> {
-        let inner = match self.state.v1.clone().finalize_proposal(
-            wallet_process_psbt,
-            min_fee_rate,
-            max_effective_fee_rate,
-        ) {
+        let inner = match self.state.v1.clone().finalize_proposal(wallet_process_psbt) {
             Ok(inner) => inner,
             Err(e) => {
                 // v1::finalize_proposal returns a ReplyableError but the only error that can be returned is ImplementationError from the closure

@@ -74,6 +74,8 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             return await self.process_wants_outputs(receiver.inner, recv_persister)
         if receiver.is_WANTS_INPUTS():
             return await self.process_wants_inputs(receiver.inner, recv_persister)
+        if receiver.is_WANTS_FEE_RANGE():
+            return await self.process_wants_fee_range(receiver.inner, recv_persister)
         if receiver.is_PROVISIONAL_PROPOSAL():
             return await self.process_provisional_proposal(receiver.inner, recv_persister)
         if receiver.is_PAYJOIN_PROPOSAL():
@@ -121,10 +123,14 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
 
     async def process_wants_inputs(self, proposal: WantsInputs, recv_persister: InMemoryReceiverSessionEventLog):
         provisional_proposal = proposal.contribute_inputs(get_inputs(self.receiver)).commit_inputs().save(recv_persister)
+        return await self.process_wants_fee_range(provisional_proposal, recv_persister)
+    
+    async def process_wants_fee_range(self, proposal: WantsFeeRange, recv_persister: InMemoryReceiverSessionEventLog):
+        provisional_proposal = proposal.apply_fee_range(1, 10).save(recv_persister)
         return await self.process_provisional_proposal(provisional_proposal, recv_persister)
 
     async def process_provisional_proposal(self, proposal: ProvisionalProposal, recv_persister: InMemoryReceiverSessionEventLog):
-        payjoin_proposal = proposal.finalize_proposal(ProcessPsbtCallback(self.receiver), 1, 10).save(recv_persister)
+        payjoin_proposal = proposal.finalize_proposal(ProcessPsbtCallback(self.receiver)).save(recv_persister)
         return ReceiveSession.PAYJOIN_PROPOSAL(payjoin_proposal)
 
     async def test_integration_v2_to_v2(self):

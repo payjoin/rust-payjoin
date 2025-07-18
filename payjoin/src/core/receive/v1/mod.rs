@@ -602,8 +602,8 @@ impl WantsInputs {
     /// Commits the inputs as final, and moves on to the next typestate.
     ///
     /// Inputs cannot be modified after this function is called.
-    pub fn commit_inputs(self) -> ProvisionalProposal {
-        ProvisionalProposal {
+    pub fn commit_inputs(self) -> WantsFeeRange {
+        WantsFeeRange {
             original_psbt: self.original_psbt,
             payjoin_psbt: self.payjoin_psbt,
             params: self.params,
@@ -613,36 +613,16 @@ impl WantsInputs {
     }
 }
 
-/// Typestate for a checked proposal which had both the outputs and the inputs modified
-/// by the receiver. The receiver may sign and finalize the Payjoin proposal which will be sent to
-/// the sender for their signature.
-///
-/// Call [`Self::finalize_proposal`] to return a finalized [`PayjoinProposal`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProvisionalProposal {
+pub struct WantsFeeRange {
     original_psbt: Psbt,
-    pub(crate) payjoin_psbt: Psbt,
+    payjoin_psbt: Psbt,
     params: Params,
     change_vout: usize,
     receiver_inputs: Vec<InputPair>,
 }
 
-impl ProvisionalProposal {
-    /// Applies additional fee contribution now that the receiver has contributed input
-    /// and may have added new outputs.
-    ///
-    /// `max_effective_fee_rate` is the maximum effective fee rate that the receiver is
-    /// willing to pay for their own input/output contributions. A `max_effective_fee_rate`
-    /// of zero indicates that the receiver is not willing to pay any additional
-    /// fees.
-    ///
-    /// If not provided, `min_fee_rate` and `max_effective_fee_rate` default to the
-    /// minimum possible relay fee.
-    ///
-    /// Note that this tries to pay for the fees from the sender's outputs as much as possible,
-    /// using the additional fee output the sender specified in the original proposal, while
-    /// keeping their minimum fee rate in account. When the sender contribution limit is reached,
-    /// it subtracts any remaining fees from the receiver change output.
+impl WantsFeeRange {
     fn apply_fee(
         &mut self,
         min_fee_rate: Option<FeeRate>,
@@ -739,6 +719,55 @@ impl ProvisionalProposal {
         output_contribution_weight
     }
 
+    /// Applies additional fee contribution now that the receiver has contributed inputs
+    /// and may have added new outputs.
+    ///
+    /// How much the receiver ends up paying for fees depends on how much the sender stated they
+    /// were willing to pay in the parameters of the original proposal. For additional
+    /// inputs, fees will be subtracted from the sender's outputs as much as possible until we hit
+    /// the limit the sender specified in the Payjoin parameters. Any remaining fees for the new inputs
+    /// will be then subtracted from the change output of the receiver.
+    /// Fees for additional outputs are always subtracted from the receiver's outputs.
+    ///
+    /// `max_effective_fee_rate` is the maximum effective fee rate that the receiver is
+    /// willing to pay for their own input/output contributions. A `max_effective_fee_rate`
+    /// of zero indicates that the receiver is not willing to pay any additional
+    /// fees. Errors if the final effective fee rate exceeds `max_effective_fee_rate`.
+    ///
+    /// If not provided, `min_fee_rate` and `max_effective_fee_rate` default to the
+    /// minimum possible relay fee.
+    ///
+    /// The minimum effective fee limit is the highest of the minimum limit set by the sender in
+    /// the original proposal parameters and the limit passed in the `min_fee_rate` parameter.
+    pub fn apply_fee_range(
+        mut self,
+        min_fee_rate: Option<FeeRate>,
+        max_effective_fee_rate: Option<FeeRate>,
+    ) -> Result<ProvisionalProposal, ReplyableError> {
+        let psbt = self.apply_fee(min_fee_rate, max_effective_fee_rate)?.clone();
+        Ok(ProvisionalProposal {
+            original_psbt: self.original_psbt.clone(),
+            payjoin_psbt: psbt,
+            params: self.params.clone(),
+            change_vout: self.change_vout,
+        })
+    }
+}
+
+/// Typestate for a checked proposal which had both the outputs and the inputs modified
+/// by the receiver. The receiver may sign and finalize the Payjoin proposal which will be sent to
+/// the sender for their signature.
+///
+/// Call [`Self::finalize_proposal`] to return a finalized [`PayjoinProposal`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProvisionalProposal {
+    original_psbt: Psbt,
+    pub(crate) payjoin_psbt: Psbt,
+    params: Params,
+    change_vout: usize,
+}
+
+impl ProvisionalProposal {
     /// Prepare the PSBT by creating a new PSBT and copying only the fields allowed by the [spec](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#senders-payjoin-proposal-checklist)
     fn prepare_psbt(self, processed_psbt: Psbt) -> PayjoinProposal {
         log::trace!("Original PSBT from callback: {processed_psbt:#?}");
@@ -801,30 +830,14 @@ impl ProvisionalProposal {
     /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
     /// they sign the transaction and broadcast it to the network.
     ///
-    /// Finalization consists of multiple steps:
-    ///   1. Apply additional fees to pay for increased weight from any new inputs and/or outputs.
-    ///   2. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
-    ///   3. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
-    ///
-    /// How much the receiver ends up paying for fees depends on how much the sender stated they
-    /// were willing to pay in the parameters of the original proposal. For additional
-    /// inputs, fees will be subtracted from the sender's outputs as much as possible until we hit
-    /// the limit the sender specified in the Payjoin parameters. Any remaining fees for the new inputs
-    /// will be then subtracted from the change output of the receiver.
-    ///
-    /// Fees for additional outputs are always subtracted from the receiver's outputs.
-    ///
-    /// The minimum effective fee limit is the highest of the minimum limit set by the sender in
-    /// the original proposal parameters and the limit passed in the `min_fee_rate` parameter.
-    ///
-    /// Errors if the final effective fee rate exceeds `max_effective_fee_rate`.
+    /// Finalization consists of two steps:
+    ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
+    ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
     pub fn finalize_proposal(
-        mut self,
+        self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-        min_fee_rate: Option<FeeRate>,
-        max_effective_fee_rate: Option<FeeRate>,
     ) -> Result<PayjoinProposal, ReplyableError> {
-        let mut psbt = self.apply_fee(min_fee_rate, max_effective_fee_rate)?.clone();
+        let mut psbt = self.payjoin_psbt.clone();
         // Remove now-invalid sender signatures before applying the receiver signatures
         for i in self.sender_input_indexes() {
             log::trace!("Clearing sender input {i}");
@@ -832,8 +845,8 @@ impl ProvisionalProposal {
             psbt.inputs[i].final_script_witness = None;
             psbt.inputs[i].tap_key_sig = None;
         }
-        let psbt = wallet_process_psbt(&psbt).map_err(ReplyableError::Implementation)?;
-        let payjoin_proposal = self.prepare_psbt(psbt);
+        let finalized_psbt = wallet_process_psbt(&psbt).map_err(ReplyableError::Implementation)?;
+        let payjoin_proposal = self.prepare_psbt(finalized_psbt);
         Ok(payjoin_proposal)
     }
 }
@@ -905,7 +918,11 @@ pub(crate) mod test {
     }
 
     fn provisional_proposal_from_test_vector(proposal: UncheckedProposal) -> ProvisionalProposal {
-        wants_outputs_from_test_vector(proposal).commit_outputs().commit_inputs()
+        wants_outputs_from_test_vector(proposal)
+            .commit_outputs()
+            .commit_inputs()
+            .apply_fee_range(None, None)
+            .expect("Contributed inputs should allow for valid fee contributions")
     }
 
     #[test]
@@ -939,7 +956,7 @@ pub(crate) mod test {
     fn unchecked_proposal_unlocks_after_checks() {
         let proposal = unchecked_proposal_from_test_vector();
         assert_eq!(proposal.psbt_fee_rate().unwrap().to_sat_per_vb_floor(), 2);
-        let payjoin = provisional_proposal_from_test_vector(proposal);
+        let payjoin = wants_outputs_from_test_vector(proposal).commit_outputs().commit_inputs();
 
         {
             let mut payjoin = payjoin.clone();
@@ -1027,7 +1044,7 @@ pub(crate) mod test {
         // All expected input weights pulled from:
         // https://bitcoin.stackexchange.com/questions/84004/how-do-virtual-size-stripped-size-and-raw-size-compare-between-legacy-address-f#84006
         // Input weight for a single P2PKH (legacy) receiver input
-        let p2pkh_proposal = ProvisionalProposal {
+        let p2pkh_proposal = WantsFeeRange {
             original_psbt: Psbt::from_str("cHNidP8BAHECAAAAAb2qhegy47hqffxh/UH5Qjd/G3sBH6cW2QSXZ86nbY3nAAAAAAD9////AhXKBSoBAAAAFgAU4TiLFD14YbpddFVrZa3+Zmz96yQQJwAAAAAAABYAFB4zA2o+5MsNRT/j+0twLi5VbwO9AAAAAAABAIcCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBSgD/////AgDyBSoBAAAAGXapFGUxpU6cGldVpjUm9rV2B+jTlphDiKwAAAAAAAAAACZqJKohqe3i9hw/cdHe/T+pmd+jaVN1XGkGiXmZYrSL69g2l06M+QAAAAABB2pHMEQCIGsOxO/bBv20bd68sBnEU3cxHR8OxEcUroL3ENhhjtN3AiB+9yWuBGKXu41hcfO4KP7IyLLEYc6j8hGowmAlCPCMPAEhA6WNSN4CqJ9F+42YKPlIFN0wJw7qawWbdelGRMkAbBRnACICAsdIAjsfMLKgfL2J9rfIa8yKdO1BOpSGRIFbFMBdTsc9GE4roNNUAACAAQAAgAAAAIABAAAAAAAAAAAA").unwrap(),
             payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAtTRxwAtk38fRMP3ffdKkIi5r+Ss9AjaO8qEv+eQ/ho3AAAAAAD9////vaqF6DLjuGp9/GH9QflCN38bewEfpxbZBJdnzqdtjecAAAAAAP3///8CgckFKgEAAAAWABThOIsUPXhhul10VWtlrf5mbP3rJBAZBioBAAAAFgAUiDIby0wSbj1kv3MlvwoEKw3vNZUAAAAAAAEAhwIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////AwFoAP////8CAPIFKgEAAAAZdqkUPXhu3I6D9R0wUpvTvvUm+VGNcNuIrAAAAAAAAAAAJmokqiGp7eL2HD9x0d79P6mZ36NpU3VcaQaJeZlitIvr2DaXToz5AAAAAAEBIgDyBSoBAAAAGXapFD14btyOg/UdMFKb0771JvlRjXDbiKwBB2pHMEQCIGzKy8QfhHoAY0+LZCpQ7ZOjyyXqaSBnr89hH3Eg/xsGAiB3n8hPRuXCX/iWtURfXoJNUFu3sLeQVFf1dDFCZPN0dAEhA8rTfrwcq6dEBSNOrUfNb8+dm7q77vCtfdOmWx0HfajRAAEAhwIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////AwFKAP////8CAPIFKgEAAAAZdqkUZTGlTpwaV1WmNSb2tXYH6NOWmEOIrAAAAAAAAAAAJmokqiGp7eL2HD9x0d79P6mZ36NpU3VcaQaJeZlitIvr2DaXToz5AAAAAAAAAA==").unwrap(),
             params: Params::default(),
@@ -1052,7 +1069,7 @@ pub(crate) mod test {
         );
 
         // Input weight for a single nested P2WPKH (nested segwit) receiver input
-        let nested_p2wpkh_proposal = ProvisionalProposal {
+        let nested_p2wpkh_proposal = WantsFeeRange {
             original_psbt: Psbt::from_str("cHNidP8BAHECAAAAAeOsT9cRWRz3te+bgmtweG1vDLkdSH4057NuoodDNPFWAAAAAAD9////AhAnAAAAAAAAFgAUtp3bPFM/YWThyxD5Cc9OR4mb8tdMygUqAQAAABYAFODlplDoE6EGlZvmqoUngBgsu8qCAAAAAAABAIUCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBZwD/////AgDyBSoBAAAAF6kU2JnIn4Mmcb5kuF3EYeFei8IB43qHAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEgAPIFKgEAAAAXqRTYmcifgyZxvmS4XcRh4V6LwgHjeocBBxcWABSPGoPK1yl60X4Z9OfA7IQPUWCgVwEIawJHMEQCICZG3s2cbulPnLTvK4TwlKhsC+cem8tD2GjZZ3eMJD7FAiADh/xwv0ib8ksOrj1M27DYLiw7WFptxkMkE2YgiNMRVgEhAlDMm5DA8kU+QGiPxEWUyV1S8+XGzUOepUOck257ZOhkAAAiAgP+oMbeca66mt+UtXgHm6v/RIFEpxrwG7IvPDim5KWHpBgfVHrXVAAAgAEAAIAAAACAAQAAAAAAAAAA").unwrap(),
             payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAuXYOTUaVRiB8cPPhEXzcJ72/SgZOPEpPx5pkG0fNeGCAAAAAAD9////46xP1xFZHPe175uCa3B4bW8MuR1IfjTns26ih0M08VYAAAAAAP3///8CEBkGKgEAAAAWABQHuuu4H4fbQWV51IunoJLUtmMTfEzKBSoBAAAAFgAU4OWmUOgToQaVm+aqhSeAGCy7yoIAAAAAAAEBIADyBSoBAAAAF6kUQ4BssmVBS3r0s95c6dl1DQCHCR+HAQQWABQbDc333XiiOeEXroP523OoYNb1aAABAIUCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBZwD/////AgDyBSoBAAAAF6kU2JnIn4Mmcb5kuF3EYeFei8IB43qHAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEgAPIFKgEAAAAXqRTYmcifgyZxvmS4XcRh4V6LwgHjeocBBxcWABSPGoPK1yl60X4Z9OfA7IQPUWCgVwEIawJHMEQCICZG3s2cbulPnLTvK4TwlKhsC+cem8tD2GjZZ3eMJD7FAiADh/xwv0ib8ksOrj1M27DYLiw7WFptxkMkE2YgiNMRVgEhAlDMm5DA8kU+QGiPxEWUyV1S8+XGzUOepUOck257ZOhkAAAA").unwrap(),
             params: Params::default(),
@@ -1081,7 +1098,7 @@ pub(crate) mod test {
         );
 
         // Input weight for a single P2WPKH (native segwit) receiver input
-        let p2wpkh_proposal = ProvisionalProposal {
+        let p2wpkh_proposal = WantsFeeRange {
             original_psbt: Psbt::from_str("cHNidP8BAHECAAAAASom13OiXZIr3bKk+LtUndZJYqdHQQU8dMs1FZ93IctIAAAAAAD9////AmPKBSoBAAAAFgAU6H98YM9NE1laARQ/t9/90nFraf4QJwAAAAAAABYAFBPJFmYuJBsrIaBBp9ur98pMSKxhAAAAAAABAIQCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBWwD/////AgDyBSoBAAAAFgAUjTJXmC73n+URSNdfgbS6Oa6JyQYAAAAAAAAAACZqJKohqe3i9hw/cdHe/T+pmd+jaVN1XGkGiXmZYrSL69g2l06M+QAAAAABAR8A8gUqAQAAABYAFI0yV5gu95/lEUjXX4G0ujmuickGAQhrAkcwRAIgUqbHS0difIGTRwN56z2/EiqLQFWerfJspyjuwsGSCXcCIA3IRTu8FVgniU5E4gecAMeegVnlTbTVfFyusWhQ2kVVASEDChVRm26KidHNWLdCLBTq5jspGJr+AJyyMqmUkvPkwFsAIgIDeBqmRB3ESjFWIp+wUXn/adGZU3kqWGjdkcnKpk8bAyUY94v8N1QAAIABAACAAAAAgAEAAAAAAAAAAAA=").unwrap(),
             payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAiom13OiXZIr3bKk+LtUndZJYqdHQQU8dMs1FZ93IctIAAAAAAD9////NG21aH8Vat3thaVmPvWDV/lvRmymFHeePcfUjlyngHIAAAAAAP3///8CH8oFKgEAAAAWABTof3xgz00TWVoBFD+33/3ScWtp/hAZBioBAAAAFgAU1mbnqky3bMxfmm0OgFaQCAs5fsoAAAAAAAEAhAIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////AwFbAP////8CAPIFKgEAAAAWABSNMleYLvef5RFI11+BtLo5ronJBgAAAAAAAAAAJmokqiGp7eL2HD9x0d79P6mZ36NpU3VcaQaJeZlitIvr2DaXToz5AAAAAAEBHwDyBSoBAAAAFgAUjTJXmC73n+URSNdfgbS6Oa6JyQYAAQCEAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP////8DAWcA/////wIA8gUqAQAAABYAFJFtkfHTt3y1EDMaN6CFjjNWtpCRAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEfAPIFKgEAAAAWABSRbZHx07d8tRAzGjeghY4zVraQkQEIawJHMEQCIDTC49IB9AnItqd8zy5RDc05f2ApBAfJ5x4zYfj3bsD2AiAQvvSt5ipScHcUwdlYB9vFnEi68hmh55M5a5e+oWvxMAEhAqErVSVulFb97/r5KQryOS1Xgghff8R7AOuEnvnmslQ5AAAA").unwrap(),
             params: Params::default(),
@@ -1106,7 +1123,7 @@ pub(crate) mod test {
         );
 
         // Input weight for a single P2TR (taproot) receiver input
-        let p2tr_proposal = ProvisionalProposal {
+        let p2tr_proposal = WantsFeeRange {
             original_psbt: Psbt::from_str("cHNidP8BAHECAAAAAU/CHxd1oi9Lq1xOD2GnHe0hsQdGJ2mkpYkmeasTj+w1AAAAAAD9////Am3KBSoBAAAAFgAUqJL/PDPnHeihhNhukTz8QEdZbZAQJwAAAAAAABYAFInyO0NQF7YR22Sm0YTPGm6yf19YAAAAAAABASsA8gUqAQAAACJRIGOPekNKFs9ASLj3FdlCLiou/jdPUegJGzlA111A80MAAQhCAUC3zX8eSeL8+bAo6xO0cpon83UsJdttiuwfMn/pBwub82rzMsoS6HZNXzg7hfcB3p1uj8JmqsBkZwm8k6fnU2peACICA+u+FjwmhEgWdjhEQbO49D0NG8iCYUoqhlfsj0LN7hiRGOcVI65UAACAAQAAgAAAAIABAAAAAAAAAAAA").unwrap(),
             payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAk/CHxd1oi9Lq1xOD2GnHe0hsQdGJ2mkpYkmeasTj+w1AAAAAAD9////Fz+ELsYp/55j6+Jl2unG9sGvpHTiSyzSORBvtu1GEB4AAAAAAP3///8CM8oFKgEAAAAWABSokv88M+cd6KGE2G6RPPxAR1ltkBAZBioBAAAAFgAU68J5imRcKy3g5JCT3bEoP9IXEn0AAAAAAAEBKwDyBSoBAAAAIlEgY496Q0oWz0BIuPcV2UIuKi7+N09R6AkbOUDXXUDzQwAAAQErAPIFKgEAAAAiUSCfbbX+FHJbzC71eEFLsMjDouMJbu8ogeR0eNoNxMM9CwEIQwFBeyOLUebV/YwpaLTpLIaTXaSiPS7Dn6o39X4nlUzQLfb6YyvCAsLA5GTxo+Zb0NUINZ8DaRyUWknOpU/Jzuwn2gEAAAA=").unwrap(),
             params: Params::default(),

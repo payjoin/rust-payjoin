@@ -44,6 +44,7 @@ pub enum ReceiveSession {
     OutputsUnknown { inner: Arc<OutputsUnknown> },
     WantsOutputs { inner: Arc<WantsOutputs> },
     WantsInputs { inner: Arc<WantsInputs> },
+    WantsFeeRange { inner: Arc<WantsFeeRange> },
     ProvisionalProposal { inner: Arc<ProvisionalProposal> },
     PayjoinProposal { inner: Arc<PayjoinProposal> },
     TerminalFailure,
@@ -71,6 +72,8 @@ impl From<super::ReceiveSession> for ReceiveSession {
                 Self::WantsOutputs { inner: Arc::new(super::WantsOutputs::from(inner).into()) },
             WantsInputs(inner) =>
                 Self::WantsInputs { inner: Arc::new(super::WantsInputs::from(inner).into()) },
+            WantsFeeRange(inner) =>
+                Self::WantsFeeRange { inner: Arc::new(super::WantsFeeRange::from(inner).into()) },
             ProvisionalProposal(inner) => Self::ProvisionalProposal {
                 inner: Arc::new(super::ProvisionalProposal::from(inner).into()),
             },
@@ -112,9 +115,9 @@ impl SessionHistory {
         self.0 .0.pj_uri().map(|pj_uri| Arc::new(pj_uri.into()))
     }
 
-    /// Psbt with receiver contributed inputs
-    pub fn psbt_with_contributed_inputs(&self) -> Option<Arc<crate::Psbt>> {
-        self.0 .0.psbt_with_contributed_inputs().map(|psbt| Arc::new(psbt.into()))
+    /// Psbt With fee contributions applied
+    pub fn psbt_ready_for_signing(&self) -> Option<Arc<crate::Psbt>> {
+        self.0 .0.psbt_ready_for_signing().map(|psbt| Arc::new(psbt.into()))
     }
 
     /// Terminal error from the session if present
@@ -578,7 +581,7 @@ impl WantsInputsTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<ProvisionalProposal, ReceiverPersistedError> {
+    ) -> Result<WantsFeeRange, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let res = self.0.save(&adapter)?;
         Ok(res.into())
@@ -627,6 +630,61 @@ impl WantsInputs {
 }
 
 #[derive(uniffi::Object)]
+pub struct WantsFeeRangeTransition(super::WantsFeeRangeTransition);
+
+#[uniffi::export]
+impl WantsFeeRangeTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<ProvisionalProposal, ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let res = self.0.save(&adapter)?;
+        Ok(res.into())
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct WantsFeeRange(super::WantsFeeRange);
+
+impl From<super::WantsFeeRange> for WantsFeeRange {
+    fn from(value: super::WantsFeeRange) -> Self { Self(value) }
+}
+
+#[uniffi::export]
+impl WantsFeeRange {
+    /// Applies additional fee contribution now that the receiver has contributed inputs
+    /// and may have added new outputs.
+    ///
+    /// How much the receiver ends up paying for fees depends on how much the sender stated they
+    /// were willing to pay in the parameters of the original proposal. For additional
+    /// inputs, fees will be subtracted from the sender's outputs as much as possible until we hit
+    /// the limit the sender specified in the Payjoin parameters. Any remaining fees for the new inputs
+    /// will be then subtracted from the change output of the receiver.
+    /// Fees for additional outputs are always subtracted from the receiver's outputs.
+    ///
+    /// `max_effective_fee_rate` is the maximum effective fee rate that the receiver is
+    /// willing to pay for their own input/output contributions. A `max_effective_fee_rate`
+    /// of zero indicates that the receiver is not willing to pay any additional
+    /// fees. Errors if the final effective fee rate exceeds `max_effective_fee_rate`.
+    ///
+    /// If not provided, `min_fee_rate_sat_per_vb` and `max_effective_fee_rate_sat_per_vb` default to the
+    /// minimum possible relay fee.
+    ///
+    /// The minimum effective fee limit is the highest of the minimum limit set by the sender in
+    /// the original proposal parameters and the limit passed in the `min_fee_rate_sat_per_vb` parameter.
+    pub fn apply_fee_range(
+        &self,
+        min_fee_rate_sat_per_vb: Option<u64>,
+        max_effective_fee_rate_sat_per_vb: Option<u64>,
+    ) -> WantsFeeRangeTransition {
+        WantsFeeRangeTransition(
+            self.0.apply_fee_range(min_fee_rate_sat_per_vb, max_effective_fee_rate_sat_per_vb),
+        )
+    }
+}
+
+#[derive(uniffi::Object)]
 pub struct ProvisionalProposal(super::ProvisionalProposal);
 
 impl From<super::ProvisionalProposal> for ProvisionalProposal {
@@ -654,18 +712,12 @@ impl ProvisionalProposal {
     pub fn finalize_proposal(
         &self,
         process_psbt: Arc<dyn ProcessPsbt>,
-        min_feerate_sat_per_vb: Option<u64>,
-        max_effective_fee_rate_sat_per_vb: Option<u64>,
     ) -> ProvisionalProposalTransition {
-        ProvisionalProposalTransition(self.0.finalize_proposal(
-            |psbt| {
-                process_psbt
-                    .callback(psbt.to_string())
-                    .map_err(|e| ImplementationError::from(e.to_string()))
-            },
-            min_feerate_sat_per_vb,
-            max_effective_fee_rate_sat_per_vb,
-        ))
+        ProvisionalProposalTransition(self.0.finalize_proposal(|psbt| {
+            process_psbt
+                .callback(psbt.to_string())
+                .map_err(|e| ImplementationError::from(e.to_string()))
+        }))
     }
 }
 

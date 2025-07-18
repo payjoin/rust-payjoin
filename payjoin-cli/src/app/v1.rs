@@ -327,14 +327,13 @@ impl App {
             .map_err(|e| Implementation(e.into()))?
             .commit_outputs();
 
-        let provisional_payjoin = try_contributing_inputs(payjoin.clone(), &self.wallet)
+        let wants_fee_range = try_contributing_inputs(payjoin.clone(), &self.wallet)
             .map_err(ReplyableError::Implementation)?;
+        let provisional_payjoin =
+            wants_fee_range.apply_fee_range(None, self.config.max_fee_rate)?;
 
-        let payjoin_proposal = provisional_payjoin.finalize_proposal(
-            |psbt| Ok(self.wallet.process_psbt(psbt)?),
-            None,
-            self.config.max_fee_rate,
-        )?;
+        let payjoin_proposal =
+            provisional_payjoin.finalize_proposal(|psbt| Ok(self.wallet.process_psbt(psbt)?))?;
         Ok(payjoin_proposal)
     }
 }
@@ -342,7 +341,7 @@ impl App {
 fn try_contributing_inputs(
     payjoin: payjoin::receive::v1::WantsInputs,
     wallet: &BitcoindWallet,
-) -> Result<payjoin::receive::v1::ProvisionalProposal, ImplementationError> {
+) -> Result<payjoin::receive::v1::WantsFeeRange, ImplementationError> {
     let candidate_inputs = wallet.list_unspent()?;
 
     let selected_input =

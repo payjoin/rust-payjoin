@@ -26,6 +26,7 @@ use url::Url;
 
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
+use crate::{Request, Version, MAX_CONTENT_LENGTH};
 
 // See usize casts
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -36,19 +37,194 @@ mod error;
 #[cfg(feature = "v1")]
 #[cfg_attr(docsrs, doc(cfg(feature = "v1")))]
 pub mod v1;
-#[cfg(not(feature = "v1"))]
-pub(crate) mod v1;
 
 #[cfg(feature = "v2")]
 #[cfg_attr(docsrs, doc(cfg(feature = "v2")))]
 pub mod v2;
-#[cfg(all(feature = "v2", not(feature = "v1")))]
-pub use v1::V1Context;
 
 #[cfg(feature = "_multiparty")]
 pub mod multiparty;
 
 type InternalResult<T> = Result<T, InternalProposalError>;
+
+/// A builder to construct the properties of a `PsbtContext`.
+#[derive(Clone)]
+pub(crate) struct PsbtContextBuilder {
+    pub(crate) psbt: Psbt,
+    pub(crate) payee: ScriptBuf,
+    pub(crate) amount: Option<bitcoin::Amount>,
+    pub(crate) fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
+    /// Decreases the fee contribution instead of erroring.
+    ///
+    /// If this option is true and a transaction with change amount lower than fee
+    /// contribution is provided then instead of returning error the fee contribution will
+    /// be just lowered in the request to match the change amount.
+    pub(crate) clamp_fee_contribution: bool,
+    pub(crate) min_fee_rate: FeeRate,
+}
+
+/// We only need to add the weight of the txid: 32, index: 4 and sequence: 4 as rust_bitcoin
+/// already accounts for the scriptsig length when calculating InputWeightPrediction
+/// <https://docs.rs/bitcoin/latest/src/bitcoin/blockdata/transaction.rs.html#1621>
+const NON_WITNESS_INPUT_WEIGHT: bitcoin::Weight = Weight::from_non_witness_data_size(32 + 4 + 4);
+
+impl PsbtContextBuilder {
+    /// Prepare the context from which to make Sender requests
+    ///
+    /// Call [`PsbtContextBuilder::build_recommended()`] or other `build` methods
+    /// to create a [`PsbtContext`]
+    pub fn new(psbt: Psbt, payee: ScriptBuf, amount: Option<bitcoin::Amount>) -> Self {
+        Self {
+            psbt,
+            payee,
+            amount,
+            // Sender's optional parameters
+            fee_contribution: None,
+            clamp_fee_contribution: false,
+            min_fee_rate: FeeRate::ZERO,
+        }
+    }
+
+    // Calculate the recommended fee contribution for an Original PSBT.
+    //
+    // BIP 78 recommends contributing `originalPSBTFeeRate * vsize(sender_input_type)`.
+    // The minfeerate parameter is set if the contribution is available in change.
+    //
+    // This method fails if no recommendation can be made or if the PSBT is malformed.
+    pub fn build_recommended(
+        self,
+        min_fee_rate: FeeRate,
+        output_substitution: OutputSubstitution,
+    ) -> Result<PsbtContext, BuildSenderError> {
+        // TODO support optional batched payout scripts. This would require a change to
+        // build() which now checks for a single payee.
+        let mut payout_scripts = std::iter::once(self.payee.clone());
+
+        // Check if the PSBT is a sweep transaction with only one output that's a payout script and no change
+        if self.psbt.unsigned_tx.output.len() == 1
+            && payout_scripts.all(|script| script == self.psbt.unsigned_tx.output[0].script_pubkey)
+        {
+            return self.build_non_incentivizing(min_fee_rate, output_substitution);
+        }
+
+        if let Some((additional_fee_index, fee_available)) = self
+            .psbt
+            .unsigned_tx
+            .output
+            .clone()
+            .into_iter()
+            .enumerate()
+            .find(|(_, txo)| payout_scripts.all(|script| script != txo.script_pubkey))
+            .map(|(i, txo)| (i, txo.value))
+        {
+            let mut input_pairs = self.psbt.input_pairs();
+            let first_input_pair = input_pairs.next().ok_or(InternalBuildSenderError::NoInputs)?;
+            let mut input_weight = first_input_pair
+                .expected_input_weight()
+                .map_err(InternalBuildSenderError::InputWeight)?;
+            for input_pair in input_pairs {
+                // use cheapest default if mixed input types
+                if input_pair.address_type()? != first_input_pair.address_type()? {
+                    input_weight =
+                        bitcoin::transaction::InputWeightPrediction::P2TR_KEY_NON_DEFAULT_SIGHASH
+                            .weight()
+                            + NON_WITNESS_INPUT_WEIGHT;
+                    break;
+                }
+            }
+
+            let recommended_additional_fee = min_fee_rate * input_weight;
+            if fee_available < recommended_additional_fee {
+                log::warn!("Insufficient funds to maintain specified minimum feerate.");
+                return self.build_with_additional_fee(
+                    fee_available,
+                    Some(additional_fee_index),
+                    min_fee_rate,
+                    true,
+                    output_substitution,
+                );
+            }
+            return self.build_with_additional_fee(
+                recommended_additional_fee,
+                Some(additional_fee_index),
+                min_fee_rate,
+                false,
+                output_substitution,
+            );
+        }
+        self.build_non_incentivizing(min_fee_rate, output_substitution)
+    }
+
+    /// Offer the receiver contribution to pay for his input.
+    ///
+    /// These parameters will allow the receiver to take `max_fee_contribution` from given change
+    /// output to pay for additional inputs. The recommended fee is `size_of_one_input * fee_rate`.
+    ///
+    /// `change_index` specifies which output can be used to pay fee. If `None` is provided, then
+    /// the output is auto-detected unless the supplied transaction has more than two outputs.
+    ///
+    /// `clamp_fee_contribution` decreases fee contribution instead of erroring.
+    ///
+    /// If this option is true and a transaction with change amount lower than fee
+    /// contribution is provided then instead of returning error the fee contribution will
+    /// be just lowered in the request to match the change amount.
+    pub fn build_with_additional_fee(
+        mut self,
+        max_fee_contribution: bitcoin::Amount,
+        change_index: Option<usize>,
+        min_fee_rate: FeeRate,
+        clamp_fee_contribution: bool,
+        output_substitution: OutputSubstitution,
+    ) -> Result<PsbtContext, BuildSenderError> {
+        self.fee_contribution = Some((max_fee_contribution, change_index));
+        self.clamp_fee_contribution = clamp_fee_contribution;
+        self.min_fee_rate = min_fee_rate;
+        self.build(output_substitution)
+    }
+
+    /// Perform Payjoin without incentivizing the payee to cooperate.
+    ///
+    /// While it's generally better to offer some contribution some users may wish not to.
+    /// This function disables contribution.
+    pub fn build_non_incentivizing(
+        mut self,
+        min_fee_rate: FeeRate,
+        output_substitution: OutputSubstitution,
+    ) -> Result<PsbtContext, BuildSenderError> {
+        // since this is a builder, these should already be cleared
+        // but we'll reset them to be sure
+        self.fee_contribution = None;
+        self.clamp_fee_contribution = false;
+        self.min_fee_rate = min_fee_rate;
+        self.build(output_substitution)
+    }
+
+    fn build(
+        self,
+        output_substitution: OutputSubstitution,
+    ) -> Result<PsbtContext, BuildSenderError> {
+        let mut psbt =
+            self.psbt.validate().map_err(InternalBuildSenderError::InconsistentOriginalPsbt)?;
+        psbt.validate_input_utxos().map_err(InternalBuildSenderError::InvalidOriginalInput)?;
+
+        check_single_payee(&psbt, &self.payee, self.amount)?;
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            &self.payee,
+            self.fee_contribution,
+            self.clamp_fee_contribution,
+        )?;
+        clear_unneeded_fields(&mut psbt);
+
+        Ok(PsbtContext {
+            original_psbt: psbt,
+            output_substitution,
+            fee_contribution,
+            min_fee_rate: self.min_fee_rate,
+            payee: self.payee,
+        })
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "v2", derive(serde::Serialize, serde::Deserialize))]
@@ -88,7 +264,7 @@ fn ensure<T>(condition: bool, error: T) -> Result<(), T> {
 impl PsbtContext {
     fn process_proposal(self, mut proposal: Psbt) -> InternalResult<Psbt> {
         self.basic_checks(&proposal)?;
-        self.check_inputs(&proposal)?;
+        self.check_inputs(&proposal, true)?;
         let contributed_fee = self.check_outputs(&proposal)?;
         self.restore_original_utxos(&mut proposal)?;
         self.check_fees(&proposal, contributed_fee)?;
@@ -161,7 +337,11 @@ impl PsbtContext {
         Ok(())
     }
 
-    fn check_inputs(&self, proposal: &Psbt) -> InternalResult<()> {
+    fn check_inputs(
+        &self,
+        proposal: &Psbt,
+        ensure_receiver_input_finalized: bool,
+    ) -> InternalResult<()> {
         let mut original_inputs = self.original_psbt.input_pairs().peekable();
 
         for proposed in proposal.input_pairs() {
@@ -200,12 +380,14 @@ impl PsbtContext {
                         .input_pairs()
                         .next()
                         .ok_or(InternalProposalError::NoInputs)?;
-                    // Verify the PSBT input is finalized
-                    ensure(
-                        proposed.psbtin.final_script_sig.is_some()
-                            || proposed.psbtin.final_script_witness.is_some(),
-                        InternalProposalError::ReceiverTxinNotFinalized,
-                    )?;
+                    if ensure_receiver_input_finalized {
+                        // Verify the PSBT input is finalized
+                        ensure(
+                            proposed.psbtin.final_script_sig.is_some()
+                                || proposed.psbtin.final_script_witness.is_some(),
+                            InternalProposalError::ReceiverTxinNotFinalized,
+                        )?;
+                    }
                     // Verify that non_witness_utxo or witness_utxo are filled in.
                     ensure(
                         proposed.psbtin.witness_utxo.is_some()
@@ -451,10 +633,10 @@ fn serialize_url(
     output_substitution: OutputSubstitution,
     fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
-    version: &str,
+    version: Version,
 ) -> Url {
     let mut url = endpoint;
-    url.query_pairs_mut().append_pair("v", version);
+    url.query_pairs_mut().append_pair("v", &version.to_string());
     if output_substitution == OutputSubstitution::Disabled {
         url.query_pairs_mut().append_pair("disableoutputsubstitution", "true");
     }
@@ -471,6 +653,56 @@ fn serialize_url(
     url
 }
 
+/// Construct serialized V1 Request and Context from a Payjoin Proposal
+pub(crate) fn create_v1_post_request(endpoint: Url, psbt_ctx: PsbtContext) -> (Request, V1Context) {
+    let url = serialize_url(
+        endpoint.clone(),
+        psbt_ctx.output_substitution,
+        psbt_ctx.fee_contribution,
+        psbt_ctx.min_fee_rate,
+        Version::One,
+    );
+    let body = psbt_ctx.original_psbt.to_string().as_bytes().to_vec();
+    (
+        Request::new_v1(&url, &body),
+        V1Context {
+            psbt_context: PsbtContext {
+                original_psbt: psbt_ctx.original_psbt.clone(),
+                output_substitution: psbt_ctx.output_substitution,
+                fee_contribution: psbt_ctx.fee_contribution,
+                payee: psbt_ctx.payee.clone(),
+                min_fee_rate: psbt_ctx.min_fee_rate,
+            },
+        },
+    )
+}
+
+/// Data required to validate the response.
+///
+/// This type is used to process a BIP78 response.
+/// Call [`Self::process_response`] on it to continue the BIP78 flow.
+#[derive(Debug, Clone)]
+pub struct V1Context {
+    psbt_context: PsbtContext,
+}
+
+impl V1Context {
+    /// Decodes and validates the response.
+    ///
+    /// Call this method with response from receiver to continue BIP78 flow. If the response is
+    /// valid you will get appropriate PSBT that you should sign and broadcast.
+    #[inline]
+    pub fn process_response(self, response: &[u8]) -> Result<Psbt, ResponseError> {
+        if response.len() > MAX_CONTENT_LENGTH {
+            return Err(ResponseError::from(InternalValidationError::ContentTooLarge));
+        }
+
+        let res_str = std::str::from_utf8(response).map_err(|_| InternalValidationError::Parse)?;
+        let proposal = Psbt::from_str(res_str).map_err(|_| ResponseError::parse(res_str))?;
+        self.psbt_context.process_proposal(proposal).map_err(Into::into)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
@@ -479,7 +711,6 @@ mod test {
     use bitcoin::ecdsa::Signature;
     use bitcoin::hex::FromHex;
     use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
-    use bitcoin::transaction::Version;
     use bitcoin::{
         Amount, FeeRate, OutPoint, Script, ScriptBuf, Sequence, Witness, XOnlyPublicKey,
     };
@@ -489,9 +720,7 @@ mod test {
     };
     use url::Url;
 
-    use super::{
-        check_single_payee, clear_unneeded_fields, determine_fee_contribution, serialize_url,
-    };
+    use super::*;
     use crate::output_substitution::OutputSubstitution;
     use crate::psbt::PsbtExt;
     use crate::send::{AdditionalFeeContribution, InternalBuildSenderError, InternalProposalError};
@@ -793,7 +1022,7 @@ mod test {
             OutputSubstitution::Disabled,
             None,
             FeeRate::ZERO,
-            "2",
+            Version::Two,
         );
         assert_eq!(url, Url::parse("http://localhost?v=2&disableoutputsubstitution=true")?);
 
@@ -802,7 +1031,7 @@ mod test {
             OutputSubstitution::Enabled,
             None,
             FeeRate::ZERO,
-            "2",
+            Version::Two,
         );
         assert_eq!(url, Url::parse("http://localhost?v=2")?);
         Ok(())
@@ -815,7 +1044,7 @@ mod test {
             OutputSubstitution::Enabled,
             None,
             FeeRate::from_sat_per_vb(10).expect("Could not parse feerate"),
-            "2",
+            Version::Two,
         );
         assert_eq!(url, Url::parse("http://localhost?v=2&minfeerate=10")?);
         Ok(())
@@ -828,7 +1057,7 @@ mod test {
             OutputSubstitution::Enabled,
             Some(AdditionalFeeContribution { max_amount: Amount::from_sat(1000), vout: 0 }),
             FeeRate::ZERO,
-            "2",
+            Version::Two,
         );
         assert_eq!(
             url,
@@ -850,7 +1079,7 @@ mod test {
             let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
 
             let original_version = ctx.original_psbt.unsigned_tx.version;
-            let proposed_version = Version::non_standard(88);
+            let proposed_version = bitcoin::transaction::Version::non_standard(88);
             proposal.unsigned_tx.version = proposed_version;
 
             assert!(matches!(

@@ -51,7 +51,7 @@ where
 {
     let logs = persister
         .load()
-        .map_err(|e| InternalReplayError::PersistenceFailure(Box::new(e).into()))?;
+        .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
     let mut receiver = ReceiveSession::Uninitialized(Receiver { state: UninitializedReceiver {} });
     let mut history = SessionHistory::default();
 
@@ -59,7 +59,10 @@ where
         history.events.push(event.clone().into());
         receiver = receiver.process_event(event.into()).map_err(|e| {
             if let Err(storage_err) = persister.close() {
-                return InternalReplayError::PersistenceFailure(Box::new(storage_err)).into();
+                return InternalReplayError::PersistenceFailure(ImplementationError::new(
+                    storage_err,
+                ))
+                .into();
             }
             e
         })?;

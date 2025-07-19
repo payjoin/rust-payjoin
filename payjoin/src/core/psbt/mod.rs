@@ -11,7 +11,7 @@ use bitcoin::psbt::Psbt;
 use bitcoin::transaction::InputWeightPrediction;
 use bitcoin::{bip32, psbt, Address, AddressType, Network, TxIn, TxOut, Weight};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InconsistentPsbt {
     UnequalInputCounts { tx_ins: usize, psbt_ins: usize },
     UnequalOutputCounts { tx_outs: usize, psbt_outs: usize },

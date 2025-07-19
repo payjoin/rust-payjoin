@@ -1,6 +1,6 @@
 use url::{ParseError, Url};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     BadScheme,
     ParseError(ParseError),

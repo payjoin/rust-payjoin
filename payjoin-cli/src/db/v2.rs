@@ -2,13 +2,19 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bitcoincore_rpc::jsonrpc::serde_json;
-use payjoin::bitcoin::hex::DisplayHex;
 use payjoin::persist::SessionPersister;
 use payjoin::receive::v2::SessionEvent as ReceiverSessionEvent;
 use payjoin::send::v2::SessionEvent as SenderSessionEvent;
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use super::*;
+
+macro_rules! now {
+    () => {
+        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as i64
+    };
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SessionWrapper<V> {
@@ -17,14 +23,25 @@ pub(crate) struct SessionWrapper<V> {
 }
 
 #[derive(Debug, Clone)]
-pub struct SessionId([u8; 8]);
-
-impl SessionId {
-    pub fn new(id: u64) -> Self { Self(id.to_be_bytes()) }
+pub enum SessionId {
+    Send(i64),
+    Receive(i64),
 }
 
-impl AsRef<[u8]> for SessionId {
-    fn as_ref(&self) -> &[u8] { self.0.as_ref() }
+impl SessionId {
+    pub fn as_integer(&self) -> i64 {
+        match self {
+            SessionId::Send(id) => *id,
+            SessionId::Receive(id) => *id,
+        }
+    }
+
+    pub fn session_type(&self) -> &'static str {
+        match self {
+            SessionId::Send(_) => "send",
+            SessionId::Receive(_) => "receive",
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -32,41 +49,49 @@ pub(crate) struct SenderPersister {
     db: Arc<Database>,
     session_id: SessionId,
 }
+
 impl SenderPersister {
     pub fn new(db: Arc<Database>) -> crate::db::Result<Self> {
-        let id = SessionId::new(db.0.generate_id().unwrap());
-        let send_tree = db.0.open_tree("send_sessions")?;
-        let empty_session: SessionWrapper<SenderSessionEvent> =
-            SessionWrapper { completed_at: None, events: vec![] };
-        let value = serde_json::to_vec(&empty_session).map_err(Error::Serialize)?;
-        send_tree.insert(id.as_ref(), value.as_slice())?;
-        send_tree.flush()?;
+        let conn = db.get_connection()?;
 
-        Ok(Self { db, session_id: id })
+        // Create a new session in send_sessions table
+        conn.execute(
+            "INSERT INTO send_sessions (completed_at) VALUES (?1)",
+            params![Option::<i64>::None],
+        )?;
+
+        // Get the generated session ID
+        let session_id = conn.last_insert_rowid();
+
+        Ok(Self { db, session_id: SessionId::Send(session_id) })
     }
 
     pub fn from_id(db: Arc<Database>, id: SessionId) -> crate::db::Result<Self> {
-        Ok(Self { db, session_id: id })
+        match id {
+            SessionId::Send(_) => Ok(Self { db, session_id: id }),
+            SessionId::Receive(_) =>
+                panic!("Attempted to create SenderPersister with Receive session ID"),
+        }
     }
 }
 
 impl SessionPersister for SenderPersister {
     type SessionEvent = SenderSessionEvent;
     type InternalStorageError = crate::db::error::Error;
+
     fn save_event(
         &self,
         event: &SenderSessionEvent,
     ) -> std::result::Result<(), Self::InternalStorageError> {
-        let send_tree = self.db.0.open_tree("send_sessions")?;
-        let key = self.session_id.as_ref();
-        let session = send_tree.get(key)?.expect("key should exist");
-        let mut session_wrapper: SessionWrapper<SenderSessionEvent> =
-            serde_json::from_slice(&session).map_err(Error::Deserialize)?;
-        session_wrapper.events.push(event.clone());
-        let value = serde_json::to_vec(&session_wrapper).map_err(Error::Serialize)?;
-        send_tree.insert(key, value.as_slice())?;
+        let conn = self.db.get_connection()?;
+        let event_data = serde_json::to_string(event).map_err(Error::Serialize)?;
+        let timestamp = now!();
 
-        send_tree.flush()?;
+        conn.execute(
+            "INSERT INTO session_events (session_id, session_type, event_data, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![self.session_id.as_integer(), self.session_id.session_type(), event_data, timestamp],
+        )?;
+
         Ok(())
     }
 
@@ -74,25 +99,39 @@ impl SessionPersister for SenderPersister {
         &self,
     ) -> std::result::Result<Box<dyn Iterator<Item = SenderSessionEvent>>, Self::InternalStorageError>
     {
-        let send_tree = self.db.0.open_tree("send_sessions")?;
-        let session_wrapper = send_tree.get(self.session_id.as_ref())?;
-        let value = session_wrapper.expect("key should exist");
-        let wrapper: SessionWrapper<SenderSessionEvent> =
-            serde_json::from_slice(&value).map_err(Error::Deserialize)?;
-        Ok(Box::new(wrapper.events.into_iter()))
+        let conn = self.db.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT event_data FROM session_events WHERE session_id = ?1 AND session_type = ?2 ORDER BY created_at ASC",
+        )?;
+
+        let event_rows = stmt.query_map(
+            params![self.session_id.as_integer(), self.session_id.session_type()],
+            |row| {
+                let event_data: String = row.get(0)?;
+                Ok(event_data)
+            },
+        )?;
+
+        let mut events = Vec::new();
+        for event_row in event_rows {
+            let event_data = event_row?;
+            let event: SenderSessionEvent =
+                serde_json::from_str(&event_data).map_err(Error::Deserialize)?;
+            events.push(event);
+        }
+
+        Ok(Box::new(events.into_iter()))
     }
 
     fn close(&self) -> std::result::Result<(), Self::InternalStorageError> {
-        let send_tree = self.db.0.open_tree("send_sessions")?;
-        let key = self.session_id.as_ref();
-        if let Some(existing) = send_tree.get(key)? {
-            let mut wrapper: SessionWrapper<SenderSessionEvent> =
-                serde_json::from_slice(&existing).map_err(Error::Deserialize)?;
-            wrapper.completed_at = Some(SystemTime::now());
-            let value = serde_json::to_vec(&wrapper).map_err(Error::Serialize)?;
-            send_tree.insert(key, value.as_slice())?;
-        }
-        send_tree.flush()?;
+        let conn = self.db.get_connection()?;
+        let timestamp = now!();
+
+        conn.execute(
+            "UPDATE send_sessions SET completed_at = ?1 WHERE session_id = ?2",
+            params![timestamp, self.session_id.as_integer()],
+        )?;
+
         Ok(())
     }
 }
@@ -102,21 +141,27 @@ pub(crate) struct ReceiverPersister {
     db: Arc<Database>,
     session_id: SessionId,
 }
+
 impl ReceiverPersister {
     pub fn new(db: Arc<Database>) -> crate::db::Result<Self> {
-        let id = SessionId::new(db.0.generate_id()?);
-        let recv_tree = db.0.open_tree("recv_sessions")?;
-        let empty_session: SessionWrapper<ReceiverSessionEvent> =
-            SessionWrapper { completed_at: None, events: vec![] };
-        let value = serde_json::to_vec(&empty_session).map_err(Error::Serialize)?;
-        recv_tree.insert(id.as_ref(), value.as_slice())?;
-        recv_tree.flush()?;
+        let conn = db.get_connection()?;
 
-        Ok(Self { db, session_id: id })
+        conn.execute(
+            "INSERT INTO receive_sessions (completed_at) VALUES (?1)",
+            params![Option::<i64>::None],
+        )?;
+
+        let session_id = conn.last_insert_rowid();
+
+        Ok(Self { db, session_id: SessionId::Receive(session_id) })
     }
 
     pub fn from_id(db: Arc<Database>, id: SessionId) -> crate::db::Result<Self> {
-        Ok(Self { db, session_id: id })
+        match id {
+            SessionId::Receive(_) => Ok(Self { db, session_id: id }),
+            SessionId::Send(_) =>
+                panic!("Attempted to create ReceiverPersister with Send session ID"),
+        }
     }
 }
 
@@ -128,16 +173,15 @@ impl SessionPersister for ReceiverPersister {
         &self,
         event: &ReceiverSessionEvent,
     ) -> std::result::Result<(), Self::InternalStorageError> {
-        let recv_tree = self.db.0.open_tree("recv_sessions")?;
-        let key = self.session_id.as_ref();
-        let session =
-            recv_tree.get(key)?.ok_or(Error::NotFound(key.to_vec().to_lower_hex_string()))?;
-        let mut session_wrapper: SessionWrapper<ReceiverSessionEvent> =
-            serde_json::from_slice(&session).map_err(Error::Deserialize)?;
-        session_wrapper.events.push(event.clone());
-        let value = serde_json::to_vec(&session_wrapper).map_err(Error::Serialize)?;
-        recv_tree.insert(key, value.as_slice())?;
-        recv_tree.flush()?;
+        let conn = self.db.get_connection()?;
+        let event_data = serde_json::to_string(event).map_err(Error::Serialize)?;
+        let timestamp = now!();
+
+        conn.execute(
+            "INSERT INTO session_events (session_id, session_type, event_data, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![self.session_id.as_integer(), self.session_id.session_type(), event_data, timestamp],
+        )?;
+
         Ok(())
     }
 
@@ -147,61 +191,79 @@ impl SessionPersister for ReceiverPersister {
         Box<dyn Iterator<Item = ReceiverSessionEvent>>,
         Self::InternalStorageError,
     > {
-        let recv_tree = self.db.0.open_tree("recv_sessions")?;
-        let session_wrapper = recv_tree.get(self.session_id.as_ref())?;
-        let value = session_wrapper.expect("key should exist");
-        let wrapper: SessionWrapper<ReceiverSessionEvent> =
-            serde_json::from_slice(&value).map_err(Error::Deserialize)?;
-        Ok(Box::new(wrapper.events.into_iter()))
+        let conn = self.db.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT event_data FROM session_events WHERE session_id = ?1 AND session_type = ?2 ORDER BY created_at ASC",
+        )?;
+
+        let event_rows = stmt.query_map(
+            params![self.session_id.as_integer(), self.session_id.session_type()],
+            |row| {
+                let event_data: String = row.get(0)?;
+                Ok(event_data)
+            },
+        )?;
+
+        let mut events = Vec::new();
+        for event_row in event_rows {
+            let event_data = event_row?;
+            let event: ReceiverSessionEvent =
+                serde_json::from_str(&event_data).map_err(Error::Deserialize)?;
+            events.push(event);
+        }
+
+        Ok(Box::new(events.into_iter()))
     }
 
     fn close(&self) -> std::result::Result<(), Self::InternalStorageError> {
-        let recv_tree = self.db.0.open_tree("recv_sessions")?;
-        let key = self.session_id.as_ref();
-        if let Some(existing) = recv_tree.get(key)? {
-            let mut wrapper: SessionWrapper<ReceiverSessionEvent> =
-                serde_json::from_slice(&existing).map_err(Error::Deserialize)?;
-            wrapper.completed_at = Some(SystemTime::now());
-            let value = serde_json::to_vec(&wrapper).map_err(Error::Serialize)?;
-            recv_tree.insert(key, value.as_slice())?;
-        }
-        recv_tree.flush()?;
+        let conn = self.db.get_connection()?;
+        let timestamp = now!();
+
+        conn.execute(
+            "UPDATE receive_sessions SET completed_at = ?1 WHERE session_id = ?2",
+            params![timestamp, self.session_id.as_integer()],
+        )?;
+
         Ok(())
     }
 }
 
 impl Database {
     pub(crate) fn get_recv_session_ids(&self) -> Result<Vec<SessionId>> {
-        let recv_tree = self.0.open_tree("recv_sessions")?;
+        let conn = self.get_connection()?;
+        let mut stmt =
+            conn.prepare("SELECT session_id FROM receive_sessions WHERE completed_at IS NULL")?;
+
+        let session_rows = stmt.query_map([], |row| {
+            let session_id: i64 = row.get(0)?;
+            Ok(SessionId::Receive(session_id))
+        })?;
+
         let mut session_ids = Vec::new();
-        for item in recv_tree.iter() {
-            let (key, value) = item?;
-            let wrapper: SessionWrapper<ReceiverSessionEvent> =
-                serde_json::from_slice(&value).map_err(Error::Deserialize)?;
-            if wrapper.completed_at.is_some() {
-                continue;
-            }
-            session_ids.push(SessionId::new(u64::from_be_bytes(
-                key.as_ref().try_into().map_err(Error::TryFromSlice)?,
-            )));
+        for session_row in session_rows {
+            let session_id = session_row?;
+            session_ids.push(session_id);
         }
+
         Ok(session_ids)
     }
 
     pub(crate) fn get_send_session_ids(&self) -> Result<Vec<SessionId>> {
-        let send_tree = self.0.open_tree("send_sessions")?;
+        let conn = self.get_connection()?;
+        let mut stmt =
+            conn.prepare("SELECT session_id FROM send_sessions WHERE completed_at IS NULL")?;
+
+        let session_rows = stmt.query_map([], |row| {
+            let session_id: i64 = row.get(0)?;
+            Ok(SessionId::Send(session_id))
+        })?;
+
         let mut session_ids = Vec::new();
-        for item in send_tree.iter() {
-            let (key, value) = item?;
-            let wrapper: SessionWrapper<SenderSessionEvent> =
-                serde_json::from_slice(&value).map_err(Error::Deserialize)?;
-            if wrapper.completed_at.is_some() {
-                continue;
-            }
-            session_ids.push(SessionId::new(u64::from_be_bytes(
-                key.as_ref().try_into().map_err(Error::TryFromSlice)?,
-            )));
+        for session_row in session_rows {
+            let session_id = session_row?;
+            session_ids.push(session_id);
         }
+
         Ok(session_ids)
     }
 }

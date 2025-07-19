@@ -9,11 +9,11 @@ pub(crate) use crate::directory::ShortId;
 use crate::output_substitution::OutputSubstitution;
 use crate::uri::error::InternalPjParseError;
 #[cfg(feature = "v2")]
-pub(crate) use crate::uri::url_ext::UrlExt;
+pub(crate) use crate::uri::v2::UrlExt;
 
 pub mod error;
 #[cfg(feature = "v2")]
-pub(crate) mod url_ext;
+pub(crate) mod v2;
 
 #[derive(Debug, Clone)]
 pub enum MaybePayjoinExtras {
@@ -158,7 +158,7 @@ impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
                     InternalPjParseError::BadEndpoint(error::BadEndpointError::UrlParse(e))
                 })?;
                 #[cfg(feature = "v2")]
-                let url = url_ext::parse_with_fragment(&endpoint)
+                let url = v2::parse_with_fragment(&endpoint)
                     .map_err(InternalPjParseError::BadEndpoint)?;
 
                 self.pj = Some(url);

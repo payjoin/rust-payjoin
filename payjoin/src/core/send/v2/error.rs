@@ -1,7 +1,7 @@
 use core::fmt;
 
 use crate::ohttp::DirectoryResponseError;
-use crate::uri::url_ext::ParseReceiverPubkeyParamError;
+use crate::uri::v2::ParseReceiverPubkeyParamError;
 
 /// Error returned when request could not be created.
 ///

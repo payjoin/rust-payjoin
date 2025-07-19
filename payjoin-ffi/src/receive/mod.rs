@@ -417,7 +417,7 @@ impl MaybeInputsOwned {
         is_owned: impl Fn(&Vec<u8>) -> Result<bool, ImplementationError>,
     ) -> MaybeInputsOwnedTransition {
         MaybeInputsOwnedTransition(Arc::new(RwLock::new(Some(
-            self.0.clone().check_inputs_not_owned(|input| Ok(is_owned(&input.to_bytes())?)),
+            self.0.clone().check_inputs_not_owned(&mut |input| Ok(is_owned(&input.to_bytes())?)),
         ))))
     }
 }
@@ -473,7 +473,7 @@ impl MaybeInputsSeen {
         MaybeInputsSeenTransition(Arc::new(RwLock::new(Some(
             self.0
                 .clone()
-                .check_no_inputs_seen_before(|outpoint| Ok(is_known(&(*outpoint).into())?)),
+                .check_no_inputs_seen_before(&mut |outpoint| Ok(is_known(&(*outpoint).into())?)),
         ))))
     }
 }
@@ -532,7 +532,7 @@ impl OutputsUnknown {
         OutputsUnknownTransition(Arc::new(RwLock::new(Some(
             self.0
                 .clone()
-                .identify_receiver_outputs(|input| Ok(is_receiver_output(&input.to_bytes())?)),
+                .identify_receiver_outputs(&mut |input| Ok(is_receiver_output(&input.to_bytes())?)),
         ))))
     }
 }

@@ -333,7 +333,7 @@ impl Sender<WithReplyKey> {
 
     pub(crate) fn extract_rs_pubkey(
         &self,
-    ) -> Result<HpkePublicKey, crate::uri::url_ext::ParseReceiverPubkeyParamError> {
+    ) -> Result<HpkePublicKey, crate::uri::v2::ParseReceiverPubkeyParamError> {
         self.endpoint.receiver_pubkey()
     }
 

@@ -133,12 +133,9 @@ impl App {
             Some(target) => target,
             None => self.config.v1()?.pj_endpoint.as_str(),
         };
-        let pj_part = payjoin::Url::parse(pj_part)
-            .map_err(|e| anyhow!("Failed to parse pj_endpoint: {}", e))?;
-
         let mut pj_uri = payjoin::receive::v1::build_v1_pj_uri(
             &pj_receiver_address,
-            &pj_part,
+            pj_part,
             payjoin::OutputSubstitution::Enabled,
         )?;
         pj_uri.amount = Some(amount);

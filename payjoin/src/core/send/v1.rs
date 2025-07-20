@@ -45,7 +45,7 @@ impl SenderBuilder {
     /// to create a [`Sender`]
     pub fn new(psbt: Psbt, uri: PjUri) -> Self {
         Self {
-            endpoint: uri.extras.endpoint,
+            endpoint: uri.extras.pj_param.endpoint().clone(),
             // Adopt the output substitution preference from the URI
             output_substitution: uri.extras.output_substitution,
             psbt_ctx_builder: PsbtContextBuilder::new(

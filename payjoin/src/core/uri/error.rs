@@ -1,5 +1,3 @@
-use url::ParseError;
-
 #[derive(Debug)]
 pub struct PjParseError(pub(crate) InternalPjParseError);
 
@@ -15,15 +13,25 @@ pub(crate) enum InternalPjParseError {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum BadEndpointError {
-    UrlParse(ParseError),
+    IntoUrl(crate::into_url::Error),
     #[cfg(feature = "v2")]
     LowercaseFragment,
+}
+
+impl std::error::Error for BadEndpointError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            BadEndpointError::IntoUrl(e) => Some(e),
+            #[cfg(feature = "v2")]
+            BadEndpointError::LowercaseFragment => None,
+        }
+    }
 }
 
 impl std::fmt::Display for BadEndpointError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BadEndpointError::UrlParse(e) => write!(f, "Invalid URL: {e:?}"),
+            BadEndpointError::IntoUrl(e) => write!(f, "Invalid URL: {e:?}"),
             #[cfg(feature = "v2")]
             BadEndpointError::LowercaseFragment =>
                 write!(f, "Some or all of the fragment is lowercase"),
@@ -33,6 +41,20 @@ impl std::fmt::Display for BadEndpointError {
 
 impl From<InternalPjParseError> for PjParseError {
     fn from(value: InternalPjParseError) -> Self { PjParseError(value) }
+}
+
+impl std::error::Error for PjParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use InternalPjParseError::*;
+        match &self.0 {
+            BadPjOs => None,
+            DuplicateParams(_) => None,
+            MissingEndpoint => None,
+            NotUtf8 => None,
+            BadEndpoint(e) => Some(e),
+            UnsecureEndpoint => None,
+        }
+    }
 }
 
 impl std::fmt::Display for PjParseError {

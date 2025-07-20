@@ -69,7 +69,7 @@ impl SenderBuilder {
     /// to create a [`Sender`]
     pub fn new(psbt: Psbt, uri: PjUri) -> Self {
         Self {
-            endpoint: uri.extras.endpoint,
+            endpoint: uri.extras.pj_param.endpoint().clone(),
             // Ignore the receiver's output substitution preference, because all
             // communications with the receiver are end-to-end authenticated. So a
             // malicious man in the middle can't substitute outputs, only the receiver can.

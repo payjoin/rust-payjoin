@@ -6,7 +6,6 @@ use bitcoin::consensus::encode::Decodable;
 use bitcoin::consensus::Encodable;
 use url::Url;
 
-use super::error::BadEndpointError;
 use crate::hpke::HpkePublicKey;
 use crate::ohttp::OhttpKeys;
 
@@ -99,17 +98,6 @@ impl UrlExt for Url {
 
         set_param(self, &exp_str)
     }
-}
-
-pub fn parse_with_fragment(endpoint: &str) -> Result<Url, BadEndpointError> {
-    let url = Url::parse(endpoint).map_err(BadEndpointError::UrlParse)?;
-
-    if let Some(fragment) = url.fragment() {
-        if fragment.chars().any(|c| c.is_lowercase()) {
-            return Err(BadEndpointError::LowercaseFragment);
-        }
-    };
-    Ok(url)
 }
 
 #[derive(Debug)]
@@ -483,7 +471,7 @@ mod tests {
         );
 
         // Upon setting any value, the delimiter should be normalized to `-`
-        endpoint.set_exp(pjuri.extras.endpoint.exp().unwrap());
+        endpoint.set_exp(pjuri.extras.pj_param.endpoint().exp().unwrap());
         assert_eq!(
             endpoint.fragment(),
             Some("EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
@@ -507,7 +495,7 @@ mod tests {
         );
 
         // Upon setting any value, the order should be normalized to lexicographical
-        endpoint.set_exp(pjuri.extras.endpoint.exp().unwrap());
+        endpoint.set_exp(pjuri.extras.pj_param.endpoint().exp().unwrap());
         assert_eq!(
             endpoint.fragment(),
             Some("EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")

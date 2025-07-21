@@ -43,3 +43,11 @@ pub mod io;
 /// 4M block size limit with base64 encoding overhead => maximum reasonable size of content-length
 /// 4_000_000 * 4 / 3 fits in u32
 pub const MAX_CONTENT_LENGTH: usize = 4_000_000 * 4 / 3;
+
+/// Weight of non-witness data in an input. This excludes the weight of the scriptSig and the varint
+/// for the length of the scriptSig.
+/// We only need to add the weight of the txid: 32, index: 4 and sequence: 4 as rust_bitcoin
+/// already accounts for the scriptsig length when calculating InputWeightPrediction
+/// <https://docs.rs/bitcoin/latest/src/bitcoin/blockdata/transaction.rs.html#1621>
+pub(crate) const NON_WITNESS_INPUT_WEIGHT: bitcoin::Weight =
+    bitcoin::Weight::from_non_witness_data_size(32 + 4 + 4);

@@ -29,7 +29,7 @@ use url::Url;
 use super::*;
 pub use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
-use crate::{PjUri, Request, MAX_CONTENT_LENGTH};
+use crate::{PjUri, Request};
 
 /// A builder to construct the properties of a `Sender`.
 #[derive(Clone)]
@@ -278,10 +278,6 @@ impl V1Context {
     /// valid you will get appropriate PSBT that you should sign and broadcast.
     #[inline]
     pub fn process_response(self, response: &[u8]) -> Result<Psbt, ResponseError> {
-        if response.len() > MAX_CONTENT_LENGTH {
-            return Err(ResponseError::from(InternalValidationError::ContentTooLarge));
-        }
-
         let res_str = std::str::from_utf8(response).map_err(|_| InternalValidationError::Parse)?;
         let proposal = Psbt::from_str(res_str).map_err(|_| ResponseError::parse(res_str))?;
         self.psbt_context.process_proposal(proposal).map_err(Into::into)
@@ -432,6 +428,7 @@ mod test {
             "message": "This version of payjoin is not supported."
         })
         .to_string();
+
         match ctx.process_response(known_json_error.as_bytes()) {
             Err(ResponseError::WellKnown(WellKnownError {
                 code: ErrorCode::VersionUnsupported,
@@ -446,6 +443,7 @@ mod test {
             "message": "This version of payjoin is not supported."
         })
         .to_string();
+
         match ctx.process_response(invalid_json_error.as_bytes()) {
             Err(ResponseError::Validation(_)) => (),
             _ => panic!("Expected unrecognized JSON error"),
@@ -455,6 +453,7 @@ mod test {
     #[test]
     fn process_response_valid() {
         let ctx = create_v1_context();
+
         let response = ctx.process_response(PAYJOIN_PROPOSAL.as_bytes());
         assert!(response.is_ok())
     }
@@ -462,6 +461,7 @@ mod test {
     #[test]
     fn process_response_invalid_psbt() {
         let ctx = create_v1_context();
+
         let response = ctx.process_response(INVALID_PSBT.as_bytes());
         match response {
             Ok(_) => panic!("Invalid PSBT should have caused an error"),
@@ -483,6 +483,7 @@ mod test {
         let invalid_utf8 = &[0xF0];
 
         let ctx = create_v1_context();
+
         let response = ctx.process_response(invalid_utf8);
         match response {
             Ok(_) => panic!("Invalid UTF-8 should have caused an error"),
@@ -491,27 +492,6 @@ mod test {
                     assert_eq!(
                         e.to_string(),
                         ValidationError::from(InternalValidationError::Parse).to_string()
-                    );
-                }
-                _ => panic!("Unexpected error type"),
-            },
-        }
-    }
-
-    #[test]
-    fn process_response_invalid_buffer_len() {
-        let mut data = PAYJOIN_PROPOSAL.as_bytes().to_vec();
-        data.extend(std::iter::repeat(0).take(MAX_CONTENT_LENGTH + 1));
-
-        let ctx = create_v1_context();
-        let response = ctx.process_response(&data);
-        match response {
-            Ok(_) => panic!("Invalid buffer length should have caused an error"),
-            Err(error) => match error {
-                ResponseError::Validation(e) => {
-                    assert_eq!(
-                        e.to_string(),
-                        ValidationError::from(InternalValidationError::ContentTooLarge).to_string()
                     );
                 }
                 _ => panic!("Unexpected error type"),

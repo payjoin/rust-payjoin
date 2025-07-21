@@ -78,7 +78,7 @@ impl AppTrait for App {
                 let persister = SenderPersister::new(self.db.clone())?;
                 let psbt = self.create_original_psbt(&uri, fee_rate)?;
                 let sender = SenderBuilder::new(psbt, uri.clone())
-                    .build_recommended(fee_rate)
+                    .build_recommended(fee_rate)?
                     .save(&persister)?;
 
                 (SendSession::WithReplyKey(sender), persister)
@@ -106,7 +106,7 @@ impl AppTrait for App {
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys,
             None,
-        )
+        )?
         .save(&persister)?;
         println!("Receive session established");
         let mut pj_uri = session.pj_uri();

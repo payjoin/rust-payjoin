@@ -27,7 +27,7 @@ impl SenderBuilder {
         let noop_persister = NoopSessionPersister::default();
         let sender = self
             .0
-            .build_recommended(min_fee_rate)
+            .build_recommended(min_fee_rate)?
             .save(&noop_persister)
             .expect("Noop persister should never fail");
         Ok(Sender(sender))

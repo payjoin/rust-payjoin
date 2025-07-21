@@ -48,7 +48,7 @@ use crate::ohttp::{
 };
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
-    MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
+    InitialTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
     MaybeSuccessTransition, MaybeTransientTransition, NextStateTransition,
 };
 use crate::receive::{parse_payload, InputPair};
@@ -270,12 +270,8 @@ impl Receiver<UninitializedReceiver> {
         directory: impl IntoUrl,
         ohttp_keys: OhttpKeys,
         expire_after: Option<Duration>,
-    ) -> MaybeBadInitInputsTransition<SessionEvent, Receiver<Initialized>, IntoUrlError> {
-        let directory = match directory.into_url() {
-            Ok(url) => url,
-            Err(e) => return MaybeBadInitInputsTransition::bad_init_inputs(e),
-        };
-
+    ) -> Result<InitialTransition<SessionEvent, Receiver<Initialized>>, IntoUrlError> {
+        let directory = directory.into_url()?;
         let session_context = SessionContext {
             address,
             directory,
@@ -285,10 +281,10 @@ impl Receiver<UninitializedReceiver> {
             s: HpkeKeyPair::gen_keypair(),
             e: None,
         };
-        MaybeBadInitInputsTransition::success(
+        Ok(InitialTransition::initialize(
             SessionEvent::Created(session_context.clone()),
             Receiver { state: Initialized { context: session_context } },
-        )
+        ))
     }
 }
 
@@ -1324,6 +1320,7 @@ pub mod test {
             SHARED_CONTEXT.ohttp_keys.clone(),
             None,
         )
+        .expect("constructor on test vector should not fail")
         .save(&noop_persister)
         .expect("Noop persister shouldn't fail");
         let session_expiry = session.context.expiry.duration_since(now).unwrap().as_secs();

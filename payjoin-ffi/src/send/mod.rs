@@ -21,21 +21,19 @@ macro_rules! impl_save_for_transition {
             pub fn save(
                 &self,
                 persister: Arc<dyn JsonSenderSessionPersister>,
-            ) -> Result<$next_state, SenderPersistedError> {
+            ) -> Result<$next_state, ForeignError> {
                 let adapter = CallbackPersisterAdapter::new(persister);
-                let mut inner = self.0.write().map_err(|_| {
-                    SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                        "Lock poisoned".to_string(),
-                    )))
-                })?;
+                let mut inner = self
+                    .0
+                    .write()
+                    .map_err(|_| ForeignError::InternalError("Lock poisoned".to_string()))?;
 
                 let value = inner.take().ok_or_else(|| {
-                    SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                        "Already saved or moved".to_string(),
-                    )))
+                    ForeignError::InternalError("Already saved or moved".to_string())
                 })?;
 
-                let res = value.save(&adapter).map_err(SenderPersistedError::from)?;
+                let res =
+                    value.save(&adapter).map_err(|e| ForeignError::InternalError(e.to_string()))?;
                 Ok(res.into())
             }
         }
@@ -142,10 +140,9 @@ pub struct InitialSendTransition(
     Arc<
         RwLock<
             Option<
-                payjoin::persist::MaybeBadInitInputsTransition<
+                payjoin::persist::InitialTransition<
                     payjoin::send::v2::SessionEvent,
                     payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>,
-                    payjoin::send::BuildSenderError,
                 >,
             >,
         >,
@@ -191,12 +188,15 @@ impl SenderBuilder {
     // The minfeerate parameter is set if the contribution is available in change.
     //
     // This method fails if no recommendation can be made or if the PSBT is malformed.
-    pub fn build_recommended(&self, min_fee_rate: u64) -> InitialSendTransition {
-        InitialSendTransition(Arc::new(RwLock::new(Some(
-            self.0
-                .clone()
-                .build_recommended(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate)),
-        ))))
+    pub fn build_recommended(
+        &self,
+        min_fee_rate: u64,
+    ) -> Result<InitialSendTransition, BuildSenderError> {
+        self.0
+            .clone()
+            .build_recommended(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate))
+            .map(|transition| InitialSendTransition(Arc::new(RwLock::new(Some(transition)))))
+            .map_err(BuildSenderError::from)
     }
     /// Offer the receiver contribution to pay for his input.
     ///
@@ -217,26 +217,31 @@ impl SenderBuilder {
         change_index: Option<u8>,
         min_fee_rate: u64,
         clamp_fee_contribution: bool,
-    ) -> InitialSendTransition {
-        InitialSendTransition(Arc::new(RwLock::new(Some(
-            self.0.clone().build_with_additional_fee(
+    ) -> Result<InitialSendTransition, BuildSenderError> {
+        self.0
+            .clone()
+            .build_with_additional_fee(
                 payjoin::bitcoin::Amount::from_sat(max_fee_contribution),
                 change_index.map(|x| x as usize),
                 payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate),
                 clamp_fee_contribution,
-            ),
-        ))))
+            )
+            .map(|transition| InitialSendTransition(Arc::new(RwLock::new(Some(transition)))))
+            .map_err(BuildSenderError::from)
     }
     /// Perform Payjoin without incentivizing the payee to cooperate.
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
-    pub fn build_non_incentivizing(&self, min_fee_rate: u64) -> InitialSendTransition {
-        InitialSendTransition(Arc::new(RwLock::new(Some(
-            self.0
-                .clone()
-                .build_non_incentivizing(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate)),
-        ))))
+    pub fn build_non_incentivizing(
+        &self,
+        min_fee_rate: u64,
+    ) -> Result<InitialSendTransition, BuildSenderError> {
+        self.0
+            .clone()
+            .build_non_incentivizing(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate))
+            .map(|transition| InitialSendTransition(Arc::new(RwLock::new(Some(transition)))))
+            .map_err(BuildSenderError::from)
     }
 }
 

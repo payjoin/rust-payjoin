@@ -41,7 +41,7 @@ where
 {
     let logs = persister
         .load()
-        .map_err(|e| InternalReplayError::PersistenceFailure(Box::new(e).into()))?;
+        .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
 
     let mut sender = SendSession::Uninitialized;
     let mut history = SessionHistory::default();
@@ -50,9 +50,9 @@ where
         match sender.clone().process_event(log.into()) {
             Ok(next_sender) => sender = next_sender,
             Err(_e) => {
-                persister
-                    .close()
-                    .map_err(|e| InternalReplayError::PersistenceFailure(Box::new(e)))?;
+                persister.close().map_err(|e| {
+                    InternalReplayError::PersistenceFailure(ImplementationError::new(e))
+                })?;
                 break;
             }
         }

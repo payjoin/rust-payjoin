@@ -69,7 +69,7 @@ impl RpcClient {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
 pub enum FfiError {
     #[error("Init error: {0}")]

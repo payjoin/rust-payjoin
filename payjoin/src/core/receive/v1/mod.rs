@@ -982,12 +982,12 @@ pub(crate) mod test {
             .identify_receiver_outputs(|script| {
                 let network = Network::Bitcoin;
                 let target_address = Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
-                    .map_err(|e| e.to_string())?
+                    .map_err(ImplementationError::new)?
                     .require_network(network)
-                    .map_err(|e| e.to_string())?;
+                    .map_err(ImplementationError::new)?;
 
                 let script_address =
-                    Address::from_script(script, network).map_err(|e| e.to_string())?;
+                    Address::from_script(script, network).map_err(ImplementationError::new)?;
                 Ok(script_address == target_address)
             })
             .expect("Receiver output should be identified")

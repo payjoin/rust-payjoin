@@ -199,30 +199,19 @@ impl<Event, NextState> NextStateTransition<Event, NextState> {
 /// A transition that can result in a state transition or a bad init inputs error.
 /// This is a special case because the session should not exist at this point.
 /// the state machine initial inputs are not valid. The only thing we can do is reject the session.
-pub struct MaybeBadInitInputsTransition<Event, NextState, Err>(
-    Result<AcceptNextState<Event, NextState>, RejectBadInitInputs<Err>>,
-);
+pub struct InitialTransition<Event, NextState>(AcceptNextState<Event, NextState>);
 
-impl<Event, NextState, Err> MaybeBadInitInputsTransition<Event, NextState, Err> {
+impl<Event, NextState> InitialTransition<Event, NextState> {
     #[inline]
-    pub(crate) fn success(event: Event, next_state: NextState) -> Self {
-        MaybeBadInitInputsTransition(Ok(AcceptNextState(event, next_state)))
+    pub(crate) fn initialize(event: Event, next_state: NextState) -> Self {
+        InitialTransition(AcceptNextState(event, next_state))
     }
 
-    #[inline]
-    pub(crate) fn bad_init_inputs(error: Err) -> Self {
-        MaybeBadInitInputsTransition(Err(RejectBadInitInputs(error)))
-    }
-
-    pub fn save<P>(
-        self,
-        persister: &P,
-    ) -> Result<NextState, PersistedError<Err, P::InternalStorageError>>
+    pub fn save<P>(self, persister: &P) -> Result<NextState, P::InternalStorageError>
     where
         P: SessionPersister<SessionEvent = Event>,
-        Err: std::error::Error,
     {
-        persister.save_maybe_bad_init_inputs(self)
+        persister.save_initialized(self)
     }
 }
 
@@ -291,9 +280,7 @@ where
 
     pub fn api_error(self) -> Option<ApiErr> {
         match self.0 {
-            InternalPersistedError::Fatal(e)
-            | InternalPersistedError::BadInitInputs(e)
-            | InternalPersistedError::Transient(e) => Some(e),
+            InternalPersistedError::Fatal(e) | InternalPersistedError::Transient(e) => Some(e),
             _ => None,
         }
     }
@@ -307,9 +294,7 @@ where
 
     pub fn api_error_ref(&self) -> Option<&ApiErr> {
         match &self.0 {
-            InternalPersistedError::Fatal(e)
-            | InternalPersistedError::BadInitInputs(e)
-            | InternalPersistedError::Transient(e) => Some(e),
+            InternalPersistedError::Fatal(e) | InternalPersistedError::Transient(e) => Some(e),
             _ => None,
         }
     }
@@ -334,7 +319,6 @@ impl<ApiError: std::error::Error, StorageError: std::error::Error> std::fmt::Dis
         match &self.0 {
             InternalPersistedError::Transient(err) => write!(f, "Transient error: {err}"),
             InternalPersistedError::Fatal(err) => write!(f, "Fatal error: {err}"),
-            InternalPersistedError::BadInitInputs(err) => write!(f, "Bad init inputs error: {err}"),
             InternalPersistedError::Storage(err) => write!(f, "Storage error: {err}"),
         }
     }
@@ -350,8 +334,6 @@ where
     Transient(InternalApiError),
     /// Error indicating that the session is terminally closed
     Fatal(InternalApiError),
-    /// Error indicating that the session cannot be created because session configurations are invalid
-    BadInitInputs(InternalApiError),
     /// Error indicating that application failed to save the session event. This should be treated as a transient error
     /// but is represented as a separate error because this error is propagated from the application's storage layer
     Storage(StorageErr),
@@ -436,20 +418,13 @@ trait InternalSessionPersister: SessionPersister {
     /// This transition can result in a bad initial inputs error or a state transition
     /// If there is a bad initial inputs error, no events are saved and there is no session to be closed
     /// because the session is not created until the first transition
-    fn save_maybe_bad_init_inputs<NextState, Err>(
+    fn save_initialized<NextState>(
         &self,
-        state_transition: MaybeBadInitInputsTransition<Self::SessionEvent, NextState, Err>,
-    ) -> Result<NextState, PersistedError<Err, Self::InternalStorageError>>
-    where
-        Err: std::error::Error,
-    {
-        match state_transition.0 {
-            Ok(AcceptNextState(event, next_state)) => {
-                self.save_event(&event).map_err(InternalPersistedError::Storage)?;
-                Ok(next_state)
-            }
-            Err(RejectBadInitInputs(err)) => Err(InternalPersistedError::BadInitInputs(err).into()),
-        }
+        state_transition: InitialTransition<Self::SessionEvent, NextState>,
+    ) -> Result<NextState, Self::InternalStorageError> {
+        let AcceptNextState(event, next_state) = state_transition.0;
+        self.save_event(&event)?;
+        Ok(next_state)
     }
 
     /// Persists the outcome of a state transition that may result in one of the following:
@@ -744,15 +719,10 @@ mod tests {
     }
 
     #[test]
-    fn test_maybe_bad_init_inputs() {
+    fn test_initial_transition() {
         let event = InMemoryTestEvent("foo".to_string());
         let next_state = "Next state".to_string();
-        let test_cases: Vec<
-            TestCase<
-                InMemoryTestState,
-                PersistedError<InMemoryTestError, std::convert::Infallible>,
-            >,
-        > = vec![
+        let test_cases: Vec<TestCase<InMemoryTestState, std::convert::Infallible>> = vec![
             // Success
             TestCase {
                 expected_result: ExpectedResult {
@@ -762,21 +732,7 @@ mod tests {
                     success: Some(next_state.clone()),
                 },
                 test: Box::new(move |persister| {
-                    MaybeBadInitInputsTransition::success(event.clone(), next_state.clone())
-                        .save(persister)
-                }),
-            },
-            // Bad init inputs
-            TestCase {
-                expected_result: ExpectedResult {
-                    events: vec![],
-                    is_closed: false,
-                    error: Some(InternalPersistedError::BadInitInputs(InMemoryTestError {}).into()),
-                    success: None,
-                },
-                test: Box::new(move |persister| {
-                    MaybeBadInitInputsTransition::bad_init_inputs(InMemoryTestError {})
-                        .save(persister)
+                    InitialTransition::initialize(event.clone(), next_state.clone()).save(persister)
                 }),
             },
         ];
@@ -1128,11 +1084,5 @@ mod tests {
         );
         assert!(transient_error.clone().storage_error().is_none());
         assert!(transient_error.api_error().is_some());
-
-        let bad_inputs_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
-            InternalPersistedError::BadInitInputs(api_err.clone()),
-        );
-        assert!(bad_inputs_error.clone().storage_error().is_none());
-        assert!(bad_inputs_error.api_error().is_some());
     }
 }

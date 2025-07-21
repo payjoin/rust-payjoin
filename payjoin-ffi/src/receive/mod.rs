@@ -15,6 +15,7 @@ use crate::error::ForeignError;
 pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::OhttpKeys;
 use crate::receive::error::{ReceiverPersistedError, ReceiverReplayError};
+use crate::uri::error::IntoUrlError;
 use crate::{ClientResponse, OutputSubstitution, Request};
 
 pub mod error;
@@ -207,10 +208,9 @@ pub struct InitialReceiveTransition(
     Arc<
         RwLock<
             Option<
-                payjoin::persist::MaybeBadInitInputsTransition<
+                payjoin::persist::NextStateTransition<
                     payjoin::receive::v2::SessionEvent,
                     payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>,
-                    payjoin::IntoUrlError,
                 >,
             >,
         >,
@@ -222,16 +222,16 @@ impl InitialReceiveTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<Initialized, ReceiverPersistedError> {
+    ) -> Result<Initialized, ForeignError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
+            self.0.write().map_err(|_| ForeignError::InternalError("Lock poisoned".to_string()))?;
 
         let value = inner
             .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
+            .ok_or_else(|| ForeignError::InternalError("Already saved or moved".to_string()))?;
 
-        let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
+        let res = value.save(&adapter)?;
         Ok(res.into())
     }
 }
@@ -266,16 +266,16 @@ impl UninitializedReceiver {
         ohttp_keys: Arc<OhttpKeys>,
         expire_after: Option<u64>,
         amount: Option<u64>,
-    ) -> InitialReceiveTransition {
-        InitialReceiveTransition(Arc::new(RwLock::new(Some(
-            payjoin::receive::v2::Receiver::create_session(
-                (*address).clone().into(),
-                directory,
-                (*ohttp_keys).clone().into(),
-                expire_after.map(Duration::from_secs),
-                amount.map(payjoin::bitcoin::Amount::from_sat),
-            ),
-        ))))
+    ) -> Result<InitialReceiveTransition, IntoUrlError> {
+        payjoin::receive::v2::Receiver::create_session(
+            (*address).clone().into(),
+            directory,
+            (*ohttp_keys).clone().into(),
+            expire_after.map(Duration::from_secs),
+            amount.map(payjoin::bitcoin::Amount::from_sat),
+        )
+        .map(|receiver| InitialReceiveTransition(Arc::new(RwLock::new(Some(receiver)))))
+        .map_err(IntoUrlError::from)
     }
 }
 

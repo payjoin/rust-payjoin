@@ -41,7 +41,7 @@ use super::*;
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
 use crate::persist::{
-    MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeSuccessTransitionWithNoResults,
+    MaybeFatalTransition, MaybeSuccessTransitionWithNoResults, NextStateTransition,
 };
 use crate::send::v2::session::InternalReplayError;
 use crate::uri::{ShortId, UrlExt};
@@ -101,11 +101,10 @@ impl SenderBuilder {
     pub fn build_recommended(
         self,
         min_fee_rate: FeeRate,
-    ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
-        Self::v2_sender_from_psbt_ctx_result(
-            self.endpoint,
-            self.psbt_ctx_builder.build_recommended(min_fee_rate, self.output_substitution),
-        )
+    ) -> Result<NextStateTransition<SessionEvent, Sender<WithReplyKey>>, BuildSenderError> {
+        let psbt_ctx =
+            self.psbt_ctx_builder.build_recommended(min_fee_rate, self.output_substitution)?;
+        Ok(Self::v2_transition_from_psbt_ctx(self.endpoint, psbt_ctx))
     }
 
     /// Offer the receiver contribution to pay for his input.
@@ -127,17 +126,15 @@ impl SenderBuilder {
         change_index: Option<usize>,
         min_fee_rate: FeeRate,
         clamp_fee_contribution: bool,
-    ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
-        Self::v2_sender_from_psbt_ctx_result(
-            self.endpoint,
-            self.psbt_ctx_builder.build_with_additional_fee(
-                max_fee_contribution,
-                change_index,
-                min_fee_rate,
-                clamp_fee_contribution,
-                self.output_substitution,
-            ),
-        )
+    ) -> Result<NextStateTransition<SessionEvent, Sender<WithReplyKey>>, BuildSenderError> {
+        let psbt_ctx = self.psbt_ctx_builder.build_with_additional_fee(
+            max_fee_contribution,
+            change_index,
+            min_fee_rate,
+            clamp_fee_contribution,
+            self.output_substitution,
+        )?;
+        Ok(Self::v2_transition_from_psbt_ctx(self.endpoint, psbt_ctx))
     }
 
     /// Perform Payjoin without incentivizing the payee to cooperate.
@@ -147,26 +144,22 @@ impl SenderBuilder {
     pub fn build_non_incentivizing(
         self,
         min_fee_rate: FeeRate,
-    ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
-        Self::v2_sender_from_psbt_ctx_result(
-            self.endpoint,
-            self.psbt_ctx_builder.build_non_incentivizing(min_fee_rate, self.output_substitution),
-        )
+    ) -> Result<NextStateTransition<SessionEvent, Sender<WithReplyKey>>, BuildSenderError> {
+        let endpoint = self.endpoint;
+        let psbt_ctx = self
+            .psbt_ctx_builder
+            .build_non_incentivizing(min_fee_rate, self.output_substitution)?;
+        Ok(Self::v2_transition_from_psbt_ctx(endpoint, psbt_ctx))
     }
 
     /// Helper function that takes a V1 sender build result and wraps it in a V2 Sender,
     /// returning the appropriate state transition.
-    fn v2_sender_from_psbt_ctx_result(
+    fn v2_transition_from_psbt_ctx(
         endpoint: Url,
-        psbt_ctx_result: Result<PsbtContext, BuildSenderError>,
-    ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
-        let psbt_ctx = match psbt_ctx_result {
-            Ok(inner) => inner,
-            Err(e) => return MaybeBadInitInputsTransition::bad_init_inputs(e),
-        };
-
+        psbt_ctx: PsbtContext,
+    ) -> NextStateTransition<SessionEvent, Sender<WithReplyKey>> {
         let with_reply_key = WithReplyKey::new(endpoint.clone(), psbt_ctx);
-        MaybeBadInitInputsTransition::success(
+        NextStateTransition::success(
             SessionEvent::CreatedReplyKey(with_reply_key.clone()),
             Sender { state: with_reply_key },
         )
@@ -658,11 +651,13 @@ mod test {
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
         );
         let pj_uri = Receiver::create_session(address.clone(), directory, ohttp_keys, None, None)
+            .expect("constructor on test vector should not fail")
             .save(&NoopSessionPersister::default())
             .expect("receiver should succeed")
             .pj_uri();
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_recommended(FeeRate::BROADCAST_MIN)
+            .expect("build on test vector should succeed")
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
         // v2 senders may always override the receiver's `pjos` parameter to enable output
@@ -677,11 +672,13 @@ mod test {
         // ensure that the other builder methods also enable output substitution
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_non_incentivizing(FeeRate::BROADCAST_MIN)
+            .expect("build on test vector should succeed")
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
         assert_eq!(req_ctx.state.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_with_additional_fee(Amount::ZERO, Some(0), FeeRate::BROADCAST_MIN, false)
+            .expect("build on test vector should succeed")
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
         assert_eq!(req_ctx.state.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
@@ -689,6 +686,7 @@ mod test {
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
             .always_disable_output_substitution()
             .build_recommended(FeeRate::BROADCAST_MIN)
+            .expect("build on test vector should succeed")
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
         assert_eq!(req_ctx.state.psbt_ctx.output_substitution, OutputSubstitution::Disabled);

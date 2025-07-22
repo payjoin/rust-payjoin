@@ -321,17 +321,18 @@ impl App {
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // Receive Check 2: receiver can't sign for proposal inputs
-        let proposal = proposal.check_inputs_not_owned(|input| {
+        let proposal = proposal.check_inputs_not_owned(&mut |input| {
             wallet.is_mine(input).map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
         })?;
         log::trace!("check2");
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
-        let payjoin = proposal
-            .check_no_inputs_seen_before(|input| Ok(self.db.insert_input_seen_before(*input)?))?;
+        let payjoin = proposal.check_no_inputs_seen_before(&mut |input| {
+            Ok(self.db.insert_input_seen_before(*input)?)
+        })?;
         log::trace!("check3");
 
-        let payjoin = payjoin.identify_receiver_outputs(|output_script| {
+        let payjoin = payjoin.identify_receiver_outputs(&mut |output_script| {
             wallet
                 .is_mine(output_script)
                 .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))

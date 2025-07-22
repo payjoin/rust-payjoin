@@ -1084,15 +1084,15 @@ mod integration {
                 // In a ns1r payment, the merged psbt is not broadcastable
                 let proposal =
                     multiparty_proposal.check_broadcast_suitability(None, |_| Ok(true))?;
-                let proposal = proposal.check_inputs_not_owned(|input| {
+                let proposal = proposal.check_inputs_not_owned(&mut |input| {
                     let address =
                         bitcoin::Address::from_script(input, bitcoin::Network::Regtest).unwrap();
                     Ok(receiver.get_address_info(&address).unwrap().is_mine.unwrap())
                 })?;
 
                 let payjoin = proposal
-                    .check_no_inputs_seen_before(|_| Ok(false))?
-                    .identify_receiver_outputs(|output_script| {
+                    .check_no_inputs_seen_before(&mut |_| Ok(false))?
+                    .identify_receiver_outputs(&mut |output_script| {
                         let address =
                             bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
                                 .unwrap();
@@ -1401,7 +1401,7 @@ mod integration {
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // Receive Check 2: receiver can't sign for proposal inputs
-        let proposal = proposal.check_inputs_not_owned(|input| {
+        let proposal = proposal.check_inputs_not_owned(&mut |input| {
             let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
                 .map_err(ImplementationError::new)?;
             receiver
@@ -1412,8 +1412,8 @@ mod integration {
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let payjoin = proposal
-            .check_no_inputs_seen_before(|_| Ok(false))?
-            .identify_receiver_outputs(|output_script| {
+            .check_no_inputs_seen_before(&mut |_| Ok(false))?
+            .identify_receiver_outputs(&mut |output_script| {
                 let address =
                     bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
                         .map_err(ImplementationError::new)?;

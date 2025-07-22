@@ -160,9 +160,8 @@ impl MaybeInputsOwned {
     /// An attacker can try to spend the receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         self,
-        is_owned: impl FnMut(&Script) -> Result<bool, ImplementationError>,
+        is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<MaybeInputsSeen, ReplyableError> {
-        let mut is_owned = is_owned;
         let mut err: Result<(), ReplyableError> = Ok(());
         if let Some(e) = self
             .psbt
@@ -207,9 +206,8 @@ impl MaybeInputsSeen {
     ///    original proposal PSBT of the current, new payjoin.
     pub fn check_no_inputs_seen_before(
         self,
-        is_known: impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
+        is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<OutputsUnknown, ReplyableError> {
-        let mut is_known = is_known;
         self.psbt.input_pairs().try_for_each(|input| {
             match is_known(&input.txin.previous_output) {
                 Ok(false) => Ok::<(), ReplyableError>(()),
@@ -250,9 +248,8 @@ impl OutputsUnknown {
     /// outputs.
     pub fn identify_receiver_outputs(
         self,
-        is_receiver_output: impl FnMut(&Script) -> Result<bool, ImplementationError>,
+        is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<WantsOutputs, ReplyableError> {
-        let mut is_receiver_output = is_receiver_output;
         let owned_vouts: Vec<usize> = self
             .psbt
             .unsigned_tx
@@ -912,11 +909,11 @@ pub(crate) mod test {
     fn wants_outputs_from_test_vector(proposal: UncheckedProposal) -> WantsOutputs {
         proposal
             .assume_interactive_receiver()
-            .check_inputs_not_owned(|_| Ok(false))
+            .check_inputs_not_owned(&mut |_| Ok(false))
             .expect("No inputs should be owned")
-            .check_no_inputs_seen_before(|_| Ok(false))
+            .check_no_inputs_seen_before(&mut |_| Ok(false))
             .expect("No inputs should be seen before")
-            .identify_receiver_outputs(|script| {
+            .identify_receiver_outputs(&mut |script| {
                 let network = Network::Bitcoin;
                 Ok(Address::from_script(script, network).unwrap()
                     == Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
@@ -945,20 +942,20 @@ pub(crate) mod test {
             Ok(ret)
         }
 
-        let maybe_inputs_seen =
-            maybe_inputs_owned.check_inputs_not_owned(|_| mock_callback(&mut call_count, false));
+        let maybe_inputs_seen = maybe_inputs_owned
+            .check_inputs_not_owned(&mut |_| mock_callback(&mut call_count, false));
         assert_eq!(call_count, 1);
 
         let outputs_unknown = maybe_inputs_seen
             .map_err(|_| "Check inputs owned closure failed".to_string())
             .expect("Next receiver state should be accessible")
-            .check_no_inputs_seen_before(|_| mock_callback(&mut call_count, false));
+            .check_no_inputs_seen_before(&mut |_| mock_callback(&mut call_count, false));
         assert_eq!(call_count, 2);
 
         let _wants_outputs = outputs_unknown
             .map_err(|_| "Check no inputs seen closure failed".to_string())
             .expect("Next receiver state should be accessible")
-            .identify_receiver_outputs(|_| mock_callback(&mut call_count, true));
+            .identify_receiver_outputs(&mut |_| mock_callback(&mut call_count, true));
         // there are 2 receiver outputs so we should expect this callback to run twice incrementing
         // call count twice
         assert_eq!(call_count, 4);
@@ -1014,11 +1011,11 @@ pub(crate) mod test {
         let proposal = unchecked_proposal_from_test_vector();
         let wants_inputs = proposal
             .assume_interactive_receiver()
-            .check_inputs_not_owned(|_| Ok(false))
+            .check_inputs_not_owned(&mut |_| Ok(false))
             .expect("No inputs should be owned")
-            .check_no_inputs_seen_before(|_| Ok(false))
+            .check_no_inputs_seen_before(&mut |_| Ok(false))
             .expect("No inputs should be seen before")
-            .identify_receiver_outputs(|script| {
+            .identify_receiver_outputs(&mut |script| {
                 let network = Network::Bitcoin;
                 let target_address = Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
                     .map_err(ImplementationError::new)?

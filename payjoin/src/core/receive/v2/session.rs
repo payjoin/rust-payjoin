@@ -178,15 +178,15 @@ mod tests {
         let maybe_inputs_owned = unchecked_proposal.clone().assume_interactive_receiver();
         let maybe_inputs_seen = maybe_inputs_owned
             .clone()
-            .check_inputs_not_owned(|_| Ok(false))
+            .check_inputs_not_owned(&mut |_| Ok(false))
             .expect("No inputs should be owned");
         let outputs_unknown = maybe_inputs_seen
             .clone()
-            .check_no_inputs_seen_before(|_| Ok(false))
+            .check_no_inputs_seen_before(&mut |_| Ok(false))
             .expect("No inputs should be seen before");
         let wants_outputs = outputs_unknown
             .clone()
-            .identify_receiver_outputs(|_| Ok(true))
+            .identify_receiver_outputs(&mut |_| Ok(true))
             .expect("Outputs should be identified");
         let wants_inputs = wants_outputs.clone().commit_outputs();
         let wants_fee_range = wants_inputs.clone().commit_inputs();
@@ -375,15 +375,15 @@ mod tests {
         let maybe_inputs_owned = unchecked_proposal.clone().assume_interactive_receiver();
         let maybe_inputs_seen = maybe_inputs_owned
             .clone()
-            .check_inputs_not_owned(|_| Ok(false))
+            .check_inputs_not_owned(&mut |_| Ok(false))
             .expect("No inputs should be owned");
         let outputs_unknown = maybe_inputs_seen
             .clone()
-            .check_no_inputs_seen_before(|_| Ok(false))
+            .check_no_inputs_seen_before(&mut |_| Ok(false))
             .expect("No inputs should be seen before");
         let wants_outputs = outputs_unknown
             .clone()
-            .identify_receiver_outputs(|_| Ok(true))
+            .identify_receiver_outputs(&mut |_| Ok(true))
             .expect("Outputs should be identified");
         let wants_inputs = wants_outputs.clone().commit_outputs();
         let wants_fee_range = wants_inputs.clone().commit_inputs();
@@ -425,15 +425,15 @@ mod tests {
         let maybe_inputs_owned = unchecked_proposal.clone().assume_interactive_receiver();
         let maybe_inputs_seen = maybe_inputs_owned
             .clone()
-            .check_inputs_not_owned(|_| Ok(false))
+            .check_inputs_not_owned(&mut |_| Ok(false))
             .expect("No inputs should be owned");
         let outputs_unknown = maybe_inputs_seen
             .clone()
-            .check_no_inputs_seen_before(|_| Ok(false))
+            .check_no_inputs_seen_before(&mut |_| Ok(false))
             .expect("No inputs should be seen before");
         let wants_outputs = outputs_unknown
             .clone()
-            .identify_receiver_outputs(|_| Ok(true))
+            .identify_receiver_outputs(&mut |_| Ok(true))
             .expect("Outputs should be identified");
         let wants_inputs = wants_outputs.clone().commit_outputs();
         let wants_fee_range = wants_inputs.clone().commit_inputs();

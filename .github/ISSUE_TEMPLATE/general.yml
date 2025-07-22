@@ -1,0 +1,20 @@
+name: General Question / Support
+description: A general question or support issue that isn't a bug or feature.
+body:
+  - type: dropdown
+    attributes:
+      label: Which crate is this feature request for (if any)?
+      multiple: true
+      options:
+        - payjoin
+        - payjoin-cli
+        - payjoin-directory
+        - payjoin-test-utils
+        - payjoin-ffi
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: Describe the issue
+    validations:
+      required: true

@@ -112,7 +112,7 @@ pub struct MaybeInputsOwned {
 impl MaybeInputsOwned {
     pub fn check_inputs_not_owned(
         self,
-        is_owned: impl Fn(&bitcoin::Script) -> Result<bool, ImplementationError>,
+        is_owned: &mut impl FnMut(&bitcoin::Script) -> Result<bool, ImplementationError>,
     ) -> Result<MaybeInputsSeen, Error> {
         let inner = self.v1.check_inputs_not_owned(is_owned)?;
         Ok(MaybeInputsSeen { v1: inner, contexts: self.contexts })
@@ -127,7 +127,7 @@ pub struct MaybeInputsSeen {
 impl MaybeInputsSeen {
     pub fn check_no_inputs_seen_before(
         self,
-        is_seen: impl Fn(&bitcoin::OutPoint) -> Result<bool, ImplementationError>,
+        is_seen: &mut impl FnMut(&bitcoin::OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<OutputsUnknown, Error> {
         let inner = self.v1.check_no_inputs_seen_before(is_seen)?;
         Ok(OutputsUnknown { v1: inner, contexts: self.contexts })
@@ -142,7 +142,7 @@ pub struct OutputsUnknown {
 impl OutputsUnknown {
     pub fn identify_receiver_outputs(
         self,
-        is_receiver_output: impl Fn(&bitcoin::Script) -> Result<bool, ImplementationError>,
+        is_receiver_output: &mut impl FnMut(&bitcoin::Script) -> Result<bool, ImplementationError>,
     ) -> Result<WantsOutputs, Error> {
         let inner = self.v1.identify_receiver_outputs(is_receiver_output)?;
         Ok(WantsOutputs { v1: inner, contexts: self.contexts })

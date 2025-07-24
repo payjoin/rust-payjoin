@@ -568,7 +568,7 @@ impl Receiver<MaybeInputsOwned> {
     /// An attacker can try to spend the receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         self,
-        is_owned: impl Fn(&Script) -> Result<bool, ImplementationError>,
+        is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<MaybeInputsSeen>, ReplyableError> {
         let inner = match self.state.v1.clone().check_inputs_not_owned(is_owned) {
             Ok(inner) => inner,
@@ -618,7 +618,7 @@ impl Receiver<MaybeInputsSeen> {
     ///    original proposal PSBT of the current, new payjoin.
     pub fn check_no_inputs_seen_before(
         self,
-        is_known: impl Fn(&OutPoint) -> Result<bool, ImplementationError>,
+        is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<OutputsUnknown>, ReplyableError> {
         let inner = match self.state.v1.clone().check_no_inputs_seen_before(is_known) {
             Ok(inner) => inner,
@@ -673,7 +673,7 @@ impl Receiver<OutputsUnknown> {
     /// outputs.
     pub fn identify_receiver_outputs(
         self,
-        is_receiver_output: impl Fn(&Script) -> Result<bool, ImplementationError>,
+        is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<WantsOutputs>, ReplyableError> {
         let inner = match self.state.inner.clone().identify_receiver_outputs(is_receiver_output) {
             Ok(inner) => inner,
@@ -1099,6 +1099,50 @@ pub mod test {
         }
     }
 
+    pub(crate) fn maybe_inputs_owned_v2_from_test_vector() -> MaybeInputsOwned {
+        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
+        let params = Params::from_query_pairs(pairs, &[Version::Two])
+            .expect("Test utils query params should not fail");
+        MaybeInputsOwned {
+            v1: v1::MaybeInputsOwned { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
+            context: SHARED_CONTEXT.clone(),
+        }
+    }
+
+    #[test]
+    fn test_v2_mutable_receiver_state_closures() {
+        let mut call_count = 0;
+        let maybe_inputs_owned = maybe_inputs_owned_v2_from_test_vector();
+        let receiver = v2::Receiver { state: maybe_inputs_owned };
+
+        fn mock_callback(call_count: &mut usize, ret: bool) -> Result<bool, ImplementationError> {
+            *call_count += 1;
+            Ok(ret)
+        }
+
+        let maybe_inputs_seen =
+            receiver.check_inputs_not_owned(&mut |_| mock_callback(&mut call_count, false));
+        assert_eq!(call_count, 1);
+
+        let outputs_unknown = maybe_inputs_seen
+            .0
+            .map_err(|_| "Check inputs owned closure failed".to_string())
+            .expect("Next receiver state should be accessible")
+            .1
+            .check_no_inputs_seen_before(&mut |_| mock_callback(&mut call_count, false));
+        assert_eq!(call_count, 2);
+
+        let _wants_outputs = outputs_unknown
+            .0
+            .map_err(|_| "Check no inputs seen closure failed".to_string())
+            .expect("Next receiver state should be accessible")
+            .1
+            .identify_receiver_outputs(&mut |_| mock_callback(&mut call_count, true));
+        // there are 2 receiver outputs so we should expect this callback to run twice incrementing
+        // call count twice
+        assert_eq!(call_count, 4);
+    }
+
     #[test]
     fn test_unchecked_proposal_transient_error() -> Result<(), BoxError> {
         let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
@@ -1127,7 +1171,7 @@ pub mod test {
         let receiver = v2::Receiver { state: unchecked_proposal };
 
         let maybe_inputs_owned = receiver.assume_interactive_receiver();
-        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(|_| {
+        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(&mut |_| {
             Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
         });
 
@@ -1150,9 +1194,9 @@ pub mod test {
         let receiver = v2::Receiver { state: unchecked_proposal };
 
         let maybe_inputs_owned = receiver.assume_interactive_receiver();
-        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(|_| Ok(false));
+        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(&mut |_| Ok(false));
         let outputs_unknown = match maybe_inputs_seen.0 {
-            Ok(state) => state.1.check_no_inputs_seen_before(|_| {
+            Ok(state) => state.1.check_no_inputs_seen_before(&mut |_| {
                 Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
             }),
             Err(_) => panic!("Expected Ok, got Err"),
@@ -1177,13 +1221,13 @@ pub mod test {
         let receiver = v2::Receiver { state: unchecked_proposal };
 
         let maybe_inputs_owned = receiver.assume_interactive_receiver();
-        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(|_| Ok(false));
+        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(&mut |_| Ok(false));
         let outputs_unknown = match maybe_inputs_seen.0 {
-            Ok(state) => state.1.check_no_inputs_seen_before(|_| Ok(false)),
+            Ok(state) => state.1.check_no_inputs_seen_before(&mut |_| Ok(false)),
             Err(_) => panic!("Expected Ok, got Err"),
         };
         let wants_outputs = match outputs_unknown.0 {
-            Ok(state) => state.1.identify_receiver_outputs(|_| {
+            Ok(state) => state.1.identify_receiver_outputs(&mut |_| {
                 Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
             }),
             Err(_) => panic!("Expected Ok, got Err"),

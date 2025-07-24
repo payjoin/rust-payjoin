@@ -6,22 +6,22 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::v2::{self, extract_request, EncapsulationError, HpkeContext};
-use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, InternalResult};
+use super::{serialize_url, AdditionalFeeContribution, BuildSenderError};
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::{process_get_res, process_post_res};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::NoopSessionPersister;
 use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
-use crate::{ImplementationError, IntoUrl, PjUri, Request};
+use crate::{ImplementationError, IntoUrl, PjUri, Request, Version};
 
 mod error;
 
 #[derive(Clone)]
-pub struct SenderBuilder<'a>(v2::SenderBuilder<'a>);
+pub struct SenderBuilder(v2::SenderBuilder);
 
-impl<'a> SenderBuilder<'a> {
-    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v2::SenderBuilder::new(psbt, uri)) }
+impl SenderBuilder {
+    pub fn new(psbt: Psbt, uri: PjUri) -> Self { Self(v2::SenderBuilder::new(psbt, uri)) }
 
     pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, BuildSenderError> {
         let noop_persister = NoopSessionPersister::default();
@@ -56,10 +56,10 @@ impl Sender {
             .ohttp()
             .map_err(|_| InternalCreateRequestError::MissingOhttpConfig)?;
         let body = serialize_v2_body(
-            &self.0.v1.psbt,
-            self.0.v1.output_substitution,
-            self.0.v1.fee_contribution,
-            self.0.v1.min_fee_rate,
+            &self.0.state.psbt_ctx.original_psbt,
+            self.0.state.psbt_ctx.output_substitution,
+            self.0.state.psbt_ctx.fee_contribution,
+            self.0.state.psbt_ctx.min_fee_rate,
         )?;
         let (request, ohttp_ctx) = extract_request(
             ohttp_relay,
@@ -72,13 +72,7 @@ impl Sender {
         .map_err(InternalCreateRequestError::V2CreateRequest)?;
         let v2_post_ctx = V2PostContext {
             endpoint: self.0.endpoint().clone(),
-            psbt_ctx: crate::send::PsbtContext {
-                original_psbt: self.0.v1.psbt.clone(),
-                output_substitution: self.0.v1.output_substitution,
-                fee_contribution: self.0.v1.fee_contribution,
-                payee: self.0.v1.payee.clone(),
-                min_fee_rate: self.0.v1.min_fee_rate,
-            },
+            psbt_ctx: self.0.state.psbt_ctx.clone(),
             hpke_ctx: HpkeContext::new(rs, &self.0.reply_key),
             ohttp_ctx,
         };
@@ -111,7 +105,7 @@ fn serialize_v2_body(
         output_substitution,
         fee_contribution,
         min_fee_rate,
-        "2",
+        Version::Two,
     );
     append_optimisitic_merge_query_param(&mut url);
     let base64 = psbt.to_string();
@@ -143,7 +137,7 @@ impl GetContext {
         ohttp_ctx: ohttp::ClientResponse,
         finalize_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> Result<FinalizeContext, FinalizedError> {
-        let psbt_ctx = PsbtContext { inner: self.0.psbt_ctx.clone() };
+        let psbt_ctx = self.0.psbt_ctx.clone();
         let body = match process_get_res(response, ohttp_ctx)? {
             Some(body) => body,
             None => return Err(FinalizedError::from(InternalFinalizedError::MissingResponse)),
@@ -156,7 +150,8 @@ impl GetContext {
         .map_err(InternalFinalizedError::Hpke)?;
 
         let proposal = Psbt::deserialize(&psbt).map_err(InternalFinalizedError::Psbt)?;
-        let psbt = psbt_ctx.process_proposal(proposal).map_err(InternalFinalizedError::Proposal)?;
+        let psbt =
+            process_proposal(psbt_ctx, proposal).map_err(InternalFinalizedError::Proposal)?;
         let finalized_psbt = finalize_psbt(&psbt).map_err(InternalFinalizedError::FinalizePsbt)?;
         Ok(FinalizeContext {
             hpke_ctx: self.0.hpke_ctx.clone(),
@@ -213,21 +208,17 @@ impl FinalizeContext {
     }
 }
 
-pub(crate) struct PsbtContext {
-    inner: crate::send::PsbtContext,
-}
-
-impl PsbtContext {
-    fn process_proposal(self, mut proposal: Psbt) -> InternalResult<Psbt> {
-        // TODO(armins) add multiparty check fees modeled after crate::send::PsbtContext::check_fees
-        // The problem with this is that some of the inputs will be missing witness_utxo or non_witness_utxo field in the psbt so the default psbt.fee() will fail
-        // Similarly we need to implement a check for the inputs. It would be useful to have all the checks as crate::send::PsbtContext::check_inputs
-        // However that method expects the receiver to have provided witness for their inputs. In a ns1r the receiver will not sign any inputs of the optimistic merged psbt
-        self.inner.basic_checks(&proposal)?;
-        self.inner.check_outputs(&proposal)?;
-        self.inner.restore_original_utxos(&mut proposal)?;
-        Ok(proposal)
-    }
+/// The same as `crate::send::PsbtContext::process_proposal` but without checking receiver input finalization
+fn process_proposal(
+    psbt_ctx: crate::send::PsbtContext,
+    mut proposal: Psbt,
+) -> crate::send::InternalResult<Psbt> {
+    psbt_ctx.basic_checks(&proposal)?;
+    psbt_ctx.check_inputs(&proposal, false)?;
+    let contributed_fee = psbt_ctx.check_outputs(&proposal)?;
+    psbt_ctx.restore_original_utxos(&mut proposal)?;
+    psbt_ctx.check_fees(&proposal, contributed_fee)?;
+    Ok(proposal)
 }
 
 fn append_optimisitic_merge_query_param(url: &mut Url) {
@@ -240,6 +231,7 @@ mod test {
     use payjoin_test_utils::BoxError;
     use url::Url;
 
+    use super::*;
     use crate::output_substitution::OutputSubstitution;
     use crate::send::multiparty::append_optimisitic_merge_query_param;
     use crate::send::serialize_url;
@@ -251,7 +243,7 @@ mod test {
             OutputSubstitution::Enabled,
             None,
             FeeRate::ZERO,
-            "2",
+            Version::Two,
         );
         append_optimisitic_merge_query_param(&mut url);
         assert_eq!(url, Url::parse("http://localhost?v=2&optimisticmerge=true")?);
@@ -261,7 +253,7 @@ mod test {
             OutputSubstitution::Enabled,
             None,
             FeeRate::ZERO,
-            "2",
+            Version::Two,
         );
         assert_eq!(url, Url::parse("http://localhost?v=2")?);
 

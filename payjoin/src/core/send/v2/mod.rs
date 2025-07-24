@@ -43,7 +43,6 @@ use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
 use crate::persist::{
     MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeSuccessTransitionWithNoResults,
 };
-use crate::send::v1;
 use crate::send::v2::session::InternalReplayError;
 use crate::uri::{ShortId, UrlExt};
 use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
@@ -52,15 +51,36 @@ mod error;
 mod session;
 
 /// A builder to construct the properties of a [`Sender`].
+/// V2 SenderBuilder differs from V1 in that it does not allow the receiver's output substitution preference to be disabled.
+/// This is because all communications with the receiver are end-to-end authenticated. So a
+/// malicious man in the middle can't substitute outputs, only the receiver can.
+/// The receiver can always choose not to substitute outputs, however.
 #[derive(Clone)]
-pub struct SenderBuilder<'a>(pub(crate) v1::SenderBuilder<'a>);
+pub struct SenderBuilder {
+    endpoint: Url,
+    output_substitution: OutputSubstitution,
+    psbt_ctx_builder: PsbtContextBuilder,
+}
 
-impl<'a> SenderBuilder<'a> {
+impl SenderBuilder {
     /// Prepare the context from which to make Sender requests
     ///
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
     /// to create a [`Sender`]
-    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v1::SenderBuilder::new(psbt, uri)) }
+    pub fn new(psbt: Psbt, uri: PjUri) -> Self {
+        Self {
+            endpoint: uri.extras.endpoint,
+            // Ignore the receiver's output substitution preference, because all
+            // communications with the receiver are end-to-end authenticated. So a
+            // malicious man in the middle can't substitute outputs, only the receiver can.
+            output_substitution: OutputSubstitution::Enabled,
+            psbt_ctx_builder: PsbtContextBuilder::new(
+                psbt,
+                uri.address.script_pubkey(),
+                uri.amount,
+            ),
+        }
+    }
 
     /// Disable output substitution even if the receiver didn't.
     ///
@@ -69,7 +89,7 @@ impl<'a> SenderBuilder<'a> {
     /// doing advanced operations such as opening LN channels and it also guarantees the
     /// receiver will **not** reward the sender with a discount.
     pub fn always_disable_output_substitution(self) -> Self {
-        Self(self.0.always_disable_output_substitution())
+        Self { output_substitution: OutputSubstitution::Disabled, ..self }
     }
 
     // Calculate the recommended fee contribution for an Original PSBT.
@@ -82,7 +102,10 @@ impl<'a> SenderBuilder<'a> {
         self,
         min_fee_rate: FeeRate,
     ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
-        self.v2_sender_from_v1(self.0.clone().build_recommended(min_fee_rate))
+        Self::v2_sender_from_psbt_ctx_result(
+            self.endpoint,
+            self.psbt_ctx_builder.build_recommended(min_fee_rate, self.output_substitution),
+        )
     }
 
     /// Offer the receiver contribution to pay for his input.
@@ -105,12 +128,16 @@ impl<'a> SenderBuilder<'a> {
         min_fee_rate: FeeRate,
         clamp_fee_contribution: bool,
     ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
-        self.v2_sender_from_v1(self.0.clone().build_with_additional_fee(
-            max_fee_contribution,
-            change_index,
-            min_fee_rate,
-            clamp_fee_contribution,
-        ))
+        Self::v2_sender_from_psbt_ctx_result(
+            self.endpoint,
+            self.psbt_ctx_builder.build_with_additional_fee(
+                max_fee_contribution,
+                change_index,
+                min_fee_rate,
+                clamp_fee_contribution,
+                self.output_substitution,
+            ),
+        )
     }
 
     /// Perform Payjoin without incentivizing the payee to cooperate.
@@ -121,27 +148,24 @@ impl<'a> SenderBuilder<'a> {
         self,
         min_fee_rate: FeeRate,
     ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
-        self.v2_sender_from_v1(self.0.clone().build_non_incentivizing(min_fee_rate))
+        Self::v2_sender_from_psbt_ctx_result(
+            self.endpoint,
+            self.psbt_ctx_builder.build_non_incentivizing(min_fee_rate, self.output_substitution),
+        )
     }
 
     /// Helper function that takes a V1 sender build result and wraps it in a V2 Sender,
     /// returning the appropriate state transition.
-    fn v2_sender_from_v1(
-        &self,
-        v1_result: Result<v1::Sender, BuildSenderError>,
+    fn v2_sender_from_psbt_ctx_result(
+        endpoint: Url,
+        psbt_ctx_result: Result<PsbtContext, BuildSenderError>,
     ) -> MaybeBadInitInputsTransition<SessionEvent, Sender<WithReplyKey>, BuildSenderError> {
-        let mut v1 = match v1_result {
+        let psbt_ctx = match psbt_ctx_result {
             Ok(inner) => inner,
             Err(e) => return MaybeBadInitInputsTransition::bad_init_inputs(e),
         };
 
-        // V2 senders may always ignore the receiver's `pjos` output substitution preference,
-        // because all communications with the receiver are end-to-end authenticated.
-        if self.0.output_substitution == OutputSubstitution::Enabled {
-            v1.output_substitution = OutputSubstitution::Enabled;
-        }
-
-        let with_reply_key = WithReplyKey { v1, reply_key: HpkeKeyPair::gen_keypair().0 };
+        let with_reply_key = WithReplyKey::new(endpoint.clone(), psbt_ctx);
         MaybeBadInitInputsTransition::success(
             SessionEvent::CreatedReplyKey(with_reply_key.clone()),
             Sender { state: with_reply_key },
@@ -202,18 +226,26 @@ impl SendSession {
 /// and the resulting [`V2PostContext`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WithReplyKey {
-    /// The v1 Sender.
-    pub(crate) v1: v1::Sender,
+    /// The endpoint in the Payjoin URI
+    pub(crate) endpoint: Url,
+    /// The Original PSBT context
+    pub(crate) psbt_ctx: PsbtContext,
     /// The secret key to decrypt the receiver's reply.
     pub(crate) reply_key: HpkeSecretKey,
 }
 
 impl State for WithReplyKey {}
 
+impl WithReplyKey {
+    pub fn new(endpoint: Url, psbt_ctx: PsbtContext) -> Self {
+        Self { endpoint, psbt_ctx, reply_key: HpkeKeyPair::gen_keypair().0 }
+    }
+}
+
 impl Sender<WithReplyKey> {
     /// Construct serialized V1 Request and Context from a Payjoin Proposal
-    pub fn create_v1_post_request(&self) -> (Request, v1::V1Context) {
-        self.v1.create_v1_post_request()
+    pub fn create_v1_post_request(&self) -> (Request, V1Context) {
+        super::create_v1_post_request(self.endpoint.clone(), self.psbt_ctx.clone())
     }
 
     /// Construct serialized Request and Context from a Payjoin Proposal.
@@ -229,28 +261,25 @@ impl Sender<WithReplyKey> {
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, V2PostContext), CreateRequestError> {
-        if let Ok(expiry) = self.v1.endpoint.exp() {
+        if let Ok(expiry) = self.endpoint.exp() {
             if std::time::SystemTime::now() > expiry {
                 return Err(InternalCreateRequestError::Expired(expiry).into());
             }
         }
 
-        let mut ohttp_keys = self
-            .v1
-            .endpoint()
-            .ohttp()
-            .map_err(|_| InternalCreateRequestError::MissingOhttpConfig)?;
+        let mut ohttp_keys =
+            self.endpoint().ohttp().map_err(|_| InternalCreateRequestError::MissingOhttpConfig)?;
         let body = serialize_v2_body(
-            &self.v1.psbt,
-            self.v1.output_substitution,
-            self.v1.fee_contribution,
-            self.v1.min_fee_rate,
+            &self.psbt_ctx.original_psbt,
+            self.psbt_ctx.output_substitution,
+            self.psbt_ctx.fee_contribution,
+            self.psbt_ctx.min_fee_rate,
         )?;
         let (request, ohttp_ctx) = extract_request(
             ohttp_relay,
             self.reply_key.clone(),
             body,
-            self.v1.endpoint.clone(),
+            self.endpoint.clone(),
             self.extract_rs_pubkey()?,
             &mut ohttp_keys,
         )?;
@@ -258,14 +287,8 @@ impl Sender<WithReplyKey> {
         Ok((
             request,
             V2PostContext {
-                endpoint: self.v1.endpoint.clone(),
-                psbt_ctx: PsbtContext {
-                    original_psbt: self.v1.psbt.clone(),
-                    output_substitution: self.v1.output_substitution,
-                    fee_contribution: self.v1.fee_contribution,
-                    payee: self.v1.payee.clone(),
-                    min_fee_rate: self.v1.min_fee_rate,
-                },
+                endpoint: self.endpoint.clone(),
+                psbt_ctx: self.psbt_ctx.clone(),
                 hpke_ctx: HpkeContext::new(rs, &self.reply_key),
                 ohttp_ctx,
             },
@@ -311,11 +334,11 @@ impl Sender<WithReplyKey> {
     pub(crate) fn extract_rs_pubkey(
         &self,
     ) -> Result<HpkePublicKey, crate::uri::url_ext::ParseReceiverPubkeyParamError> {
-        self.v1.endpoint.receiver_pubkey()
+        self.endpoint.receiver_pubkey()
     }
 
     /// The endpoint in the Payjoin URI
-    pub fn endpoint(&self) -> &Url { self.v1.endpoint() }
+    pub fn endpoint(&self) -> &Url { &self.endpoint }
 
     pub(crate) fn apply_v2_get_context(self, v2_get_context: V2GetContext) -> SendSession {
         SendSession::V2GetContext(Sender { state: v2_get_context })
@@ -359,13 +382,8 @@ pub(crate) fn serialize_v2_body(
     // Grug say localhost base be discarded anyway. no big brain needed.
     let base_url = Url::parse("http://localhost").expect("invalid URL");
 
-    let placeholder_url = serialize_url(
-        base_url,
-        output_substitution,
-        fee_contribution,
-        min_fee_rate,
-        "2", // payjoin version
-    );
+    let placeholder_url =
+        serialize_url(base_url, output_substitution, fee_contribution, min_fee_rate, Version::Two);
     let query_params = placeholder_url.query().unwrap_or_default();
     let base64 = psbt.to_string();
     Ok(format!("{base64}\n{query_params}").into_bytes())
@@ -521,9 +539,9 @@ mod test {
         let endpoint = Url::parse("http://localhost:1234")?;
         let mut sender = super::Sender {
             state: super::WithReplyKey {
-                v1: v1::Sender {
-                    psbt: PARSED_ORIGINAL_PSBT.clone(),
-                    endpoint,
+                endpoint,
+                psbt_ctx: PsbtContext {
+                    original_psbt: PARSED_ORIGINAL_PSBT.clone(),
                     output_substitution: OutputSubstitution::Enabled,
                     fee_contribution: None,
                     min_fee_rate: FeeRate::ZERO,
@@ -532,9 +550,9 @@ mod test {
                 reply_key: HpkeKeyPair::gen_keypair().0,
             },
         };
-        sender.v1.endpoint.set_exp(SystemTime::now() + Duration::from_secs(60));
-        sender.v1.endpoint.set_receiver_pubkey(HpkeKeyPair::gen_keypair().1);
-        sender.v1.endpoint.set_ohttp(OhttpKeys(
+        sender.endpoint.set_exp(SystemTime::now() + Duration::from_secs(60));
+        sender.endpoint.set_receiver_pubkey(HpkeKeyPair::gen_keypair().1);
+        sender.endpoint.set_ohttp(OhttpKeys(
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
         ));
 
@@ -545,10 +563,10 @@ mod test {
     fn test_serialize_v2() -> Result<(), BoxError> {
         let sender = create_sender_context()?;
         let body = serialize_v2_body(
-            &sender.v1.psbt,
-            sender.v1.output_substitution,
-            sender.v1.fee_contribution,
-            sender.v1.min_fee_rate,
+            &sender.psbt_ctx.original_psbt,
+            sender.psbt_ctx.output_substitution,
+            sender.psbt_ctx.fee_contribution,
+            sender.psbt_ctx.min_fee_rate,
         );
         assert_eq!(body.as_ref().unwrap(), &<Vec<u8> as FromHex>::from_hex(SERIALIZED_BODY_V2)?,);
         Ok(())
@@ -563,10 +581,10 @@ mod test {
         assert!(!request.body.is_empty(), "Request body should not be empty");
         assert_eq!(
             request.url.to_string(),
-            format!("{}{}", EXAMPLE_URL.clone(), sender.v1.endpoint.join("/")?)
+            format!("{}{}", EXAMPLE_URL.clone(), sender.endpoint.join("/")?)
         );
-        assert_eq!(context.endpoint, sender.v1.endpoint);
-        assert_eq!(context.psbt_ctx.original_psbt, sender.v1.psbt);
+        assert_eq!(context.endpoint, sender.endpoint);
+        assert_eq!(context.psbt_ctx.original_psbt, sender.psbt_ctx.original_psbt);
         Ok(())
     }
 
@@ -574,9 +592,9 @@ mod test {
     fn test_extract_v2_fails_missing_pubkey() -> Result<(), BoxError> {
         let expected_error = "cannot parse receiver public key: receiver public key is missing";
         let mut sender = create_sender_context()?;
-        sender.v1.endpoint.set_fragment(Some(""));
-        sender.v1.endpoint.set_exp(SystemTime::now() + Duration::from_secs(60));
-        sender.v1.endpoint.set_ohttp(OhttpKeys(
+        sender.endpoint.set_fragment(Some(""));
+        sender.endpoint.set_exp(SystemTime::now() + Duration::from_secs(60));
+        sender.endpoint.set_ohttp(OhttpKeys(
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
         ));
         let ohttp_relay = EXAMPLE_URL.clone();
@@ -594,9 +612,9 @@ mod test {
     fn test_extract_v2_fails_missing_ohttp_config() -> Result<(), BoxError> {
         let expected_error = "no ohttp configuration with which to make a v2 request available";
         let mut sender = create_sender_context()?;
-        sender.v1.endpoint.set_fragment(Some(""));
-        sender.v1.endpoint.set_exp(SystemTime::now() + Duration::from_secs(60));
-        sender.v1.endpoint.set_receiver_pubkey(HpkeKeyPair::gen_keypair().1);
+        sender.endpoint.set_fragment(Some(""));
+        sender.endpoint.set_exp(SystemTime::now() + Duration::from_secs(60));
+        sender.endpoint.set_receiver_pubkey(HpkeKeyPair::gen_keypair().1);
         let ohttp_relay = EXAMPLE_URL.clone();
         let result = sender.create_v2_post_request(ohttp_relay);
         assert!(result.is_err(), "Extract v2 expected missing ohttp error, but it succeeded");
@@ -613,7 +631,7 @@ mod test {
         let expected_error = "session expired at SystemTime";
         let mut sender = create_sender_context()?;
         let exp_time = std::time::SystemTime::now();
-        sender.v1.endpoint.set_exp(exp_time);
+        sender.endpoint.set_exp(exp_time);
         let ohttp_relay = EXAMPLE_URL.clone();
         let result = sender.create_v2_post_request(ohttp_relay);
         assert!(result.is_err(), "Extract v2 expected expiry error, but it succeeded");
@@ -649,29 +667,30 @@ mod test {
             .expect("sender should succeed");
         // v2 senders may always override the receiver's `pjos` parameter to enable output
         // substitution
-        assert_eq!(req_ctx.v1.output_substitution, OutputSubstitution::Enabled);
-        assert_eq!(&req_ctx.v1.payee, &address.script_pubkey());
-        let fee_contribution = req_ctx.v1.fee_contribution.expect("sender should contribute fees");
+        assert_eq!(req_ctx.state.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
+        assert_eq!(&req_ctx.state.psbt_ctx.payee, &address.script_pubkey());
+        let fee_contribution =
+            req_ctx.state.psbt_ctx.fee_contribution.expect("sender should contribute fees");
         assert_eq!(fee_contribution.max_amount, Amount::from_sat(91));
         assert_eq!(fee_contribution.vout, 0);
-        assert_eq!(req_ctx.v1.min_fee_rate, FeeRate::from_sat_per_kwu(250));
+        assert_eq!(req_ctx.state.psbt_ctx.min_fee_rate, FeeRate::from_sat_per_kwu(250));
         // ensure that the other builder methods also enable output substitution
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_non_incentivizing(FeeRate::BROADCAST_MIN)
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
-        assert_eq!(req_ctx.v1.output_substitution, OutputSubstitution::Enabled);
+        assert_eq!(req_ctx.state.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_with_additional_fee(Amount::ZERO, Some(0), FeeRate::BROADCAST_MIN, false)
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
-        assert_eq!(req_ctx.v1.output_substitution, OutputSubstitution::Enabled);
+        assert_eq!(req_ctx.state.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
         // ensure that a v2 sender may still disable output substitution if they prefer.
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
             .always_disable_output_substitution()
             .build_recommended(FeeRate::BROADCAST_MIN)
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
-        assert_eq!(req_ctx.v1.output_substitution, OutputSubstitution::Disabled);
+        assert_eq!(req_ctx.state.psbt_ctx.output_substitution, OutputSubstitution::Disabled);
     }
 }

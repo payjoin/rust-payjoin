@@ -183,7 +183,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
                 headers={"Content-Type": request.request.content_type},
                 content=request.request.body
             )
-            payjoin_proposal.process_res(response.content, request.client_response)
+            payjoin_proposal.process_response(response.content, request.client_response)
 
             # **********************
             # Inside the Sender:

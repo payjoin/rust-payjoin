@@ -8,56 +8,173 @@ pub use error::{
 };
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
-use payjoin::persist::{MaybeFatalTransition, NextStateTransition, SessionPersister};
+use payjoin::persist::{MaybeFatalTransition, NextStateTransition};
 
 use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
+use crate::error::ForeignError;
 pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::OhttpKeys;
 use crate::receive::error::{ReceiverPersistedError, ReceiverReplayError};
 use crate::{ClientResponse, OutputSubstitution, Request};
 
 pub mod error;
-#[cfg(feature = "uniffi")]
-pub mod uni;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SessionEvent(payjoin::receive::v2::SessionEvent);
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Object)]
+pub struct ReceiverSessionEvent(payjoin::receive::v2::SessionEvent);
 
-impl From<payjoin::receive::v2::SessionEvent> for SessionEvent {
+impl From<payjoin::receive::v2::SessionEvent> for ReceiverSessionEvent {
     fn from(event: payjoin::receive::v2::SessionEvent) -> Self { Self(event) }
 }
 
-impl From<SessionEvent> for payjoin::receive::v2::SessionEvent {
-    fn from(event: SessionEvent) -> Self { event.0 }
+impl From<ReceiverSessionEvent> for payjoin::receive::v2::SessionEvent {
+    fn from(event: ReceiverSessionEvent) -> Self { event.0 }
 }
 
-pub struct ReceiveSession(pub payjoin::receive::v2::ReceiveSession);
+#[uniffi::export]
+impl ReceiverSessionEvent {
+    pub fn to_json(&self) -> Result<String, SerdeJsonError> {
+        serde_json::to_string(&self.0).map_err(Into::into)
+    }
+
+    #[uniffi::constructor]
+    pub fn from_json(json: String) -> Result<Self, SerdeJsonError> {
+        let event: payjoin::receive::v2::SessionEvent = serde_json::from_str(&json)?;
+        Ok(ReceiverSessionEvent(event))
+    }
+}
+
+#[derive(Clone, uniffi::Enum)]
+pub enum ReceiveSession {
+    Uninitialized,
+    Initialized { inner: Arc<Initialized> },
+    UncheckedProposal { inner: Arc<UncheckedProposal> },
+    MaybeInputsOwned { inner: Arc<MaybeInputsOwned> },
+    MaybeInputsSeen { inner: Arc<MaybeInputsSeen> },
+    OutputsUnknown { inner: Arc<OutputsUnknown> },
+    WantsOutputs { inner: Arc<WantsOutputs> },
+    WantsInputs { inner: Arc<WantsInputs> },
+    WantsFeeRange { inner: Arc<WantsFeeRange> },
+    ProvisionalProposal { inner: Arc<ProvisionalProposal> },
+    PayjoinProposal { inner: Arc<PayjoinProposal> },
+    TerminalFailure,
+}
 
 impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
-    fn from(value: payjoin::receive::v2::ReceiveSession) -> Self { Self(value) }
+    fn from(value: payjoin::receive::v2::ReceiveSession) -> Self {
+        use payjoin::receive::v2::ReceiveSession;
+        match value {
+            ReceiveSession::Uninitialized(_) => Self::Uninitialized,
+            ReceiveSession::Initialized(inner) =>
+                Self::Initialized { inner: Arc::new(inner.into()) },
+            ReceiveSession::UncheckedProposal(inner) =>
+                Self::UncheckedProposal { inner: Arc::new(inner.into()) },
+            ReceiveSession::MaybeInputsOwned(inner) =>
+                Self::MaybeInputsOwned { inner: Arc::new(inner.into()) },
+            ReceiveSession::MaybeInputsSeen(inner) =>
+                Self::MaybeInputsSeen { inner: Arc::new(inner.into()) },
+            ReceiveSession::OutputsUnknown(inner) =>
+                Self::OutputsUnknown { inner: Arc::new(inner.into()) },
+            ReceiveSession::WantsOutputs(inner) =>
+                Self::WantsOutputs { inner: Arc::new(inner.into()) },
+            ReceiveSession::WantsInputs(inner) =>
+                Self::WantsInputs { inner: Arc::new(inner.into()) },
+            ReceiveSession::WantsFeeRange(inner) =>
+                Self::WantsFeeRange { inner: Arc::new(inner.into()) },
+            ReceiveSession::ProvisionalProposal(inner) =>
+                Self::ProvisionalProposal { inner: Arc::new(inner.into()) },
+            ReceiveSession::PayjoinProposal(inner) =>
+                Self::PayjoinProposal { inner: Arc::new(inner.into()) },
+            ReceiveSession::TerminalFailure => Self::TerminalFailure,
+        }
+    }
 }
 
-pub fn replay_event_log<P>(
-    persister: &P,
-) -> Result<(ReceiveSession, SessionHistory), ReceiverReplayError>
-where
-    P: SessionPersister,
-    P::SessionEvent: Into<payjoin::receive::v2::SessionEvent> + Clone,
-{
-    let (state, history) =
-        payjoin::receive::v2::replay_event_log(persister).map_err(ReceiverReplayError::from)?;
-    Ok((state.into(), history.into()))
+#[derive(uniffi::Object)]
+pub struct ReplayResult {
+    state: ReceiveSession,
+    session_history: SessionHistory,
 }
 
-#[derive(Default, Clone)]
+#[uniffi::export]
+impl ReplayResult {
+    pub fn state(&self) -> ReceiveSession { self.state.clone() }
+
+    pub fn session_history(&self) -> SessionHistory { self.session_history.clone() }
+}
+
+#[uniffi::export]
+pub fn replay_receiver_event_log(
+    persister: Arc<dyn JsonReceiverSessionPersister>,
+) -> Result<ReplayResult, ReceiverReplayError> {
+    let adapter = CallbackPersisterAdapter::new(persister);
+    let (state, session_history) = payjoin::receive::v2::replay_event_log(&adapter)?;
+    Ok(ReplayResult { state: state.into(), session_history: session_history.into() })
+}
+
+#[derive(Default, Clone, uniffi::Object)]
 pub struct SessionHistory(pub payjoin::receive::v2::SessionHistory);
 
 impl From<payjoin::receive::v2::SessionHistory> for SessionHistory {
     fn from(value: payjoin::receive::v2::SessionHistory) -> Self { Self(value) }
 }
 
+#[derive(uniffi::Object)]
+pub struct TerminalErr {
+    error: String,
+    reply: Option<JsonReply>,
+}
+
+#[uniffi::export]
+impl TerminalErr {
+    pub fn error(&self) -> String { self.error.clone() }
+
+    pub fn reply(&self) -> Option<Arc<JsonReply>> { self.reply.clone().map(Arc::new) }
+}
+
+#[uniffi::export]
+impl SessionHistory {
+    /// Receiver session Payjoin URI
+    pub fn pj_uri(&self) -> Option<Arc<crate::PjUri>> {
+        self.0.pj_uri().map(|pj_uri| Arc::new(pj_uri.into()))
+    }
+
+    /// Psbt With fee contributions applied
+    pub fn psbt_ready_for_signing(&self) -> Option<Arc<crate::Psbt>> {
+        self.0.psbt_ready_for_signing().map(|psbt| Arc::new(psbt.into()))
+    }
+
+    /// Terminal error from the session if present
+    pub fn terminal_error(&self) -> Option<Arc<TerminalErr>> {
+        self.0.terminal_error().map(|(error, reply)| {
+            Arc::new(TerminalErr { error, reply: reply.map(|reply| reply.into()) })
+        })
+    }
+
+    /// Fallback transaction from the session if present
+    pub fn fallback_tx(&self) -> Option<Arc<crate::Transaction>> {
+        self.0.fallback_tx().map(|tx| Arc::new(tx.into()))
+    }
+
+    /// Construct the error request to be posted on the directory if an error occurred.
+    /// To process the response, use [process_err_res]
+    pub fn extract_err_req(
+        &self,
+        ohttp_relay: String,
+    ) -> Result<Option<RequestResponse>, SessionError> {
+        match self.0.extract_err_req(ohttp_relay) {
+            Ok(Some((request, ctx))) => Ok(Some(RequestResponse {
+                request: request.into(),
+                client_response: Arc::new(ctx.into()),
+            })),
+            Ok(None) => Ok(None),
+            Err(e) => Err(SessionError::from(e)),
+        }
+    }
+}
+
+#[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
-pub struct InitInputsTransition(
+pub struct InitialReceiveTransition(
     Arc<
         RwLock<
             Option<
@@ -71,11 +188,13 @@ pub struct InitInputsTransition(
     >,
 );
 
-impl InitInputsTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<Initialized, ReceiverPersistedError>
-    where
-        P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
-    {
+#[uniffi::export]
+impl InitialReceiveTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<Initialized, ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner =
             self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
 
@@ -83,22 +202,21 @@ impl InitInputsTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
+        let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
 
-pub struct UninitializedReceiver(
-    payjoin::receive::v2::Receiver<payjoin::receive::v2::UninitializedReceiver>,
-);
+#[derive(uniffi::Object)]
+pub struct UninitializedReceiver {}
 
-impl From<UninitializedReceiver>
-    for payjoin::receive::v2::Receiver<payjoin::receive::v2::UninitializedReceiver>
-{
-    fn from(value: UninitializedReceiver) -> Self { value.0 }
-}
-
+#[uniffi::export]
 impl UninitializedReceiver {
+    #[allow(clippy::new_without_default)]
+    #[uniffi::constructor]
+    // TODO: no need for this constructor. `create_session` is the only way to create a receiver.
+    pub fn new() -> Self { Self {} }
+
     /// Creates a new [`Initialized`] with the provided parameters.
     ///
     /// # Parameters
@@ -113,23 +231,24 @@ impl UninitializedReceiver {
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md)
     pub fn create_session(
-        address: Address,
+        &self,
+        address: Arc<Address>,
         directory: String,
-        ohttp_keys: OhttpKeys,
+        ohttp_keys: Arc<OhttpKeys>,
         expire_after: Option<u64>,
-    ) -> InitInputsTransition {
-        InitInputsTransition(Arc::new(RwLock::new(Some(
+    ) -> InitialReceiveTransition {
+        InitialReceiveTransition(Arc::new(RwLock::new(Some(
             payjoin::receive::v2::Receiver::create_session(
-                address.into(),
+                (*address).clone().into(),
                 directory,
-                ohttp_keys.into(),
+                (*ohttp_keys).clone().into(),
                 expire_after.map(Duration::from_secs),
             ),
         ))))
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Object)]
 pub struct Initialized(payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>);
 
 impl From<Initialized> for payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized> {
@@ -142,6 +261,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>> for
     }
 }
 
+#[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
 pub struct InitializedTransition(
     Arc<
@@ -158,14 +278,13 @@ pub struct InitializedTransition(
     >,
 );
 
+#[uniffi::export]
 impl InitializedTransition {
-    pub fn save<P>(
+    pub fn save(
         &self,
-        persister: &P,
-    ) -> Result<InitializedTransitionOutcome, ReceiverPersistedError>
-    where
-        P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
-    {
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<InitializedTransitionOutcome, ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner =
             self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
 
@@ -173,11 +292,12 @@ impl InitializedTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
+        let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
 
+#[derive(uniffi::Object)]
 pub struct InitializedTransitionOutcome(
     payjoin::persist::OptionalTransitionOutcome<
         payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>,
@@ -185,13 +305,14 @@ pub struct InitializedTransitionOutcome(
     >,
 );
 
+#[uniffi::export]
 impl InitializedTransitionOutcome {
     pub fn is_none(&self) -> bool { self.0.is_none() }
 
     pub fn is_success(&self) -> bool { self.0.is_success() }
 
-    pub fn success(&self) -> Option<UncheckedProposal> {
-        self.0.success().map(|r| r.clone().into())
+    pub fn success(&self) -> Option<Arc<UncheckedProposal>> {
+        self.0.success().map(|r| Arc::new(r.clone().into()))
     }
 }
 
@@ -213,16 +334,26 @@ impl
     }
 }
 
+#[derive(uniffi::Record)]
+pub struct RequestResponse {
+    pub request: Request,
+    pub client_response: Arc<ClientResponse>,
+}
+
+#[uniffi::export]
 impl Initialized {
     /// Construct an OHTTP encapsulated GET request, polling the mailbox for the Original PSBT
     pub fn create_poll_request(
         &self,
         ohttp_relay: String,
-    ) -> Result<(Request, ClientResponse), ReceiverError> {
+    ) -> Result<RequestResponse, ReceiverError> {
         self.0
             .clone()
             .create_poll_request(ohttp_relay)
-            .map(|(req, ctx)| (req.into(), ctx.into()))
+            .map(|(req, ctx)| RequestResponse {
+                request: req.into(),
+                client_response: Arc::new(ctx.into()),
+            })
             .map_err(Into::into)
     }
 
@@ -243,7 +374,7 @@ impl Initialized {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, uniffi::Object)]
 pub struct UncheckedProposal(
     payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>,
 );
@@ -264,6 +395,7 @@ impl From<UncheckedProposal>
     fn from(value: UncheckedProposal) -> Self { value.0 }
 }
 
+#[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
 pub struct UncheckedProposalTransition(
     Arc<
@@ -279,11 +411,13 @@ pub struct UncheckedProposalTransition(
     >,
 );
 
+#[uniffi::export]
 impl UncheckedProposalTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<MaybeInputsOwned, ReceiverPersistedError>
-    where
-        P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
-    {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<MaybeInputsOwned, ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner =
             self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
 
@@ -291,11 +425,12 @@ impl UncheckedProposalTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
+        let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
 
+#[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
 pub struct AssumeInteractiveTransition(
     Arc<
@@ -310,11 +445,13 @@ pub struct AssumeInteractiveTransition(
     >,
 );
 
+#[uniffi::export]
 impl AssumeInteractiveTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<MaybeInputsOwned, ReceiverPersistedError>
-    where
-        P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
-    {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<MaybeInputsOwned, ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner =
             self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
 
@@ -322,24 +459,32 @@ impl AssumeInteractiveTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| {
+        let res = value.save(&adapter).map_err(|e| {
             ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
         })?;
         Ok(res.into())
     }
 }
 
+#[uniffi::export(with_foreign)]
+pub trait CanBroadcast: Send + Sync {
+    fn callback(&self, tx: Vec<u8>) -> Result<bool, ForeignError>;
+}
+
+#[uniffi::export]
 impl UncheckedProposal {
     pub fn check_broadcast_suitability(
         &self,
         min_fee_rate: Option<u64>,
-        can_broadcast: impl Fn(&Vec<u8>) -> Result<bool, ImplementationError>,
+        can_broadcast: Arc<dyn CanBroadcast>,
     ) -> UncheckedProposalTransition {
         UncheckedProposalTransition(Arc::new(RwLock::new(Some(
             self.0.clone().check_broadcast_suitability(
                 min_fee_rate.map(FeeRate::from_sat_per_kwu),
                 |transaction| {
-                    Ok(can_broadcast(&payjoin::bitcoin::consensus::encode::serialize(transaction))?)
+                    can_broadcast
+                        .callback(payjoin::bitcoin::consensus::encode::serialize(transaction))
+                        .map_err(|e| ImplementationError::from(e.to_string()).into())
                 },
             ),
         ))))
@@ -359,10 +504,11 @@ impl UncheckedProposal {
 
 /// Process an OHTTP Encapsulated HTTP POST Error response
 /// to ensure it has been posted properly
+#[uniffi::export]
 pub fn process_err_res(body: &[u8], context: &ClientResponse) -> Result<(), SessionError> {
     payjoin::receive::v2::process_err_res(body, context.into()).map_err(Into::into)
 }
-#[derive(Clone)]
+#[derive(Clone, uniffi::Object)]
 pub struct MaybeInputsOwned(payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsOwned>);
 
 impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsOwned>>
@@ -373,6 +519,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsOwned>
     }
 }
 
+#[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
 pub struct MaybeInputsOwnedTransition(
     Arc<
@@ -388,11 +535,13 @@ pub struct MaybeInputsOwnedTransition(
     >,
 );
 
+#[uniffi::export]
 impl MaybeInputsOwnedTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<MaybeInputsSeen, ReceiverPersistedError>
-    where
-        P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
-    {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<MaybeInputsSeen, ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner =
             self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
 
@@ -400,11 +549,17 @@ impl MaybeInputsOwnedTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
+        let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
 
+#[uniffi::export(with_foreign)]
+pub trait IsScriptOwned: Send + Sync {
+    fn callback(&self, script: Vec<u8>) -> Result<bool, ForeignError>;
+}
+
+#[uniffi::export]
 impl MaybeInputsOwned {
     ///The Sender’s Original PSBT
     pub fn extract_tx_to_schedule_broadcast(&self) -> Vec<u8> {
@@ -414,15 +569,19 @@ impl MaybeInputsOwned {
     }
     pub fn check_inputs_not_owned(
         &self,
-        is_owned: impl Fn(&Vec<u8>) -> Result<bool, ImplementationError>,
+        is_owned: Arc<dyn IsScriptOwned>,
     ) -> MaybeInputsOwnedTransition {
         MaybeInputsOwnedTransition(Arc::new(RwLock::new(Some(
-            self.0.clone().check_inputs_not_owned(&mut |input| Ok(is_owned(&input.to_bytes())?)),
+            self.0.clone().check_inputs_not_owned(&mut |input| {
+                is_owned
+                    .callback(input.to_bytes())
+                    .map_err(|e| ImplementationError::from(e.to_string()).into())
+            }),
         ))))
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, uniffi::Object)]
 pub struct MaybeInputsSeen(payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsSeen>);
 
 impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsSeen>>
@@ -433,6 +592,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsSeen>>
     }
 }
 
+#[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
 pub struct MaybeInputsSeenTransition(
     Arc<
@@ -448,11 +608,13 @@ pub struct MaybeInputsSeenTransition(
     >,
 );
 
+#[uniffi::export]
 impl MaybeInputsSeenTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<OutputsUnknown, ReceiverPersistedError>
-    where
-        P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
-    {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<OutputsUnknown, ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner =
             self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
 
@@ -460,20 +622,28 @@ impl MaybeInputsSeenTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
+        let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
 
+#[uniffi::export(with_foreign)]
+pub trait IsOutputKnown: Send + Sync {
+    fn callback(&self, outpoint: OutPoint) -> Result<bool, ForeignError>;
+}
+
+#[uniffi::export]
 impl MaybeInputsSeen {
     pub fn check_no_inputs_seen_before(
         &self,
-        is_known: impl Fn(&OutPoint) -> Result<bool, ImplementationError>,
+        is_known: Arc<dyn IsOutputKnown>,
     ) -> MaybeInputsSeenTransition {
         MaybeInputsSeenTransition(Arc::new(RwLock::new(Some(
-            self.0
-                .clone()
-                .check_no_inputs_seen_before(&mut |outpoint| Ok(is_known(&(*outpoint).into())?)),
+            self.0.clone().check_no_inputs_seen_before(&mut |outpoint| {
+                is_known
+                    .callback((*outpoint).into())
+                    .map_err(|e| ImplementationError::from(e.to_string()).into())
+            }),
         ))))
     }
 }
@@ -482,7 +652,7 @@ impl MaybeInputsSeen {
 ///
 /// Only accept PSBTs that send us money.
 /// Identify those outputs with `identify_receiver_outputs()` to proceed
-#[derive(Clone)]
+#[derive(Clone, uniffi::Object)]
 pub struct OutputsUnknown(payjoin::receive::v2::Receiver<payjoin::receive::v2::OutputsUnknown>);
 
 impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::OutputsUnknown>> for OutputsUnknown {
@@ -491,6 +661,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::OutputsUnknown>> 
     }
 }
 
+#[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
 pub struct OutputsUnknownTransition(
     Arc<
@@ -506,11 +677,13 @@ pub struct OutputsUnknownTransition(
     >,
 );
 
+#[uniffi::export]
 impl OutputsUnknownTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<WantsOutputs, ReceiverPersistedError>
-    where
-        P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
-    {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<WantsOutputs, ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner =
             self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
 
@@ -518,25 +691,29 @@ impl OutputsUnknownTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
+        let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
 
+#[uniffi::export]
 impl OutputsUnknown {
     /// Find which outputs belong to the receiver
     pub fn identify_receiver_outputs(
         &self,
-        is_receiver_output: impl Fn(&Vec<u8>) -> Result<bool, ImplementationError>,
+        is_receiver_output: Arc<dyn IsScriptOwned>,
     ) -> OutputsUnknownTransition {
         OutputsUnknownTransition(Arc::new(RwLock::new(Some(
-            self.0
-                .clone()
-                .identify_receiver_outputs(&mut |input| Ok(is_receiver_output(&input.to_bytes())?)),
+            self.0.clone().identify_receiver_outputs(&mut |input| {
+                is_receiver_output
+                    .callback(input.to_bytes())
+                    .map_err(|e| ImplementationError::from(e.to_string()).into())
+            }),
         ))))
     }
 }
 
+#[derive(uniffi::Object)]
 pub struct WantsOutputs(payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsOutputs>);
 
 impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsOutputs>> for WantsOutputs {
@@ -545,6 +722,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsOutputs>> fo
     }
 }
 
+#[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
 pub struct WantsOutputsTransition(
     Arc<
@@ -559,11 +737,13 @@ pub struct WantsOutputsTransition(
     >,
 );
 
+#[uniffi::export]
 impl WantsOutputsTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<WantsInputs, ReceiverPersistedError>
-    where
-        P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
-    {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<WantsInputs, ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner =
             self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
 
@@ -571,13 +751,14 @@ impl WantsOutputsTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| {
+        let res = value.save(&adapter).map_err(|e| {
             ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
         })?;
         Ok(res.into())
     }
 }
 
+#[uniffi::export]
 impl WantsOutputs {
     pub fn output_substitution(&self) -> OutputSubstitution { self.0.output_substitution() }
 
@@ -611,6 +792,7 @@ impl WantsOutputs {
     }
 }
 
+#[derive(uniffi::Object)]
 pub struct WantsInputs(payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsInputs>);
 
 impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsInputs>> for WantsInputs {
@@ -619,6 +801,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsInputs>> for
     }
 }
 
+#[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
 pub struct WantsInputsTransition(
     Arc<
@@ -633,11 +816,13 @@ pub struct WantsInputsTransition(
     >,
 );
 
+#[uniffi::export]
 impl WantsInputsTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<WantsFeeRange, ReceiverPersistedError>
-    where
-        P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
-    {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<WantsFeeRange, ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner =
             self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
 
@@ -645,13 +830,14 @@ impl WantsInputsTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| {
+        let res = value.save(&adapter).map_err(|e| {
             ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
         })?;
         Ok(res.into())
     }
 }
 
+#[uniffi::export]
 impl WantsInputs {
     /// Select receiver input such that the payjoin avoids surveillance.
     /// Return the input chosen that has been applied to the Proposal.
@@ -666,22 +852,30 @@ impl WantsInputs {
     // https://eprint.iacr.org/2022/589.pdf
     pub fn try_preserving_privacy(
         &self,
-        candidate_inputs: Vec<InputPair>,
-    ) -> Result<InputPair, SelectionError> {
-        match self.0.clone().try_preserving_privacy(candidate_inputs.into_iter().map(Into::into)) {
-            Ok(t) => Ok(t.into()),
+        candidate_inputs: Vec<Arc<InputPair>>,
+    ) -> Result<Arc<InputPair>, SelectionError> {
+        let candidate_inputs: Vec<payjoin::receive::InputPair> = candidate_inputs
+            .into_iter()
+            .map(|pair| Arc::try_unwrap(pair).unwrap_or_else(|arc| (*arc).clone()).into())
+            .collect();
+        match self.0.clone().try_preserving_privacy(candidate_inputs) {
+            Ok(t) => Ok(Arc::new(t.into())),
             Err(e) => Err(e.into()),
         }
     }
 
     pub fn contribute_inputs(
         &self,
-        replacement_inputs: Vec<InputPair>,
-    ) -> Result<WantsInputs, InputContributionError> {
+        replacement_inputs: Vec<Arc<InputPair>>,
+    ) -> Result<Arc<WantsInputs>, InputContributionError> {
+        let replacement_inputs: Vec<payjoin::receive::InputPair> = replacement_inputs
+            .into_iter()
+            .map(|pair| Arc::try_unwrap(pair).unwrap_or_else(|arc| (*arc).clone()).into())
+            .collect();
         self.0
             .clone()
-            .contribute_inputs(replacement_inputs.into_iter().map(Into::into))
-            .map(Into::into)
+            .contribute_inputs(replacement_inputs)
+            .map(|t| Arc::new(t.into()))
             .map_err(Into::into)
     }
 
@@ -690,13 +884,12 @@ impl WantsInputs {
     }
 }
 
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+#[derive(Debug, Clone, uniffi::Object)]
 pub struct InputPair(payjoin::receive::InputPair);
 
-#[cfg_attr(feature = "uniffi", uniffi::export)]
+#[uniffi::export]
 impl InputPair {
-    #[cfg_attr(feature = "uniffi", uniffi::constructor)]
+    #[uniffi::constructor]
     pub fn new(
         txin: bitcoin_ffi::TxIn,
         psbtin: crate::bitcoin_ffi::PsbtInput,
@@ -718,6 +911,7 @@ impl From<payjoin::receive::InputPair> for InputPair {
     fn from(value: payjoin::receive::InputPair) -> Self { Self(value) }
 }
 
+#[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
 pub struct WantsFeeRangeTransition(
     Arc<
@@ -733,11 +927,13 @@ pub struct WantsFeeRangeTransition(
     >,
 );
 
+#[uniffi::export]
 impl WantsFeeRangeTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<ProvisionalProposal, ReceiverPersistedError>
-    where
-        P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
-    {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<ProvisionalProposal, ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner =
             self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
 
@@ -745,13 +941,14 @@ impl WantsFeeRangeTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(|e| {
+        let res = value.save(&adapter).map_err(|e| {
             ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
         })?;
         Ok(res.into())
     }
 }
 
+#[derive(uniffi::Object)]
 pub struct WantsFeeRange(payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsFeeRange>);
 
 impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsFeeRange>> for WantsFeeRange {
@@ -760,6 +957,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsFeeRange>> f
     }
 }
 
+#[uniffi::export]
 impl WantsFeeRange {
     /// Applies additional fee contribution now that the receiver has contributed inputs
     /// and may have added new outputs.
@@ -793,6 +991,7 @@ impl WantsFeeRange {
     }
 }
 
+#[derive(uniffi::Object)]
 pub struct ProvisionalProposal(
     pub payjoin::receive::v2::Receiver<payjoin::receive::v2::ProvisionalProposal>,
 );
@@ -807,6 +1006,7 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::ProvisionalPropos
     }
 }
 
+#[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
 pub struct ProvisionalProposalTransition(
     Arc<
@@ -822,11 +1022,13 @@ pub struct ProvisionalProposalTransition(
     >,
 );
 
+#[uniffi::export]
 impl ProvisionalProposalTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<PayjoinProposal, ReceiverPersistedError>
-    where
-        P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
-    {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<PayjoinProposal, ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner =
             self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
 
@@ -834,26 +1036,34 @@ impl ProvisionalProposalTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        let res = value.save(persister).map_err(ReceiverPersistedError::from)?;
+        let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
     }
 }
 
+#[uniffi::export(with_foreign)]
+pub trait ProcessPsbt: Send + Sync {
+    fn callback(&self, psbt: String) -> Result<String, ForeignError>;
+}
+
+#[uniffi::export]
 impl ProvisionalProposal {
     pub fn finalize_proposal(
         &self,
-        process_psbt: impl Fn(String) -> Result<String, ImplementationError>,
+        process_psbt: Arc<dyn ProcessPsbt>,
     ) -> ProvisionalProposalTransition {
         ProvisionalProposalTransition(Arc::new(RwLock::new(Some(
             self.0.clone().finalize_proposal(|pre_processed| {
-                let psbt = process_psbt(pre_processed.to_string())?;
+                let psbt = process_psbt
+                    .callback(pre_processed.to_string())
+                    .map_err(|e| ImplementationError::from(e.to_string()))?;
                 Ok(Psbt::from_str(&psbt).map_err(ImplementationError::new)?)
             }),
         ))))
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, uniffi::Object)]
 pub struct PayjoinProposal(
     pub payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>,
 );
@@ -872,15 +1082,18 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>>
     }
 }
 
+#[derive(uniffi::Object)]
 pub struct PayjoinProposalTransition(
     Arc<RwLock<Option<payjoin::persist::MaybeSuccessTransition<(), payjoin::receive::Error>>>>,
 );
 
+#[uniffi::export]
 impl PayjoinProposalTransition {
-    pub fn save<P>(&self, persister: &P) -> Result<(), ReceiverPersistedError>
-    where
-        P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
-    {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<(), ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner =
             self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
 
@@ -888,11 +1101,12 @@ impl PayjoinProposalTransition {
             .take()
             .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
 
-        value.save(persister).map_err(ReceiverPersistedError::from)?;
+        value.save(&adapter).map_err(ReceiverPersistedError::from)?;
         Ok(())
     }
 }
 
+#[uniffi::export]
 impl PayjoinProposal {
     pub fn utxos_to_be_locked(&self) -> Vec<OutPoint> {
         let mut outpoints: Vec<OutPoint> = Vec::new();
@@ -919,12 +1133,10 @@ impl PayjoinProposal {
     pub fn create_post_request(
         &self,
         ohttp_relay: String,
-    ) -> Result<(Request, ClientResponse), ReceiverError> {
-        self.0
-            .clone()
-            .create_post_request(ohttp_relay)
-            .map_err(Into::into)
-            .map(|(req, ctx)| (req.into(), ctx.into()))
+    ) -> Result<RequestResponse, ReceiverError> {
+        self.0.clone().create_post_request(ohttp_relay).map_err(Into::into).map(|(req, ctx)| {
+            RequestResponse { request: req.into(), client_response: Arc::new(ctx.into()) }
+        })
     }
 
     /// Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
@@ -941,4 +1153,56 @@ impl PayjoinProposal {
             self.0.clone().process_response(body, ohttp_context.into()),
         ))))
     }
+}
+
+/// Session persister that should save and load events as JSON strings.
+#[uniffi::export(with_foreign)]
+pub trait JsonReceiverSessionPersister: Send + Sync {
+    fn save(&self, event: String) -> Result<(), ForeignError>;
+    fn load(&self) -> Result<Vec<String>, ForeignError>;
+    fn close(&self) -> Result<(), ForeignError>;
+}
+
+/// Adapter for the [JsonReceiverSessionPersister] trait to use the save and load callbacks.
+struct CallbackPersisterAdapter {
+    callback_persister: Arc<dyn JsonReceiverSessionPersister>,
+}
+
+impl CallbackPersisterAdapter {
+    pub fn new(callback_persister: Arc<dyn JsonReceiverSessionPersister>) -> Self {
+        Self { callback_persister }
+    }
+}
+
+impl payjoin::persist::SessionPersister for CallbackPersisterAdapter {
+    type SessionEvent = payjoin::receive::v2::SessionEvent;
+    type InternalStorageError = ForeignError;
+
+    fn save_event(&self, event: &Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
+        let uni_event: ReceiverSessionEvent = event.clone().into();
+        self.callback_persister
+            .save(uni_event.to_json().map_err(|e| ForeignError::InternalError(e.to_string()))?)
+    }
+
+    fn load(
+        &self,
+    ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError> {
+        let res = self.callback_persister.load()?;
+        Ok(Box::new(
+            match res
+                .into_iter()
+                .map(|event| {
+                    ReceiverSessionEvent::from_json(event)
+                        .map_err(|e| ForeignError::InternalError(e.to_string()))
+                        .map(|e| e.into())
+                })
+                .collect::<Result<Vec<_>, _>>()
+            {
+                Ok(events) => Box::new(events.into_iter()),
+                Err(e) => return Err(e),
+            },
+        ))
+    }
+
+    fn close(&self) -> Result<(), Self::InternalStorageError> { self.callback_persister.close() }
 }

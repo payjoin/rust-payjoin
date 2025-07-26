@@ -17,8 +17,7 @@ pub use payjoin::persist::NoopSessionPersister;
 pub use crate::bitcoin_ffi::*;
 pub use crate::ohttp::*;
 pub use crate::output_substitution::*;
-#[cfg(feature = "uniffi")]
-pub use crate::receive::uni::*;
+pub use crate::receive::*;
 pub use crate::request::Request;
 pub use crate::send::*;
 #[cfg(feature = "_test-utils")]

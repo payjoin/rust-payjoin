@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-#[cfg(not(feature = "uniffi"))]
-pub use bitcoin_ffi::*;
 use payjoin::bitcoin;
 
 #[cfg(feature = "uniffi")]

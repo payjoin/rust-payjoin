@@ -33,13 +33,7 @@ impl Uri {
     pub fn message(&self) -> Option<String> {
         self.0.message.clone().and_then(|x| String::try_from(x).ok())
     }
-    #[cfg(not(feature = "uniffi"))]
-    pub fn check_pj_supported(&self) -> Result<PjUri, PjNotSupported> {
-        match self.0.clone().check_pj_supported() {
-            Ok(e) => Ok(e.into()),
-            Err(uri) => Err(uri.to_string().into()),
-        }
-    }
+
     #[cfg(feature = "uniffi")]
     pub fn check_pj_supported(&self) -> Result<Arc<PjUri>, PjNotSupported> {
         match self.0.clone().check_pj_supported() {

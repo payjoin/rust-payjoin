@@ -2,7 +2,7 @@
 set -e
 
 # Individual features with no defaults.
-features=("uniffi" "_danger-local-https" "_test-utils")
+features=("_danger-local-https" "_test-utils")
 
 for feature in "${features[@]}"; do
   # Don't duplicate --all-targets clippy. Clippy end-user code, not tests.

@@ -20,8 +20,7 @@ pub use crate::output_substitution::*;
 #[cfg(feature = "uniffi")]
 pub use crate::receive::uni::*;
 pub use crate::request::Request;
-#[cfg(feature = "uniffi")]
-pub use crate::send::uni::*;
+pub use crate::send::*;
 #[cfg(feature = "_test-utils")]
 pub use crate::test_utils::*;
 pub use crate::uri::{PjUri, Uri, Url};

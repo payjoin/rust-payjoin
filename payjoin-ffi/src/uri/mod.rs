@@ -6,7 +6,7 @@ use payjoin::bitcoin::address::NetworkChecked;
 use payjoin::UriExt;
 
 pub mod error;
-#[derive(Clone)]
+#[derive(Clone, uniffi::Object)]
 pub struct Uri(payjoin::Uri<'static, NetworkChecked>);
 impl From<Uri> for payjoin::Uri<'static, NetworkChecked> {
     fn from(value: Uri) -> Self { value.0 }
@@ -16,7 +16,9 @@ impl From<payjoin::Uri<'static, NetworkChecked>> for Uri {
     fn from(value: payjoin::Uri<'static, NetworkChecked>) -> Self { Uri(value) }
 }
 
+#[uniffi::export]
 impl Uri {
+    #[uniffi::constructor]
     pub fn parse(uri: String) -> Result<Self, PjParseError> {
         match payjoin::Uri::from_str(uri.as_str()) {
             Ok(e) => Ok(e.assume_checked().into()),

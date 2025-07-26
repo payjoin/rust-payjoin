@@ -6,9 +6,8 @@ use crate::error::ImplementationError;
 use crate::uri::error::IntoUrlError;
 
 /// The top-level error type for the payjoin receiver
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Error)]
 #[non_exhaustive]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
 pub enum ReceiverError {
     /// Errors that can be replied to the sender
     #[error("Replyable error: {0}")]
@@ -37,9 +36,8 @@ impl From<receive::Error> for ReceiverError {
 }
 
 /// Error that may occur during state machine transitions
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Error)]
 #[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
 pub enum ReceiverPersistedError {
     /// rust-payjoin receiver error
     #[error(transparent)]
@@ -96,9 +94,8 @@ impl_persisted_error_from!(payjoin::IntoUrlError, |api_err: payjoin::IntoUrlErro
 /// 3. Support proper error propagation through the receiver stack
 /// 4. Provide errors according to BIP-78 JSON error specifications for return
 ///    after conversion into [`JsonReply`]
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct ReplyableError(#[from] receive::ReplyableError);
 
 /// The standard format for errors that can be replied as JSON.
@@ -110,8 +107,7 @@ pub struct ReplyableError(#[from] receive::ReplyableError);
 ///     "message": "Human readable error message"
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Object)]
 pub struct JsonReply(receive::JsonReply);
 
 impl From<JsonReply> for receive::JsonReply {
@@ -127,37 +123,31 @@ impl From<ReplyableError> for JsonReply {
 }
 
 /// Error that may occur during a v2 session typestate change
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct SessionError(#[from] receive::v2::SessionError);
 
 /// Error that may occur when output substitution fails.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct OutputSubstitutionError(#[from] receive::OutputSubstitutionError);
 
 /// Error that may occur when coin selection fails.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct SelectionError(#[from] receive::SelectionError);
 
 /// Error that may occur when input contribution fails.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct InputContributionError(#[from] receive::InputContributionError);
 
 /// Error validating a PSBT Input
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct PsbtInputError(#[from] receive::PsbtInputError);
 
 /// Error that may occur when a receiver event log is replayed
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct ReceiverReplayError(#[from] receive::v2::ReplayError);

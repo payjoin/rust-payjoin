@@ -1,5 +1,4 @@
 use std::str::FromStr;
-#[cfg(feature = "uniffi")]
 use std::sync::Arc;
 
 pub use error::{PjNotSupported, PjParseError, UrlParseError};
@@ -34,7 +33,6 @@ impl Uri {
         self.0.message.clone().and_then(|x| String::try_from(x).ok())
     }
 
-    #[cfg(feature = "uniffi")]
     pub fn check_pj_supported(&self) -> Result<Arc<PjUri>, PjNotSupported> {
         match self.0.clone().check_pj_supported() {
             Ok(e) => Ok(Arc::new(e.into())),
@@ -52,11 +50,10 @@ impl<'a> From<PjUri> for payjoin::PjUri<'a> {
     fn from(value: PjUri) -> Self { value.0 }
 }
 
-#[derive(Clone)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+#[derive(Clone, uniffi::Object)]
 pub struct PjUri(pub payjoin::PjUri<'static>);
 
-#[cfg_attr(feature = "uniffi", uniffi::export)]
+#[uniffi::export]
 impl PjUri {
     pub fn address(&self) -> String { self.0.clone().address.to_string() }
     /// Number of sats requested as payment
@@ -83,13 +80,12 @@ impl From<Url> for payjoin::Url {
     fn from(value: Url) -> Self { value.0 }
 }
 
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+#[derive(Clone, Debug, uniffi::Object)]
 pub struct Url(payjoin::Url);
 
-#[cfg_attr(feature = "uniffi", uniffi::export)]
+#[uniffi::export]
 impl Url {
-    #[cfg_attr(feature = "uniffi", uniffi::constructor)]
+    #[uniffi::constructor]
     pub fn parse(input: String) -> Result<Url, UrlParseError> {
         payjoin::Url::parse(input.as_str()).map_err(Into::into).map(Self)
     }

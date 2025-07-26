@@ -23,5 +23,4 @@ pub use crate::send::*;
 #[cfg(feature = "_test-utils")]
 pub use crate::test_utils::*;
 pub use crate::uri::{PjUri, Uri, Url};
-#[cfg(feature = "uniffi")]
 uniffi::setup_scaffolding!();

@@ -6,10 +6,8 @@ license = "MIT OR Apache-2.0"
 exclude = ["tests"]
 
 [features]
-default = ["uniffi"]
 _test-utils = ["payjoin-test-utils", "tokio", "bitcoind"]
 _danger-local-https = ["payjoin/_danger-local-https"]
-uniffi = []
 
 [lib]
 name = "payjoin_ffi"

@@ -8,9 +8,8 @@ use crate::error::ImplementationError;
 /// Error building a Sender from a SenderBuilder.
 ///
 /// This error is unrecoverable.
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
 #[error("Error initializing the sender: {msg}")]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct BuildSenderError {
     msg: String,
 }
@@ -28,26 +27,22 @@ impl From<send::BuildSenderError> for BuildSenderError {
 /// This error can currently only happen due to programmer mistake.
 /// `unwrap()`ing it is thus considered OK in Rust but you may achieve nicer message by displaying
 /// it.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct CreateRequestError(#[from] send::v2::CreateRequestError);
 
 /// Error returned for v2-specific payload encapsulation errors.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct EncapsulationError(#[from] send::v2::EncapsulationError);
 
 /// Error that may occur when the response from receiver is malformed.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct ValidationError(#[from] send::ValidationError);
 
 /// Represent an error returned by Payjoin receiver.
-#[derive(Debug, thiserror::Error)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
+#[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum ResponseError {
     /// `WellKnown` Errors are defined in the [`BIP78::ReceiverWellKnownError`] spec.
     ///
@@ -83,21 +78,18 @@ impl From<send::ResponseError> for ResponseError {
 }
 
 /// A well-known error that can be safely displayed to end users.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct WellKnownError(#[from] send::WellKnownError);
 
 /// Error that may occur when the sender session event log is replayed
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct SenderReplayError(#[from] send::v2::ReplayError);
 
 /// Error that may occur during state machine transitions
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Error)]
 #[error(transparent)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
 pub enum SenderPersistedError {
     /// rust-payjoin sender Encapsulation error
     #[error(transparent)]

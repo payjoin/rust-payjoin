@@ -1,9 +1,5 @@
-fn main() {
-    #[cfg(feature = "uniffi")]
-    uniffi_bindgen()
-}
+fn main() { uniffi_bindgen() }
 
-#[cfg(feature = "uniffi")]
 fn uniffi_bindgen() {
     // uniffi_bindgen_main parses command line arguments for officially supported languages,
     // but we need to parse them manually first to decide whether to use the uniffi_dart plugin.

@@ -1,19 +1,9 @@
 use std::sync::Arc;
 
-#[cfg(not(feature = "uniffi"))]
 pub use bitcoin_ffi::*;
 use payjoin::bitcoin;
 
-#[cfg(feature = "uniffi")]
-mod uni {
-    pub use bitcoin_ffi::*;
-}
-
-#[cfg(feature = "uniffi")]
-pub use uni::*;
-
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct PsbtInput {
     pub witness_utxo: Option<TxOut>,
     pub redeem_script: Option<Arc<Script>>,
@@ -55,7 +45,7 @@ impl From<PsbtInput> for bitcoin::psbt::Input {
     }
 }
 
-#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+#[derive(uniffi::Record)]
 pub struct Weight {
     pub weight_units: u64,
 }

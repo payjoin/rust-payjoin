@@ -1,9 +1,8 @@
 pub use error::OhttpError;
 
 pub mod error {
-    #[derive(Debug, PartialEq, Eq, thiserror::Error)]
+    #[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
     #[error("OHTTP error: {message}")]
-    #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
     pub struct OhttpError {
         message: String,
     }
@@ -21,20 +20,19 @@ impl From<payjoin::OhttpKeys> for OhttpKeys {
 impl From<OhttpKeys> for payjoin::OhttpKeys {
     fn from(value: OhttpKeys) -> Self { value.0 }
 }
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, uniffi::Object)]
 pub struct OhttpKeys(payjoin::OhttpKeys);
 
-#[cfg_attr(feature = "uniffi", uniffi::export)]
+#[uniffi::export]
 impl OhttpKeys {
     /// Decode an OHTTP KeyConfig
-    #[cfg_attr(feature = "uniffi", uniffi::constructor)]
+    #[uniffi::constructor]
     pub fn decode(bytes: Vec<u8>) -> Result<Self, OhttpError> {
         payjoin::OhttpKeys::decode(bytes.as_slice()).map(Into::into).map_err(Into::into)
     }
 
     /// Create an OHTTP KeyConfig from a string
-    #[cfg_attr(feature = "uniffi", uniffi::constructor)]
+    #[uniffi::constructor]
     pub fn from_string(s: String) -> Result<Self, OhttpError> {
         let res = payjoin::OhttpKeys::from_str(s.as_str())
             .map_err(|e| OhttpError::from(e.to_string()))?;
@@ -45,7 +43,7 @@ impl OhttpKeys {
 use std::str::FromStr;
 use std::sync::Mutex;
 
-#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
+#[derive(uniffi::Object)]
 pub struct ClientResponse(Mutex<Option<ohttp::ClientResponse>>);
 
 impl From<&ClientResponse> for ohttp::ClientResponse {

@@ -4,8 +4,7 @@ use crate::uri::Url;
 
 ///Represents data that needs to be transmitted to the receiver.
 ///You need to send this request over HTTP(S) to the receiver.
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, uniffi::Record)]
 pub struct Request {
     /// URL to send the request to.
     ///

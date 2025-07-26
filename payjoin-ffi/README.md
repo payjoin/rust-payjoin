@@ -31,18 +31,8 @@ This library should compile with any combination of features with Rust 1.78.0.
 pip install payjoin
 
 ```
-## Running the Integration Test
 
 
-The integration tests illustrates and verify integration using bitcoin core and bdk.
-
-```shell
-
-# Run the integration test
-cargo test  --package payjoin_ffi --test bdk_integration_test v2_to_v2_full_cycle --features _danger-local-https
-
-
-```
 ## References
 
 [Payjoin Dev Kit](https://payjoindevkit.org/)

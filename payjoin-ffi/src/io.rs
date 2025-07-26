@@ -3,9 +3,8 @@ pub use error::IoError;
 use crate::ohttp::OhttpKeys;
 
 pub mod error {
-    #[derive(Debug, PartialEq, Eq, thiserror::Error)]
+    #[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
     #[error("IO error: {message}")]
-    #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
     pub struct IoError {
         message: String,
     }

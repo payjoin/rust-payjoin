@@ -16,6 +16,10 @@ pub struct Cli {
     #[arg(long, env = "PJ_METRIC_PORT", help = "The port to bind for prometheus metrics export")]
     pub metrics_port: Option<u16>, // TODO tokio_listener::ListenerAddressLFlag
 
+    #[cfg(feature = "acme")]
+    #[clap(flatten)]
+    pub acme: AcmeCli,
+
     #[arg(
         long,
         env = "PJ_DIR_TIMEOUT_SECS",
@@ -36,4 +40,23 @@ pub struct Cli {
         help = "The ohttp key config file path [default: ohttp_keys]"
     )]
     pub ohttp_keys: Option<PathBuf>,
+}
+
+#[cfg(feature = "acme")]
+#[derive(Debug, Parser)]
+pub struct AcmeCli {
+    #[arg(long = "acme-domain", help = "The domain for which to request a certificate using ACME")]
+    pub domain: Option<String>,
+
+    #[arg(
+        long = "acme-contact",
+        help = "Contact information for ACME usage (e.g. 'mailto:admin@example.com')"
+    )]
+    pub contact: Option<String>,
+
+    #[arg(long, help = "Whether to use the staging environment [default: production]")]
+    pub lets_encrypt_staging: Option<bool>,
+
+    #[arg(long = "acme-cache-dir", help = "What directory to use for the ACME cache")]
+    pub cache_dir: Option<PathBuf>,
 }

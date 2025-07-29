@@ -203,7 +203,7 @@ impl PsbtContextBuilder {
         self,
         output_substitution: OutputSubstitution,
     ) -> Result<PsbtContext, BuildSenderError> {
-        let mut psbt =
+        let psbt =
             self.psbt.validate().map_err(InternalBuildSenderError::InconsistentOriginalPsbt)?;
         psbt.validate_input_utxos().map_err(InternalBuildSenderError::InvalidOriginalInput)?;
 
@@ -214,7 +214,6 @@ impl PsbtContextBuilder {
             self.fee_contribution,
             self.clamp_fee_contribution,
         )?;
-        clear_unneeded_fields(&mut psbt);
 
         Ok(PsbtContext {
             original_psbt: psbt,
@@ -662,7 +661,9 @@ pub(crate) fn create_v1_post_request(endpoint: Url, psbt_ctx: PsbtContext) -> (R
         psbt_ctx.min_fee_rate,
         Version::One,
     );
-    let body = psbt_ctx.original_psbt.to_string().as_bytes().to_vec();
+    let mut sanitized_psbt = psbt_ctx.original_psbt.clone();
+    clear_unneeded_fields(&mut sanitized_psbt);
+    let body = sanitized_psbt.to_string().as_bytes().to_vec();
     (
         Request::new_v1(&url, &body),
         V1Context {
@@ -708,9 +709,10 @@ mod test {
     use std::str::FromStr;
 
     use bitcoin::absolute::LockTime;
+    use bitcoin::bip32::{DerivationPath, Fingerprint};
     use bitcoin::ecdsa::Signature;
     use bitcoin::hex::FromHex;
-    use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
+    use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey, SECP256K1};
     use bitcoin::{
         Amount, FeeRate, OutPoint, Script, ScriptBuf, Sequence, Witness, XOnlyPublicKey,
     };
@@ -738,6 +740,38 @@ mod test {
             min_fee_rate: FeeRate::ZERO,
             payee,
         })
+    }
+
+    #[test]
+    fn test_restore_original_utxos() -> Result<(), BoxError> {
+        let mut original_psbt = PARSED_ORIGINAL_PSBT.clone();
+        let mut payjoin_proposal = PARSED_PAYJOIN_PROPOSAL.clone();
+        let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
+        let (_, pk) = SECP256K1.generate_keypair(&mut bitcoin::key::rand::thread_rng());
+        let x_only = pk.x_only_public_key().0;
+        // Fill out dummy data in the original PSBT so we can restore it
+        let _ = original_psbt.inputs[0].tap_internal_key.insert(x_only);
+        let _ = original_psbt.outputs[0].tap_internal_key.insert(x_only);
+        original_psbt.inputs[0]
+            .bip32_derivation
+            .insert(pk, (Fingerprint::default(), DerivationPath::default()));
+        original_psbt.inputs[0]
+            .tap_key_origins
+            .insert(x_only, (vec![], (Fingerprint::default(), DerivationPath::default())));
+
+        let prev_txout = TxOut { value: Amount::ONE_BTC, script_pubkey: payee.clone() };
+        original_psbt.inputs[0].witness_utxo = Some(prev_txout.clone());
+        let psbt_ctx = PsbtContextBuilder::new(original_psbt, payee, None)
+            .build(OutputSubstitution::Disabled)?;
+        clear_unneeded_fields(&mut payjoin_proposal);
+
+        psbt_ctx.restore_original_utxos(&mut payjoin_proposal)?;
+        assert!(payjoin_proposal.inputs[0].bip32_derivation.contains_key(&pk));
+        assert!(payjoin_proposal.inputs[0].tap_key_origins.contains_key(&x_only));
+        assert_eq!(payjoin_proposal.inputs[0].witness_utxo, Some(prev_txout));
+        assert_eq!(payjoin_proposal.inputs[0].tap_internal_key, Some(x_only));
+
+        Ok(())
     }
 
     #[test]
@@ -988,6 +1022,7 @@ mod test {
     #[test]
     fn test_clear_unneeded_fields() -> Result<(), BoxError> {
         let mut proposal = PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO.clone();
+        let payee = proposal.unsigned_tx.output[1].script_pubkey.clone();
         let x_only_key = XOnlyPublicKey::from_str(
             "4f65949efe60e5be80cf171c06144641e832815de4f6ab3fe0257351aeb22a84",
         )?;
@@ -997,7 +1032,12 @@ mod test {
         assert!(!proposal.inputs[0].bip32_derivation.is_empty());
         assert!(proposal.outputs[0].tap_internal_key.is_some());
         assert!(!proposal.outputs[0].bip32_derivation.is_empty());
-        clear_unneeded_fields(&mut proposal);
+        let psbt_ctx = PsbtContextBuilder::new(proposal.clone(), payee, None)
+            .build(OutputSubstitution::Disabled)?;
+
+        let body = create_v1_post_request(Url::from_str("HTTPS://EXAMPLE.COM/")?, psbt_ctx).0.body;
+        let res_str = std::str::from_utf8(&body)?;
+        let proposal = Psbt::from_str(res_str)?;
         assert!(proposal.inputs[0].tap_internal_key.is_none());
         assert!(proposal.inputs[0].bip32_derivation.is_empty());
         assert!(proposal.outputs[0].tap_internal_key.is_none());

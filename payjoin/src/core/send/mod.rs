@@ -1012,6 +1012,7 @@ mod test {
     #[test]
     fn test_clear_unneeded_fields() -> Result<(), BoxError> {
         let mut proposal = PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO.clone();
+        let payee = proposal.unsigned_tx.output[1].script_pubkey.clone();
         let x_only_key = XOnlyPublicKey::from_str(
             "4f65949efe60e5be80cf171c06144641e832815de4f6ab3fe0257351aeb22a84",
         )?;
@@ -1021,7 +1022,12 @@ mod test {
         assert!(!proposal.inputs[0].bip32_derivation.is_empty());
         assert!(proposal.outputs[0].tap_internal_key.is_some());
         assert!(!proposal.outputs[0].bip32_derivation.is_empty());
-        clear_unneeded_fields(&mut proposal);
+        let psbt_ctx = PsbtContextBuilder::new(proposal.clone(), payee, None)
+            .build(OutputSubstitution::Disabled)?;
+
+        let body = create_v1_post_request(Url::from_str("HTTPS://EXAMPLE.COM/")?, psbt_ctx).0.body;
+        let res_str = std::str::from_utf8(&body)?;
+        let proposal = Psbt::from_str(res_str)?;
         assert!(proposal.inputs[0].tap_internal_key.is_none());
         assert!(proposal.inputs[0].bip32_derivation.is_empty());
         assert!(proposal.outputs[0].tap_internal_key.is_none());

@@ -10,21 +10,21 @@ mod app;
 mod cli;
 mod db;
 
-const PAYJOIN_CONFIG_DIR: &str = "payjoin-cli";
+const CONFIG_DIR: &str = "payjoin-cli";
 
 #[cfg(not(any(feature = "v1", feature = "v2")))]
 compile_error!("At least one of the features ['v1', 'v2'] must be enabled");
 
 fn find_config_path() -> Option<PathBuf> {
     // Look for a config.toml in the current working directory first
-    //if not found, look for a config.toml in .config/payjoin-cli directory
+    // if not found, look for a config.toml in .config/payjoin-cli directory
     let cwd = std::env::current_dir().ok()?;
     let local_config = cwd.join("config.toml");
     if local_config.exists() {
         return Some(local_config);
     }
     let config_dir = dirs::config_dir()?;
-    let payjoin_config = config_dir.join(PAYJOIN_CONFIG_DIR).join("config.toml");
+    let payjoin_config = config_dir.join(CONFIG_DIR).join("config.toml");
     if payjoin_config.exists() {
         Some(payjoin_config)
     } else {

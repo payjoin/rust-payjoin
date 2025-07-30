@@ -266,6 +266,7 @@ impl PsbtContext {
         self.check_inputs(&proposal, true)?;
         let contributed_fee = self.check_outputs(&proposal)?;
         self.restore_original_utxos(&mut proposal)?;
+        self.restore_original_outputs(&mut proposal)?;
         self.check_fees(&proposal, contributed_fee)?;
         Ok(proposal)
     }
@@ -425,6 +426,31 @@ impl PsbtContext {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Restore Original PSBT outputs that were stripped before sending to the receiver.
+    /// BIP78 spec requires output fields to be removed, but many wallets
+    /// require output fields to be present in order to validate change and payment outputs.
+    fn restore_original_outputs(&self, proposal: &mut Psbt) -> InternalResult<()> {
+        let mut original_outputs = self
+            .original_psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .zip(self.original_psbt.outputs.iter())
+            .peekable();
+        let proposal_outputs = proposal.unsigned_tx.output.iter().zip(proposal.outputs.iter_mut());
+
+        for (proposed_txout, proposed_psbtout) in proposal_outputs {
+            if let Some((original_txout, original_psbtout)) = original_outputs.peek() {
+                if proposed_txout == *original_txout {
+                    *proposed_psbtout = (*original_psbtout).clone();
+                    original_outputs.next();
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -714,6 +740,7 @@ mod test {
     use bitcoin::ecdsa::Signature;
     use bitcoin::hex::FromHex;
     use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey, SECP256K1};
+    use bitcoin::taproot::TaprootBuilder;
     use bitcoin::{
         Amount, FeeRate, OutPoint, Script, ScriptBuf, Sequence, Witness, XOnlyPublicKey,
     };
@@ -772,6 +799,41 @@ mod test {
         assert_eq!(payjoin_proposal.inputs[0].witness_utxo, Some(prev_txout));
         assert_eq!(payjoin_proposal.inputs[0].tap_internal_key, Some(x_only));
         assert_eq!(payjoin_proposal.inputs[0].witness_script, Some(payee));
+        Ok(())
+    }
+
+    #[test]
+    fn test_restore_original_outputs() -> Result<(), BoxError> {
+        let mut original_psbt = PARSED_ORIGINAL_PSBT.clone();
+        let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
+        let (_, pk) = SECP256K1.generate_keypair(&mut bitcoin::key::rand::thread_rng());
+        let x_only = pk.x_only_public_key().0;
+        let taptree = TaprootBuilder::new()
+            .add_leaf(0, payee.clone())?
+            .try_into_taptree()
+            .expect("Valid tap tree");
+
+        original_psbt.outputs[0].witness_script = Some(payee.clone());
+        original_psbt.outputs[0]
+            .bip32_derivation
+            .insert(pk, (Fingerprint::default(), DerivationPath::default()));
+        original_psbt.outputs[0].tap_internal_key = Some(x_only);
+        original_psbt.outputs[0]
+            .tap_key_origins
+            .insert(x_only, (vec![], (Fingerprint::default(), DerivationPath::default())));
+        original_psbt.outputs[0].tap_tree = Some(taptree.clone());
+
+        let psbt_ctx = PsbtContextBuilder::new(original_psbt.clone(), payee.clone(), None)
+            .build(OutputSubstitution::Disabled)?;
+
+        let mut payjoin_proposal = original_psbt.clone();
+        clear_unneeded_fields(&mut payjoin_proposal);
+        psbt_ctx.restore_original_outputs(&mut payjoin_proposal)?;
+        assert_eq!(payjoin_proposal.outputs[0].witness_script, Some(payee));
+        assert!(payjoin_proposal.outputs[0].bip32_derivation.contains_key(&pk));
+        assert!(payjoin_proposal.outputs[0].tap_key_origins.contains_key(&x_only));
+        assert_eq!(payjoin_proposal.outputs[0].tap_internal_key, Some(x_only));
+        assert_eq!(payjoin_proposal.outputs[0].tap_tree, Some(taptree));
         Ok(())
     }
 

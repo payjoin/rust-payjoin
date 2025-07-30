@@ -217,6 +217,7 @@ fn process_proposal(
     psbt_ctx.check_inputs(&proposal, false)?;
     let contributed_fee = psbt_ctx.check_outputs(&proposal)?;
     psbt_ctx.restore_original_utxos(&mut proposal)?;
+    psbt_ctx.restore_original_outputs(&mut proposal)?;
     psbt_ctx.check_fees(&proposal, contributed_fee)?;
     Ok(proposal)
 }

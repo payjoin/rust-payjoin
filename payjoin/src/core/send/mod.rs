@@ -420,6 +420,7 @@ impl PsbtContext {
                     proposed_psbtin.bip32_derivation = original.psbtin.bip32_derivation.clone();
                     proposed_psbtin.tap_internal_key = original.psbtin.tap_internal_key;
                     proposed_psbtin.tap_key_origins = original.psbtin.tap_key_origins.clone();
+                    proposed_psbtin.witness_script = original.psbtin.witness_script.clone();
                     original_inputs.next();
                 }
             }
@@ -758,10 +759,10 @@ mod test {
         original_psbt.inputs[0]
             .tap_key_origins
             .insert(x_only, (vec![], (Fingerprint::default(), DerivationPath::default())));
-
+        original_psbt.inputs[0].witness_script = Some(payee.clone());
         let prev_txout = TxOut { value: Amount::ONE_BTC, script_pubkey: payee.clone() };
         original_psbt.inputs[0].witness_utxo = Some(prev_txout.clone());
-        let psbt_ctx = PsbtContextBuilder::new(original_psbt, payee, None)
+        let psbt_ctx = PsbtContextBuilder::new(original_psbt, payee.clone(), None)
             .build(OutputSubstitution::Disabled)?;
         clear_unneeded_fields(&mut payjoin_proposal);
 
@@ -770,7 +771,7 @@ mod test {
         assert!(payjoin_proposal.inputs[0].tap_key_origins.contains_key(&x_only));
         assert_eq!(payjoin_proposal.inputs[0].witness_utxo, Some(prev_txout));
         assert_eq!(payjoin_proposal.inputs[0].tap_internal_key, Some(x_only));
-
+        assert_eq!(payjoin_proposal.inputs[0].witness_script, Some(payee));
         Ok(())
     }
 

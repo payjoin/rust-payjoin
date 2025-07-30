@@ -36,9 +36,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
-      - name: Run unit tests only (no bitcoind)
+      - name: Run unit and doc tests only (no bitcoind)
         run: |
           cargo test --workspace --lib --bins --examples --verbose
+          cargo test --workspace --doc --verbose
 
 
   Format:

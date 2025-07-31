@@ -11,6 +11,8 @@ use url::Url;
 use crate::cli::{Cli, Commands};
 use crate::db;
 
+const CONFIG_DIR: &str = "payjoin-cli";
+
 type Builder = config::builder::ConfigBuilder<DefaultState>;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -94,10 +96,7 @@ impl Config {
         ));
     }
 
-    pub(crate) fn new(
-        cli: &Cli,
-        config_path: Option<std::path::PathBuf>,
-    ) -> Result<Self, ConfigError> {
+    pub(crate) fn new(cli: &Cli) -> Result<Self, ConfigError> {
         let mut config = config::Config::builder();
         config = add_bitcoind_defaults(config, cli)?;
         config = add_common_defaults(config, cli)?;
@@ -129,9 +128,12 @@ impl Config {
 
         config = handle_subcommands(config, cli)?;
 
-        if let Some(path) = config_path {
-            config = config.add_source(File::from(path).format(FileFormat::Toml).required(true));
+        if let Some(config_dir) = dirs::config_dir() {
+            let global_config_path = config_dir.join(CONFIG_DIR).join("config.toml");
+            config = config.add_source(File::from(global_config_path).required(false));
         }
+
+        config = config.add_source(File::new("config.toml", FileFormat::Toml).required(false));
         let built_config = config.build()?;
 
         let mut config = Config {

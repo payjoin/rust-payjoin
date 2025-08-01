@@ -662,7 +662,7 @@ fn serialize_url(
     version: Version,
 ) -> Url {
     let mut url = endpoint;
-    url.query_pairs_mut().append_pair("v", &version.to_string());
+    url.query_pairs_mut().append_pair("v", version.as_str());
     if output_substitution == OutputSubstitution::Disabled {
         url.query_pairs_mut().append_pair("disableoutputsubstitution", "true");
     }

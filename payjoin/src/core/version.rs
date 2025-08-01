@@ -28,6 +28,20 @@ pub enum Version {
     Two = 2,
 }
 
+impl Version {
+    /// Returns the string representation of the version
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Version::One => "1",
+            Version::Two => "2",
+        }
+    }
+}
+
+impl From<Version> for &'static str {
+    fn from(val: Version) -> Self { val.as_str() }
+}
+
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { (*self as u8).fmt(f) }
 }

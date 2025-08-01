@@ -48,11 +48,11 @@ use crate::ohttp::{
 };
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
-    MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
+    InitialTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
     MaybeSuccessTransition, MaybeTransientTransition, NextStateTransition,
 };
 use crate::receive::{parse_payload, InputPair};
-use crate::uri::ShortId;
+use crate::uri::{PjParam, ShortId};
 use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
 
 mod error;
@@ -270,12 +270,8 @@ impl Receiver<UninitializedReceiver> {
         directory: impl IntoUrl,
         ohttp_keys: OhttpKeys,
         expire_after: Option<Duration>,
-    ) -> MaybeBadInitInputsTransition<SessionEvent, Receiver<Initialized>, IntoUrlError> {
-        let directory = match directory.into_url() {
-            Ok(url) => url,
-            Err(e) => return MaybeBadInitInputsTransition::bad_init_inputs(e),
-        };
-
+    ) -> Result<InitialTransition<SessionEvent, Receiver<Initialized>>, IntoUrlError> {
+        let directory = directory.into_url()?;
         let session_context = SessionContext {
             address,
             directory,
@@ -285,10 +281,10 @@ impl Receiver<UninitializedReceiver> {
             s: HpkeKeyPair::gen_keypair(),
             e: None,
         };
-        MaybeBadInitInputsTransition::success(
+        Ok(InitialTransition::initialize(
             SessionEvent::Created(session_context.clone()),
             Receiver { state: Initialized { context: session_context } },
-        )
+        ))
     }
 }
 
@@ -1037,11 +1033,13 @@ pub(crate) fn pj_uri<'a>(
 ) -> crate::PjUri<'a> {
     use crate::uri::{PayjoinExtras, UrlExt};
     let id = session_context.id();
-    let mut pj = mailbox_endpoint(&session_context.directory, &id).clone();
-    pj.set_receiver_pubkey(session_context.s.public_key().clone());
-    pj.set_ohttp(session_context.ohttp_keys.clone());
-    pj.set_exp(session_context.expiry);
-    let extras = PayjoinExtras { endpoint: pj, output_substitution };
+    let mut pj_url = mailbox_endpoint(&session_context.directory, &id).clone();
+    pj_url.set_receiver_pubkey(session_context.s.public_key().clone());
+    pj_url.set_ohttp(session_context.ohttp_keys.clone());
+    pj_url.set_exp(session_context.expiry);
+    // TODO use proper constructor
+    let pj_param = PjParam::new(pj_url).expect("valid pj_url");
+    let extras = PayjoinExtras { pj_param, output_substitution };
     bitcoin_uri::Uri::with_extras(session_context.address.clone(), extras)
 }
 
@@ -1322,6 +1320,7 @@ pub mod test {
             SHARED_CONTEXT.ohttp_keys.clone(),
             None,
         )
+        .expect("constructor on test vector should not fail")
         .save(&noop_persister)
         .expect("Noop persister shouldn't fail");
         let session_expiry = session.context.expiry.duration_since(now).unwrap().as_secs();
@@ -1335,7 +1334,7 @@ pub mod test {
     #[test]
     fn test_v2_pj_uri() {
         let uri = Receiver { state: Initialized { context: SHARED_CONTEXT.clone() } }.pj_uri();
-        assert_ne!(uri.extras.endpoint, EXAMPLE_URL.clone());
+        assert_ne!(uri.extras.pj_param.endpoint(), &EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
     }
 }

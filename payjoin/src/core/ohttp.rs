@@ -340,21 +340,39 @@ impl std::error::Error for ParseOhttpKeysError {
 
 #[cfg(test)]
 mod test {
+    use payjoin_test_utils::{KEM, KEY_ID, SYMMETRIC};
+
     use super::*;
 
     #[test]
     fn test_ohttp_keys_roundtrip() {
         use std::str::FromStr;
 
-        use ohttp::hpke::{Aead, Kdf, Kem};
-        use ohttp::{KeyId, SymmetricSuite};
-        const KEY_ID: KeyId = 1;
-        const KEM: Kem = Kem::K256Sha256;
-        const SYMMETRIC: &[SymmetricSuite] =
-            &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
         let keys = OhttpKeys(ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap());
         let serialized = &keys.to_string();
         let deserialized = OhttpKeys::from_str(serialized).unwrap();
-        assert_eq!(keys.encode().unwrap(), deserialized.encode().unwrap());
+        assert!(keys.eq(&deserialized));
+    }
+
+    #[test]
+    fn test_ohttp_keys_equality() {
+        use std::str::FromStr;
+
+        use ohttp::KeyId;
+        const KEY_ID_ONE: KeyId = 1;
+        let keys_one =
+            OhttpKeys(ohttp::KeyConfig::new(KEY_ID_ONE, KEM, Vec::from(SYMMETRIC)).unwrap());
+        let serialized_one = &keys_one.to_string();
+        let deserialized_one = OhttpKeys::from_str(serialized_one).unwrap();
+
+        const KEY_ID_TWO: KeyId = 2;
+        let keys_two =
+            OhttpKeys(ohttp::KeyConfig::new(KEY_ID_TWO, KEM, Vec::from(SYMMETRIC)).unwrap());
+        let serialized_two = &keys_two.to_string();
+        let deserialized_two = OhttpKeys::from_str(serialized_two).unwrap();
+        assert!(keys_one.eq(&deserialized_one));
+        assert!(keys_two.eq(&deserialized_two));
+        assert!(!keys_one.eq(&deserialized_two));
+        assert!(!keys_two.eq(&deserialized_one));
     }
 }

@@ -1,6 +1,11 @@
 additional_cargo_args = ["--all-features"]
 gitignore = true
-examine_globs = ["payjoin/src/core/uri/*.rs", "payjoin/src/core/receive/**/*.rs", "payjoin/src/core/send/**/*.rs"]
+examine_globs = [
+	"payjoin/src/core/ohttp.rs", 
+	"payjoin/src/core/uri/*.rs", 
+	"payjoin/src/core/receive/**/*.rs", 
+	"payjoin/src/core/send/**/*.rs"
+]
 exclude_globs = []
 exclude_re = [
 	"impl Debug",

@@ -846,6 +846,13 @@ impl ProvisionalProposal {
             psbt.inputs[i].tap_key_sig = None;
         }
         let finalized_psbt = wallet_process_psbt(&psbt).map_err(ReplyableError::Implementation)?;
+        if self.payjoin_psbt.unsigned_tx.compute_ntxid()
+            != finalized_psbt.unsigned_tx.compute_ntxid()
+        {
+            return Err(ReplyableError::Implementation(
+                "Invalid payjoin proposal was returned by the wallet".into(),
+            ));
+        }
         let payjoin_proposal = self.prepare_psbt(finalized_psbt);
         Ok(payjoin_proposal)
     }
@@ -1395,5 +1402,23 @@ pub(crate) mod test {
         assert_eq!(wants_inputs.receiver_inputs[0], input_pair_1);
         assert_eq!(wants_inputs.receiver_inputs[1], input_pair_2);
         assert_eq!(wants_inputs.receiver_inputs[2], input_pair_1);
+    }
+
+    #[test]
+    fn test_finalize_proposal_invalid_payjoin_proposal() {
+        let proposal = unchecked_proposal_from_test_vector();
+        let provisional = provisional_proposal_from_test_vector(proposal);
+        let empty_tx = Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: LockTime::Seconds(Time::MIN),
+            input: vec![],
+            output: vec![],
+        };
+        let other_psbt = Psbt::from_unsigned_tx(empty_tx).expect("Valid unsigned tx");
+        let err = provisional.finalize_proposal(|_| Ok(other_psbt.clone())).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Internal Server Error: Invalid payjoin proposal was returned by the wallet"
+        );
     }
 }

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Ok, Result};
 use bitcoincore_rpc::bitcoin::Amount;
+use clap::builder;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 use payjoin::{bitcoin, PjUri};
@@ -56,31 +57,48 @@ pub trait App: Send + Sync {
 }
 
 #[cfg(feature = "_manual-tls")]
-fn http_agent() -> Result<reqwest::Client> { Ok(http_agent_builder()?.build()?) }
+fn http_agent(cert: Option<Vec<u8>>) -> Result<reqwest::Client> {
+    match cert {
+        Some(cert_der) => build_http_agent_with_cert(&cert_der),
+        None =>
+            if let Ok(base64_cert) = std::env::var("MANUAL_TLS_CERT") {
+                let cert_der = base64::decode(base64_cert)?;
+                build_http_agent_with_cert(&cert_der)
+            } else {
+                Err(anyhow::anyhow!("No certificate provided for manual TLS mode"))
+            },
+    }
+}
 
 #[cfg(not(feature = "_manual-tls"))]
-fn http_agent() -> Result<reqwest::Client> { Ok(reqwest::Client::new()) }
+fn http_agent() -> Result<reqwest::Client> { Ok(reqwest::Client::builder().build()?) }
 
 #[cfg(feature = "_manual-tls")]
-fn http_agent_builder() -> Result<reqwest::ClientBuilder> {
-    use rustls::pki_types::CertificateDer;
-    use rustls::RootCertStore;
-
-    let cert_der = read_local_cert()?;
-    let mut root_cert_store = RootCertStore::empty();
-    root_cert_store.add(CertificateDer::from(cert_der.as_slice()))?;
-    Ok(reqwest::ClientBuilder::new()
+fn build_http_agent_with_cert(cert_der: &[u8]) -> Result<reqwest::Client> {
+    let mut root_cert_store = rustls::RootCertStore::empty();
+    root_cert_store.add(rustls::pki_types::CertificateDer::from(cert_der))?;
+    Ok(reqwest::Client::builder()
         .use_rustls_tls()
-        .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der.as_slice())?))
+        .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der)?)
+        .build()?)
 }
 
 #[cfg(feature = "_manual-tls")]
-fn read_local_cert() -> Result<Vec<u8>> {
-    let mut local_cert_path = std::env::temp_dir();
-    local_cert_path.push(LOCAL_CERT_FILE);
-    Ok(std::fs::read(local_cert_path)?)
+fn generate_self_signed_cert() -> Result<(Vec<u8>, Vec<u8>)> {
+    use rcgen::generate_simple_self_signed;
+    let cert = generate_simple_self_signed(vec!["localhost".into()])?;
+    Ok((cert.serialize_der()?, cert.serialize_private_key_der()))
 }
 
+#[cfg(feature = "_manual-tls")]
+pub fn create_http_client_with_server_cert(server_cert: Vec<u8>) -> Result<reqwest::Client> {
+    http_agent(Some(server_cert))
+}
+
+// #[cfg(not(feature = "manual-tls"))]
+// pub fn create_http_client_with_server_cert(_server_cert: Vec<u8>) -> Result<reqwest::Client> {
+//     http_agent()
+// }
 async fn handle_interrupt(tx: watch::Sender<()>) {
     if let Err(e) = signal::ctrl_c().await {
         eprintln!("Error setting up Ctrl-C handler: {e}");

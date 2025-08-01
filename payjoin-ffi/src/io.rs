@@ -41,7 +41,7 @@ pub async fn fetch_ohttp_keys(
 ///   directory stores and forwards payjoin client payloads.
 ///
 /// * `cert_der`: The DER-encoded certificate to use for local HTTPS connections.
-#[cfg(feature = "_danger-local-https")]
+#[cfg(feature = "_manual-tls")]
 pub async fn fetch_ohttp_keys_with_cert(
     ohttp_relay: &str,
     payjoin_directory: &str,

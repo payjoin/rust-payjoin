@@ -19,6 +19,10 @@ async fn main() -> Result<(), BoxError> {
         .map_or(DEFAULT_TIMEOUT_SECS, |s| s.parse().expect("Invalid timeout"));
     let timeout = std::time::Duration::from_secs(timeout_env);
 
+    #[cfg(not(feature = "redis"))]
+    let db = payjoin_directory::MemDb::new(timeout);
+
+    #[cfg(feature = "redis")]
     let db = {
         let db_host = env::var("PJ_DB_HOST").unwrap_or_else(|_| DEFAULT_DB_HOST.to_string());
         RedisDb::new(timeout, db_host).await?

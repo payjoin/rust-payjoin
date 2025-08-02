@@ -4,6 +4,8 @@ use std::result::Result;
 use payjoin::directory::ShortId;
 
 pub(crate) mod mem;
+
+#[cfg(feature = "redis")]
 pub(crate) mod redis;
 
 pub trait SendableError:

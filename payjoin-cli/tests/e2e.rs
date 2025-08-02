@@ -21,6 +21,8 @@ mod e2e {
     #[cfg(feature = "v1")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn send_receive_payjoin_v1() -> Result<(), BoxError> {
+        use payjoin_test_utils::local_cert_key;
+
         let (bitcoind, _sender, _receiver) = init_bitcoind_sender_receiver(None, None)?;
         let temp_dir = tempdir()?;
         let receiver_db_path = temp_dir.path().join("receiver_db");
@@ -33,7 +35,25 @@ mod e2e {
             let pj_endpoint = "https://localhost";
             let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
 
+            let cert = local_cert_key();
+            let cert_path = &temp_dir.path().join("localhost.crt");
+            tokio::fs::write(
+                cert_path,
+                cert.serialize_der().expect("must be able to serialize self signed certificate"),
+            )
+            .await
+            .expect("must be able to write self signed certificate");
+
+            let key_path = &temp_dir.path().join("localhost.key");
+            tokio::fs::write(key_path, cert.serialize_private_key_der())
+                .await
+                .expect("must be able to write self signed certificate");
+
             let mut cli_receiver = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--certificate-key")
+                .arg(key_path)
                 .arg("--bip78")
                 .arg("--rpchost")
                 .arg(&receiver_rpchost)
@@ -76,6 +96,8 @@ mod e2e {
             log::debug!("Got bip21 {}", &bip21);
 
             let mut cli_sender = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
                 .arg("--bip78")
                 .arg("--rpchost")
                 .arg(&sender_rpchost)
@@ -156,8 +178,8 @@ mod e2e {
             let receiver_db_path = temp_dir.path().join("receiver_db");
             let sender_db_path = temp_dir.path().join("sender_db");
             let (bitcoind, _sender, _receiver) = init_bitcoind_sender_receiver(None, None)?;
-            let cert_path = std::env::temp_dir().join("localhost.der");
-            tokio::fs::write(&cert_path, services.cert()).await?;
+            let cert_path = &temp_dir.path().join("localhost.der");
+            tokio::fs::write(cert_path, services.cert()).await?;
             services.wait_for_services_ready().await?;
             let ohttp_keys = services.fetch_ohttp_keys().await?;
             let ohttp_keys_path = temp_dir.path().join("ohttp_keys");
@@ -173,6 +195,8 @@ mod e2e {
             let ohttp_relay = &services.ohttp_relay_url().to_string();
 
             let cli_receive_initiator = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
                 .arg("--rpchost")
                 .arg(&receiver_rpchost)
                 .arg("--cookie-file")
@@ -193,6 +217,8 @@ mod e2e {
                 .expect("Failed to execute payjoin-cli");
             let bip21 = get_bip21_from_receiver(cli_receive_initiator).await;
             let cli_send_initiator = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
                 .arg("--rpchost")
                 .arg(&sender_rpchost)
                 .arg("--cookie-file")
@@ -212,6 +238,8 @@ mod e2e {
             send_until_request_timeout(cli_send_initiator).await?;
 
             let cli_receive_resumer = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
                 .arg("--rpchost")
                 .arg(&receiver_rpchost)
                 .arg("--cookie-file")
@@ -228,6 +256,8 @@ mod e2e {
             respond_with_payjoin(cli_receive_resumer).await?;
 
             let cli_send_resumer = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
                 .arg("--rpchost")
                 .arg(&sender_rpchost)
                 .arg("--cookie-file")
@@ -248,6 +278,8 @@ mod e2e {
 
             // Check that neither the sender or the receiver have sessions to resume
             let cli_receive_resumer = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
                 .arg("--rpchost")
                 .arg(&receiver_rpchost)
                 .arg("--cookie-file")
@@ -263,6 +295,8 @@ mod e2e {
                 .expect("Failed to execute payjoin-cli");
             check_resume_has_no_sessions(cli_receive_resumer).await?;
             let cli_send_resumer = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
                 .arg("--rpchost")
                 .arg(&sender_rpchost)
                 .arg("--cookie-file")

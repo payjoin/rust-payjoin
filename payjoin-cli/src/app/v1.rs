@@ -26,8 +26,6 @@ use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::{handle_interrupt, http_agent};
 use crate::db::Database;
-#[cfg(feature = "_danger-local-https")]
-pub const LOCAL_CERT_FILE: &str = "localhost.der";
 
 struct Headers<'a>(&'a hyper::HeaderMap);
 impl payjoin::receive::v1::Headers for Headers<'_> {
@@ -70,7 +68,7 @@ impl AppTrait for App {
             .build_recommended(fee_rate)
             .with_context(|| "Failed to build payjoin request")?
             .create_v1_post_request();
-        let http = http_agent()?;
+        let http = http_agent(&self.config)?;
         let body = String::from_utf8(req.body.clone()).unwrap();
         println!("Sending fallback request to {}", &req.url);
         let response = http
@@ -167,7 +165,7 @@ impl App {
         let app = self.clone();
 
         #[cfg(feature = "_danger-local-https")]
-        let tls_acceptor = Self::init_tls_acceptor()?;
+        let tls_acceptor = self.init_tls_acceptor()?;
         while let Ok((stream, _)) = listener.accept().await {
             let app = app.clone();
             #[cfg(feature = "_danger-local-https")]
@@ -194,28 +192,36 @@ impl App {
     }
 
     #[cfg(feature = "_danger-local-https")]
-    fn init_tls_acceptor() -> Result<tokio_rustls::TlsAcceptor> {
-        use std::io::Write;
-
+    fn init_tls_acceptor(&self) -> Result<tokio_rustls::TlsAcceptor> {
         use rustls::pki_types::{CertificateDer, PrivateKeyDer};
         use rustls::ServerConfig;
         use tokio_rustls::TlsAcceptor;
 
-        let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
-        let cert_der = cert.serialize_der()?;
-        let mut local_cert_path = std::env::temp_dir();
-        local_cert_path.push(LOCAL_CERT_FILE);
-        let mut file = std::fs::File::create(local_cert_path)?;
-        file.write_all(&cert_der)?;
-        let key = PrivateKeyDer::try_from(cert.serialize_private_key_der())
+        let key_der = std::fs::read(
+            self.config
+                .certificate_key
+                .as_ref()
+                .expect("certificate key is required if listening with tls"),
+        )?;
+        let key = PrivateKeyDer::try_from(key_der.clone())
             .map_err(|e| anyhow::anyhow!("Could not parse key: {}", e))?;
+
+        let cert_der = std::fs::read(
+            self.config
+                .root_certificate
+                .as_ref()
+                .expect("certificate key is required if listening with tls"),
+        )?;
         let certs = vec![CertificateDer::from(cert_der)];
+
         let mut server_config = ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(certs, key)
             .map_err(|e| anyhow::anyhow!("TLS error: {}", e))?;
+
         server_config.alpn_protocols =
             vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
+
         Ok(TlsAcceptor::from(Arc::new(server_config)))
     }
 

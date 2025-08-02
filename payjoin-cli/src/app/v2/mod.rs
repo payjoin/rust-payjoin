@@ -183,7 +183,7 @@ impl App {
                     Ok(()) => (),
                     Err(_) => {
                         let (req, v1_ctx) = context.create_v1_post_request();
-                        let response = post_request(req).await?;
+                        let response = self.post_request(req).await?;
                         let psbt = Arc::new(
                             v1_ctx.process_response(response.bytes().await?.to_vec().as_slice())?,
                         );
@@ -211,7 +211,7 @@ impl App {
         let (req, ctx) = sender.create_v2_post_request(
             self.unwrap_relay_or_else_fetch(Some(sender.endpoint().clone())).await?,
         )?;
-        let response = post_request(req).await?;
+        let response = self.post_request(req).await?;
         println!("Posted original proposal...");
         let sender = sender.process_response(&response.bytes().await?, ctx).save(persister)?;
         self.get_proposed_payjoin_psbt(sender, persister).await
@@ -228,7 +228,7 @@ impl App {
             let (req, ctx) = session.create_poll_request(
                 self.unwrap_relay_or_else_fetch(Some(session.endpoint().clone())).await?,
             )?;
-            let response = post_request(req).await?;
+            let response = self.post_request(req).await?;
             let res = session.process_response(&response.bytes().await?, ctx).save(persister);
             match res {
                 Ok(OptionalTransitionOutcome::Progress(psbt)) => {
@@ -263,7 +263,7 @@ impl App {
         loop {
             let (req, context) = session.create_poll_request(&ohttp_relay)?;
             println!("Polling receive request...");
-            let ohttp_response = post_request(req).await?;
+            let ohttp_response = self.post_request(req).await?;
             let state_transition = session
                 .process_response(ohttp_response.bytes().await?.to_vec().as_slice(), context)
                 .save(persister);
@@ -324,7 +324,7 @@ impl App {
                     None => None,
                 };
                 let ohttp_relay = self.unwrap_relay_or_else_fetch(pj_uri).await?;
-                handle_recoverable_error(&ohttp_relay, &session_history).await?;
+                self.handle_recoverable_error(&ohttp_relay, &session_history).await?;
 
                 Err(e)
             }
@@ -468,7 +468,7 @@ impl App {
         let (req, ohttp_ctx) = proposal
             .create_post_request(&self.unwrap_relay_or_else_fetch(None).await?)
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
-        let res = post_request(req).await?;
+        let res = self.post_request(req).await?;
         let payjoin_psbt = proposal.psbt().clone();
         proposal.process_response(&res.bytes().await?, ohttp_ctx).save(persister)?;
         println!(
@@ -493,47 +493,48 @@ impl App {
         };
         Ok(ohttp_relay)
     }
-}
 
-/// Handle request error by sending an error response over the directory
-async fn handle_recoverable_error(
-    ohttp_relay: &payjoin::Url,
-    session_history: &SessionHistory,
-) -> Result<()> {
-    let e = match session_history.terminal_error() {
-        Some((_, Some(e))) => e,
-        _ => return Ok(()),
-    };
-    let (err_req, err_ctx) = session_history
-        .extract_err_req(ohttp_relay)?
-        .expect("If JsonReply is Some, then err_req and err_ctx should be Some");
-    let to_return = anyhow!("Replied with error: {}", e.to_json().to_string());
+    /// Handle request error by sending an error response over the directory
+    async fn handle_recoverable_error(
+        &self,
+        ohttp_relay: &payjoin::Url,
+        session_history: &SessionHistory,
+    ) -> Result<()> {
+        let e = match session_history.terminal_error() {
+            Some((_, Some(e))) => e,
+            _ => return Ok(()),
+        };
+        let (err_req, err_ctx) = session_history
+            .extract_err_req(ohttp_relay)?
+            .expect("If JsonReply is Some, then err_req and err_ctx should be Some");
+        let to_return = anyhow!("Replied with error: {}", e.to_json().to_string());
 
-    let err_response = match post_request(err_req).await {
-        Ok(response) => response,
-        Err(e) => return Err(anyhow!("Failed to post error request: {}", e)),
-    };
+        let err_response = match self.post_request(err_req).await {
+            Ok(response) => response,
+            Err(e) => return Err(anyhow!("Failed to post error request: {}", e)),
+        };
 
-    let err_bytes = match err_response.bytes().await {
-        Ok(bytes) => bytes,
-        Err(e) => return Err(anyhow!("Failed to get error response bytes: {}", e)),
-    };
+        let err_bytes = match err_response.bytes().await {
+            Ok(bytes) => bytes,
+            Err(e) => return Err(anyhow!("Failed to get error response bytes: {}", e)),
+        };
 
-    if let Err(e) = process_err_res(&err_bytes, err_ctx) {
-        return Err(anyhow!("Failed to process error response: {}", e));
+        if let Err(e) = process_err_res(&err_bytes, err_ctx) {
+            return Err(anyhow!("Failed to process error response: {}", e));
+        }
+
+        Err(to_return)
     }
 
-    Err(to_return)
-}
-
-async fn post_request(req: payjoin::Request) -> Result<reqwest::Response> {
-    let http = http_agent()?;
-    http.post(req.url)
-        .header("Content-Type", req.content_type)
-        .body(req.body)
-        .send()
-        .await
-        .map_err(map_reqwest_err)
+    async fn post_request(&self, req: payjoin::Request) -> Result<reqwest::Response> {
+        let http = http_agent(&self.config)?;
+        http.post(req.url)
+            .header("Content-Type", req.content_type)
+            .body(req.body)
+            .send()
+            .await
+            .map_err(map_reqwest_err)
+    }
 }
 
 fn map_reqwest_err(e: reqwest::Error) -> anyhow::Error {

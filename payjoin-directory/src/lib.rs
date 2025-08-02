@@ -13,6 +13,7 @@ use hyper_util::rt::TokioIo;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tracing::{debug, error, trace, warn};
 
+pub use crate::db::files::Db as FilesDb;
 pub use crate::db::redis::Db as RedisDb;
 use crate::db::Db;
 pub mod key_config;

@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use payjoin::directory::ShortId;
 
+pub(crate) mod files;
 pub(crate) mod redis;
 
 pub trait SendableError:
@@ -58,7 +59,7 @@ pub trait Db: Clone + Send + Sync + 'static {
         &self,
         mailbox_id: &ShortId,
         data: Vec<u8>,
-    ) -> impl Future<Output = Result<(), Error<Self::OperationalError>>> + Send;
+    ) -> impl Future<Output = Result<Option<()>, Error<Self::OperationalError>>> + Send;
 
     /// Read a stored v1 request or v2 payload, waiting if not yet posted.
     fn wait_for_v2_payload(

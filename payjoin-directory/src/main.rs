@@ -25,7 +25,7 @@ async fn main() -> Result<(), BoxError> {
     };
 
     let listener = TcpListener::bind(config.listen_addr).await?;
-    let db = DbPool::new(config.timeout, config.db_host).await?;
+    let db = RedisDb::new(config.timeout, config.db_host).await?;
     let service = Service::new(db, ohttp.into());
     service.serve_tcp(listener).await
 }

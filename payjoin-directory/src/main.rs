@@ -26,9 +26,8 @@ async fn main() -> Result<(), BoxError> {
         }
     };
 
-    let db = DbPool::new(config.timeout, config.db_host).await?;
+    let db = RedisDb::new(config.timeout, config.db_host).await?;
     let metrics = Metrics::new();
-
     let service = Service::new(db, ohttp.into(), metrics);
 
     // Start metrics server in the background
@@ -36,7 +35,7 @@ async fn main() -> Result<(), BoxError> {
     {
         let service = service.clone();
         tokio::spawn(async move {
-            if let Err(e) = payjoin_directory::serve_metrics_tcp(service, metrics_listener).await {
+            if let Err(e) = service.serve_metrics_tcp(metrics_listener).await {
                 error!("Metrics server error: {e}");
             }
         });

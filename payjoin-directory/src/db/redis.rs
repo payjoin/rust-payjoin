@@ -1,89 +1,35 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
 use payjoin::directory::ShortId;
 use redis::{AsyncCommands, Client, ErrorKind, RedisError, RedisResult};
-use tracing::debug;
+use tracing::{debug, trace};
 
 const DEFAULT_COLUMN: &str = "";
 const PJ_V1_COLUMN: &str = "pjv1";
 
 #[derive(Debug, Clone)]
-pub struct DbPool {
+pub struct Db {
     client: Client,
     timeout: Duration,
 }
 
-/// Errors pertaining to [`DbPool`]
-#[derive(Debug)]
-pub enum Error {
-    Redis(RedisError),
-    Timeout(tokio::time::error::Elapsed),
-}
+impl crate::db::SendableError for RedisError {}
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use Error::*;
+pub type Result<T> = core::result::Result<T, super::Error<RedisError>>;
 
-        match &self {
-            Redis(error) => write!(f, "Redis error: {error}"),
-            Timeout(timeout) => write!(f, "Timeout: {timeout}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Error::Redis(e) => Some(e),
-            Error::Timeout(e) => Some(e),
-        }
-    }
-}
-
-impl From<RedisError> for Error {
-    fn from(value: RedisError) -> Self { Error::Redis(value) }
-}
-
-pub(crate) type Result<T> = core::result::Result<T, Error>;
-
-impl DbPool {
+impl Db {
     pub async fn new(timeout: Duration, db_host: String) -> Result<Self> {
         let client = Client::open(format!("redis://{db_host}"))?;
         Ok(Self { client, timeout })
     }
 
-    pub async fn push_default(&self, mailbox_id: &ShortId, data: Vec<u8>) -> Result<()> {
-        self.push(mailbox_id, DEFAULT_COLUMN, data).await
-    }
-
-    pub async fn peek_default(&self, mailbox_id: &ShortId) -> Result<Vec<u8>> {
-        self.peek_with_timeout(mailbox_id, DEFAULT_COLUMN).await
-    }
-
-    pub async fn push_v1(&self, mailbox_id: &ShortId, data: Vec<u8>) -> Result<()> {
-        self.push(mailbox_id, PJ_V1_COLUMN, data).await
-    }
-
-    pub async fn peek_v1(&self, mailbox_id: &ShortId) -> Result<Vec<u8>> {
-        self.peek_with_timeout(mailbox_id, PJ_V1_COLUMN).await
-    }
-
-    async fn push(&self, mailbox_id: &ShortId, channel_type: &str, data: Vec<u8>) -> Result<()> {
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
-        let key = channel_name(mailbox_id, channel_type);
-        () = conn.set(&key, data.clone()).await?;
-        () = conn.publish(&key, "updated").await?;
-        Ok(())
-    }
-
     async fn peek_with_timeout(&self, mailbox_id: &ShortId, channel_type: &str) -> Result<Vec<u8>> {
+        trace!("blocking on {}", mailbox_id);
         match tokio::time::timeout(self.timeout, self.peek(mailbox_id, channel_type)).await {
-            Ok(redis_result) => match redis_result {
-                Ok(result) => Ok(result),
-                Err(redis_err) => Err(Error::Redis(redis_err)),
-            },
-            Err(elapsed) => Err(Error::Timeout(elapsed)),
+            Ok(redis_result) => redis_result.map_err(super::Error::Operational),
+            Err(elapsed) => Err(super::Error::Timeout(elapsed)),
         }
     }
 
@@ -111,6 +57,8 @@ impl DbPool {
             loop {
                 match message_stream.next().await {
                     Some(msg) => {
+                        trace!("got pubsub: {:?}", msg);
+
                         () = msg.get_payload()?; // Notification received
                                                  // Try fetching the data again
                         if let Some(data) = conn.get::<_, Option<Vec<u8>>>(&key).await? {
@@ -132,6 +80,39 @@ impl DbPool {
         pubsub_conn.unsubscribe(&channel_name).await?;
 
         Ok(data)
+    }
+
+    async fn push(&self, mailbox_id: &ShortId, channel_type: &str, data: Vec<u8>) -> Result<()> {
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let key = channel_name(mailbox_id, channel_type);
+        () = conn.set(&key, data).await?;
+        () = conn.publish(&key, "updated").await?;
+        Ok(())
+    }
+}
+
+impl super::Db for Db {
+    type OperationalError = RedisError;
+
+    async fn post_v2_payload(&self, mailbox_id: &ShortId, data: Vec<u8>) -> Result<()> {
+        self.push(mailbox_id, DEFAULT_COLUMN, data).await
+    }
+
+    async fn post_v1_request_and_wait_for_response(
+        &self,
+        mailbox_id: &ShortId,
+        data: Vec<u8>,
+    ) -> Result<Arc<Vec<u8>>> {
+        self.push(mailbox_id, DEFAULT_COLUMN, data).await?;
+        self.peek_with_timeout(mailbox_id, PJ_V1_COLUMN).await.map(Arc::new)
+    }
+
+    async fn wait_for_v2_payload(&self, mailbox_id: &ShortId) -> Result<Arc<Vec<u8>>> {
+        self.peek_with_timeout(mailbox_id, DEFAULT_COLUMN).await.map(Arc::new)
+    }
+
+    async fn post_v1_response(&self, mailbox_id: &ShortId, data: Vec<u8>) -> Result<()> {
+        self.push(mailbox_id, PJ_V1_COLUMN, data).await
     }
 }
 

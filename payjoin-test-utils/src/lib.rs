@@ -141,7 +141,7 @@ pub async fn init_directory(
     let ohttp_server = payjoin_directory::gen_ohttp_server_config()?;
 
     println!("Database running on {db_host}");
-    let db = payjoin_directory::DbPool::new(timeout, db_host).await?;
+    let db = payjoin_directory::RedisDb::new(timeout, db_host).await?;
     let metrics = payjoin_directory::metrics::Metrics::new();
     let service = payjoin_directory::Service::new(db, ohttp_server.into(), metrics);
 

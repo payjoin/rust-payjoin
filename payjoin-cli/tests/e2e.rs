@@ -25,13 +25,12 @@ mod e2e {
         let temp_dir = tempdir()?;
         let receiver_db_path = temp_dir.path().join("receiver_db");
         let sender_db_path = temp_dir.path().join("sender_db");
-        let port = find_free_port()?;
 
         let payjoin_sent = tokio::spawn(async move {
             let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
             let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
             let cookie_file = &bitcoind.params.cookie_file;
-            let pj_endpoint = format!("https://localhost:{port}");
+            let pj_endpoint = "https://localhost";
             let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
 
             let mut cli_receiver = Command::new(payjoin_cli)
@@ -45,9 +44,9 @@ mod e2e {
                 .arg("receive")
                 .arg(RECEIVE_SATS)
                 .arg("--port")
-                .arg(port.to_string())
+                .arg("0")
                 .arg("--pj-endpoint")
-                .arg(&pj_endpoint)
+                .arg(pj_endpoint)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
                 .spawn()
@@ -128,11 +127,6 @@ mod e2e {
         .await?;
 
         assert!(payjoin_sent, "Payjoin send was not detected");
-
-        fn find_free_port() -> Result<u16, BoxError> {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
-            Ok(listener.local_addr()?.port())
-        }
 
         Ok(())
     }

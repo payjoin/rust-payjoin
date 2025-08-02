@@ -9,14 +9,14 @@ const DEFAULT_COLUMN: &str = "";
 const PJ_V1_COLUMN: &str = "pjv1";
 
 #[derive(Debug, Clone)]
-pub(crate) struct DbPool {
+pub struct DbPool {
     client: Client,
     timeout: Duration,
 }
 
 /// Errors pertaining to [`DbPool`]
 #[derive(Debug)]
-pub(crate) enum Error {
+pub enum Error {
     Redis(RedisError),
     Timeout(tokio::time::error::Elapsed),
 }
@@ -53,7 +53,6 @@ impl DbPool {
         Ok(Self { client, timeout })
     }
 
-    /// Peek using [`DEFAULT_COLUMN`] as the channel type.
     pub async fn push_default(&self, mailbox_id: &ShortId, data: Vec<u8>) -> Result<()> {
         self.push(mailbox_id, DEFAULT_COLUMN, data).await
     }
@@ -66,7 +65,6 @@ impl DbPool {
         self.push(mailbox_id, PJ_V1_COLUMN, data).await
     }
 
-    /// Peek using [`PJ_V1_COLUMN`] as the channel type.
     pub async fn peek_v1(&self, mailbox_id: &ShortId) -> Result<Vec<u8>> {
         self.peek_with_timeout(mailbox_id, PJ_V1_COLUMN).await
     }

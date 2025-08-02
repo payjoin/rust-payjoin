@@ -138,8 +138,8 @@ impl Service {
         let query = req.uri().query().unwrap_or_default().to_string();
         let (parts, body) = req.into_parts();
 
+        debug!("Service::serve_request: {} {}", parts.method, path);
         let path_segments: Vec<&str> = path.split('/').collect();
-        debug!("Service::serve_request: {:?}", &path_segments);
         let mut response = match (parts.method, path_segments.as_slice()) {
             (Method::POST, ["", ".well-known", "ohttp-gateway"]) =>
                 self.handle_ohttp_gateway(body).await,

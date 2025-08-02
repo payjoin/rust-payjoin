@@ -175,7 +175,7 @@ async fn serve_payjoin_directory(
     let (parts, body) = req.into_parts();
 
     let path_segments: Vec<&str> = path.split('/').collect();
-    debug!("serve_payjoin_directory: {:?}", &path_segments);
+    debug!("serve_payjoin_directory: {} {}", parts.method, path);
     let mut response = match (parts.method, path_segments.as_slice()) {
         (Method::POST, ["", ".well-known", "ohttp-gateway"]) =>
             handle_ohttp_gateway(body, pool, ohttp).await,

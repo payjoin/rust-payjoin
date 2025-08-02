@@ -99,16 +99,9 @@ impl AppTrait for App {
 
     #[allow(clippy::incompatible_msrv)]
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
-        let pj_uri_string = self.construct_payjoin_uri(amount, None)?;
-        println!(
-            "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
-            self.config.v1()?.port
-        );
-        println!("{}", pj_uri_string);
-
         let mut interrupt = self.interrupt.clone();
         tokio::select! {
-            res = self.start_http_server() => { res?; }
+            res = self.start_http_server(amount) => { res?; }
             _ = interrupt.changed() => {
                 println!("Interrupted.");
             }
@@ -146,9 +139,31 @@ impl App {
         Ok(pj_uri.to_string())
     }
 
-    async fn start_http_server(&self) -> Result<()> {
-        let addr = SocketAddr::from(([0, 0, 0, 0], self.config.v1()?.port));
+    async fn start_http_server(&self, amount: Amount) -> Result<()> {
+        let port = self.config.v1()?.port;
+        let addr = SocketAddr::from(([0, 0, 0, 0], port));
         let listener = TcpListener::bind(addr).await?;
+
+        let mut endpoint = self.config.v1()?.pj_endpoint.clone();
+
+        // If --port 0 is specified, a free port is chosen, so we need to set it
+        // on the endpoint which must not have a port.
+        let fallback_endpoint = if port == 0 {
+            endpoint
+                .set_port(Some(listener.local_addr()?.port()))
+                .expect("setting port must succeed");
+            Some(endpoint.as_str())
+        } else {
+            None
+        };
+
+        let pj_uri_string = self.construct_payjoin_uri(amount, fallback_endpoint)?;
+        println!(
+            "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
+            listener.local_addr()?
+        );
+        println!("{}", pj_uri_string);
+
         let app = self.clone();
 
         #[cfg(feature = "_danger-local-https")]

@@ -141,7 +141,15 @@ impl Config {
                 #[cfg(feature = "v1")]
                 {
                     match built_config.get::<V1Config>("v1") {
-                        Ok(v1) => config.version = Some(VersionConfig::V1(v1)),
+                        Ok(v1) => {
+                            if v1.pj_endpoint.port().is_none() != (v1.port == 0) {
+                                return Err(ConfigError::Message(
+                                    "If --port is 0, --pj-endpoint may not have a port".to_owned(),
+                                ));
+                            }
+
+                            config.version = Some(VersionConfig::V1(v1))
+                        }
                         Err(e) =>
                             return Err(ConfigError::Message(format!(
                                 "Valid V1 configuration is required for BIP78 mode: {e}"

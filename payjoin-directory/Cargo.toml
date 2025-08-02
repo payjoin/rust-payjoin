@@ -28,12 +28,19 @@ http-body-util = "0.1.2"
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-rustls = { version = "0.26", optional = true }
 hyper-util = { version = "0.1", features = ["tokio"] }
-ohttp = { package = "bitcoin-ohttp", version = "0.6.0"}
-payjoin = { version = "0.24.0", features = ["directory"], default-features = false }
-redis = { version = "0.23.3", features = ["aio", "tokio-comp"], optional = true }
+ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }
+payjoin = { version = "0.24.0", features = [
+    "directory",
+], default-features = false }
+redis = { version = "0.23.3", features = [
+    "aio",
+    "tokio-comp",
+], optional = true }
 rustls = { version = "0.22.4", optional = true }
 tokio = { version = "1.12.0", features = ["full"] }
-tokio-rustls = { version = "0.25", features = ["ring"], default-features = false, optional = true }
+tokio-rustls = { version = "0.25", features = [
+    "ring",
+], default-features = false, optional = true }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 

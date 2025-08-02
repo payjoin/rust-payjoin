@@ -37,6 +37,7 @@ prometheus = "0.13.4"
 clap = { version = "4.5.45", features = ["derive", "env"] }
 config = "0.15.14"
 serde = { version = "1.0.219", features = ["derive"] }
+rand = "0.8"
 
 [dev-dependencies]
 tempfile = "3.20.0"

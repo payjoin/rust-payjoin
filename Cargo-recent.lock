@@ -2653,6 +2653,7 @@ dependencies = [
  "hyper-util",
  "payjoin",
  "prometheus",
+ "rand 0.8.5",
  "redis",
  "serde",
  "tempfile",

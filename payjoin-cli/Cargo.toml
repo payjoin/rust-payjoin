@@ -20,9 +20,17 @@ path = "src/main.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = ["v2"]
+redis = ["payjoin-test-utils/redis"]
 native-certs = ["reqwest/rustls-tls-native-roots"]
-_danger-local-https = ["rcgen", "reqwest/rustls-tls", "rustls", "hyper-rustls", "payjoin/_danger-local-https", "tokio-rustls"]
-v1 = ["payjoin/v1","hyper", "hyper-util", "http-body-util"]
+_danger-local-https = [
+    "rcgen",
+    "reqwest/rustls-tls",
+    "rustls",
+    "hyper-rustls",
+    "payjoin/_danger-local-https",
+    "tokio-rustls",
+]
+v1 = ["payjoin/v1", "hyper", "hyper-util", "http-body-util"]
 v2 = ["payjoin/v2", "payjoin/io"]
 
 [dependencies]
@@ -44,7 +52,9 @@ rustls = { version = "0.22.4", optional = true }
 serde = { version = "1.0.160", features = ["derive"] }
 sled = "0.34"
 tokio = { version = "1.38.1", features = ["full"] }
-tokio-rustls = { version = "0.25", features = ["ring"], default-features = false, optional = true }
+tokio-rustls = { version = "0.25", features = [
+    "ring",
+], default-features = false, optional = true }
 url = { version = "2.3.1", features = ["serde"] }
 
 [dev-dependencies]

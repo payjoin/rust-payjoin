@@ -1,4 +1,5 @@
 use std::env;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::result::Result;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -18,8 +19,11 @@ use rcgen::Certificate;
 use reqwest::{Client, ClientBuilder};
 use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
+#[cfg(feature = "redis")]
 use testcontainers::{clients, Container};
+#[cfg(feature = "redis")]
 use testcontainers_modules::redis::{Redis, REDIS_PORT};
+use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 use url::Url;
@@ -47,6 +51,7 @@ pub fn init_tracing() {
 pub struct TestServices {
     cert: Certificate,
     /// redis is an implicit dependency of the directory service
+    #[cfg(feature = "redis")]
     #[allow(dead_code)]
     redis: (u16, Container<'static, Redis>),
     directory: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
@@ -65,9 +70,17 @@ impl TestServices {
         let mut root_store = RootCertStore::empty();
         root_store.add(CertificateDer::from(cert.serialize_der().unwrap())).unwrap();
 
+        #[cfg(feature = "redis")]
         let redis = init_redis();
+        #[cfg(feature = "redis")]
         let db_host = format!("127.0.0.1:{}", redis.0);
-        let directory = init_directory(db_host, cert_key.clone()).await?;
+        let directory = init_directory(
+            #[cfg(feature = "redis")]
+            db_host,
+            cert_key.clone(),
+        )
+        .await?;
+
         let gateway_origin =
             ohttp_relay::GatewayUri::from_str(&format!("https://localhost:{}", directory.0))?;
         let ohttp_relay = ohttp_relay::listen_tcp_on_free_port(gateway_origin, root_store).await?;
@@ -75,6 +88,7 @@ impl TestServices {
 
         Ok(Self {
             cert,
+            #[cfg(feature = "redis")]
             redis,
             directory: (directory.0, Some(directory.1)),
             ohttp_relay: (ohttp_relay.0, Some(ohttp_relay.1)),
@@ -118,6 +132,7 @@ impl TestServices {
     }
 }
 
+#[cfg(feature = "redis")]
 pub fn init_redis() -> (u16, Container<'static, Redis>) {
     let docker = Box::leak(Box::new(clients::Cli::default()));
     let redis_instance = docker.run(Redis);
@@ -126,22 +141,37 @@ pub fn init_redis() -> (u16, Container<'static, Redis>) {
 }
 
 pub async fn init_directory(
-    db_host: String,
+    #[cfg(feature = "redis")] db_host: String,
     local_cert_key: (Vec<u8>, Vec<u8>),
 ) -> std::result::Result<
     (u16, tokio::task::JoinHandle<std::result::Result<(), BoxSendSyncError>>),
     BoxSendSyncError,
 > {
-    println!("Database running on {db_host}");
     let timeout = Duration::from_secs(2);
     let ohttp_server = payjoin_directory::gen_ohttp_server_config()?;
-    payjoin_directory::listen_tcp_with_tls_on_free_port(
-        db_host,
-        timeout,
-        local_cert_key,
-        ohttp_server.into(),
-    )
-    .await
+
+    #[cfg(feature = "redis")]
+    let db = {
+        println!("Database running on {db_host}");
+        payjoin_directory::RedisDb::new(timeout, db_host).await?
+    };
+
+    #[cfg(not(feature = "redis"))]
+    let db = payjoin_directory::MemDb::new(timeout);
+
+    let service = payjoin_directory::Service::new(db, ohttp_server.into());
+
+    let listener = bind_free_port().await?;
+    let port = listener.local_addr()?.port();
+
+    let handle = tokio::spawn(service.serve_tls(listener, local_cert_key));
+
+    Ok((port, handle))
+}
+
+async fn bind_free_port() -> Result<tokio::net::TcpListener, std::io::Error> {
+    let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0);
+    TcpListener::bind(bind_addr).await
 }
 
 /// generate or get a DER encoded localhost cert and key.

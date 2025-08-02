@@ -1,13 +1,15 @@
 use std::env;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
 use payjoin_directory::*;
+use tokio::net::TcpListener;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
 const DEFAULT_KEY_CONFIG_DIR: &str = "ohttp_keys";
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), BoxError> {
     init_logging();
 
     let dir_port =
@@ -17,7 +19,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_or(DEFAULT_TIMEOUT_SECS, |s| s.parse().expect("Invalid timeout"));
     let timeout = std::time::Duration::from_secs(timeout_env);
 
-    let db_host = env::var("PJ_DB_HOST").unwrap_or_else(|_| DEFAULT_DB_HOST.to_string());
+    #[cfg(not(feature = "redis"))]
+    let db = payjoin_directory::MemDb::new(timeout);
+
+    #[cfg(feature = "redis")]
+    let db = {
+        let db_host = env::var("PJ_DB_HOST").unwrap_or_else(|_| DEFAULT_DB_HOST.to_string());
+        RedisDb::new(timeout, db_host).await?
+    };
 
     let key_dir =
         std::env::var("PJ_OHTTP_KEY_DIR").map(std::path::PathBuf::from).unwrap_or_else(|_| {
@@ -36,7 +45,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    payjoin_directory::listen_tcp(dir_port, db_host, timeout, ohttp.into()).await
+    let listener = bind_port(dir_port).await?;
+    let service = Service::new(db, ohttp.into());
+    service.serve_tcp(listener).await
+}
+
+async fn bind_port(port: u16) -> Result<tokio::net::TcpListener, std::io::Error> {
+    let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
+    TcpListener::bind(bind_addr).await
 }
 
 fn init_logging() {

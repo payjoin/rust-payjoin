@@ -1,4 +1,5 @@
 use std::env;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::result::Result;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -20,6 +21,7 @@ use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
 use testcontainers::{clients, Container};
 use testcontainers_modules::redis::{Redis, REDIS_PORT};
+use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 use url::Url;
@@ -132,16 +134,24 @@ pub async fn init_directory(
     (u16, tokio::task::JoinHandle<std::result::Result<(), BoxSendSyncError>>),
     BoxSendSyncError,
 > {
-    println!("Database running on {db_host}");
     let timeout = Duration::from_secs(2);
     let ohttp_server = payjoin_directory::gen_ohttp_server_config()?;
-    payjoin_directory::listen_tcp_with_tls_on_free_port(
-        db_host,
-        timeout,
-        local_cert_key,
-        ohttp_server.into(),
-    )
-    .await
+
+    println!("Database running on {db_host}");
+    let db = payjoin_directory::DbPool::new(timeout, db_host).await?;
+    let service = payjoin_directory::Service::new(db, ohttp_server.into());
+
+    let listener = bind_free_port().await?;
+    let port = listener.local_addr()?.port();
+
+    let handle = tokio::spawn(service.serve_tls(listener, local_cert_key));
+
+    Ok((port, handle))
+}
+
+async fn bind_free_port() -> Result<tokio::net::TcpListener, std::io::Error> {
+    let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0);
+    TcpListener::bind(bind_addr).await
 }
 
 /// generate or get a DER encoded localhost cert and key.

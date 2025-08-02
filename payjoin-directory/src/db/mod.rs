@@ -3,6 +3,7 @@ use std::result::Result;
 
 use payjoin::directory::ShortId;
 
+pub(crate) mod mem;
 pub(crate) mod redis;
 
 pub trait SendableError:

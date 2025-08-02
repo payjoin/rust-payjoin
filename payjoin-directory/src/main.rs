@@ -13,6 +13,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir_port =
         env::var("PJ_DIR_PORT").map_or(DEFAULT_DIR_PORT, |s| s.parse().expect("Invalid port"));
 
+    let metric_port = env::var("PJ_METRIC_PORT")
+        .map_or(DEFAULT_METRIC_PORT, |s| s.parse().expect("invalid metric port"));
+
     let timeout_env = env::var("PJ_DIR_TIMEOUT_SECS")
         .map_or(DEFAULT_TIMEOUT_SECS, |s| s.parse().expect("Invalid timeout"));
     let timeout = std::time::Duration::from_secs(timeout_env);
@@ -35,6 +38,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             key_config::read_server_config(&key_dir).expect("Failed to read newly generated config")
         }
     };
+
+    // Start metrics server in the background
+    tokio::spawn(async move {
+        if let Err(e) = payjoin_directory::listen_metrics_server(metric_port).await {
+            eprintln!("Metrics server error: {e}");
+        }
+    });
 
     payjoin_directory::listen_tcp(dir_port, db_host, timeout, ohttp.into()).await
 }

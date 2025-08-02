@@ -19,7 +19,10 @@ async fn main() -> Result<(), BoxError> {
         .map_or(DEFAULT_TIMEOUT_SECS, |s| s.parse().expect("Invalid timeout"));
     let timeout = std::time::Duration::from_secs(timeout_env);
 
-    let db_host = env::var("PJ_DB_HOST").unwrap_or_else(|_| DEFAULT_DB_HOST.to_string());
+    let db = {
+        let db_host = env::var("PJ_DB_HOST").unwrap_or_else(|_| DEFAULT_DB_HOST.to_string());
+        RedisDb::new(timeout, db_host).await?
+    };
 
     let key_dir =
         std::env::var("PJ_OHTTP_KEY_DIR").map(std::path::PathBuf::from).unwrap_or_else(|_| {
@@ -39,7 +42,6 @@ async fn main() -> Result<(), BoxError> {
     };
 
     let listener = bind_port(dir_port).await?;
-    let db = DbPool::new(timeout, db_host).await?;
     let service = Service::new(db, ohttp.into());
     service.serve_tcp(listener).await
 }

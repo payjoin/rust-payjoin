@@ -643,7 +643,7 @@ impl WantsFeeRange {
         let additional_fee = input_contribution_weight * min_fee_rate;
         log::trace!("additional_fee: {additional_fee}");
         let mut receiver_additional_fee = additional_fee;
-        if additional_fee > Amount::ZERO {
+        if additional_fee >= Amount::ONE_SAT {
             log::trace!(
                 "self.params.additional_fee_contribution: {:?}",
                 self.params.additional_fee_contribution
@@ -688,7 +688,7 @@ impl WantsFeeRange {
                 receiver_additional_fee / (input_contribution_weight + output_contribution_weight);
             return Err(InternalPayloadError::FeeTooHigh(proposed_fee_rate, max_fee_rate));
         }
-        if receiver_additional_fee > Amount::ZERO {
+        if receiver_additional_fee >= Amount::ONE_SAT {
             // Remove additional miner fee from the receiver's specified output
             self.payjoin_psbt.unsigned_tx.output[self.change_vout].value -= receiver_additional_fee;
         }

@@ -1,13 +1,15 @@
 use std::env;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
 use payjoin_directory::*;
+use tokio::net::TcpListener;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
 const DEFAULT_KEY_CONFIG_DIR: &str = "ohttp_keys";
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), BoxError> {
     init_logging();
 
     let dir_port =
@@ -36,7 +38,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    payjoin_directory::listen_tcp(dir_port, db_host, timeout, ohttp.into()).await
+    let listener = bind_port(dir_port).await?;
+    let db = DbPool::new(timeout, db_host).await?;
+    let service = Service::new(db, ohttp.into());
+    service.serve_tcp(listener).await
+}
+
+async fn bind_port(port: u16) -> Result<tokio::net::TcpListener, std::io::Error> {
+    let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
+    TcpListener::bind(bind_addr).await
 }
 
 fn init_logging() {

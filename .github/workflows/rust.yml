@@ -32,6 +32,26 @@ jobs:
       - name: Run tests
         run: RUST_LOG=debug bash contrib/test.sh
 
+  Test-Stable-macOS:
+    name: Stable tests on macOS
+    runs-on: macos-latest
+    env:
+      # Override the value from the rust-toolchain file
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - name: "Checkout repo"
+        uses: actions/checkout@v4
+      - name: "Install stable toolchain"
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+      - name: Run tests
+        run: RUST_LOG=debug bash contrib/test.sh
+        shell: bash
+
+
   Format:
     runs-on: ubuntu-latest
     steps:

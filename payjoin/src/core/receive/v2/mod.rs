@@ -29,7 +29,7 @@ use std::time::{Duration, SystemTime};
 
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
-use bitcoin::{Address, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut};
 pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
 use serde::de::Deserializer;
@@ -70,6 +70,7 @@ pub struct SessionContext {
     mailbox: Option<url::Url>,
     ohttp_keys: OhttpKeys,
     expiry: SystemTime,
+    amount: Option<Amount>,
     s: HpkeKeyPair,
     e: Option<HpkePublicKey>,
 }
@@ -270,6 +271,7 @@ impl Receiver<UninitializedReceiver> {
         directory: impl IntoUrl,
         ohttp_keys: OhttpKeys,
         expire_after: Option<Duration>,
+        amount: Option<Amount>,
     ) -> MaybeBadInitInputsTransition<SessionEvent, Receiver<Initialized>, IntoUrlError> {
         let directory = match directory.into_url() {
             Ok(url) => url,
@@ -284,6 +286,7 @@ impl Receiver<UninitializedReceiver> {
             expiry: SystemTime::now() + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
             s: HpkeKeyPair::gen_keypair(),
             e: None,
+            amount,
         };
         MaybeBadInitInputsTransition::success(
             SessionEvent::Created(session_context.clone()),
@@ -1025,7 +1028,10 @@ pub(crate) fn pj_uri<'a>(
     pj.set_ohttp(session_context.ohttp_keys.clone());
     pj.set_exp(session_context.expiry);
     let extras = PayjoinExtras { endpoint: pj, output_substitution };
-    bitcoin_uri::Uri::with_extras(session_context.address.clone(), extras)
+    let mut uri = bitcoin_uri::Uri::with_extras(session_context.address.clone(), extras);
+    uri.amount = session_context.amount;
+
+    uri
 }
 
 #[cfg(test)]
@@ -1056,6 +1062,7 @@ pub mod test {
         expiry: SystemTime::now() + Duration::from_secs(60),
         s: HpkeKeyPair::gen_keypair(),
         e: None,
+        amount: None,
     });
 
     pub(crate) fn unchecked_proposal_v2_from_test_vector() -> UncheckedProposal {
@@ -1289,6 +1296,7 @@ pub mod test {
             SHARED_CONTEXT.address.clone(),
             SHARED_CONTEXT.directory.clone(),
             SHARED_CONTEXT.ohttp_keys.clone(),
+            None,
             None,
         )
         .save(&noop_persister)

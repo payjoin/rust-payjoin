@@ -54,6 +54,7 @@ class TestReceiverPersistence(unittest.TestCase):
             address, 
             "https://example.com", 
             payjoin.OhttpKeys.from_string("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC"), 
+            None,
             None
         ).save(persister)
         result = payjoin.payjoin_ffi.replay_receiver_event_log(persister)
@@ -83,6 +84,7 @@ class TestSenderPersistence(unittest.TestCase):
             address, 
             "https://example.com", 
             payjoin.OhttpKeys.from_string("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC"), 
+            None,
             None
         ).save(persister)
         uri = receiver.pj_uri()

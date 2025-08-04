@@ -31,8 +31,6 @@ use crate::Version;
 mod error;
 pub(crate) mod optional_parameters;
 
-#[cfg(feature = "_multiparty")]
-pub mod multiparty;
 #[cfg(feature = "v1")]
 #[cfg_attr(docsrs, doc(cfg(feature = "v1")))]
 pub mod v1;

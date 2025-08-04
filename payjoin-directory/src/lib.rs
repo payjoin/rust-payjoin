@@ -16,10 +16,6 @@ pub use crate::db::DbPool;
 pub mod key_config;
 pub use crate::key_config::*;
 use crate::metrics::Metrics;
-pub const DEFAULT_DIR_PORT: u16 = 8080;
-pub const DEFAULT_DB_HOST: &str = "localhost:6379";
-pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
-pub const DEFAULT_METRIC_PORT: u16 = 9090;
 
 const CHACHA20_POLY1305_NONCE_LEN: usize = 32; // chacha20poly1305 n_k
 const POLY1305_TAG_SIZE: usize = 16;
@@ -33,6 +29,8 @@ const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message"
 
 mod db;
 
+pub mod cli;
+pub mod config;
 pub mod metrics;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;

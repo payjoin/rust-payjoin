@@ -20,14 +20,12 @@ exclude_re = [
         "interleave_shuffle", # Replacing index += 1 with index *= 1 in a loop causes a timeout due to an infinite loop
 
 	# Trivial mutations
-	# These exlusions are allowing code blocks to run with artithmetic invloving zero and as a result do nothing
-	# payjoin/src/core/receive/v1/mod.rs
-	"replace > with >= in ProvisionalProposal::apply_fee",
+	# These exlusions are allowing code blocks to run with artithmetic involving zero and as a result are no-ops
 	# payjoin/src/core/send/mod.rs
 	"replace < with <= in PsbtContext::check_outputs",
 	"replace > with >= in PsbtContext::check_fees",
 	# payjoin/src/core/send/mod.rs
-	"replace < with <= in SenderBuilder<'a>::build_recommended", # clamping the fee contribution when the fee equals to the recommended fee does not do anything
+	"replace < with <= in PsbtContextBuilder::build_recommended", # clamping the fee contribution when the fee equals to the recommended fee does not do anything
 
 	# Async SystemTime comparison
         # checking if the system time is equal to the expiry is difficult to reasonably test

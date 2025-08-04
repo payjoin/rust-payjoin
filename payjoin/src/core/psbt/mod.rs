@@ -1,8 +1,5 @@
 //! Utilities to make work with PSBTs easier
 
-#[cfg(feature = "_multiparty")]
-pub(crate) mod merge;
-
 use std::collections::BTreeMap;
 use std::fmt;
 

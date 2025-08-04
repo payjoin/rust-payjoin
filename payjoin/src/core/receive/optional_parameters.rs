@@ -17,9 +17,6 @@ pub(crate) struct Params {
     pub additional_fee_contribution: Option<(bitcoin::Amount, usize)>,
     // minfeerate
     pub min_fee_rate: FeeRate,
-    #[cfg(feature = "_multiparty")]
-    /// Opt in to optimistic psbt merge
-    pub optimistic_merge: bool,
 }
 
 impl Default for Params {
@@ -29,8 +26,6 @@ impl Default for Params {
             output_substitution: OutputSubstitution::Enabled,
             additional_fee_contribution: None,
             min_fee_rate: FeeRate::BROADCAST_MIN,
-            #[cfg(feature = "_multiparty")]
-            optimistic_merge: false,
         }
     }
 }
@@ -114,8 +109,6 @@ impl Params {
                     } else {
                         OutputSubstitution::Enabled
                     },
-                #[cfg(feature = "_multiparty")]
-                ("optimisticmerge", v) => params.optimistic_merge = v == "true",
                 _ => (),
             }
         }
@@ -169,8 +162,6 @@ pub(crate) mod test {
             params.min_fee_rate,
             FeeRate::from_sat_per_vb(2).expect("Could not calculate feerate")
         );
-        #[cfg(feature = "_multiparty")]
-        assert!(params.optimistic_merge)
     }
 
     #[test]

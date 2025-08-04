@@ -25,7 +25,6 @@ v2 = ["_core", "hpke", "dep:http", "bhttp", "ohttp", "url/serde", "directory"]
 #[doc = "Functions to fetch OHTTP keys via CONNECT proxy using reqwest. Enables `v2` since only `v2` uses OHTTP."]
 io = ["v2", "reqwest/rustls-tls"]
 _danger-local-https = ["reqwest/rustls-tls", "rustls"]
-_multiparty = ["v2"]
 _test-utils = []
 
 [dependencies]

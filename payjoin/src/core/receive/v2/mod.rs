@@ -415,12 +415,6 @@ impl Receiver<Initialized> {
         // see: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#unsecured-payjoin-server
         if params.v == Version::One {
             params.output_substitution = OutputSubstitution::Disabled;
-
-            // Additionally V1 sessions never have an optimistic merge opportunity
-            #[cfg(feature = "_multiparty")]
-            {
-                params.optimistic_merge = false;
-            }
         }
 
         let inner = v1::UncheckedProposal { psbt, params };
@@ -932,20 +926,9 @@ pub struct PayjoinProposal {
 
 impl State for PayjoinProposal {}
 
-impl PayjoinProposal {
-    #[cfg(feature = "_multiparty")]
-    // TODO hack to get multi party working. A better solution would be to allow create_poll_request to be separate from the rest of the v2 context
-    pub(crate) fn new(v1: v1::PayjoinProposal, context: SessionContext) -> Self {
-        Self { v1, context }
-    }
-}
-
 /// A finalized Payjoin proposal, complete with fees and receiver signatures, that the sender
 /// should find acceptable.
 impl Receiver<PayjoinProposal> {
-    #[cfg(feature = "_multiparty")]
-    pub(crate) fn new(proposal: PayjoinProposal) -> Self { Receiver { state: proposal } }
-
     /// The UTXOs that would be spent by this Payjoin transaction.
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
         self.v1.utxos_to_be_locked()
@@ -1063,20 +1046,6 @@ pub mod test {
 
     pub(crate) static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
         address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
-            .expect("valid address")
-            .assume_checked(),
-        directory: EXAMPLE_URL.clone(),
-        mailbox: None,
-        ohttp_keys: OhttpKeys(
-            ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
-        ),
-        expiry: SystemTime::now() + Duration::from_secs(60),
-        s: HpkeKeyPair::gen_keypair(),
-        e: None,
-    });
-
-    pub(crate) static SHARED_CONTEXT_TWO: Lazy<SessionContext> = Lazy::new(|| SessionContext {
-        address: Address::from_str("tb1qv7scm7gxs32qg3lnm9kf267kllc63yvdxyh72e")
             .expect("valid address")
             .assume_checked(),
         directory: EXAMPLE_URL.clone(),

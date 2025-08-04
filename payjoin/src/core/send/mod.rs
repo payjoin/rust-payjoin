@@ -42,9 +42,6 @@ pub mod v1;
 #[cfg_attr(docsrs, doc(cfg(feature = "v2")))]
 pub mod v2;
 
-#[cfg(feature = "_multiparty")]
-pub mod multiparty;
-
 type InternalResult<T> = Result<T, InternalProposalError>;
 
 /// A builder to construct the properties of a `PsbtContext`.

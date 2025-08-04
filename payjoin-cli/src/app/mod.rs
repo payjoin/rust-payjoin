@@ -18,9 +18,6 @@ pub(crate) mod v1;
 #[cfg(feature = "v2")]
 pub(crate) mod v2;
 
-#[cfg(feature = "_danger-local-https")]
-pub const LOCAL_CERT_FILE: &str = "localhost.der";
-
 #[async_trait::async_trait]
 pub trait App: Send + Sync {
     fn new(config: Config) -> Result<Self>
@@ -56,29 +53,25 @@ pub trait App: Send + Sync {
 }
 
 #[cfg(feature = "_danger-local-https")]
-fn http_agent() -> Result<reqwest::Client> { Ok(http_agent_builder()?.build()?) }
-
-#[cfg(not(feature = "_danger-local-https"))]
-fn http_agent() -> Result<reqwest::Client> { Ok(reqwest::Client::new()) }
-
-#[cfg(feature = "_danger-local-https")]
-fn http_agent_builder() -> Result<reqwest::ClientBuilder> {
-    use rustls::pki_types::CertificateDer;
-    use rustls::RootCertStore;
-
-    let cert_der = read_local_cert()?;
-    let mut root_cert_store = RootCertStore::empty();
-    root_cert_store.add(CertificateDer::from(cert_der.as_slice()))?;
-    Ok(reqwest::ClientBuilder::new()
-        .use_rustls_tls()
-        .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der.as_slice())?))
+fn http_agent(config: &Config) -> Result<reqwest::Client> {
+    Ok(http_agent_builder(config.root_certificate.as_ref())?.build()?)
 }
 
+#[cfg(not(feature = "_danger-local-https"))]
+fn http_agent(_config: &Config) -> Result<reqwest::Client> { Ok(reqwest::Client::new()) }
+
 #[cfg(feature = "_danger-local-https")]
-fn read_local_cert() -> Result<Vec<u8>> {
-    let mut local_cert_path = std::env::temp_dir();
-    local_cert_path.push(LOCAL_CERT_FILE);
-    Ok(std::fs::read(local_cert_path)?)
+fn http_agent_builder(
+    root_cert_path: Option<&std::path::PathBuf>,
+) -> Result<reqwest::ClientBuilder> {
+    let mut builder = reqwest::ClientBuilder::new().use_rustls_tls();
+
+    if let Some(root_cert_path) = root_cert_path {
+        let cert_der = std::fs::read(root_cert_path)?;
+        builder =
+            builder.add_root_certificate(reqwest::tls::Certificate::from_der(cert_der.as_slice())?)
+    }
+    Ok(builder)
 }
 
 async fn handle_interrupt(tx: watch::Sender<()>) {

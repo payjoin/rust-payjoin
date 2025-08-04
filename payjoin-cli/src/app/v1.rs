@@ -17,7 +17,7 @@ use payjoin::bitcoin::FeeRate;
 use payjoin::receive::v1::{PayjoinProposal, UncheckedProposal};
 use payjoin::receive::ReplyableError::{self, Implementation, V1};
 use payjoin::send::v1::SenderBuilder;
-use payjoin::{ImplementationError, Uri, UriExt};
+use payjoin::{ImplementationError, IntoUrl, Uri, UriExt};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
@@ -26,8 +26,6 @@ use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::{handle_interrupt, http_agent};
 use crate::db::Database;
-#[cfg(feature = "_danger-local-https")]
-pub const LOCAL_CERT_FILE: &str = "localhost.der";
 
 struct Headers<'a>(&'a hyper::HeaderMap);
 impl payjoin::receive::v1::Headers for Headers<'_> {
@@ -70,7 +68,7 @@ impl AppTrait for App {
             .build_recommended(fee_rate)
             .with_context(|| "Failed to build payjoin request")?
             .create_v1_post_request();
-        let http = http_agent()?;
+        let http = http_agent(&self.config)?;
         let body = String::from_utf8(req.body.clone()).unwrap();
         println!("Sending fallback request to {}", &req.url);
         let response = http
@@ -99,16 +97,9 @@ impl AppTrait for App {
 
     #[allow(clippy::incompatible_msrv)]
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
-        let pj_uri_string = self.construct_payjoin_uri(amount, None)?;
-        println!(
-            "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
-            self.config.v1()?.port
-        );
-        println!("{}", pj_uri_string);
-
         let mut interrupt = self.interrupt.clone();
         tokio::select! {
-            res = self.start_http_server() => { res?; }
+            res = self.start_http_server(amount) => { res?; }
             _ = interrupt.changed() => {
                 println!("Interrupted.");
             }
@@ -123,22 +114,12 @@ impl AppTrait for App {
 }
 
 impl App {
-    fn construct_payjoin_uri(
-        &self,
-        amount: Amount,
-        fallback_target: Option<&str>,
-    ) -> Result<String> {
+    fn construct_payjoin_uri(&self, amount: Amount, endpoint: impl IntoUrl) -> Result<String> {
         let pj_receiver_address = self.wallet.get_new_address()?;
-        let pj_part = match fallback_target {
-            Some(target) => target,
-            None => self.config.v1()?.pj_endpoint.as_str(),
-        };
-        let pj_part = payjoin::Url::parse(pj_part)
-            .map_err(|e| anyhow!("Failed to parse pj_endpoint: {}", e))?;
 
         let mut pj_uri = payjoin::receive::v1::build_v1_pj_uri(
             &pj_receiver_address,
-            &pj_part,
+            endpoint,
             payjoin::OutputSubstitution::Enabled,
         )?;
         pj_uri.amount = Some(amount);
@@ -146,13 +127,32 @@ impl App {
         Ok(pj_uri.to_string())
     }
 
-    async fn start_http_server(&self) -> Result<()> {
-        let addr = SocketAddr::from(([0, 0, 0, 0], self.config.v1()?.port));
+    async fn start_http_server(&self, amount: Amount) -> Result<()> {
+        let port = self.config.v1()?.port;
+        let addr = SocketAddr::from(([0, 0, 0, 0], port));
         let listener = TcpListener::bind(addr).await?;
+
+        let mut endpoint = self.config.v1()?.pj_endpoint.clone();
+
+        // If --port 0 is specified, a free port is chosen, so we need to set it
+        // on the endpoint which must not have a port.
+        if port == 0 {
+            endpoint
+                .set_port(Some(listener.local_addr()?.port()))
+                .expect("setting port must succeed");
+        }
+
+        let pj_uri_string = self.construct_payjoin_uri(amount, endpoint)?;
+        println!(
+            "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
+            listener.local_addr()?
+        );
+        println!("{}", pj_uri_string);
+
         let app = self.clone();
 
         #[cfg(feature = "_danger-local-https")]
-        let tls_acceptor = Self::init_tls_acceptor()?;
+        let tls_acceptor = self.init_tls_acceptor()?;
         while let Ok((stream, _)) = listener.accept().await {
             let app = app.clone();
             #[cfg(feature = "_danger-local-https")]
@@ -179,28 +179,36 @@ impl App {
     }
 
     #[cfg(feature = "_danger-local-https")]
-    fn init_tls_acceptor() -> Result<tokio_rustls::TlsAcceptor> {
-        use std::io::Write;
-
+    fn init_tls_acceptor(&self) -> Result<tokio_rustls::TlsAcceptor> {
         use rustls::pki_types::{CertificateDer, PrivateKeyDer};
         use rustls::ServerConfig;
         use tokio_rustls::TlsAcceptor;
 
-        let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
-        let cert_der = cert.serialize_der()?;
-        let mut local_cert_path = std::env::temp_dir();
-        local_cert_path.push(LOCAL_CERT_FILE);
-        let mut file = std::fs::File::create(local_cert_path)?;
-        file.write_all(&cert_der)?;
-        let key = PrivateKeyDer::try_from(cert.serialize_private_key_der())
+        let key_der = std::fs::read(
+            self.config
+                .certificate_key
+                .as_ref()
+                .expect("certificate key is required if listening with tls"),
+        )?;
+        let key = PrivateKeyDer::try_from(key_der.clone())
             .map_err(|e| anyhow::anyhow!("Could not parse key: {}", e))?;
+
+        let cert_der = std::fs::read(
+            self.config
+                .root_certificate
+                .as_ref()
+                .expect("certificate key is required if listening with tls"),
+        )?;
         let certs = vec![CertificateDer::from(cert_der)];
+
         let mut server_config = ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(certs, key)
             .map_err(|e| anyhow::anyhow!("TLS error: {}", e))?;
+
         server_config.alpn_protocols =
             vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
+
         Ok(TlsAcceptor::from(Arc::new(server_config)))
     }
 

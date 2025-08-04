@@ -80,18 +80,20 @@ async fn fetch_ohttp_keys(
         let ohttp_keys = {
             #[cfg(feature = "_danger-local-https")]
             {
-                let cert_der = crate::app::read_local_cert()?;
-                payjoin::io::fetch_ohttp_keys_with_cert(
-                    &selected_relay,
-                    &payjoin_directory,
-                    cert_der,
-                )
-                .await
+                if let Some(cert_path) = config.root_certificate.as_ref() {
+                    let cert_der = std::fs::read(cert_path)?;
+                    payjoin::io::fetch_ohttp_keys_with_cert(
+                        &selected_relay,
+                        &payjoin_directory,
+                        cert_der,
+                    )
+                    .await
+                } else {
+                    payjoin::io::fetch_ohttp_keys(&selected_relay, &payjoin_directory).await
+                }
             }
             #[cfg(not(feature = "_danger-local-https"))]
-            {
-                payjoin::io::fetch_ohttp_keys(&selected_relay, &payjoin_directory).await
-            }
+            payjoin::io::fetch_ohttp_keys(&selected_relay, &payjoin_directory).await
         };
 
         match ohttp_keys {

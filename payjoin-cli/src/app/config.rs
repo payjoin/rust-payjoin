@@ -56,6 +56,10 @@ pub struct Config {
     pub bitcoind: BitcoindConfig,
     #[serde(skip)]
     pub version: Option<VersionConfig>,
+    #[cfg(feature = "_danger-local-https")]
+    pub root_certificate: Option<PathBuf>,
+    #[cfg(feature = "_danger-local-https")]
+    pub certificate_key: Option<PathBuf>,
 }
 
 impl Config {
@@ -134,6 +138,10 @@ impl Config {
             max_fee_rate: built_config.get("max_fee_rate").ok(),
             bitcoind: built_config.get("bitcoind")?,
             version: None,
+            #[cfg(feature = "_danger-local-https")]
+            root_certificate: built_config.get("root_certificate").ok(),
+            #[cfg(feature = "_danger-local-https")]
+            certificate_key: built_config.get("certificate_key").ok(),
         };
 
         match version {
@@ -141,7 +149,15 @@ impl Config {
                 #[cfg(feature = "v1")]
                 {
                     match built_config.get::<V1Config>("v1") {
-                        Ok(v1) => config.version = Some(VersionConfig::V1(v1)),
+                        Ok(v1) => {
+                            if v1.pj_endpoint.port().is_none() != (v1.port == 0) {
+                                return Err(ConfigError::Message(
+                                    "If --port is 0, --pj-endpoint may not have a port".to_owned(),
+                                ));
+                            }
+
+                            config.version = Some(VersionConfig::V1(v1))
+                        }
                         Err(e) =>
                             return Err(ConfigError::Message(format!(
                                 "Valid V1 configuration is required for BIP78 mode: {e}"
@@ -266,6 +282,18 @@ fn add_v2_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
 
 /// Handles configuration overrides based on CLI subcommands
 fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
+    #[cfg(feature = "_danger-local-https")]
+    let config = {
+        config
+            .set_override_option(
+                "root_certificate",
+                Some(cli.root_certificate.as_ref().map(|s| s.to_string_lossy().into_owned())),
+            )?
+            .set_override_option(
+                "certificate_key",
+                Some(cli.certificate_key.as_ref().map(|s| s.to_string_lossy().into_owned())),
+            )?
+    };
     match &cli.command {
         Commands::Send { .. } => Ok(config),
         Commands::Receive {

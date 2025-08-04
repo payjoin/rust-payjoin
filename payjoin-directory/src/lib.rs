@@ -64,9 +64,7 @@ impl hyper::service::Service<Request<Incoming>> for Service {
         Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
-        let pool = self.pool.clone();
-        let ohttp = self.ohttp.clone();
-        let this = Service::new(pool, ohttp);
+        let this = self.clone();
         Box::pin(async move { this.serve_request(req).await })
     }
 }

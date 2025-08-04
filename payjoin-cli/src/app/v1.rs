@@ -17,7 +17,7 @@ use payjoin::bitcoin::FeeRate;
 use payjoin::receive::v1::{PayjoinProposal, UncheckedProposal};
 use payjoin::receive::ReplyableError::{self, Implementation, V1};
 use payjoin::send::v1::SenderBuilder;
-use payjoin::{ImplementationError, Uri, UriExt};
+use payjoin::{ImplementationError, IntoUrl, Uri, UriExt};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
@@ -114,22 +114,12 @@ impl AppTrait for App {
 }
 
 impl App {
-    fn construct_payjoin_uri(
-        &self,
-        amount: Amount,
-        fallback_target: Option<&str>,
-    ) -> Result<String> {
+    fn construct_payjoin_uri(&self, amount: Amount, endpoint: impl IntoUrl) -> Result<String> {
         let pj_receiver_address = self.wallet.get_new_address()?;
-        let pj_part = match fallback_target {
-            Some(target) => target,
-            None => self.config.v1()?.pj_endpoint.as_str(),
-        };
-        let pj_part = payjoin::Url::parse(pj_part)
-            .map_err(|e| anyhow!("Failed to parse pj_endpoint: {}", e))?;
 
         let mut pj_uri = payjoin::receive::v1::build_v1_pj_uri(
             &pj_receiver_address,
-            &pj_part,
+            endpoint,
             payjoin::OutputSubstitution::Enabled,
         )?;
         pj_uri.amount = Some(amount);
@@ -146,16 +136,13 @@ impl App {
 
         // If --port 0 is specified, a free port is chosen, so we need to set it
         // on the endpoint which must not have a port.
-        let fallback_endpoint = if port == 0 {
+        if port == 0 {
             endpoint
                 .set_port(Some(listener.local_addr()?.port()))
                 .expect("setting port must succeed");
-            Some(endpoint.as_str())
-        } else {
-            None
-        };
+        }
 
-        let pj_uri_string = self.construct_payjoin_uri(amount, fallback_endpoint)?;
+        let pj_uri_string = self.construct_payjoin_uri(amount, endpoint)?;
         println!(
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
             listener.local_addr()?

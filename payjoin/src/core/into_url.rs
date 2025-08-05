@@ -111,4 +111,27 @@ mod tests {
         let err = "blob:https://example.com".into_url().unwrap_err();
         assert_eq!(err.to_string(), "URL scheme is not allowed");
     }
+
+    #[test]
+    fn into_url_conversions() {
+        let input = "http://localhost/";
+        let url = Url::parse(input).unwrap();
+
+        let url_ref = &url;
+        assert_eq!(url_ref.as_str(), url.as_ref());
+        assert_eq!(IntoUrlSealed::as_str(url_ref), url.as_ref());
+        assert_eq!(IntoUrlSealed::as_str(&url_ref), url.as_ref());
+
+        let url_str: &str = input;
+        assert_eq!(url_str, url.as_ref());
+        assert_eq!(IntoUrlSealed::as_str(&url_str), url.as_ref());
+
+        let url_string: String = input.to_string();
+        assert_eq!(url_string, url.as_ref());
+        assert_eq!(IntoUrlSealed::as_str(&url_string), url.as_ref());
+
+        let url_string_ref: &String = &input.to_string();
+        assert_eq!(url_string_ref, url.as_ref());
+        assert_eq!(IntoUrlSealed::as_str(&url_string_ref), url.as_ref());
+    }
 }

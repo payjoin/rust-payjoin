@@ -121,7 +121,7 @@ impl fmt::Display for ReplyableError {
             Self::Payload(e) => e.fmt(f),
             #[cfg(feature = "v1")]
             Self::V1(e) => e.fmt(f),
-            Self::Implementation(e) => write!(f, "Internal Server Error: {e}"),
+            Self::Implementation(_) => write!(f, "Internal Server Error"),
         }
     }
 }

@@ -1416,9 +1416,6 @@ pub(crate) mod test {
         };
         let other_psbt = Psbt::from_unsigned_tx(empty_tx).expect("Valid unsigned tx");
         let err = provisional.finalize_proposal(|_| Ok(other_psbt.clone())).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Internal Server Error: Invalid payjoin proposal was returned by the wallet"
-        );
+        assert_eq!(err.to_string(), "Internal Server Error");
     }
 }

@@ -63,12 +63,12 @@ impl AppTrait for App {
         // TODO: perhaps we should store pj uri in the session wrapper as to not replay the event log for each session
         let sender_state = self.db.get_send_session_ids()?.into_iter().find_map(|session_id| {
             let sender_persister = SenderPersister::from_id(self.db.clone(), session_id).ok()?;
-            let replay_results = replay_sender_event_log(&sender_persister)
+            let (send_session, session_history) = replay_sender_event_log(&sender_persister)
                 .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))
                 .ok()?;
 
-            let pj_uri = replay_results.1.endpoint();
-            let sender_state = pj_uri.filter(|uri| uri == &url).map(|_| replay_results.0);
+            let pj_uri = session_history.pj_param().map(|pj_param| pj_param.endpoint());
+            let sender_state = pj_uri.filter(|uri| uri == &url).map(|_| send_session);
             sender_state.map(|sender_state| (sender_state, sender_persister))
         });
 
@@ -177,21 +177,8 @@ impl App {
         persister: &SenderPersister,
     ) -> Result<()> {
         match session {
-            SendSession::WithReplyKey(context) => {
-                // TODO: can we handle the fall back case in `post_original_proposal`. That way we don't have to clone here
-                match self.post_original_proposal(context.clone(), persister).await {
-                    Ok(()) => (),
-                    Err(_) => {
-                        let (req, v1_ctx) = context.create_v1_post_request();
-                        let response = self.post_request(req).await?;
-                        let psbt = Arc::new(
-                            v1_ctx.process_response(response.bytes().await?.to_vec().as_slice())?,
-                        );
-                        self.process_pj_response((*psbt).clone())?;
-                    }
-                }
-                return Ok(());
-            }
+            SendSession::WithReplyKey(context) =>
+                self.post_original_proposal(context, persister).await?,
             SendSession::V2GetContext(context) =>
                 self.get_proposed_payjoin_psbt(context, persister).await?,
             SendSession::ProposalReceived(proposal) => {

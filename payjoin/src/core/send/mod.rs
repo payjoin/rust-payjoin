@@ -26,7 +26,7 @@ use url::Url;
 
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
-use crate::{Request, Version, MAX_CONTENT_LENGTH};
+use crate::{PjUri, Request, Version, MAX_CONTENT_LENGTH};
 
 // See usize casts
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -43,6 +43,119 @@ pub mod v1;
 pub mod v2;
 
 type InternalResult<T> = Result<T, InternalProposalError>;
+
+/// A builder to construct the properties of a [`Sender`] by detecting version information.
+#[derive(Clone)]
+#[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
+pub enum SenderBuilder {
+    V1(v1::SenderBuilder),
+    #[cfg(feature = "v2")]
+    V2(v2::SenderBuilder),
+}
+
+impl SenderBuilder {
+    /// Prepare the context from which to make Sender requests
+    ///
+    /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
+    /// to create a [`Sender`]
+    pub fn new(psbt: Psbt, uri: PjUri) -> Self {
+        match uri.extras.pj_param {
+            // TODO move the uri details into versioned builders
+            crate::uri::PjParam::V1(_) => Self::V1(v1::SenderBuilder::new(psbt, uri)),
+            crate::uri::PjParam::V2(_) => Self::V2(v2::SenderBuilder::new(psbt, uri)),
+        }
+    }
+
+    /// Disable output substitution even if the receiver didn't.
+    ///
+    /// This forbids receiver switching output or decreasing amount.
+    /// It is generally **not** recommended to set this as it may prevent the receiver from
+    /// doing advanced operations such as opening LN channels and it also guarantees the
+    /// receiver will **not** reward the sender with a discount.
+    pub fn always_disable_output_substitution(self) -> Self {
+        match self {
+            Self::V1(builder) => Self::V1(builder.always_disable_output_substitution()),
+            Self::V2(builder) => Self::V2(builder.always_disable_output_substitution()),
+        }
+    }
+
+    // Calculate the recommended fee contribution for an Original PSBT.
+    //
+    // BIP 78 recommends contributing `originalPSBTFeeRate * vsize(sender_input_type)`.
+    // The minfeerate parameter is set if the contribution is available in change.
+    //
+    // This method fails if no recommendation can be made or if the PSBT is malformed.
+    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, BuildSenderError> {
+        match self {
+            Self::V1(builder) => builder.build_recommended(min_fee_rate).map(Sender::V1),
+            Self::V2(builder) => builder.build_recommended(min_fee_rate).map(Sender::V2),
+        }
+    }
+
+    /// Offer the receiver contribution to pay for his input.
+    ///
+    /// These parameters will allow the receiver to take `max_fee_contribution` from given change
+    /// output to pay for additional inputs. The recommended fee is `size_of_one_input * fee_rate`.
+    ///
+    /// `change_index` specifies which output can be used to pay fee. If `None` is provided, then
+    /// the output is auto-detected unless the supplied transaction has more than two outputs.
+    ///
+    /// `clamp_fee_contribution` decreases fee contribution instead of erroring.
+    ///
+    /// If this option is true and a transaction with change amount lower than fee
+    /// contribution is provided then instead of returning error the fee contribution will
+    /// be just lowered in the request to match the change amount.
+    pub fn build_with_additional_fee(
+        self,
+        max_fee_contribution: bitcoin::Amount,
+        change_index: Option<usize>,
+        min_fee_rate: FeeRate,
+        clamp_fee_contribution: bool,
+    ) -> Result<Sender, BuildSenderError> {
+        match self {
+            Self::V1(builder) => builder
+                .build_with_additional_fee(
+                    max_fee_contribution,
+                    change_index,
+                    min_fee_rate,
+                    clamp_fee_contribution,
+                )
+                .map(Sender::V1),
+            Self::V2(builder) => builder
+                .build_with_additional_fee(
+                    max_fee_contribution,
+                    change_index,
+                    min_fee_rate,
+                    clamp_fee_contribution,
+                )
+                .map(Sender::V2),
+        }
+    }
+
+    /// Perform Payjoin without incentivizing the payee to cooperate.
+    ///
+    /// While it's generally better to offer some contribution some users may wish not to.
+    /// This function disables contribution.
+    pub fn build_non_incentivizing(
+        self,
+        min_fee_rate: FeeRate,
+    ) -> Result<Sender, BuildSenderError> {
+        match self {
+            Self::V1(builder) => builder.build_non_incentivizing(min_fee_rate).map(Sender::V1),
+            Self::V2(builder) => builder.build_non_incentivizing(min_fee_rate).map(Sender::V2),
+        }
+    }
+}
+
+/// A sender, allowing the construction of a payjoin request
+#[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
+pub enum Sender {
+    V1(v1::Sender),
+    #[cfg(feature = "v2")]
+    V2(super::persist::InitialTransition<v2::SessionEvent, v2::Sender<v2::WithReplyKey>>),
+}
 
 /// A builder to construct the properties of a `PsbtContext`.
 #[derive(Clone)]

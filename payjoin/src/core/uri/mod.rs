@@ -7,37 +7,33 @@ use url::Url;
 #[cfg(feature = "v2")]
 pub(crate) use crate::directory::ShortId;
 use crate::output_substitution::OutputSubstitution;
-use crate::uri::error::{BadEndpointError, InternalPjParseError};
-#[cfg(feature = "v2")]
-pub(crate) use crate::uri::v2::UrlExt;
+use crate::uri::error::InternalPjParseError;
 use crate::IntoUrl;
 
 pub mod error;
 #[cfg(feature = "v2")]
 pub(crate) mod v2;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum PjParam {
     V1(Url),
     #[cfg(feature = "v2")]
-    V2(Url),
+    V2(v2::PjParam),
 }
 
 impl PjParam {
     /// Temporary and footgunny constructor that lets any URL be used as v2
     pub fn new(url: impl IntoUrl) -> Result<Self, PjParseError> {
-        PjParam::try_from(
-            url.into_url()
-                .map_err(|e| InternalPjParseError::BadEndpoint(BadEndpointError::IntoUrl(e)))?,
-        )
+        PjParam::try_from(url.into_url().map_err(InternalPjParseError::IntoUrl)?)
     }
 
-    pub fn endpoint(&self) -> &Url {
+    pub fn endpoint(&self) -> Url {
         match self {
-            PjParam::V1(url) => url,
+            PjParam::V1(url) => url.clone(),
             #[cfg(feature = "v2")]
-            PjParam::V2(url) => url,
+            PjParam::V2(url) => url.endpoint(),
         }
     }
 }
@@ -46,8 +42,9 @@ impl std::fmt::Display for PjParam {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // normalizing to uppercase enables QR alphanumeric mode encoding
         // unfortunately Url normalizes these to be lowercase
-        let scheme = self.endpoint().scheme();
-        let host = self.endpoint().host_str().expect("host must be set");
+        let endpoint = self.endpoint();
+        let scheme = endpoint.scheme();
+        let host = endpoint.host_str().expect("host must be set");
         let endpoint_str = self
             .endpoint()
             .as_str()
@@ -61,11 +58,8 @@ impl TryFrom<&str> for PjParam {
     type Error = PjParseError;
 
     fn try_from(endpoint: &str) -> Result<Self, Self::Error> {
-        let url = Url::parse(endpoint).map_err(|e| {
-            InternalPjParseError::BadEndpoint(error::BadEndpointError::IntoUrl(
-                crate::IntoUrlError::ParseError(e),
-            ))
-        })?;
+        let url = Url::parse(endpoint)
+            .map_err(|e| InternalPjParseError::IntoUrl(crate::IntoUrlError::ParseError(e)))?;
         PjParam::try_from(url)
     }
 }
@@ -78,18 +72,13 @@ impl TryFrom<Url> for PjParam {
             || endpoint.scheme() == "http"
                 && endpoint.domain().unwrap_or_default().ends_with(".onion")
         {
-            // Temporarily switch on has .fragment()
-            // TODO fully validate v2
             #[cfg(feature = "v2")]
-            if let Some(fragment) = endpoint.fragment() {
-                if fragment.chars().any(|c| c.is_lowercase()) {
-                    return Err(InternalPjParseError::BadEndpoint(
-                        BadEndpointError::LowercaseFragment,
-                    )
-                    .into());
-                }
-                return Ok(PjParam::V2(endpoint));
+            match v2::PjParam::parse(endpoint.clone()) {
+                Err(v2::PjParseError::NotV2) => (), // continue
+                Ok(v2) => return Ok(PjParam::V2(v2)),
+                Err(e) => return Err(InternalPjParseError::V2(e).into()),
             }
+
             Ok(PjParam::V1(endpoint))
         } else {
             Err(InternalPjParseError::UnsecureEndpoint.into())
@@ -98,6 +87,7 @@ impl TryFrom<Url> for PjParam {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum MaybePayjoinExtras {
     Supported(PayjoinExtras),
     Unsupported,
@@ -122,7 +112,7 @@ pub struct PayjoinExtras {
 }
 
 impl PayjoinExtras {
-    pub fn endpoint(&self) -> &Url { self.pj_param.endpoint() }
+    pub fn endpoint(&self) -> Url { self.pj_param.endpoint() }
     pub fn output_substitution(&self) -> OutputSubstitution { self.output_substitution }
 }
 

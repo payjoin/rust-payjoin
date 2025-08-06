@@ -26,7 +26,7 @@ use url::Url;
 
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
-use crate::{PjUri, Request, Version, MAX_CONTENT_LENGTH};
+use crate::{PjUri, Version, MAX_CONTENT_LENGTH};
 
 // See usize casts
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -789,32 +789,6 @@ fn serialize_url(
     url
 }
 
-/// Construct serialized V1 Request and Context from a Payjoin Proposal
-pub(crate) fn create_v1_post_request(endpoint: Url, psbt_ctx: PsbtContext) -> (Request, V1Context) {
-    let url = serialize_url(
-        endpoint.clone(),
-        psbt_ctx.output_substitution,
-        psbt_ctx.fee_contribution,
-        psbt_ctx.min_fee_rate,
-        Version::One,
-    );
-    let mut sanitized_psbt = psbt_ctx.original_psbt.clone();
-    clear_unneeded_fields(&mut sanitized_psbt);
-    let body = sanitized_psbt.to_string().as_bytes().to_vec();
-    (
-        Request::new_v1(&url, &body),
-        V1Context {
-            psbt_context: PsbtContext {
-                original_psbt: psbt_ctx.original_psbt.clone(),
-                output_substitution: psbt_ctx.output_substitution,
-                fee_contribution: psbt_ctx.fee_contribution,
-                payee: psbt_ctx.payee.clone(),
-                min_fee_rate: psbt_ctx.min_fee_rate,
-            },
-        },
-    )
-}
-
 /// Data required to validate the response.
 ///
 /// This type is used to process a BIP78 response.
@@ -1208,13 +1182,12 @@ mod test {
         let psbt_ctx = PsbtContextBuilder::new(proposal.clone(), payee, None)
             .build(OutputSubstitution::Disabled)?;
 
-        let body = create_v1_post_request(Url::from_str("HTTPS://EXAMPLE.COM/")?, psbt_ctx).0.body;
-        let res_str = std::str::from_utf8(&body)?;
-        let proposal = Psbt::from_str(res_str)?;
-        assert!(proposal.inputs[0].tap_internal_key.is_none());
-        assert!(proposal.inputs[0].bip32_derivation.is_empty());
-        assert!(proposal.outputs[0].tap_internal_key.is_none());
-        assert!(proposal.outputs[0].bip32_derivation.is_empty());
+        let mut sanitized_psbt = psbt_ctx.original_psbt.clone();
+        clear_unneeded_fields(&mut sanitized_psbt);
+        assert!(sanitized_psbt.inputs[0].tap_internal_key.is_none());
+        assert!(sanitized_psbt.inputs[0].bip32_derivation.is_empty());
+        assert!(sanitized_psbt.outputs[0].tap_internal_key.is_none());
+        assert!(sanitized_psbt.outputs[0].bip32_derivation.is_empty());
         Ok(())
     }
 

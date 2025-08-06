@@ -100,7 +100,8 @@ impl SessionHistory {
     /// Psbt with fee contributions applied
     pub fn psbt_ready_for_signing(&self) -> Option<bitcoin::Psbt> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::ProvisionalProposal(proposal) => Some(proposal.payjoin_psbt.clone()),
+            SessionEvent::ProvisionalProposal(proposal) =>
+                Some(proposal.psbt_context.payjoin_psbt.clone()),
             _ => None,
         })
     }
@@ -152,7 +153,7 @@ pub enum SessionEvent {
     WantsInputs(v1::WantsInputs),
     WantsFeeRange(v1::WantsFeeRange),
     ProvisionalProposal(v1::ProvisionalProposal),
-    PayjoinProposal(v1::PayjoinProposal),
+    PayjoinProposal(bitcoin::Psbt),
     /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
     /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
     /// Reason being in some cases we still want to preserve the error b/c we can action on it. For now this is a terminal state and there is nothing to replay and is saved to be displayed.
@@ -209,7 +210,7 @@ mod tests {
             SessionEvent::WantsOutputs(wants_outputs),
             SessionEvent::WantsInputs(wants_inputs),
             SessionEvent::ProvisionalProposal(provisional_proposal),
-            SessionEvent::PayjoinProposal(payjoin_proposal),
+            SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()),
         ];
 
         for event in test_cases {
@@ -406,11 +407,16 @@ mod tests {
         let test = SessionHistoryTest {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: Some(provisional_proposal.payjoin_psbt.clone()),
+                psbt_with_fee_contributions: Some(
+                    provisional_proposal.psbt_context.payjoin_psbt.clone(),
+                ),
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::ProvisionalProposal(Receiver {
-                state: ProvisionalProposal { v1: provisional_proposal, context: session_context },
+                state: ProvisionalProposal {
+                    psbt_context: provisional_proposal.psbt_context,
+                    context: session_context,
+                },
             }),
         };
         run_session_history_test(test)
@@ -456,16 +462,21 @@ mod tests {
         events.push(SessionEvent::WantsInputs(wants_inputs));
         events.push(SessionEvent::WantsFeeRange(wants_fee_range));
         events.push(SessionEvent::ProvisionalProposal(provisional_proposal.clone()));
-        events.push(SessionEvent::PayjoinProposal(payjoin_proposal.clone()));
+        events.push(SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()));
 
         let test = SessionHistoryTest {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: Some(provisional_proposal.payjoin_psbt.clone()),
+                psbt_with_fee_contributions: Some(
+                    provisional_proposal.psbt_context.payjoin_psbt.clone(),
+                ),
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {
-                state: PayjoinProposal { v1: payjoin_proposal, context: session_context },
+                state: PayjoinProposal {
+                    psbt: payjoin_proposal.psbt().clone(),
+                    context: session_context,
+                },
             }),
         };
         run_session_history_test(test)

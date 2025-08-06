@@ -51,7 +51,7 @@ use crate::persist::{
     MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
     MaybeSuccessTransition, MaybeTransientTransition, NextStateTransition,
 };
-use crate::receive::{parse_payload, InputPair};
+use crate::receive::{parse_payload, InputPair, PsbtContext};
 use crate::uri::ShortId;
 use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
 
@@ -863,20 +863,28 @@ impl Receiver<WantsFeeRange> {
         MaybeFatalTransition::success(
             SessionEvent::ProvisionalProposal(inner.clone()),
             Receiver {
-                state: ProvisionalProposal { v1: inner, context: self.state.context.clone() },
+                state: ProvisionalProposal {
+                    psbt_context: inner.psbt_context,
+                    context: self.state.context.clone(),
+                },
             },
         )
     }
 
     pub(crate) fn apply_provisional_proposal(self, v1: v1::ProvisionalProposal) -> ReceiveSession {
-        let new_state = Receiver { state: ProvisionalProposal { v1, context: self.state.context } };
+        let new_state = Receiver {
+            state: ProvisionalProposal {
+                psbt_context: v1.psbt_context,
+                context: self.state.context,
+            },
+        };
         ReceiveSession::ProvisionalProposal(new_state)
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProvisionalProposal {
-    v1: v1::ProvisionalProposal,
+    psbt_context: PsbtContext,
     context: SessionContext,
 }
 
@@ -898,29 +906,32 @@ impl Receiver<ProvisionalProposal> {
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, ReplyableError> {
-        let inner = match self.state.v1.clone().finalize_proposal(wallet_process_psbt) {
+        let inner = match self.state.psbt_context.finalize_proposal(wallet_process_psbt) {
             Ok(inner) => inner,
             Err(e) => {
                 // v1::finalize_proposal returns a ReplyableError but the only error that can be returned is ImplementationError from the closure
                 // And that is a transient error
-                return MaybeTransientTransition::transient(e);
+                return MaybeTransientTransition::transient(ReplyableError::Implementation(
+                    ImplementationError::new(e),
+                ));
             }
         };
+        let payjoin_proposal = PayjoinProposal { psbt: inner.clone(), context: self.state.context };
         MaybeTransientTransition::success(
-            SessionEvent::PayjoinProposal(inner.clone()),
-            Receiver { state: PayjoinProposal { v1: inner, context: self.state.context } },
+            SessionEvent::PayjoinProposal(inner),
+            Receiver { state: payjoin_proposal },
         )
     }
 
-    pub(crate) fn apply_payjoin_proposal(self, v1: v1::PayjoinProposal) -> ReceiveSession {
-        let new_state = Receiver { state: PayjoinProposal { v1, context: self.state.context } };
+    pub(crate) fn apply_payjoin_proposal(self, psbt: Psbt) -> ReceiveSession {
+        let new_state = Receiver { state: PayjoinProposal { psbt, context: self.state.context } };
         ReceiveSession::PayjoinProposal(new_state)
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PayjoinProposal {
-    v1: v1::PayjoinProposal,
+    psbt: Psbt,
     context: SessionContext,
 }
 
@@ -931,11 +942,13 @@ impl State for PayjoinProposal {}
 impl Receiver<PayjoinProposal> {
     /// The UTXOs that would be spent by this Payjoin transaction.
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
-        self.v1.utxos_to_be_locked()
+        // TODO: de-duplicate this with the v1 implementation
+        // It would make more sense if the payjoin proposal was only available after utxos are locked via session persister
+        self.psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
     }
 
     /// The Payjoin Proposal PSBT.
-    pub fn psbt(&self) -> &Psbt { self.v1.psbt() }
+    pub fn psbt(&self) -> &Psbt { &self.psbt }
 
     /// Construct an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
     pub fn create_post_request(
@@ -948,7 +961,7 @@ impl Receiver<PayjoinProposal> {
 
         if let Some(e) = &self.context.e {
             // Prepare v2 payload
-            let payjoin_bytes = self.v1.psbt().serialize();
+            let payjoin_bytes = self.psbt.serialize();
             let sender_mailbox = short_id_from_pubkey(e);
             target_resource = self
                 .context
@@ -959,7 +972,7 @@ impl Receiver<PayjoinProposal> {
             method = "POST";
         } else {
             // Prepare v2 wrapped and backwards-compatible v1 payload
-            body = self.v1.psbt().to_string().as_bytes().to_vec();
+            body = self.psbt.to_string().as_bytes().to_vec();
             let receiver_mailbox = short_id_from_pubkey(self.context.s.public_key());
             target_resource = self
                 .context

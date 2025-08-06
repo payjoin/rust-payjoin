@@ -32,7 +32,6 @@
 //! but request reuse makes correlation trivial for the relay.
 
 use std::cmp::{max, min};
-use std::collections::BTreeMap;
 
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::rand::seq::SliceRandom;
@@ -48,7 +47,7 @@ use super::optional_parameters::Params;
 use super::{InputPair, OutputSubstitutionError, ReplyableError, SelectionError};
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
-use crate::receive::InternalPayloadError;
+use crate::receive::{InternalPayloadError, PsbtContext};
 use crate::ImplementationError;
 
 #[cfg(feature = "v1")]
@@ -746,8 +745,10 @@ impl WantsFeeRange {
     ) -> Result<ProvisionalProposal, ReplyableError> {
         let psbt = self.apply_fee(min_fee_rate, max_effective_fee_rate)?.clone();
         Ok(ProvisionalProposal {
-            original_psbt: self.original_psbt.clone(),
-            payjoin_psbt: psbt,
+            psbt_context: PsbtContext {
+                original_psbt: self.original_psbt.clone(),
+                payjoin_psbt: psbt,
+            },
             params: self.params.clone(),
             change_vout: self.change_vout,
         })
@@ -761,72 +762,12 @@ impl WantsFeeRange {
 /// Call [`Self::finalize_proposal`] to return a finalized [`PayjoinProposal`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProvisionalProposal {
-    original_psbt: Psbt,
-    pub(crate) payjoin_psbt: Psbt,
+    pub(crate) psbt_context: PsbtContext,
     params: Params,
     change_vout: usize,
 }
 
 impl ProvisionalProposal {
-    /// Prepare the PSBT by creating a new PSBT and copying only the fields allowed by the [spec](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#senders-payjoin-proposal-checklist)
-    fn prepare_psbt(self, processed_psbt: Psbt) -> PayjoinProposal {
-        log::trace!("Original PSBT from callback: {processed_psbt:#?}");
-
-        // Create a new PSBT and copy only the allowed fields
-        let mut filtered_psbt = Psbt {
-            unsigned_tx: processed_psbt.unsigned_tx,
-            version: processed_psbt.version,
-            xpub: BTreeMap::new(),
-            proprietary: BTreeMap::new(),
-            unknown: BTreeMap::new(),
-            inputs: vec![],
-            outputs: vec![],
-        };
-
-        for input in &processed_psbt.inputs {
-            filtered_psbt.inputs.push(bitcoin::psbt::Input {
-                witness_utxo: input.witness_utxo.clone(),
-                non_witness_utxo: input.non_witness_utxo.clone(),
-                sighash_type: input.sighash_type,
-                final_script_sig: input.final_script_sig.clone(),
-                final_script_witness: input.final_script_witness.clone(),
-                tap_key_sig: input.tap_key_sig,
-                tap_script_sigs: input.tap_script_sigs.clone(),
-                tap_merkle_root: input.tap_merkle_root,
-                ..Default::default()
-            });
-        }
-
-        for _ in &processed_psbt.outputs {
-            filtered_psbt.outputs.push(bitcoin::psbt::Output::default());
-        }
-
-        log::trace!("Filtered PSBT: {filtered_psbt:#?}");
-
-        PayjoinProposal { payjoin_psbt: filtered_psbt }
-    }
-
-    /// Return the indexes of the sender inputs.
-    fn sender_input_indexes(&self) -> Vec<usize> {
-        // iterate proposal as mutable WITH the outpoint (previous_output) available too
-        let mut original_inputs = self.original_psbt.input_pairs().peekable();
-        let mut sender_input_indexes = vec![];
-        for (i, input) in self.payjoin_psbt.input_pairs().enumerate() {
-            if let Some(original) = original_inputs.peek() {
-                log::trace!(
-                    "match previous_output: {} == {}",
-                    input.txin.previous_output,
-                    original.txin.previous_output
-                );
-                if input.txin.previous_output == original.txin.previous_output {
-                    sender_input_indexes.push(i);
-                    original_inputs.next();
-                }
-            }
-        }
-        sender_input_indexes
-    }
-
     /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
     /// they sign the transaction and broadcast it to the network.
     ///
@@ -837,24 +778,11 @@ impl ProvisionalProposal {
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> Result<PayjoinProposal, ReplyableError> {
-        let mut psbt = self.payjoin_psbt.clone();
-        // Remove now-invalid sender signatures before applying the receiver signatures
-        for i in self.sender_input_indexes() {
-            log::trace!("Clearing sender input {i}");
-            psbt.inputs[i].final_script_sig = None;
-            psbt.inputs[i].final_script_witness = None;
-            psbt.inputs[i].tap_key_sig = None;
-        }
-        let finalized_psbt = wallet_process_psbt(&psbt).map_err(ReplyableError::Implementation)?;
-        if self.payjoin_psbt.unsigned_tx.compute_ntxid()
-            != finalized_psbt.unsigned_tx.compute_ntxid()
-        {
-            return Err(ReplyableError::Implementation(
-                "Invalid payjoin proposal was returned by the wallet".into(),
-            ));
-        }
-        let payjoin_proposal = self.prepare_psbt(finalized_psbt);
-        Ok(payjoin_proposal)
+        let finalized_psbt = self
+            .psbt_context
+            .finalize_proposal(wallet_process_psbt)
+            .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
+        Ok(PayjoinProposal { payjoin_psbt: finalized_psbt })
     }
 }
 
@@ -1343,7 +1271,8 @@ pub(crate) mod test {
         }
 
         let provisional = provisional_proposal_from_test_vector(proposal);
-        let payjoin_proposal = provisional.prepare_psbt(processed_psbt);
+        let payjoin_proposal =
+            provisional.finalize_proposal(|_| Ok(processed_psbt.clone())).expect("Valid psbt");
 
         assert!(payjoin_proposal.payjoin_psbt.xpub.is_empty());
 
@@ -1415,10 +1344,14 @@ pub(crate) mod test {
             output: vec![],
         };
         let other_psbt = Psbt::from_unsigned_tx(empty_tx).expect("Valid unsigned tx");
-        let err = provisional.finalize_proposal(|_| Ok(other_psbt.clone())).unwrap_err();
+        let err = provisional.clone().finalize_proposal(|_| Ok(other_psbt.clone())).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Internal Server Error: Invalid payjoin proposal was returned by the wallet"
+            format!(
+                "Internal Server Error: Ntxid mismatch: expected {}, got {}",
+                provisional.psbt_context.payjoin_psbt.unsigned_tx.compute_txid(),
+                other_psbt.unsigned_tx.compute_txid()
+            )
         );
     }
 }

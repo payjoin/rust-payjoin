@@ -657,10 +657,11 @@ mod test {
         let ohttp_keys = OhttpKeys(
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
         );
-        let pj_uri = Receiver::create_session(address.clone(), directory, ohttp_keys, None, None)
-            .save(&NoopSessionPersister::default())
-            .expect("receiver should succeed")
-            .pj_uri();
+        let pj_uri =
+            Receiver::create_session(address.clone(), directory, ohttp_keys, None, None, None)
+                .save(&NoopSessionPersister::default())
+                .expect("receiver should succeed")
+                .pj_uri();
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_recommended(FeeRate::BROADCAST_MIN)
             .save(&NoopSessionPersister::default())

@@ -494,6 +494,7 @@ impl Sender<V2GetContext> {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
     use std::time::{Duration, SystemTime};
 
     use bitcoin::hex::FromHex;

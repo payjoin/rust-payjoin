@@ -366,9 +366,9 @@ pub struct RequestV1Context {
 /// Data required for validation of response.
 /// This type is used to process the response. Get it from SenderBuilder's build methods. Then you only need to call .process_response() on it to continue BIP78 flow.
 #[derive(Clone, uniffi::Object)]
-pub struct V1Context(Arc<payjoin::send::V1Context>);
-impl From<payjoin::send::V1Context> for V1Context {
-    fn from(value: payjoin::send::V1Context) -> Self { Self(Arc::new(value)) }
+pub struct V1Context(Arc<payjoin::send::v1::V1Context>);
+impl From<payjoin::send::v1::V1Context> for V1Context {
+    fn from(value: payjoin::send::v1::V1Context) -> Self { Self(Arc::new(value)) }
 }
 
 #[uniffi::export]
@@ -376,7 +376,7 @@ impl V1Context {
     ///Decodes and validates the response.
     /// Call this method with response from receiver to continue BIP78 flow. If the response is valid you will get appropriate PSBT that you should sign and broadcast.
     pub fn process_response(&self, response: &[u8]) -> Result<String, ResponseError> {
-        <payjoin::send::V1Context as Clone>::clone(&self.0.clone())
+        <payjoin::send::v1::V1Context as Clone>::clone(&self.0.clone())
             .process_response(response)
             .map(|e| e.to_string())
             .map_err(Into::into)

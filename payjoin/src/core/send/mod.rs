@@ -16,6 +16,7 @@
 //! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
 //! but request reuse makes correlation trivial for the relay.
 
+#[cfg(feature = "v1")]
 use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
@@ -26,7 +27,9 @@ use url::Url;
 
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
-use crate::{Request, Version, MAX_CONTENT_LENGTH};
+#[cfg(feature = "v1")]
+use crate::Request;
+use crate::Version;
 
 // See usize casts
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -677,6 +680,7 @@ fn serialize_url(
 }
 
 /// Construct serialized V1 Request and Context from a Payjoin Proposal
+#[cfg(feature = "v1")]
 pub(crate) fn create_v1_post_request(endpoint: Url, psbt_ctx: PsbtContext) -> (Request, V1Context) {
     let url = serialize_url(
         endpoint.clone(),
@@ -706,11 +710,13 @@ pub(crate) fn create_v1_post_request(endpoint: Url, psbt_ctx: PsbtContext) -> (R
 ///
 /// This type is used to process a BIP78 response.
 /// Call [`Self::process_response`] on it to continue the BIP78 flow.
+#[cfg(feature = "v1")]
 #[derive(Debug, Clone)]
 pub struct V1Context {
     psbt_context: PsbtContext,
 }
 
+#[cfg(feature = "v1")]
 impl V1Context {
     /// Decodes and validates the response.
     ///
@@ -718,7 +724,7 @@ impl V1Context {
     /// valid you will get appropriate PSBT that you should sign and broadcast.
     #[inline]
     pub fn process_response(self, response: &[u8]) -> Result<Psbt, ResponseError> {
-        if response.len() > MAX_CONTENT_LENGTH {
+        if response.len() > crate::MAX_CONTENT_LENGTH {
             return Err(ResponseError::from(InternalValidationError::ContentTooLarge));
         }
 

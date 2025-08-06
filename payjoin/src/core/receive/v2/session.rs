@@ -496,7 +496,7 @@ mod tests {
         let uri =
             SessionHistory { events }.pj_uri().expect("SHARED_CONTEXT should contain valid uri");
 
-        assert_ne!(uri.extras.pj_param.endpoint(), &EXAMPLE_URL.clone());
+        assert_ne!(uri.extras.pj_param.endpoint(), EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
 
         Ok(())

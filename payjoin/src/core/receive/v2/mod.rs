@@ -52,7 +52,7 @@ use crate::persist::{
     MaybeTransientTransition, NextStateTransition,
 };
 use crate::receive::{parse_payload, InputPair, Original, PsbtContext};
-use crate::uri::{PjParam, ShortId};
+use crate::uri::ShortId;
 use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
 
 mod error;
@@ -1073,14 +1073,14 @@ pub(crate) fn pj_uri<'a>(
     session_context: &SessionContext,
     output_substitution: OutputSubstitution,
 ) -> crate::PjUri<'a> {
-    use crate::uri::{PayjoinExtras, UrlExt};
-    let id = session_context.id();
-    let mut pj_url = mailbox_endpoint(&session_context.directory, &id).clone();
-    pj_url.set_receiver_pubkey(session_context.s.public_key().clone());
-    pj_url.set_ohttp(session_context.ohttp_keys.clone());
-    pj_url.set_exp(session_context.expiry);
-    // TODO use proper constructor
-    let pj_param = PjParam::new(pj_url).expect("valid pj_url");
+    use crate::uri::PayjoinExtras;
+    let pj_param = crate::uri::PjParam::V2(crate::uri::v2::PjParam::new(
+        session_context.directory.clone(),
+        session_context.id(),
+        session_context.expiry,
+        session_context.ohttp_keys.clone(),
+        session_context.s.public_key().clone(),
+    ));
     let extras = PayjoinExtras { pj_param, output_substitution };
     let mut uri = bitcoin_uri::Uri::with_extras(session_context.address.clone(), extras);
     uri.amount = session_context.amount;
@@ -1376,7 +1376,7 @@ pub mod test {
     #[test]
     fn test_v2_pj_uri() {
         let uri = Receiver { state: Initialized { context: SHARED_CONTEXT.clone() } }.pj_uri();
-        assert_ne!(uri.extras.pj_param.endpoint(), &EXAMPLE_URL.clone());
+        assert_ne!(uri.extras.pj_param.endpoint(), EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
     }
 

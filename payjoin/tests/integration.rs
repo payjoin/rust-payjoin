@@ -549,11 +549,13 @@ mod integration {
                 .assume_checked()
                 .check_pj_supported()
                 .map_err(|e| e.to_string())?;
+            // FIXME this test no longer sends v2 to v1 because that concept is gone and should now be
+            // Handled by the implementation. Therefore, the e2e test should now test v2-capable sender
+            // successfully sending to v1.
+            assert!(matches!(pj_uri.extras.pj_param(), payjoin::PjParam::V1(_)));
             let psbt = build_original_psbt(&sender, &pj_uri)?;
-            let send_persister = NoopSessionPersister::default();
-            let req_ctx = SenderBuilder::new(psbt, pj_uri)
-                .build_recommended(FeeRate::BROADCAST_MIN)?
-                .save(&send_persister)?;
+            let req_ctx = payjoin::send::v1::SenderBuilder::new(psbt, pj_uri)
+                .build_recommended(FeeRate::BROADCAST_MIN)?;
             let (req, ctx) = req_ctx.create_v1_post_request();
             let headers = HeaderMock::new(&req.body, req.content_type);
 
@@ -601,7 +603,6 @@ mod integration {
                 let directory = services.directory_url();
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let recv_persister = NoopSessionPersister::default();
-                let send_persister = NoopSessionPersister::default();
                 let address = receiver.get_new_address(None, None)?.assume_checked();
                 let mut session = Receiver::create_session(
                     address,
@@ -621,9 +622,13 @@ mod integration {
                     .check_pj_supported()
                     .map_err(|e| e.to_string())?;
                 let psbt = build_original_psbt(&sender, &pj_uri)?;
-                let req_ctx = SenderBuilder::new(psbt, pj_uri)
-                    .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
-                    .save(&send_persister)?;
+                let req_ctx = payjoin::send::v1::SenderBuilder::new(psbt, pj_uri)
+                    .build_with_additional_fee(
+                        Amount::from_sat(10000),
+                        None,
+                        FeeRate::ZERO,
+                        false,
+                    )?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
                     req_ctx.create_v1_post_request();
                 log::info!("send fallback v1 to offline receiver fail");

@@ -13,7 +13,7 @@ use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, SendSession, Sender, SenderBuilder, V2GetContext,
     WithReplyKey,
 };
-use payjoin::{ImplementationError, Uri};
+use payjoin::{ImplementationError, PjParam, Uri};
 use tokio::sync::watch;
 
 use super::config::Config;
@@ -59,38 +59,47 @@ impl AppTrait for App {
             Uri::try_from(bip21).map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
         let uri = uri.assume_checked();
         let uri = uri.check_pj_supported().map_err(|_| anyhow!("URI does not support Payjoin"))?;
-        let url = uri.extras.endpoint();
-        // TODO: perhaps we should store pj uri in the session wrapper as to not replay the event log for each session
-        let sender_state = self.db.get_send_session_ids()?.into_iter().find_map(|session_id| {
-            let sender_persister = SenderPersister::from_id(self.db.clone(), session_id).ok()?;
-            let replay_results = replay_sender_event_log(&sender_persister)
-                .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))
-                .ok()?;
+        match uri.extras.pj_param() {
+            PjParam::V1(_endpoint) => todo!(),
+            PjParam::V2(pj_param) => {
+                // TODO: perhaps we should store pj uri in the session wrapper as to not replay the event log for each session
+                let sender_state =
+                    self.db.get_send_session_ids()?.into_iter().find_map(|session_id| {
+                        let sender_persister =
+                            SenderPersister::from_id(self.db.clone(), session_id).ok()?;
+                        let (send_session, session_history) =
+                            replay_sender_event_log(&sender_persister)
+                                .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))
+                                .ok()?;
 
-            let pj_uri = replay_results.1.endpoint();
-            let sender_state = pj_uri.filter(|uri| uri == &url).map(|_| replay_results.0);
-            sender_state.map(|sender_state| (sender_state, sender_persister))
-        });
+                        let pj_uri = session_history.pj_param().map(|pj_param| pj_param.endpoint());
+                        let sender_state =
+                            pj_uri.filter(|uri| uri == &pj_param.endpoint()).map(|_| send_session);
+                        sender_state.map(|sender_state| (sender_state, sender_persister))
+                    });
 
-        let (sender_state, persister) = match sender_state {
-            Some((sender_state, persister)) => (sender_state, persister),
-            None => {
-                let persister = SenderPersister::new(self.db.clone())?;
-                let psbt = self.create_original_psbt(&uri, fee_rate)?;
-                let sender = SenderBuilder::new(psbt, uri.clone())
-                    .build_recommended(fee_rate)?
-                    .save(&persister)?;
+                let (sender_state, persister) = match sender_state {
+                    Some((sender_state, persister)) => (sender_state, persister),
+                    None => {
+                        let persister = SenderPersister::new(self.db.clone())?;
+                        let psbt = self.create_original_psbt(&uri, fee_rate)?;
+                        let sender = SenderBuilder::new(psbt, uri.clone())
+                            .build_recommended(fee_rate)?
+                            .save(&persister)?;
 
-                (SendSession::WithReplyKey(sender), persister)
+                        (SendSession::WithReplyKey(sender), persister)
+                    }
+                };
+                let mut interrupt = self.interrupt.clone();
+                tokio::select! {
+                    _ = self.process_sender_session(sender_state, &persister) => return Ok(()),
+                    _ = interrupt.changed() => {
+                        println!("Interrupted. Call `send` with the same arguments to resume this session or `resume` to resume all sessions.");
+                        return Err(anyhow!("Interrupted"))
+                    }
+                }
             }
-        };
-        let mut interrupt = self.interrupt.clone();
-        tokio::select! {
-            _ = self.process_sender_session(sender_state, &persister) => return Ok(()),
-            _ = interrupt.changed() => {
-                println!("Interrupted. Call `send` with the same arguments to resume this session or `resume` to resume all sessions.");
-                return Err(anyhow!("Interrupted"))
-            }
+            _ => unimplemented!("Unrecognized payjoin version"),
         }
     }
 
@@ -177,20 +186,8 @@ impl App {
         persister: &SenderPersister,
     ) -> Result<()> {
         match session {
-            SendSession::WithReplyKey(context) => {
-                // TODO: can we handle the fall back case in `post_original_proposal`. That way we don't have to clone here
-                match self.post_original_proposal(context.clone(), persister).await {
-                    Ok(()) => (),
-                    Err(_) => {
-                        let (req, v1_ctx) = context.create_v1_post_request();
-                        let response = self.post_request(req).await?;
-                        let psbt =
-                            v1_ctx.process_response(response.bytes().await?.to_vec().as_slice())?;
-                        self.process_pj_response(psbt)?;
-                    }
-                }
-                return Ok(());
-            }
+            SendSession::WithReplyKey(context) =>
+                self.post_original_proposal(context, persister).await?,
             SendSession::V2GetContext(context) =>
                 self.get_proposed_payjoin_psbt(context, persister).await?,
             SendSession::ProposalReceived(proposal) => {

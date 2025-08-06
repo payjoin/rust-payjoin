@@ -1,5 +1,5 @@
 use url::Url;
-
+#[cfg(feature = "v1")]
 const V1_REQ_CONTENT_TYPE: &str = "text/plain";
 
 #[cfg(feature = "v2")]
@@ -28,6 +28,7 @@ pub struct Request {
 
 impl Request {
     /// Construct a new v1 request.
+    #[cfg(feature = "v1")]
     pub(crate) fn new_v1(url: &Url, body: &[u8]) -> Self {
         Self { url: url.clone(), content_type: V1_REQ_CONTENT_TYPE, body: body.to_vec() }
     }

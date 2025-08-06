@@ -1,4 +1,5 @@
-use std::fmt::{self, Display};
+use std::fmt;
+#[cfg(feature = "v1")]
 use std::str::FromStr;
 
 use bitcoin::locktime::absolute::LockTime;
@@ -6,6 +7,7 @@ use bitcoin::transaction::Version;
 use bitcoin::Sequence;
 
 use crate::error_codes::ErrorCode;
+#[cfg(feature = "v1")]
 use crate::MAX_CONTENT_LENGTH;
 
 /// Error building a Sender from a SenderBuilder.
@@ -94,7 +96,9 @@ pub struct ValidationError(InternalValidationError);
 
 #[derive(Debug)]
 pub(crate) enum InternalValidationError {
+    #[cfg(feature = "v1")]
     Parse,
+    #[cfg(feature = "v1")]
     ContentTooLarge,
     Proposal(InternalProposalError),
     #[cfg(feature = "v2")]
@@ -118,7 +122,9 @@ impl fmt::Display for ValidationError {
         use InternalValidationError::*;
 
         match &self.0 {
+            #[cfg(feature = "v1")]
             Parse => write!(f, "couldn't decode as PSBT or JSON",),
+            #[cfg(feature = "v1")]
             ContentTooLarge => write!(f, "content is larger than {MAX_CONTENT_LENGTH} bytes"),
             Proposal(e) => write!(f, "proposal PSBT error: {e}"),
             #[cfg(feature = "v2")]
@@ -132,7 +138,9 @@ impl std::error::Error for ValidationError {
         use InternalValidationError::*;
 
         match &self.0 {
+            #[cfg(feature = "v1")]
             Parse => None,
+            #[cfg(feature = "v1")]
             ContentTooLarge => None,
             Proposal(e) => Some(e),
             #[cfg(feature = "v2")]
@@ -266,6 +274,7 @@ pub enum ResponseError {
     Unrecognized { error_code: String, message: String },
 }
 
+#[cfg(feature = "v1")]
 impl ResponseError {
     pub(crate) fn from_json(json: serde_json::Value) -> Self {
         let message = json
@@ -318,6 +327,7 @@ impl std::error::Error for ResponseError {
     }
 }
 
+#[cfg(feature = "v1")]
 impl From<WellKnownError> for ResponseError {
     fn from(value: WellKnownError) -> Self { Self::WellKnown(value) }
 }
@@ -332,7 +342,7 @@ impl From<InternalProposalError> for ResponseError {
     }
 }
 
-impl Display for ResponseError {
+impl fmt::Display for ResponseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::WellKnown(e) => e.fmt(f),
@@ -375,6 +385,7 @@ pub struct WellKnownError {
     pub(crate) supported_versions: Option<Vec<u64>>,
 }
 
+#[cfg(feature = "v1")]
 impl WellKnownError {
     /// Create a new well-known error with the given code and message.
     pub(crate) fn new(code: ErrorCode, message: String) -> Self {

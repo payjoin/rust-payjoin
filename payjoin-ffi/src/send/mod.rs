@@ -125,7 +125,10 @@ impl From<SenderSessionHistory> for payjoin::send::v2::SessionHistory {
 #[uniffi::export]
 impl SenderSessionHistory {
     pub fn endpoint(&self) -> Option<Arc<Url>> {
-        self.0.endpoint().map(|url| Arc::new(url.clone().into()))
+        self.0.pj_param().map(|pj_param| {
+            let endpoint = pj_param.endpoint();
+            Arc::new(endpoint.into())
+        })
     }
 
     /// Fallback transaction from the session if present
@@ -300,11 +303,6 @@ impl WithReplyKeyTransition {
 
 #[uniffi::export]
 impl WithReplyKey {
-    pub fn create_v1_post_request(&self) -> RequestV1Context {
-        let (req, ctx) = self.0.clone().create_v1_post_request();
-        RequestV1Context { request: req.into(), context: Arc::new(ctx.into()) }
-    }
-
     /// Construct serialized Request and Context from a Payjoin Proposal.
     ///
     /// Important: This request must not be retried or reused on failure.

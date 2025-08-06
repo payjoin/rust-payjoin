@@ -143,6 +143,7 @@ pub struct Sender {
 
 impl Sender {
     /// Construct serialized V1 Request and Context from a Payjoin Proposal
+    #[cfg(feature = "v1")]
     pub fn create_v1_post_request(&self) -> (Request, V1Context) {
         super::create_v1_post_request(self.endpoint.clone(), self.psbt_ctx.clone())
     }
@@ -163,7 +164,7 @@ mod test {
     use crate::error_codes::ErrorCode;
     use crate::send::error::{ResponseError, WellKnownError};
     use crate::send::test::create_psbt_context;
-    use crate::{Uri, UriExt};
+    use crate::{Uri, UriExt, MAX_CONTENT_LENGTH};
 
     const PJ_URI: &str =
         "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/";

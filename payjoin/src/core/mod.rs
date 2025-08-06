@@ -17,7 +17,7 @@ pub use request::*;
 pub(crate) mod into_url;
 pub use into_url::{Error as IntoUrlError, IntoUrl};
 pub(crate) mod uri;
-pub use uri::{PjParseError, PjUri, Uri, UriExt};
+pub use uri::{PjParam, PjParseError, PjUri, Uri, UriExt};
 pub use url::{ParseError, Url};
 pub(crate) mod error_codes;
 

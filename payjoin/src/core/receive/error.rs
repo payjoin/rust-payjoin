@@ -82,7 +82,7 @@ pub struct JsonReply {
 
 impl JsonReply {
     /// Create a new Reply
-    pub fn new(error_code: ErrorCode, message: impl fmt::Display) -> Self {
+    pub(crate) fn new(error_code: ErrorCode, message: impl fmt::Display) -> Self {
         Self { error_code, message: message.to_string(), extra: serde_json::Map::new() }
     }
 

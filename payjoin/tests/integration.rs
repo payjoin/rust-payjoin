@@ -209,9 +209,15 @@ mod integration {
                 let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")?
                     .assume_checked();
                 let noop_persister = NoopSessionPersister::default();
-                let mut bad_initializer =
-                    Receiver::create_session(mock_address, directory, bad_ohttp_keys, None, None)?
-                        .save(&noop_persister)?;
+                let mut bad_initializer = Receiver::create_session(
+                    mock_address,
+                    directory,
+                    bad_ohttp_keys,
+                    None,
+                    None,
+                    None,
+                )?
+                .save(&noop_persister)?;
                 let (req, _ctx) = bad_initializer.create_poll_request(&ohttp_relay)?;
                 agent
                     .post(req.url)
@@ -254,6 +260,7 @@ mod integration {
                     directory,
                     ohttp_keys,
                     Some(Duration::from_secs(0)),
+                    None,
                     None,
                 )?
                 .save(&recv_noop_persister)?;
@@ -307,7 +314,7 @@ mod integration {
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
                 let mut session =
-                    Receiver::create_session(address, directory, ohttp_keys, None, None)?
+                    Receiver::create_session(address, directory, ohttp_keys, None, None, None)?
                         .save(&persister)?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
@@ -425,7 +432,7 @@ mod integration {
 
                 // test session with expiry in the future
                 let mut session =
-                    Receiver::create_session(address, directory, ohttp_keys, None, None)?
+                    Receiver::create_session(address, directory, ohttp_keys, None, None, None)?
                         .save(&recv_persister)?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
@@ -608,6 +615,7 @@ mod integration {
                     address,
                     directory.clone(),
                     ohttp_keys.clone(),
+                    None,
                     None,
                     None,
                 )?

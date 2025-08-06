@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
             app.receive_payjoin(*amount).await?;
         }
         #[cfg(feature = "v2")]
-        Commands::Resume => {
+        Commands::Resume { .. } => {
             app.resume_payjoins().await?;
         }
     };

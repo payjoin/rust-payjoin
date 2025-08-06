@@ -106,6 +106,7 @@ impl AppTrait for App {
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys,
             None,
+            self.config.max_fee_rate,
         )
         .save(&persister)?;
         println!("Receive session established");

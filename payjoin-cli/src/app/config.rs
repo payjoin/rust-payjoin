@@ -328,7 +328,7 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
             Ok(config)
         }
         #[cfg(feature = "v2")]
-        Commands::Resume => Ok(config),
+        Commands::Resume { .. } => Ok(config),
     }
 }
 

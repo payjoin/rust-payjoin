@@ -398,3 +398,19 @@ impl error::Error for InputContributionError {
 impl From<InternalInputContributionError> for InputContributionError {
     fn from(value: InternalInputContributionError) -> Self { InputContributionError(value) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ImplementationError;
+
+    #[test]
+    fn test_json_reply_from_implementation_error() {
+        let error = ReplyableError::Implementation(ImplementationError::from(
+            "Should not see this in the json reply",
+        ));
+        let reply = JsonReply::from(&error);
+        assert_eq!(reply.error_code, ErrorCode::Unavailable);
+        assert_eq!(reply.message, "Receiver error");
+    }
+}

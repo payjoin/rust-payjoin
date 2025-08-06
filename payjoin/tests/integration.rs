@@ -282,6 +282,163 @@ mod integration {
         }
 
         #[tokio::test]
+        async fn test_enable_output_substitution_v1_to_v2() -> Result<(), BoxSendSyncError> {
+            init_tracing();
+            let mut services = TestServices::initialize().await?;
+            let result = tokio::select!(
+            err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
+            err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
+            res = do_enable_output_substitution_v1_to_v2(&services) => res
+            );
+
+            assert!(result.is_ok(), "v2 send receive failed: {:#?}", result.unwrap_err());
+
+            async fn do_enable_output_substitution_v1_to_v2(
+                services: &TestServices,
+            ) -> Result<(), BoxError> {
+                let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
+                let agent = services.http_agent();
+                services.wait_for_services_ready().await?;
+                let directory = services.directory_url();
+                let ohttp_keys = services.fetch_ohttp_keys().await?;
+                let recv_persister = NoopSessionPersister::default();
+                let send_persister = NoopSessionPersister::default();
+                let address = receiver.get_new_address(None, None)?.assume_checked();
+                let mut session =
+                    Receiver::create_session(address, directory.clone(), ohttp_keys.clone(), None)
+                        .save(&recv_persister)?;
+
+                // **********************
+                // Inside the V1 Sender:
+                // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
+                assert_eq!(
+                    session.pj_uri().extras.output_substitution(),
+                    OutputSubstitution::Disabled
+                );
+                let enabled_output_substitution =
+                    session.pj_uri().to_string().replace("?pjos=0&", "?");
+                let pj_uri = Uri::from_str(&enabled_output_substitution)
+                    .map_err(|e| e.to_string())?
+                    .assume_checked()
+                    .check_pj_supported()
+                    .map_err(|e| e.to_string())?;
+                // We need to check that output substitution is enabled
+                assert_eq!(pj_uri.extras.output_substitution(), OutputSubstitution::Enabled);
+                let psbt = build_original_psbt(&sender, &pj_uri)?;
+                let req_ctx = SenderBuilder::new(psbt, pj_uri)
+                    .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)
+                    .save(&send_persister)?;
+                let (Request { url, body, content_type, .. }, _) = req_ctx.create_v1_post_request();
+                log::info!("send fallback v1 to offline receiver fail");
+                let res = agent
+                    .post(url.clone())
+                    .header("Content-Type", content_type)
+                    .body(body.clone())
+                    .send()
+                    .await;
+                assert!(res?.status() == StatusCode::SERVICE_UNAVAILABLE);
+
+                // **********************
+                // Inside the Receiver:
+                let agent_clone: Arc<Client> = agent.clone();
+                let receiver: Arc<bitcoincore_rpc::Client> = Arc::new(receiver);
+                let ohttp_relay = services.ohttp_relay_url();
+                let receiver_loop = tokio::task::spawn(async move {
+                    let agent_clone = agent_clone.clone();
+                    let proposal = loop {
+                        let (req, ctx) = session.create_poll_request(&ohttp_relay).unwrap();
+                        let response = agent_clone
+                            .post(req.url)
+                            .header("Content-Type", req.content_type)
+                            .body(req.body)
+                            .send()
+                            .await
+                            .unwrap();
+
+                        if response.status() == 200 {
+                            let proposal = session
+                                .clone()
+                                .process_response(
+                                    response.bytes().await.unwrap().to_vec().as_slice(),
+                                    ctx,
+                                )
+                                .save(&recv_persister)
+                                .unwrap();
+                            if let Some(unchecked_proposal) = proposal.success() {
+                                break unchecked_proposal.clone();
+                            } else {
+                                log::info!(
+                                    "No response yet for POST payjoin request, retrying some seconds"
+                                );
+                            }
+                        } else {
+                            log::error!("Unexpected response status: {}", response.status());
+                            panic!("Unexpected response status: {}", response.status())
+                        }
+                    };
+                    // We only need to get to the want outputs step to check the state of output
+                    // substitution
+                    let noop_persister = NoopSessionPersister::default();
+                    let proposal = proposal
+                        .check_broadcast_suitability(None, |tx| {
+                            Ok(receiver
+                                .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(
+                                    &tx,
+                                )])
+                                .map_err(ImplementationError::new)?
+                                .first()
+                                .ok_or(ImplementationError::from(
+                                    "testmempoolaccept should return a result",
+                                ))?
+                                .allowed)
+                        })
+                        .save(&noop_persister)
+                        .unwrap();
+
+                    let proposal = proposal
+                        .check_inputs_not_owned(&mut |input| {
+                            let address =
+                                bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
+                                    .map_err(ImplementationError::new)?;
+                            receiver
+                                .get_address_info(&address)
+                                .map(|info| info.is_mine.unwrap_or(false))
+                                .map_err(ImplementationError::new)
+                        })
+                        .save(&noop_persister)
+                        .unwrap();
+
+                    let payjoin = proposal
+                        .check_no_inputs_seen_before(&mut |_| Ok(false))
+                        .save(&noop_persister)
+                        .unwrap()
+                        .identify_receiver_outputs(&mut |output_script| {
+                            let address = bitcoin::Address::from_script(
+                                output_script,
+                                bitcoin::Network::Regtest,
+                            )
+                            .map_err(ImplementationError::new)?;
+                            receiver
+                                .get_address_info(&address)
+                                .map(|info| info.is_mine.unwrap_or(false))
+                                .map_err(ImplementationError::new)
+                        })
+                        .save(&noop_persister)
+                        .unwrap();
+
+                    // Process response has forced the version one receiver back to disabling output
+                    // substitution
+                    assert_eq!(payjoin.output_substitution(), OutputSubstitution::Disabled);
+                    Ok::<_, BoxSendSyncError>(())
+                });
+                assert!(receiver_loop.await.is_ok());
+                Ok(())
+            }
+
+            Ok(())
+        }
+
+        #[tokio::test]
         async fn test_err_response() -> Result<(), BoxSendSyncError> {
             init_tracing();
             let mut services = TestServices::initialize().await?;

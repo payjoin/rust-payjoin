@@ -84,7 +84,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         raise Exception(f"Unknown receiver state: {receiver}")
 
     def create_receiver_context(self, receiver_address: bitcoinffi.Address, directory: Url, ohttp_keys: OhttpKeys, recv_persister: InMemoryReceiverSessionEventLog) -> Initialized:
-        receiver = UninitializedReceiver().create_session(address=receiver_address, directory=directory.as_string(), ohttp_keys=ohttp_keys, expire_after=None, amount=None).save(recv_persister)
+        receiver = UninitializedReceiver().create_session(address=receiver_address, directory=directory.as_string(), ohttp_keys=ohttp_keys, expire_after=None, amount=None, max_fee_rate_sat_per_vb=10).save(recv_persister)
         return receiver
 
     async def retrieve_receiver_proposal(self, receiver: Initialized, recv_persister: InMemoryReceiverSessionEventLog, ohttp_relay: Url):
@@ -124,9 +124,9 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
     async def process_wants_inputs(self, proposal: WantsInputs, recv_persister: InMemoryReceiverSessionEventLog):
         provisional_proposal = proposal.contribute_inputs(get_inputs(self.receiver)).commit_inputs().save(recv_persister)
         return await self.process_wants_fee_range(provisional_proposal, recv_persister)
-    
+
     async def process_wants_fee_range(self, proposal: WantsFeeRange, recv_persister: InMemoryReceiverSessionEventLog):
-        provisional_proposal = proposal.apply_fee_range(1, 10).save(recv_persister)
+        provisional_proposal = proposal.apply_fee_range(1, None).save(recv_persister)
         return await self.process_provisional_proposal(provisional_proposal, recv_persister)
 
     async def process_provisional_proposal(self, proposal: ProvisionalProposal, recv_persister: InMemoryReceiverSessionEventLog):

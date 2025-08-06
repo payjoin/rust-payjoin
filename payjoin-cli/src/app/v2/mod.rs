@@ -159,6 +159,7 @@ impl AppTrait for App {
             ohttp_keys,
             None,
             Some(amount),
+            self.config.max_fee_rate,
         )?
         .save(&persister)?;
         println!("Receive session established");

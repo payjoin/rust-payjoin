@@ -5,6 +5,7 @@ use super::Error::V2;
 use crate::hpke::HpkeError;
 use crate::ohttp::{DirectoryResponseError, OhttpEncapsulationError};
 use crate::receive::error::Error;
+use crate::ImplementationError;
 
 /// Error that may occur during a v2 session typestate change
 ///
@@ -33,6 +34,8 @@ pub(crate) enum InternalSessionError {
     Hpke(HpkeError),
     /// The directory returned a bad response
     DirectoryResponse(DirectoryResponseError),
+    /// Integration Error
+    Integration(ImplementationError),
 }
 
 impl From<OhttpEncapsulationError> for Error {
@@ -55,6 +58,7 @@ impl fmt::Display for SessionError {
             OhttpEncapsulation(e) => write!(f, "OHTTP Encapsulation Error: {e}"),
             Hpke(e) => write!(f, "Hpke decryption failed: {e}"),
             DirectoryResponse(e) => write!(f, "Directory response error: {e}"),
+            Integration(e) => write!(f, "Integration error: {e}"),
         }
     }
 }
@@ -69,6 +73,7 @@ impl error::Error for SessionError {
             OhttpEncapsulation(e) => Some(e),
             Hpke(e) => Some(e),
             DirectoryResponse(e) => Some(e),
+            Integration(e) => Some(e),
         }
     }
 }

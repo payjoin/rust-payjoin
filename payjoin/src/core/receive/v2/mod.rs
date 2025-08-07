@@ -905,15 +905,13 @@ impl Receiver<ProvisionalProposal> {
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-    ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, ReplyableError> {
+    ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, SessionError> {
         let inner = match self.state.psbt_context.finalize_proposal(wallet_process_psbt) {
             Ok(inner) => inner,
             Err(e) => {
-                // v1::finalize_proposal returns a ReplyableError but the only error that can be returned is ImplementationError from the closure
-                // And that is a transient error
-                return MaybeTransientTransition::transient(ReplyableError::Implementation(
-                    ImplementationError::new(e),
-                ));
+                return MaybeTransientTransition::transient(
+                    InternalSessionError::Implementation(ImplementationError::new(e)).into(),
+                );
             }
         };
         let payjoin_proposal = PayjoinProposal { psbt: inner.clone(), context: self.state.context };

@@ -1015,7 +1015,7 @@ pub struct ProvisionalProposalTransition(
                 payjoin::persist::MaybeTransientTransition<
                     payjoin::receive::v2::SessionEvent,
                     payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>,
-                    payjoin::receive::ReplyableError,
+                    payjoin::receive::v2::SessionError,
                 >,
             >,
         >,

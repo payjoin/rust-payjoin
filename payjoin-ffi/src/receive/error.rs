@@ -79,6 +79,10 @@ impl_persisted_error_from!(receive::ReplyableError, |api_err: receive::Replyable
     ReceiverError::ReplyToSender(Arc::new(api_err.into()))
 });
 
+impl_persisted_error_from!(receive::v2::SessionError, |api_err: receive::v2::SessionError| {
+    ReceiverError::V2(Arc::new(api_err.into()))
+});
+
 impl_persisted_error_from!(receive::Error, |api_err: receive::Error| api_err.into());
 
 impl_persisted_error_from!(payjoin::IntoUrlError, |api_err: payjoin::IntoUrlError| {

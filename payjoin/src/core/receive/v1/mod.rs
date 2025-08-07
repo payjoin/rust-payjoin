@@ -749,7 +749,6 @@ impl WantsFeeRange {
             original_psbt: self.original_psbt.clone(),
             payjoin_psbt: psbt,
             params: self.params.clone(),
-            change_vout: self.change_vout,
         })
     }
 }
@@ -764,7 +763,6 @@ pub struct ProvisionalProposal {
     original_psbt: Psbt,
     pub(crate) payjoin_psbt: Psbt,
     params: Params,
-    change_vout: usize,
 }
 
 impl ProvisionalProposal {

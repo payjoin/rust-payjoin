@@ -14,6 +14,34 @@ use crate::Url;
 
 pub mod error;
 
+macro_rules! impl_save_for_transition {
+    ($ty:ident, $next_state:ident) => {
+        #[uniffi::export]
+        impl $ty {
+            pub fn save(
+                &self,
+                persister: Arc<dyn JsonSenderSessionPersister>,
+            ) -> Result<$next_state, SenderPersistedError> {
+                let adapter = CallbackPersisterAdapter::new(persister);
+                let mut inner = self.0.write().map_err(|_| {
+                    SenderPersistedError::Storage(Arc::new(ImplementationError::from(
+                        "Lock poisoned".to_string(),
+                    )))
+                })?;
+
+                let value = inner.take().ok_or_else(|| {
+                    SenderPersistedError::Storage(Arc::new(ImplementationError::from(
+                        "Already saved or moved".to_string(),
+                    )))
+                })?;
+
+                let res = value.save(&adapter).map_err(SenderPersistedError::from)?;
+                Ok(res.into())
+            }
+        }
+    };
+}
+
 #[derive(uniffi::Object, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SenderSessionEvent(payjoin::send::v2::SessionEvent);
 
@@ -124,29 +152,7 @@ pub struct InitialSendTransition(
     >,
 );
 
-#[uniffi::export]
-impl InitialSendTransition {
-    pub fn save(
-        &self,
-        persister: Arc<dyn JsonSenderSessionPersister>,
-    ) -> Result<WithReplyKey, SenderPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner = self.0.write().map_err(|_| {
-            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                "Lock poisoned".to_string(),
-            )))
-        })?;
-
-        let value = inner.take().ok_or_else(|| {
-            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                "Already saved or moved".to_string(),
-            )))
-        })?;
-
-        let res = value.save(&adapter).map_err(SenderPersistedError::from)?;
-        Ok(res.into())
-    }
-}
+impl_save_for_transition!(InitialSendTransition, WithReplyKey);
 
 ///Builder for sender-side payjoin parameters
 ///
@@ -436,29 +442,7 @@ pub struct V2GetContextTransition(
     >,
 );
 
-#[uniffi::export]
-impl V2GetContextTransition {
-    pub fn save(
-        &self,
-        persister: Arc<dyn JsonSenderSessionPersister>,
-    ) -> Result<V2GetContextTransitionOutcome, SenderPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner = self.0.write().map_err(|_| {
-            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                "Lock poisoned".to_string(),
-            )))
-        })?;
-
-        let value = inner.take().ok_or_else(|| {
-            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                "Already saved or moved".to_string(),
-            )))
-        })?;
-
-        let res = value.save(&adapter).map_err(SenderPersistedError::from)?;
-        Ok(res.into())
-    }
-}
+impl_save_for_transition!(V2GetContextTransition, V2GetContextTransitionOutcome);
 
 #[uniffi::export]
 impl V2GetContext {

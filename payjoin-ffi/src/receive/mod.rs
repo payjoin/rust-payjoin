@@ -19,6 +19,35 @@ use crate::{ClientResponse, OutputSubstitution, Request};
 
 pub mod error;
 
+macro_rules! impl_save_for_transition {
+    ($ty:ident, $next_state:ident) => {
+        #[uniffi::export]
+        impl $ty {
+            pub fn save(
+                &self,
+                persister: Arc<dyn JsonReceiverSessionPersister>,
+            ) -> Result<$next_state, ReceiverPersistedError> {
+                let adapter = CallbackPersisterAdapter::new(persister);
+                let mut inner = self
+                    .0
+                    .write()
+                    .map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
+
+                let value = inner.take().ok_or_else(|| {
+                    ImplementationError::from("Already saved or moved".to_string())
+                })?;
+
+                let res = value.save(&adapter).map_err(|e| {
+                    ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(
+                        e.to_string(),
+                    )))
+                })?;
+                Ok(res.into())
+            }
+        }
+    };
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Object)]
 pub struct ReceiverSessionEvent(payjoin::receive::v2::SessionEvent);
 
@@ -411,24 +440,7 @@ pub struct UncheckedProposalTransition(
     >,
 );
 
-#[uniffi::export]
-impl UncheckedProposalTransition {
-    pub fn save(
-        &self,
-        persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<MaybeInputsOwned, ReceiverPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
-
-        let value = inner
-            .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
-
-        let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
-        Ok(res.into())
-    }
-}
+impl_save_for_transition!(UncheckedProposalTransition, MaybeInputsOwned);
 
 #[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
@@ -445,26 +457,7 @@ pub struct AssumeInteractiveTransition(
     >,
 );
 
-#[uniffi::export]
-impl AssumeInteractiveTransition {
-    pub fn save(
-        &self,
-        persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<MaybeInputsOwned, ReceiverPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
-
-        let value = inner
-            .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
-
-        let res = value.save(&adapter).map_err(|e| {
-            ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
-        })?;
-        Ok(res.into())
-    }
-}
+impl_save_for_transition!(AssumeInteractiveTransition, MaybeInputsOwned);
 
 #[uniffi::export(with_foreign)]
 pub trait CanBroadcast: Send + Sync {
@@ -535,24 +528,7 @@ pub struct MaybeInputsOwnedTransition(
     >,
 );
 
-#[uniffi::export]
-impl MaybeInputsOwnedTransition {
-    pub fn save(
-        &self,
-        persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<MaybeInputsSeen, ReceiverPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
-
-        let value = inner
-            .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
-
-        let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
-        Ok(res.into())
-    }
-}
+impl_save_for_transition!(MaybeInputsOwnedTransition, MaybeInputsSeen);
 
 #[uniffi::export(with_foreign)]
 pub trait IsScriptOwned: Send + Sync {
@@ -608,24 +584,7 @@ pub struct MaybeInputsSeenTransition(
     >,
 );
 
-#[uniffi::export]
-impl MaybeInputsSeenTransition {
-    pub fn save(
-        &self,
-        persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<OutputsUnknown, ReceiverPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
-
-        let value = inner
-            .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
-
-        let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
-        Ok(res.into())
-    }
-}
+impl_save_for_transition!(MaybeInputsSeenTransition, OutputsUnknown);
 
 #[uniffi::export(with_foreign)]
 pub trait IsOutputKnown: Send + Sync {
@@ -677,24 +636,7 @@ pub struct OutputsUnknownTransition(
     >,
 );
 
-#[uniffi::export]
-impl OutputsUnknownTransition {
-    pub fn save(
-        &self,
-        persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<WantsOutputs, ReceiverPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
-
-        let value = inner
-            .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
-
-        let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
-        Ok(res.into())
-    }
-}
+impl_save_for_transition!(OutputsUnknownTransition, WantsOutputs);
 
 #[uniffi::export]
 impl OutputsUnknown {
@@ -737,26 +679,7 @@ pub struct WantsOutputsTransition(
     >,
 );
 
-#[uniffi::export]
-impl WantsOutputsTransition {
-    pub fn save(
-        &self,
-        persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<WantsInputs, ReceiverPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
-
-        let value = inner
-            .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
-
-        let res = value.save(&adapter).map_err(|e| {
-            ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
-        })?;
-        Ok(res.into())
-    }
-}
+impl_save_for_transition!(WantsOutputsTransition, WantsInputs);
 
 #[uniffi::export]
 impl WantsOutputs {
@@ -816,26 +739,7 @@ pub struct WantsInputsTransition(
     >,
 );
 
-#[uniffi::export]
-impl WantsInputsTransition {
-    pub fn save(
-        &self,
-        persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<WantsFeeRange, ReceiverPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
-
-        let value = inner
-            .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
-
-        let res = value.save(&adapter).map_err(|e| {
-            ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
-        })?;
-        Ok(res.into())
-    }
-}
+impl_save_for_transition!(WantsInputsTransition, WantsFeeRange);
 
 #[uniffi::export]
 impl WantsInputs {
@@ -927,26 +831,7 @@ pub struct WantsFeeRangeTransition(
     >,
 );
 
-#[uniffi::export]
-impl WantsFeeRangeTransition {
-    pub fn save(
-        &self,
-        persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<ProvisionalProposal, ReceiverPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
-
-        let value = inner
-            .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
-
-        let res = value.save(&adapter).map_err(|e| {
-            ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
-        })?;
-        Ok(res.into())
-    }
-}
+impl_save_for_transition!(WantsFeeRangeTransition, ProvisionalProposal);
 
 #[derive(uniffi::Object)]
 pub struct WantsFeeRange(payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsFeeRange>);
@@ -1022,24 +907,7 @@ pub struct ProvisionalProposalTransition(
     >,
 );
 
-#[uniffi::export]
-impl ProvisionalProposalTransition {
-    pub fn save(
-        &self,
-        persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<PayjoinProposal, ReceiverPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
-
-        let value = inner
-            .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
-
-        let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
-        Ok(res.into())
-    }
-}
+impl_save_for_transition!(ProvisionalProposalTransition, PayjoinProposal);
 
 #[uniffi::export(with_foreign)]
 pub trait ProcessPsbt: Send + Sync {

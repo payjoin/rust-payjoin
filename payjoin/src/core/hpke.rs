@@ -1,5 +1,6 @@
+use core::fmt;
+use std::error;
 use std::ops::Deref;
-use std::{error, fmt};
 
 use bitcoin::key::constants::{ELLSWIFT_ENCODING_SIZE, PUBLIC_KEY_SIZE};
 use bitcoin::secp256k1;
@@ -88,7 +89,7 @@ impl Deref for HpkeSecretKey {
     fn deref(&self) -> &Self::Target { &self.0 }
 }
 
-impl core::fmt::Debug for HpkeSecretKey {
+impl fmt::Debug for HpkeSecretKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "SecpHpkeSecretKey([REDACTED])")
     }
@@ -140,7 +141,7 @@ impl Deref for HpkePublicKey {
     fn deref(&self) -> &Self::Target { &self.0 }
 }
 
-impl core::fmt::Debug for HpkePublicKey {
+impl fmt::Debug for HpkePublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "SecpHpkePublicKey({:?})", self.0)
     }

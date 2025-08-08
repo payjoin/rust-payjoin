@@ -1,3 +1,4 @@
+use std::fmt;
 /// Handles cases where the transition either succeeds with a final result that ends the session, or hits a static condition and stays in the same state.
 /// State transition may also be a fatal error or transient error.
 pub struct MaybeSuccessTransitionWithNoResults<Event, SuccessValue, CurrentState, Err>(
@@ -263,7 +264,7 @@ pub struct RejectTransient<Err>(pub(crate) Err);
 /// The wrapper contains the error and should be returned to the caller.
 pub struct RejectBadInitInputs<Err>(Err);
 
-impl<Err: std::error::Error> std::fmt::Display for RejectTransient<Err> {
+impl<Err: std::error::Error> fmt::Display for RejectTransient<Err> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let RejectTransient(err) = self;
         write!(f, "{err}")
@@ -327,7 +328,7 @@ impl<ApiError: std::error::Error, StorageError: std::error::Error> std::error::E
 {
 }
 
-impl<ApiError: std::error::Error, StorageError: std::error::Error> std::fmt::Display
+impl<ApiError: std::error::Error, StorageError: std::error::Error> fmt::Display
     for PersistedError<ApiError, StorageError>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -687,7 +688,7 @@ mod tests {
 
     impl std::error::Error for InMemoryTestError {}
 
-    impl std::fmt::Display for InMemoryTestError {
+    impl fmt::Display for InMemoryTestError {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "InMemoryTestError")
         }

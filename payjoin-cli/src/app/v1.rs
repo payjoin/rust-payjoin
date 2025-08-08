@@ -147,7 +147,7 @@ impl App {
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
             listener.local_addr()?
         );
-        println!("{}", pj_uri_string);
+        println!("{pj_uri_string}");
 
         let app = self.clone();
 

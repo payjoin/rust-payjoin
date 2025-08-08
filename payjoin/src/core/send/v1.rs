@@ -394,6 +394,11 @@ mod test {
     }
 
     #[test]
+    fn test_max_content_length() {
+        assert_eq!(MAX_CONTENT_LENGTH, 4_000_000 * 4 / 3);
+    }
+
+    #[test]
     fn test_non_witness_input_weight_const() {
         assert_eq!(NON_WITNESS_INPUT_WEIGHT, bitcoin::Weight::from_wu(160));
     }

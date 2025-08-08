@@ -106,11 +106,11 @@ impl AppTrait for App {
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys,
             None,
+            Some(amount),
         )
         .save(&persister)?;
         println!("Receive session established");
-        let mut pj_uri = session.pj_uri();
-        pj_uri.amount = Some(amount);
+        let pj_uri = session.pj_uri();
         println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{}", pj_uri);
 

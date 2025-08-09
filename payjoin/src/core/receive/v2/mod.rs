@@ -72,6 +72,7 @@ pub struct SessionContext {
     expiry: SystemTime,
     s: HpkeKeyPair,
     e: Option<HpkePublicKey>,
+    max_fee_rate: FeeRate,
 }
 
 impl SessionContext {
@@ -270,6 +271,7 @@ impl Receiver<UninitializedReceiver> {
         directory: impl IntoUrl,
         ohttp_keys: OhttpKeys,
         expire_after: Option<Duration>,
+        max_fee_rate: Option<FeeRate>,
     ) -> MaybeBadInitInputsTransition<SessionEvent, Receiver<Initialized>, IntoUrlError> {
         let directory = match directory.into_url() {
             Ok(url) => url,
@@ -284,6 +286,7 @@ impl Receiver<UninitializedReceiver> {
             expiry: SystemTime::now() + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
             s: HpkeKeyPair::gen_keypair(),
             e: None,
+            max_fee_rate: max_fee_rate.unwrap_or(FeeRate::BROADCAST_MIN),
         };
         MaybeBadInitInputsTransition::success(
             SessionEvent::Created(session_context.clone()),
@@ -851,6 +854,10 @@ impl Receiver<WantsFeeRange> {
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<ProvisionalProposal>, ReplyableError> {
+        let max_effective_fee_rate = max_effective_fee_rate
+            .map(|rate| rate.min(self.state.context.max_fee_rate))
+            .or(Some(self.state.context.max_fee_rate));
+
         let inner = match self.state.v1.apply_fee_range(min_fee_rate, max_effective_fee_rate) {
             Ok(inner) => inner,
             Err(e) => {
@@ -1054,6 +1061,7 @@ pub mod test {
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
         ),
         expiry: SystemTime::now() + Duration::from_secs(60),
+        max_fee_rate: FeeRate::BROADCAST_MIN,
         s: HpkeKeyPair::gen_keypair(),
         e: None,
     });
@@ -1076,6 +1084,25 @@ pub mod test {
             v1: v1::MaybeInputsOwned { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
             context: SHARED_CONTEXT.clone(),
         }
+    }
+
+    fn create_wants_fee_range_with_context(context: SessionContext) -> WantsFeeRange {
+        // Create a proper v1 WantsFeeRange state by going through the flow
+        let unchecked = v1::test::unchecked_proposal_from_test_vector();
+        // Replicate the wants_outputs_from_test_vector logic without making it public
+        let wants_outputs = unchecked
+            .assume_interactive_receiver()
+            .check_inputs_not_owned(&mut |_| Ok(false))
+            .expect("No inputs should be owned")
+            .check_no_inputs_seen_before(&mut |_| Ok(false))
+            .expect("No inputs should be seen before")
+            .identify_receiver_outputs(&mut |_| Ok(true))
+            .expect("Receiver output should be identified");
+
+        let wants_inputs = wants_outputs.commit_outputs();
+        let v1_wants_fee_range = wants_inputs.commit_inputs();
+
+        WantsFeeRange { v1: v1_wants_fee_range, context }
     }
 
     #[test]
@@ -1290,6 +1317,7 @@ pub mod test {
             SHARED_CONTEXT.directory.clone(),
             SHARED_CONTEXT.ohttp_keys.clone(),
             None,
+            None,
         )
         .save(&noop_persister)
         .expect("Noop persister shouldn't fail");
@@ -1303,6 +1331,109 @@ pub mod test {
 
     #[test]
     fn test_v2_pj_uri() {
+        let context = SHARED_CONTEXT.clone();
+        let uri = pj_uri(&context, OutputSubstitution::Disabled);
+        assert!(!uri.to_string().is_empty());
+    }
+
+    #[test]
+    fn test_session_creation_with_max_fee_rate() {
+        let custom_fee_rate = FeeRate::from_sat_per_vb_unchecked(5);
+        let address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
+            .expect("valid address")
+            .assume_checked();
+
+        let session = Receiver::create_session(
+            address,
+            EXAMPLE_URL.clone(),
+            SHARED_CONTEXT.ohttp_keys.clone(),
+            None,
+            Some(custom_fee_rate),
+        );
+
+        let noop_persister = NoopSessionPersister::default();
+        let session = session.save(&noop_persister).expect("Noop persister shouldn't fail");
+
+        assert_eq!(session.context.max_fee_rate, custom_fee_rate);
+    }
+
+    #[test]
+    fn test_apply_fee_range_respects_session_max() {
+        let session_max = FeeRate::from_sat_per_vb_unchecked(5);
+        let context = SessionContext { max_fee_rate: session_max, ..SHARED_CONTEXT.clone() };
+
+        let wants_fee_range = create_wants_fee_range_with_context(context);
+        let receiver = Receiver { state: wants_fee_range };
+
+        let higher_rate = FeeRate::from_sat_per_vb_unchecked(10);
+
+        let result = match receiver.apply_fee_range(None, Some(higher_rate)).0 {
+            Ok(state) => state.1,
+            Err(_) => panic!("Expected successful fee range application"),
+        };
+
+        let payjoin_psbt = &result.state.v1.payjoin_psbt;
+        let payjoin_fee = payjoin_psbt.fee().expect("PSBT should have fee");
+        let actual_fee_rate =
+            payjoin_fee / payjoin_psbt.clone().extract_tx_unchecked_fee_rate().weight();
+
+        assert!(
+            actual_fee_rate <= session_max,
+            "Fee rate {actual_fee_rate} should be capped at session maximum {session_max}"
+        );
+    }
+
+    #[test]
+    fn test_apply_fee_range_with_lower_max() {
+        let session_max = FeeRate::from_sat_per_vb_unchecked(10);
+        let context = SessionContext { max_fee_rate: session_max, ..SHARED_CONTEXT.clone() };
+
+        let wants_fee_range = create_wants_fee_range_with_context(context);
+        let receiver = Receiver { state: wants_fee_range };
+
+        let lower_rate = Some(FeeRate::from_sat_per_vb_unchecked(2));
+        let result = match receiver.apply_fee_range(None, lower_rate).0 {
+            Ok(state) => state.1,
+            Err(_) => panic!("Expected successful fee range application"),
+        };
+
+        let payjoin_psbt = &result.state.v1.payjoin_psbt;
+        let payjoin_fee = payjoin_psbt.fee().expect("PSBT should have fee");
+        let actual_fee_rate =
+            payjoin_fee / payjoin_psbt.clone().extract_tx_unchecked_fee_rate().weight();
+
+        assert!(
+            actual_fee_rate <= session_max,
+            "Fee rate {actual_fee_rate} should not exceed session maximum {session_max}"
+        );
+    }
+
+    #[test]
+    fn test_apply_fee_range_with_none_uses_session_max() {
+        let session_max = FeeRate::from_sat_per_vb_unchecked(7);
+        let context = SessionContext { max_fee_rate: session_max, ..SHARED_CONTEXT.clone() };
+
+        let wants_fee_range = create_wants_fee_range_with_context(context);
+        let receiver = Receiver { state: wants_fee_range };
+
+        let result = match receiver.apply_fee_range(None, None).0 {
+            Ok(state) => state.1,
+            Err(_) => panic!("Expected successful fee range application"),
+        };
+
+        let payjoin_psbt = &result.state.v1.payjoin_psbt;
+        let payjoin_fee = payjoin_psbt.fee().expect("PSBT should have fee");
+        let actual_fee_rate =
+            payjoin_fee / payjoin_psbt.clone().extract_tx_unchecked_fee_rate().weight();
+
+        assert!(
+            actual_fee_rate <= session_max,
+            "Fee rate {actual_fee_rate} should not exceed session maximum {session_max}"
+        );
+    }
+
+    #[test]
+    fn test_v2_pj_uri_with_output_substitution() {
         let uri = Receiver { state: Initialized { context: SHARED_CONTEXT.clone() } }.pj_uri();
         assert_ne!(uri.extras.endpoint, EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);

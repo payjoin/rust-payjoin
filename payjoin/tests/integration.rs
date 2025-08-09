@@ -210,7 +210,7 @@ mod integration {
                     .assume_checked();
                 let noop_persister = NoopSessionPersister::default();
                 let mut bad_initializer =
-                    Receiver::create_session(mock_address, directory, bad_ohttp_keys, None)
+                    Receiver::create_session(mock_address, directory, bad_ohttp_keys, None, None)
                         .save(&noop_persister)?;
                 let (req, _ctx) = bad_initializer.create_poll_request(&ohttp_relay)?;
                 agent
@@ -254,6 +254,7 @@ mod integration {
                     directory.clone(),
                     ohttp_keys.clone(),
                     Some(Duration::from_secs(0)),
+                    None,
                 )
                 .save(&recv_noop_persister)?;
                 match expired_receiver.create_poll_request(&ohttp_relay) {
@@ -309,6 +310,7 @@ mod integration {
                     address.clone(),
                     directory.clone(),
                     ohttp_keys.clone(),
+                    None,
                     None,
                 )
                 .save(&persister)?;
@@ -435,6 +437,7 @@ mod integration {
                     address.clone(),
                     directory.clone(),
                     ohttp_keys.clone(),
+                    None,
                     None,
                 )
                 .save(&recv_persister)?;
@@ -621,9 +624,14 @@ mod integration {
                 let recv_persister = NoopSessionPersister::default();
                 let send_persister = NoopSessionPersister::default();
                 let address = receiver.get_new_address(None, None)?.assume_checked();
-                let mut session =
-                    Receiver::create_session(address, directory.clone(), ohttp_keys.clone(), None)
-                        .save(&recv_persister)?;
+                let mut session = Receiver::create_session(
+                    address,
+                    directory.clone(),
+                    ohttp_keys.clone(),
+                    None,
+                    None,
+                )
+                .save(&recv_persister)?;
 
                 // **********************
                 // Inside the V1 Sender:

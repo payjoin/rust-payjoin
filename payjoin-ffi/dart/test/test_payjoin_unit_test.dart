@@ -109,6 +109,7 @@ void main() {
               "https://example.com",
               payjoin.OhttpKeys.fromString(
                   "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC"),
+              null,
               null)
           .save(persister);
       final result = payjoin.replayReceiverEventLog(persister);
@@ -126,6 +127,7 @@ void main() {
               "https://example.com",
               payjoin.OhttpKeys.fromString(
                   "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC"),
+              null,
               null)
           .save(receiver_persister);
       var uri = receiver.pjUri();

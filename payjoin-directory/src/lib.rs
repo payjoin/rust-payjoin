@@ -32,6 +32,9 @@ const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message"
 
 mod db;
 
+pub mod cli;
+pub mod config;
+
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[cfg(feature = "_danger-local-https")]

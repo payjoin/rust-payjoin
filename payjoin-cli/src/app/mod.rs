@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
-use bitcoincore_rpc::bitcoin::Amount;
 use payjoin::bitcoin::psbt::Psbt;
+use payjoin::bitcoin::Amount;
 use payjoin::bitcoin::FeeRate;
 use payjoin::{bitcoin, PjUri};
 use tokio::signal;
 use tokio::sync::watch;
 
 pub mod config;
+pub mod rpc;
 pub mod wallet;
 use crate::app::config::Config;
 use crate::app::wallet::BitcoindWallet;
@@ -58,7 +59,9 @@ fn http_agent(config: &Config) -> Result<reqwest::Client> {
 }
 
 #[cfg(not(feature = "_danger-local-https"))]
-fn http_agent(_config: &Config) -> Result<reqwest::Client> { Ok(reqwest::Client::new()) }
+fn http_agent(_config: &Config) -> Result<reqwest::Client> {
+    Ok(reqwest::Client::new())
+}
 
 #[cfg(feature = "_danger-local-https")]
 fn http_agent_builder(

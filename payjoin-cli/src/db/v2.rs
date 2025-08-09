@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use bitcoincore_rpc::jsonrpc::serde_json;
 use payjoin::bitcoin::hex::DisplayHex;
 use payjoin::persist::SessionPersister;
 use payjoin::receive::v2::SessionEvent as ReceiverSessionEvent;
@@ -20,11 +19,15 @@ pub(crate) struct SessionWrapper<V> {
 pub struct SessionId([u8; 8]);
 
 impl SessionId {
-    pub fn new(id: u64) -> Self { Self(id.to_be_bytes()) }
+    pub fn new(id: u64) -> Self {
+        Self(id.to_be_bytes())
+    }
 }
 
 impl AsRef<[u8]> for SessionId {
-    fn as_ref(&self) -> &[u8] { self.0.as_ref() }
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
 }
 
 #[derive(Clone)]

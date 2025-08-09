@@ -4,7 +4,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use bitcoincore_rpc::bitcoin::Amount;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
@@ -13,6 +12,7 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
+use payjoin::bitcoin::Amount;
 use payjoin::bitcoin::FeeRate;
 use payjoin::receive::v1::{PayjoinProposal, UncheckedProposal};
 use payjoin::receive::ReplyableError::{self, Implementation, V1};
@@ -56,7 +56,9 @@ impl AppTrait for App {
         Ok(app)
     }
 
-    fn wallet(&self) -> BitcoindWallet { self.wallet.clone() }
+    fn wallet(&self) -> BitcoindWallet {
+        self.wallet.clone()
+    }
 
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {
         let uri =
@@ -147,7 +149,7 @@ impl App {
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
             listener.local_addr()?
         );
-        println!("{}", pj_uri_string);
+        println!("{pj_uri_string}");
 
         let app = self.clone();
 

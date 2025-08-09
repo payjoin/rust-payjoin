@@ -45,7 +45,7 @@ impl SenderBuilder {
     /// to create a [`Sender`]
     pub fn new(psbt: Psbt, uri: PjUri) -> Self {
         Self {
-            endpoint: uri.extras.endpoint,
+            endpoint: uri.extras.pj_param.endpoint().clone(),
             // Adopt the output substitution preference from the URI
             output_substitution: uri.extras.output_substitution,
             psbt_ctx_builder: PsbtContextBuilder::new(
@@ -144,7 +144,28 @@ pub struct Sender {
 impl Sender {
     /// Construct serialized V1 Request and Context from a Payjoin Proposal
     pub fn create_v1_post_request(&self) -> (Request, V1Context) {
-        super::create_v1_post_request(self.endpoint.clone(), self.psbt_ctx.clone())
+        let url = serialize_url(
+            self.endpoint.clone(),
+            self.psbt_ctx.output_substitution,
+            self.psbt_ctx.fee_contribution,
+            self.psbt_ctx.min_fee_rate,
+            Version::One,
+        );
+        let mut sanitized_psbt = self.psbt_ctx.original_psbt.clone();
+        clear_unneeded_fields(&mut sanitized_psbt);
+        let body = sanitized_psbt.to_string().as_bytes().to_vec();
+        (
+            Request::new_v1(&url, &body),
+            V1Context {
+                psbt_context: PsbtContext {
+                    original_psbt: self.psbt_ctx.original_psbt.clone(),
+                    output_substitution: self.psbt_ctx.output_substitution,
+                    fee_contribution: self.psbt_ctx.fee_contribution,
+                    payee: self.psbt_ctx.payee.clone(),
+                    min_fee_rate: self.psbt_ctx.min_fee_rate,
+                },
+            },
+        )
     }
 
     /// The endpoint in the Payjoin URI

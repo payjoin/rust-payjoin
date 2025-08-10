@@ -51,8 +51,11 @@ url = { version = "2.5.4", features = ["serde"] }
 dirs = "6.0.0"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+toml = "0.5.11"
 
 [dev-dependencies]
 nix = { version = "0.30.1", features = ["aio", "process", "signal"] }
 payjoin-test-utils = { version = "0.0.1" }
 tempfile = "3.20.0"
+
+

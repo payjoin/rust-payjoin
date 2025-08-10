@@ -16,6 +16,11 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     let cli = Cli::parse();
+
+    #[cfg(feature = "v2")]
+    if cli.set_config {
+        Config::save_config(&cli)?;
+    }
     let config = Config::new(&cli)?;
 
     #[allow(clippy::if_same_then_else)]

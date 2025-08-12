@@ -1994,6 +1994,7 @@ dependencies = [
  "hyper-rustls 0.26.0",
  "hyper-util",
  "payjoin",
+ "rand",
  "redis",
  "rustls 0.22.4",
  "serde",

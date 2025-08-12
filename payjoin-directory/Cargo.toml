@@ -37,6 +37,7 @@ tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 clap = { version = "^4", features = ["derive", "env"] }
 config = "0.13.3"
 serde = { version = "1.0.160", features = ["derive"] }
+rand = "0.8"
 
 [dev-dependencies]
 tempfile = "3.5.0"

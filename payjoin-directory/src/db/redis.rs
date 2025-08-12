@@ -94,8 +94,8 @@ impl Db {
 impl super::Db for Db {
     type OperationalError = RedisError;
 
-    async fn post_v2_payload(&self, mailbox_id: &ShortId, data: Vec<u8>) -> Result<()> {
-        self.push(mailbox_id, DEFAULT_COLUMN, data).await
+    async fn post_v2_payload(&self, mailbox_id: &ShortId, data: Vec<u8>) -> Result<Option<()>> {
+        self.push(mailbox_id, DEFAULT_COLUMN, data).await.map(Some)
     }
 
     async fn post_v1_request_and_wait_for_response(

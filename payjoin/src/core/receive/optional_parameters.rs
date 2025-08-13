@@ -118,7 +118,7 @@ impl Params {
             additional_fee_output_index,
         );
 
-        tracing::debug!("parsed optional parameters: {params:?}");
+        tracing::trace!("parsed optional parameters: {params:?}");
         Ok(params)
     }
 }

@@ -1013,7 +1013,7 @@ impl Receiver<PayjoinProposal> {
             target_resource = mailbox_endpoint(&self.session_context.directory, &receiver_mailbox);
             method = "PUT";
         }
-        tracing::debug!("Payjoin PSBT target: {}", target_resource.as_str());
+        tracing::trace!("Payjoin PSBT target: {}", target_resource.as_str());
         let (body, ctx) = ohttp_encapsulate(
             &self.session_context.ohttp_keys,
             method,

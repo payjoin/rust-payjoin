@@ -280,7 +280,7 @@ mod tests {
             expected_receiver_state: ReceiveSession::UncheckedProposal(Receiver {
                 state: UncheckedProposal {
                     v1: unchecked_proposal_from_test_vector(),
-                    context: session_context,
+                    session_context,
                 },
             }),
         };
@@ -302,7 +302,10 @@ mod tests {
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedProposal(Receiver {
-                state: UncheckedProposal { v1: unchecked_proposal_from_test_vector(), context },
+                state: UncheckedProposal {
+                    v1: unchecked_proposal_from_test_vector(),
+                    session_context: context,
+                },
             }),
         };
         let session_history = run_session_history_test(test);
@@ -335,7 +338,7 @@ mod tests {
             expected_receiver_state: ReceiveSession::UncheckedProposal(Receiver {
                 state: UncheckedProposal {
                     v1: unchecked_proposal_from_test_vector(),
-                    context: session_context,
+                    session_context,
                 },
             }),
         };
@@ -361,7 +364,7 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::MaybeInputsOwned(Receiver {
-                state: MaybeInputsOwned { v1: maybe_inputs_owned, context: session_context },
+                state: MaybeInputsOwned { v1: maybe_inputs_owned, session_context },
             }),
         };
         run_session_history_test(test)
@@ -415,7 +418,7 @@ mod tests {
             expected_receiver_state: ReceiveSession::ProvisionalProposal(Receiver {
                 state: ProvisionalProposal {
                     psbt_context: provisional_proposal.psbt_context,
-                    context: session_context,
+                    session_context,
                 },
             }),
         };
@@ -473,10 +476,7 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {
-                state: PayjoinProposal {
-                    psbt: payjoin_proposal.psbt().clone(),
-                    context: session_context,
-                },
+                state: PayjoinProposal { psbt: payjoin_proposal.psbt().clone(), session_context },
             }),
         };
         run_session_history_test(test)

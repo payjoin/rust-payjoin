@@ -9,8 +9,10 @@
 //! If you specifically need to use
 //! version 1, refer to the `receive::v1` module documentation after enabling the `v1` feature.
 
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
+use bitcoin::hashes::sha256d::Hash;
 use bitcoin::{
     psbt, AddressType, OutPoint, Psbt, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Weight,
 };
@@ -26,7 +28,7 @@ pub use crate::psbt::PsbtInputError;
 use crate::psbt::{
     InputWeightError, InternalInputPair, InternalPsbtInputError, PrevTxOutError, PsbtExt,
 };
-use crate::Version;
+use crate::{ImplementationError, Version};
 
 mod error;
 pub(crate) mod optional_parameters;
@@ -237,6 +239,123 @@ pub(crate) fn parse_payload(
 
     Ok((psbt, params))
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct PsbtContext {
+    original_psbt: Psbt,
+    pub(crate) payjoin_psbt: Psbt,
+}
+
+impl PsbtContext {
+    /// Prepare the PSBT by creating a new PSBT and copying only the fields allowed by the [spec](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#senders-payjoin-proposal-checklist)
+    fn prepare_psbt(self, processed_psbt: Psbt) -> Psbt {
+        log::trace!("Original PSBT from callback: {processed_psbt:#?}");
+
+        // Create a new PSBT and copy only the allowed fields
+        let mut filtered_psbt = Psbt {
+            unsigned_tx: processed_psbt.unsigned_tx,
+            version: processed_psbt.version,
+            xpub: BTreeMap::new(),
+            proprietary: BTreeMap::new(),
+            unknown: BTreeMap::new(),
+            inputs: vec![],
+            outputs: vec![],
+        };
+
+        for input in &processed_psbt.inputs {
+            filtered_psbt.inputs.push(bitcoin::psbt::Input {
+                witness_utxo: input.witness_utxo.clone(),
+                non_witness_utxo: input.non_witness_utxo.clone(),
+                sighash_type: input.sighash_type,
+                final_script_sig: input.final_script_sig.clone(),
+                final_script_witness: input.final_script_witness.clone(),
+                tap_key_sig: input.tap_key_sig,
+                tap_script_sigs: input.tap_script_sigs.clone(),
+                tap_merkle_root: input.tap_merkle_root,
+                ..Default::default()
+            });
+        }
+
+        for _ in &processed_psbt.outputs {
+            filtered_psbt.outputs.push(bitcoin::psbt::Output::default());
+        }
+
+        log::trace!("Filtered PSBT: {filtered_psbt:#?}");
+
+        filtered_psbt
+    }
+
+    /// Return the indexes of the sender inputs.
+    fn sender_input_indexes(&self) -> Vec<usize> {
+        // iterate proposal as mutable WITH the outpoint (previous_output) available too
+        let mut original_inputs = self.original_psbt.input_pairs().peekable();
+        let mut sender_input_indexes = vec![];
+        for (i, input) in self.payjoin_psbt.input_pairs().enumerate() {
+            if let Some(original) = original_inputs.peek() {
+                log::trace!(
+                    "match previous_output: {} == {}",
+                    input.txin.previous_output,
+                    original.txin.previous_output
+                );
+                if input.txin.previous_output == original.txin.previous_output {
+                    sender_input_indexes.push(i);
+                    original_inputs.next();
+                }
+            }
+        }
+        sender_input_indexes
+    }
+
+    /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
+    /// they sign the transaction and broadcast it to the network.
+    ///
+    /// Finalization consists of two steps:
+    ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
+    ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
+    pub(crate) fn finalize_proposal(
+        self,
+        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
+    ) -> Result<Psbt, FinalizeProposalError> {
+        let mut psbt = self.payjoin_psbt.clone();
+        // Remove now-invalid sender signatures before applying the receiver signatures
+        for i in self.sender_input_indexes() {
+            log::trace!("Clearing sender input {i}");
+            psbt.inputs[i].final_script_sig = None;
+            psbt.inputs[i].final_script_witness = None;
+            psbt.inputs[i].tap_key_sig = None;
+        }
+        let finalized_psbt =
+            wallet_process_psbt(&psbt).map_err(FinalizeProposalError::Implementation)?;
+        let expected_ntxid = self.payjoin_psbt.unsigned_tx.compute_ntxid();
+        let actual_ntxid = finalized_psbt.unsigned_tx.compute_ntxid();
+        if expected_ntxid != actual_ntxid {
+            return Err(FinalizeProposalError::NtxidMismatch(expected_ntxid, actual_ntxid));
+        }
+        let payjoin_proposal = self.prepare_psbt(finalized_psbt);
+        Ok(payjoin_proposal)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum FinalizeProposalError {
+    /// The ntxid of the original PSBT does not match the ntxid of the finalized PSBT.
+    NtxidMismatch(Hash, Hash),
+    /// The implementation of the `wallet_process_psbt` function returned an error.
+    Implementation(ImplementationError),
+}
+
+impl std::fmt::Display for FinalizeProposalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NtxidMismatch(expected, actual) => {
+                write!(f, "Ntxid mismatch: expected {expected}, got {actual}")
+            }
+            Self::Implementation(e) => write!(f, "Implementation error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for FinalizeProposalError {}
 
 #[cfg(test)]
 mod tests {

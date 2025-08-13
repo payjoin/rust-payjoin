@@ -210,10 +210,10 @@ impl MaybeInputsSeen {
         self.psbt.input_pairs().try_for_each(|input| {
             match is_known(&input.txin.previous_output) {
                 Ok(false) => Ok::<(), ReplyableError>(()),
-                Ok(true) =>  {
-                    log::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
+                Ok(true) => {
+                    log::trace!("Input outpoint: {}", input.txin.previous_output);
                     Err(InternalPayloadError::InputSeen(input.txin.previous_output))?
-                },
+                }
                 Err(e) => Err(ReplyableError::Implementation(e))?,
             }
         })?;

@@ -40,7 +40,11 @@ pub trait App: Send + Sync {
     }
 
     fn process_pj_response(&self, psbt: Psbt) -> Result<bitcoin::Txid> {
-        log::debug!("Proposed psbt: {psbt:#?}");
+        log::trace!(
+            "Processing payjoin response with {} inputs and {} outputs",
+            psbt.inputs.len(),
+            psbt.unsigned_tx.output.len()
+        );
 
         let signed = self.wallet().process_psbt(&psbt)?;
         let tx = self.wallet().finalize_psbt(&signed)?;

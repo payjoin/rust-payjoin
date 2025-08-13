@@ -200,7 +200,7 @@ impl Config {
             ));
         }
 
-        log::debug!("App config: {config:?}");
+        log::trace!("App config loaded successfully");
         Ok(config)
     }
 

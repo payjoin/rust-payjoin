@@ -612,6 +612,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
+name = "corepc-types"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a7f2faedffc7c654e348e2da6c6416090525c6072979fee9681d620d1d398a4"
+dependencies = [
+ "bitcoin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1672,11 +1683,12 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bitcoincore-rpc",
  "clap",
  "config",
+ "corepc-types",
  "dirs",
  "env_logger",
+ "futures",
  "http-body-util",
  "hyper",
  "hyper-rustls",
@@ -1689,6 +1701,7 @@ dependencies = [
  "reqwest",
  "rustls 0.22.4",
  "serde",
+ "serde_json",
  "sled",
  "tempfile",
  "tokio",

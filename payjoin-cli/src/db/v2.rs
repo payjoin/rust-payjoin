@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use bitcoincore_rpc::jsonrpc::serde_json;
 use payjoin::bitcoin::hex::DisplayHex;
 use payjoin::persist::SessionPersister;
 use payjoin::receive::v2::SessionEvent as ReceiverSessionEvent;

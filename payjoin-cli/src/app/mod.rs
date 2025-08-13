@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
-use bitcoincore_rpc::bitcoin::Amount;
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::bitcoin::FeeRate;
+use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::{bitcoin, PjUri};
 use tokio::signal;
 use tokio::sync::watch;
 
 pub mod config;
+pub mod rpc;
 pub mod wallet;
 use crate::app::config::Config;
 use crate::app::wallet::BitcoindWallet;
@@ -20,7 +20,7 @@ pub(crate) mod v2;
 
 #[async_trait::async_trait]
 pub trait App: Send + Sync {
-    fn new(config: Config) -> Result<Self>
+    async fn new(config: Config) -> Result<Self>
     where
         Self: Sized;
     fn wallet(&self) -> BitcoindWallet;

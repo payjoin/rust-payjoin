@@ -1,7 +1,5 @@
 use std::fmt;
 
-#[cfg(feature = "v2")]
-use bitcoincore_rpc::jsonrpc::serde_json;
 use payjoin::ImplementationError;
 use sled::Error as SledError;
 

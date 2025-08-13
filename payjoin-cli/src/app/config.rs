@@ -200,7 +200,7 @@ impl Config {
             ));
         }
 
-        tracing::debug!("App config: {config:?}");
+        tracing::trace!("App config: {config:?}");
         Ok(config)
     }
 

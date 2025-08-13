@@ -180,7 +180,7 @@ where
 }
 
 /// A transition that always results in a state transition.
-pub struct NextStateTransition<Event, NextState>(pub(crate) AcceptNextState<Event, NextState>);
+pub struct NextStateTransition<Event, NextState>(AcceptNextState<Event, NextState>);
 
 impl<Event, NextState> NextStateTransition<Event, NextState> {
     #[inline]
@@ -227,7 +227,7 @@ impl<Event, NextState, Err> MaybeBadInitInputsTransition<Event, NextState, Err> 
 }
 
 /// Wrapper that marks the progression of a state machine
-pub struct AcceptNextState<Event, NextState>(pub(crate) Event, pub(crate) NextState);
+pub struct AcceptNextState<Event, NextState>(Event, NextState);
 /// Wrapper that marks the success of a state machine with a value that was returned
 struct AcceptCompleted<SuccessValue>(SuccessValue);
 

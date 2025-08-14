@@ -37,12 +37,12 @@ pub(crate) struct App {
 
 #[async_trait::async_trait]
 impl AppTrait for App {
-    fn new(config: Config) -> Result<Self> {
+    async fn new(config: Config) -> Result<Self> {
         let db = Arc::new(Database::create(&config.db_path)?);
         let relay_manager = Arc::new(Mutex::new(RelayManager::new()));
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
-        let wallet = BitcoindWallet::new(&config.bitcoind)?;
+        let wallet = BitcoindWallet::new(&config.bitcoind).await?;
         let app = Self { config, db, wallet, interrupt: interrupt_rx, relay_manager };
         app.wallet()
             .network()

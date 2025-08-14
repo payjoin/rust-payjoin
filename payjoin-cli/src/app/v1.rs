@@ -4,7 +4,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use bitcoincore_rpc::bitcoin::Amount;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
@@ -13,7 +12,7 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::bitcoin::FeeRate;
+use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v1::{PayjoinProposal, UncheckedProposal};
 use payjoin::receive::ReplyableError::{self, Implementation, V1};
 use payjoin::send::v1::SenderBuilder;
@@ -44,11 +43,11 @@ pub(crate) struct App {
 
 #[async_trait::async_trait]
 impl AppTrait for App {
-    fn new(config: Config) -> Result<Self> {
+    async fn new(config: Config) -> Result<Self> {
         let db = Arc::new(Database::create(&config.db_path)?);
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
-        let wallet = BitcoindWallet::new(&config.bitcoind)?;
+        let wallet = BitcoindWallet::new(&config.bitcoind).await?;
         let app = Self { config, db, wallet, interrupt: interrupt_rx };
         app.wallet()
             .network()

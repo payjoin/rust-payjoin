@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
     let app: Box<dyn AppTrait> = if cli.flags.bip78.unwrap_or(false) {
         #[cfg(feature = "v1")]
         {
-            Box::new(crate::app::v1::App::new(config)?)
+            Box::new(crate::app::v1::App::new(config).await?)
         }
         #[cfg(not(feature = "v1"))]
         {
@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
     } else if cli.flags.bip77.unwrap_or(false) {
         #[cfg(feature = "v2")]
         {
-            Box::new(crate::app::v2::App::new(config)?)
+            Box::new(crate::app::v2::App::new(config).await?)
         }
         #[cfg(not(feature = "v2"))]
         {
@@ -44,11 +44,11 @@ async fn main() -> Result<()> {
     } else {
         #[cfg(feature = "v2")]
         {
-            Box::new(crate::app::v2::App::new(config)?)
+            Box::new(crate::app::v2::App::new(config).await?)
         }
         #[cfg(all(feature = "v1", not(feature = "v2")))]
         {
-            Box::new(crate::app::v1::App::new(config)?)
+            Box::new(crate::app::v1::App::new(config).await?)
         }
         #[cfg(not(any(feature = "v1", feature = "v2")))]
         {

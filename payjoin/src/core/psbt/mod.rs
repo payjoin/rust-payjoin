@@ -404,3 +404,121 @@ impl std::error::Error for InputWeightError {
 impl From<AddressTypeError> for InputWeightError {
     fn from(value: AddressTypeError) -> Self { Self::AddressType(value) }
 }
+
+#[cfg(test)]
+mod test {
+    use bitcoin::{Psbt, ScriptBuf, Transaction};
+    use payjoin_test_utils::PARSED_ORIGINAL_PSBT;
+
+    use crate::psbt::{InputWeightError, InternalInputPair, InternalPsbtInputError, PsbtExt};
+
+    #[test]
+    fn validate_input_utxos() {
+        let psbt: Psbt = PARSED_ORIGINAL_PSBT.clone();
+        let validated_pairs = psbt.validate_input_utxos();
+        assert!(validated_pairs.is_ok());
+    }
+
+    #[test]
+    fn input_pairs_validate_witness_utxo() {
+        let psbt: Psbt = PARSED_ORIGINAL_PSBT.clone();
+        let txin = &psbt.unsigned_tx.input[0];
+        let psbtin = &psbt.inputs[0];
+
+        let pair: InternalInputPair = InternalInputPair { txin, psbtin };
+        assert!(pair.validate_utxo().is_ok());
+    }
+
+    #[test]
+    fn input_pairs_validate_non_witness_utxo() {
+        // This test checks each variation of the validate_utxo match block with no
+        // non_witness_utxo
+        let psbt: Psbt = PARSED_ORIGINAL_PSBT.clone();
+        let raw_tx = "010000000001015721029046ec1840d5bc8f4e59ae8ac4b576191d5e7994c8d1c44ddeaffc176c0300000000fdffffff018e8d00000000000017a9144a87748bc7bcfee8290e36700eeca3112f53ecbe870140239d1975e0fc9b8345bce9a170a0224cf8eb327bfcaccf0f8b9434d17345579e4dcbb68f7be39eac7987dfaa08293b11fdc76ac28e26bd85e99a46b69675418100000000";
+
+        let mut txin = psbt.unsigned_tx.input[0].clone();
+        let mut psbtin = psbt.inputs[0].clone();
+
+        let transaction: Transaction = bitcoin::consensus::encode::deserialize_hex(raw_tx).unwrap();
+        psbtin.non_witness_utxo = Some(transaction.clone());
+        psbtin.witness_utxo = None;
+        txin.previous_output.txid = transaction.compute_txid();
+
+        let pair: InternalInputPair = InternalInputPair { txin: &txin, psbtin: &psbtin };
+        assert!(pair.validate_utxo().is_ok());
+    }
+
+    #[test]
+    fn input_pairs_unequal_txid() {
+        // This test checks each variation of the validate_utxo match block where is it expected to
+        // return an unequal_txid error
+        let psbt: Psbt = PARSED_ORIGINAL_PSBT.clone();
+        let raw_tx = "010000000001015721029046ec1840d5bc8f4e59ae8ac4b576191d5e7994c8d1c44ddeaffc176c0300000000fdffffff018e8d00000000000017a9144a87748bc7bcfee8290e36700eeca3112f53ecbe870140239d1975e0fc9b8345bce9a170a0224cf8eb327bfcaccf0f8b9434d17345579e4dcbb68f7be39eac7987dfaa08293b11fdc76ac28e26bd85e99a46b69675418100000000";
+
+        let txin = &psbt.unsigned_tx.input[0];
+        let mut psbtin = psbt.inputs[0].clone();
+
+        let transaction: Transaction = bitcoin::consensus::encode::deserialize_hex(raw_tx).unwrap();
+        psbtin.non_witness_utxo = Some(transaction);
+
+        let pair: InternalInputPair = InternalInputPair { txin, psbtin: &psbtin };
+        let validated_utxo = pair.validate_utxo();
+        assert_eq!(validated_utxo.unwrap_err(), InternalPsbtInputError::UnequalTxid);
+
+        let txin = &psbt.unsigned_tx.input[0];
+        let mut psbtin = psbt.inputs[0].clone();
+
+        let transaction: Transaction = bitcoin::consensus::encode::deserialize_hex(raw_tx).unwrap();
+        psbtin.non_witness_utxo = Some(transaction);
+        psbtin.witness_utxo = None;
+
+        let pair: InternalInputPair = InternalInputPair { txin, psbtin: &psbtin };
+        let validated_utxo = pair.validate_utxo();
+        assert_eq!(validated_utxo.unwrap_err(), InternalPsbtInputError::UnequalTxid);
+    }
+
+    #[test]
+    fn input_pairs_txout_mismatch() {
+        let psbt: Psbt = PARSED_ORIGINAL_PSBT.clone();
+        let raw_tx = "010000000001015721029046ec1840d5bc8f4e59ae8ac4b576191d5e7994c8d1c44ddeaffc176c0300000000fdffffff018e8d00000000000017a9144a87748bc7bcfee8290e36700eeca3112f53ecbe870140239d1975e0fc9b8345bce9a170a0224cf8eb327bfcaccf0f8b9434d17345579e4dcbb68f7be39eac7987dfaa08293b11fdc76ac28e26bd85e99a46b69675418100000000";
+
+        let mut txin = psbt.unsigned_tx.input[0].clone();
+        let mut psbtin = psbt.inputs[0].clone();
+
+        let transaction: Transaction = bitcoin::consensus::encode::deserialize_hex(raw_tx).unwrap();
+        psbtin.non_witness_utxo = Some(transaction.clone());
+        txin.previous_output.txid = transaction.compute_txid();
+
+        let pair: InternalInputPair = InternalInputPair { txin: &txin, psbtin: &psbtin };
+        let validated_utxo = pair.validate_utxo();
+        assert_eq!(validated_utxo.unwrap_err(), InternalPsbtInputError::SegWitTxOutMismatch);
+    }
+
+    #[test]
+    fn expected_input_weight() {
+        let psbt: Psbt = PARSED_ORIGINAL_PSBT.clone();
+        let txin = &psbt.unsigned_tx.input[0];
+        let psbtin = psbt.inputs[0].clone();
+
+        let pair: InternalInputPair = InternalInputPair { txin, psbtin: &psbtin };
+        let weight = pair.expected_input_weight();
+        assert!(weight.is_ok());
+
+        let mut psbtin = psbt.inputs[0].clone();
+        psbtin.final_script_sig = Some(
+            ScriptBuf::from_hex(
+                "22002065f91a53cb7120057db3d378bd0f7d944167d43a7dcbff15d6afc4823f1d3ed3",
+            )
+            .unwrap(),
+        );
+        let pair: InternalInputPair = InternalInputPair { txin, psbtin: &psbtin };
+        let weight = pair.expected_input_weight();
+        assert_eq!(weight.unwrap_err(), InputWeightError::NotSupported);
+
+        let mut psbtin = psbt.inputs[0].clone();
+        psbtin.final_script_sig = None;
+        let pair: InternalInputPair = InternalInputPair { txin, psbtin: &psbtin };
+        let weight = pair.expected_input_weight();
+        assert_eq!(weight.unwrap_err(), InputWeightError::NoRedeemScript)
+    }
+}

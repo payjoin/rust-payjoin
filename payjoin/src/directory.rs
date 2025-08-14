@@ -69,3 +69,15 @@ impl std::str::FromStr for ShortId {
         (&bytes[..]).try_into()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::uri::ShortId;
+
+    #[test]
+    fn short_id_conversion() {
+        let short_id = ShortId([0; 8]);
+        assert_eq!(short_id.as_bytes(), short_id.0);
+        assert_eq!(short_id.as_slice(), short_id.0);
+    }
+}

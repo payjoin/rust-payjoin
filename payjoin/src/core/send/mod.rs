@@ -730,16 +730,19 @@ impl V1Context {
 
 #[cfg(test)]
 mod test {
+    use std::collections::BTreeMap;
     use std::str::FromStr;
 
     use bitcoin::absolute::LockTime;
-    use bitcoin::bip32::{DerivationPath, Fingerprint};
+    use bitcoin::bip32::{self, DerivationPath, Fingerprint};
     use bitcoin::ecdsa::Signature;
     use bitcoin::hex::FromHex;
+    use bitcoin::psbt::raw::ProprietaryKey;
     use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey, SECP256K1};
     use bitcoin::taproot::TaprootBuilder;
     use bitcoin::{
-        Amount, FeeRate, OutPoint, Script, ScriptBuf, Sequence, Witness, XOnlyPublicKey,
+        psbt, Amount, FeeRate, NetworkKind, OutPoint, Script, ScriptBuf, Sequence, Witness,
+        XOnlyPublicKey,
     };
     use payjoin_test_utils::{
         BoxError, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL,
@@ -1092,8 +1095,30 @@ mod test {
         assert!(!proposal.inputs[0].bip32_derivation.is_empty());
         assert!(proposal.outputs[0].tap_internal_key.is_some());
         assert!(!proposal.outputs[0].bip32_derivation.is_empty());
-        let psbt_ctx = PsbtContextBuilder::new(proposal.clone(), payee, None)
+        let mut psbt_ctx = PsbtContextBuilder::new(proposal.clone(), payee, None)
             .build(OutputSubstitution::Disabled)?;
+
+        let mut map = BTreeMap::new();
+        let secp = Secp256k1::new();
+        let seed = Vec::<u8>::from_hex("BEEFCAFE").unwrap();
+        let xpriv = bip32::Xpriv::new_master(NetworkKind::Main, &seed).unwrap();
+        let xpub: bip32::Xpub = bip32::Xpub::from_priv(&secp, &xpriv);
+        let value = (xpriv.fingerprint(&secp), DerivationPath::from_str("42'").unwrap());
+        map.insert(xpub, value);
+        psbt_ctx.original_psbt.xpub = map;
+
+        let mut map = BTreeMap::new();
+        let proprietary_key =
+            ProprietaryKey { prefix: b"mock_prefix".to_vec(), subtype: 0x00, key: vec![] };
+        let value = FromHex::from_hex("BEEFCAFE").unwrap();
+        map.insert(proprietary_key, value);
+        psbt_ctx.original_psbt.proprietary = map;
+
+        let mut map = BTreeMap::new();
+        let unknown_key: psbt::raw::Key = psbt::raw::Key { type_value: 0x00, key: vec![] };
+        let value = FromHex::from_hex("BEEFCAFE").unwrap();
+        map.insert(unknown_key, value);
+        psbt_ctx.original_psbt.unknown = map;
 
         let body = create_v1_post_request(Url::from_str("HTTPS://EXAMPLE.COM/")?, psbt_ctx).0.body;
         let res_str = std::str::from_utf8(&body)?;
@@ -1102,6 +1127,9 @@ mod test {
         assert!(proposal.inputs[0].bip32_derivation.is_empty());
         assert!(proposal.outputs[0].tap_internal_key.is_none());
         assert!(proposal.outputs[0].bip32_derivation.is_empty());
+        assert!(proposal.xpub.is_empty());
+        assert!(proposal.proprietary.is_empty());
+        assert!(proposal.unknown.is_empty());
         Ok(())
     }
 

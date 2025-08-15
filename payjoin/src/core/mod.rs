@@ -17,6 +17,8 @@ pub use request::*;
 pub(crate) mod into_url;
 pub use into_url::{Error as IntoUrlError, IntoUrl};
 pub(crate) mod uri;
+#[cfg(feature = "v2")]
+pub use uri::v2::PjParam as V2PjParam;
 pub use uri::{PjParam, PjParseError, PjUri, Uri, UriExt};
 pub use url::{ParseError, Url};
 pub(crate) mod error_codes;

@@ -62,7 +62,8 @@ impl AppTrait for App {
             Uri::try_from(bip21).map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
         let uri = uri.assume_checked();
         let uri = uri.check_pj_supported().map_err(|_| anyhow!("URI does not support Payjoin"))?;
-        let psbt = self.create_original_psbt(&uri, fee_rate)?;
+        let amount = uri.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
+        let psbt = self.create_original_psbt(&uri.address, amount, fee_rate)?;
         let (req, ctx) = SenderBuilder::new(psbt, uri.clone())
             .build_recommended(fee_rate)
             .with_context(|| "Failed to build payjoin request")?

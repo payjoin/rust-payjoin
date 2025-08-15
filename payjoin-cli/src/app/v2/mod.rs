@@ -55,10 +55,13 @@ impl AppTrait for App {
     #[allow(clippy::incompatible_msrv)]
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {
         use payjoin::UriExt;
-        let uri =
-            Uri::try_from(bip21).map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
-        let uri = uri.assume_checked();
-        let uri = uri.check_pj_supported().map_err(|_| anyhow!("URI does not support Payjoin"))?;
+        let uri = Uri::try_from(bip21)
+            .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?
+            .assume_checked()
+            .check_pj_supported()
+            .map_err(|_| anyhow!("URI does not support Payjoin"))?;
+        let address = uri.address;
+        let amount = uri.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
         match uri.extras.pj_param() {
             PjParam::V1(_endpoint) => todo!(),
             PjParam::V2(pj_param) => {
@@ -82,10 +85,11 @@ impl AppTrait for App {
                     Some((sender_state, persister)) => (sender_state, persister),
                     None => {
                         let persister = SenderPersister::new(self.db.clone())?;
-                        let psbt = self.create_original_psbt(&uri, fee_rate)?;
-                        let sender = SenderBuilder::new(psbt, uri.clone())
-                            .build_recommended(fee_rate)?
-                            .save(&persister)?;
+                        let psbt = self.create_original_psbt(&address, amount, fee_rate)?;
+                        let sender =
+                            SenderBuilder::from_parts(psbt, pj_param, &address, Some(amount))
+                                .build_recommended(fee_rate)?
+                                .save(&persister)?;
 
                         (SendSession::WithReplyKey(sender), persister)
                     }

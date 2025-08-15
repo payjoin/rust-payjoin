@@ -63,6 +63,7 @@ impl AppTrait for App {
         let address = uri.address;
         let amount = uri.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
         match uri.extras.pj_param() {
+            #[cfg(feature = "v1")]
             PjParam::V1(_endpoint) => todo!(),
             PjParam::V2(pj_param) => {
                 // TODO: perhaps we should store pj uri in the session wrapper as to not replay the event log for each session

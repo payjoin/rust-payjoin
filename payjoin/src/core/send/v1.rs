@@ -24,7 +24,7 @@
 use std::str::FromStr;
 
 use bitcoin::psbt::Psbt;
-use bitcoin::FeeRate;
+use bitcoin::{Address, Amount, FeeRate};
 use error::BuildSenderError;
 use url::Url;
 
@@ -56,6 +56,24 @@ impl SenderBuilder {
                 uri.address.script_pubkey(),
                 uri.amount,
             ),
+        }
+    }
+
+    /// Create a SenderBuilder from component parts to mirror v2::SenderBuilder::from_parts
+    ///
+    /// This method allows constructing a v1 SenderBuilder using a v1::PjParam directly,
+    /// rather than requiring a full PjUri.
+    pub fn from_parts(
+        psbt: Psbt,
+        pj_param: &crate::uri::v1::PjParam,
+        address: &Address,
+        amount: Option<Amount>,
+    ) -> Self {
+        Self {
+            endpoint: pj_param.endpoint().clone(),
+            // Default to enabled output substitution for v1 when not specified via URI
+            output_substitution: OutputSubstitution::Enabled,
+            psbt_ctx_builder: PsbtContextBuilder::new(psbt, address.script_pubkey(), amount),
         }
     }
 

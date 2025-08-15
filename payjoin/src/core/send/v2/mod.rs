@@ -29,6 +29,7 @@
 //! but request reuse makes correlation trivial for the relay.
 
 use bitcoin::hashes::{sha256, Hash};
+use bitcoin::Address;
 pub use error::{CreateRequestError, EncapsulationError};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
@@ -71,18 +72,24 @@ impl SenderBuilder {
     pub fn new(psbt: Psbt, uri: PjUri) -> Self {
         match uri.extras.pj_param {
             crate::uri::PjParam::V1(_) => unimplemented!("V2 SenderBuilder only supports v2 URLs"),
-            crate::uri::PjParam::V2(pj_param) => Self {
-                pj_param,
-                // Ignore the receiver's output substitution preference, because all
-                // communications with the receiver are end-to-end authenticated. So a
-                // malicious man in the middle can't substitute outputs, only the receiver can.
-                output_substitution: OutputSubstitution::Enabled,
-                psbt_ctx_builder: PsbtContextBuilder::new(
-                    psbt,
-                    uri.address.script_pubkey(),
-                    uri.amount,
-                ),
-            },
+            crate::uri::PjParam::V2(pj_param) =>
+                Self::from_parts(psbt, &pj_param, &uri.address, uri.amount),
+        }
+    }
+
+    pub fn from_parts(
+        psbt: Psbt,
+        pj_param: &PjParam,
+        address: &Address,
+        amount: Option<Amount>,
+    ) -> Self {
+        Self {
+            pj_param: pj_param.clone(),
+            // Ignore the receiver's output substitution preference, because all
+            // communications with the receiver are end-to-end authenticated. So a
+            // malicious man in the middle can't substitute outputs, only the receiver can.
+            output_substitution: OutputSubstitution::Enabled,
+            psbt_ctx_builder: PsbtContextBuilder::new(psbt, address.script_pubkey(), amount),
         }
     }
 

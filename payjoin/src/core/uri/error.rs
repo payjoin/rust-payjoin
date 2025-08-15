@@ -8,6 +8,7 @@ pub(crate) enum InternalPjParseError {
     MissingEndpoint,
     NotUtf8,
     IntoUrl(crate::into_url::Error),
+    #[cfg(feature = "v1")]
     UnsecureEndpoint,
     #[cfg(feature = "v2")]
     V2(super::v2::PjParseError),
@@ -26,6 +27,7 @@ impl std::error::Error for PjParseError {
             MissingEndpoint => None,
             NotUtf8 => None,
             IntoUrl(e) => Some(e),
+            #[cfg(feature = "v1")]
             UnsecureEndpoint => None,
             #[cfg(feature = "v2")]
             V2(e) => Some(e),
@@ -44,6 +46,7 @@ impl std::fmt::Display for PjParseError {
             MissingEndpoint => write!(f, "Missing payjoin endpoint"),
             NotUtf8 => write!(f, "Endpoint is not valid UTF-8"),
             IntoUrl(e) => write!(f, "Endpoint is not valid: {e:?}"),
+            #[cfg(feature = "v1")]
             UnsecureEndpoint => {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }

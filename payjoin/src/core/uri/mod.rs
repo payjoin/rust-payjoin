@@ -15,12 +15,12 @@ pub(crate) mod v1;
 #[cfg(feature = "v2")]
 pub(crate) mod v2;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 #[cfg_attr(feature = "v2", allow(clippy::large_enum_variant))]
-#[cfg_attr(not(feature = "v2"), derive(serde::Serialize, serde::Deserialize))]
 pub enum PjParam {
-    V1(Url),
+    #[cfg(feature = "v1")]
+    V1(v1::PjParam),
     #[cfg(feature = "v2")]
     V2(v2::PjParam),
 }
@@ -28,7 +28,8 @@ pub enum PjParam {
 impl PjParam {
     pub fn endpoint(&self) -> Url {
         match self {
-            PjParam::V1(url) => url.clone(),
+            #[cfg(feature = "v1")]
+            PjParam::V1(url) => url.endpoint(),
             #[cfg(feature = "v2")]
             PjParam::V2(url) => url.endpoint(),
         }
@@ -65,21 +66,21 @@ impl TryFrom<Url> for PjParam {
     type Error = PjParseError;
 
     fn try_from(endpoint: Url) -> Result<Self, Self::Error> {
-        if endpoint.scheme() == "https"
-            || endpoint.scheme() == "http"
-                && endpoint.domain().unwrap_or_default().ends_with(".onion")
-        {
-            #[cfg(feature = "v2")]
-            match v2::PjParam::parse(endpoint.clone()) {
-                Err(v2::PjParseError::NotV2) => (), // continue
-                Ok(v2) => return Ok(PjParam::V2(v2)),
-                Err(e) => return Err(InternalPjParseError::V2(e).into()),
-            }
-
-            Ok(PjParam::V1(endpoint))
-        } else {
-            Err(InternalPjParseError::UnsecureEndpoint.into())
+        #[cfg(feature = "v2")]
+        match v2::PjParam::parse(endpoint.clone()) {
+            Err(v2::PjParseError::NotV2) => (), // continue
+            Ok(v2) => return Ok(PjParam::V2(v2)),
+            Err(e) => return Err(InternalPjParseError::V2(e).into()),
         }
+
+        #[cfg(feature = "v1")]
+        return Ok(PjParam::V1(v1::PjParam::parse(endpoint)?));
+
+        #[cfg(all(not(feature = "v1"), feature = "v2"))]
+        return Err(InternalPjParseError::V2(v2::PjParseError::NotV2).into());
+
+        #[cfg(all(not(feature = "v1"), not(feature = "v2")))]
+        compile_error!("Either v1 or v2 feature must be enabled");
     }
 }
 

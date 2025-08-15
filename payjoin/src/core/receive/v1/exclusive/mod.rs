@@ -17,7 +17,8 @@ pub fn build_v1_pj_uri<'a>(
     endpoint: impl IntoUrl,
     output_substitution: OutputSubstitution,
 ) -> Result<crate::uri::PjUri<'a>, PjParseError> {
-    let pj_param = PjParam::new(endpoint)?;
+    let url = endpoint.into_url().map_err(crate::uri::error::InternalPjParseError::IntoUrl)?;
+    let pj_param = PjParam::V1(crate::uri::v1::PjParam::parse(url)?);
     let extras = crate::uri::PayjoinExtras { pj_param, output_substitution };
     Ok(bitcoin_uri::Uri::with_extras(address.clone(), extras))
 }

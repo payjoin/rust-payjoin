@@ -70,7 +70,7 @@ impl DbPool {
     }
 
     async fn push(&self, mailbox_id: &ShortId, channel_type: &str, data: Vec<u8>) -> Result<()> {
-        let mut conn = self.client.get_async_connection().await?;
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
         let key = channel_name(mailbox_id, channel_type);
         () = conn.set(&key, data.clone()).await?;
         () = conn.publish(&key, "updated").await?;
@@ -88,7 +88,7 @@ impl DbPool {
     }
 
     async fn peek(&self, mailbox_id: &ShortId, channel_type: &str) -> RedisResult<Vec<u8>> {
-        let mut conn = self.client.get_async_connection().await?;
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
         let key = channel_name(mailbox_id, channel_type);
 
         // Attempt to fetch existing content for the given mailbox_id and channel_type
@@ -100,7 +100,7 @@ impl DbPool {
         debug!("Failed to fetch content initially");
 
         // Set up a temporary listener for changes
-        let mut pubsub_conn = self.client.get_async_connection().await?.into_pubsub();
+        let mut pubsub_conn = self.client.get_async_pubsub().await?;
         let channel_name = channel_name(mailbox_id, channel_type);
         pubsub_conn.subscribe(&channel_name).await?;
 

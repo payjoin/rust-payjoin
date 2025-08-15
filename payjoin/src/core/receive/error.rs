@@ -406,11 +406,43 @@ mod tests {
 
     #[test]
     fn test_json_reply_from_implementation_error() {
-        let error = ReplyableError::Implementation(ImplementationError::from(
-            "Should not see this in the json reply",
-        ));
+        struct AlwaysPanics;
+
+        impl fmt::Display for AlwaysPanics {
+            fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                panic!("internal error should never display when converting to JsonReply");
+            }
+        }
+
+        impl fmt::Debug for AlwaysPanics {
+            fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                panic!("internal error should never debug when converting to JsonReply");
+            }
+        }
+
+        impl error::Error for AlwaysPanics {
+            fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+                panic!("internal error should never be examined when converting to JsonReply");
+            }
+        }
+        // Use a panicking error to ensure conversion does not touch internal formatting
+        let internal = AlwaysPanics;
+        let error = ReplyableError::Implementation(ImplementationError::new(internal));
         let reply = JsonReply::from(&error);
-        assert_eq!(reply.error_code, ErrorCode::Unavailable);
-        assert_eq!(reply.message, "Receiver error");
+        let expected = JsonReply {
+            error_code: ErrorCode::Unavailable,
+            message: "Receiver error".to_string(),
+            extra: serde_json::Map::new(),
+        };
+        assert_eq!(reply, expected);
+
+        let json = reply.to_json();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "errorCode": ErrorCode::Unavailable.to_string(),
+                "message": "Receiver error",
+            })
+        );
     }
 }

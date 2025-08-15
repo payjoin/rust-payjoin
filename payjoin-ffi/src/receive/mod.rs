@@ -1048,8 +1048,8 @@ impl payjoin::persist::SessionPersister for CallbackPersisterAdapter {
     type SessionEvent = payjoin::receive::v2::SessionEvent;
     type InternalStorageError = ForeignError;
 
-    fn save_event(&self, event: &Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
-        let uni_event: ReceiverSessionEvent = event.clone().into();
+    fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
+        let uni_event: ReceiverSessionEvent = event.into();
         self.callback_persister
             .save(uni_event.to_json().map_err(|e| ForeignError::InternalError(e.to_string()))?)
     }

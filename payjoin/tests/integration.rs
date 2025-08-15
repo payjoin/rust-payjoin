@@ -250,9 +250,9 @@ mod integration {
                 let address = receiver.get_new_address(None, None)?.assume_checked();
                 // test session with expiry in the past
                 let mut expired_receiver = Receiver::create_session(
-                    address.clone(),
-                    directory.clone(),
-                    ohttp_keys.clone(),
+                    address,
+                    directory,
+                    ohttp_keys,
                     Some(Duration::from_secs(0)),
                     None,
                 )
@@ -306,14 +306,9 @@ mod integration {
                 // Inside the Receiver:
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
-                let mut session = Receiver::create_session(
-                    address.clone(),
-                    directory.clone(),
-                    ohttp_keys.clone(),
-                    None,
-                    None,
-                )
-                .save(&persister)?;
+                let mut session =
+                    Receiver::create_session(address, directory, ohttp_keys, None, None)
+                        .save(&persister)?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
                 let ohttp_relay = services.ohttp_relay_url();
@@ -345,12 +340,8 @@ mod integration {
                     .save(&sender_persister)?;
                 let (Request { url, body, content_type, .. }, _send_ctx) =
                     req_ctx.create_v2_post_request(ohttp_relay.to_owned())?;
-                let response = agent
-                    .post(url.clone())
-                    .header("Content-Type", content_type)
-                    .body(body.clone())
-                    .send()
-                    .await?;
+                let response =
+                    agent.post(url).header("Content-Type", content_type).body(body).send().await?;
                 log::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success(), "error response: {}", response.status());
                 // POST Original PSBT
@@ -370,7 +361,7 @@ mod integration {
                 let outcome = session
                     .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
                     .save(&persister)?;
-                let proposal = outcome.success().expect("proposal should exist").clone();
+                let proposal = outcome.success().expect("proposal should exist");
 
                 // Generate replyable error
                 let check_broadcast_suitability = || {
@@ -433,14 +424,9 @@ mod integration {
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
                 // test session with expiry in the future
-                let mut session = Receiver::create_session(
-                    address.clone(),
-                    directory.clone(),
-                    ohttp_keys.clone(),
-                    None,
-                    None,
-                )
-                .save(&recv_persister)?;
+                let mut session =
+                    Receiver::create_session(address, directory, ohttp_keys, None, None)
+                        .save(&recv_persister)?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
                 let ohttp_relay = services.ohttp_relay_url();
@@ -472,12 +458,8 @@ mod integration {
                     .save(&send_persister)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
                     req_ctx.create_v2_post_request(ohttp_relay.to_owned())?;
-                let response = agent
-                    .post(url.clone())
-                    .header("Content-Type", content_type)
-                    .body(body.clone())
-                    .send()
-                    .await?;
+                let response =
+                    agent.post(url).header("Content-Type", content_type).body(body).send().await?;
                 log::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success(), "error response: {}", response.status());
                 let send_ctx = req_ctx
@@ -519,20 +501,17 @@ mod integration {
                 // Replay post fallback to get the response
                 let (Request { url, body, content_type, .. }, ohttp_ctx) =
                     send_ctx.create_poll_request(ohttp_relay.to_owned())?;
-                let response = agent
-                    .post(url.clone())
-                    .header("Content-Type", content_type)
-                    .body(body.clone())
-                    .send()
-                    .await?;
+                let response =
+                    agent.post(url).header("Content-Type", content_type).body(body).send().await?;
                 log::info!("Response: {:#?}", &response);
                 let response = send_ctx
                     .process_response(&response.bytes().await?, ohttp_ctx)
                     .save(&send_persister)
                     .expect("psbt should exist");
 
-                let checked_payjoin_proposal_psbt = response.success().expect("psbt should exist");
-                let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt.clone())?;
+                let checked_payjoin_proposal_psbt =
+                    response.success().expect("psbt should exist").clone();
+                let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
                 log::info!("sent");
 

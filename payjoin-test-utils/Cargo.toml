@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Dan Gould <d@ngould.dev>"]
 description = "Payjoin test utilities"
 repository = "https://github.com/payjoin/rust-payjoin"
-rust-version = "1.63"
+rust-version = "1.85"
 license = "MIT"
 
 [dependencies]

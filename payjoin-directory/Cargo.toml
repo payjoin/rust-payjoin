@@ -9,7 +9,7 @@ keywords = ["bip78", "bip77", "payjoin", "bitcoin", "ohttp"]
 categories = ["cryptography::cryptocurrencies", "network-programming"]
 license = "MITNFA"
 edition = "2021"
-rust-version = "1.63"
+rust-version = "1.85"
 resolver = "2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

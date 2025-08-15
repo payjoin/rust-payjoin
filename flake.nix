@@ -25,7 +25,7 @@
           overlays = [rust-overlay.overlays.default];
         };
 
-        msrv = "1.63.0";
+        msrv = "1.85.0";
         rustVersions = with pkgs.rust-bin;
           builtins.mapAttrs (_name: rust-bin:
             rust-bin.override {

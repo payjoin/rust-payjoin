@@ -354,7 +354,7 @@ mod test {
         // invalid
         let mut invalid_utf8_padding = PAYJOIN_PROPOSAL.as_bytes().to_vec();
         invalid_utf8_padding
-            .extend(std::iter::repeat(0x00).take(MAX_CONTENT_LENGTH - invalid_utf8_padding.len()));
+            .extend(std::iter::repeat_n(0x00, MAX_CONTENT_LENGTH - invalid_utf8_padding.len()));
 
         let ctx = create_v1_context();
         let response = ctx.process_response(&invalid_utf8_padding);
@@ -375,7 +375,7 @@ mod test {
     #[test]
     fn process_response_invalid_buffer_len() {
         let mut data = PAYJOIN_PROPOSAL.as_bytes().to_vec();
-        data.extend(std::iter::repeat(0).take(MAX_CONTENT_LENGTH + 1));
+        data.extend(std::iter::repeat_n(0, MAX_CONTENT_LENGTH + 1));
 
         let ctx = create_v1_context();
         let response = ctx.process_response(&data);

@@ -129,7 +129,10 @@ pub enum Commands {
     },
     /// Resume pending payjoins (BIP77/v2 only)
     #[cfg(feature = "v2")]
-    Resume,
+    Resume {
+        #[arg(short = 'f', long = "max-fee-rate", value_parser = parse_fee_rate_in_sat_per_vb)]
+        max_fee_rate: Option<FeeRate>,
+    },
 }
 
 pub fn parse_amount_in_sat(s: &str) -> Result<Amount, ParseAmountError> {

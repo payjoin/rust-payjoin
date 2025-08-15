@@ -12,7 +12,7 @@
     <a href="https://docs.rs/payjoin"><img alt="Crates" src="https://img.shields.io/static/v1?logo=read-the-docs&label=docs.rs&message=payjoin&color=f75390"></a>
     <a href="https://github.com/payjoin/rust-payjoin/actions/workflows/rust.yml"><img alt="CI Status" src="https://github.com/payjoin/rust-payjoin/actions/workflows/rust.yml/badge.svg"></a>
     <a href="https://coveralls.io/github/payjoin/rust-payjoin?branch=master"><img src="https://coveralls.io/repos/github/payjoin/rust-payjoin/badge.svg?branch=master"/></a>
-    <a href="https://blog.rust-lang.org/2022/08/11/Rust-1.63.0.html"><img alt="Rustc Version 1.63.0+" src="https://img.shields.io/badge/rustc-1.63.0%2B-lightgrey.svg"/></a>
+    <a href="https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/"><img alt="Rustc Version 1.85.0+" src="https://img.shields.io/badge/rustc-1.85.0%2B-lightgrey.svg"/></a>
   </p>
 
   <h4>
@@ -101,7 +101,7 @@ Seeking review of the code that verifies there is no overpayment. Contributions 
 
 ## Minimum Supported Rust Version (MSRV)
 
-The `payjoin` library and `payjoin-cli` should always compile with any combination of features on Rust **1.63.0**.
+The `payjoin` library and `payjoin-cli` should always compile with any combination of features on Rust **1.85.0**.
 
 To build and test with the MSRV you will need to pin the below dependency versions:
 

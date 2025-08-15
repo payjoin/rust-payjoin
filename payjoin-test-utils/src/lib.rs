@@ -47,13 +47,13 @@ pub fn init_tracing() {
 }
 
 pub struct TestServices {
-    cert: Certificate,
+    pub cert: Certificate,
     /// redis is an implicit dependency of the directory service
     #[allow(dead_code)]
-    redis: (u16, Container<'static, Redis>),
-    directory: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
-    ohttp_relay: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
-    http_agent: Arc<Client>,
+    pub redis: (u16, Container<'static, Redis>),
+    pub directory: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
+    pub ohttp_relay: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
+    pub http_agent: Arc<Client>,
 }
 
 impl TestServices {
@@ -84,7 +84,7 @@ impl TestServices {
         })
     }
 
-    pub fn cert(&self) -> Vec<u8> { self.cert.serialize_der().expect("Failed to serialize cert") }
+    pub fn cert(&self) -> Vec<u8> { self.cert.serialize_der().expect("Failed to seriallze cert") }
 
     pub fn directory_url(&self) -> Url {
         Url::parse(&format!("https://localhost:{}", self.directory.0)).expect("invalid URL")

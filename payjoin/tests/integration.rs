@@ -188,6 +188,8 @@ mod integration {
                 OhttpKeys::from_str("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
                     .expect("Invalid OhttpKeys");
             let mut services = TestServices::initialize().await?;
+            println!("{:?}", services.directory.0);
+            println!("{:?}", services.directory.1);
             let result = tokio::select!(
             err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
             res = try_request_with_bad_keys(&services, bad_ohttp_keys) => res

@@ -1135,6 +1135,7 @@ pub mod test {
 
     #[test]
     fn test_v2_mutable_receiver_state_closures() {
+        let persister = NoopSessionPersister::default();
         let mut call_count = 0;
         let maybe_inputs_owned = maybe_inputs_owned_v2_from_test_vector();
         let receiver = v2::Receiver { state: maybe_inputs_owned };
@@ -1149,18 +1150,14 @@ pub mod test {
         assert_eq!(call_count, 1);
 
         let outputs_unknown = maybe_inputs_seen
-            .0
-            .map_err(|_| "Check inputs owned closure failed".to_string())
-            .expect("Next receiver state should be accessible")
-            .1
-            .check_no_inputs_seen_before(&mut |_| mock_callback(&mut call_count, false));
+            .save(&persister)
+            .expect("Noop persister shouldn't fail")
+            .check_no_inputs_seen_before(&mut |_| mock_callback(&mut call_count, false))
+            .save(&persister)
+            .expect("Noop persister shouldn't fail");
         assert_eq!(call_count, 2);
 
         let _wants_outputs = outputs_unknown
-            .0
-            .map_err(|_| "Check no inputs seen closure failed".to_string())
-            .expect("Next receiver state should be accessible")
-            .1
             .identify_receiver_outputs(&mut |_| mock_callback(&mut call_count, true));
         // there are 2 receiver outputs so we should expect this callback to run twice incrementing
         // call count twice
@@ -1191,11 +1188,15 @@ pub mod test {
 
     #[test]
     fn test_maybe_inputs_seen_transient_error() -> Result<(), BoxError> {
+        let persister = NoopSessionPersister::default();
         let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
         let receiver = v2::Receiver { state: unchecked_proposal };
 
-        let maybe_inputs_owned = receiver.assume_interactive_receiver();
-        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(&mut |_| {
+        let maybe_inputs_owned = receiver
+            .assume_interactive_receiver()
+            .save(&persister)
+            .expect("Noop persister shouldn't fail");
+        let maybe_inputs_seen = maybe_inputs_owned.check_inputs_not_owned(&mut |_| {
             Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
         });
 
@@ -1214,18 +1215,21 @@ pub mod test {
 
     #[test]
     fn test_outputs_unknown_transient_error() -> Result<(), BoxError> {
+        let persister = NoopSessionPersister::default();
         let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
         let receiver = v2::Receiver { state: unchecked_proposal };
 
-        let maybe_inputs_owned = receiver.assume_interactive_receiver();
-        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(&mut |_| Ok(false));
-        let outputs_unknown = match maybe_inputs_seen.0 {
-            Ok(state) => state.1.check_no_inputs_seen_before(&mut |_| {
-                Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
-            }),
-            Err(_) => panic!("Expected Ok, got Err"),
-        };
-
+        let maybe_inputs_owned = receiver
+            .assume_interactive_receiver()
+            .save(&persister)
+            .expect("Noop persister shouldn't fail");
+        let maybe_inputs_seen = maybe_inputs_owned
+            .check_inputs_not_owned(&mut |_| Ok(false))
+            .save(&persister)
+            .expect("Noop persister shouldn't fail");
+        let outputs_unknown = maybe_inputs_seen.check_no_inputs_seen_before(&mut |_| {
+            Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
+        });
         match outputs_unknown {
             MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
                 ReplyableError::Implementation(error),
@@ -1241,22 +1245,25 @@ pub mod test {
 
     #[test]
     fn test_wants_outputs_transient_error() -> Result<(), BoxError> {
+        let persister = NoopSessionPersister::default();
         let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
         let receiver = v2::Receiver { state: unchecked_proposal };
 
-        let maybe_inputs_owned = receiver.assume_interactive_receiver();
-        let maybe_inputs_seen = maybe_inputs_owned.0 .1.check_inputs_not_owned(&mut |_| Ok(false));
-        let outputs_unknown = match maybe_inputs_seen.0 {
-            Ok(state) => state.1.check_no_inputs_seen_before(&mut |_| Ok(false)),
-            Err(_) => panic!("Expected Ok, got Err"),
-        };
-        let wants_outputs = match outputs_unknown.0 {
-            Ok(state) => state.1.identify_receiver_outputs(&mut |_| {
-                Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
-            }),
-            Err(_) => panic!("Expected Ok, got Err"),
-        };
-
+        let maybe_inputs_owned = receiver
+            .assume_interactive_receiver()
+            .save(&persister)
+            .expect("Noop persister shouldn't fail");
+        let maybe_inputs_seen = maybe_inputs_owned
+            .check_inputs_not_owned(&mut |_| Ok(false))
+            .save(&persister)
+            .expect("Noop persister should not fail");
+        let outputs_unknown = maybe_inputs_seen
+            .check_no_inputs_seen_before(&mut |_| Ok(false))
+            .save(&persister)
+            .expect("Noop persister should not fail");
+        let wants_outputs = outputs_unknown.identify_receiver_outputs(&mut |_| {
+            Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
+        });
         match wants_outputs {
             MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
                 ReplyableError::Implementation(error),

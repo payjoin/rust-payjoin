@@ -16,8 +16,6 @@
 //! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
 //! but request reuse makes correlation trivial for the relay.
 
-use std::str::FromStr;
-
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
 pub use error::{BuildSenderError, ResponseError, ValidationError, WellKnownError};
@@ -26,7 +24,7 @@ use url::Url;
 
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
-use crate::{Request, Version, MAX_CONTENT_LENGTH};
+use crate::Version;
 
 // See usize casts
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -676,74 +674,15 @@ fn serialize_url(
     url
 }
 
-/// Construct serialized V1 Request and Context from a Payjoin Proposal
-pub(crate) fn create_v1_post_request(endpoint: Url, psbt_ctx: PsbtContext) -> (Request, V1Context) {
-    let url = serialize_url(
-        endpoint.clone(),
-        psbt_ctx.output_substitution,
-        psbt_ctx.fee_contribution,
-        psbt_ctx.min_fee_rate,
-        Version::One,
-    );
-    let mut sanitized_psbt = psbt_ctx.original_psbt.clone();
-    clear_unneeded_fields(&mut sanitized_psbt);
-    let body = sanitized_psbt.to_string().as_bytes().to_vec();
-    (
-        Request::new_v1(&url, &body),
-        V1Context {
-            psbt_context: PsbtContext {
-                original_psbt: psbt_ctx.original_psbt.clone(),
-                output_substitution: psbt_ctx.output_substitution,
-                fee_contribution: psbt_ctx.fee_contribution,
-                payee: psbt_ctx.payee.clone(),
-                min_fee_rate: psbt_ctx.min_fee_rate,
-            },
-        },
-    )
-}
-
-/// Data required to validate the response.
-///
-/// This type is used to process a BIP78 response.
-/// Call [`Self::process_response`] on it to continue the BIP78 flow.
-#[derive(Debug, Clone)]
-pub struct V1Context {
-    psbt_context: PsbtContext,
-}
-
-impl V1Context {
-    /// Decodes and validates the response.
-    ///
-    /// Call this method with response from receiver to continue BIP78 flow. If the response is
-    /// valid you will get appropriate PSBT that you should sign and broadcast.
-    #[inline]
-    pub fn process_response(self, response: &[u8]) -> Result<Psbt, ResponseError> {
-        if response.len() > MAX_CONTENT_LENGTH {
-            return Err(ResponseError::from(InternalValidationError::ContentTooLarge));
-        }
-
-        let res_str = std::str::from_utf8(response).map_err(|_| InternalValidationError::Parse)?;
-        let proposal = Psbt::from_str(res_str).map_err(|_| ResponseError::parse(res_str))?;
-        self.psbt_context.process_proposal(proposal).map_err(Into::into)
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use std::collections::BTreeMap;
-    use std::str::FromStr;
-
     use bitcoin::absolute::LockTime;
-    use bitcoin::bip32::{self, DerivationPath, Fingerprint};
+    use bitcoin::bip32::{DerivationPath, Fingerprint};
     use bitcoin::ecdsa::Signature;
     use bitcoin::hex::FromHex;
-    use bitcoin::psbt::raw::ProprietaryKey;
     use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey, SECP256K1};
     use bitcoin::taproot::TaprootBuilder;
-    use bitcoin::{
-        psbt, Amount, FeeRate, NetworkKind, OutPoint, Script, ScriptBuf, Sequence, Witness,
-        XOnlyPublicKey,
-    };
+    use bitcoin::{Amount, FeeRate, OutPoint, Script, ScriptBuf, Sequence, Witness};
     use payjoin_test_utils::{
         BoxError, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL,
         PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO,
@@ -1079,57 +1018,6 @@ mod test {
         ctx.original_psbt.unsigned_tx.output[0].script_pubkey = ctx.payee.clone();
         assert!(ctx.process_proposal(proposal).is_ok());
 
-        Ok(())
-    }
-
-    #[test]
-    fn test_clear_unneeded_fields() -> Result<(), BoxError> {
-        let mut proposal = PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO.clone();
-        let payee = proposal.unsigned_tx.output[1].script_pubkey.clone();
-        let x_only_key = XOnlyPublicKey::from_str(
-            "4f65949efe60e5be80cf171c06144641e832815de4f6ab3fe0257351aeb22a84",
-        )?;
-        let _ = proposal.inputs[0].tap_internal_key.insert(x_only_key);
-        let _ = proposal.outputs[0].tap_internal_key.insert(x_only_key);
-        assert!(proposal.inputs[0].tap_internal_key.is_some());
-        assert!(!proposal.inputs[0].bip32_derivation.is_empty());
-        assert!(proposal.outputs[0].tap_internal_key.is_some());
-        assert!(!proposal.outputs[0].bip32_derivation.is_empty());
-        let mut psbt_ctx = PsbtContextBuilder::new(proposal.clone(), payee, None)
-            .build(OutputSubstitution::Disabled)?;
-
-        let mut map = BTreeMap::new();
-        let secp = Secp256k1::new();
-        let seed = Vec::<u8>::from_hex("BEEFCAFE").unwrap();
-        let xpriv = bip32::Xpriv::new_master(NetworkKind::Main, &seed).unwrap();
-        let xpub: bip32::Xpub = bip32::Xpub::from_priv(&secp, &xpriv);
-        let value = (xpriv.fingerprint(&secp), DerivationPath::from_str("42'").unwrap());
-        map.insert(xpub, value);
-        psbt_ctx.original_psbt.xpub = map;
-
-        let mut map = BTreeMap::new();
-        let proprietary_key =
-            ProprietaryKey { prefix: b"mock_prefix".to_vec(), subtype: 0x00, key: vec![] };
-        let value = FromHex::from_hex("BEEFCAFE").unwrap();
-        map.insert(proprietary_key, value);
-        psbt_ctx.original_psbt.proprietary = map;
-
-        let mut map = BTreeMap::new();
-        let unknown_key: psbt::raw::Key = psbt::raw::Key { type_value: 0x00, key: vec![] };
-        let value = FromHex::from_hex("BEEFCAFE").unwrap();
-        map.insert(unknown_key, value);
-        psbt_ctx.original_psbt.unknown = map;
-
-        let body = create_v1_post_request(Url::from_str("HTTPS://EXAMPLE.COM/")?, psbt_ctx).0.body;
-        let res_str = std::str::from_utf8(&body)?;
-        let proposal = Psbt::from_str(res_str)?;
-        assert!(proposal.inputs[0].tap_internal_key.is_none());
-        assert!(proposal.inputs[0].bip32_derivation.is_empty());
-        assert!(proposal.outputs[0].tap_internal_key.is_none());
-        assert!(proposal.outputs[0].bip32_derivation.is_empty());
-        assert!(proposal.xpub.is_empty());
-        assert!(proposal.proprietary.is_empty());
-        assert!(proposal.unknown.is_empty());
         Ok(())
     }
 

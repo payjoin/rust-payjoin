@@ -21,21 +21,19 @@ macro_rules! impl_save_for_transition {
             pub fn save(
                 &self,
                 persister: Arc<dyn JsonSenderSessionPersister>,
-            ) -> Result<$next_state, SenderPersistedError> {
+            ) -> Result<$next_state, ForeignError> {
                 let adapter = CallbackPersisterAdapter::new(persister);
-                let mut inner = self.0.write().map_err(|_| {
-                    SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                        "Lock poisoned".to_string(),
-                    )))
-                })?;
+                let mut inner = self
+                    .0
+                    .write()
+                    .map_err(|_| ForeignError::InternalError("Lock poisoned".to_string()))?;
 
                 let value = inner.take().ok_or_else(|| {
-                    SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                        "Already saved or moved".to_string(),
-                    )))
+                    ForeignError::InternalError("Already saved or moved".to_string())
                 })?;
 
-                let res = value.save(&adapter).map_err(SenderPersistedError::from)?;
+                let res =
+                    value.save(&adapter).map_err(|e| ForeignError::InternalError(e.to_string()))?;
                 Ok(res.into())
             }
         }
@@ -127,7 +125,10 @@ impl From<SenderSessionHistory> for payjoin::send::v2::SessionHistory {
 #[uniffi::export]
 impl SenderSessionHistory {
     pub fn endpoint(&self) -> Option<Arc<Url>> {
-        self.0.endpoint().map(|url| Arc::new(url.clone().into()))
+        self.0.pj_param().map(|pj_param| {
+            let endpoint = pj_param.endpoint();
+            Arc::new(endpoint.into())
+        })
     }
 
     /// Fallback transaction from the session if present
@@ -142,10 +143,9 @@ pub struct InitialSendTransition(
     Arc<
         RwLock<
             Option<
-                payjoin::persist::MaybeBadInitInputsTransition<
+                payjoin::persist::InitialTransition<
                     payjoin::send::v2::SessionEvent,
                     payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>,
-                    payjoin::send::BuildSenderError,
                 >,
             >,
         >,
@@ -191,12 +191,15 @@ impl SenderBuilder {
     // The minfeerate parameter is set if the contribution is available in change.
     //
     // This method fails if no recommendation can be made or if the PSBT is malformed.
-    pub fn build_recommended(&self, min_fee_rate: u64) -> InitialSendTransition {
-        InitialSendTransition(Arc::new(RwLock::new(Some(
-            self.0
-                .clone()
-                .build_recommended(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate)),
-        ))))
+    pub fn build_recommended(
+        &self,
+        min_fee_rate: u64,
+    ) -> Result<InitialSendTransition, BuildSenderError> {
+        self.0
+            .clone()
+            .build_recommended(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate))
+            .map(|transition| InitialSendTransition(Arc::new(RwLock::new(Some(transition)))))
+            .map_err(BuildSenderError::from)
     }
     /// Offer the receiver contribution to pay for his input.
     ///
@@ -217,26 +220,31 @@ impl SenderBuilder {
         change_index: Option<u8>,
         min_fee_rate: u64,
         clamp_fee_contribution: bool,
-    ) -> InitialSendTransition {
-        InitialSendTransition(Arc::new(RwLock::new(Some(
-            self.0.clone().build_with_additional_fee(
+    ) -> Result<InitialSendTransition, BuildSenderError> {
+        self.0
+            .clone()
+            .build_with_additional_fee(
                 payjoin::bitcoin::Amount::from_sat(max_fee_contribution),
                 change_index.map(|x| x as usize),
                 payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate),
                 clamp_fee_contribution,
-            ),
-        ))))
+            )
+            .map(|transition| InitialSendTransition(Arc::new(RwLock::new(Some(transition)))))
+            .map_err(BuildSenderError::from)
     }
     /// Perform Payjoin without incentivizing the payee to cooperate.
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
-    pub fn build_non_incentivizing(&self, min_fee_rate: u64) -> InitialSendTransition {
-        InitialSendTransition(Arc::new(RwLock::new(Some(
-            self.0
-                .clone()
-                .build_non_incentivizing(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate)),
-        ))))
+    pub fn build_non_incentivizing(
+        &self,
+        min_fee_rate: u64,
+    ) -> Result<InitialSendTransition, BuildSenderError> {
+        self.0
+            .clone()
+            .build_non_incentivizing(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate))
+            .map(|transition| InitialSendTransition(Arc::new(RwLock::new(Some(transition)))))
+            .map_err(BuildSenderError::from)
     }
 }
 
@@ -295,11 +303,6 @@ impl WithReplyKeyTransition {
 
 #[uniffi::export]
 impl WithReplyKey {
-    pub fn create_v1_post_request(&self) -> RequestV1Context {
-        let (req, ctx) = self.0.clone().create_v1_post_request();
-        RequestV1Context { request: req.into(), context: Arc::new(ctx.into()) }
-    }
-
     /// Construct serialized Request and Context from a Payjoin Proposal.
     ///
     /// Important: This request must not be retried or reused on failure.
@@ -347,9 +350,9 @@ pub struct RequestV1Context {
 /// Data required for validation of response.
 /// This type is used to process the response. Get it from SenderBuilder's build methods. Then you only need to call .process_response() on it to continue BIP78 flow.
 #[derive(Clone, uniffi::Object)]
-pub struct V1Context(Arc<payjoin::send::V1Context>);
-impl From<payjoin::send::V1Context> for V1Context {
-    fn from(value: payjoin::send::V1Context) -> Self { Self(Arc::new(value)) }
+pub struct V1Context(Arc<payjoin::send::v1::V1Context>);
+impl From<payjoin::send::v1::V1Context> for V1Context {
+    fn from(value: payjoin::send::v1::V1Context) -> Self { Self(Arc::new(value)) }
 }
 
 #[uniffi::export]
@@ -357,7 +360,7 @@ impl V1Context {
     ///Decodes and validates the response.
     /// Call this method with response from receiver to continue BIP78 flow. If the response is valid you will get appropriate PSBT that you should sign and broadcast.
     pub fn process_response(&self, response: &[u8]) -> Result<String, ResponseError> {
-        <payjoin::send::V1Context as Clone>::clone(&self.0.clone())
+        <payjoin::send::v1::V1Context as Clone>::clone(&self.0.clone())
             .process_response(response)
             .map(|e| e.to_string())
             .map_err(Into::into)

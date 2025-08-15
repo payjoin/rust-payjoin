@@ -346,9 +346,9 @@ mod integration {
                 let (Request { url, body, content_type, .. }, _send_ctx) =
                     req_ctx.create_v2_post_request(ohttp_relay.to_owned())?;
                 let response = agent
-                    .post(url.clone())
+                    .post(url)
                     .header("Content-Type", content_type)
-                    .body(body.clone())
+                    .body(body)
                     .send()
                     .await?;
                 log::info!("Response: {:#?}", &response);
@@ -370,7 +370,7 @@ mod integration {
                 let outcome = session
                     .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
                     .save(&persister)?;
-                let proposal = outcome.success().expect("proposal should exist").clone();
+                let proposal = outcome.success().expect("proposal should exist");
 
                 // Generate replyable error
                 let check_broadcast_suitability = || {
@@ -473,9 +473,9 @@ mod integration {
                 let (Request { url, body, content_type, .. }, send_ctx) =
                     req_ctx.create_v2_post_request(ohttp_relay.to_owned())?;
                 let response = agent
-                    .post(url.clone())
+                    .post(url)
                     .header("Content-Type", content_type)
-                    .body(body.clone())
+                    .body(body)
                     .send()
                     .await?;
                 log::info!("Response: {:#?}", &response);
@@ -520,9 +520,9 @@ mod integration {
                 let (Request { url, body, content_type, .. }, ohttp_ctx) =
                     send_ctx.create_poll_request(ohttp_relay.to_owned())?;
                 let response = agent
-                    .post(url.clone())
+                    .post(url)
                     .header("Content-Type", content_type)
-                    .body(body.clone())
+                    .body(body)
                     .send()
                     .await?;
                 log::info!("Response: {:#?}", &response);
@@ -531,8 +531,8 @@ mod integration {
                     .save(&send_persister)
                     .expect("psbt should exist");
 
-                let checked_payjoin_proposal_psbt = response.success().expect("psbt should exist");
-                let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt.clone())?;
+                let checked_payjoin_proposal_psbt = response.success().expect("psbt should exist").clone();
+                let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
                 log::info!("sent");
 

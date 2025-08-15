@@ -64,7 +64,45 @@ impl AppTrait for App {
         let amount = uri.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
         match uri.extras.pj_param() {
             #[cfg(feature = "v1")]
-            PjParam::V1(_endpoint) => todo!(),
+            PjParam::V1(pj_param) => {
+                use std::str::FromStr;
+
+                let psbt = self.create_original_psbt(&address, amount, fee_rate)?;
+                let (req, ctx) = payjoin::send::v1::SenderBuilder::from_parts(
+                    psbt,
+                    pj_param,
+                    &address,
+                    Some(amount),
+                )
+                .build_recommended(fee_rate)
+                .with_context(|| "Failed to build payjoin request")?
+                .create_v1_post_request();
+                let http = http_agent(&self.config)?;
+                let body = String::from_utf8(req.body.clone()).unwrap();
+                println!("Sending fallback request to {}", &req.url);
+                let response = http
+                    .post(req.url)
+                    .header("Content-Type", req.content_type)
+                    .body(body.clone())
+                    .send()
+                    .await
+                    .with_context(|| "HTTP request failed")?;
+                let fallback_tx = payjoin::bitcoin::Psbt::from_str(&body)
+                    .map_err(|e| anyhow!("Failed to load PSBT from base64: {}", e))?
+                    .extract_tx()?;
+                println!("Sent fallback transaction txid: {}", fallback_tx.compute_txid());
+                println!(
+                    "Sent fallback transaction hex: {:#}",
+                    payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
+                );
+                let psbt = ctx.process_response(&response.bytes().await?).map_err(|e| {
+                    log::debug!("Error processing response: {e:?}");
+                    anyhow!("Failed to process response {e}")
+                })?;
+
+                self.process_pj_response(psbt)?;
+                Ok(())
+            }
             PjParam::V2(pj_param) => {
                 // TODO: perhaps we should store pj uri in the session wrapper as to not replay the event log for each session
                 let sender_state =

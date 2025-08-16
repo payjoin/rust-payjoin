@@ -23,7 +23,9 @@ impl std::fmt::Display for ReplayError {
 impl std::error::Error for ReplayError {}
 
 impl From<InternalReplayError> for ReplayError {
-    fn from(e: InternalReplayError) -> Self { ReplayError(e) }
+    fn from(e: InternalReplayError) -> Self {
+        ReplayError(e)
+    }
 }
 
 #[derive(Debug)]
@@ -70,8 +72,9 @@ impl SessionHistory {
     /// Fallback transaction from the session if present
     pub fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::CreatedReplyKey(proposal) =>
-                Some(proposal.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate()),
+            SessionEvent::CreatedReplyKey(proposal) => {
+                Some(proposal.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate())
+            }
             _ => None,
         })
     }
@@ -169,7 +172,7 @@ mod tests {
     fn run_session_history_test(test: SessionHistoryTest) {
         let persister = InMemoryTestPersister::<SessionEvent>::default();
         for event in test.events {
-            persister.save_event(&event).expect("In memory persister shouldn't fail");
+            persister.save_event(event).expect("In memory persister shouldn't fail");
         }
 
         let (sender, session_history) =

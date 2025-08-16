@@ -243,8 +243,9 @@ pub struct PsbtContext {
 macro_rules! check_eq {
     ($proposed:expr, $original:expr, $error:ident) => {
         match ($proposed, $original) {
-            (proposed, original) if proposed != original =>
-                return Err(InternalProposalError::$error { proposed, original }),
+            (proposed, original) if proposed != original => {
+                return Err(InternalProposalError::$error { proposed, original })
+            }
             _ => (),
         }
     };
@@ -593,8 +594,9 @@ fn find_change_index(
 ) -> Result<Option<AdditionalFeeContribution>, InternalBuildSenderError> {
     match (psbt.unsigned_tx.output.len(), clamp_fee_contribution) {
         (0, _) => return Err(InternalBuildSenderError::NoOutputs),
-        (1, false) if psbt.unsigned_tx.output[0].script_pubkey == *payee =>
-            return Err(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution),
+        (1, false) if psbt.unsigned_tx.output[0].script_pubkey == *payee => {
+            return Err(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution)
+        }
         (1, true) if psbt.unsigned_tx.output[0].script_pubkey == *payee => return Ok(None),
         (1, _) => return Err(InternalBuildSenderError::MissingPayeeOutput),
         (2, _) => (),
@@ -645,8 +647,9 @@ fn determine_fee_contribution(
 ) -> Result<Option<AdditionalFeeContribution>, InternalBuildSenderError> {
     Ok(match fee_contribution {
         Some((fee, None)) => find_change_index(psbt, payee, fee, clamp_fee_contribution)?,
-        Some((fee, Some(index))) =>
-            Some(check_change_index(psbt, payee, fee, index, clamp_fee_contribution)?),
+        Some((fee, Some(index))) => {
+            Some(check_change_index(psbt, payee, fee, index, clamp_fee_contribution)?)
+        }
         None => None,
     })
 }

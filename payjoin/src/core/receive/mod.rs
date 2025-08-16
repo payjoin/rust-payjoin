@@ -218,7 +218,9 @@ impl InputPair {
 }
 
 impl<'a> From<&'a InputPair> for InternalInputPair<'a> {
-    fn from(pair: &'a InputPair) -> Self { Self { psbtin: &pair.psbtin, txin: &pair.txin } }
+    fn from(pair: &'a InputPair) -> Self {
+        Self { psbtin: &pair.psbtin, txin: &pair.txin }
+    }
 }
 
 /// Validate the payload of a Payjoin request for PSBT and Params sanity

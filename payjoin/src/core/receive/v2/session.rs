@@ -29,7 +29,9 @@ impl std::fmt::Display for ReplayError {
 impl std::error::Error for ReplayError {}
 
 impl From<InternalReplayError> for ReplayError {
-    fn from(e: InternalReplayError) -> Self { ReplayError(e) }
+    fn from(e: InternalReplayError) -> Self {
+        ReplayError(e)
+    }
 }
 
 #[derive(Debug)]
@@ -82,8 +84,9 @@ impl SessionHistory {
     /// Receiver session Payjoin URI
     pub fn pj_uri<'a>(&self) -> Option<PjUri<'a>> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::Created(session_context) =>
-                Some(crate::receive::v2::pj_uri(session_context, OutputSubstitution::Disabled)),
+            SessionEvent::Created(session_context) => {
+                Some(crate::receive::v2::pj_uri(session_context, OutputSubstitution::Disabled))
+            }
             _ => None,
         })
     }
@@ -91,8 +94,9 @@ impl SessionHistory {
     /// Fallback transaction from the session if present
     pub fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::MaybeInputsOwned(proposal) =>
-                Some(proposal.extract_tx_to_schedule_broadcast()),
+            SessionEvent::MaybeInputsOwned(proposal) => {
+                Some(proposal.extract_tx_to_schedule_broadcast())
+            }
             _ => None,
         })
     }
@@ -100,8 +104,9 @@ impl SessionHistory {
     /// Psbt with fee contributions applied
     pub fn psbt_ready_for_signing(&self) -> Option<bitcoin::Psbt> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::ProvisionalProposal(proposal) =>
-                Some(proposal.psbt_context.payjoin_psbt.clone()),
+            SessionEvent::ProvisionalProposal(proposal) => {
+                Some(proposal.psbt_context.payjoin_psbt.clone())
+            }
             _ => None,
         })
     }
@@ -235,7 +240,7 @@ mod tests {
     fn run_session_history_test(test: SessionHistoryTest) -> Result<(), BoxError> {
         let persister = InMemoryTestPersister::<SessionEvent>::default();
         for event in test.events {
-            persister.save_event(&event)?;
+            persister.save_event(event)?;
         }
 
         let (receiver, session_history) = replay_event_log(&persister)?;

@@ -248,9 +248,13 @@ pub enum Rejection<Event, Err> {
 
 impl<Event, Err> Rejection<Event, Err> {
     #[inline]
-    pub fn fatal(event: Event, error: Err) -> Self { Rejection::Fatal(RejectFatal(event, error)) }
+    pub fn fatal(event: Event, error: Err) -> Self {
+        Rejection::Fatal(RejectFatal(event, error))
+    }
     #[inline]
-    pub fn transient(error: Err) -> Self { Rejection::Transient(RejectTransient(error)) }
+    pub fn transient(error: Err) -> Self {
+        Rejection::Transient(RejectTransient(error))
+    }
 }
 
 /// Represents a fatal rejection of a state transition.
@@ -320,7 +324,9 @@ impl<ApiError: std::error::Error, StorageError: std::error::Error>
     From<InternalPersistedError<ApiError, StorageError>>
     for PersistedError<ApiError, StorageError>
 {
-    fn from(value: InternalPersistedError<ApiError, StorageError>) -> Self { PersistedError(value) }
+    fn from(value: InternalPersistedError<ApiError, StorageError>) -> Self {
+        PersistedError(value)
+    }
 }
 
 impl<ApiError: std::error::Error, StorageError: std::error::Error> std::error::Error
@@ -368,9 +374,13 @@ pub enum OptionalTransitionOutcome<NextState, CurrentState> {
 }
 
 impl<NextState, CurrentState> OptionalTransitionOutcome<NextState, CurrentState> {
-    pub fn is_none(&self) -> bool { matches!(self, OptionalTransitionOutcome::Stasis(_)) }
+    pub fn is_none(&self) -> bool {
+        matches!(self, OptionalTransitionOutcome::Stasis(_))
+    }
 
-    pub fn is_success(&self) -> bool { matches!(self, OptionalTransitionOutcome::Progress(_)) }
+    pub fn is_success(&self) -> bool {
+        matches!(self, OptionalTransitionOutcome::Progress(_))
+    }
 
     pub fn success(&self) -> Option<&NextState> {
         match self {
@@ -390,7 +400,7 @@ pub trait SessionPersister {
     type SessionEvent;
 
     /// Appends to list of session updates, Receives generic events
-    fn save_event(&self, event: &Self::SessionEvent) -> Result<(), Self::InternalStorageError>;
+    fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError>;
 
     /// Loads all the events from the session in the same order they were saved
     fn load(
@@ -412,7 +422,7 @@ trait InternalSessionPersister: SessionPersister {
         &self,
         state_transition: NextStateTransition<Self::SessionEvent, NextState>,
     ) -> Result<NextState, Self::InternalStorageError> {
-        self.save_event(&state_transition.0 .0)?;
+        self.save_event(state_transition.0 .0)?;
         Ok(state_transition.0 .1)
     }
 
@@ -446,7 +456,7 @@ trait InternalSessionPersister: SessionPersister {
     {
         match state_transition.0 {
             Ok(AcceptNextState(event, next_state)) => {
-                self.save_event(&event).map_err(InternalPersistedError::Storage)?;
+                self.save_event(event).map_err(InternalPersistedError::Storage)?;
                 Ok(next_state)
             }
             Err(RejectBadInitInputs(err)) => Err(InternalPersistedError::BadInitInputs(err).into()),
@@ -475,18 +485,21 @@ trait InternalSessionPersister: SessionPersister {
     {
         match state_transition.0 {
             Ok(AcceptOptionalTransition::Success(AcceptNextState(event, success_value))) => {
-                self.save_event(&event).map_err(InternalPersistedError::Storage)?;
+                self.save_event(event).map_err(InternalPersistedError::Storage)?;
                 self.close().map_err(InternalPersistedError::Storage)?;
                 Ok(OptionalTransitionOutcome::Progress(success_value))
             }
-            Ok(AcceptOptionalTransition::NoResults(current_state)) =>
-                Ok(OptionalTransitionOutcome::Stasis(current_state)),
-            Err(Rejection::Fatal(fatal_rejection)) => {
-                self.handle_fatal_reject(&fatal_rejection)?;
-                Err(InternalPersistedError::Fatal(fatal_rejection.1).into())
+            Ok(AcceptOptionalTransition::NoResults(current_state)) => {
+                Ok(OptionalTransitionOutcome::Stasis(current_state))
             }
-            Err(Rejection::Transient(RejectTransient(err))) =>
-                Err(InternalPersistedError::Transient(err).into()),
+            Err(Rejection::Fatal(fatal_rejection)) => {
+                let error = fatal_rejection.1;
+                self.handle_fatal_reject(fatal_rejection.0)?;
+                Err(InternalPersistedError::Fatal(error).into())
+            }
+            Err(Rejection::Transient(RejectTransient(err))) => {
+                Err(InternalPersistedError::Transient(err).into())
+            }
         }
     }
     /// Save a transition that can result in:
@@ -511,17 +524,20 @@ trait InternalSessionPersister: SessionPersister {
     {
         match state_transition.0 {
             Ok(AcceptOptionalTransition::Success(AcceptNextState(event, next_state))) => {
-                self.save_event(&event).map_err(InternalPersistedError::Storage)?;
+                self.save_event(event).map_err(InternalPersistedError::Storage)?;
                 Ok(OptionalTransitionOutcome::Progress(next_state))
             }
-            Ok(AcceptOptionalTransition::NoResults(current_state)) =>
-                Ok(OptionalTransitionOutcome::Stasis(current_state)),
-            Err(Rejection::Fatal(fatal_rejection)) => {
-                self.handle_fatal_reject(&fatal_rejection)?;
-                Err(InternalPersistedError::Fatal(fatal_rejection.1).into())
+            Ok(AcceptOptionalTransition::NoResults(current_state)) => {
+                Ok(OptionalTransitionOutcome::Stasis(current_state))
             }
-            Err(Rejection::Transient(RejectTransient(err))) =>
-                Err(InternalPersistedError::Transient(err).into()),
+            Err(Rejection::Fatal(fatal_rejection)) => {
+                let error = fatal_rejection.1;
+                self.handle_fatal_reject(fatal_rejection.0)?;
+                Err(InternalPersistedError::Fatal(error).into())
+            }
+            Err(Rejection::Transient(RejectTransient(err))) => {
+                Err(InternalPersistedError::Transient(err).into())
+            }
         }
     }
 
@@ -535,7 +551,7 @@ trait InternalSessionPersister: SessionPersister {
     {
         match state_transition.0 {
             Ok(AcceptNextState(event, next_state)) => {
-                self.save_event(&event).map_err(InternalPersistedError::Storage)?;
+                self.save_event(event).map_err(InternalPersistedError::Storage)?;
                 Ok(next_state)
             }
             Err(RejectTransient(err)) => Err(InternalPersistedError::Transient(err).into()),
@@ -552,14 +568,15 @@ trait InternalSessionPersister: SessionPersister {
     {
         match state_transition.0 {
             Ok(AcceptNextState(event, next_state)) => {
-                self.save_event(&event).map_err(InternalPersistedError::Storage)?;
+                self.save_event(event).map_err(InternalPersistedError::Storage)?;
                 Ok(next_state)
             }
             Err(e) => {
                 match e {
                     Rejection::Fatal(fatal_rejection) => {
-                        self.handle_fatal_reject(&fatal_rejection)?;
-                        Err(InternalPersistedError::Fatal(fatal_rejection.1).into())
+                        let error = fatal_rejection.1;
+                        self.handle_fatal_reject(fatal_rejection.0)?;
+                        Err(InternalPersistedError::Fatal(error).into())
                     }
                     Rejection::Transient(RejectTransient(err)) => {
                         // No event to store for transient errors
@@ -572,12 +589,12 @@ trait InternalSessionPersister: SessionPersister {
 
     fn handle_fatal_reject<Err>(
         &self,
-        fatal_rejection: &RejectFatal<Self::SessionEvent, Err>,
+        event: Self::SessionEvent,
     ) -> Result<(), InternalPersistedError<Err, Self::InternalStorageError>>
     where
         Err: std::error::Error,
     {
-        self.save_event(&fatal_rejection.0).map_err(InternalPersistedError::Storage)?;
+        self.save_event(event).map_err(InternalPersistedError::Storage)?;
         // Session is in a terminal state, close it
         self.close().map_err(InternalPersistedError::Storage)
     }
@@ -594,14 +611,16 @@ pub struct NoopPersisterEvent;
 pub struct NoopSessionPersister<E = NoopPersisterEvent>(std::marker::PhantomData<E>);
 
 impl<E> Default for NoopSessionPersister<E> {
-    fn default() -> Self { Self(std::marker::PhantomData) }
+    fn default() -> Self {
+        Self(std::marker::PhantomData)
+    }
 }
 
 impl<E: 'static> SessionPersister for NoopSessionPersister<E> {
     type InternalStorageError = std::convert::Infallible;
     type SessionEvent = E;
 
-    fn save_event(&self, _event: &Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
+    fn save_event(&self, _event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
         Ok(())
     }
 
@@ -611,7 +630,9 @@ impl<E: 'static> SessionPersister for NoopSessionPersister<E> {
         Ok(Box::new(std::iter::empty()))
     }
 
-    fn close(&self) -> Result<(), Self::InternalStorageError> { Ok(()) }
+    fn close(&self) -> Result<(), Self::InternalStorageError> {
+        Ok(())
+    }
 }
 
 #[cfg(feature = "_test-utils")]
@@ -627,17 +648,21 @@ pub mod test_utils {
     }
 
     impl<V> Default for InMemoryTestPersister<V> {
-        fn default() -> Self { Self { inner: Arc::new(RwLock::new(InnerStorage::default())) } }
+        fn default() -> Self {
+            Self { inner: Arc::new(RwLock::new(InnerStorage::default())) }
+        }
     }
 
     #[derive(Clone)]
     pub(crate) struct InnerStorage<V> {
-        pub(crate) events: Vec<V>,
+        pub(crate) events: std::sync::Arc<Vec<V>>,
         pub(crate) is_closed: bool,
     }
 
     impl<V> Default for InnerStorage<V> {
-        fn default() -> Self { Self { events: vec![], is_closed: false } }
+        fn default() -> Self {
+            Self { events: std::sync::Arc::new(vec![]), is_closed: false }
+        }
     }
 
     impl<V> SessionPersister for InMemoryTestPersister<V>
@@ -647,9 +672,9 @@ pub mod test_utils {
         type InternalStorageError = std::convert::Infallible;
         type SessionEvent = V;
 
-        fn save_event(&self, event: &Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
+        fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
             let mut inner = self.inner.write().expect("Lock should not be poisoned");
-            inner.events.push(event.clone());
+            std::sync::Arc::make_mut(&mut inner.events).push(event);
             Ok(())
         }
 
@@ -658,8 +683,10 @@ pub mod test_utils {
         ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError>
         {
             let inner = self.inner.read().expect("Lock should not be poisoned");
-            let events = inner.events.clone();
-            Ok(Box::new(events.into_iter()))
+            let events = std::sync::Arc::clone(&inner.events);
+            Ok(Box::new(
+                std::sync::Arc::try_unwrap(events).unwrap_or_else(|arc| (*arc).clone()).into_iter(),
+            ))
         }
 
         fn close(&self) -> Result<(), Self::InternalStorageError> {
@@ -1107,33 +1134,32 @@ mod tests {
 
     #[test]
     fn test_persisted_error_helpers() {
-        let storage_err = InMemoryTestError {};
         let api_err = InMemoryTestError {};
 
         // Test Storage error case
         let storage_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
-            InternalPersistedError::Storage(storage_err.clone()),
+            InternalPersistedError::Storage(InMemoryTestError {}),
         );
-        assert!(storage_error.clone().storage_error().is_some());
-        assert!(storage_error.api_error().is_none());
+        assert!(storage_error.storage_error_ref().is_some());
+        assert!(storage_error.api_error_ref().is_none());
 
         // Test Internal API error cases
         let fatal_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
             InternalPersistedError::Fatal(api_err.clone()),
         );
-        assert!(fatal_error.clone().storage_error().is_none());
-        assert!(fatal_error.api_error().is_some());
+        assert!(fatal_error.storage_error_ref().is_none());
+        assert!(fatal_error.api_error_ref().is_some());
 
         let transient_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
             InternalPersistedError::Transient(api_err.clone()),
         );
-        assert!(transient_error.clone().storage_error().is_none());
-        assert!(transient_error.api_error().is_some());
+        assert!(transient_error.storage_error_ref().is_none());
+        assert!(transient_error.api_error_ref().is_some());
 
         let bad_inputs_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
             InternalPersistedError::BadInitInputs(api_err.clone()),
         );
-        assert!(bad_inputs_error.clone().storage_error().is_none());
-        assert!(bad_inputs_error.api_error().is_some());
+        assert!(bad_inputs_error.storage_error_ref().is_none());
+        assert!(bad_inputs_error.api_error_ref().is_some());
     }
 }

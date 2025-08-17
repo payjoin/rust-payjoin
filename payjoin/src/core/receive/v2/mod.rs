@@ -1089,10 +1089,12 @@ pub mod test {
     use bitcoin::FeeRate;
     use once_cell::sync::Lazy;
     use payjoin_test_utils::{
-        BoxError, EXAMPLE_URL, KEM, KEY_ID, PARSED_ORIGINAL_PSBT, QUERY_PARAMS, SYMMETRIC,
+        BoxError, EXAMPLE_URL, KEM, KEY_ID, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT, QUERY_PARAMS,
+        SYMMETRIC,
     };
 
     use super::*;
+    use crate::output_substitution::OutputSubstitution;
     use crate::persist::{NoopSessionPersister, RejectTransient, Rejection};
     use crate::receive::optional_parameters::Params;
     use crate::receive::{v2, ReplyableError};
@@ -1369,5 +1371,18 @@ pub mod test {
         let uri = Receiver { state: Initialized { context: SHARED_CONTEXT.clone() } }.pj_uri();
         assert_ne!(uri.extras.endpoint, EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
+    }
+
+    #[test]
+    /// Ensures output substitution is disabled for v1 proposals in v2 logic.
+    fn test_unchecked_from_payload_disables_output_substitution_for_v1() {
+        let base64 = ORIGINAL_PSBT;
+        let query = "v=1";
+        let payload = format!("{base64}\n{query}");
+        let mut receiver = Receiver { state: Initialized { context: SHARED_CONTEXT.clone() } };
+        let proposal = receiver
+            .unchecked_from_payload(&payload)
+            .expect("unchecked_from_payload should parse valid v1 PSBT payload");
+        assert_eq!(proposal.params.output_substitution, OutputSubstitution::Disabled);
     }
 }

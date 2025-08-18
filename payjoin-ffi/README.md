@@ -13,6 +13,7 @@ The directories below include instructions for using, building, and publishing t
 | Language | Platform              | Repository | Published Package | 
 |----------|-----------------------|-------------------|------------------------------------|
 | Python   | linux, macOS          | [payjoin-ffi/python](python) | [payjoin](https://pypi.org/project/payjoin/) |
+| Dart     | linux, macOS          | [payjoin-ffi/dart](dart)     | N/A |
 
 ## Minimum Supported Rust Version (MSRV)
 

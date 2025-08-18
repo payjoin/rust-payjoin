@@ -19,8 +19,9 @@ use rcgen::Certificate;
 use reqwest::{Client, ClientBuilder};
 use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
-use testcontainers::{clients, Container};
 use testcontainers_modules::redis::{Redis, REDIS_PORT};
+use testcontainers_modules::testcontainers::runners::AsyncRunner;
+use testcontainers_modules::testcontainers::ContainerAsync;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
@@ -50,7 +51,7 @@ pub struct TestServices {
     cert: Certificate,
     /// redis is an implicit dependency of the directory service
     #[allow(dead_code)]
-    redis: (u16, Container<'static, Redis>),
+    redis: (u16, ContainerAsync<Redis>),
     directory: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
     ohttp_relay: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
     http_agent: Arc<Client>,
@@ -62,12 +63,12 @@ impl TestServices {
         let cert = local_cert_key();
         let cert_der = cert.serialize_der().expect("Failed to serialize cert");
         let key_der = cert.serialize_private_key_der();
-        let cert_key = (cert_der.clone(), key_der);
+        let cert_key = (cert_der.clone(), key_der.clone());
 
         let mut root_store = RootCertStore::empty();
         root_store.add(CertificateDer::from(cert.serialize_der().unwrap())).unwrap();
 
-        let redis = init_redis();
+        let redis = init_redis().await;
         let db_host = format!("127.0.0.1:{}", redis.0);
         let directory = init_directory(db_host, cert_key.clone()).await?;
         let gateway_origin =
@@ -120,10 +121,12 @@ impl TestServices {
     }
 }
 
-pub fn init_redis() -> (u16, Container<'static, Redis>) {
-    let docker = Box::leak(Box::new(clients::Cli::default()));
-    let redis_instance = docker.run(Redis);
-    let host_port = redis_instance.get_host_port_ipv4(REDIS_PORT);
+pub async fn init_redis() -> (u16, ContainerAsync<Redis>) {
+    let redis_instance = Redis::default().start().await.expect("redis container should start");
+    let host_port = redis_instance
+        .get_host_port_ipv4(REDIS_PORT)
+        .await
+        .expect("redis instance should have port");
     (host_port, redis_instance)
 }
 

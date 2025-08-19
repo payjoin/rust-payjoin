@@ -81,17 +81,18 @@ impl AsyncBitcoinRpc {
             .json(&request_body)
             .basic_auth(&self.username, Some(&self.password));
 
-        let response = request.send().await.context("Failed to send RPC request")?;
+        let response =
+            request.send().await.with_context(|| format!("RPC '{}': connection failed", method))?;
 
-        if !response.status().is_success() {
-            return Err(anyhow!("RPC request failed with status: {}", response.status()));
-        }
-
-        let json: RpcResponse<T> = response.json().await.context("Failed to parse RPC response")?;
+        let json = response
+            .json::<RpcResponse<T>>()
+            .await
+            .with_context(|| format!("RPC '{}': invalid response", method))?;
 
         match json {
             RpcResponse::Success { result, .. } => Ok(result),
-            RpcResponse::Error { error, .. } => Err(anyhow!("RPC error: {:?}", error)),
+            RpcResponse::Error { error, .. } =>
+                Err(anyhow!("RPC '{}' failed: {}", method, error.message)),
         }
     }
 
@@ -255,4 +256,77 @@ pub struct ListUnspentResult {
 #[derive(Debug, Deserialize)]
 pub struct FinalizePsbtResult {
     pub hex: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    const TEST_AMOUNT_SATS: u64 = 100_000;
+    const INVALID_ADDRESS: &str = "invalid_bitcoin_address_12345";
+
+    fn assert_rpc_error_format(error_msg: &str, method: &str, expected_keywords: &[&str]) {
+        assert!(error_msg.contains(method));
+        assert!(expected_keywords.iter().any(|&keyword| error_msg.contains(keyword)));
+    }
+
+    #[tokio::test]
+    async fn test_rpc_error_messages_invalid_bitcoin_address() {
+        use payjoin_test_utils::init_bitcoind;
+
+        let bitcoind = init_bitcoind().expect("Bitcoin Core required for this test");
+        let rpc_url = format!("http://127.0.0.1:{}", bitcoind.params.rpc_socket.port());
+        let auth = Auth::CookieFile(bitcoind.params.cookie_file.clone());
+        let rpc = AsyncBitcoinRpc::new(rpc_url, auth).await.unwrap();
+
+        let outputs = HashMap::from([(
+            INVALID_ADDRESS.to_string(),
+            payjoin::bitcoin::Amount::from_sat(TEST_AMOUNT_SATS),
+        )]);
+
+        let error = rpc
+            .wallet_create_funded_psbt(&[], &outputs, None, None, None)
+            .await
+            .expect_err("Should fail due to invalid address");
+        let error_msg = error.to_string();
+        println!("{}", error_msg);
+
+        assert_rpc_error_format(
+            &error_msg,
+            "walletcreatefundedpsbt",
+            &["address", "Invalid", "invalid"],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rpc_error_messages_insufficient_funds() {
+        use payjoin_test_utils::init_bitcoind;
+
+        let bitcoind = init_bitcoind().expect("Bitcoin Core required for this test");
+        let _wallet = bitcoind.create_wallet("empty_wallet").unwrap();
+        let rpc_url =
+            format!("http://127.0.0.1:{}/wallet/empty_wallet", bitcoind.params.rpc_socket.port());
+        let auth = Auth::CookieFile(bitcoind.params.cookie_file.clone());
+        let rpc = AsyncBitcoinRpc::new(rpc_url, auth).await.unwrap();
+
+        let valid_address =
+            rpc.get_new_address(None, None).await.unwrap().assume_checked_ref().to_string();
+        let outputs =
+            HashMap::from([(valid_address, payjoin::bitcoin::Amount::from_sat(TEST_AMOUNT_SATS))]);
+
+        let error = rpc
+            .wallet_create_funded_psbt(&[], &outputs, None, None, None)
+            .await
+            .expect_err("Should fail due to insufficient funds");
+        let error_msg = error.to_string();
+        println!("{}", error_msg);
+
+        assert_rpc_error_format(
+            &error_msg,
+            "walletcreatefundedpsbt",
+            &["fund", "balance", "amount", "Insufficient"],
+        );
+    }
 }

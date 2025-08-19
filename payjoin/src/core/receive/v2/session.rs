@@ -209,6 +209,7 @@ mod tests {
             SessionEvent::OutputsUnknown(outputs_unknown),
             SessionEvent::WantsOutputs(wants_outputs),
             SessionEvent::WantsInputs(wants_inputs),
+            SessionEvent::WantsFeeRange(wants_fee_range),
             SessionEvent::ProvisionalProposal(provisional_proposal),
             SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()),
         ];

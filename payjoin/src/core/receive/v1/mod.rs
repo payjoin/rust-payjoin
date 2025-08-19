@@ -73,7 +73,7 @@ pub use exclusive::*;
 /// If you are implementing an interactive payment receiver, then such checks are not necessary, and you
 /// can go ahead with calling [`Self::assume_interactive_receiver`] to move on to the next typestate.
 #[cfg_attr(not(feature = "v1"), allow(dead_code))]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct UncheckedProposal {
     original: Original,
 }
@@ -117,7 +117,7 @@ impl UncheckedProposal {
 /// to extract the signed original PSBT to schedule a fallback in case the Payjoin process fails.
 ///
 /// Call [`Self::check_inputs_not_owned`] to proceed.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 #[cfg_attr(not(feature = "v1"), allow(dead_code))]
 pub struct MaybeInputsOwned {
     pub(crate) original: Original,
@@ -150,7 +150,7 @@ impl MaybeInputsOwned {
 /// Typestate to check that the original PSBT has no inputs that the receiver has seen before.
 ///
 /// Call [`Self::check_no_inputs_seen_before`] to proceed.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 #[cfg_attr(not(feature = "v1"), allow(dead_code))]
 pub struct MaybeInputsSeen {
     original: Original,
@@ -180,7 +180,7 @@ impl MaybeInputsSeen {
 /// money.
 ///
 /// Call [`Self::identify_receiver_outputs`] to proceed.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 #[cfg_attr(not(feature = "v1"), allow(dead_code))]
 pub struct OutputsUnknown {
     original: Original,

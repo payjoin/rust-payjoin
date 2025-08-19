@@ -279,8 +279,10 @@ pub struct OutputSubstitutionError(InternalOutputSubstitutionError);
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InternalOutputSubstitutionError {
+    #[cfg(feature = "v1")]
     /// Output substitution is disabled and output value was decreased
     DecreasedValueWhenDisabled,
+    #[cfg(feature = "v1")]
     /// Output substitution is disabled and script pubkey was changed
     ScriptPubKeyChangedWhenDisabled,
     /// Current output substitution implementation doesn't support reducing the number of outputs
@@ -292,7 +294,9 @@ pub(crate) enum InternalOutputSubstitutionError {
 impl fmt::Display for OutputSubstitutionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
+            #[cfg(feature = "v1")]
             InternalOutputSubstitutionError::DecreasedValueWhenDisabled => write!(f, "Decreasing the receiver output value is not allowed when output substitution is disabled"),
+            #[cfg(feature = "v1")]
             InternalOutputSubstitutionError::ScriptPubKeyChangedWhenDisabled => write!(f, "Changing the receiver output script pubkey is not allowed when output substitution is disabled"),
             InternalOutputSubstitutionError::NotEnoughOutputs => write!(
                 f,
@@ -311,7 +315,9 @@ impl From<InternalOutputSubstitutionError> for OutputSubstitutionError {
 impl std::error::Error for OutputSubstitutionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.0 {
+            #[cfg(feature = "v1")]
             InternalOutputSubstitutionError::DecreasedValueWhenDisabled => None,
+            #[cfg(feature = "v1")]
             InternalOutputSubstitutionError::ScriptPubKeyChangedWhenDisabled => None,
             InternalOutputSubstitutionError::NotEnoughOutputs => None,
             InternalOutputSubstitutionError::InvalidDrainScript => None,

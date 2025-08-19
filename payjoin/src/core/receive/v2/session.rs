@@ -160,7 +160,7 @@ pub enum SessionEvent {
     MaybeInputsOwned(),
     MaybeInputsSeen(),
     OutputsUnknown(),
-    WantsOutputs(v1::WantsOutputs),
+    WantsOutputs(crate::receive::WantsOutputs),
     WantsInputs(v1::WantsInputs),
     WantsFeeRange(v1::WantsFeeRange),
     ProvisionalProposal(v1::ProvisionalProposal),
@@ -218,7 +218,7 @@ mod tests {
             SessionEvent::MaybeInputsOwned(),
             SessionEvent::MaybeInputsSeen(),
             SessionEvent::OutputsUnknown(),
-            SessionEvent::WantsOutputs(wants_outputs),
+            SessionEvent::WantsOutputs(wants_outputs.inner),
             SessionEvent::WantsInputs(wants_inputs),
             SessionEvent::WantsFeeRange(wants_fee_range),
             SessionEvent::ProvisionalProposal(provisional_proposal),
@@ -407,7 +407,7 @@ mod tests {
         events.push(SessionEvent::MaybeInputsOwned());
         events.push(SessionEvent::MaybeInputsSeen());
         events.push(SessionEvent::OutputsUnknown());
-        events.push(SessionEvent::WantsOutputs(wants_outputs));
+        events.push(SessionEvent::WantsOutputs(wants_outputs.inner));
         events.push(SessionEvent::WantsInputs(wants_inputs));
         events.push(SessionEvent::WantsFeeRange(wants_fee_range));
         events.push(SessionEvent::ProvisionalProposal(provisional_proposal.clone()));
@@ -467,7 +467,7 @@ mod tests {
         events.push(SessionEvent::MaybeInputsOwned());
         events.push(SessionEvent::MaybeInputsSeen());
         events.push(SessionEvent::OutputsUnknown());
-        events.push(SessionEvent::WantsOutputs(wants_outputs));
+        events.push(SessionEvent::WantsOutputs(wants_outputs.inner));
         events.push(SessionEvent::WantsInputs(wants_inputs));
         events.push(SessionEvent::WantsFeeRange(wants_fee_range));
         events.push(SessionEvent::ProvisionalProposal(provisional_proposal.clone()));

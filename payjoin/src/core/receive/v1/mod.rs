@@ -34,17 +34,16 @@
 use std::cmp::{max, min};
 
 use bitcoin::psbt::Psbt;
-use bitcoin::secp256k1::rand::seq::SliceRandom;
 use bitcoin::secp256k1::rand::{self, Rng};
 use bitcoin::{Amount, FeeRate, OutPoint, Script, TxIn, TxOut, Weight};
 use serde::{Deserialize, Serialize};
 
 use super::error::{
-    InputContributionError, InternalInputContributionError, InternalOutputSubstitutionError,
-    InternalSelectionError,
+    InputContributionError, InternalInputContributionError, InternalSelectionError,
 };
 use super::optional_parameters::Params;
 use super::{InputPair, OutputSubstitutionError, ReplyableError, SelectionError};
+#[cfg(feature = "v1")]
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
 use crate::receive::{InternalPayloadError, Original, PsbtContext};
@@ -218,27 +217,27 @@ impl OutputsUnknown {
 /// original Payjoin URI, and can make substitutions of the existing outputs in the proposal.
 ///
 /// Call [`Self::commit_outputs`] to proceed.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct WantsOutputs {
-    original_psbt: Psbt,
-    payjoin_psbt: Psbt,
-    params: Params,
-    change_vout: usize,
-    owned_vouts: Vec<usize>,
+    pub(crate) inner: crate::receive::WantsOutputs,
 }
 
 impl WantsOutputs {
     /// Returns whether the receiver is allowed to substitute original outputs or not.
-    pub fn output_substitution(&self) -> OutputSubstitution { self.params.output_substitution }
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
+    #[cfg(feature = "v1")]
+    pub fn output_substitution(&self) -> crate::OutputSubstitution {
+        self.inner.output_substitution()
+    }
 
     /// Substitute the receiver output script with the provided script.
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
     pub fn substitute_receiver_script(
         self,
         output_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
-        let output_value = self.original_psbt.unsigned_tx.output[self.change_vout].value;
-        let outputs = [TxOut { value: output_value, script_pubkey: output_script.into() }];
-        self.replace_receiver_outputs(outputs, output_script)
+        let inner = self.inner.substitute_receiver_script(output_script)?;
+        Ok(Self { inner })
     }
 
     /// Replaces **all** receiver outputs with the one or more provided `replacement_outputs`, and
@@ -254,119 +253,25 @@ impl WantsOutputs {
     /// example, if the receiver adds their own input, then the drain script output will have its
     /// value increased by the same amount. Or if an output needs to have its value reduced to
     /// account for fees, the value of the output for this script will be reduced.
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
     pub fn replace_receiver_outputs(
         self,
         replacement_outputs: impl IntoIterator<Item = TxOut>,
         drain_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
-        let mut payjoin_psbt = self.original_psbt.clone();
-        let mut outputs = vec![];
-        let mut replacement_outputs: Vec<TxOut> = replacement_outputs.into_iter().collect();
-        let mut rng = rand::thread_rng();
-        // Substitute the existing receiver outputs, keeping the sender/receiver output ordering
-        for (i, original_output) in self.original_psbt.unsigned_tx.output.iter().enumerate() {
-            if self.owned_vouts.contains(&i) {
-                // Receiver output: substitute in-place a provided replacement output
-                if replacement_outputs.is_empty() {
-                    return Err(InternalOutputSubstitutionError::NotEnoughOutputs.into());
-                }
-                match replacement_outputs
-                    .iter()
-                    .position(|txo| txo.script_pubkey == original_output.script_pubkey)
-                {
-                    // Select an output with the same address if one was provided
-                    Some(pos) => {
-                        let txo = replacement_outputs.swap_remove(pos);
-                        if self.output_substitution() == OutputSubstitution::Disabled
-                            && txo.value < original_output.value
-                        {
-                            return Err(
-                                InternalOutputSubstitutionError::DecreasedValueWhenDisabled.into(),
-                            );
-                        }
-                        outputs.push(txo);
-                    }
-                    // Otherwise randomly select one of the replacement outputs
-                    None => {
-                        if self.output_substitution() == OutputSubstitution::Disabled {
-                            return Err(
-                                InternalOutputSubstitutionError::ScriptPubKeyChangedWhenDisabled
-                                    .into(),
-                            );
-                        }
-                        let index = rng.gen_range(0..replacement_outputs.len());
-                        let txo = replacement_outputs.swap_remove(index);
-                        outputs.push(txo);
-                    }
-                }
-            } else {
-                // Sender output: leave it as is
-                outputs.push(original_output.clone());
-            }
-        }
-        // Insert all remaining outputs at random indices for privacy
-        interleave_shuffle(&mut outputs, &mut replacement_outputs, &mut rng);
-        // Identify the receiver output that will be used for change and fees
-        let change_vout = outputs.iter().position(|txo| txo.script_pubkey == *drain_script);
-        // Update the payjoin PSBT outputs
-        payjoin_psbt.outputs = vec![Default::default(); outputs.len()];
-        payjoin_psbt.unsigned_tx.output = outputs;
-        Ok(Self {
-            original_psbt: self.original_psbt,
-            payjoin_psbt,
-            params: self.params,
-            change_vout: change_vout.ok_or(InternalOutputSubstitutionError::InvalidDrainScript)?,
-            owned_vouts: self.owned_vouts,
-        })
+        let inner = self.inner.replace_receiver_outputs(replacement_outputs, drain_script)?;
+        Ok(Self { inner })
     }
 
     /// Commits the outputs as final, and moves on to the next typestate.
     ///
     /// Outputs cannot be modified after this function is called.
-    pub fn commit_outputs(self) -> WantsInputs {
-        WantsInputs {
-            original_psbt: self.original_psbt,
-            payjoin_psbt: self.payjoin_psbt,
-            params: self.params,
-            change_vout: self.change_vout,
-            receiver_inputs: vec![],
-        }
-    }
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
+    pub fn commit_outputs(self) -> WantsInputs { WantsInputs::from_wants_outputs(self.inner) }
 
     pub(crate) fn from_proposal(proposal: Original, owned_vouts: Vec<usize>) -> Self {
-        Self {
-            original_psbt: proposal.psbt.clone(),
-            payjoin_psbt: proposal.psbt,
-            params: proposal.params,
-            change_vout: owned_vouts[0],
-            owned_vouts,
-        }
+        Self { inner: crate::receive::WantsOutputs::from_proposal(proposal, owned_vouts) }
     }
-}
-
-/// Shuffles `new` vector, then interleaves its elements with those from `original`,
-/// maintaining the relative order in `original` but randomly inserting elements from `new`.
-///
-/// The combined result replaces the contents of `original`.
-fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [T], rng: &mut R) {
-    // Shuffle the substitute_outputs
-    new.shuffle(rng);
-    // Create a new vector to store the combined result
-    let mut combined = Vec::with_capacity(original.len() + new.len());
-    // Initialize indices
-    let mut original_index = 0;
-    let mut new_index = 0;
-    // Interleave elements
-    while original_index < original.len() || new_index < new.len() {
-        if original_index < original.len() && (new_index >= new.len() || rng.gen_bool(0.5)) {
-            combined.push(original[original_index].clone());
-            original_index += 1;
-        } else {
-            combined.push(new[new_index].clone());
-            new_index += 1;
-        }
-    }
-    *original = combined;
 }
 
 /// Typestate for a checked proposal which the receiver may contribute inputs to.
@@ -382,6 +287,15 @@ pub struct WantsInputs {
 }
 
 impl WantsInputs {
+    pub(crate) fn from_wants_outputs(wants_outputs: crate::receive::WantsOutputs) -> Self {
+        Self {
+            original_psbt: wants_outputs.original_psbt,
+            payjoin_psbt: wants_outputs.payjoin_psbt,
+            params: wants_outputs.params,
+            change_vout: wants_outputs.change_vout,
+            receiver_inputs: vec![],
+        }
+    }
     /// Selects and returns an input from `candidate_inputs` which will preserve the receiver's privacy by
     /// avoiding the Unnecessary Input Heuristic 2 (UIH2) outlined in [Unnecessary Input
     /// Heuristics and PayJoin Transactions by Ghesmati et al. (2022)](https://eprint.iacr.org/2022/589).
@@ -746,12 +660,11 @@ pub(crate) mod test {
     use payjoin_test_utils::{
         DUMMY20, PARSED_ORIGINAL_PSBT, QUERY_PARAMS, RECEIVER_INPUT_CONTRIBUTION,
     };
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
 
     use super::*;
+    use crate::receive::error::InternalOutputSubstitutionError;
     use crate::receive::PayloadError;
-    use crate::Version;
+    use crate::{OutputSubstitution, Version};
 
     pub(crate) fn proposal_from_test_vector() -> Original {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
@@ -1065,12 +978,13 @@ pub(crate) mod test {
         let mut proposal = unchecked_proposal_from_test_vector();
         proposal.original.params.output_substitution = OutputSubstitution::Disabled;
         let wants_outputs = wants_outputs_from_test_vector(proposal);
-        let script_pubkey = &wants_outputs.original_psbt.unsigned_tx.output
-            [wants_outputs.change_vout]
+        let script_pubkey = &wants_outputs.inner.original_psbt.unsigned_tx.output
+            [wants_outputs.inner.change_vout]
             .script_pubkey;
 
-        let output_value =
-            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value;
+        let output_value = wants_outputs.inner.original_psbt.unsigned_tx.output
+            [wants_outputs.inner.change_vout]
+            .value;
         let outputs = vec![TxOut { value: output_value, script_pubkey: script_pubkey.clone() }];
         let unchanged_amount =
             wants_outputs.clone().replace_receiver_outputs(outputs, script_pubkey.as_script());
@@ -1078,11 +992,12 @@ pub(crate) mod test {
             unchanged_amount.is_ok(),
             "Not touching the receiver output amount is always allowed"
         );
-        assert_ne!(wants_outputs.payjoin_psbt, unchanged_amount.unwrap().payjoin_psbt);
+        assert_ne!(wants_outputs.inner.payjoin_psbt, unchanged_amount.unwrap().inner.payjoin_psbt);
 
-        let output_value =
-            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value
-                + Amount::ONE_SAT;
+        let output_value = wants_outputs.inner.original_psbt.unsigned_tx.output
+            [wants_outputs.inner.change_vout]
+            .value
+            + Amount::ONE_SAT;
         let outputs = vec![TxOut { value: output_value, script_pubkey: script_pubkey.clone() }];
         let increased_amount =
             wants_outputs.clone().replace_receiver_outputs(outputs, script_pubkey.as_script());
@@ -1090,11 +1005,12 @@ pub(crate) mod test {
             increased_amount.is_ok(),
             "Increasing the receiver output amount is always allowed"
         );
-        assert_ne!(wants_outputs.payjoin_psbt, increased_amount.unwrap().payjoin_psbt);
+        assert_ne!(wants_outputs.inner.payjoin_psbt, increased_amount.unwrap().inner.payjoin_psbt);
 
-        let output_value =
-            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value
-                - Amount::ONE_SAT;
+        let output_value = wants_outputs.inner.original_psbt.unsigned_tx.output
+            [wants_outputs.inner.change_vout]
+            .value
+            - Amount::ONE_SAT;
         let outputs = vec![TxOut { value: output_value, script_pubkey: script_pubkey.clone() }];
         let decreased_amount =
             wants_outputs.clone().replace_receiver_outputs(outputs, script_pubkey.as_script());
@@ -1140,28 +1056,6 @@ pub(crate) mod test {
             SelectionError::from(InternalSelectionError::UnsupportedOutputLength),
             "Payjoin below minimum allowed outputs for avoid uih and should error"
         );
-    }
-
-    #[test]
-    fn test_interleave_shuffle() {
-        let mut original1 = vec![1, 2, 3];
-        let mut original2 = original1.clone();
-        let mut original3 = original1.clone();
-        let mut new1 = vec![4, 5, 6];
-        let mut new2 = new1.clone();
-        let mut new3 = new1.clone();
-        let mut rng1 = StdRng::seed_from_u64(123);
-        let mut rng2 = StdRng::seed_from_u64(234);
-        let mut rng3 = StdRng::seed_from_u64(345);
-        // Operate on the same data multiple times with different RNG seeds.
-        interleave_shuffle(&mut original1, &mut new1, &mut rng1);
-        interleave_shuffle(&mut original2, &mut new2, &mut rng2);
-        interleave_shuffle(&mut original3, &mut new3, &mut rng3);
-        // The result should be different for each seed
-        // and the relative ordering from `original` always preserved/
-        assert_eq!(original1, vec![1, 6, 2, 5, 4, 3]);
-        assert_eq!(original2, vec![1, 5, 4, 2, 6, 3]);
-        assert_eq!(original3, vec![4, 5, 1, 2, 6, 3]);
     }
 
     /// Add keypath data to psbt to be prepared and verify it is excluded from the final PSBT

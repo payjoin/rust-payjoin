@@ -705,28 +705,29 @@ impl Receiver<OutputsUnknown> {
                 }
             },
         };
-        let wants_outputs = v1::WantsOutputs::from_proposal(self.state.original, owned_vouts);
+        let wants_outputs =
+            crate::receive::WantsOutputs::from_proposal(self.state.original, owned_vouts);
         MaybeFatalTransition::success(
             SessionEvent::WantsOutputs(wants_outputs.clone()),
             Receiver {
                 state: WantsOutputs {
-                    v1: wants_outputs,
+                    inner: wants_outputs,
                     session_context: self.state.session_context,
                 },
             },
         )
     }
 
-    pub(crate) fn apply_wants_outputs(self, v1: v1::WantsOutputs) -> ReceiveSession {
+    pub(crate) fn apply_wants_outputs(self, inner: crate::receive::WantsOutputs) -> ReceiveSession {
         let new_state =
-            Receiver { state: WantsOutputs { v1, session_context: self.state.session_context } };
+            Receiver { state: WantsOutputs { inner, session_context: self.state.session_context } };
         ReceiveSession::WantsOutputs(new_state)
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WantsOutputs {
-    v1: v1::WantsOutputs,
+    inner: crate::receive::WantsOutputs,
     session_context: SessionContext,
 }
 
@@ -741,18 +742,17 @@ impl State for WantsOutputs {}
 ///
 /// Call [`Receiver<WantsOutputs>::commit_outputs`] to proceed.
 impl Receiver<WantsOutputs> {
-    /// Whether the receiver is allowed to substitute original outputs or not.
-    pub fn output_substitution(&self) -> OutputSubstitution { self.v1.output_substitution() }
+    pub fn output_substitution(&self) -> OutputSubstitution {
+        self.state.inner.output_substitution()
+    }
 
     /// Substitute the receiver output script with the provided script.
     pub fn substitute_receiver_script(
         self,
         output_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
-        let inner = self.state.v1.substitute_receiver_script(output_script)?;
-        Ok(Receiver {
-            state: WantsOutputs { v1: inner, session_context: self.state.session_context },
-        })
+        let inner = self.state.inner.substitute_receiver_script(output_script)?;
+        Ok(Receiver { state: WantsOutputs { inner, session_context: self.state.session_context } })
     }
 
     /// Replaces **all** receiver outputs with the one or more provided `replacement_outputs`, and
@@ -773,17 +773,15 @@ impl Receiver<WantsOutputs> {
         replacement_outputs: impl IntoIterator<Item = TxOut>,
         drain_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
-        let inner = self.state.v1.replace_receiver_outputs(replacement_outputs, drain_script)?;
-        Ok(Receiver {
-            state: WantsOutputs { v1: inner, session_context: self.state.session_context },
-        })
+        let inner = self.state.inner.replace_receiver_outputs(replacement_outputs, drain_script)?;
+        Ok(Receiver { state: WantsOutputs { inner, session_context: self.state.session_context } })
     }
 
     /// Commits the outputs as final, and moves on to the next typestate.
     ///
     /// Outputs cannot be modified after this function is called.
     pub fn commit_outputs(self) -> NextStateTransition<SessionEvent, Receiver<WantsInputs>> {
-        let inner = self.state.v1.clone().commit_outputs();
+        let inner = v1::WantsInputs::from_wants_outputs(self.inner.clone());
         NextStateTransition::success(
             SessionEvent::WantsInputs(inner.clone()),
             Receiver {

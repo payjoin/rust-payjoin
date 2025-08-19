@@ -14,7 +14,8 @@ use std::str::FromStr;
 
 use bitcoin::hashes::sha256d::Hash;
 use bitcoin::{
-    psbt, AddressType, OutPoint, Psbt, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Weight,
+    psbt, AddressType, FeeRate, OutPoint, Psbt, Script, ScriptBuf, Sequence, Transaction, TxIn,
+    TxOut, Weight,
 };
 pub(crate) use error::InternalPayloadError;
 pub use error::{
@@ -356,6 +357,127 @@ impl std::fmt::Display for FinalizeProposalError {
 }
 
 impl std::error::Error for FinalizeProposalError {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Original {
+    pub(crate) psbt: Psbt,
+    pub(crate) params: Params,
+}
+
+impl Original {
+    // Calculates the fee rate of the original proposal PSBT.
+    fn psbt_fee_rate(&self) -> Result<FeeRate, InternalPayloadError> {
+        let original_psbt_fee = self.psbt.fee().map_err(|e| {
+            InternalPayloadError::ParsePsbt(bitcoin::psbt::PsbtParseError::PsbtEncoding(e))
+        })?;
+        Ok(original_psbt_fee / self.psbt.clone().extract_tx_unchecked_fee_rate().weight())
+    }
+
+    pub fn check_broadcast_suitability(
+        &self,
+        min_fee_rate: Option<FeeRate>,
+        can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
+    ) -> Result<(), ReplyableError> {
+        let original_psbt_fee_rate = self.psbt_fee_rate()?;
+        if let Some(min_fee_rate) = min_fee_rate {
+            if original_psbt_fee_rate < min_fee_rate {
+                return Err(InternalPayloadError::PsbtBelowFeeRate(
+                    original_psbt_fee_rate,
+                    min_fee_rate,
+                )
+                .into());
+            }
+        }
+        if can_broadcast(&self.psbt.clone().extract_tx_unchecked_fee_rate())
+            .map_err(ReplyableError::Implementation)?
+        {
+            Ok(())
+        } else {
+            Err(InternalPayloadError::OriginalPsbtNotBroadcastable.into())
+        }
+    }
+
+    /// Check that the original PSBT has no receiver-owned inputs.
+    ///
+    /// An attacker can try to spend the receiver's own inputs. This check prevents that.
+    pub fn check_inputs_not_owned(
+        &self,
+        is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
+    ) -> Result<(), ReplyableError> {
+        let mut err: Result<(), ReplyableError> = Ok(());
+        if let Some(e) = self
+            .psbt
+            .input_pairs()
+            .scan(&mut err, |err, input| match input.previous_txout() {
+                Ok(txout) => Some(txout.script_pubkey.to_owned()),
+                Err(e) => {
+                    **err = Err(InternalPayloadError::PrevTxOut(e).into());
+                    None
+                }
+            })
+            .find_map(|script| match is_owned(&script) {
+                Ok(false) => None,
+                Ok(true) => Some(InternalPayloadError::InputOwned(script).into()),
+                Err(e) => Some(ReplyableError::Implementation(e)),
+            })
+        {
+            return Err(e);
+        }
+        err?;
+        Ok(())
+    }
+
+    pub fn check_no_inputs_seen_before(
+        &self,
+        is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
+    ) -> Result<(), ReplyableError> {
+        self.psbt.input_pairs().try_for_each(|input| {
+            match is_known(&input.txin.previous_output) {
+                Ok(false) => Ok::<(), ReplyableError>(()),
+                Ok(true) =>  {
+                    log::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
+                    Err(InternalPayloadError::InputSeen(input.txin.previous_output))?
+                },
+                Err(e) => Err(ReplyableError::Implementation(e))?,
+            }
+        })?;
+        Ok(())
+    }
+
+    pub fn identify_receiver_outputs(
+        &self,
+        is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
+    ) -> Result<Vec<usize>, ReplyableError> {
+        let owned_vouts: Vec<usize> = self
+            .psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .enumerate()
+            .filter_map(|(vout, txo)| match is_receiver_output(&txo.script_pubkey) {
+                Ok(true) => Some(Ok(vout)),
+                Ok(false) => None,
+                Err(e) => Some(Err(e)),
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(ReplyableError::Implementation)?;
+
+        if owned_vouts.is_empty() {
+            return Err(InternalPayloadError::MissingPayment.into());
+        }
+
+        let mut params = self.params.clone();
+        if let Some((_, additional_fee_output_index)) = params.additional_fee_contribution {
+            // If the additional fee output index specified by the sender is pointing to a receiver output,
+            // the receiver should ignore the parameter.
+            if owned_vouts.contains(&additional_fee_output_index) {
+                params.additional_fee_contribution = None;
+            }
+        }
+
+        Ok(owned_vouts)
+    }
+}
 
 #[cfg(test)]
 mod tests {

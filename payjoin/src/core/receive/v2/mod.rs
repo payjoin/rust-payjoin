@@ -51,7 +51,7 @@ use crate::persist::{
     MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
     MaybeSuccessTransition, MaybeTransientTransition, NextStateTransition,
 };
-use crate::receive::{parse_payload, InputPair, PsbtContext};
+use crate::receive::{parse_payload, InputPair, Original, PsbtContext};
 use crate::uri::ShortId;
 use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
 
@@ -141,18 +141,14 @@ impl ReceiveSession {
                 SessionEvent::UncheckedProposal((proposal, reply_key)),
             ) => Ok(state.apply_unchecked_from_payload(proposal, reply_key)?),
 
-            (ReceiveSession::UncheckedProposal(state), SessionEvent::MaybeInputsOwned(inputs)) =>
-                Ok(state.apply_maybe_inputs_owned(inputs)),
+            (ReceiveSession::UncheckedProposal(state), SessionEvent::MaybeInputsOwned()) =>
+                Ok(state.apply_maybe_inputs_owned()),
 
-            (
-                ReceiveSession::MaybeInputsOwned(state),
-                SessionEvent::MaybeInputsSeen(maybe_inputs_seen),
-            ) => Ok(state.apply_maybe_inputs_seen(maybe_inputs_seen)),
+            (ReceiveSession::MaybeInputsOwned(state), SessionEvent::MaybeInputsSeen()) =>
+                Ok(state.apply_maybe_inputs_seen()),
 
-            (
-                ReceiveSession::MaybeInputsSeen(state),
-                SessionEvent::OutputsUnknown(outputs_unknown),
-            ) => Ok(state.apply_outputs_unknown(outputs_unknown)),
+            (ReceiveSession::MaybeInputsSeen(state), SessionEvent::OutputsUnknown()) =>
+                Ok(state.apply_outputs_unknown()),
 
             (ReceiveSession::OutputsUnknown(state), SessionEvent::WantsOutputs(wants_outputs)) =>
                 Ok(state.apply_wants_outputs(wants_outputs)),
@@ -344,7 +340,7 @@ impl Receiver<Initialized> {
                 SessionEvent::UncheckedProposal((proposal.clone(), self.context.e.clone())),
                 Receiver {
                     state: UncheckedProposal {
-                        v1: proposal,
+                        original: proposal,
                         session_context: self.state.context.clone(),
                     },
                 },
@@ -358,7 +354,7 @@ impl Receiver<Initialized> {
         &mut self,
         body: &[u8],
         context: ohttp::ClientResponse,
-    ) -> Result<Option<v1::UncheckedProposal>, Error> {
+    ) -> Result<Option<Original>, Error> {
         let body = match process_get_res(body, context)
             .map_err(InternalSessionError::DirectoryResponse)?
         {
@@ -383,17 +379,11 @@ impl Receiver<Initialized> {
         ohttp_encapsulate(&mut self.context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
 
-    fn extract_proposal_from_v1(
-        &mut self,
-        response: &str,
-    ) -> Result<v1::UncheckedProposal, ReplyableError> {
+    fn extract_proposal_from_v1(&mut self, response: &str) -> Result<Original, ReplyableError> {
         self.unchecked_from_payload(response)
     }
 
-    fn extract_proposal_from_v2(
-        &mut self,
-        response: Vec<u8>,
-    ) -> Result<v1::UncheckedProposal, Error> {
+    fn extract_proposal_from_v2(&mut self, response: Vec<u8>) -> Result<Original, Error> {
         let (payload_bytes, e) = decrypt_message_a(&response, self.context.s.secret_key().clone())?;
         self.context.e = Some(e);
         let payload = std::str::from_utf8(&payload_bytes)
@@ -401,10 +391,7 @@ impl Receiver<Initialized> {
         self.unchecked_from_payload(payload).map_err(Error::ReplyToSender)
     }
 
-    fn unchecked_from_payload(
-        &mut self,
-        payload: &str,
-    ) -> Result<v1::UncheckedProposal, ReplyableError> {
+    fn unchecked_from_payload(&mut self, payload: &str) -> Result<Original, ReplyableError> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
         log::trace!("Received query: {query}, base64: {base64}"); // my guess is no \n so default is wrong
@@ -423,7 +410,7 @@ impl Receiver<Initialized> {
             params.output_substitution = OutputSubstitution::Disabled;
         }
 
-        let inner = v1::UncheckedProposal { psbt, params };
+        let inner = Original { psbt, params };
         Ok(inner)
     }
 
@@ -434,7 +421,7 @@ impl Receiver<Initialized> {
 
     pub(crate) fn apply_unchecked_from_payload(
         self,
-        event: v1::UncheckedProposal,
+        event: Original,
         reply_key: Option<HpkePublicKey>,
     ) -> Result<ReceiveSession, InternalReplayError> {
         if self.state.context.expiry < SystemTime::now() {
@@ -444,7 +431,7 @@ impl Receiver<Initialized> {
 
         let new_state = Receiver {
             state: UncheckedProposal {
-                v1: event,
+                original: event,
                 session_context: SessionContext { e: reply_key, ..self.state.context },
             },
         };
@@ -460,7 +447,7 @@ impl Receiver<Initialized> {
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct UncheckedProposal {
-    pub(crate) v1: v1::UncheckedProposal,
+    pub(crate) original: Original,
     pub(crate) session_context: SessionContext,
 }
 
@@ -500,23 +487,22 @@ impl Receiver<UncheckedProposal> {
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<MaybeInputsOwned>, ReplyableError> {
-        let inner =
-            match self.state.v1.clone().check_broadcast_suitability(min_fee_rate, can_broadcast) {
-                Ok(v1) => v1,
-                Err(e) => match e {
-                    ReplyableError::Implementation(_) => return MaybeFatalTransition::transient(e),
-                    _ =>
-                        return MaybeFatalTransition::fatal(
-                            SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
-                            e,
-                        ),
-                },
-            };
+        match self.state.original.check_broadcast_suitability(min_fee_rate, can_broadcast) {
+            Ok(v1) => v1,
+            Err(e) => match e {
+                ReplyableError::Implementation(_) => return MaybeFatalTransition::transient(e),
+                _ =>
+                    return MaybeFatalTransition::fatal(
+                        SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                        e,
+                    ),
+            },
+        };
         MaybeFatalTransition::success(
-            SessionEvent::MaybeInputsOwned(inner.clone()),
+            SessionEvent::MaybeInputsOwned(),
             Receiver {
                 state: MaybeInputsOwned {
-                    v1: inner,
+                    original: self.original.clone(),
                     session_context: self.session_context.clone(),
                 },
             },
@@ -530,18 +516,23 @@ impl Receiver<UncheckedProposal> {
     pub fn assume_interactive_receiver(
         self,
     ) -> NextStateTransition<SessionEvent, Receiver<MaybeInputsOwned>> {
-        let inner = self.state.v1.assume_interactive_receiver();
         NextStateTransition::success(
-            SessionEvent::MaybeInputsOwned(inner.clone()),
+            SessionEvent::MaybeInputsOwned(),
             Receiver {
-                state: MaybeInputsOwned { v1: inner, session_context: self.state.session_context },
+                state: MaybeInputsOwned {
+                    original: self.original.clone(),
+                    session_context: self.state.session_context,
+                },
             },
         )
     }
 
-    pub(crate) fn apply_maybe_inputs_owned(self, v1: v1::MaybeInputsOwned) -> ReceiveSession {
+    pub(crate) fn apply_maybe_inputs_owned(self) -> ReceiveSession {
         let new_state = Receiver {
-            state: MaybeInputsOwned { v1, session_context: self.state.session_context },
+            state: MaybeInputsOwned {
+                original: self.original.clone(),
+                session_context: self.state.session_context,
+            },
         };
         ReceiveSession::MaybeInputsOwned(new_state)
     }
@@ -549,7 +540,7 @@ impl Receiver<UncheckedProposal> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsOwned {
-    v1: v1::MaybeInputsOwned,
+    original: Original,
     session_context: SessionContext,
 }
 
@@ -569,7 +560,7 @@ impl Receiver<MaybeInputsOwned> {
     /// for the payjoin. Note that this function does not make any validation on whether
     /// the transaction is broadcastable; it simply extracts it.
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
-        self.v1.extract_tx_to_schedule_broadcast()
+        self.original.psbt.clone().extract_tx_unchecked_fee_rate()
     }
 
     /// Check that the original PSBT has no receiver-owned inputs.
@@ -579,7 +570,7 @@ impl Receiver<MaybeInputsOwned> {
         self,
         is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<MaybeInputsSeen>, ReplyableError> {
-        let inner = match self.state.v1.clone().check_inputs_not_owned(is_owned) {
+        match self.state.original.check_inputs_not_owned(is_owned) {
             Ok(inner) => inner,
             Err(e) => match e {
                 ReplyableError::Implementation(_) => {
@@ -594,23 +585,30 @@ impl Receiver<MaybeInputsOwned> {
             },
         };
         MaybeFatalTransition::success(
-            SessionEvent::MaybeInputsSeen(inner.clone()),
+            SessionEvent::MaybeInputsSeen(),
             Receiver {
-                state: MaybeInputsSeen { v1: inner, session_context: self.state.session_context },
+                state: MaybeInputsSeen {
+                    original: self.original.clone(),
+                    session_context: self.state.session_context,
+                },
             },
         )
     }
 
-    pub(crate) fn apply_maybe_inputs_seen(self, v1: v1::MaybeInputsSeen) -> ReceiveSession {
-        let new_state =
-            Receiver { state: MaybeInputsSeen { v1, session_context: self.state.session_context } };
+    pub(crate) fn apply_maybe_inputs_seen(self) -> ReceiveSession {
+        let new_state = Receiver {
+            state: MaybeInputsSeen {
+                original: self.original.clone(),
+                session_context: self.state.session_context,
+            },
+        };
         ReceiveSession::MaybeInputsSeen(new_state)
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsSeen {
-    v1: v1::MaybeInputsSeen,
+    original: Original,
     session_context: SessionContext,
 }
 
@@ -632,7 +630,7 @@ impl Receiver<MaybeInputsSeen> {
         self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<OutputsUnknown>, ReplyableError> {
-        let inner = match self.state.v1.clone().check_no_inputs_seen_before(is_known) {
+        match self.state.original.check_no_inputs_seen_before(is_known) {
             Ok(inner) => inner,
             Err(e) => match e {
                 ReplyableError::Implementation(_) => {
@@ -647,16 +645,22 @@ impl Receiver<MaybeInputsSeen> {
             },
         };
         MaybeFatalTransition::success(
-            SessionEvent::OutputsUnknown(inner.clone()),
+            SessionEvent::OutputsUnknown(),
             Receiver {
-                state: OutputsUnknown { inner, session_context: self.state.session_context },
+                state: OutputsUnknown {
+                    original: self.original.clone(),
+                    session_context: self.state.session_context,
+                },
             },
         )
     }
 
-    pub(crate) fn apply_outputs_unknown(self, inner: v1::OutputsUnknown) -> ReceiveSession {
+    pub(crate) fn apply_outputs_unknown(self) -> ReceiveSession {
         let new_state = Receiver {
-            state: OutputsUnknown { inner, session_context: self.state.session_context },
+            state: OutputsUnknown {
+                original: self.original.clone(),
+                session_context: self.state.session_context,
+            },
         };
         ReceiveSession::OutputsUnknown(new_state)
     }
@@ -664,7 +668,7 @@ impl Receiver<MaybeInputsSeen> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutputsUnknown {
-    inner: v1::OutputsUnknown,
+    original: Original,
     session_context: SessionContext,
 }
 
@@ -691,7 +695,7 @@ impl Receiver<OutputsUnknown> {
         self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<WantsOutputs>, ReplyableError> {
-        let inner = match self.state.inner.clone().identify_receiver_outputs(is_receiver_output) {
+        let owned_vouts = match self.state.original.identify_receiver_outputs(is_receiver_output) {
             Ok(inner) => inner,
             Err(e) => match e {
                 ReplyableError::Implementation(_) => {
@@ -705,10 +709,14 @@ impl Receiver<OutputsUnknown> {
                 }
             },
         };
+        let wants_outputs = v1::WantsOutputs::from_proposal(self.state.original, owned_vouts);
         MaybeFatalTransition::success(
-            SessionEvent::WantsOutputs(inner.clone()),
+            SessionEvent::WantsOutputs(wants_outputs.clone()),
             Receiver {
-                state: WantsOutputs { v1: inner, session_context: self.state.session_context },
+                state: WantsOutputs {
+                    v1: wants_outputs,
+                    session_context: self.state.session_context,
+                },
             },
         )
     }
@@ -1118,7 +1126,7 @@ pub mod test {
         let params = Params::from_query_pairs(pairs, &[Version::Two])
             .expect("Test utils query params should not fail");
         UncheckedProposal {
-            v1: v1::UncheckedProposal { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
+            original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
             session_context: SHARED_CONTEXT.clone(),
         }
     }
@@ -1128,7 +1136,7 @@ pub mod test {
         let params = Params::from_query_pairs(pairs, &[Version::Two])
             .expect("Test utils query params should not fail");
         MaybeInputsOwned {
-            v1: v1::MaybeInputsOwned { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
+            original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
             session_context: SHARED_CONTEXT.clone(),
         }
     }
@@ -1314,7 +1322,7 @@ pub mod test {
         let context = SessionContext { expiry: now, ..SHARED_CONTEXT.clone() };
         let receiver = Receiver {
             state: UncheckedProposal {
-                v1: crate::receive::v1::test::unchecked_proposal_from_test_vector(),
+                original: crate::receive::v1::test::proposal_from_test_vector(),
                 session_context: context.clone(),
             },
         };

@@ -6,7 +6,7 @@ use super::{ReceiveSession, Receiver, SessionContext, UninitializedReceiver};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
 use crate::receive::v2::{extract_err_req, SessionError};
-use crate::receive::{v1, JsonReply};
+use crate::receive::{v1, JsonReply, Original};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
 /// Errors that can occur when replaying a receiver event log
@@ -88,11 +88,22 @@ impl SessionHistory {
         })
     }
 
+    fn get_unchecked_proposal(&self) -> Option<Original> {
+        self.events.iter().find_map(|event| match event {
+            SessionEvent::UncheckedProposal(proposal) => Some(proposal.0.clone()),
+            _ => None,
+        })
+    }
+
     /// Fallback transaction from the session if present
     pub fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::MaybeInputsOwned(proposal) =>
-                Some(proposal.extract_tx_to_schedule_broadcast()),
+            SessionEvent::MaybeInputsOwned() => Some(
+                self.get_unchecked_proposal()
+                    .expect("Should exist if this event is present")
+                    .psbt
+                    .extract_tx_unchecked_fee_rate(),
+            ),
             _ => None,
         })
     }
@@ -145,10 +156,10 @@ impl SessionHistory {
 /// Each event can be used to transition the receiver state machine to a new state
 pub enum SessionEvent {
     Created(SessionContext),
-    UncheckedProposal((v1::UncheckedProposal, Option<crate::HpkePublicKey>)),
-    MaybeInputsOwned(v1::MaybeInputsOwned),
-    MaybeInputsSeen(v1::MaybeInputsSeen),
-    OutputsUnknown(v1::OutputsUnknown),
+    UncheckedProposal((Original, Option<crate::HpkePublicKey>)),
+    MaybeInputsOwned(),
+    MaybeInputsSeen(),
+    OutputsUnknown(),
     WantsOutputs(v1::WantsOutputs),
     WantsInputs(v1::WantsInputs),
     WantsFeeRange(v1::WantsFeeRange),
@@ -167,7 +178,9 @@ mod tests {
 
     use super::*;
     use crate::persist::test_utils::InMemoryTestPersister;
-    use crate::receive::v1::test::unchecked_proposal_from_test_vector;
+    use crate::receive::v1::test::{
+        proposal_from_test_vector, unchecked_proposal_from_test_vector,
+    };
     use crate::receive::v2::test::SHARED_CONTEXT;
     use crate::receive::v2::{
         Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal, UncheckedProposal,
@@ -175,6 +188,7 @@ mod tests {
 
     #[test]
     fn test_session_event_serialization_roundtrip() {
+        let proposal = crate::receive::v1::test::proposal_from_test_vector();
         let unchecked_proposal = unchecked_proposal_from_test_vector();
         let maybe_inputs_owned = unchecked_proposal.clone().assume_interactive_receiver();
         let maybe_inputs_seen = maybe_inputs_owned
@@ -199,14 +213,11 @@ mod tests {
 
         let test_cases = vec![
             SessionEvent::Created(SHARED_CONTEXT.clone()),
-            SessionEvent::UncheckedProposal((unchecked_proposal.clone(), None)),
-            SessionEvent::UncheckedProposal((
-                unchecked_proposal,
-                Some(crate::HpkeKeyPair::gen_keypair().1),
-            )),
-            SessionEvent::MaybeInputsOwned(maybe_inputs_owned),
-            SessionEvent::MaybeInputsSeen(maybe_inputs_seen),
-            SessionEvent::OutputsUnknown(outputs_unknown),
+            SessionEvent::UncheckedProposal((proposal.clone(), None)),
+            SessionEvent::UncheckedProposal((proposal, Some(crate::HpkeKeyPair::gen_keypair().1))),
+            SessionEvent::MaybeInputsOwned(),
+            SessionEvent::MaybeInputsSeen(),
+            SessionEvent::OutputsUnknown(),
             SessionEvent::WantsOutputs(wants_outputs),
             SessionEvent::WantsInputs(wants_inputs),
             SessionEvent::ProvisionalProposal(provisional_proposal),
@@ -267,21 +278,19 @@ mod tests {
     #[test]
     fn test_replaying_unchecked_proposal() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
+        let proposal = proposal_from_test_vector();
 
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
-                SessionEvent::UncheckedProposal((unchecked_proposal_from_test_vector(), None)),
+                SessionEvent::UncheckedProposal((proposal.clone(), None)),
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedProposal(Receiver {
-                state: UncheckedProposal {
-                    v1: unchecked_proposal_from_test_vector(),
-                    session_context,
-                },
+                state: UncheckedProposal { original: proposal, session_context },
             }),
         };
         run_session_history_test(test)
@@ -291,21 +300,19 @@ mod tests {
     fn test_replaying_unchecked_proposal_expiry() {
         let now = SystemTime::now();
         let context = SessionContext { expiry: now, ..SHARED_CONTEXT.clone() };
+        let proposal = proposal_from_test_vector();
 
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(context.clone()),
-                SessionEvent::UncheckedProposal((unchecked_proposal_from_test_vector(), None)),
+                SessionEvent::UncheckedProposal((proposal.clone(), None)),
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedProposal(Receiver {
-                state: UncheckedProposal {
-                    v1: unchecked_proposal_from_test_vector(),
-                    session_context: context,
-                },
+                state: UncheckedProposal { original: proposal, session_context: context },
             }),
         };
         let session_history = run_session_history_test(test);
@@ -322,24 +329,19 @@ mod tests {
     #[test]
     fn test_replaying_unchecked_proposal_with_reply_key() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
+        let proposal = proposal_from_test_vector();
 
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
-                SessionEvent::UncheckedProposal((
-                    unchecked_proposal_from_test_vector(),
-                    session_context.e.clone(),
-                )),
+                SessionEvent::UncheckedProposal((proposal.clone(), session_context.e.clone())),
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedProposal(Receiver {
-                state: UncheckedProposal {
-                    v1: unchecked_proposal_from_test_vector(),
-                    session_context,
-                },
+                state: UncheckedProposal { original: proposal, session_context },
             }),
         };
         run_session_history_test(test)
@@ -349,13 +351,14 @@ mod tests {
     fn getting_fallback_tx() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
-        let unchecked_proposal = unchecked_proposal_from_test_vector();
-        let maybe_inputs_owned = unchecked_proposal.clone().assume_interactive_receiver();
+        let proposal = proposal_from_test_vector();
+        let maybe_inputs_owned =
+            unchecked_proposal_from_test_vector().assume_interactive_receiver();
         let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedProposal((unchecked_proposal, None)));
-        events.push(SessionEvent::MaybeInputsOwned(maybe_inputs_owned.clone()));
+        events.push(SessionEvent::UncheckedProposal((proposal.clone(), None)));
+        events.push(SessionEvent::MaybeInputsOwned());
 
         let test = SessionHistoryTest {
             events,
@@ -364,7 +367,7 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::MaybeInputsOwned(Receiver {
-                state: MaybeInputsOwned { v1: maybe_inputs_owned, session_context },
+                state: MaybeInputsOwned { original: proposal, session_context },
             }),
         };
         run_session_history_test(test)
@@ -375,8 +378,9 @@ mod tests {
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
 
-        let unchecked_proposal = unchecked_proposal_from_test_vector();
-        let maybe_inputs_owned = unchecked_proposal.clone().assume_interactive_receiver();
+        let proposal = proposal_from_test_vector();
+        let maybe_inputs_owned =
+            unchecked_proposal_from_test_vector().assume_interactive_receiver();
         let maybe_inputs_seen = maybe_inputs_owned
             .clone()
             .check_inputs_not_owned(&mut |_| Ok(false))
@@ -398,10 +402,10 @@ mod tests {
         let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedProposal((unchecked_proposal, None)));
-        events.push(SessionEvent::MaybeInputsOwned(maybe_inputs_owned));
-        events.push(SessionEvent::MaybeInputsSeen(maybe_inputs_seen));
-        events.push(SessionEvent::OutputsUnknown(outputs_unknown));
+        events.push(SessionEvent::UncheckedProposal((proposal.clone(), None)));
+        events.push(SessionEvent::MaybeInputsOwned());
+        events.push(SessionEvent::MaybeInputsSeen());
+        events.push(SessionEvent::OutputsUnknown());
         events.push(SessionEvent::WantsOutputs(wants_outputs));
         events.push(SessionEvent::WantsInputs(wants_inputs));
         events.push(SessionEvent::WantsFeeRange(wants_fee_range));
@@ -430,8 +434,9 @@ mod tests {
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
 
-        let unchecked_proposal = unchecked_proposal_from_test_vector();
-        let maybe_inputs_owned = unchecked_proposal.clone().assume_interactive_receiver();
+        let proposal = proposal_from_test_vector();
+        let maybe_inputs_owned =
+            unchecked_proposal_from_test_vector().assume_interactive_receiver();
         let maybe_inputs_seen = maybe_inputs_owned
             .clone()
             .check_inputs_not_owned(&mut |_| Ok(false))
@@ -457,10 +462,10 @@ mod tests {
         let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedProposal((unchecked_proposal, None)));
-        events.push(SessionEvent::MaybeInputsOwned(maybe_inputs_owned));
-        events.push(SessionEvent::MaybeInputsSeen(maybe_inputs_seen));
-        events.push(SessionEvent::OutputsUnknown(outputs_unknown));
+        events.push(SessionEvent::UncheckedProposal((proposal.clone(), None)));
+        events.push(SessionEvent::MaybeInputsOwned());
+        events.push(SessionEvent::MaybeInputsSeen());
+        events.push(SessionEvent::OutputsUnknown());
         events.push(SessionEvent::WantsOutputs(wants_outputs));
         events.push(SessionEvent::WantsInputs(wants_inputs));
         events.push(SessionEvent::WantsFeeRange(wants_fee_range));

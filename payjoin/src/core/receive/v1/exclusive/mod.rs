@@ -34,7 +34,7 @@ impl UncheckedProposal {
         let (psbt, params) = crate::receive::parse_payload(base64, query, SUPPORTED_VERSIONS)
             .map_err(ReplyableError::Payload)?;
 
-        Ok(UncheckedProposal { psbt, params })
+        Ok(UncheckedProposal { original: Original { psbt, params } })
     }
 }
 
@@ -123,14 +123,19 @@ mod tests {
 
         let proposal = UncheckedProposal::from_request(body, QUERY_PARAMS, headers)?;
 
-        let witness_utxo =
-            proposal.psbt.inputs[0].witness_utxo.as_ref().expect("witness_utxo should be present");
+        let witness_utxo = proposal.original.psbt.inputs[0]
+            .witness_utxo
+            .as_ref()
+            .expect("witness_utxo should be present");
         let address =
             Address::from_script(&witness_utxo.script_pubkey, bitcoin::params::Params::MAINNET)?;
         assert_eq!(address.address_type(), Some(AddressType::P2sh));
 
-        assert_eq!(proposal.params.v, Version::One);
-        assert_eq!(proposal.params.additional_fee_contribution, Some((Amount::from_sat(182), 0)));
+        assert_eq!(proposal.original.params.v, Version::One);
+        assert_eq!(
+            proposal.original.params.additional_fee_contribution,
+            Some((Amount::from_sat(182), 0))
+        );
         Ok(())
     }
 }

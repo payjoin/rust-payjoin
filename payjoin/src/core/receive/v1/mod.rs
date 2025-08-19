@@ -47,7 +47,7 @@ use super::optional_parameters::Params;
 use super::{InputPair, OutputSubstitutionError, ReplyableError, SelectionError};
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
-use crate::receive::{InternalPayloadError, PsbtContext};
+use crate::receive::{InternalPayloadError, Original, PsbtContext};
 use crate::ImplementationError;
 
 #[cfg(feature = "v1")]
@@ -72,21 +72,13 @@ pub use exclusive::*;
 ///
 /// If you are implementing an interactive payment receiver, then such checks are not necessary, and you
 /// can go ahead with calling [`Self::assume_interactive_receiver`] to move on to the next typestate.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(not(feature = "v1"), allow(dead_code))]
+#[derive(Debug, Clone)]
 pub struct UncheckedProposal {
-    pub(crate) psbt: Psbt,
-    pub(crate) params: Params,
+    original: Original,
 }
 
 impl UncheckedProposal {
-    /// Calculates the fee rate of the original proposal PSBT.
-    fn psbt_fee_rate(&self) -> Result<FeeRate, InternalPayloadError> {
-        let original_psbt_fee = self.psbt.fee().map_err(|e| {
-            InternalPayloadError::ParsePsbt(bitcoin::psbt::PsbtParseError::PsbtEncoding(e))
-        })?;
-        Ok(original_psbt_fee / self.psbt.clone().extract_tx_unchecked_fee_rate().weight())
-    }
-
     /// Checks that the original PSBT in the proposal can be broadcasted.
     ///
     /// If the receiver is a non-interactive payment processor (ex. a donation page which generates
@@ -98,36 +90,23 @@ impl UncheckedProposal {
     /// This can be used to further prevent probing attacks since the attacker would now need to probe the receiver
     /// with transactions which are both broadcastable and pay high fee. Unrelated to the probing attack scenario,
     /// this parameter also makes operating in a high fee environment easier for the receiver.
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
     pub fn check_broadcast_suitability(
         self,
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
     ) -> Result<MaybeInputsOwned, ReplyableError> {
-        let original_psbt_fee_rate = self.psbt_fee_rate()?;
-        if let Some(min_fee_rate) = min_fee_rate {
-            if original_psbt_fee_rate < min_fee_rate {
-                return Err(InternalPayloadError::PsbtBelowFeeRate(
-                    original_psbt_fee_rate,
-                    min_fee_rate,
-                )
-                .into());
-            }
-        }
-        if can_broadcast(&self.psbt.clone().extract_tx_unchecked_fee_rate())
-            .map_err(ReplyableError::Implementation)?
-        {
-            Ok(MaybeInputsOwned { psbt: self.psbt, params: self.params })
-        } else {
-            Err(InternalPayloadError::OriginalPsbtNotBroadcastable.into())
-        }
+        self.original.check_broadcast_suitability(min_fee_rate, can_broadcast)?;
+        Ok(MaybeInputsOwned { original: self.original })
     }
 
     /// Moves on to the next typestate without any of the current typestate's validations.
     ///
     /// Use this for interactive payment receivers, where there is no risk of a probing attack since the
     /// receiver needs to manually create payjoin URIs.
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
     pub fn assume_interactive_receiver(self) -> MaybeInputsOwned {
-        MaybeInputsOwned { psbt: self.psbt, params: self.params }
+        MaybeInputsOwned { original: self.original }
     }
 }
 
@@ -138,10 +117,10 @@ impl UncheckedProposal {
 /// to extract the signed original PSBT to schedule a fallback in case the Payjoin process fails.
 ///
 /// Call [`Self::check_inputs_not_owned`] to proceed.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone)]
+#[cfg_attr(not(feature = "v1"), allow(dead_code))]
 pub struct MaybeInputsOwned {
-    pub(crate) psbt: Psbt,
-    pub(crate) params: Params,
+    pub(crate) original: Original,
 }
 
 impl MaybeInputsOwned {
@@ -150,49 +129,31 @@ impl MaybeInputsOwned {
     /// Use this for scheduling the broadcast of the original transaction as a fallback
     /// for the payjoin. Note that this function does not make any validation on whether
     /// the transaction is broadcastable; it simply extracts it.
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
-        self.psbt.clone().extract_tx_unchecked_fee_rate()
+        self.original.psbt.clone().extract_tx_unchecked_fee_rate()
     }
 
     /// Check that the original PSBT has no receiver-owned inputs.
     ///
     /// An attacker can try to spend the receiver's own inputs. This check prevents that.
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
     pub fn check_inputs_not_owned(
         self,
         is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<MaybeInputsSeen, ReplyableError> {
-        let mut err: Result<(), ReplyableError> = Ok(());
-        if let Some(e) = self
-            .psbt
-            .input_pairs()
-            .scan(&mut err, |err, input| match input.previous_txout() {
-                Ok(txout) => Some(txout.script_pubkey.to_owned()),
-                Err(e) => {
-                    **err = Err(InternalPayloadError::PrevTxOut(e).into());
-                    None
-                }
-            })
-            .find_map(|script| match is_owned(&script) {
-                Ok(false) => None,
-                Ok(true) => Some(InternalPayloadError::InputOwned(script).into()),
-                Err(e) => Some(ReplyableError::Implementation(e)),
-            })
-        {
-            return Err(e);
-        }
-        err?;
-
-        Ok(MaybeInputsSeen { psbt: self.psbt, params: self.params })
+        self.original.check_inputs_not_owned(is_owned)?;
+        Ok(MaybeInputsSeen { original: self.original })
     }
 }
 
 /// Typestate to check that the original PSBT has no inputs that the receiver has seen before.
 ///
 /// Call [`Self::check_no_inputs_seen_before`] to proceed.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone)]
+#[cfg_attr(not(feature = "v1"), allow(dead_code))]
 pub struct MaybeInputsSeen {
-    psbt: Psbt,
-    params: Params,
+    original: Original,
 }
 impl MaybeInputsSeen {
     /// Check that the receiver has never seen the inputs in the original proposal before.
@@ -203,22 +164,13 @@ impl MaybeInputsSeen {
     ///    and sending them back to the receiver.
     /// 2. Re-entrant payjoin, where the sender uses the payjoin PSBT of a previous payjoin as the
     ///    original proposal PSBT of the current, new payjoin.
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
     pub fn check_no_inputs_seen_before(
         self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<OutputsUnknown, ReplyableError> {
-        self.psbt.input_pairs().try_for_each(|input| {
-            match is_known(&input.txin.previous_output) {
-                Ok(false) => Ok::<(), ReplyableError>(()),
-                Ok(true) =>  {
-                    log::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
-                    Err(InternalPayloadError::InputSeen(input.txin.previous_output))?
-                },
-                Err(e) => Err(ReplyableError::Implementation(e))?,
-            }
-        })?;
-
-        Ok(OutputsUnknown { psbt: self.psbt, params: self.params })
+        self.original.check_no_inputs_seen_before(is_known)?;
+        Ok(OutputsUnknown { original: self.original })
     }
 }
 
@@ -228,10 +180,10 @@ impl MaybeInputsSeen {
 /// money.
 ///
 /// Call [`Self::identify_receiver_outputs`] to proceed.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone)]
+#[cfg_attr(not(feature = "v1"), allow(dead_code))]
 pub struct OutputsUnknown {
-    psbt: Psbt,
-    params: Params,
+    original: Original,
 }
 
 impl OutputsUnknown {
@@ -245,47 +197,16 @@ impl OutputsUnknown {
     /// function sets that parameter to None so that it is ignored in subsequent steps of the
     /// receiver flow. This protects the receiver from accidentally subtracting fees from their own
     /// outputs.
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<WantsOutputs, ReplyableError> {
-        let owned_vouts: Vec<usize> = self
-            .psbt
-            .unsigned_tx
-            .output
-            .iter()
-            .enumerate()
-            .filter_map(|(vout, txo)| match is_receiver_output(&txo.script_pubkey) {
-                Ok(true) => Some(Ok(vout)),
-                Ok(false) => None,
-                Err(e) => Some(Err(e)),
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(ReplyableError::Implementation)?;
-
-        if owned_vouts.is_empty() {
-            return Err(InternalPayloadError::MissingPayment.into());
-        }
-
-        let mut params = self.params.clone();
-        if let Some((_, additional_fee_output_index)) = params.additional_fee_contribution {
-            // If the additional fee output index specified by the sender is pointing to a receiver output,
-            // the receiver should ignore the parameter.
-            if owned_vouts.contains(&additional_fee_output_index) {
-                params.additional_fee_contribution = None;
-            }
-        }
-
+        let owned_vouts = self.original.identify_receiver_outputs(is_receiver_output)?;
         // In case of there being multiple outputs paying to the receiver, we select the first one
         // as the `change_vout`, which we will default to when making single output changes in
         // future mutating typestates.
-        Ok(WantsOutputs {
-            original_psbt: self.psbt.clone(),
-            payjoin_psbt: self.psbt,
-            params,
-            change_vout: owned_vouts[0],
-            owned_vouts,
-        })
+        Ok(WantsOutputs::from_proposal(self.original, owned_vouts))
     }
 }
 
@@ -409,6 +330,16 @@ impl WantsOutputs {
             params: self.params,
             change_vout: self.change_vout,
             receiver_inputs: vec![],
+        }
+    }
+
+    pub(crate) fn from_proposal(proposal: Original, owned_vouts: Vec<usize>) -> Self {
+        Self {
+            original_psbt: proposal.psbt.clone(),
+            payjoin_psbt: proposal.psbt,
+            params: proposal.params,
+            change_vout: owned_vouts[0],
+            owned_vouts,
         }
     }
 }
@@ -825,18 +756,25 @@ pub(crate) mod test {
     use crate::receive::PayloadError;
     use crate::Version;
 
+    pub(crate) fn proposal_from_test_vector() -> Original {
+        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
+        let params = Params::from_query_pairs(pairs, &[Version::One])
+            .expect("Could not parse params from query pairs");
+        Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
+    }
+
     pub(crate) fn unchecked_proposal_from_test_vector() -> UncheckedProposal {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");
-        UncheckedProposal { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
+        UncheckedProposal { original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params } }
     }
 
     pub(crate) fn maybe_inputs_owned_from_test_vector() -> MaybeInputsOwned {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");
-        MaybeInputsOwned { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
+        MaybeInputsOwned { original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params } }
     }
 
     fn wants_outputs_from_test_vector(proposal: UncheckedProposal) -> WantsOutputs {
@@ -900,7 +838,7 @@ pub(crate) mod test {
         let payjoin = wants_outputs_from_test_vector(proposal.clone());
         assert_eq!(payjoin.output_substitution(), OutputSubstitution::Enabled);
 
-        proposal.params.output_substitution = OutputSubstitution::Disabled;
+        proposal.original.params.output_substitution = OutputSubstitution::Disabled;
         let payjoin = wants_outputs_from_test_vector(proposal);
         assert_eq!(payjoin.output_substitution(), OutputSubstitution::Disabled);
     }
@@ -909,17 +847,20 @@ pub(crate) mod test {
     fn unchecked_proposal_min_fee() {
         let proposal = unchecked_proposal_from_test_vector();
 
-        let min_fee_rate = proposal.psbt_fee_rate().expect("Feerate calculation should not fail");
+        let min_fee_rate =
+            proposal.original.psbt_fee_rate().expect("Feerate calculation should not fail");
         let _ = proposal
             .clone()
             .check_broadcast_suitability(Some(min_fee_rate), |_| Ok(true))
             .expect("Broadcast suitability check with appropriate min_fee_rate should succeed");
-        assert_eq!(proposal.clone().psbt_fee_rate().unwrap(), min_fee_rate);
+        assert_eq!(proposal.original.psbt_fee_rate().unwrap(), min_fee_rate);
 
         let min_fee_rate = FeeRate::MAX;
-        let expected_err = ReplyableError::Payload(PayloadError(
-            InternalPayloadError::PsbtBelowFeeRate(proposal.psbt_fee_rate().unwrap(), min_fee_rate),
-        ));
+        let expected_err =
+            ReplyableError::Payload(PayloadError(InternalPayloadError::PsbtBelowFeeRate(
+                proposal.original.psbt_fee_rate().unwrap(),
+                min_fee_rate,
+            )));
         let proposal_below_min_fee = proposal
             .clone()
             .check_broadcast_suitability(Some(min_fee_rate), |_| Ok(true))
@@ -930,7 +871,7 @@ pub(crate) mod test {
     #[test]
     fn unchecked_proposal_unlocks_after_checks() {
         let proposal = unchecked_proposal_from_test_vector();
-        assert_eq!(proposal.psbt_fee_rate().unwrap().to_sat_per_vb_floor(), 2);
+        assert_eq!(proposal.original.psbt_fee_rate().unwrap().to_sat_per_vb_floor(), 2);
         let payjoin = wants_outputs_from_test_vector(proposal).commit_outputs().commit_inputs();
 
         {
@@ -979,9 +920,9 @@ pub(crate) mod test {
     #[test]
     fn sender_specifies_excessive_fee_rate() {
         let mut proposal = unchecked_proposal_from_test_vector();
-        assert_eq!(proposal.psbt_fee_rate().unwrap().to_sat_per_vb_floor(), 2);
+        assert_eq!(proposal.original.psbt_fee_rate().unwrap().to_sat_per_vb_floor(), 2);
         // Specify excessive fee rate in sender params
-        proposal.params.min_fee_rate = FeeRate::from_sat_per_vb_unchecked(1000);
+        proposal.original.params.min_fee_rate = FeeRate::from_sat_per_vb_unchecked(1000);
         let proposal_psbt = Psbt::from_str(RECEIVER_INPUT_CONTRIBUTION).unwrap();
         let input = InputPair::new(
             proposal_psbt.unsigned_tx.input[1].clone(),
@@ -1126,7 +1067,7 @@ pub(crate) mod test {
     #[test]
     fn test_pjos_disabled() {
         let mut proposal = unchecked_proposal_from_test_vector();
-        proposal.params.output_substitution = OutputSubstitution::Disabled;
+        proposal.original.params.output_substitution = OutputSubstitution::Disabled;
         let wants_outputs = wants_outputs_from_test_vector(proposal);
         let script_pubkey = &wants_outputs.original_psbt.unsigned_tx.output
             [wants_outputs.change_vout]
@@ -1232,7 +1173,7 @@ pub(crate) mod test {
     #[test]
     fn test_prepare_psbt_excludes_keypaths() {
         let proposal = unchecked_proposal_from_test_vector();
-        let mut processed_psbt = proposal.psbt.clone();
+        let mut processed_psbt = proposal.original.psbt.clone();
 
         let secp = Secp256k1::new();
         let (_, pk) = secp.generate_keypair(&mut bitcoin::key::rand::thread_rng());

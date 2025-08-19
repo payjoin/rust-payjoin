@@ -46,8 +46,10 @@ where
     let mut sender = SendSession::Uninitialized;
     let mut history = SessionHistory::default();
     for log in logs {
-        history.events.push(log.clone().into());
-        match sender.clone().process_event(log.into()) {
+        let session_event = log.into();
+        history.events.push(session_event.clone());
+        let current_sender = std::mem::replace(&mut sender, SendSession::Uninitialized);
+        match current_sender.process_event(session_event) {
             Ok(next_sender) => sender = next_sender,
             Err(_e) => {
                 persister.close().map_err(|e| {
@@ -169,7 +171,7 @@ mod tests {
     fn run_session_history_test(test: SessionHistoryTest) {
         let persister = InMemoryTestPersister::<SessionEvent>::default();
         for event in test.events {
-            persister.save_event(&event).expect("In memory persister shouldn't fail");
+            persister.save_event(event).expect("In memory persister shouldn't fail");
         }
 
         let (sender, session_history) =

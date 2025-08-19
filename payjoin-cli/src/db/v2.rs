@@ -54,14 +54,14 @@ impl SessionPersister for SenderPersister {
     type InternalStorageError = crate::db::error::Error;
     fn save_event(
         &self,
-        event: &SenderSessionEvent,
+        event: SenderSessionEvent,
     ) -> std::result::Result<(), Self::InternalStorageError> {
         let send_tree = self.db.0.open_tree("send_sessions")?;
         let key = self.session_id.as_ref();
         let session = send_tree.get(key)?.expect("key should exist");
         let mut session_wrapper: SessionWrapper<SenderSessionEvent> =
             serde_json::from_slice(&session).map_err(Error::Deserialize)?;
-        session_wrapper.events.push(event.clone());
+        session_wrapper.events.push(event);
         let value = serde_json::to_vec(&session_wrapper).map_err(Error::Serialize)?;
         send_tree.insert(key, value.as_slice())?;
 
@@ -125,7 +125,7 @@ impl SessionPersister for ReceiverPersister {
 
     fn save_event(
         &self,
-        event: &ReceiverSessionEvent,
+        event: ReceiverSessionEvent,
     ) -> std::result::Result<(), Self::InternalStorageError> {
         let recv_tree = self.db.0.open_tree("recv_sessions")?;
         let key = self.session_id.as_ref();
@@ -133,7 +133,7 @@ impl SessionPersister for ReceiverPersister {
             recv_tree.get(key)?.ok_or(Error::NotFound(key.to_vec().to_lower_hex_string()))?;
         let mut session_wrapper: SessionWrapper<ReceiverSessionEvent> =
             serde_json::from_slice(&session).map_err(Error::Deserialize)?;
-        session_wrapper.events.push(event.clone());
+        session_wrapper.events.push(event);
         let value = serde_json::to_vec(&session_wrapper).map_err(Error::Serialize)?;
         recv_tree.insert(key, value.as_slice())?;
         recv_tree.flush()?;

@@ -235,7 +235,7 @@ mod tests {
     fn run_session_history_test(test: SessionHistoryTest) -> Result<(), BoxError> {
         let persister = InMemoryTestPersister::<SessionEvent>::default();
         for event in test.events {
-            persister.save_event(&event)?;
+            persister.save_event(event)?;
         }
 
         let (receiver, session_history) = replay_event_log(&persister)?;

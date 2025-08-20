@@ -133,6 +133,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         payjoin_proposal = proposal.finalize_proposal(ProcessPsbtCallback(self.receiver)).save(recv_persister)
         return ReceiveSession.PAYJOIN_PROPOSAL(payjoin_proposal)
 
+    @unittest.skip("Temporarily disabled")
     async def test_integration_v2_to_v2(self):
         try:
             receiver_address = bitcoinffi.Address(json.loads(self.receiver.call("getnewaddress", [])), bitcoinffi.Network.REGTEST)

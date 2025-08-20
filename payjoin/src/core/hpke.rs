@@ -189,7 +189,7 @@ pub fn encrypt_message_a(
     let ciphertext = encryption_context.seal(&plaintext, &[])?;
     let mut message_a = ellswift_bytes_from_encapped_key(&encapsulated_key)?.to_vec();
     message_a.extend(&ciphertext);
-    Ok(message_a.to_vec())
+    Ok(message_a)
 }
 
 pub fn decrypt_message_a(
@@ -241,7 +241,7 @@ pub fn encrypt_message_b(
     let ciphertext = encryption_context.seal(plaintext, &[])?;
     let mut message_b = ellswift_bytes_from_encapped_key(&encapsulated_key)?.to_vec();
     message_b.extend(&ciphertext);
-    Ok(message_b.to_vec())
+    Ok(message_b)
 }
 
 pub fn decrypt_message_b(

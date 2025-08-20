@@ -277,7 +277,7 @@ class CheckInputsNotSeenCallback(IsOutputKnown):
     def __init__(self, connection: RpcClient):
         self.connection = connection
 
-    def callback(self, _outpoint):
+    def callback(self):
         return False
 
 class ProcessPsbtCallback(ProcessPsbt):

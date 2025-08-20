@@ -1,4 +1,3 @@
-#[cfg(all(feature = "v1", feature = "v2"))]
 mod integration {
     use std::collections::HashMap;
     use std::str::FromStr;
@@ -163,7 +162,8 @@ mod integration {
         }
     }
 
-    #[cfg(all(feature = "io", feature = "v2", feature = "_manual-tls"))]
+    // not all needs v1
+    #[cfg(all(feature = "io", feature = "v2", feature = "v1", feature = "_manual-tls"))]
     mod v2 {
         use std::sync::Arc;
         use std::time::Duration;

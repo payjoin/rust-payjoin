@@ -14,6 +14,7 @@ use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tracing::{debug, error, trace, warn};
 
 pub use crate::db::files::Db as FilesDb;
+#[cfg(feature = "redis")]
 pub use crate::db::redis::Db as RedisDb;
 use crate::db::Db;
 pub mod key_config;
@@ -405,8 +406,8 @@ fn handle_peek<Error: db::SendableError>(
     match result {
         Ok(payload) => Ok(Response::new(full((*payload).clone()))), // TODO Bytes instead of Arc<Vec<u8>>
         Err(e) => match e {
-            db::Error::Operational(re) => {
-                error!("Redis error: {}", re);
+            db::Error::Operational(err) => {
+                error!("Storage error: {err}");
                 Err(HandlerError::InternalServerError(anyhow::Error::msg("Internal server error")))
             }
             db::Error::Timeout(_) => Ok(timeout_response),

@@ -35,11 +35,6 @@ pub struct Cli {
     )]
     pub timeout: u64,
 
-    #[cfg(feature = "redis")]
-    #[arg(long = "db-host", env = "PJ_DB_HOST", help = "The redis host to connect to")]
-    pub db_host: String,
-
-    #[cfg(not(feature = "redis"))]
     #[arg(
         long = "storage-dir",
         env = "PJ_STORAGE_DIR",

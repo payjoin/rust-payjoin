@@ -131,6 +131,14 @@ impl SessionHistory {
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<Option<(Request, ohttp::ClientResponse)>, SessionError> {
+        // FIXME ideally this should be more like a method of
+        // Receiver<UncheckedProposal> and subsequent states instead of the
+        // history as a whole since it doesn't make sense to call it before,
+        // reaching that state.
+        if !self.received_sender_proposal() {
+            return Ok(None);
+        }
+
         let session_context = match self.session_context() {
             Some(session_context) => session_context,
             None => return Ok(None),
@@ -139,15 +147,26 @@ impl SessionHistory {
             Some((_, Some(json_reply))) => json_reply,
             _ => return Ok(None),
         };
-        let (req, ctx) = extract_err_req(&json_reply, ohttp_relay, session_context)?;
+        let (req, ctx) = extract_err_req(&json_reply, ohttp_relay, &session_context)?;
         Ok(Some((req, ctx)))
     }
 
-    fn session_context(&self) -> Option<&SessionContext> {
-        self.events.iter().find_map(|event| match event {
-            SessionEvent::Created(session_context) => Some(session_context),
+    fn received_sender_proposal(&self) -> bool {
+        self.events.iter().any(|event| matches!(event, SessionEvent::UncheckedProposal(_)))
+    }
+
+    fn session_context(&self) -> Option<SessionContext> {
+        let mut initial_session_context = self.events.iter().find_map(|event| match event {
+            SessionEvent::Created(session_context) => Some(session_context.clone()),
             _ => None,
-        })
+        })?;
+
+        initial_session_context.reply_key = self.events.iter().find_map(|event| match event {
+            SessionEvent::UncheckedProposal((_proposal, reply_key)) => reply_key.clone(),
+            _ => None,
+        });
+
+        Some(initial_session_context)
     }
 }
 
@@ -305,18 +324,22 @@ mod tests {
     fn test_replaying_unchecked_proposal() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
         let original = original_from_test_vector();
+        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
-                SessionEvent::UncheckedProposal((original.clone(), None)),
+                SessionEvent::UncheckedProposal((original.clone(), reply_key.clone())),
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedProposal(Receiver {
-                state: UncheckedProposal { original, session_context },
+                state: UncheckedProposal {
+                    original,
+                    session_context: SessionContext { reply_key, ..session_context },
+                },
             }),
         };
         run_session_history_test(test)
@@ -356,18 +379,22 @@ mod tests {
     fn test_replaying_unchecked_proposal_with_reply_key() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
         let original = original_from_test_vector();
+        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
-                SessionEvent::UncheckedProposal((original.clone(), session_context.e.clone())),
+                SessionEvent::UncheckedProposal((original.clone(), reply_key.clone())),
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedProposal(Receiver {
-                state: UncheckedProposal { original, session_context },
+                state: UncheckedProposal {
+                    original,
+                    session_context: SessionContext { reply_key, ..session_context },
+                },
             }),
         };
         run_session_history_test(test)
@@ -384,9 +411,10 @@ mod tests {
             .save(&persister)
             .unwrap();
         let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
+        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedProposal((original.clone(), None)));
+        events.push(SessionEvent::UncheckedProposal((original.clone(), reply_key.clone())));
         events.push(SessionEvent::MaybeInputsOwned());
 
         let test = SessionHistoryTest {
@@ -396,7 +424,10 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::MaybeInputsOwned(Receiver {
-                state: MaybeInputsOwned { original, session_context },
+                state: MaybeInputsOwned {
+                    original,
+                    session_context: SessionContext { reply_key, ..session_context },
+                },
             }),
         };
         run_session_history_test(test)
@@ -438,9 +469,10 @@ mod tests {
             .save(&persister)
             .expect("Contributed inputs should be valid");
         let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
+        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedProposal((original.clone(), None)));
+        events.push(SessionEvent::UncheckedProposal((original.clone(), reply_key.clone())));
         events.push(SessionEvent::MaybeInputsOwned());
         events.push(SessionEvent::MaybeInputsSeen());
         events.push(SessionEvent::OutputsUnknown());
@@ -462,7 +494,7 @@ mod tests {
             expected_receiver_state: ReceiveSession::ProvisionalProposal(Receiver {
                 state: ProvisionalProposal {
                     psbt_context: provisional_proposal.state.psbt_context.clone(),
-                    session_context,
+                    session_context: SessionContext { reply_key, ..session_context },
                 },
             }),
         };
@@ -510,9 +542,10 @@ mod tests {
             .save(&persister)
             .expect("Payjoin proposal should be finalized");
         let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
+        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedProposal((original.clone(), None)));
+        events.push(SessionEvent::UncheckedProposal((original.clone(), reply_key.clone())));
         events.push(SessionEvent::MaybeInputsOwned());
         events.push(SessionEvent::MaybeInputsSeen());
         events.push(SessionEvent::OutputsUnknown());
@@ -533,7 +566,10 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {
-                state: PayjoinProposal { psbt: payjoin_proposal.psbt().clone(), session_context },
+                state: PayjoinProposal {
+                    psbt: payjoin_proposal.psbt().clone(),
+                    session_context: SessionContext { reply_key, ..session_context },
+                },
             }),
         };
         run_session_history_test(test)

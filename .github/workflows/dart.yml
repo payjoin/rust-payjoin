@@ -1,0 +1,47 @@
+name: Build and Test Dart
+on:
+  pull_request:
+    paths:
+      - payjoin-ffi/**
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: payjoin-ffi/dart
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-13]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: "Install Rust 1.85.0"
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: Install Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+
+      - name: Generate bindings and binaries
+        run: |
+          if [ "${{ matrix.os }}" = "macos-13" ]; then
+            bash ./scripts/generate_macos.sh
+          else
+            bash ./scripts/generate_linux.sh
+          fi
+
+      - name: Run tests
+        # Skip integration test on macOS due to Docker issues
+        run: |
+          if [ "${{ matrix.os }}" = "macos-13" ]; then
+            dart test "test/test_payjoin_unit_test.dart"
+          else
+            dart test
+          fi
+

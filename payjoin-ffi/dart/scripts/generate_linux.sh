@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+dart --version
+dart pub get
 LIBNAME=libpayjoin_ffi.so
 LINUX_TARGET=x86_64-unknown-linux-gnu
 

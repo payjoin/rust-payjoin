@@ -1,6 +1,6 @@
-# Payjoin
+# Payjoin Python Bindings
 
-Welcome to the Python language bindings for the [Payjoin Dev Kit](https://payjoindevkit.org/)! Let's get you up and running with some smooth transactions and a sprinkle of fun.
+Welcome to the Python language bindings for the [Payjoin Dev Kit](https://payjoindevkit.org/)!
 
 ## Install from PyPI
 
@@ -22,9 +22,6 @@ cd rust-payjoin/payjoin-ffi/python
 # Setup a python virtual environment
 python -m venv venv
 source venv/bin/activate
-
-# Install dependencies
-pip install --requirement requirements.txt --requirement requirements-dev.txt
 
 # Generate the bindings (use the script appropriate for your platform)
 PYBIN="./venv/bin/" bash ./scripts/generate_<platform>.sh
@@ -49,9 +46,6 @@ You can [filter which tests](https://docs.python.org/3/library/unittest.html#com
 python -m venv venv
 source venv/bin/activate
 
-# Install dependencies
-pip install --requirement requirements.txt
-
 # Generate the bindings (use the script appropriate for your platform)
 PYBIN="./venv/bin/" bash ./scripts/generate_<platform>.sh
 
@@ -59,5 +53,3 @@ PYBIN="./venv/bin/" bash ./scripts/generate_<platform>.sh
 python setup.py --verbose bdist_wheel
 
 ```
-We hope everything worked smoothly! Now go forth test, and may your test results be as reliable as the Bitcoin blockchain itself!
-₿🔒🤝

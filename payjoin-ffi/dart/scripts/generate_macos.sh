@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+dart --version
+dart pub get
 LIBNAME=libpayjoin_ffi.dylib
 
 echo "Generating payjoin_ffi.dart..."

@@ -2022,6 +2022,7 @@ dependencies = [
  "rcgen",
  "reqwest",
  "rustls 0.22.4",
+ "tempfile",
  "testcontainers-modules",
  "tokio",
  "tracing",

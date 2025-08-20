@@ -24,9 +24,17 @@ async fn main() -> Result<(), BoxError> {
         }
     };
 
-    let listener = TcpListener::bind(config.listen_addr).await?;
-    let db = RedisDb::new(config.timeout, config.db_host).await?;
+    #[cfg(feature = "redis")]
+    let db = { RedisDb::new(config.timeout, config.db_host).await? };
+
+    #[cfg(not(feature = "redis"))]
+    let db = payjoin_directory::FilesDb::init(config.timeout, config.storage_dir)
+        .await
+        .expect("Failed to initialize persistent storage");
+
     let service = Service::new(db, ohttp.into());
+
+    let listener = TcpListener::bind(config.listen_addr).await?;
     service.serve_tcp(listener).await
 }
 

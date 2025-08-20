@@ -8,12 +8,6 @@ repository = "https://github.com/payjoin/rust-payjoin"
 rust-version = "1.85"
 license = "MIT"
 
-[features]
-redis = [
-    "dep:testcontainers-modules",
-    "payjoin-directory/redis",
-]
-
 [dependencies]
 bitcoin = { version = "0.32.5", features = ["base64"] }
 bitcoincore-rpc = "0.19.0"
@@ -28,7 +22,6 @@ payjoin-directory = { version = "0.0.3", features = ["_manual-tls"] }
 rcgen = "0.11"
 rustls = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
-testcontainers-modules = { version = "0.12.1", features = ["redis"], optional = true }
 tokio = { version = "1.38.1", features = ["full"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }

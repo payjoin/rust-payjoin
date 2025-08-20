@@ -24,10 +24,6 @@ async fn main() -> Result<(), BoxError> {
         }
     };
 
-    #[cfg(feature = "redis")]
-    let db = { RedisDb::new(config.timeout, config.db_host).await? };
-
-    #[cfg(not(feature = "redis"))]
     let db = payjoin_directory::FilesDb::init(config.timeout, config.storage_dir)
         .await
         .expect("Failed to initialize persistent storage");

@@ -6,9 +6,6 @@ use payjoin::directory::ShortId;
 
 pub(crate) mod files;
 
-#[cfg(feature = "redis")]
-pub(crate) mod redis;
-
 pub trait SendableError:
     std::error::Error + std::marker::Send + std::marker::Sync + std::convert::Into<anyhow::Error>
 {

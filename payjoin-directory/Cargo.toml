@@ -16,6 +16,8 @@ resolver = "2"
 
 [features]
 _manual-tls = ["hyper-rustls", "tokio-rustls"]
+default = ["redis"]
+redis = ["dep:redis"]
 
 [dependencies]
 anyhow = "1.0.99"
@@ -28,7 +30,7 @@ hyper-rustls = { version = "0.27.7", default-features=false, features = ["webpki
 hyper-util = { version = "0.1.16", features = ["tokio"] }
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0"}
 payjoin = { version = "0.24.0", features = ["directory"], default-features = false }
-redis = { version = "0.32.5", features = ["aio", "tokio-comp"] }
+redis = { version = "0.32.5", features = ["aio", "tokio-comp"], optional = true }
 tokio = { version = "1.47.1", features = ["full"] }
 tokio-rustls = { version = "0.26.2", features = ["ring"], default-features = false, optional = true }
 tracing = "0.1.41"

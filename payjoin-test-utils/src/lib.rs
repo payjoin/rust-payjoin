@@ -17,8 +17,13 @@ use rcgen::Certificate;
 use reqwest::{Client, ClientBuilder};
 use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
+#[cfg(not(feature = "redis"))]
+use tempfile::tempdir;
+#[cfg(feature = "redis")]
 use testcontainers_modules::redis::{Redis, REDIS_PORT};
+#[cfg(feature = "redis")]
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
+#[cfg(feature = "redis")]
 use testcontainers_modules::testcontainers::ContainerAsync;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -49,6 +54,7 @@ pub fn init_tracing() {
 pub struct TestServices {
     cert: Certificate,
     /// redis is an implicit dependency of the directory service
+    #[cfg(feature = "redis")]
     #[allow(dead_code)]
     redis: (u16, ContainerAsync<Redis>),
     directory: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
@@ -67,9 +73,17 @@ impl TestServices {
         let mut root_store = RootCertStore::empty();
         root_store.add(CertificateDer::from(cert.cert.der().to_vec())).unwrap();
 
+        #[cfg(feature = "redis")]
         let redis = init_redis().await;
+        #[cfg(feature = "redis")]
         let db_host = format!("127.0.0.1:{}", redis.0);
-        let directory = init_directory(db_host, cert_key).await?;
+        let directory = init_directory(
+            #[cfg(feature = "redis")]
+            db_host,
+            cert_key,
+        )
+        .await?;
+
         let gateway_origin =
             ohttp_relay::GatewayUri::from_str(&format!("https://localhost:{}", directory.0))?;
         let ohttp_relay = ohttp_relay::listen_tcp_on_free_port(gateway_origin, root_store).await?;
@@ -77,6 +91,7 @@ impl TestServices {
 
         Ok(Self {
             cert: cert.cert,
+            #[cfg(feature = "redis")]
             redis,
             directory: (directory.0, Some(directory.1)),
             ohttp_relay: (ohttp_relay.0, Some(ohttp_relay.1)),
@@ -125,6 +140,7 @@ impl TestServices {
     }
 }
 
+#[cfg(feature = "redis")]
 pub async fn init_redis() -> (u16, ContainerAsync<Redis>) {
     let redis_instance = Redis::default().start().await.expect("redis container should start");
     let host_port = redis_instance
@@ -135,7 +151,7 @@ pub async fn init_redis() -> (u16, ContainerAsync<Redis>) {
 }
 
 pub async fn init_directory(
-    db_host: String,
+    #[cfg(feature = "redis")] db_host: String,
     local_cert_key: (Vec<u8>, Vec<u8>),
 ) -> std::result::Result<
     (u16, tokio::task::JoinHandle<std::result::Result<(), BoxSendSyncError>>),
@@ -144,15 +160,29 @@ pub async fn init_directory(
     let timeout = Duration::from_secs(2);
     let ohttp_server = payjoin_directory::gen_ohttp_server_config()?;
 
-    println!("Database running on {db_host}");
-    let db = payjoin_directory::RedisDb::new(timeout, db_host).await?;
     let metrics = payjoin_directory::metrics::Metrics::new();
+
+    #[cfg(feature = "redis")]
+    let db = {
+        println!("Database running on {db_host}");
+        payjoin_directory::RedisDb::new(timeout, db_host).await?
+    };
+
+    #[cfg(not(feature = "redis"))]
+    let tempdir = tempdir()?;
+    #[cfg(not(feature = "redis"))]
+    let db = payjoin_directory::FilesDb::init(timeout, tempdir.path().to_path_buf()).await?;
+
     let service = payjoin_directory::Service::new(db, ohttp_server.into(), metrics);
 
     let listener = bind_free_port().await?;
     let port = listener.local_addr()?.port();
 
-    let handle = tokio::spawn(service.serve_tls(listener, local_cert_key));
+    let handle = tokio::spawn(async move {
+        #[cfg(not(feature = "redis"))]
+        let _tempdir = tempdir; // keep the tempdir until the directory shuts down
+        service.serve_tls(listener, local_cert_key).await
+    });
 
     Ok((port, handle))
 }

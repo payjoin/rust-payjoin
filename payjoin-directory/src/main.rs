@@ -2,7 +2,6 @@ use clap::Parser;
 use payjoin_directory::metrics::Metrics;
 use payjoin_directory::*;
 use tokio::net::TcpListener;
-use tracing::error;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
@@ -26,20 +25,17 @@ async fn main() -> Result<(), BoxError> {
         }
     };
 
-    let db = RedisDb::new(config.timeout, config.db_host).await?;
     let metrics = Metrics::new();
-    let service = Service::new(db, ohttp.into(), metrics);
 
-    // Start metrics server in the background
-    let metrics_listener = TcpListener::bind(config.metrics_listen_addr).await?;
-    {
-        let service = service.clone();
-        tokio::spawn(async move {
-            if let Err(e) = service.serve_metrics_tcp(metrics_listener).await {
-                error!("Metrics server error: {e}");
-            }
-        });
-    }
+    #[cfg(feature = "redis")]
+    let db = { RedisDb::new(config.timeout, config.db_host).await? };
+
+    #[cfg(not(feature = "redis"))]
+    let db = payjoin_directory::FilesDb::init(config.timeout, config.storage_dir)
+        .await
+        .expect("Failed to initialize persistent storage");
+
+    let service = Service::new(db, ohttp.into(), metrics);
 
     let listener = TcpListener::bind(config.listen_addr).await?;
     service.serve_tcp(listener).await

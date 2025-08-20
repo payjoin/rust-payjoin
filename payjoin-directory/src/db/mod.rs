@@ -5,6 +5,8 @@ use std::sync::Arc;
 use payjoin::directory::ShortId;
 
 pub(crate) mod files;
+
+#[cfg(feature = "redis")]
 pub(crate) mod redis;
 
 pub trait SendableError:

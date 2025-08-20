@@ -112,7 +112,7 @@ impl AppTrait for App {
         println!("Receive session established");
         let pj_uri = session.pj_uri();
         println!("Request Payjoin by sharing this Payjoin Uri:");
-        println!("{}", pj_uri);
+        println!("{pj_uri}");
 
         self.process_receiver_session(ReceiveSession::Initialized(session.clone()), &persister)
             .await?;

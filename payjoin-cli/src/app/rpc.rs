@@ -82,12 +82,12 @@ impl AsyncBitcoinRpc {
             .basic_auth(&self.username, Some(&self.password));
 
         let response =
-            request.send().await.with_context(|| format!("RPC '{}': connection failed", method))?;
+            request.send().await.with_context(|| format!("RPC '{method}': connection failed"))?;
 
         let json = response
             .json::<RpcResponse<T>>()
             .await
-            .with_context(|| format!("RPC '{}': invalid response", method))?;
+            .with_context(|| format!("RPC '{method}': invalid response"))?;
 
         match json {
             RpcResponse::Success { result, .. } => Ok(result),
@@ -291,7 +291,7 @@ mod tests {
             .await
             .expect_err("Should fail due to invalid address");
         let error_msg = error.to_string();
-        println!("{}", error_msg);
+        println!("{error_msg}");
 
         assert_rpc_error_format(
             &error_msg,
@@ -321,7 +321,7 @@ mod tests {
             .await
             .expect_err("Should fail due to insufficient funds");
         let error_msg = error.to_string();
-        println!("{}", error_msg);
+        println!("{error_msg}");
 
         assert_rpc_error_format(
             &error_msg,

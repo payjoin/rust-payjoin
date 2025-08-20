@@ -47,7 +47,7 @@ impl BitcoindWallet {
         lock_unspent: bool,
     ) -> Result<Psbt> {
         let fee_sat_per_vb = fee_rate.to_sat_per_vb_ceil();
-        log::debug!("Fee rate sat/vb: {}", fee_sat_per_vb);
+        log::debug!("Fee rate sat/vb: {fee_sat_per_vb}");
 
         let options = json!({
             "lockUnspents": lock_unspent,

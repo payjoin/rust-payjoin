@@ -1,5 +1,19 @@
 [build-system]
-requires = ["setuptools", "wheel", "setuptools-rust"]
+requires = ["setuptools>=62", "wheel", "toml"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "payjoin"
+description = "The Python language bindings for the Payjoin Dev Kit"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+dynamic = ["version"]
+
+[tool.setuptools]
+packages = ["payjoin"]
+package-dir = { "payjoin" = "src/payjoin" }
+include-package-data = true
 
 [tool.pytest.ini_options]
 pythonpath = [

@@ -42,7 +42,7 @@ jobs:
       - name: "Generate payjoin-ffi.py and binaries"
         run: |
             PYBIN=$(dirname $(which python))
-            PYBIN="$PYBIN" bash ./scripts/generate_linux.sh
+            PYBIN="$PYBIN" bash ./scripts/generate_linux.sh 1.85.0
 
       - name: "Build wheel"
         run: python setup.py bdist_wheel --verbose
@@ -81,7 +81,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: "Generate payjoin-ffi.py and binaries"
-        run: bash ./scripts/generate_macos.sh
+        run: bash ./scripts/generate_macos.sh 1.85.0
 
       - name: "Build wheel"
         run: python3 setup.py bdist_wheel --verbose

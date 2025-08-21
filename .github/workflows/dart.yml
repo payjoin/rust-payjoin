@@ -31,9 +31,9 @@ jobs:
       - name: Generate bindings and binaries
         run: |
           if [ "${{ matrix.os }}" = "macos-13" ]; then
-            bash ./scripts/generate_macos.sh
+            bash ./scripts/generate_macos.sh 1.85.0
           else
-            bash ./scripts/generate_linux.sh
+            bash ./scripts/generate_linux.sh 1.85.0
           fi
 
       - name: Run tests

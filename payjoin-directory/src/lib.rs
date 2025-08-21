@@ -34,7 +34,7 @@ mod db;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-#[cfg(feature = "_danger-local-https")]
+#[cfg(feature = "_manual-tls")]
 fn init_tls_acceptor(cert_key: (Vec<u8>, Vec<u8>)) -> Result<tokio_rustls::TlsAcceptor> {
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use rustls::ServerConfig;
@@ -75,7 +75,7 @@ impl hyper::service::Service<Request<Incoming>> for Service {
 impl Service {
     pub fn new(pool: DbPool, ohttp: ohttp::Server) -> Self { Self { pool, ohttp } }
 
-    #[cfg(feature = "_danger-local-https")]
+    #[cfg(feature = "_manual-tls")]
     pub async fn serve_tls(
         self,
         listener: tokio::net::TcpListener,

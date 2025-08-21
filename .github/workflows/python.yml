@@ -3,6 +3,12 @@ on:
   pull_request:
     paths:
       - payjoin-ffi/**
+env:
+  # Override the value from the rust-toolchain file
+  # This is necessary because even though the correct toolchain
+  # is explicitly specified for the rust-toolchain action,
+  # rustup honors the rust-toolchain file over the default
+  RUSTUP_TOOLCHAIN: 1.85
 
 jobs:
   build-wheels-and-test:

@@ -184,10 +184,9 @@ impl App {
                     Err(_) => {
                         let (req, v1_ctx) = context.create_v1_post_request();
                         let response = self.post_request(req).await?;
-                        let psbt = Arc::new(
-                            v1_ctx.process_response(response.bytes().await?.to_vec().as_slice())?,
-                        );
-                        self.process_pj_response((*psbt).clone())?;
+                        let psbt =
+                            v1_ctx.process_response(response.bytes().await?.to_vec().as_slice())?;
+                        self.process_pj_response(psbt)?;
                     }
                 }
                 return Ok(());

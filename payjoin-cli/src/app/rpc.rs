@@ -47,11 +47,11 @@ impl AsyncBitcoinRpc {
     }
 
     /// Get base URL without wallet path for blockchain-level calls
-    fn get_base_url(&self) -> String {
+    fn get_base_url(&self) -> &str {
         if let Some(pos) = self.url.find("/wallet/") {
-            self.url[..pos].to_string()
+            &self.url[..pos]
         } else {
-            self.url.clone()
+            &self.url
         }
     }
 
@@ -65,7 +65,7 @@ impl AsyncBitcoinRpc {
         let url = match method {
             "getblockchaininfo" | "getnetworkinfo" | "getmininginfo" | "getblockcount"
             | "getbestblockhash" | "getblock" | "getblockhash" | "gettxout" => self.get_base_url(),
-            _ => self.url.clone(),
+            _ => &self.url,
         };
 
         let request_body = json!({
@@ -77,7 +77,7 @@ impl AsyncBitcoinRpc {
 
         let request = self
             .client
-            .post(&url)
+            .post(url)
             .json(&request_body)
             .basic_auth(&self.username, Some(&self.password));
 

@@ -6,3 +6,4 @@ Cargo.lock
 .vscode
 mutants.out*
 *.ikm
+*payjoin.sqlite

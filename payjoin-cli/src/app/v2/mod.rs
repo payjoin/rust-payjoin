@@ -62,7 +62,9 @@ impl AppTrait for App {
         let url = uri.extras.endpoint();
         // TODO: perhaps we should store pj uri in the session wrapper as to not replay the event log for each session
         let sender_state = self.db.get_send_session_ids()?.into_iter().find_map(|session_id| {
-            let sender_persister = SenderPersister::from_id(self.db.clone(), session_id).ok()?;
+            let sender_persister = SenderPersister::from_id(self.db.clone(), session_id)
+                .map_err(|e| anyhow!("Failed to create sender persister: {:?}", e))
+                .ok()?;
             let replay_results = replay_sender_event_log(&sender_persister)
                 .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))
                 .ok()?;

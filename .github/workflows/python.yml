@@ -13,12 +13,13 @@ env:
 jobs:
   build-wheels-and-test:
     name: "Build and test Linux"
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: payjoin-ffi/python
     strategy:
       matrix:
+        os: [ubuntu-latest, macos-15]
         python: ["3.12"]
     steps:
       - name: "Checkout"
@@ -33,16 +34,22 @@ jobs:
           python-version: ${{ matrix.python }}
 
       - name: "Install build dependencies"
+        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt update
           sudo apt install -y build-essential python3-dev
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: "Generate payjoin-ffi.py and binaries"
+      - name: "Generate linux payjoin-ffi.py and binaries"
+        if: matrix.os == 'ubuntu-latest'
         run: |
             PYBIN=$(dirname $(which python))
             PYBIN="$PYBIN" bash ./scripts/bindgen_generate.sh
+
+      - name: "Generate macos payjoin-ffi.py and binaries"
+        if: matrix.os == 'macos-15'
+        run: bash ./scripts/bindgen_generate.sh
 
       - name: "Build wheel"
         run: python -m build --wheel
@@ -51,103 +58,10 @@ jobs:
         run: pip install ./dist/*.whl
 
       - name: "Run tests"
-        run: python -m unittest -v
+        run: |
+          if [ "${{ matrix.os }}" = "macos-15" ]; then
+            python -m unittest test/test_payjoin_unit_test.py -v
+          else
+            python -m unittest -v
+          fi
 
-  build-macos-aarch64:
-    name: "Build macOS aarch64"
-    runs-on: macos-14
-    defaults:
-      run:
-        working-directory: payjoin-ffi/python
-    strategy:
-      matrix:
-        python: ["3.12"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@1.85.0
-
-      - uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python }}
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build aarch64 binary
-        run: bash ./scripts/bindgen_generate.sh
-
-      - name: Upload aarch64 binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: libpayjoin_ffi-aarch64
-          path: ${{ github.workspace }}/payjoin-ffi/target/aarch64-apple-darwin/release-smaller/libpayjoin_ffi.dylib
-  
-  build-macos-x86_64:
-    name: "Build macOS x86_64"
-    runs-on: macos-13
-    defaults:
-      run:
-        working-directory: payjoin-ffi/python
-    strategy:
-      matrix:
-        python: ["3.12"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@1.85.0
-
-      - uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python }}
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build x86_64 binary
-        run: bash ./scripts/bindgen_generate.sh
-
-      - name: Upload x86_64 binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: libpayjoin_ffi-x86_64
-          path: ${{ github.workspace }}/payjoin-ffi/target/x86_64-apple-darwin/release-smaller/libpayjoin_ffi.dylib
-
-  
-  build-macos-merge:
-    name: "Merge and test macOS universal binary"
-    runs-on: macos-14
-    needs: [build-macos-aarch64, build-macos-x86_64]
-    defaults:
-      run:
-        working-directory: payjoin-ffi/python
-    strategy:
-      matrix:
-        python: ["3.12"]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python }}
-      
-      - name: Download aarch64 binary
-        uses: actions/download-artifact@v4
-        with:
-          name: libpayjoin_ffi-aarch64
-          path: ${{ github.workspace}}/payjoin-ffi/target/aarch64-apple-darwin/release-smaller
-      
-      - name: Download x86_64 binary
-        uses: actions/download-artifact@v4
-        with:
-          name: libpayjoin_ffi-x86_64
-          path: ${{ github.workspace }}/payjoin-ffi/target/x86_64-apple-darwin/release-smaller
-
-      - name: Merge binaries
-        run: bash ./scripts/generate_universal_macos.sh
-
-      - name: Build wheel
-        run: python -m build --wheel
-
-      - name: Install wheel
-        run: pip3 install ./dist/*.whl
-
-      - name: Run tests
-        run: python -m unittest test/test_payjoin_unit_test.py --verbose

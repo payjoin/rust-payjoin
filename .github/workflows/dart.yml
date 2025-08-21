@@ -11,14 +11,15 @@ env:
   RUSTUP_TOOLCHAIN: 1.85
 
 jobs:
-  test:
+  build-dart-and-test:
+    name: "Build and test dart"
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: payjoin-ffi/dart
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-13]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,17 +36,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Generate bindings and binaries
-        run: |
-          if [ "${{ matrix.os }}" = "macos-13" ]; then
-            bash ./scripts/generate_macos.sh
-          else
-            bash ./scripts/generate_linux.sh
-          fi
+        run: bash ./scripts/generate_bindings.sh
 
       - name: Run tests
         # Skip integration test on macOS due to Docker issues
         run: |
-          if [ "${{ matrix.os }}" = "macos-13" ]; then
+          if [[ "${{ matrix.os }}" = "macos-latest" ]]; then
             dart test "test/test_payjoin_unit_test.dart"
           else
             dart test

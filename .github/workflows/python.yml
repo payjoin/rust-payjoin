@@ -39,7 +39,7 @@ jobs:
         run: bash ./scripts/generate_bindings.sh
 
       - name: "Build wheel"
-        run: python setup.py bdist_wheel --verbose
+        run: python -m build --wheel
 
       - name: "Install wheel"
         run: pip install ./dist/*.whl

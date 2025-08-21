@@ -26,7 +26,7 @@ source venv/bin/activate
 PYBIN="./venv/bin/" bash ./scripts/generate_bindings.sh
 
 # Build the wheel
-python setup.py bdist_wheel --verbose
+python -m build --wheel
 
 # Force reinstall payjoin
 pip install ./dist/payjoin-<version>.whl --force-reinstall
@@ -48,6 +48,6 @@ source venv/bin/activate
 PYBIN="./venv/bin/" bash ./scripts/generate_bindings.sh
 
 # Build the wheel
-python setup.py --verbose bdist_wheel
+python -m build --wheel
 
 ```

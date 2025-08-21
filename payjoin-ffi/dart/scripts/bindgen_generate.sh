@@ -21,30 +21,28 @@ else
     exit 1
 fi
 
+cd ../
 # Build native binary
 if [[ "$OS" == "Darwin" ]]; then
-    if [[ "$ARCH" == "arm64" ]]; then
-        echo "Generating native binaries..."
-        rustup target add aarch64-apple-darwin
-        # This is a test script the actual release should not include the test utils feature
-        cargo build --profile release-smaller --target aarch64-apple-darwin --features _test-utils
-        echo "Done building aarch64-apple-darwin"
-    elif [[ "$ARCH" == "x86_64" ]]; then
-        echo "Generating native binaries..."
-        rustup target add x86_64-apple-darwin
-        # This is a test script the actual release should not include the test utils feature
-        cargo build --profile release-smaller --target x86_64-apple-darwin --features _test-utils
-        echo "Done building x86_64-apple-darwin"
-    fi
+    cargo build --features _test-utils --profile release
+    cargo run --features _test-utils --profile release --bin uniffi-bindgen -- --library target/release/$LIBNAME --language dart --out-dir dart/lib/
+
+    echo "Generating native binaries..."
+    rustup target add aarch64-apple-darwin x86_64-apple-darwin
+    # This is a test script the actual release should not include the test utils feature
+    cargo build --profile release-smaller --target aarch64-apple-darwin --features _test-utils
+    cargo build --profile release-smaller --target x86_64-apple-darwin --features _test-utils
+
+    echo "Building macos fat library"
+    lipo -create -output dart/$LIBNAME \
+        target/aarch64-apple-darwin/release-smaller/$LIBNAME \
+        target/x86_64-apple-darwin/release-smaller/$LIBNAME
 else
     # Generate Python bindings
     echo "Generating payjoin dart..."
-    cd ../
     # This is a test script the actual release should not include the test utils feature
     cargo build --features _test-utils --profile release 
     cargo run --features _test-utils --profile release --bin uniffi-bindgen -- --library target/release/$LIBNAME --language dart --out-dir dart/lib/
-
-
 
     echo "Generating native binaries..."
     rustup target add x86_64-unknown-linux-gnu

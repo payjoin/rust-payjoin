@@ -1,38 +1,38 @@
-use url::ParseError;
-
 #[derive(Debug)]
 pub struct PjParseError(pub(crate) InternalPjParseError);
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum InternalPjParseError {
     BadPjOs,
     DuplicateParams(&'static str),
     MissingEndpoint,
     NotUtf8,
-    BadEndpoint(BadEndpointError),
+    IntoUrl(crate::into_url::Error),
+    #[cfg(feature = "v1")]
     UnsecureEndpoint,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum BadEndpointError {
-    UrlParse(ParseError),
     #[cfg(feature = "v2")]
-    LowercaseFragment,
-}
-
-impl std::fmt::Display for BadEndpointError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BadEndpointError::UrlParse(e) => write!(f, "Invalid URL: {e:?}"),
-            #[cfg(feature = "v2")]
-            BadEndpointError::LowercaseFragment =>
-                write!(f, "Some or all of the fragment is lowercase"),
-        }
-    }
+    V2(super::v2::PjParseError),
 }
 
 impl From<InternalPjParseError> for PjParseError {
     fn from(value: InternalPjParseError) -> Self { PjParseError(value) }
+}
+
+impl std::error::Error for PjParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use InternalPjParseError::*;
+        match &self.0 {
+            BadPjOs => None,
+            DuplicateParams(_) => None,
+            MissingEndpoint => None,
+            NotUtf8 => None,
+            IntoUrl(e) => Some(e),
+            #[cfg(feature = "v1")]
+            UnsecureEndpoint => None,
+            #[cfg(feature = "v2")]
+            V2(e) => Some(e),
+        }
+    }
 }
 
 impl std::fmt::Display for PjParseError {
@@ -45,10 +45,13 @@ impl std::fmt::Display for PjParseError {
             }
             MissingEndpoint => write!(f, "Missing payjoin endpoint"),
             NotUtf8 => write!(f, "Endpoint is not valid UTF-8"),
-            BadEndpoint(e) => write!(f, "Endpoint is not valid: {e:?}"),
+            IntoUrl(e) => write!(f, "Endpoint is not valid: {e:?}"),
+            #[cfg(feature = "v1")]
             UnsecureEndpoint => {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }
+            #[cfg(feature = "v2")]
+            V2(e) => write!(f, "Invalid v2 parameter: {e:?}"),
         }
     }
 }

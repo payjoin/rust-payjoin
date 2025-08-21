@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::{bitcoin, PjUri};
+use payjoin::bitcoin::{self, Address, Amount, FeeRate};
 use tokio::signal;
 use tokio::sync::watch;
 
@@ -29,12 +28,15 @@ pub trait App: Send + Sync {
     #[cfg(feature = "v2")]
     async fn resume_payjoins(&self) -> Result<()>;
 
-    fn create_original_psbt(&self, uri: &PjUri, fee_rate: FeeRate) -> Result<Psbt> {
-        let amount = uri.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
-
+    fn create_original_psbt(
+        &self,
+        address: &Address,
+        amount: Amount,
+        fee_rate: FeeRate,
+    ) -> Result<Psbt> {
         // wallet_create_funded_psbt requires a HashMap<address: String, Amount>
         let mut outputs = HashMap::with_capacity(1);
-        outputs.insert(uri.address.to_string(), amount);
+        outputs.insert(address.to_string(), amount);
 
         self.wallet().create_psbt(outputs, fee_rate, true)
     }

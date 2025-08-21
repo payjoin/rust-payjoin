@@ -21,14 +21,18 @@
 //! [`bitmask-core`](https://github.com/diba-io/bitmask-core) BDK integration. Bring your own
 //! wallet and http client.
 
+use std::str::FromStr;
+
 use bitcoin::psbt::Psbt;
-use bitcoin::FeeRate;
+use bitcoin::{Address, Amount, FeeRate};
 use error::BuildSenderError;
 use url::Url;
 
 use super::*;
+use crate::error_codes::ErrorCode;
 pub use crate::output_substitution::OutputSubstitution;
-use crate::{PjUri, Request};
+use crate::uri::v1::PjParam;
+use crate::{PjUri, Request, MAX_CONTENT_LENGTH};
 
 /// A builder to construct the properties of a `Sender`.
 #[derive(Clone)]
@@ -45,7 +49,7 @@ impl SenderBuilder {
     /// to create a [`Sender`]
     pub fn new(psbt: Psbt, uri: PjUri) -> Self {
         Self {
-            endpoint: uri.extras.endpoint,
+            endpoint: uri.extras.pj_param.endpoint().clone(),
             // Adopt the output substitution preference from the URI
             output_substitution: uri.extras.output_substitution,
             psbt_ctx_builder: PsbtContextBuilder::new(
@@ -53,6 +57,24 @@ impl SenderBuilder {
                 uri.address.script_pubkey(),
                 uri.amount,
             ),
+        }
+    }
+
+    /// Create a [SenderBuilder] from component parts to mirror [crate::send::v2::SenderBuilder::from_parts]
+    ///
+    /// This method allows constructing a v1 [SenderBuilder] using a [PjParam] directly,
+    /// rather than requiring a full [PjUri].
+    pub fn from_parts(
+        psbt: Psbt,
+        pj_param: &PjParam,
+        address: &Address,
+        amount: Option<Amount>,
+    ) -> Self {
+        Self {
+            endpoint: pj_param.endpoint().clone(),
+            // Default to enabled output substitution for v1 when not specified via URI
+            output_substitution: OutputSubstitution::Enabled,
+            psbt_ctx_builder: PsbtContextBuilder::new(psbt, address.script_pubkey(), amount),
         }
     }
 
@@ -144,26 +166,135 @@ pub struct Sender {
 impl Sender {
     /// Construct serialized V1 Request and Context from a Payjoin Proposal
     pub fn create_v1_post_request(&self) -> (Request, V1Context) {
-        super::create_v1_post_request(self.endpoint.clone(), self.psbt_ctx.clone())
+        let url = serialize_url(
+            self.endpoint.clone(),
+            self.psbt_ctx.output_substitution,
+            self.psbt_ctx.fee_contribution,
+            self.psbt_ctx.min_fee_rate,
+            Version::One,
+        );
+        let mut sanitized_psbt = self.psbt_ctx.original_psbt.clone();
+        clear_unneeded_fields(&mut sanitized_psbt);
+        let body = sanitized_psbt.to_string().as_bytes().to_vec();
+        (
+            Request::new_v1(&url, &body),
+            V1Context {
+                psbt_context: PsbtContext {
+                    original_psbt: self.psbt_ctx.original_psbt.clone(),
+                    output_substitution: self.psbt_ctx.output_substitution,
+                    fee_contribution: self.psbt_ctx.fee_contribution,
+                    payee: self.psbt_ctx.payee.clone(),
+                    min_fee_rate: self.psbt_ctx.min_fee_rate,
+                },
+            },
+        )
     }
 
     /// The endpoint in the Payjoin URI
     pub fn endpoint(&self) -> &Url { &self.endpoint }
 }
 
+/// Data required to validate the response.
+///
+/// This type is used to process a BIP78 response.
+/// Call [`Self::process_response`] on it to continue the BIP78 flow.
+#[derive(Debug, Clone)]
+pub struct V1Context {
+    psbt_context: PsbtContext,
+}
+
+impl V1Context {
+    /// Decodes and validates the response.
+    ///
+    /// Call this method with response from receiver to continue BIP78 flow. If the response is
+    /// valid you will get appropriate PSBT that you should sign and broadcast.
+    #[inline]
+    pub fn process_response(self, response: &[u8]) -> Result<Psbt, ResponseError> {
+        if response.len() > MAX_CONTENT_LENGTH {
+            return Err(ResponseError::from(InternalValidationError::ContentTooLarge));
+        }
+
+        let res_str = std::str::from_utf8(response).map_err(|_| InternalValidationError::Parse)?;
+        let proposal = Psbt::from_str(res_str).map_err(|_| ResponseError::parse(res_str))?;
+        self.psbt_context.process_proposal(proposal).map_err(Into::into)
+    }
+}
+
+impl ResponseError {
+    pub(crate) fn from_json(json: serde_json::Value) -> Self {
+        let message = json
+            .as_object()
+            .and_then(|v| v.get("message"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        let error_code = json.as_object().and_then(|v| v.get("errorCode")).and_then(|v| v.as_str());
+
+        match error_code {
+            Some(code) => match ErrorCode::from_str(code) {
+                Ok(ErrorCode::VersionUnsupported) => {
+                    let supported = json
+                        .as_object()
+                        .and_then(|v| v.get("supported"))
+                        .and_then(|v| v.as_array())
+                        .map(|array| array.iter().filter_map(|v| v.as_u64()).collect::<Vec<u64>>())
+                        .unwrap_or_default();
+                    WellKnownError::version_unsupported(message, supported).into()
+                }
+                Ok(code) => WellKnownError::new(code, message).into(),
+                Err(_) => Self::Unrecognized { error_code: code.to_string(), message },
+            },
+            None => InternalValidationError::Parse.into(),
+        }
+    }
+
+    /// Parse a response from the receiver.
+    ///
+    /// response must be valid JSON string.
+    pub(crate) fn parse(response: &str) -> Self {
+        match serde_json::from_str(response) {
+            Ok(json) => Self::from_json(json),
+            Err(_) => InternalValidationError::Parse.into(),
+        }
+    }
+}
+
+impl WellKnownError {
+    /// Create a new well-known error with the given code and message.
+    pub(crate) fn new(code: ErrorCode, message: String) -> Self {
+        Self { code, message, supported_versions: None }
+    }
+
+    /// Create a version unsupported error with the given message and supported versions.
+    pub(crate) fn version_unsupported(message: String, supported: Vec<u64>) -> Self {
+        Self { code: ErrorCode::VersionUnsupported, message, supported_versions: Some(supported) }
+    }
+}
+
+impl From<WellKnownError> for ResponseError {
+    fn from(value: WellKnownError) -> Self { Self::WellKnown(value) }
+}
+
 #[cfg(test)]
 mod test {
-    use bitcoin::FeeRate;
+    use std::collections::BTreeMap;
+
+    use bitcoin::bip32::{self, DerivationPath};
+    use bitcoin::hex::FromHex;
+    use bitcoin::key::Secp256k1;
+    use bitcoin::psbt::raw::ProprietaryKey;
+    use bitcoin::{psbt, FeeRate, NetworkKind, XOnlyPublicKey};
     use payjoin_test_utils::{
         BoxError, INVALID_PSBT, MULTIPARTY_ORIGINAL_PSBT_ONE, PARSED_ORIGINAL_PSBT,
-        PAYJOIN_PROPOSAL,
+        PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO, PAYJOIN_PROPOSAL,
     };
 
     use super::*;
     use crate::error_codes::ErrorCode;
     use crate::send::error::{ResponseError, WellKnownError};
     use crate::send::test::create_psbt_context;
-    use crate::{Uri, UriExt};
+    use crate::{Uri, UriExt, MAX_CONTENT_LENGTH};
 
     const PJ_URI: &str =
         "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/";
@@ -179,6 +310,59 @@ mod test {
     fn create_v1_context() -> super::V1Context {
         let psbt_context = create_psbt_context().expect("failed to create context");
         super::V1Context { psbt_context }
+    }
+
+    #[test]
+    fn test_clear_unneeded_fields() -> Result<(), BoxError> {
+        let mut proposal = PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO.clone();
+        let payee = proposal.unsigned_tx.output[1].script_pubkey.clone();
+        let x_only_key = XOnlyPublicKey::from_str(
+            "4f65949efe60e5be80cf171c06144641e832815de4f6ab3fe0257351aeb22a84",
+        )?;
+        let _ = proposal.inputs[0].tap_internal_key.insert(x_only_key);
+        let _ = proposal.outputs[0].tap_internal_key.insert(x_only_key);
+        assert!(proposal.inputs[0].tap_internal_key.is_some());
+        assert!(!proposal.inputs[0].bip32_derivation.is_empty());
+        assert!(proposal.outputs[0].tap_internal_key.is_some());
+        assert!(!proposal.outputs[0].bip32_derivation.is_empty());
+        let mut psbt_ctx = PsbtContextBuilder::new(proposal.clone(), payee, None)
+            .build(OutputSubstitution::Disabled)?;
+
+        let mut map = BTreeMap::new();
+        let secp = Secp256k1::new();
+        let seed = Vec::<u8>::from_hex("BEEFCAFE").unwrap();
+        let xpriv = bip32::Xpriv::new_master(NetworkKind::Main, &seed).unwrap();
+        let xpub: bip32::Xpub = bip32::Xpub::from_priv(&secp, &xpriv);
+        let value = (xpriv.fingerprint(&secp), DerivationPath::from_str("42'").unwrap());
+        map.insert(xpub, value);
+        psbt_ctx.original_psbt.xpub = map;
+
+        let mut map = BTreeMap::new();
+        let proprietary_key =
+            ProprietaryKey { prefix: b"mock_prefix".to_vec(), subtype: 0x00, key: vec![] };
+        let value = FromHex::from_hex("BEEFCAFE").unwrap();
+        map.insert(proprietary_key, value);
+        psbt_ctx.original_psbt.proprietary = map;
+
+        let mut map = BTreeMap::new();
+        let unknown_key: psbt::raw::Key = psbt::raw::Key { type_value: 0x00, key: vec![] };
+        let value = FromHex::from_hex("BEEFCAFE").unwrap();
+        map.insert(unknown_key, value);
+        psbt_ctx.original_psbt.unknown = map;
+
+        let sender = Sender { endpoint: Url::from_str("HTTPS://EXAMPLE.COM/")?, psbt_ctx };
+
+        let body = sender.create_v1_post_request().0.body;
+        let res_str = std::str::from_utf8(&body)?;
+        let proposal = Psbt::from_str(res_str)?;
+        assert!(proposal.inputs[0].tap_internal_key.is_none());
+        assert!(proposal.inputs[0].bip32_derivation.is_empty());
+        assert!(proposal.outputs[0].tap_internal_key.is_none());
+        assert!(proposal.outputs[0].bip32_derivation.is_empty());
+        assert!(proposal.xpub.is_empty());
+        assert!(proposal.proprietary.is_empty());
+        assert!(proposal.unknown.is_empty());
+        Ok(())
     }
 
     /// This test adds mutation coverage for build_recommended when the outputs are equal to the

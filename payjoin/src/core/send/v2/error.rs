@@ -1,7 +1,6 @@
 use core::fmt;
 
 use crate::ohttp::DirectoryResponseError;
-use crate::uri::url_ext::ParseReceiverPubkeyParamError;
 
 /// Error returned when request could not be created.
 ///
@@ -16,8 +15,6 @@ pub(crate) enum InternalCreateRequestError {
     Url(crate::into_url::Error),
     Hpke(crate::hpke::HpkeError),
     OhttpEncapsulation(crate::ohttp::OhttpEncapsulationError),
-    ParseReceiverPubkey(ParseReceiverPubkeyParamError),
-    MissingOhttpConfig,
     Expired(std::time::SystemTime),
 }
 
@@ -29,9 +26,6 @@ impl fmt::Display for CreateRequestError {
             Url(e) => write!(f, "cannot parse url: {e:#?}"),
             Hpke(e) => write!(f, "v2 error: {e}"),
             OhttpEncapsulation(e) => write!(f, "v2 error: {e}"),
-            ParseReceiverPubkey(e) => write!(f, "cannot parse receiver public key: {e}"),
-            MissingOhttpConfig =>
-                write!(f, "no ohttp configuration with which to make a v2 request available"),
             Expired(expiry) => write!(f, "session expired at {expiry:?}"),
         }
     }
@@ -45,8 +39,6 @@ impl std::error::Error for CreateRequestError {
             Url(error) => Some(error),
             Hpke(error) => Some(error),
             OhttpEncapsulation(error) => Some(error),
-            ParseReceiverPubkey(error) => Some(error),
-            MissingOhttpConfig => None,
             Expired(_) => None,
         }
     }
@@ -59,12 +51,6 @@ impl From<InternalCreateRequestError> for CreateRequestError {
 impl From<crate::into_url::Error> for CreateRequestError {
     fn from(value: crate::into_url::Error) -> Self {
         CreateRequestError(InternalCreateRequestError::Url(value))
-    }
-}
-
-impl From<ParseReceiverPubkeyParamError> for CreateRequestError {
-    fn from(value: ParseReceiverPubkeyParamError) -> Self {
-        CreateRequestError(InternalCreateRequestError::ParseReceiverPubkey(value))
     }
 }
 

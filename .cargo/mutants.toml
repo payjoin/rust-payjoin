@@ -6,7 +6,7 @@ examine_globs = [
 exclude_globs = [
 ]
 exclude_re = [
-	"impl (fmt::)?(Debug|Display)",
+	"impl\\s+(std::fmt::|core::fmt::|fmt::)?(Display|Debug)",
 	"deserialize",
 	"Iterator",
 	".*Error",

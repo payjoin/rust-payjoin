@@ -8,14 +8,84 @@ use url::Url;
 pub(crate) use crate::directory::ShortId;
 use crate::output_substitution::OutputSubstitution;
 use crate::uri::error::InternalPjParseError;
-#[cfg(feature = "v2")]
-pub(crate) use crate::uri::url_ext::UrlExt;
 
 pub mod error;
+#[cfg(feature = "v1")]
+pub(crate) mod v1;
 #[cfg(feature = "v2")]
-pub(crate) mod url_ext;
+pub(crate) mod v2;
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+#[cfg_attr(feature = "v2", allow(clippy::large_enum_variant))]
+pub enum PjParam {
+    #[cfg(feature = "v1")]
+    V1(v1::PjParam),
+    #[cfg(feature = "v2")]
+    V2(v2::PjParam),
+}
+
+impl PjParam {
+    pub fn endpoint(&self) -> Url {
+        match self {
+            #[cfg(feature = "v1")]
+            PjParam::V1(url) => url.endpoint(),
+            #[cfg(feature = "v2")]
+            PjParam::V2(url) => url.endpoint(),
+        }
+    }
+}
+
+impl std::fmt::Display for PjParam {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // normalizing to uppercase enables QR alphanumeric mode encoding
+        // unfortunately Url normalizes these to be lowercase
+        let endpoint = self.endpoint();
+        let scheme = endpoint.scheme();
+        let host = endpoint.host_str().expect("host must be set");
+        let endpoint_str = self
+            .endpoint()
+            .as_str()
+            .replacen(scheme, &scheme.to_uppercase(), 1)
+            .replacen(host, &host.to_uppercase(), 1);
+        write!(f, "{endpoint_str}")
+    }
+}
+
+impl TryFrom<&str> for PjParam {
+    type Error = PjParseError;
+
+    fn try_from(endpoint: &str) -> Result<Self, Self::Error> {
+        let url = Url::parse(endpoint)
+            .map_err(|e| InternalPjParseError::IntoUrl(crate::IntoUrlError::ParseError(e)))?;
+        PjParam::try_from(url)
+    }
+}
+
+impl TryFrom<Url> for PjParam {
+    type Error = PjParseError;
+
+    fn try_from(endpoint: Url) -> Result<Self, Self::Error> {
+        #[cfg(feature = "v2")]
+        match v2::PjParam::parse(endpoint.clone()) {
+            Err(v2::PjParseError::NotV2) => (), // continue
+            Ok(v2) => return Ok(PjParam::V2(v2)),
+            Err(e) => return Err(InternalPjParseError::V2(e).into()),
+        }
+
+        #[cfg(feature = "v1")]
+        return Ok(PjParam::V1(v1::PjParam::parse(endpoint)?));
+
+        #[cfg(all(not(feature = "v1"), feature = "v2"))]
+        return Err(InternalPjParseError::V2(v2::PjParseError::NotV2).into());
+
+        #[cfg(all(not(feature = "v1"), not(feature = "v2")))]
+        compile_error!("Either v1 or v2 feature must be enabled");
+    }
+}
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum MaybePayjoinExtras {
     Supported(PayjoinExtras),
     Unsupported,
@@ -34,13 +104,14 @@ impl MaybePayjoinExtras {
 #[derive(Debug, Clone)]
 pub struct PayjoinExtras {
     /// pj parameter
-    pub(crate) endpoint: Url,
+    pub(crate) pj_param: PjParam,
     /// pjos parameter
     pub(crate) output_substitution: OutputSubstitution,
 }
 
 impl PayjoinExtras {
-    pub fn endpoint(&self) -> &Url { &self.endpoint }
+    pub fn pj_param(&self) -> &PjParam { &self.pj_param }
+    pub fn endpoint(&self) -> Url { self.pj_param.endpoint() }
     pub fn output_substitution(&self) -> OutputSubstitution { self.output_substitution }
 }
 
@@ -95,7 +166,7 @@ impl bitcoin_uri::de::DeserializeParams<'_> for MaybePayjoinExtras {
 
 #[derive(Default)]
 pub struct DeserializationState {
-    pj: Option<Url>,
+    pj: Option<PjParam>,
     pjos: Option<OutputSubstitution>,
 }
 
@@ -118,21 +189,11 @@ impl bitcoin_uri::SerializeParams for &PayjoinExtras {
     type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
 
     fn serialize_params(self) -> Self::Iterator {
-        // normalizing to uppercase enables QR alphanumeric mode encoding
-        // unfortunately Url normalizes these to be lowercase
-        let scheme = self.endpoint.scheme();
-        let host = self.endpoint.host_str().expect("host must be set");
-        let endpoint_str = self
-            .endpoint
-            .as_str()
-            .replacen(scheme, &scheme.to_uppercase(), 1)
-            .replacen(host, &host.to_uppercase(), 1);
-
         let mut params = Vec::with_capacity(2);
         if self.output_substitution == OutputSubstitution::Disabled {
             params.push(("pjos", String::from("0")));
         }
-        params.push(("pj", endpoint_str));
+        params.push(("pj", self.pj_param.to_string()));
         params.into_iter()
     }
 }
@@ -153,15 +214,8 @@ impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
         match key {
             "pj" if self.pj.is_none() => {
                 let endpoint = Cow::try_from(value).map_err(|_| InternalPjParseError::NotUtf8)?;
-                #[cfg(not(feature = "v2"))]
-                let url = Url::parse(&endpoint).map_err(|e| {
-                    InternalPjParseError::BadEndpoint(error::BadEndpointError::UrlParse(e))
-                })?;
-                #[cfg(feature = "v2")]
-                let url = url_ext::parse_with_fragment(&endpoint)
-                    .map_err(InternalPjParseError::BadEndpoint)?;
-
-                self.pj = Some(url);
+                let pj_param = PjParam::try_from(endpoint.as_ref())?;
+                self.pj = Some(pj_param);
 
                 Ok(bitcoin_uri::de::ParamKind::Known)
             }
@@ -186,19 +240,10 @@ impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
         match (self.pj, self.pjos) {
             (None, None) => Ok(MaybePayjoinExtras::Unsupported),
             (None, Some(_)) => Err(InternalPjParseError::MissingEndpoint.into()),
-            (Some(endpoint), pjos) => {
-                if endpoint.scheme() == "https"
-                    || endpoint.scheme() == "http"
-                        && endpoint.domain().unwrap_or_default().ends_with(".onion")
-                {
-                    Ok(MaybePayjoinExtras::Supported(PayjoinExtras {
-                        endpoint,
-                        output_substitution: pjos.unwrap_or(OutputSubstitution::Enabled),
-                    }))
-                } else {
-                    Err(InternalPjParseError::UnsecureEndpoint.into())
-                }
-            }
+            (Some(pj_param), pjos) => Ok(MaybePayjoinExtras::Supported(PayjoinExtras {
+                pj_param,
+                output_substitution: pjos.unwrap_or(OutputSubstitution::Enabled),
+            })),
         }
     }
 }
@@ -392,5 +437,33 @@ mod tests {
                 assert_eq!(extras.output_substitution, OutputSubstitution::Enabled),
             _ => panic!("Expected Supported PayjoinExtras"),
         }
+    }
+
+    /// Test that rejects HTTP URLs that are not onion addresses
+    #[test]
+    fn test_http_non_onion_rejected() {
+        // HTTP to regular domain should be rejected
+        let url = "http://example.com";
+        let result = PjParam::try_from(url);
+        assert!(
+            matches!(result, Err(PjParseError(InternalPjParseError::UnsecureEndpoint))),
+            "Expected UnsecureEndpoint error for HTTP to non-onion domain"
+        );
+
+        // HTTPS to subdomain should be accepted
+        let url = "https://example.com";
+        let result = PjParam::try_from(url);
+        assert!(
+            matches!(result, Ok(PjParam::V1(_))),
+            "Expected PjParam::V1 for HTTPS to non-onion domain without fragment"
+        );
+
+        // HTTP to domain ending in .onion should be accepted
+        let url = "http://example.onion";
+        let result = PjParam::try_from(url);
+        assert!(
+            matches!(result, Ok(PjParam::V1(_))),
+            "Expected PjParam::V1 for HTTP to onion domain without fragment"
+        );
     }
 }

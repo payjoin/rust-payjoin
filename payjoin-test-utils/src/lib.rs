@@ -24,6 +24,7 @@ use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::ContainerAsync;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
+use tracing_log::LogTracer;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 use url::Url;
 
@@ -37,6 +38,8 @@ static INIT_TRACING: OnceCell<()> = OnceCell::new();
 
 pub fn init_tracing() {
     INIT_TRACING.get_or_init(|| {
+        LogTracer::init().expect("failed to initialize log tracersetting up log tracer");
+
         let subscriber = FmtSubscriber::builder()
             .with_env_filter(EnvFilter::from_default_env())
             .with_test_writer()

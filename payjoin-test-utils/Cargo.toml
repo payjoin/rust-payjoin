@@ -27,3 +27,4 @@ tokio = { version = "1.38.1", features = ["full"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 url = "2.2.2"
+tracing-log = "0.2.0"

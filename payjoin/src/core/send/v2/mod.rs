@@ -374,7 +374,7 @@ pub(crate) fn serialize_v2_body(
     let base_url = Url::parse("http://localhost").expect("invalid URL");
 
     let placeholder_url =
-        serialize_url(base_url, output_substitution, fee_contribution, min_fee_rate, Version::Two);
+        serialize_url(&base_url, output_substitution, fee_contribution, min_fee_rate, Version::Two);
     let query_params = placeholder_url.query().unwrap_or_default();
     let base64 = psbt.to_string();
     Ok(format!("{base64}\n{query_params}").into_bytes())

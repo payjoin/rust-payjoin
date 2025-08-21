@@ -256,7 +256,11 @@ fn ensure<T>(condition: bool, error: T) -> Result<(), T> {
 }
 
 impl PsbtContext {
-    fn process_proposal(self, mut proposal: Psbt) -> InternalResult<Psbt> {
+    fn process_proposal(self, proposal: Psbt) -> InternalResult<Psbt> {
+        self.process_proposal_ref(proposal)
+    }
+
+    fn process_proposal_ref(&self, mut proposal: Psbt) -> InternalResult<Psbt> {
         self.basic_checks(&proposal)?;
         self.check_inputs(&proposal, true)?;
         let contributed_fee = self.check_outputs(&proposal)?;
@@ -650,13 +654,13 @@ fn determine_fee_contribution(
 }
 
 fn serialize_url(
-    endpoint: Url,
+    endpoint: &Url,
     output_substitution: OutputSubstitution,
     fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
     version: Version,
 ) -> Url {
-    let mut url = endpoint;
+    let mut url = endpoint.clone();
     url.query_pairs_mut().append_pair("v", &version.to_string());
     if output_substitution == OutputSubstitution::Disabled {
         url.query_pairs_mut().append_pair("disableoutputsubstitution", "true");
@@ -1044,7 +1048,7 @@ mod test {
     #[test]
     fn test_disable_output_substitution_query_param() -> Result<(), BoxError> {
         let url = serialize_url(
-            Url::parse("http://localhost")?,
+            &Url::parse("http://localhost")?,
             OutputSubstitution::Disabled,
             None,
             FeeRate::ZERO,
@@ -1053,7 +1057,7 @@ mod test {
         assert_eq!(url, Url::parse("http://localhost?v=2&disableoutputsubstitution=true")?);
 
         let url = serialize_url(
-            Url::parse("http://localhost")?,
+            &Url::parse("http://localhost")?,
             OutputSubstitution::Enabled,
             None,
             FeeRate::ZERO,
@@ -1066,7 +1070,7 @@ mod test {
     #[test]
     fn test_min_feerate_query_param() -> Result<(), BoxError> {
         let url = serialize_url(
-            Url::parse("http://localhost")?,
+            &Url::parse("http://localhost")?,
             OutputSubstitution::Enabled,
             None,
             FeeRate::from_sat_per_vb(10).expect("Could not parse feerate"),
@@ -1079,7 +1083,7 @@ mod test {
     #[test]
     fn test_additional_fee_contribution_query_param() -> Result<(), BoxError> {
         let url = serialize_url(
-            Url::parse("http://localhost")?,
+            &Url::parse("http://localhost")?,
             OutputSubstitution::Enabled,
             Some(AdditionalFeeContribution { max_amount: Amount::from_sat(1000), vout: 0 }),
             FeeRate::ZERO,

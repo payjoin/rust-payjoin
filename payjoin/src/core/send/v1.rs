@@ -167,7 +167,7 @@ impl Sender {
     /// Construct serialized V1 Request and Context from a Payjoin Proposal
     pub fn create_v1_post_request(&self) -> (Request, V1Context) {
         let url = serialize_url(
-            self.endpoint.clone(),
+            &self.endpoint,
             self.psbt_ctx.output_substitution,
             self.psbt_ctx.fee_contribution,
             self.psbt_ctx.min_fee_rate,

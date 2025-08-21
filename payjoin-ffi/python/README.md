@@ -23,8 +23,7 @@ cd rust-payjoin/payjoin-ffi/python
 python -m venv venv
 source venv/bin/activate
 
-# Generate the bindings (use the script appropriate for your platform)
-PYBIN="./venv/bin/" bash ./scripts/generate_<platform>.sh
+PYBIN="./venv/bin/" bash ./scripts/generate_bindings.sh
 
 # Build the wheel
 python setup.py bdist_wheel --verbose
@@ -46,8 +45,7 @@ You can [filter which tests](https://docs.python.org/3/library/unittest.html#com
 python -m venv venv
 source venv/bin/activate
 
-# Generate the bindings (use the script appropriate for your platform)
-PYBIN="./venv/bin/" bash ./scripts/generate_<platform>.sh
+PYBIN="./venv/bin/" bash ./scripts/generate_bindings.sh
 
 # Build the wheel
 python setup.py --verbose bdist_wheel

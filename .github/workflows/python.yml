@@ -11,20 +11,15 @@ env:
   RUSTUP_TOOLCHAIN: 1.85
 
 jobs:
-  build-wheels-and-test:
-    name: "Build and test Linux"
-    runs-on: ubuntu-latest
+  build-python-and-test:
+    name: "Build and test python"
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: payjoin-ffi/python
     strategy:
       matrix:
-        include:
-          - python: "3.9"
-          - python: "3.10"
-          - python: "3.11"
-          - python: "3.12"
-          - python: "3.13"
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: "Checkout"
         uses: actions/checkout@v4
@@ -35,20 +30,13 @@ jobs:
       - name: "Install Python"
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ matrix.python }}
-
-      - name: "Install build dependencies"
-        run: |
-          sudo apt update
-          sudo apt install -y build-essential python3-dev
+          python-version: 3.12
 
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
 
       - name: "Generate payjoin-ffi.py and binaries"
-        run: |
-            PYBIN=$(dirname $(which python))
-            PYBIN="$PYBIN" bash ./scripts/generate_linux.sh
+        run: bash ./scripts/generate_bindings.sh
 
       - name: "Build wheel"
         run: python setup.py bdist_wheel --verbose
@@ -57,44 +45,10 @@ jobs:
         run: pip install ./dist/*.whl
 
       - name: "Run tests"
-        run: python -m unittest -v
-
-  build-macos:
-    name: "Build and test macOS"
-    runs-on: macos-13
-    defaults:
-      run:
-        working-directory: payjoin-ffi/python
-    strategy:
-      matrix:
-        python:
-          - "3.12"
-    steps:
-      - name: "Checkout"
-        uses: actions/checkout@v4
-        with:
-          submodules: true
-
-      - name: "Install Rust 1.85.0"
-        uses: dtolnay/rust-toolchain@1.85.0
-
-      - name: "Install Python"
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python }}
-
-      - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
-
-      - name: "Generate payjoin-ffi.py and binaries"
-        run: bash ./scripts/generate_macos.sh
-
-      - name: "Build wheel"
-        run: python3 setup.py bdist_wheel --verbose
-
-      - name: "Install wheel"
-        run: pip3 install ./dist/*.whl
-
-      - name: "Run tests"
         # Skip integration test on macOS due to Docker issues
-        run: python3 -m unittest -v test/test_payjoin_unit_test.py
+        run: |
+          if [[ "${{ matrix.os }}" = "macos-latest" ]]; then
+            python -m unittest test/test_payjoin_unit_test.py -v
+          else
+            python -m unittest -v
+          fi

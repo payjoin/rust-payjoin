@@ -11,14 +11,12 @@ env:
   RUSTUP_TOOLCHAIN: 1.85
 
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
+  build-wheels-and-test:
+    name: "Build and test Linux"
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: payjoin-ffi/dart
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-13]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,19 +33,75 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Generate bindings and binaries
-        run: |
-          if [ "${{ matrix.os }}" = "macos-13" ]; then
-            bash ./scripts/generate_macos.sh
-          else
-            bash ./scripts/generate_linux.sh
-          fi
+        run: bash ./scripts/bindgen_generate.sh
+
+      - name: Run tests
+        run: dart test
+
+  build-macos-binary:
+    name: "Build macOS binary"
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: payjoin-ffi/dart
+    strategy:
+      matrix:
+        os: [macos-13, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: Install Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build aarch64 binary
+        run: bash ./scripts/bindgen_generate.sh
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: libpayjoin_ffi-${{ matrix.os }}
+          path: |
+            ${{ github.workspace }}/payjoin-ffi/target/x86_64-apple-darwin/release-smaller/libpayjoin_ffi.dylib
+            ${{ github.workspace }}/payjoin-ffi/target/aarch64-apple-darwin/release-smaller/libpayjoin_ffi.dylib
+
+  
+  build-merge:
+    name: "Merge and test macOS universal binary"
+    runs-on: macos-14
+    needs: [build-macos-binary]
+    defaults:
+      run:
+        working-directory: payjoin-ffi/dart
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      
+      - name: Download aarch64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: libpayjoin_ffi-aarch64
+          path: ${{ github.workspace}}/payjoin-ffi/target/aarch64-apple-darwin/release-smaller
+      
+      - name: Download x86_64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: libpayjoin_ffi-x86_64
+          path: ${{ github.workspace }}/payjoin-ffi/target/x86_64-apple-darwin/release-smaller
+
+      - name: Merge binaries
+        run: bash ./scripts/generate_universal_macos.sh
 
       - name: Run tests
         # Skip integration test on macOS due to Docker issues
-        run: |
-          if [ "${{ matrix.os }}" = "macos-13" ]; then
-            dart test "test/test_payjoin_unit_test.dart"
-          else
-            dart test
-          fi
+        run: dart test "test/test_payjoin_unit_test.dart"
 

@@ -55,9 +55,13 @@ set -euo pipefail
 echo "▶  cargo +nightly fmt --check"
 cargo +nightly fmt --all -- --check
 
-# -------- 2. Project-specific linter --------
+# -------- 2.1 Project-specific linter --------
 echo "▶  ./contrib/lint.sh"
 ./contrib/lint.sh
+
+# -------- 2.2 Documentation builder --------
+echo '▶  RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --document-private-items'
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --document-private-items
 
 # -------- 3. Fast local test suite --------
 echo "▶  ./contrib/test_local.sh"

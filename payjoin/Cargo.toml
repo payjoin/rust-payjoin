@@ -23,7 +23,7 @@ directory = []
 v1 = ["_core"]
 v2 = ["_core", "hpke", "dep:http", "bhttp", "ohttp", "url/serde", "directory"]
 #[doc = "Functions to fetch OHTTP keys via CONNECT proxy using reqwest. Enables `v2` since only `v2` uses OHTTP."]
-io = ["v2", "reqwest/rustls-tls"]
+io = ["v2", "reqwest/rustls-tls", "dashmap", "urlencoding", "thiserror"]
 _danger-local-https = ["reqwest/rustls-tls", "rustls"]
 _test-utils = []
 
@@ -40,6 +40,9 @@ reqwest = { version = "0.12", default-features = false, optional = true }
 rustls = { version = "0.22.4", optional = true }
 url = { version = "2.2.2", optional = true }
 serde_json = { version = "1.0.108", optional = true }
+dashmap = { version = "6.0", optional = true }
+urlencoding = { version = "2.1", optional = true }
+thiserror = { version = "1.0", optional = true }
 
 [dev-dependencies]
 bitcoind = { version = "0.36.0", features = ["0_21_2"] }

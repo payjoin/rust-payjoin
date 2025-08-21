@@ -676,11 +676,8 @@ impl WantsFeeRange {
     ) -> Result<ProvisionalProposal, ReplyableError> {
         let psbt = self.apply_fee(min_fee_rate, max_effective_fee_rate)?.clone();
         Ok(ProvisionalProposal {
-            psbt_context: PsbtContext {
-                original_psbt: self.original_psbt.clone(),
-                payjoin_psbt: psbt,
-            },
-            params: self.params.clone(),
+            psbt_context: PsbtContext { original_psbt: self.original_psbt, payjoin_psbt: psbt },
+            params: self.params,
         })
     }
 }
@@ -862,7 +859,6 @@ pub(crate) mod test {
                 min_fee_rate,
             )));
         let proposal_below_min_fee = proposal
-            .clone()
             .check_broadcast_suitability(Some(min_fee_rate), |_| Ok(true))
             .expect_err("Broadcast suitability with min_fee_rate below minimum should fail");
         assert_eq!(proposal_below_min_fee.to_string(), expected_err.to_string());

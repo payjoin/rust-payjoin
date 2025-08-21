@@ -52,15 +52,15 @@ pub trait App: Send + Sync {
     }
 }
 
-#[cfg(feature = "_danger-local-https")]
+#[cfg(feature = "_manual-tls")]
 fn http_agent(config: &Config) -> Result<reqwest::Client> {
     Ok(http_agent_builder(config.root_certificate.as_ref())?.build()?)
 }
 
-#[cfg(not(feature = "_danger-local-https"))]
+#[cfg(not(feature = "_manual-tls"))]
 fn http_agent(_config: &Config) -> Result<reqwest::Client> { Ok(reqwest::Client::new()) }
 
-#[cfg(feature = "_danger-local-https")]
+#[cfg(feature = "_manual-tls")]
 fn http_agent_builder(
     root_cert_path: Option<&std::path::PathBuf>,
 ) -> Result<reqwest::ClientBuilder> {

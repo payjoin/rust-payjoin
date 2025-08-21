@@ -126,7 +126,7 @@
                 partitions = 1;
                 partitionType = "count";
                 # TODO also run integration tests
-                # this needs --all-features to enable io,_danger_local_https features
+                # this needs --all-features to enable io,_manual-tls features
                 # unfortunately this can't yet work because running docker inside the nix sandbox is not possible,
                 # which precludes use of the redis test container
                 # cargoExtraArgs = "--locked --all-features";

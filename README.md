@@ -26,6 +26,16 @@
 
 The Payjoin Dev Kit `payjoin` library implements both [BIP 78 Payjoin V1](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) and [BIP 77 Payjoin V2](https://github.com/bitcoin/bips/blob/master/bip-0077.md).
 
+### Feature Flags
+
+The `payjoin` crate supports the following features:
+- `v1`: Enables BIP 78 Payjoin V1 support.
+- `v2`: Enables BIP 77 Payjoin V2 support (enabled by default).
+- `directory`: Enables Payjoin Directory support.
+
+**Note:**
+The crate will now build with no features enabled (e.g., `cargo build --no-default-features`), but in this configuration, no functionality is available. This is intended to support comprehensive CI and linting. To use the library, enable at least one of the features above.
+
 ### `payjoin-cli`
 
 The [`payjoin-cli`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli) crate performs no-frills Payjoin as a reference implementation using Bitcoin Core wallet.

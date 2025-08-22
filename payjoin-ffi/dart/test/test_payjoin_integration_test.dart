@@ -233,7 +233,7 @@ Future<payjoin.PayjoinProposalReceiveSession> process_maybe_inputs_owned(
 }
 
 Future<payjoin.PayjoinProposalReceiveSession> process_unchecked_proposal(
-    payjoin.UncheckedProposal proposal,
+    payjoin.UncheckedOriginalPayload proposal,
     InMemoryReceiverPersister recv_persister) async {
   final unchecked_proposal = proposal
       .checkBroadcastSuitability(null, MempoolAcceptanceCallback(receiver))
@@ -258,7 +258,7 @@ Future<payjoin.ReceiveSession?> retrieve_receiver_proposal(
   }
   var proposal = res.success();
   return await process_unchecked_proposal(
-      proposal as payjoin.UncheckedProposal, recv_persister);
+      proposal as payjoin.UncheckedOriginalPayload, recv_persister);
 }
 
 Future<payjoin.ReceiveSession?> process_receiver_proposal(
@@ -274,7 +274,7 @@ Future<payjoin.ReceiveSession?> process_receiver_proposal(
     return res;
   }
 
-  if (receiver is payjoin.UncheckedProposalReceiveSession) {
+  if (receiver is payjoin.UncheckedOriginalPayloadReceiveSession) {
     return await process_unchecked_proposal(receiver.inner, recv_persister);
   }
   if (receiver is payjoin.MaybeInputsOwnedReceiveSession) {

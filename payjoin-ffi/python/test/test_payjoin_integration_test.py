@@ -101,7 +101,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         proposal = res.success()
         return await self.process_unchecked_proposal(proposal, recv_persister)
 
-    async def process_unchecked_proposal(self, proposal: UncheckedProposal, recv_persister: InMemoryReceiverSessionEventLog) :
+    async def process_unchecked_proposal(self, proposal: UncheckedOriginalPayload, recv_persister: InMemoryReceiverSessionEventLog) :
         receiver = proposal.check_broadcast_suitability(None, MempoolAcceptanceCallback(self.receiver)).save(recv_persister)
         return await self.process_maybe_inputs_owned(receiver, recv_persister)
 

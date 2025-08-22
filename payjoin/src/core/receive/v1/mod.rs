@@ -47,7 +47,7 @@ use super::optional_parameters::Params;
 use super::{InputPair, OutputSubstitutionError, ReplyableError, SelectionError};
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
-use crate::receive::{InternalPayloadError, Original, PsbtContext};
+use crate::receive::{InternalPayloadError, OriginalPsbt, PsbtContext};
 use crate::ImplementationError;
 
 #[cfg(feature = "v1")]
@@ -75,7 +75,7 @@ pub use exclusive::*;
 #[cfg_attr(not(feature = "v1"), allow(dead_code))]
 #[derive(Debug, Clone)]
 pub struct UncheckedOriginalPsbt {
-    original: Original,
+    original: OriginalPsbt,
 }
 
 impl UncheckedOriginalPsbt {
@@ -120,7 +120,7 @@ impl UncheckedOriginalPsbt {
 #[derive(Debug, Clone)]
 #[cfg_attr(not(feature = "v1"), allow(dead_code))]
 pub struct MaybeInputsOwned {
-    pub(crate) original: Original,
+    pub(crate) original: OriginalPsbt,
 }
 
 impl MaybeInputsOwned {
@@ -153,7 +153,7 @@ impl MaybeInputsOwned {
 #[derive(Debug, Clone)]
 #[cfg_attr(not(feature = "v1"), allow(dead_code))]
 pub struct MaybeInputsSeen {
-    original: Original,
+    original: OriginalPsbt,
 }
 impl MaybeInputsSeen {
     /// Check that the receiver has never seen the inputs in the original proposal before.
@@ -183,7 +183,7 @@ impl MaybeInputsSeen {
 #[derive(Debug, Clone)]
 #[cfg_attr(not(feature = "v1"), allow(dead_code))]
 pub struct OutputsUnknown {
-    original: Original,
+    original: OriginalPsbt,
 }
 
 impl OutputsUnknown {
@@ -333,7 +333,7 @@ impl WantsOutputs {
         }
     }
 
-    pub(crate) fn from_proposal(proposal: Original, owned_vouts: Vec<usize>) -> Self {
+    pub(crate) fn from_proposal(proposal: OriginalPsbt, owned_vouts: Vec<usize>) -> Self {
         Self {
             original_psbt: proposal.psbt.clone(),
             payjoin_psbt: proposal.psbt,
@@ -753,25 +753,27 @@ pub(crate) mod test {
     use crate::receive::PayloadError;
     use crate::Version;
 
-    pub(crate) fn proposal_from_test_vector() -> Original {
+    pub(crate) fn proposal_from_test_vector() -> OriginalPsbt {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");
-        Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
+        OriginalPsbt { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
     }
 
     pub(crate) fn unchecked_proposal_from_test_vector() -> UncheckedOriginalPsbt {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");
-        UncheckedOriginalPsbt { original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params } }
+        UncheckedOriginalPsbt {
+            original: OriginalPsbt { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
+        }
     }
 
     pub(crate) fn maybe_inputs_owned_from_test_vector() -> MaybeInputsOwned {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");
-        MaybeInputsOwned { original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params } }
+        MaybeInputsOwned { original: OriginalPsbt { psbt: PARSED_ORIGINAL_PSBT.clone(), params } }
     }
 
     fn wants_outputs_from_test_vector(proposal: UncheckedOriginalPsbt) -> WantsOutputs {
@@ -792,7 +794,9 @@ pub(crate) mod test {
             .expect("Receiver output should be identified")
     }
 
-    fn provisional_proposal_from_test_vector(proposal: UncheckedOriginalPsbt) -> ProvisionalProposal {
+    fn provisional_proposal_from_test_vector(
+        proposal: UncheckedOriginalPsbt,
+    ) -> ProvisionalProposal {
         wants_outputs_from_test_vector(proposal)
             .commit_outputs()
             .commit_inputs()

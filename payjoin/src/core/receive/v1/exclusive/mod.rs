@@ -36,7 +36,7 @@ impl UncheckedOriginalPsbt {
         let (psbt, params) = crate::receive::parse_payload(base64, query, SUPPORTED_VERSIONS)
             .map_err(ReplyableError::Payload)?;
 
-        Ok(UncheckedOriginalPsbt { original: Original { psbt, params } })
+        Ok(UncheckedOriginalPsbt { original: OriginalPsbt { psbt, params } })
     }
 }
 

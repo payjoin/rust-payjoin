@@ -51,7 +51,7 @@ use crate::persist::{
     MaybeFatalTransition, MaybeFatalTransitionWithNoResults, MaybeSuccessTransition,
     MaybeTransientTransition, NextStateTransition,
 };
-use crate::receive::{parse_payload, InputPair, Original, PsbtContext};
+use crate::receive::{parse_payload, InputPair, OriginalPsbt, PsbtContext};
 use crate::uri::ShortId;
 use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
 
@@ -361,7 +361,7 @@ impl Receiver<Initialized> {
         &mut self,
         body: &[u8],
         context: ohttp::ClientResponse,
-    ) -> Result<Option<(Original, Option<HpkePublicKey>)>, Error> {
+    ) -> Result<Option<(OriginalPsbt, Option<HpkePublicKey>)>, Error> {
         let body = match process_get_res(body, context)
             .map_err(InternalSessionError::DirectoryResponse)?
         {
@@ -387,14 +387,14 @@ impl Receiver<Initialized> {
         ohttp_encapsulate(&mut self.context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
 
-    fn extract_proposal_from_v1(&mut self, response: &str) -> Result<Original, ReplyableError> {
+    fn extract_proposal_from_v1(&mut self, response: &str) -> Result<OriginalPsbt, ReplyableError> {
         self.unchecked_from_payload(response)
     }
 
     fn extract_proposal_from_v2(
         &mut self,
         response: Vec<u8>,
-    ) -> Result<(Original, HpkePublicKey), Error> {
+    ) -> Result<(OriginalPsbt, HpkePublicKey), Error> {
         let (payload_bytes, reply_key) =
             decrypt_message_a(&response, self.context.receiver_key.secret_key().clone())?;
         let payload = std::str::from_utf8(&payload_bytes)
@@ -402,7 +402,7 @@ impl Receiver<Initialized> {
         self.unchecked_from_payload(payload).map_err(Error::ReplyToSender).map(|p| (p, reply_key))
     }
 
-    fn unchecked_from_payload(&mut self, payload: &str) -> Result<Original, ReplyableError> {
+    fn unchecked_from_payload(&mut self, payload: &str) -> Result<OriginalPsbt, ReplyableError> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
         log::trace!("Received query: {query}, base64: {base64}"); // my guess is no \n so default is wrong
@@ -421,7 +421,7 @@ impl Receiver<Initialized> {
             params.output_substitution = OutputSubstitution::Disabled;
         }
 
-        let inner = Original { psbt, params };
+        let inner = OriginalPsbt { psbt, params };
         Ok(inner)
     }
 
@@ -432,7 +432,7 @@ impl Receiver<Initialized> {
 
     pub(crate) fn apply_unchecked_from_payload(
         self,
-        event: Original,
+        event: OriginalPsbt,
         reply_key: Option<HpkePublicKey>,
     ) -> Result<ReceiveSession, InternalReplayError> {
         if self.state.context.expiry < SystemTime::now() {
@@ -458,7 +458,7 @@ impl Receiver<Initialized> {
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct UncheckedOriginalPsbt {
-    pub(crate) original: Original,
+    pub(crate) original: OriginalPsbt,
     pub(crate) session_context: SessionContext,
 }
 
@@ -551,7 +551,7 @@ impl Receiver<UncheckedOriginalPsbt> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsOwned {
-    original: Original,
+    original: OriginalPsbt,
     session_context: SessionContext,
 }
 
@@ -619,7 +619,7 @@ impl Receiver<MaybeInputsOwned> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsSeen {
-    original: Original,
+    original: OriginalPsbt,
     session_context: SessionContext,
 }
 
@@ -679,7 +679,7 @@ impl Receiver<MaybeInputsSeen> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutputsUnknown {
-    original: Original,
+    original: OriginalPsbt,
     session_context: SessionContext,
 }
 
@@ -1142,7 +1142,7 @@ pub mod test {
         let params = Params::from_query_pairs(pairs, &[Version::Two])
             .expect("Test utils query params should not fail");
         UncheckedOriginalPsbt {
-            original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
+            original: OriginalPsbt { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
             session_context: SessionContext {
                 reply_key: Some(HpkeKeyPair::gen_keypair().public_key().clone()),
                 ..SHARED_CONTEXT.clone()
@@ -1155,7 +1155,7 @@ pub mod test {
         let params = Params::from_query_pairs(pairs, &[Version::Two])
             .expect("Test utils query params should not fail");
         MaybeInputsOwned {
-            original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
+            original: OriginalPsbt { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
             session_context: SessionContext {
                 reply_key: Some(HpkeKeyPair::gen_keypair().public_key().clone()),
                 ..SHARED_CONTEXT.clone()

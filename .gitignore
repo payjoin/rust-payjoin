@@ -1,7 +1,7 @@
 target
 *config.toml
 !example.config.toml
-*payjoin.sled
+*.sqlite
 Cargo.lock
 .vscode
 mutants.out*

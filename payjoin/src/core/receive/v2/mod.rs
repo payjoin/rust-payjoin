@@ -96,7 +96,7 @@ impl SessionContext {
 
     /// The mailbox ID where replies (the Proposal PSBT or errors) should
     /// be sent. For V1 requests this is the same as the proposal mailbox ID.
-    // FIXME before the UncheckedProposal typestate is reached, this returns the
+    // FIXME before the UncheckedOriginalPsbt typestate is reached, this returns the
     // propsal mailbox ID. It doesn't make sense to reply before receiving
     // anything from the sender and at that point it's ambiguous whether it's a
     // v2 or v1 sender anyway. Ideally this should be impossible leveraging the
@@ -129,7 +129,7 @@ fn short_id_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 pub enum ReceiveSession {
     Uninitialized(Receiver<UninitializedReceiver>),
     Initialized(Receiver<Initialized>),
-    UncheckedProposal(Receiver<UncheckedProposal>),
+    UncheckedOriginalPsbt(Receiver<UncheckedOriginalPsbt>),
     MaybeInputsOwned(Receiver<MaybeInputsOwned>),
     MaybeInputsSeen(Receiver<MaybeInputsSeen>),
     OutputsUnknown(Receiver<OutputsUnknown>),
@@ -149,10 +149,10 @@ impl ReceiveSession {
 
             (
                 ReceiveSession::Initialized(state),
-                SessionEvent::UncheckedProposal((proposal, reply_key)),
+                SessionEvent::UncheckedOriginalPsbt((proposal, reply_key)),
             ) => Ok(state.apply_unchecked_from_payload(proposal, reply_key)?),
 
-            (ReceiveSession::UncheckedProposal(state), SessionEvent::MaybeInputsOwned()) =>
+            (ReceiveSession::UncheckedOriginalPsbt(state), SessionEvent::MaybeInputsOwned()) =>
                 Ok(state.apply_maybe_inputs_owned()),
 
             (ReceiveSession::MaybeInputsOwned(state), SessionEvent::MaybeInputsSeen()) =>
@@ -320,15 +320,15 @@ impl Receiver<Initialized> {
         Ok((req, ohttp_ctx))
     }
 
-    /// The response can either be an UncheckedProposal or an ACCEPTED message
-    /// indicating no UncheckedProposal is available yet.
+    /// The response can either be an UncheckedOriginalPsbt or an ACCEPTED message
+    /// indicating no UncheckedOriginalPsbt is available yet.
     pub fn process_response(
         &mut self,
         body: &[u8],
         context: ohttp::ClientResponse,
     ) -> MaybeFatalTransitionWithNoResults<
         SessionEvent,
-        Receiver<UncheckedProposal>,
+        Receiver<UncheckedOriginalPsbt>,
         Receiver<Initialized>,
         Error,
     > {
@@ -344,9 +344,9 @@ impl Receiver<Initialized> {
 
         if let Some((proposal, reply_key)) = proposal {
             MaybeFatalTransitionWithNoResults::success(
-                SessionEvent::UncheckedProposal((proposal.clone(), reply_key.clone())),
+                SessionEvent::UncheckedOriginalPsbt((proposal.clone(), reply_key.clone())),
                 Receiver {
-                    state: UncheckedProposal {
+                    state: UncheckedOriginalPsbt {
                         original: proposal,
                         session_context: SessionContext { reply_key, ..self.state.context.clone() },
                     },
@@ -441,13 +441,13 @@ impl Receiver<Initialized> {
         }
 
         let new_state = Receiver {
-            state: UncheckedProposal {
+            state: UncheckedOriginalPsbt {
                 original: event,
                 session_context: SessionContext { reply_key, ..self.state.context },
             },
         };
 
-        Ok(ReceiveSession::UncheckedProposal(new_state))
+        Ok(ReceiveSession::UncheckedOriginalPsbt(new_state))
     }
 }
 
@@ -457,12 +457,12 @@ impl Receiver<Initialized> {
 /// [`Receiver::process_response()`].
 ///
 #[derive(Debug, Clone, PartialEq)]
-pub struct UncheckedProposal {
+pub struct UncheckedOriginalPsbt {
     pub(crate) original: Original,
     pub(crate) session_context: SessionContext,
 }
 
-impl State for UncheckedProposal {}
+impl State for UncheckedOriginalPsbt {}
 
 /// The original PSBT and the optional parameters received from the sender.
 ///
@@ -473,15 +473,15 @@ impl State for UncheckedProposal {}
 /// The recommended usage of this typestate differs based on whether you are implementing an
 /// interactive (where the receiver takes manual actions to respond to the
 /// payjoin proposal) or a non-interactive (ex. a donation page which automatically generates a new QR code
-/// for each visit) payment receiver. For the latter, you should call [`Receiver<UncheckedProposal>::check_broadcast_suitability`] to check
+/// for each visit) payment receiver. For the latter, you should call [`Receiver<UncheckedOriginalPsbt>::check_broadcast_suitability`] to check
 /// that the proposal is actually broadcastable (and, optionally, whether the fee rate is above the
 /// minimum limit you have set). These mechanisms protect the receiver against probing attacks, where
 /// a malicious sender can repeatedly send proposals to have the non-interactive receiver reveal the UTXOs
 /// it owns with the proposals it modifies.
 ///
 /// If you are implementing an interactive payment receiver, then such checks are not necessary, and you
-/// can go ahead with calling [`Receiver<UncheckedProposal>::assume_interactive_receiver`] to move on to the next typestate.
-impl Receiver<UncheckedProposal> {
+/// can go ahead with calling [`Receiver<UncheckedOriginalPsbt>::assume_interactive_receiver`] to move on to the next typestate.
+impl Receiver<UncheckedOriginalPsbt> {
     /// Checks that the original PSBT in the proposal can be broadcasted.
     ///
     /// If the receiver is a non-interactive payment processor (ex. a donation page which generates
@@ -1137,11 +1137,11 @@ pub mod test {
         amount: None,
     });
 
-    pub(crate) fn unchecked_proposal_v2_from_test_vector() -> UncheckedProposal {
+    pub(crate) fn unchecked_proposal_v2_from_test_vector() -> UncheckedOriginalPsbt {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::Two])
             .expect("Test utils query params should not fail");
-        UncheckedProposal {
+        UncheckedOriginalPsbt {
             original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
             session_context: SessionContext {
                 reply_key: Some(HpkeKeyPair::gen_keypair().public_key().clone()),
@@ -1343,7 +1343,7 @@ pub mod test {
         let noop_persister = NoopSessionPersister::default();
         let context = SessionContext { expiry: now, ..SHARED_CONTEXT.clone() };
         let receiver = Receiver {
-            state: UncheckedProposal {
+            state: UncheckedOriginalPsbt {
                 original: crate::receive::v1::test::proposal_from_test_vector(),
                 session_context: context.clone(),
             },

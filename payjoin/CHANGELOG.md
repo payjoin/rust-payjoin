@@ -194,10 +194,10 @@ This release attempts to stabilize the Payjoin V2 Bitcoin URI format. That inclu
 
 - Introduce `v2` feature with oblivious, asynchronous, serverless payjoin
 - Return `RequestContext` from which either v1 or v2 `(Request, Context)` tuples may be extracted
-- Derive `Debug, Clone` from `send::Request`, `receive::UncheckedProposal`, `optional_parameters::Params`
+- Derive `Debug, Clone` from `send::Request`, `receive::UncheckedOriginalPsbt`, `optional_parameters::Params`
 - Don't derive `Debug, Clone` from `uri::{Payjoin, PayjoinParams}`
 - Derive `Serialize, Deserialize` for `RequestContext` and `Enrolled` in `v2` to enable persistent state for asynchronous requests
-- `UncheckedProposal::check_can_broadcast` became `::check_broadcast_suitability` allowing receiver to specify minimum acceptable feerate
+- `UncheckedOriginalPsbt::check_can_broadcast` became `::check_broadcast_suitability` allowing receiver to specify minimum acceptable feerate
 
 ## 0.11.0
 

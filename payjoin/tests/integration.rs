@@ -173,7 +173,7 @@ mod integration {
         use payjoin::persist::NoopSessionPersister;
         use payjoin::receive::v2::{
             replay_event_log as replay_receiver_event_log, PayjoinProposal, Receiver,
-            UncheckedProposal,
+            UncheckedOriginalPsbt,
         };
         use payjoin::send::v2::SenderBuilder;
         use payjoin::{OhttpKeys, PjUri, UriExt};
@@ -731,7 +731,7 @@ mod integration {
 
         fn handle_directory_proposal(
             receiver: &bitcoincore_rpc::Client,
-            proposal: Receiver<UncheckedProposal>,
+            proposal: Receiver<UncheckedOriginalPsbt>,
             custom_inputs: Option<Vec<InputPair>>,
         ) -> Result<Receiver<PayjoinProposal>, BoxError> {
             let noop_persister = NoopSessionPersister::default();
@@ -1076,7 +1076,7 @@ mod integration {
         custom_inputs: Option<Vec<InputPair>>,
     ) -> Result<String, BoxError> {
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
-        let proposal = payjoin::receive::v1::UncheckedProposal::from_request(
+        let proposal = payjoin::receive::v1::UncheckedOriginalPsbt::from_request(
             req.body.as_slice(),
             req.url.query().unwrap_or(""),
             headers,
@@ -1089,7 +1089,7 @@ mod integration {
     }
 
     fn handle_proposal(
-        proposal: payjoin::receive::v1::UncheckedProposal,
+        proposal: payjoin::receive::v1::UncheckedOriginalPsbt,
         receiver: &bitcoincore_rpc::Client,
         custom_outputs: Option<Vec<TxOut>>,
         drain_script: Option<&bitcoin::Script>,

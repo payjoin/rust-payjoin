@@ -143,7 +143,7 @@ impl SessionHistory {
         Ok(Some((req, ctx)))
     }
 
-    pub fn session_context(&self) -> Option<&SessionContext> {
+    fn session_context(&self) -> Option<&SessionContext> {
         self.events.iter().find_map(|event| match event {
             SessionEvent::Created(session_context) => Some(session_context),
             _ => None,

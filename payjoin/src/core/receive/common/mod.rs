@@ -18,7 +18,7 @@ use super::optional_parameters::Params;
 use super::{InputPair, OutputSubstitutionError, ReplyableError, SelectionError};
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
-use crate::receive::{InternalPayloadError, Original, PsbtContext};
+use crate::receive::{InternalPayloadError, OriginalPayload, PsbtContext};
 
 /// Typestate which the receiver may substitute or add outputs to.
 ///
@@ -38,11 +38,11 @@ pub struct WantsOutputs {
 }
 
 impl WantsOutputs {
-    /// Create a new [`WantsOutputs`] typestate from an [`Original`] typestate and a list of
+    /// Create a new [`WantsOutputs`] typestate from an [`OriginalPayload`] typestate and a list of
     /// owned outputs.
     ///
     /// The first output in the `owned_vouts` list is used as the `change_vout`.
-    pub(crate) fn new(original: Original, owned_vouts: Vec<usize>) -> Self {
+    pub(crate) fn new(original: OriginalPayload, owned_vouts: Vec<usize>) -> Self {
         Self {
             original_psbt: original.psbt.clone(),
             payjoin_psbt: original.psbt,
@@ -670,7 +670,7 @@ mod tests {
         assert_eq!(original.psbt_fee_rate().unwrap().to_sat_per_vb_floor(), 2);
         // Specify excessive fee rate in sender params
         original_params.min_fee_rate = FeeRate::from_sat_per_vb_unchecked(1000);
-        let updated_original = Original { psbt: original.psbt, params: original_params };
+        let updated_original = OriginalPayload { psbt: original.psbt, params: original_params };
 
         let proposal_psbt = Psbt::from_str(RECEIVER_INPUT_CONTRIBUTION).unwrap();
         let input = InputPair::new(

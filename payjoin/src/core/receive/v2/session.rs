@@ -6,7 +6,7 @@ use super::{ReceiveSession, SessionContext};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
 use crate::receive::v2::{extract_err_req, SessionError};
-use crate::receive::{common, JsonReply, Original, PsbtContext};
+use crate::receive::{common, JsonReply, OriginalPayload, PsbtContext};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
 /// Errors that can occur when replaying a receiver event log
@@ -88,7 +88,7 @@ impl SessionHistory {
         })
     }
 
-    fn get_unchecked_proposal(&self) -> Option<Original> {
+    fn get_unchecked_proposal(&self) -> Option<OriginalPayload> {
         self.events.iter().find_map(|event| match event {
             SessionEvent::UncheckedOriginalPayload(proposal) => Some(proposal.0.clone()),
             _ => None,
@@ -175,7 +175,7 @@ impl SessionHistory {
 /// Each event can be used to transition the receiver state machine to a new state
 pub enum SessionEvent {
     Created(SessionContext),
-    UncheckedOriginalPayload((Original, Option<crate::HpkePublicKey>)),
+    UncheckedOriginalPayload((OriginalPayload, Option<crate::HpkePublicKey>)),
     MaybeInputsOwned(),
     MaybeInputsSeen(),
     OutputsUnknown(),

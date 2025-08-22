@@ -71,7 +71,7 @@ impl UncheckedOriginalPayload {
         let (psbt, params) = crate::receive::parse_payload(base64, query, SUPPORTED_VERSIONS)
             .map_err(ReplyableError::Payload)?;
 
-        Ok(Self { original: Original { psbt, params } })
+        Ok(Self { original: OriginalPayload { psbt, params } })
     }
 }
 
@@ -94,7 +94,7 @@ impl UncheckedOriginalPayload {
 /// can go ahead with calling [`Self::assume_interactive_receiver`] to move on to the next typestate.
 #[derive(Debug, Clone)]
 pub struct UncheckedOriginalPayload {
-    original: Original,
+    original: OriginalPayload,
 }
 
 impl UncheckedOriginalPayload {
@@ -136,7 +136,7 @@ impl UncheckedOriginalPayload {
 /// Call [`Self::check_inputs_not_owned`] to proceed.
 #[derive(Debug, Clone)]
 pub struct MaybeInputsOwned {
-    pub(crate) original: Original,
+    pub(crate) original: OriginalPayload,
 }
 
 impl MaybeInputsOwned {
@@ -166,7 +166,7 @@ impl MaybeInputsOwned {
 /// Call [`Self::check_no_inputs_seen_before`] to proceed.
 #[derive(Debug, Clone)]
 pub struct MaybeInputsSeen {
-    original: Original,
+    original: OriginalPayload,
 }
 impl MaybeInputsSeen {
     /// Check that the receiver has never seen the inputs in the original proposal before.
@@ -194,7 +194,7 @@ impl MaybeInputsSeen {
 /// Call [`Self::identify_receiver_outputs`] to proceed.
 #[derive(Debug, Clone)]
 pub struct OutputsUnknown {
-    original: Original,
+    original: OriginalPayload,
 }
 
 impl OutputsUnknown {
@@ -409,14 +409,18 @@ mod tests {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");
-        UncheckedOriginalPayload { original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params } }
+        UncheckedOriginalPayload {
+            original: OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
+        }
     }
 
     fn maybe_inputs_owned_from_test_vector() -> MaybeInputsOwned {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");
-        MaybeInputsOwned { original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params } }
+        MaybeInputsOwned {
+            original: OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
+        }
     }
 
     fn wants_outputs_from_test_vector(proposal: UncheckedOriginalPayload) -> WantsOutputs {

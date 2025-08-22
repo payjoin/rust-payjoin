@@ -16,10 +16,6 @@ pub use crate::db::DbPool;
 pub mod key_config;
 pub use crate::key_config::*;
 
-pub const DEFAULT_DIR_PORT: u16 = 8080;
-pub const DEFAULT_DB_HOST: &str = "localhost:6379";
-pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
-
 const CHACHA20_POLY1305_NONCE_LEN: usize = 32; // chacha20poly1305 n_k
 const POLY1305_TAG_SIZE: usize = 16;
 pub const BHTTP_REQ_BYTES: usize =
@@ -31,6 +27,9 @@ const V1_REJECT_RES_JSON: &str =
 const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message": "V2 receiver offline. V1 sends require synchronous communications."}}"#;
 
 mod db;
+
+pub mod cli;
+pub mod config;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 

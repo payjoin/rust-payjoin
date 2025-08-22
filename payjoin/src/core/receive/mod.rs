@@ -359,12 +359,12 @@ impl std::fmt::Display for FinalizeProposalError {
 impl std::error::Error for FinalizeProposalError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Original {
+pub struct OriginalPsbt {
     pub(crate) psbt: Psbt,
     pub(crate) params: Params,
 }
 
-impl Original {
+impl OriginalPsbt {
     // Calculates the fee rate of the original proposal PSBT.
     fn psbt_fee_rate(&self) -> Result<FeeRate, InternalPayloadError> {
         let original_psbt_fee = self.psbt.fee().map_err(|e| {

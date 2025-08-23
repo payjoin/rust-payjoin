@@ -77,7 +77,7 @@ impl ReceiverSessionEvent {
 pub enum ReceiveSession {
     Uninitialized,
     Initialized { inner: Arc<Initialized> },
-    UncheckedProposal { inner: Arc<UncheckedProposal> },
+    UncheckedOriginalPsbt { inner: Arc<UncheckedOriginalPsbt> },
     MaybeInputsOwned { inner: Arc<MaybeInputsOwned> },
     MaybeInputsSeen { inner: Arc<MaybeInputsSeen> },
     OutputsUnknown { inner: Arc<OutputsUnknown> },
@@ -96,8 +96,8 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
             ReceiveSession::Uninitialized(_) => Self::Uninitialized,
             ReceiveSession::Initialized(inner) =>
                 Self::Initialized { inner: Arc::new(inner.into()) },
-            ReceiveSession::UncheckedProposal(inner) =>
-                Self::UncheckedProposal { inner: Arc::new(inner.into()) },
+            ReceiveSession::UncheckedOriginalPsbt(inner) =>
+                Self::UncheckedOriginalPsbt { inner: Arc::new(inner.into()) },
             ReceiveSession::MaybeInputsOwned(inner) =>
                 Self::MaybeInputsOwned { inner: Arc::new(inner.into()) },
             ReceiveSession::MaybeInputsSeen(inner) =>
@@ -300,7 +300,7 @@ pub struct InitializedTransition(
             Option<
                 payjoin::persist::MaybeFatalTransitionWithNoResults<
                     payjoin::receive::v2::SessionEvent,
-                    payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>,
+                    payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedOriginalPsbt>,
                     payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>,
                     payjoin::receive::Error,
                 >,
@@ -331,7 +331,7 @@ impl InitializedTransition {
 #[derive(uniffi::Object)]
 pub struct InitializedTransitionOutcome(
     payjoin::persist::OptionalTransitionOutcome<
-        payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>,
+        payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedOriginalPsbt>,
         payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>,
     >,
 );
@@ -342,7 +342,7 @@ impl InitializedTransitionOutcome {
 
     pub fn is_success(&self) -> bool { self.0.is_success() }
 
-    pub fn success(&self) -> Option<Arc<UncheckedProposal>> {
+    pub fn success(&self) -> Option<Arc<UncheckedOriginalPsbt>> {
         self.0.success().map(|r| Arc::new(r.clone().into()))
     }
 }
@@ -350,14 +350,14 @@ impl InitializedTransitionOutcome {
 impl
     From<
         payjoin::persist::OptionalTransitionOutcome<
-            payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>,
+            payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedOriginalPsbt>,
             payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>,
         >,
     > for InitializedTransitionOutcome
 {
     fn from(
         value: payjoin::persist::OptionalTransitionOutcome<
-            payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>,
+            payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedOriginalPsbt>,
             payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>,
         >,
     ) -> Self {
@@ -388,7 +388,7 @@ impl Initialized {
             .map_err(Into::into)
     }
 
-    /// The response can either be an UncheckedProposal or an ACCEPTED message indicating no UncheckedProposal is available yet.
+    /// The response can either be an UncheckedOriginalPsbt or an ACCEPTED message indicating no UncheckedOriginalPsbt is available yet.
     pub fn process_response(&self, body: &[u8], ctx: &ClientResponse) -> InitializedTransition {
         InitializedTransition(Arc::new(RwLock::new(Some(
             self.0.clone().process_response(body, ctx.into()),
@@ -406,29 +406,29 @@ impl Initialized {
 }
 
 #[derive(Clone, uniffi::Object)]
-pub struct UncheckedProposal(
-    payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>,
+pub struct UncheckedOriginalPsbt(
+    payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedOriginalPsbt>,
 );
 
-impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>>
-    for UncheckedProposal
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedOriginalPsbt>>
+    for UncheckedOriginalPsbt
 {
     fn from(
-        value: payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>,
+        value: payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedOriginalPsbt>,
     ) -> Self {
         Self(value)
     }
 }
 
-impl From<UncheckedProposal>
-    for payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedProposal>
+impl From<UncheckedOriginalPsbt>
+    for payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedOriginalPsbt>
 {
-    fn from(value: UncheckedProposal) -> Self { value.0 }
+    fn from(value: UncheckedOriginalPsbt) -> Self { value.0 }
 }
 
 #[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
-pub struct UncheckedProposalTransition(
+pub struct UncheckedOriginalPsbtTransition(
     Arc<
         RwLock<
             Option<
@@ -442,7 +442,7 @@ pub struct UncheckedProposalTransition(
     >,
 );
 
-impl_save_for_transition!(UncheckedProposalTransition, MaybeInputsOwned);
+impl_save_for_transition!(UncheckedOriginalPsbtTransition, MaybeInputsOwned);
 
 #[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
@@ -467,13 +467,13 @@ pub trait CanBroadcast: Send + Sync {
 }
 
 #[uniffi::export]
-impl UncheckedProposal {
+impl UncheckedOriginalPsbt {
     pub fn check_broadcast_suitability(
         &self,
         min_fee_rate: Option<u64>,
         can_broadcast: Arc<dyn CanBroadcast>,
-    ) -> UncheckedProposalTransition {
-        UncheckedProposalTransition(Arc::new(RwLock::new(Some(
+    ) -> UncheckedOriginalPsbtTransition {
+        UncheckedOriginalPsbtTransition(Arc::new(RwLock::new(Some(
             self.0.clone().check_broadcast_suitability(
                 min_fee_rate.map(FeeRate::from_sat_per_kwu),
                 |transaction| {

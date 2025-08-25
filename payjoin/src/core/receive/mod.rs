@@ -517,11 +517,11 @@ pub struct WantsOutputs {
 }
 
 impl WantsOutputs {
-    pub(crate) fn from_proposal(proposal: Original, owned_vouts: Vec<usize>) -> Self {
+    pub(crate) fn from_original(original: Original, owned_vouts: Vec<usize>) -> Self {
         Self {
-            original_psbt: proposal.psbt.clone(),
-            payjoin_psbt: proposal.psbt,
-            params: proposal.params,
+            original_psbt: original.psbt.clone(),
+            payjoin_psbt: original.psbt,
+            params: original.params,
             change_vout: owned_vouts[0],
             owned_vouts,
         }

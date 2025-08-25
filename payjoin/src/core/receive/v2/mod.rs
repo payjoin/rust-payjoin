@@ -706,7 +706,7 @@ impl Receiver<OutputsUnknown> {
             },
         };
         let wants_outputs =
-            crate::receive::WantsOutputs::from_proposal(self.state.original, owned_vouts);
+            crate::receive::WantsOutputs::from_original(self.state.original, owned_vouts);
         MaybeFatalTransition::success(
             SessionEvent::WantsOutputs(wants_outputs.clone()),
             Receiver {

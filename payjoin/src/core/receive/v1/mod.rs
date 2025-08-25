@@ -205,7 +205,7 @@ impl OutputsUnknown {
         // In case of there being multiple outputs paying to the receiver, we select the first one
         // as the `change_vout`, which we will default to when making single output changes in
         // future mutating typestates.
-        Ok(WantsOutputs::from_proposal(self.original, owned_vouts))
+        Ok(WantsOutputs::from_original(self.original, owned_vouts))
     }
 }
 
@@ -269,8 +269,8 @@ impl WantsOutputs {
     #[cfg_attr(not(feature = "v1"), allow(dead_code))]
     pub fn commit_outputs(self) -> WantsInputs { WantsInputs::from_wants_outputs(self.inner) }
 
-    pub(crate) fn from_proposal(proposal: Original, owned_vouts: Vec<usize>) -> Self {
-        Self { inner: crate::receive::WantsOutputs::from_proposal(proposal, owned_vouts) }
+    pub(crate) fn from_original(original: Original, owned_vouts: Vec<usize>) -> Self {
+        Self { inner: crate::receive::WantsOutputs::from_original(original, owned_vouts) }
     }
 }
 

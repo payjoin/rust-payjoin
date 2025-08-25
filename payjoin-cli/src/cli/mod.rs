@@ -129,7 +129,7 @@ pub enum Commands {
     },
     /// Resume pending payjoins (BIP77/v2 only)
     #[cfg(feature = "v2")]
-    Resume,
+    Resume {},
 }
 
 pub fn parse_amount_in_sat(s: &str) -> Result<Amount, ParseAmountError> {

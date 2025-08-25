@@ -15,7 +15,6 @@ use crate::error::ForeignError;
 pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::OhttpKeys;
 use crate::receive::error::{ReceiverPersistedError, ReceiverReplayError};
-use crate::uri::error::IntoUrlError;
 use crate::{ClientResponse, OutputSubstitution, Request};
 
 pub mod error;
@@ -266,16 +265,23 @@ impl UninitializedReceiver {
         ohttp_keys: Arc<OhttpKeys>,
         expire_after: Option<u64>,
         amount: Option<u64>,
-    ) -> Result<InitialReceiveTransition, IntoUrlError> {
+        max_fee_rate_sat_per_vb: Option<u64>,
+    ) -> Result<InitialReceiveTransition, ImplementationError> {
         payjoin::receive::v2::Receiver::create_session(
             (*address).clone().into(),
-            directory,
+            directory.clone(),
             (*ohttp_keys).clone().into(),
             expire_after.map(Duration::from_secs),
             amount.map(payjoin::bitcoin::Amount::from_sat),
+            max_fee_rate_sat_per_vb.and_then(FeeRate::from_sat_per_vb),
         )
-        .map(|receiver| InitialReceiveTransition(Arc::new(RwLock::new(Some(receiver)))))
-        .map_err(IntoUrlError::from)
+        .map_err(|e| {
+            ImplementationError::from(format!(
+                "Session creation failed for directory {}: {}",
+                directory, e
+            ))
+        })
+        .map(|session| InitialReceiveTransition(Arc::new(RwLock::new(Some(session)))))
     }
 }
 

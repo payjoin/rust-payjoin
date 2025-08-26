@@ -367,7 +367,7 @@ mod tests {
 }
 
 #[cfg(test)]
-pub(crate) mod test {
+pub mod test {
     use std::str::FromStr;
 
     use bitcoin::absolute::{LockTime, Time};
@@ -390,15 +390,14 @@ pub(crate) mod test {
     use crate::receive::PayloadError;
     use crate::Version;
 
-    // TODO: restrict to v1 only since UncheckedProposal is a v1 only type
-    pub(crate) fn unchecked_proposal_from_test_vector() -> UncheckedProposal {
+    fn unchecked_proposal_from_test_vector() -> UncheckedProposal {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");
         UncheckedProposal { original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params } }
     }
 
-    pub(crate) fn maybe_inputs_owned_from_test_vector() -> MaybeInputsOwned {
+    fn maybe_inputs_owned_from_test_vector() -> MaybeInputsOwned {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");

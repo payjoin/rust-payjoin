@@ -1,11 +1,45 @@
+//! Receive BIP 78 Payjoin v1
+//!
+//! This module contains types and methods used to receive payjoin via BIP78.
+//! Usage is pretty simple:
+//!
+//! 1. Generate a pj_uri [BIP 21](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki)
+//!    using [`build_v1_pj_uri`]
+//! 2. Listen for a sender's request on the `pj` endpoint
+//! 3. Parse the request using
+//!    [`UncheckedProposal::from_request()`]
+//! 4. Validate the proposal using the `check` methods to guide you.
+//! 5. Assuming the proposal is valid, augment it into a payjoin with the available
+//!    `try_preserving_privacy` and `contribute` methods
+//! 6. Extract the payjoin PSBT and sign it
+//! 7. Respond to the sender's http request with the signed PSBT as payload.
+//!
+//! The `receive` feature provides all of the check methods, PSBT data manipulation, coin
+//! selection, and transport structures to receive payjoin and handle errors in a privacy
+//! preserving way.
+//!
+//! Receiving payjoin entails listening to a secure http endpoint for inbound requests.  The
+//! endpoint is displayed in the `pj` parameter of a [bip
+//! 21](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki) request URI.
+//!
+//! [reference implementation](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli)
+//!
+//! OHTTP Privacy Warning
+//! Encapsulated requests whether GET or POST—**must not be retried or reused**.
+//! Retransmitting the same ciphertext (including via automatic retries) breaks the unlinkability and privacy guarantees of OHTTP,
+//! as it allows the relay to correlate requests by comparing ciphertexts.
+//! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
+//! but request reuse makes correlation trivial for the relay.
+
 mod error;
 use bitcoin::OutPoint;
 pub(crate) use error::InternalRequestError;
 pub use error::RequestError;
 
 use super::*;
+pub use crate::receive::common::{WantsFeeRange, WantsInputs, WantsOutputs};
 use crate::uri::PjParam;
-use crate::{ImplementationError, IntoUrl, PjParseError, Version};
+use crate::{IntoUrl, OutputSubstitution, PjParseError, Version};
 
 const SUPPORTED_VERSIONS: &[Version] = &[Version::One];
 
@@ -214,7 +248,7 @@ fn validate_body(headers: impl Headers, body: &[u8]) -> Result<&[u8], RequestErr
     Ok(body)
 }
 
-impl super::WantsFeeRange {
+impl crate::receive::common::WantsFeeRange {
     /// Applies additional fee contribution now that the receiver has contributed inputs
     /// and may have added new outputs.
     ///
@@ -252,7 +286,7 @@ impl super::WantsFeeRange {
 /// Call [`Self::finalize_proposal`] to return a finalized [`PayjoinProposal`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProvisionalProposal {
-    pub(crate) psbt_context: PsbtContext,
+    psbt_context: PsbtContext,
 }
 
 impl ProvisionalProposal {
@@ -293,10 +327,29 @@ impl PayjoinProposal {
 
 #[cfg(test)]
 mod tests {
-    use bitcoin::{Address, AddressType};
-    use payjoin_test_utils::{ORIGINAL_PSBT, QUERY_PARAMS};
+    use std::str::FromStr;
+
+    use bitcoin::absolute::{LockTime, Time};
+    use bitcoin::bip32::{DerivationPath, Fingerprint, Xpriv, Xpub};
+    use bitcoin::hashes::Hash;
+    use bitcoin::key::rand::rngs::StdRng;
+    use bitcoin::key::rand::SeedableRng;
+    use bitcoin::psbt::Input;
+    use bitcoin::secp256k1::Secp256k1;
+    use bitcoin::taproot::LeafVersion;
+    use bitcoin::{
+        Address, Amount, Network, OutPoint, PubkeyHash, ScriptBuf, Sequence, TapLeafHash,
+        Transaction,
+    };
+    use payjoin_test_utils::{
+        DUMMY20, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT, QUERY_PARAMS, RECEIVER_INPUT_CONTRIBUTION,
+    };
 
     use super::*;
+    use crate::receive::common::interleave_shuffle;
+    use crate::receive::error::{InternalOutputSubstitutionError, InternalSelectionError};
+    use crate::receive::PayloadError;
+    use crate::Version;
 
     #[derive(Debug, Clone)]
     struct MockHeaders {
@@ -364,31 +417,6 @@ mod tests {
         );
         Ok(())
     }
-}
-
-#[cfg(test)]
-pub mod test {
-    use std::str::FromStr;
-
-    use bitcoin::absolute::{LockTime, Time};
-    use bitcoin::bip32::{DerivationPath, Fingerprint, Xpriv, Xpub};
-    use bitcoin::hashes::Hash;
-    use bitcoin::psbt::Input;
-    use bitcoin::secp256k1::Secp256k1;
-    use bitcoin::taproot::LeafVersion;
-    use bitcoin::{
-        Address, Amount, Network, OutPoint, PubkeyHash, ScriptBuf, Sequence, TapLeafHash,
-        Transaction,
-    };
-    use payjoin_test_utils::{
-        DUMMY20, PARSED_ORIGINAL_PSBT, QUERY_PARAMS, RECEIVER_INPUT_CONTRIBUTION,
-    };
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
-
-    use super::*;
-    use crate::receive::PayloadError;
-    use crate::Version;
 
     fn unchecked_proposal_from_test_vector() -> UncheckedProposal {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());

@@ -13,7 +13,7 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::receive::common::{PayjoinProposal, UncheckedProposal};
+use payjoin::receive::v1::{PayjoinProposal, UncheckedProposal};
 use payjoin::receive::ReplyableError::{self, Implementation, V1};
 use payjoin::send::v1::SenderBuilder;
 use payjoin::{ImplementationError, IntoUrl, Uri, UriExt};
@@ -27,7 +27,7 @@ use crate::app::{handle_interrupt, http_agent};
 use crate::db::Database;
 
 struct Headers<'a>(&'a hyper::HeaderMap);
-impl payjoin::receive::common::Headers for Headers<'_> {
+impl payjoin::receive::v1::Headers for Headers<'_> {
     fn get_header(&self, key: &str) -> Option<&str> {
         self.0.get(key).map(|v| v.to_str()).transpose().ok().flatten()
     }
@@ -117,7 +117,7 @@ impl App {
     fn construct_payjoin_uri(&self, amount: Amount, endpoint: impl IntoUrl) -> Result<String> {
         let pj_receiver_address = self.wallet.get_new_address()?;
 
-        let mut pj_uri = payjoin::receive::common::build_v1_pj_uri(
+        let mut pj_uri = payjoin::receive::v1::build_v1_pj_uri(
             &pj_receiver_address,
             endpoint,
             payjoin::OutputSubstitution::Enabled,
@@ -374,9 +374,9 @@ impl App {
 }
 
 fn try_contributing_inputs(
-    payjoin: payjoin::receive::common::WantsInputs,
+    payjoin: payjoin::receive::v1::WantsInputs,
     wallet: &BitcoindWallet,
-) -> Result<payjoin::receive::common::WantsFeeRange, ImplementationError> {
+) -> Result<payjoin::receive::v1::WantsFeeRange, ImplementationError> {
     let candidate_inputs =
         wallet.list_unspent().map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
 

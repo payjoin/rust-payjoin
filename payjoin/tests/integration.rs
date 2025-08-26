@@ -9,7 +9,7 @@ mod integration {
     use bitcoin::{Amount, FeeRate, OutPoint, TxIn, TxOut, Weight};
     use bitcoind::bitcoincore_rpc::json::{AddressType, WalletProcessPsbtResult};
     use bitcoind::bitcoincore_rpc::{self, RpcApi};
-    use payjoin::receive::common::build_v1_pj_uri;
+    use payjoin::receive::v1::build_v1_pj_uri;
     use payjoin::receive::InputPair;
     use payjoin::{ImplementationError, OutputSubstitution, PjUri, Request, Uri};
     use payjoin_test_utils::{init_bitcoind_sender_receiver, init_tracing, BoxError};
@@ -1069,14 +1069,14 @@ mod integration {
     // In production it it will come in as an HTTP request (over ssl or onion)
     fn handle_v1_pj_request(
         req: Request,
-        headers: impl payjoin::receive::common::Headers,
+        headers: impl payjoin::receive::v1::Headers,
         receiver: &bitcoincore_rpc::Client,
         custom_outputs: Option<Vec<TxOut>>,
         drain_script: Option<&bitcoin::Script>,
         custom_inputs: Option<Vec<InputPair>>,
     ) -> Result<String, BoxError> {
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
-        let proposal = payjoin::receive::common::UncheckedProposal::from_request(
+        let proposal = payjoin::receive::v1::UncheckedProposal::from_request(
             req.body.as_slice(),
             req.url.query().unwrap_or(""),
             headers,
@@ -1089,12 +1089,12 @@ mod integration {
     }
 
     fn handle_proposal(
-        proposal: payjoin::receive::common::UncheckedProposal,
+        proposal: payjoin::receive::v1::UncheckedProposal,
         receiver: &bitcoincore_rpc::Client,
         custom_outputs: Option<Vec<TxOut>>,
         drain_script: Option<&bitcoin::Script>,
         custom_inputs: Option<Vec<InputPair>>,
-    ) -> Result<payjoin::receive::common::PayjoinProposal, BoxError> {
+    ) -> Result<payjoin::receive::v1::PayjoinProposal, BoxError> {
         // Receive Check 1: Can Broadcast
         let proposal = proposal.check_broadcast_suitability(None, |tx| {
             Ok(receiver
@@ -1238,7 +1238,7 @@ mod integration {
 
     struct HeaderMock(HashMap<String, String>);
 
-    impl payjoin::receive::common::Headers for HeaderMock {
+    impl payjoin::receive::v1::Headers for HeaderMock {
         fn get_header(&self, key: &str) -> Option<&str> { self.0.get(key).map(|e| e.as_str()) }
     }
 

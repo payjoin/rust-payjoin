@@ -30,14 +30,13 @@ use crate::psbt::{
 };
 use crate::{ImplementationError, Version};
 
+pub(crate) mod common;
 mod error;
 pub(crate) mod optional_parameters;
 
 #[cfg(feature = "v1")]
 #[cfg_attr(docsrs, doc(cfg(feature = "v1")))]
-pub mod common;
-#[cfg(not(feature = "v1"))]
-pub(crate) mod common;
+pub mod v1;
 
 #[cfg(feature = "v2")]
 #[cfg_attr(docsrs, doc(cfg(feature = "v2")))]

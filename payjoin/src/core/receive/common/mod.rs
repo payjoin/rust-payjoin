@@ -1,35 +1,6 @@
-//! Receive BIP 78 Payjoin v1
-//!
-//! This module contains types and methods used to receive payjoin via BIP78.
-//! Usage is pretty simple:
-//!
-//! 1. Generate a pj_uri [BIP 21](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki)
-//!    using [`build_v1_pj_uri`]
-//! 2. Listen for a sender's request on the `pj` endpoint
-//! 3. Parse the request using
-//!    [`UncheckedProposal::from_request()`]
-//! 4. Validate the proposal using the `check` methods to guide you.
-//! 5. Assuming the proposal is valid, augment it into a payjoin with the available
-//!    `try_preserving_privacy` and `contribute` methods
-//! 6. Extract the payjoin PSBT and sign it
-//! 7. Respond to the sender's http request with the signed PSBT as payload.
-//!
-//! The `receive` feature provides all of the check methods, PSBT data manipulation, coin
-//! selection, and transport structures to receive payjoin and handle errors in a privacy
-//! preserving way.
-//!
-//! Receiving payjoin entails listening to a secure http endpoint for inbound requests.  The
-//! endpoint is displayed in the `pj` parameter of a [bip
-//! 21](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki) request URI.
-//!
-//! [reference implementation](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli)
-//!
-//! OHTTP Privacy Warning
-//! Encapsulated requests whether GET or POST—**must not be retried or reused**.
-//! Retransmitting the same ciphertext (including via automatic retries) breaks the unlinkability and privacy guarantees of OHTTP,
-//! as it allows the relay to correlate requests by comparing ciphertexts.
-//! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
-//! but request reuse makes correlation trivial for the relay.
+//! Common typestates and methods for both BIP 77 v2 and BIP 78 v1.
+//! This module isn't meant to be exposed publicly, but for v1 and v2
+//! APIs to expose as relevant typestates.
 
 use std::cmp::{max, min};
 
@@ -49,11 +20,6 @@ use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
 use crate::receive::{InternalPayloadError, Original, PsbtContext};
 
-#[cfg(feature = "v1")]
-mod v1;
-#[cfg(feature = "v1")]
-pub use v1::*;
-
 /// Typestate which the receiver may substitute or add outputs to.
 ///
 /// In addition to contributing new inputs to an existing PSBT, Payjoin allows the
@@ -64,11 +30,11 @@ pub use v1::*;
 /// Call [`Self::commit_outputs`] to proceed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsOutputs {
-    original_psbt: Psbt,
-    payjoin_psbt: Psbt,
-    params: Params,
-    change_vout: usize,
-    owned_vouts: Vec<usize>,
+    pub(crate) original_psbt: Psbt,
+    pub(crate) payjoin_psbt: Psbt,
+    pub(crate) params: Params,
+    pub(crate) change_vout: usize,
+    pub(crate) owned_vouts: Vec<usize>,
 }
 
 impl WantsOutputs {
@@ -192,7 +158,11 @@ impl WantsOutputs {
 /// maintaining the relative order in `original` but randomly inserting elements from `new`.
 ///
 /// The combined result replaces the contents of `original`.
-fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [T], rng: &mut R) {
+pub(crate) fn interleave_shuffle<T: Clone, R: rand::Rng>(
+    original: &mut Vec<T>,
+    new: &mut [T],
+    rng: &mut R,
+) {
     // Shuffle the substitute_outputs
     new.shuffle(rng);
     // Create a new vector to store the combined result
@@ -218,11 +188,11 @@ fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [
 /// Call [`Self::commit_inputs`] to proceed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsInputs {
-    original_psbt: Psbt,
-    payjoin_psbt: Psbt,
-    params: Params,
-    change_vout: usize,
-    receiver_inputs: Vec<InputPair>,
+    pub(crate) original_psbt: Psbt,
+    pub(crate) payjoin_psbt: Psbt,
+    pub(crate) params: Params,
+    pub(crate) change_vout: usize,
+    pub(crate) receiver_inputs: Vec<InputPair>,
 }
 
 impl WantsInputs {
@@ -253,7 +223,7 @@ impl WantsInputs {
     /// value increased by the amount of the candidate input.
     ///
     /// Errors if the transaction does not have exactly 2 outputs.
-    fn avoid_uih(
+    pub(crate) fn avoid_uih(
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<InputPair, SelectionError> {
@@ -389,15 +359,15 @@ impl WantsInputs {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsFeeRange {
-    original_psbt: Psbt,
-    payjoin_psbt: Psbt,
-    params: Params,
-    change_vout: usize,
-    receiver_inputs: Vec<InputPair>,
+    pub(crate) original_psbt: Psbt,
+    pub(crate) payjoin_psbt: Psbt,
+    pub(crate) params: Params,
+    pub(crate) change_vout: usize,
+    pub(crate) receiver_inputs: Vec<InputPair>,
 }
 
 impl WantsFeeRange {
-    fn apply_fee(
+    pub(crate) fn apply_fee(
         &mut self,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
@@ -470,7 +440,7 @@ impl WantsFeeRange {
     }
 
     /// Calculate the additional input weight contributed by the receiver.
-    fn additional_input_weight(&self) -> Result<Weight, InternalPayloadError> {
+    pub(crate) fn additional_input_weight(&self) -> Result<Weight, InternalPayloadError> {
         Ok(self.receiver_inputs.iter().map(|input_pair| input_pair.expected_weight).sum())
     }
 

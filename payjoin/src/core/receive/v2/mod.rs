@@ -1314,7 +1314,7 @@ pub mod test {
         let context = SessionContext { expiry: now, ..SHARED_CONTEXT.clone() };
         let receiver = Receiver {
             state: UncheckedProposal {
-                original: crate::receive::common::test::proposal_from_test_vector(),
+                original: crate::receive::tests::original_from_test_vector(),
                 session_context: context.clone(),
             },
         };

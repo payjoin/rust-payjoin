@@ -313,13 +313,7 @@ pub(crate) mod test {
     use crate::receive::PayloadError;
     use crate::Version;
 
-    pub(crate) fn proposal_from_test_vector() -> Original {
-        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
-        let params = Params::from_query_pairs(pairs, &[Version::One])
-            .expect("Could not parse params from query pairs");
-        Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
-    }
-
+    // TODO: restrict to v1 only since UncheckedProposal is a v1 only type
     pub(crate) fn unchecked_proposal_from_test_vector() -> UncheckedProposal {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])

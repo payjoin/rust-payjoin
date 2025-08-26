@@ -458,7 +458,7 @@ impl Original {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use bitcoin::absolute::{LockTime, Time};
     use bitcoin::hashes::Hash;
     use bitcoin::key::{PublicKey, WPubkeyHash};
@@ -467,7 +467,7 @@ mod tests {
     use bitcoin::{
         witness, Amount, PubkeyHash, ScriptBuf, ScriptHash, Txid, WScriptHash, XOnlyPublicKey,
     };
-    use payjoin_test_utils::{DUMMY20, DUMMY32};
+    use payjoin_test_utils::{DUMMY20, DUMMY32, PARSED_ORIGINAL_PSBT, QUERY_PARAMS};
 
     use super::*;
     use crate::psbt::InternalPsbtInputError::InvalidScriptPubKey;
@@ -475,6 +475,13 @@ mod tests {
     // TODO: this is duplicated in a couple places. In these tests, receiver, and the sender.
     // We should pub(crate) it and moved to a common place.
     const NON_WITNESS_DATA_WEIGHT: Weight = Weight::from_non_witness_data_size(32 + 4 + 4);
+
+    pub(crate) fn original_from_test_vector() -> Original {
+        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
+        let params = Params::from_query_pairs(pairs, &[Version::One])
+            .expect("Could not parse params from query pairs");
+        Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
+    }
 
     #[test]
     fn input_pair_with_expected_weight() {

@@ -51,9 +51,9 @@ use crate::receive::{InternalPayloadError, Original, PsbtContext};
 use crate::ImplementationError;
 
 #[cfg(feature = "v1")]
-mod exclusive;
+mod v1;
 #[cfg(feature = "v1")]
-pub use exclusive::*;
+pub use v1::*;
 
 /// Typestate which the receiver may substitute or add outputs to.
 ///

@@ -180,8 +180,10 @@ impl App {
 
     #[cfg(feature = "_manual-tls")]
     fn init_tls_acceptor(&self) -> Result<tokio_rustls::TlsAcceptor> {
-        use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-        use rustls::ServerConfig;
+        use std::sync::Arc;
+
+        use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
+        use tokio_rustls::rustls::ServerConfig;
         use tokio_rustls::TlsAcceptor;
 
         let key_der = std::fs::read(

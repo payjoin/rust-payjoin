@@ -39,8 +39,8 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[cfg(feature = "_manual-tls")]
 fn init_tls_acceptor(cert_key: (Vec<u8>, Vec<u8>)) -> Result<tokio_rustls::TlsAcceptor> {
-    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-    use rustls::ServerConfig;
+    use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    use tokio_rustls::rustls::ServerConfig;
     use tokio_rustls::TlsAcceptor;
     let (cert, key) = cert_key;
     let cert = CertificateDer::from(cert);

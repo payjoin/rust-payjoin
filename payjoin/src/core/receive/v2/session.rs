@@ -2,7 +2,7 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use super::{ReceiveSession, Receiver, SessionContext, UninitializedReceiver};
+use super::{ReceiveSession, SessionContext};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
 use crate::receive::v2::{extract_err_req, SessionError};
@@ -52,7 +52,7 @@ where
     let logs = persister
         .load()
         .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
-    let mut receiver = ReceiveSession::Uninitialized(Receiver { state: UninitializedReceiver {} });
+    let mut receiver = ReceiveSession::Uninitialized;
     let mut history = SessionHistory::default();
 
     for event in logs {
@@ -182,7 +182,8 @@ mod tests {
     use crate::receive::tests::original_from_test_vector;
     use crate::receive::v2::test::SHARED_CONTEXT;
     use crate::receive::v2::{
-        Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal, UncheckedProposal,
+        Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal, Receiver,
+        UncheckedProposal,
     };
 
     fn unchecked_receiver_from_test_vector() -> Receiver<UncheckedProposal> {

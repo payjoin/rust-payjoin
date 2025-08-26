@@ -84,7 +84,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         raise Exception(f"Unknown receiver state: {receiver}")
 
     def create_receiver_context(self, receiver_address: bitcoinffi.Address, directory: Url, ohttp_keys: OhttpKeys, recv_persister: InMemoryReceiverSessionEventLog) -> Initialized:
-        receiver = UninitializedReceiver().create_session(address=receiver_address, directory=directory.as_string(), ohttp_keys=ohttp_keys, expire_after=None, amount=None).save(recv_persister)
+        receiver = ReceiverBuilder(address=receiver_address, directory=directory.as_string(), ohttp_keys=ohttp_keys).build().save(recv_persister)
         return receiver
 
     async def retrieve_receiver_proposal(self, receiver: Initialized, recv_persister: InMemoryReceiverSessionEventLog, ohttp_relay: Url):

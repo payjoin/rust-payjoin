@@ -173,7 +173,7 @@ mod integration {
         use payjoin::persist::NoopSessionPersister;
         use payjoin::receive::v2::{
             replay_event_log as replay_receiver_event_log, PayjoinProposal, Receiver,
-            UncheckedProposal,
+            ReceiverBuilder, UncheckedProposal,
         };
         use payjoin::send::v2::SenderBuilder;
         use payjoin::{OhttpKeys, PjUri, UriExt};
@@ -210,7 +210,8 @@ mod integration {
                     .assume_checked();
                 let noop_persister = NoopSessionPersister::default();
                 let mut bad_initializer =
-                    Receiver::create_session(mock_address, directory, bad_ohttp_keys, None, None)?
+                    ReceiverBuilder::new(mock_address, directory, bad_ohttp_keys)?
+                        .build()
                         .save(&noop_persister)?;
                 let (req, _ctx) = bad_initializer.create_poll_request(&ohttp_relay)?;
                 agent
@@ -249,14 +250,10 @@ mod integration {
                 // Inside the Receiver:
                 let address = receiver.get_new_address(None, None)?.assume_checked();
                 // test session with expiry in the past
-                let mut expired_receiver = Receiver::create_session(
-                    address,
-                    directory,
-                    ohttp_keys,
-                    Some(Duration::from_secs(0)),
-                    None,
-                )?
-                .save(&recv_noop_persister)?;
+                let mut expired_receiver = ReceiverBuilder::new(address, directory, ohttp_keys)?
+                    .with_expiry(Duration::from_secs(0))
+                    .build()
+                    .save(&recv_noop_persister)?;
                 match expired_receiver.create_poll_request(&ohttp_relay) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
@@ -306,9 +303,9 @@ mod integration {
                 // Inside the Receiver:
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
-                let mut session =
-                    Receiver::create_session(address, directory, ohttp_keys, None, None)?
-                        .save(&persister)?;
+                let mut session = ReceiverBuilder::new(address, directory, ohttp_keys)?
+                    .build()
+                    .save(&persister)?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
                 let ohttp_relay = services.ohttp_relay_url();
@@ -424,9 +421,9 @@ mod integration {
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
                 // test session with expiry in the future
-                let mut session =
-                    Receiver::create_session(address, directory, ohttp_keys, None, None)?
-                        .save(&recv_persister)?;
+                let mut session = ReceiverBuilder::new(address, directory, ohttp_keys)?
+                    .build()
+                    .save(&recv_persister)?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
                 let ohttp_relay = services.ohttp_relay_url();
@@ -604,14 +601,10 @@ mod integration {
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let recv_persister = NoopSessionPersister::default();
                 let address = receiver.get_new_address(None, None)?.assume_checked();
-                let mut session = Receiver::create_session(
-                    address,
-                    directory.clone(),
-                    ohttp_keys.clone(),
-                    None,
-                    None,
-                )?
-                .save(&recv_persister)?;
+                let mut session =
+                    ReceiverBuilder::new(address, directory.clone(), ohttp_keys.clone())?
+                        .build()
+                        .save(&recv_persister)?;
 
                 // **********************
                 // Inside the V1 Sender:

@@ -35,9 +35,9 @@ pub(crate) mod optional_parameters;
 
 #[cfg(feature = "v1")]
 #[cfg_attr(docsrs, doc(cfg(feature = "v1")))]
-pub mod v1;
+pub mod common;
 #[cfg(not(feature = "v1"))]
-pub(crate) mod v1;
+pub(crate) mod common;
 
 #[cfg(feature = "v2")]
 #[cfg_attr(docsrs, doc(cfg(feature = "v2")))]

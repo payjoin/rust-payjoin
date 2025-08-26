@@ -6,7 +6,7 @@ use super::{ReceiveSession, Receiver, SessionContext, UninitializedReceiver};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
 use crate::receive::v2::{extract_err_req, SessionError};
-use crate::receive::{v1, JsonReply, Original};
+use crate::receive::{common, JsonReply, Original};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
 /// Errors that can occur when replaying a receiver event log
@@ -160,10 +160,10 @@ pub enum SessionEvent {
     MaybeInputsOwned(),
     MaybeInputsSeen(),
     OutputsUnknown(),
-    WantsOutputs(v1::WantsOutputs),
-    WantsInputs(v1::WantsInputs),
-    WantsFeeRange(v1::WantsFeeRange),
-    ProvisionalProposal(v1::ProvisionalProposal),
+    WantsOutputs(common::WantsOutputs),
+    WantsInputs(common::WantsInputs),
+    WantsFeeRange(common::WantsFeeRange),
+    ProvisionalProposal(common::ProvisionalProposal),
     PayjoinProposal(bitcoin::Psbt),
     /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
     /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
@@ -178,7 +178,7 @@ mod tests {
 
     use super::*;
     use crate::persist::test_utils::InMemoryTestPersister;
-    use crate::receive::v1::test::{
+    use crate::receive::common::test::{
         proposal_from_test_vector, unchecked_proposal_from_test_vector,
     };
     use crate::receive::v2::test::SHARED_CONTEXT;
@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_session_event_serialization_roundtrip() {
-        let proposal = crate::receive::v1::test::proposal_from_test_vector();
+        let proposal = crate::receive::common::test::proposal_from_test_vector();
         let unchecked_proposal = unchecked_proposal_from_test_vector();
         let maybe_inputs_owned = unchecked_proposal.clone().assume_interactive_receiver();
         let maybe_inputs_seen = maybe_inputs_owned

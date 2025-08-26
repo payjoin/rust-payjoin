@@ -57,7 +57,7 @@ pub enum ReplyableError {
     Payload(PayloadError),
     /// Protocol-specific errors for BIP-78 v1 requests (e.g. HTTP request validation, parameter checks)
     #[cfg(feature = "v1")]
-    V1(crate::receive::v1::RequestError),
+    V1(crate::receive::common::RequestError),
     /// Error arising due to the specific receiver implementation
     ///
     /// e.g. database errors, network failures, wallet errors

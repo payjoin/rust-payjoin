@@ -162,8 +162,8 @@ impl ReceiveSession {
 
             (
                 ReceiveSession::WantsFeeRange(state),
-                SessionEvent::ProvisionalProposal(provisional_proposal),
-            ) => Ok(state.apply_provisional_proposal(provisional_proposal)),
+                SessionEvent::ProvisionalProposal(psbt_context),
+            ) => Ok(state.apply_provisional_proposal(psbt_context)),
 
             (
                 ReceiveSession::ProvisionalProposal(state),
@@ -881,33 +881,31 @@ impl Receiver<WantsFeeRange> {
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<ProvisionalProposal>, ReplyableError> {
-        let inner = match self.state.inner.apply_fee_range(min_fee_rate, max_effective_fee_rate) {
-            Ok(inner) => inner,
-            Err(e) => {
-                return MaybeFatalTransition::fatal(
-                    SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
-                    e,
-                );
-            }
-        };
+        let psbt_context =
+            match self.state.inner._apply_fee_range(min_fee_rate, max_effective_fee_rate) {
+                Ok(inner) => inner,
+                Err(e) => {
+                    return MaybeFatalTransition::fatal(
+                        SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                        e,
+                    );
+                }
+            };
         MaybeFatalTransition::success(
-            SessionEvent::ProvisionalProposal(inner.clone()),
+            SessionEvent::ProvisionalProposal(psbt_context.clone()),
             Receiver {
                 state: ProvisionalProposal {
-                    psbt_context: inner.psbt_context,
+                    psbt_context,
                     session_context: self.state.session_context.clone(),
                 },
             },
         )
     }
 
-    pub(crate) fn apply_provisional_proposal(
-        self,
-        inner: common::ProvisionalProposal,
-    ) -> ReceiveSession {
+    pub(crate) fn apply_provisional_proposal(self, psbt_context: PsbtContext) -> ReceiveSession {
         let new_state = Receiver {
             state: ProvisionalProposal {
-                psbt_context: inner.psbt_context,
+                psbt_context,
                 session_context: self.state.session_context,
             },
         };

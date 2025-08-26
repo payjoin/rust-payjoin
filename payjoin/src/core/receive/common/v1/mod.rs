@@ -5,7 +5,7 @@ pub use error::RequestError;
 
 use super::*;
 use crate::uri::PjParam;
-use crate::{IntoUrl, PjParseError, Version};
+use crate::{ImplementationError, IntoUrl, PjParseError, Version};
 
 const SUPPORTED_VERSIONS: &[Version] = &[Version::One];
 
@@ -212,6 +212,83 @@ fn validate_body(headers: impl Headers, body: &[u8]) -> Result<&[u8], RequestErr
     }
 
     Ok(body)
+}
+
+impl super::WantsFeeRange {
+    /// Applies additional fee contribution now that the receiver has contributed inputs
+    /// and may have added new outputs.
+    ///
+    /// How much the receiver ends up paying for fees depends on how much the sender stated they
+    /// were willing to pay in the parameters of the original proposal. For additional
+    /// inputs, fees will be subtracted from the sender's outputs as much as possible until we hit
+    /// the limit the sender specified in the Payjoin parameters. Any remaining fees for the new inputs
+    /// will be then subtracted from the change output of the receiver.
+    /// Fees for additional outputs are always subtracted from the receiver's outputs.
+    ///
+    /// `max_effective_fee_rate` is the maximum effective fee rate that the receiver is
+    /// willing to pay for their own input/output contributions. A `max_effective_fee_rate`
+    /// of zero indicates that the receiver is not willing to pay any additional
+    /// fees. Errors if the final effective fee rate exceeds `max_effective_fee_rate`.
+    ///
+    /// If not provided, `min_fee_rate` and `max_effective_fee_rate` default to the
+    /// minimum possible relay fee.
+    ///
+    /// The minimum effective fee limit is the highest of the minimum limit set by the sender in
+    /// the original proposal parameters and the limit passed in the `min_fee_rate` parameter.
+    pub fn apply_fee_range(
+        self,
+        min_fee_rate: Option<FeeRate>,
+        max_effective_fee_rate: Option<FeeRate>,
+    ) -> Result<ProvisionalProposal, ReplyableError> {
+        let psbt_context = self._apply_fee_range(min_fee_rate, max_effective_fee_rate)?;
+        Ok(ProvisionalProposal { psbt_context })
+    }
+}
+
+/// Typestate for a checked proposal which had both the outputs and the inputs modified
+/// by the receiver. The receiver may sign and finalize the Payjoin proposal which will be sent to
+/// the sender for their signature.
+///
+/// Call [`Self::finalize_proposal`] to return a finalized [`PayjoinProposal`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProvisionalProposal {
+    pub(crate) psbt_context: PsbtContext,
+}
+
+impl ProvisionalProposal {
+    /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
+    /// they sign the transaction and broadcast it to the network.
+    ///
+    /// Finalization consists of two steps:
+    ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
+    ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
+    pub fn finalize_proposal(
+        self,
+        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
+    ) -> Result<PayjoinProposal, ReplyableError> {
+        let finalized_psbt = self
+            .psbt_context
+            .finalize_proposal(wallet_process_psbt)
+            .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
+        Ok(PayjoinProposal { payjoin_psbt: finalized_psbt })
+    }
+}
+
+/// A finalized Payjoin proposal, complete with fees and receiver signatures, that the sender
+/// should find acceptable.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PayjoinProposal {
+    payjoin_psbt: Psbt,
+}
+
+impl PayjoinProposal {
+    /// The UTXOs that would be spent by this Payjoin transaction.
+    pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
+        self.payjoin_psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
+    }
+
+    /// The Payjoin Proposal PSBT.
+    pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
 }
 
 #[cfg(test)]

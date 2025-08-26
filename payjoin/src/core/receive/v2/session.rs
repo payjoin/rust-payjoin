@@ -6,7 +6,7 @@ use super::{ReceiveSession, Receiver, SessionContext, UninitializedReceiver};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
 use crate::receive::v2::{extract_err_req, SessionError};
-use crate::receive::{common, JsonReply, Original};
+use crate::receive::{common, JsonReply, Original, PsbtContext};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
 /// Errors that can occur when replaying a receiver event log
@@ -111,8 +111,8 @@ impl SessionHistory {
     /// Psbt with fee contributions applied
     pub fn psbt_ready_for_signing(&self) -> Option<bitcoin::Psbt> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::ProvisionalProposal(proposal) =>
-                Some(proposal.psbt_context.payjoin_psbt.clone()),
+            SessionEvent::ProvisionalProposal(psbt_context) =>
+                Some(psbt_context.payjoin_psbt.clone()),
             _ => None,
         })
     }
@@ -163,7 +163,7 @@ pub enum SessionEvent {
     WantsOutputs(common::WantsOutputs),
     WantsInputs(common::WantsInputs),
     WantsFeeRange(common::WantsFeeRange),
-    ProvisionalProposal(common::ProvisionalProposal),
+    ProvisionalProposal(PsbtContext),
     PayjoinProposal(bitcoin::Psbt),
     /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
     /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
@@ -204,8 +204,8 @@ mod tests {
             .expect("Outputs should be identified");
         let wants_inputs = wants_outputs.clone().commit_outputs();
         let wants_fee_range = wants_inputs.clone().commit_inputs();
-        let provisional_proposal = wants_fee_range.clone().apply_fee_range(None, None).unwrap();
-        let payjoin_proposal = provisional_proposal
+        let psbt_context = wants_fee_range.clone()._apply_fee_range(None, None).unwrap();
+        let psbt = psbt_context
             .clone()
             .finalize_proposal(|psbt| Ok(psbt.clone()))
             .expect("Payjoin proposal should be finalized");
@@ -220,8 +220,8 @@ mod tests {
             SessionEvent::WantsOutputs(wants_outputs),
             SessionEvent::WantsInputs(wants_inputs),
             SessionEvent::WantsFeeRange(wants_fee_range),
-            SessionEvent::ProvisionalProposal(provisional_proposal),
-            SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()),
+            SessionEvent::ProvisionalProposal(psbt_context),
+            SessionEvent::PayjoinProposal(psbt.clone()),
         ];
 
         for event in test_cases {
@@ -395,9 +395,9 @@ mod tests {
             .expect("Outputs should be identified");
         let wants_inputs = wants_outputs.clone().commit_outputs();
         let wants_fee_range = wants_inputs.clone().commit_inputs();
-        let provisional_proposal = wants_fee_range
+        let psbt_context = wants_fee_range
             .clone()
-            .apply_fee_range(None, None)
+            ._apply_fee_range(None, None)
             .expect("Contributed inputs should be valid");
         let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
 
@@ -409,21 +409,16 @@ mod tests {
         events.push(SessionEvent::WantsOutputs(wants_outputs));
         events.push(SessionEvent::WantsInputs(wants_inputs));
         events.push(SessionEvent::WantsFeeRange(wants_fee_range));
-        events.push(SessionEvent::ProvisionalProposal(provisional_proposal.clone()));
+        events.push(SessionEvent::ProvisionalProposal(psbt_context.clone()));
 
         let test = SessionHistoryTest {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: Some(
-                    provisional_proposal.psbt_context.payjoin_psbt.clone(),
-                ),
+                psbt_with_fee_contributions: Some(psbt_context.payjoin_psbt.clone()),
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::ProvisionalProposal(Receiver {
-                state: ProvisionalProposal {
-                    psbt_context: provisional_proposal.psbt_context,
-                    session_context,
-                },
+                state: ProvisionalProposal { psbt_context: psbt_context, session_context },
             }),
         };
         run_session_history_test(test)
@@ -451,11 +446,11 @@ mod tests {
             .expect("Outputs should be identified");
         let wants_inputs = wants_outputs.clone().commit_outputs();
         let wants_fee_range = wants_inputs.clone().commit_inputs();
-        let provisional_proposal = wants_fee_range
+        let psbt_context = wants_fee_range
             .clone()
-            .apply_fee_range(None, None)
+            ._apply_fee_range(None, None)
             .expect("Contributed inputs should be valid");
-        let payjoin_proposal = provisional_proposal
+        let psbt = psbt_context
             .clone()
             .finalize_proposal(|psbt| Ok(psbt.clone()))
             .expect("Payjoin proposal should be finalized");
@@ -469,19 +464,17 @@ mod tests {
         events.push(SessionEvent::WantsOutputs(wants_outputs));
         events.push(SessionEvent::WantsInputs(wants_inputs));
         events.push(SessionEvent::WantsFeeRange(wants_fee_range));
-        events.push(SessionEvent::ProvisionalProposal(provisional_proposal.clone()));
-        events.push(SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()));
+        events.push(SessionEvent::ProvisionalProposal(psbt_context.clone()));
+        events.push(SessionEvent::PayjoinProposal(psbt.clone()));
 
         let test = SessionHistoryTest {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: Some(
-                    provisional_proposal.psbt_context.payjoin_psbt.clone(),
-                ),
+                psbt_with_fee_contributions: Some(psbt_context.payjoin_psbt.clone()),
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {
-                state: PayjoinProposal { psbt: payjoin_proposal.psbt().clone(), session_context },
+                state: PayjoinProposal { psbt: psbt.clone(), session_context },
             }),
         };
         run_session_history_test(test)

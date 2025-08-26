@@ -48,7 +48,6 @@ use super::{InputPair, OutputSubstitutionError, ReplyableError, SelectionError};
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
 use crate::receive::{InternalPayloadError, Original, PsbtContext};
-use crate::ImplementationError;
 
 #[cfg(feature = "v1")]
 mod v1;
@@ -514,60 +513,12 @@ impl WantsFeeRange {
     ///
     /// The minimum effective fee limit is the highest of the minimum limit set by the sender in
     /// the original proposal parameters and the limit passed in the `min_fee_rate` parameter.
-    pub fn apply_fee_range(
+    pub(crate) fn _apply_fee_range(
         mut self,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
-    ) -> Result<ProvisionalProposal, ReplyableError> {
+    ) -> Result<PsbtContext, ReplyableError> {
         let psbt = self.apply_fee(min_fee_rate, max_effective_fee_rate)?.clone();
-        Ok(ProvisionalProposal {
-            psbt_context: PsbtContext { original_psbt: self.original_psbt, payjoin_psbt: psbt },
-        })
+        Ok(PsbtContext { original_psbt: self.original_psbt, payjoin_psbt: psbt })
     }
-}
-
-/// Typestate for a checked proposal which had both the outputs and the inputs modified
-/// by the receiver. The receiver may sign and finalize the Payjoin proposal which will be sent to
-/// the sender for their signature.
-///
-/// Call [`Self::finalize_proposal`] to return a finalized [`PayjoinProposal`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProvisionalProposal {
-    pub(crate) psbt_context: PsbtContext,
-}
-
-impl ProvisionalProposal {
-    /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
-    /// they sign the transaction and broadcast it to the network.
-    ///
-    /// Finalization consists of two steps:
-    ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
-    ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
-    pub fn finalize_proposal(
-        self,
-        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-    ) -> Result<PayjoinProposal, ReplyableError> {
-        let finalized_psbt = self
-            .psbt_context
-            .finalize_proposal(wallet_process_psbt)
-            .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
-        Ok(PayjoinProposal { payjoin_psbt: finalized_psbt })
-    }
-}
-
-/// A finalized Payjoin proposal, complete with fees and receiver signatures, that the sender
-/// should find acceptable.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PayjoinProposal {
-    payjoin_psbt: Psbt,
-}
-
-impl PayjoinProposal {
-    /// The UTXOs that would be spent by this Payjoin transaction.
-    pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
-        self.payjoin_psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
-    }
-
-    /// The Payjoin Proposal PSBT.
-    pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
 }

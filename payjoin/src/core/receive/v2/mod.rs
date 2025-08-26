@@ -178,13 +178,27 @@ impl ReceiveSession {
     }
 }
 
+mod sealed {
+    pub trait State {}
+
+    impl State for super::Initialized {}
+    impl State for super::UncheckedProposal {}
+    impl State for super::MaybeInputsOwned {}
+    impl State for super::MaybeInputsSeen {}
+    impl State for super::OutputsUnknown {}
+    impl State for super::WantsOutputs {}
+    impl State for super::WantsInputs {}
+    impl State for super::WantsFeeRange {}
+    impl State for super::ProvisionalProposal {}
+    impl State for super::PayjoinProposal {}
+}
+
+/// Sealed trait for V2 receive session states.
+///
 /// Any typestate should implement this trait to be considered a part of the protocol flow.
-///
-/// **IMPORTANT**: This is only meant to be implemented within the crate. It should not be used by dependencies
-/// to extend the flow with new custom typestates.
-///
-/// TODO: Make this sealed (<https://github.com/payjoin/rust-payjoin/issues/747>).
-pub trait State {}
+/// This trait is sealed to prevent external implementations. Only types within this crate
+/// can implement this trait, ensuring type safety and protocol integrity.
+pub trait State: sealed::State {}
 
 /// A higher-level receiver construct which will be taken through different states through the
 /// protocol workflow.
@@ -301,8 +315,6 @@ impl ReceiverBuilder {
 pub struct Initialized {
     context: SessionContext,
 }
-
-impl State for Initialized {}
 
 impl Receiver<Initialized> {
     /// construct an OHTTP Encapsulated HTTP GET request for the Original PSBT
@@ -457,8 +469,6 @@ pub struct UncheckedProposal {
     pub(crate) session_context: SessionContext,
 }
 
-impl State for UncheckedProposal {}
-
 /// The original PSBT and the optional parameters received from the sender.
 ///
 /// This is the first typestate after the retrieval of the sender's original proposal in
@@ -550,8 +560,6 @@ pub struct MaybeInputsOwned {
     session_context: SessionContext,
 }
 
-impl State for MaybeInputsOwned {}
-
 /// Typestate to check that the original PSBT has no inputs owned by the receiver.
 ///
 /// At this point, it has been verified that the transaction is broadcastable from previous
@@ -618,8 +626,6 @@ pub struct MaybeInputsSeen {
     session_context: SessionContext,
 }
 
-impl State for MaybeInputsSeen {}
-
 /// Typestate to check that the original PSBT has no inputs that the receiver has seen before.
 ///
 /// Call [`Receiver<MaybeInputsSeen>::check_no_inputs_seen_before`] to proceed.
@@ -678,8 +684,6 @@ pub struct OutputsUnknown {
     session_context: SessionContext,
 }
 
-impl State for OutputsUnknown {}
-
 /// Typestate to check that the outputs of the original PSBT actually pay to the receiver.
 ///
 /// The receiver should only accept the original PSBTs from the sender which actually send them
@@ -734,8 +738,6 @@ pub struct WantsOutputs {
     inner: common::WantsOutputs,
     session_context: SessionContext,
 }
-
-impl State for WantsOutputs {}
 
 /// Typestate which the receiver may substitute or add outputs to.
 ///
@@ -804,8 +806,6 @@ pub struct WantsInputs {
     session_context: SessionContext,
 }
 
-impl State for WantsInputs {}
-
 /// Typestate for a checked proposal which the receiver may contribute inputs to.
 ///
 /// Call [`Receiver<WantsInputs>::commit_inputs`] to proceed.
@@ -861,8 +861,6 @@ pub struct WantsFeeRange {
     inner: common::WantsFeeRange,
     session_context: SessionContext,
 }
-
-impl State for WantsFeeRange {}
 
 impl Receiver<WantsFeeRange> {
     /// Applies additional fee contribution now that the receiver has contributed inputs
@@ -931,8 +929,6 @@ pub struct ProvisionalProposal {
     session_context: SessionContext,
 }
 
-impl State for ProvisionalProposal {}
-
 /// Typestate for a checked proposal which had both the outputs and the inputs modified
 /// by the receiver. The receiver may sign and finalize the Payjoin proposal which will be sent to
 /// the sender for their signature.
@@ -978,8 +974,6 @@ pub struct PayjoinProposal {
     psbt: Psbt,
     session_context: SessionContext,
 }
-
-impl State for PayjoinProposal {}
 
 /// A finalized Payjoin proposal, complete with fees and receiver signatures, that the sender
 /// should find acceptable.

@@ -39,10 +39,10 @@ jobs:
         run: bash ./scripts/generate_bindings.sh
 
       - name: "Build wheel"
-        run: python -m build --wheel
+        run: uv build
 
       - name: "Install wheel"
-        run: pip install ./dist/*.whl
+        run: uv pip install ./dist/*.whl
 
       - name: "Run tests"
         run: python -m unittest -v

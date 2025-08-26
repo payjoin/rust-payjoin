@@ -12,16 +12,15 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use bitcoin::hashes::sha256d::Hash;
 use bitcoin::{
     psbt, AddressType, FeeRate, OutPoint, Psbt, Script, ScriptBuf, Sequence, Transaction, TxIn,
     TxOut, Weight,
 };
-pub(crate) use error::InternalPayloadError;
 pub use error::{
     Error, InputContributionError, JsonReply, OutputSubstitutionError, PayloadError,
     ReplyableError, SelectionError,
 };
+pub(crate) use error::{FinalizeProposalError, InternalPayloadError};
 use optional_parameters::Params;
 use serde::{Deserialize, Serialize};
 
@@ -336,27 +335,6 @@ impl PsbtContext {
         Ok(payjoin_proposal)
     }
 }
-
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum FinalizeProposalError {
-    /// The ntxid of the original PSBT does not match the ntxid of the finalized PSBT.
-    NtxidMismatch(Hash, Hash),
-    /// The implementation of the `wallet_process_psbt` function returned an error.
-    Implementation(ImplementationError),
-}
-
-impl std::fmt::Display for FinalizeProposalError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NtxidMismatch(expected, actual) => {
-                write!(f, "Ntxid mismatch: expected {expected}, got {actual}")
-            }
-            Self::Implementation(e) => write!(f, "Implementation error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for FinalizeProposalError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Original {

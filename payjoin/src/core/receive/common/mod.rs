@@ -522,7 +522,6 @@ impl WantsFeeRange {
         let psbt = self.apply_fee(min_fee_rate, max_effective_fee_rate)?.clone();
         Ok(ProvisionalProposal {
             psbt_context: PsbtContext { original_psbt: self.original_psbt, payjoin_psbt: psbt },
-            params: self.params,
         })
     }
 }
@@ -535,7 +534,6 @@ impl WantsFeeRange {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProvisionalProposal {
     pub(crate) psbt_context: PsbtContext,
-    params: Params,
 }
 
 impl ProvisionalProposal {

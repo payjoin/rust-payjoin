@@ -178,36 +178,53 @@ mod tests {
 
     use super::*;
     use crate::persist::test_utils::InMemoryTestPersister;
-    use crate::receive::common::test::unchecked_proposal_from_test_vector;
+    use crate::persist::NoopSessionPersister;
     use crate::receive::tests::original_from_test_vector;
     use crate::receive::v2::test::SHARED_CONTEXT;
     use crate::receive::v2::{
         Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal, UncheckedProposal,
     };
 
+    fn unchecked_receiver_from_test_vector() -> Receiver<UncheckedProposal> {
+        Receiver {
+            state: UncheckedProposal {
+                original: original_from_test_vector(),
+                session_context: SHARED_CONTEXT.clone(),
+            },
+        }
+    }
+
     #[test]
     fn test_session_event_serialization_roundtrip() {
+        let persister = NoopSessionPersister::<SessionEvent>::default();
+
         let original = original_from_test_vector();
-        let unchecked_proposal = unchecked_proposal_from_test_vector();
-        let maybe_inputs_owned = unchecked_proposal.clone().assume_interactive_receiver();
+        let unchecked_proposal = unchecked_receiver_from_test_vector();
+        let maybe_inputs_owned =
+            unchecked_proposal.clone().assume_interactive_receiver().save(&persister).unwrap();
         let maybe_inputs_seen = maybe_inputs_owned
             .clone()
             .check_inputs_not_owned(&mut |_| Ok(false))
+            .save(&persister)
             .expect("No inputs should be owned");
         let outputs_unknown = maybe_inputs_seen
             .clone()
             .check_no_inputs_seen_before(&mut |_| Ok(false))
+            .save(&persister)
             .expect("No inputs should be seen before");
         let wants_outputs = outputs_unknown
             .clone()
             .identify_receiver_outputs(&mut |_| Ok(true))
+            .save(&persister)
             .expect("Outputs should be identified");
-        let wants_inputs = wants_outputs.clone().commit_outputs();
-        let wants_fee_range = wants_inputs.clone().commit_inputs();
-        let psbt_context = wants_fee_range.clone()._apply_fee_range(None, None).unwrap();
-        let psbt = psbt_context
+        let wants_inputs = wants_outputs.clone().commit_outputs().save(&persister).unwrap();
+        let wants_fee_range = wants_inputs.clone().commit_inputs().save(&persister).unwrap();
+        let provisional_proposal =
+            wants_fee_range.clone().apply_fee_range(None, None).save(&persister).unwrap();
+        let payjoin_proposal = provisional_proposal
             .clone()
             .finalize_proposal(|psbt| Ok(psbt.clone()))
+            .save(&persister)
             .expect("Payjoin proposal should be finalized");
 
         let test_cases = vec![
@@ -217,11 +234,11 @@ mod tests {
             SessionEvent::MaybeInputsOwned(),
             SessionEvent::MaybeInputsSeen(),
             SessionEvent::OutputsUnknown(),
-            SessionEvent::WantsOutputs(wants_outputs),
-            SessionEvent::WantsInputs(wants_inputs),
-            SessionEvent::WantsFeeRange(wants_fee_range),
-            SessionEvent::ProvisionalProposal(psbt_context),
-            SessionEvent::PayjoinProposal(psbt.clone()),
+            SessionEvent::WantsOutputs(wants_outputs.state.inner.clone()),
+            SessionEvent::WantsInputs(wants_inputs.state.inner.clone()),
+            SessionEvent::WantsFeeRange(wants_fee_range.state.inner.clone()),
+            SessionEvent::ProvisionalProposal(provisional_proposal.state.psbt_context.clone()),
+            SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()),
         ];
 
         for event in test_cases {
@@ -349,11 +366,14 @@ mod tests {
 
     #[test]
     fn getting_fallback_tx() -> Result<(), BoxError> {
+        let persister = NoopSessionPersister::<SessionEvent>::default();
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
         let original = original_from_test_vector();
-        let maybe_inputs_owned =
-            unchecked_proposal_from_test_vector().assume_interactive_receiver();
+        let maybe_inputs_owned = unchecked_receiver_from_test_vector()
+            .assume_interactive_receiver()
+            .save(&persister)
+            .unwrap();
         let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
 
         events.push(SessionEvent::Created(session_context.clone()));
@@ -375,29 +395,36 @@ mod tests {
 
     #[test]
     fn test_contributed_inputs() -> Result<(), BoxError> {
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
 
         let original = original_from_test_vector();
-        let maybe_inputs_owned =
-            unchecked_proposal_from_test_vector().assume_interactive_receiver();
+        let maybe_inputs_owned = unchecked_receiver_from_test_vector()
+            .assume_interactive_receiver()
+            .save(&persister)
+            .unwrap();
         let maybe_inputs_seen = maybe_inputs_owned
             .clone()
             .check_inputs_not_owned(&mut |_| Ok(false))
+            .save(&persister)
             .expect("No inputs should be owned");
         let outputs_unknown = maybe_inputs_seen
             .clone()
             .check_no_inputs_seen_before(&mut |_| Ok(false))
+            .save(&persister)
             .expect("No inputs should be seen before");
         let wants_outputs = outputs_unknown
             .clone()
             .identify_receiver_outputs(&mut |_| Ok(true))
+            .save(&persister)
             .expect("Outputs should be identified");
-        let wants_inputs = wants_outputs.clone().commit_outputs();
-        let wants_fee_range = wants_inputs.clone().commit_inputs();
-        let psbt_context = wants_fee_range
+        let wants_inputs = wants_outputs.clone().commit_outputs().save(&persister).unwrap();
+        let wants_fee_range = wants_inputs.clone().commit_inputs().save(&persister).unwrap();
+        let provisional_proposal = wants_fee_range
             .clone()
-            ._apply_fee_range(None, None)
+            .apply_fee_range(None, None)
+            .save(&persister)
             .expect("Contributed inputs should be valid");
         let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
 
@@ -406,19 +433,26 @@ mod tests {
         events.push(SessionEvent::MaybeInputsOwned());
         events.push(SessionEvent::MaybeInputsSeen());
         events.push(SessionEvent::OutputsUnknown());
-        events.push(SessionEvent::WantsOutputs(wants_outputs));
-        events.push(SessionEvent::WantsInputs(wants_inputs));
-        events.push(SessionEvent::WantsFeeRange(wants_fee_range));
-        events.push(SessionEvent::ProvisionalProposal(psbt_context.clone()));
+        events.push(SessionEvent::WantsOutputs(wants_outputs.state.inner.clone()));
+        events.push(SessionEvent::WantsInputs(wants_inputs.state.inner.clone()));
+        events.push(SessionEvent::WantsFeeRange(wants_fee_range.state.inner.clone()));
+        events.push(SessionEvent::ProvisionalProposal(
+            provisional_proposal.state.psbt_context.clone(),
+        ));
 
         let test = SessionHistoryTest {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: Some(psbt_context.payjoin_psbt.clone()),
+                psbt_with_fee_contributions: Some(
+                    provisional_proposal.state.psbt_context.payjoin_psbt.clone(),
+                ),
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::ProvisionalProposal(Receiver {
-                state: ProvisionalProposal { psbt_context: psbt_context, session_context },
+                state: ProvisionalProposal {
+                    psbt_context: provisional_proposal.state.psbt_context.clone(),
+                    session_context,
+                },
             }),
         };
         run_session_history_test(test)
@@ -426,33 +460,41 @@ mod tests {
 
     #[test]
     fn test_payjoin_proposal() -> Result<(), BoxError> {
+        let persister = NoopSessionPersister::<SessionEvent>::default();
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
 
         let original = original_from_test_vector();
-        let maybe_inputs_owned =
-            unchecked_proposal_from_test_vector().assume_interactive_receiver();
+        let maybe_inputs_owned = unchecked_receiver_from_test_vector()
+            .assume_interactive_receiver()
+            .save(&persister)
+            .unwrap();
         let maybe_inputs_seen = maybe_inputs_owned
             .clone()
             .check_inputs_not_owned(&mut |_| Ok(false))
+            .save(&persister)
             .expect("No inputs should be owned");
         let outputs_unknown = maybe_inputs_seen
             .clone()
             .check_no_inputs_seen_before(&mut |_| Ok(false))
+            .save(&persister)
             .expect("No inputs should be seen before");
         let wants_outputs = outputs_unknown
             .clone()
             .identify_receiver_outputs(&mut |_| Ok(true))
+            .save(&persister)
             .expect("Outputs should be identified");
-        let wants_inputs = wants_outputs.clone().commit_outputs();
-        let wants_fee_range = wants_inputs.clone().commit_inputs();
-        let psbt_context = wants_fee_range
+        let wants_inputs = wants_outputs.clone().commit_outputs().save(&persister).unwrap();
+        let wants_fee_range = wants_inputs.clone().commit_inputs().save(&persister).unwrap();
+        let provisional_proposal = wants_fee_range
             .clone()
-            ._apply_fee_range(None, None)
+            .apply_fee_range(None, None)
+            .save(&persister)
             .expect("Contributed inputs should be valid");
-        let psbt = psbt_context
+        let payjoin_proposal = provisional_proposal
             .clone()
             .finalize_proposal(|psbt| Ok(psbt.clone()))
+            .save(&persister)
             .expect("Payjoin proposal should be finalized");
         let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
 
@@ -461,20 +503,24 @@ mod tests {
         events.push(SessionEvent::MaybeInputsOwned());
         events.push(SessionEvent::MaybeInputsSeen());
         events.push(SessionEvent::OutputsUnknown());
-        events.push(SessionEvent::WantsOutputs(wants_outputs));
-        events.push(SessionEvent::WantsInputs(wants_inputs));
-        events.push(SessionEvent::WantsFeeRange(wants_fee_range));
-        events.push(SessionEvent::ProvisionalProposal(psbt_context.clone()));
-        events.push(SessionEvent::PayjoinProposal(psbt.clone()));
+        events.push(SessionEvent::WantsOutputs(wants_outputs.state.inner.clone()));
+        events.push(SessionEvent::WantsInputs(wants_inputs.state.inner.clone()));
+        events.push(SessionEvent::WantsFeeRange(wants_fee_range.state.inner.clone()));
+        events.push(SessionEvent::ProvisionalProposal(
+            provisional_proposal.state.psbt_context.clone(),
+        ));
+        events.push(SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()));
 
         let test = SessionHistoryTest {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: Some(psbt_context.payjoin_psbt.clone()),
+                psbt_with_fee_contributions: Some(
+                    provisional_proposal.state.psbt_context.payjoin_psbt.clone(),
+                ),
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {
-                state: PayjoinProposal { psbt: psbt.clone(), session_context },
+                state: PayjoinProposal { psbt: payjoin_proposal.psbt().clone(), session_context },
             }),
         };
         run_session_history_test(test)

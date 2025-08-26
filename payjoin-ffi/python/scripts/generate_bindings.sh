@@ -11,13 +11,13 @@ if [[ "$OS" == "Darwin" ]]; then
     python3 --version
     pip install -r requirements.txt -r requirements-dev.txt
 elif [[ "$OS" == "Linux" ]]; then
-    sudo apt update
-    sudo apt install -y build-essential python3-dev
+    # sudo apt update
+    # sudo apt install -y build-essential python3-dev
     LIBNAME=libpayjoin_ffi.so
     PYBIN=$(dirname $(which python))
     PYBIN="$PYBIN" 
     ${PYBIN}/python --version
-    ${PYBIN}/pip install -r requirements.txt -r requirements-dev.txt
+    # ${PYBIN}/pip install -r requirements.txt -r requirements-dev.txt
 else
     echo "Unsupported os: $OS"
     exit 1
@@ -43,7 +43,7 @@ if [[ "$OS" == "Darwin" ]]; then
 
 else
     echo "Generating native binaries..."
-    rustup target add x86_64-unknown-linux-gnu
+    # rustup target add x86_64-unknown-linux-gnu
     # This is a test script the actual release should not include the test utils feature
     cargo build --profile release-smaller --target x86_64-unknown-linux-gnu --features _test-utils
 

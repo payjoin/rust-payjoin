@@ -23,7 +23,7 @@ pub fn build_v1_pj_uri<'a>(
     Ok(bitcoin_uri::Uri::with_extras(address.clone(), extras))
 }
 
-impl UncheckedProposal {
+impl UncheckedOriginalPsbt {
     pub fn from_request(
         body: &[u8],
         query: &str,
@@ -36,7 +36,7 @@ impl UncheckedProposal {
         let (psbt, params) = crate::receive::parse_payload(base64, query, SUPPORTED_VERSIONS)
             .map_err(ReplyableError::Payload)?;
 
-        Ok(UncheckedProposal { original: Original { psbt, params } })
+        Ok(UncheckedOriginalPsbt { original: OriginalPsbt { psbt, params } })
     }
 }
 
@@ -123,7 +123,7 @@ mod tests {
         let validated_request = validate_body(headers.clone(), body);
         assert!(validated_request.is_ok());
 
-        let proposal = UncheckedProposal::from_request(body, QUERY_PARAMS, headers)?;
+        let proposal = UncheckedOriginalPsbt::from_request(body, QUERY_PARAMS, headers)?;
 
         let witness_utxo = proposal.original.psbt.inputs[0]
             .witness_utxo

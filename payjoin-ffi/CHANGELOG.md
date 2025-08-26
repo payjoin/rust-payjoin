@@ -87,7 +87,7 @@ This release updates the bindings libraries to `payjoin` version `0.18.0`.
     - `ContextV2` exposes `process_response`.
 #### Receive module
 - #####  V1
-    - `UncheckedProposal` exposes `from_request`, `extract_tx_to_schedule_broadcast`, `check_broadcast_suitability`, `build_non_incentivizing`,
+    - `UncheckedOriginalPsbt` exposes `from_request`, `extract_tx_to_schedule_broadcast`, `check_broadcast_suitability`, `build_non_incentivizing`,
       `assume_interactive_receiver` &`always_disable_output_substitution`.
     - `MaybeInputsOwned` exposes `check_inputs_not_owned`.
     - `MaybeMixedInputScripts` exposes `check_no_mixed_input_scripts`.
@@ -99,7 +99,7 @@ This release updates the bindings libraries to `payjoin` version `0.18.0`.
 - ##### V2
     - `Enroller` exposes `from_directory_config`, `process_response` & `extract_request`.
     - `Enrolled` exposes `extract_request`, `process_response` & `fall_back_target`.
-    - `V2UncheckedProposal` exposes  `extract_tx_to_schedule_broadcast`, `check_broadcast_suitability` & `assume_interactive_receiver`.
+    - `V2UncheckedOriginalPsbt` exposes  `extract_tx_to_schedule_broadcast`, `check_broadcast_suitability` & `assume_interactive_receiver`.
     - `V2MaybeInputsOwned` exposes `check_inputs_not_owned`.
     - `V2MaybeMixedInputScripts` exposes `check_no_mixed_input_scripts`.
     - `V2MaybeInputsSeen` exposes `check_no_inputs_seen_before`.

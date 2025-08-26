@@ -193,7 +193,10 @@ impl Service {
         let response = self.handle_v2(request).await?;
 
         let (parts, body) = response.into_parts();
-        let mut bhttp_res = bhttp::Message::response(parts.status.as_u16());
+        let mut bhttp_res = bhttp::Message::response(
+            bhttp::StatusCode::try_from(parts.status.as_u16())
+                .map_err(|e| HandlerError::InternalServerError(e.into()))?,
+        );
         for (name, value) in parts.headers.iter() {
             bhttp_res.put_header(name.as_str(), value.to_str().unwrap_or_default());
         }

@@ -275,6 +275,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ef06386f8f092c3419e153a657396e53cafbb901de445a5c54d96ab2ff8c7b2"
 dependencies = [
  "thiserror 1.0.63",
+]
+
+[[package]]
+name = "bhttp"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16fc24bc615b9fd63148f59b218ea58a444b55762f8845da910e23aca686398b"
+dependencies = [
+ "thiserror 1.0.63",
  "url",
 ]
 
@@ -2207,7 +2216,7 @@ checksum = "8835116a5c179084a830efb3adc117ab007512b535bc1a21c991d3b32a6b44dd"
 name = "payjoin"
 version = "0.24.0"
 dependencies = [
- "bhttp",
+ "bhttp 0.5.1",
  "bitcoin",
  "bitcoin-hpke",
  "bitcoin-ohttp",
@@ -2266,7 +2275,7 @@ name = "payjoin-directory"
 version = "0.0.3"
 dependencies = [
  "anyhow",
- "bhttp",
+ "bhttp 0.6.1",
  "bitcoin",
  "bitcoin-ohttp",
  "futures",

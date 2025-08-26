@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - payjoin-ffi/**
+      - .github/workflows/python.yml
 env:
   # Override the value from the rust-toolchain file
   # This is necessary because even though the correct toolchain

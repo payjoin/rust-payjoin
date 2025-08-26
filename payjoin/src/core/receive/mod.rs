@@ -243,7 +243,7 @@ pub(crate) fn parse_payload(
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct PsbtContext {
     original_psbt: Psbt,
-    pub(crate) payjoin_psbt: Psbt,
+    payjoin_psbt: Psbt,
 }
 
 impl PsbtContext {
@@ -312,7 +312,7 @@ impl PsbtContext {
     /// Finalization consists of two steps:
     ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
     ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
-    pub(crate) fn finalize_proposal(
+    pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> Result<Psbt, FinalizeProposalError> {
@@ -338,8 +338,8 @@ impl PsbtContext {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Original {
-    pub(crate) psbt: Psbt,
-    pub(crate) params: Params,
+    psbt: Psbt,
+    params: Params,
 }
 
 impl Original {

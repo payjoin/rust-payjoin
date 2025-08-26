@@ -3,6 +3,7 @@ use std::sync::Arc;
 use payjoin::persist::SessionPersister;
 use payjoin::receive::v2::SessionEvent as ReceiverSessionEvent;
 use payjoin::send::v2::SessionEvent as SenderSessionEvent;
+use payjoin::HpkePublicKey;
 use rusqlite::params;
 
 use super::*;
@@ -22,13 +23,13 @@ pub(crate) struct SenderPersister {
 }
 
 impl SenderPersister {
-    pub fn new(db: Arc<Database>) -> crate::db::Result<Self> {
+    pub fn new(db: Arc<Database>, receiver_pubkey: HpkePublicKey) -> crate::db::Result<Self> {
         let conn = db.get_connection()?;
 
         // Create a new session in send_sessions and get its ID
         let session_id: i64 = conn.query_row(
-            "INSERT INTO send_sessions (session_id) VALUES (NULL) RETURNING session_id",
-            [],
+            "INSERT INTO send_sessions (session_id, receiver_pubkey) VALUES (NULL, ?1) RETURNING session_id",
+            params![receiver_pubkey.to_compressed_bytes()],
             |row| row.get(0),
         )?;
 
@@ -216,5 +217,16 @@ impl Database {
         }
 
         Ok(session_ids)
+    }
+
+    pub(crate) fn get_send_session_receiver_pk(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<HpkePublicKey> {
+        let conn = self.get_connection()?;
+        let mut stmt =
+            conn.prepare("SELECT receiver_pubkey FROM send_sessions WHERE session_id = ?1")?;
+        let receiver_pubkey: Vec<u8> = stmt.query_row(params![session_id.0], |row| row.get(0))?;
+        Ok(HpkePublicKey::from_compressed_bytes(&receiver_pubkey).expect("Valid receiver pubkey"))
     }
 }

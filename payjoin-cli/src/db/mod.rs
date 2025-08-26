@@ -37,6 +37,7 @@ impl Database {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS send_sessions (
                 session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                receiver_pubkey BLOB NOT NULL,
                 completed_at INTEGER
             )",
             [],

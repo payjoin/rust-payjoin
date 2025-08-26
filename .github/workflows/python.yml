@@ -47,6 +47,7 @@ jobs:
       - name: "Run tests"
         # Skip integration test on macOS due to Docker issues
         run: |
+          set -e
           if [[ "${{ matrix.os }}" = "macos-latest" ]]; then
             python -m unittest test/test_payjoin_unit_test.py -v
           else

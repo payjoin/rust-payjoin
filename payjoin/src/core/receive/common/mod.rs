@@ -30,11 +30,11 @@ use crate::receive::{InternalPayloadError, Original, PsbtContext};
 /// Call [`Self::commit_outputs`] to proceed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsOutputs {
-    pub(crate) original_psbt: Psbt,
-    pub(crate) payjoin_psbt: Psbt,
-    pub(crate) params: Params,
-    pub(crate) change_vout: usize,
-    pub(crate) owned_vouts: Vec<usize>,
+    original_psbt: Psbt,
+    payjoin_psbt: Psbt,
+    params: Params,
+    change_vout: usize,
+    owned_vouts: Vec<usize>,
 }
 
 impl WantsOutputs {
@@ -188,11 +188,11 @@ fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [
 /// Call [`Self::commit_inputs`] to proceed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsInputs {
-    pub(crate) original_psbt: Psbt,
-    pub(crate) payjoin_psbt: Psbt,
-    pub(crate) params: Params,
-    pub(crate) change_vout: usize,
-    pub(crate) receiver_inputs: Vec<InputPair>,
+    original_psbt: Psbt,
+    payjoin_psbt: Psbt,
+    params: Params,
+    change_vout: usize,
+    receiver_inputs: Vec<InputPair>,
 }
 
 impl WantsInputs {
@@ -359,15 +359,15 @@ impl WantsInputs {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsFeeRange {
-    pub(crate) original_psbt: Psbt,
-    pub(crate) payjoin_psbt: Psbt,
-    pub(crate) params: Params,
-    pub(crate) change_vout: usize,
-    pub(crate) receiver_inputs: Vec<InputPair>,
+    original_psbt: Psbt,
+    payjoin_psbt: Psbt,
+    params: Params,
+    change_vout: usize,
+    receiver_inputs: Vec<InputPair>,
 }
 
 impl WantsFeeRange {
-    pub(crate) fn apply_fee(
+    fn apply_fee(
         &mut self,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
@@ -440,7 +440,7 @@ impl WantsFeeRange {
     }
 
     /// Calculate the additional input weight contributed by the receiver.
-    pub(crate) fn additional_input_weight(&self) -> Result<Weight, InternalPayloadError> {
+    fn additional_input_weight(&self) -> Result<Weight, InternalPayloadError> {
         Ok(self.receiver_inputs.iter().map(|input_pair| input_pair.expected_weight).sum())
     }
 
@@ -884,6 +884,22 @@ mod tests {
             assert!(output.bip32_derivation.is_empty());
             assert!(output.tap_key_origins.is_empty());
             assert!(output.tap_internal_key.is_none());
+        }
+    }
+
+    #[test]
+    fn unchecked_proposal_unlocks_after_checks() {
+        let proposal = original_from_test_vector();
+        let payjoin = WantsOutputs::new(proposal, vec![0]).commit_outputs().commit_inputs();
+        {
+            let mut payjoin = payjoin.clone();
+            let psbt = payjoin.apply_fee(None, None);
+            assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
+        }
+        {
+            let mut payjoin = payjoin.clone();
+            let psbt = payjoin.apply_fee(None, Some(FeeRate::ZERO));
+            assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
         }
     }
 }

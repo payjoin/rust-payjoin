@@ -509,24 +509,6 @@ mod tests {
     }
 
     #[test]
-    fn unchecked_proposal_unlocks_after_checks() {
-        let proposal = unchecked_proposal_from_test_vector();
-        assert_eq!(proposal.original.psbt_fee_rate().unwrap().to_sat_per_vb_floor(), 2);
-        let payjoin = wants_outputs_from_test_vector(proposal).commit_outputs().commit_inputs();
-
-        {
-            let mut payjoin = payjoin.clone();
-            let psbt = payjoin.apply_fee(None, None);
-            assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
-        }
-        {
-            let mut payjoin = payjoin.clone();
-            let psbt = payjoin.apply_fee(None, Some(FeeRate::ZERO));
-            assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
-        }
-    }
-
-    #[test]
     fn test_finalize_proposal_invalid_payjoin_proposal() {
         let proposal = unchecked_proposal_from_test_vector();
         let provisional = provisional_proposal_from_test_vector(proposal);

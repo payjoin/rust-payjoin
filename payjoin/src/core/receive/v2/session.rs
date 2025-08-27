@@ -9,6 +9,7 @@ use crate::receive::v2::{extract_err_req, SessionError};
 use crate::receive::{common, JsonReply, OriginalPayload, PsbtContext};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
+// TODO: we could have a shared error type for both receive and send
 /// Errors that can occur when replaying a receiver event log
 #[derive(Debug)]
 pub struct ReplayError(InternalReplayError);
@@ -18,10 +19,11 @@ impl std::fmt::Display for ReplayError {
         use InternalReplayError::*;
         match &self.0 {
             SessionExpired(expiry) => write!(f, "Session expired at {expiry:?}"),
-            InvalidStateAndEvent(state, event) => write!(
-                f,
-                "Invalid combination of state ({state:?}) and event ({event:?}) during replay",
-            ),
+            NoEvents => write!(f, "No events found in session"),
+            InvalidEvent(event, session) => match session {
+                Some(session) => write!(f, "Invalid event ({event:?}) for session ({session:?})",),
+                None => write!(f, "Invalid first event ({event:?}) for session",),
+            },
             PersistenceFailure(e) => write!(f, "Persistence failure: {e}"),
         }
     }
@@ -36,8 +38,9 @@ impl From<InternalReplayError> for ReplayError {
 pub(crate) enum InternalReplayError {
     /// Session expired
     SessionExpired(SystemTime),
-    /// Invalid combination of state and event
-    InvalidStateAndEvent(Box<ReceiveSession>, Box<SessionEvent>),
+    /// No events found in session
+    NoEvents,
+    InvalidEvent(Box<SessionEvent>, Option<Box<ReceiveSession>>),
     /// Application storage error
     PersistenceFailure(ImplementationError),
 }
@@ -49,12 +52,17 @@ where
     P: SessionPersister,
     P::SessionEvent: Into<SessionEvent> + Clone,
 {
-    let logs = persister
+    let mut logs = persister
         .load()
         .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
-    let mut receiver = ReceiveSession::Uninitialized;
-    let mut history = SessionHistory::default();
 
+    let mut history = SessionHistory::default();
+    let first_event = logs.next().ok_or(InternalReplayError::NoEvents)?.into();
+    history.events.push(first_event.clone());
+    let mut receiver = match first_event {
+        SessionEvent::Created(context) => ReceiveSession::new(context),
+        _ => return Err(InternalReplayError::InvalidEvent(Box::new(first_event), None).into()),
+    };
     for event in logs {
         history.events.push(event.clone().into());
         receiver = receiver.process_event(event.into()).map_err(|e| {

@@ -121,14 +121,12 @@ fn short_id_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 }
 
 /// Represents the various states of a Payjoin receiver session during the protocol flow.
-/// Each variant parameterizes a `Receiver` with a specific state type, except for [`ReceiveSession::Uninitialized`] which
-/// has no context yet and [`ReceiveSession::TerminalFailure`] which indicates the session has ended or is invalid.
+/// Each variant parameterizes a `Receiver` with a specific state type, and [`ReceiveSession::TerminalFailure`] which indicates the session has ended or is invalid.
 ///
 /// This provides type erasure for the receive session state, allowing for the session to be replayed
 /// and the state to be updated with the next event over a uniform interface.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReceiveSession {
-    Uninitialized,
     Initialized(Receiver<Initialized>),
     UncheckedOriginalPayload(Receiver<UncheckedOriginalPayload>),
     MaybeInputsOwned(Receiver<MaybeInputsOwned>),
@@ -143,6 +141,16 @@ pub enum ReceiveSession {
 }
 
 impl ReceiveSession {
+    fn new(event: SessionEvent) -> Result<Self, ReplayError> {
+        match event {
+            SessionEvent::Created(context) =>
+                Ok(ReceiveSession::Initialized(Receiver { state: Initialized { context } })),
+            _ =>
+                Err(InternalReplayError::InvalidEventForUninitializedSession(Box::new(event))
+                    .into()),
+        }
+    }
+
     fn process_event(self, event: SessionEvent) -> Result<ReceiveSession, ReplayError> {
         match (self, event) {
             (ReceiveSession::Uninitialized, SessionEvent::Created(context)) =>

@@ -162,11 +162,7 @@ impl WantsOutputs {
 /// maintaining the relative order in `original` but randomly inserting elements from `new`.
 ///
 /// The combined result replaces the contents of `original`.
-pub(crate) fn interleave_shuffle<T: Clone, R: rand::Rng>(
-    original: &mut Vec<T>,
-    new: &mut [T],
-    rng: &mut R,
-) {
+fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [T], rng: &mut R) {
     // Shuffle the substitute_outputs
     new.shuffle(rng);
     // Create a new vector to store the combined result
@@ -494,5 +490,35 @@ impl WantsFeeRange {
     ) -> Result<PsbtContext, ReplyableError> {
         let psbt = self.apply_fee(min_fee_rate, max_effective_fee_rate)?.clone();
         Ok(PsbtContext { original_psbt: self.original_psbt, payjoin_psbt: psbt })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bitcoin::key::rand::rngs::StdRng;
+    use bitcoin::key::rand::SeedableRng;
+
+    use super::*;
+
+    #[test]
+    fn test_interleave_shuffle() {
+        let mut original1 = vec![1, 2, 3];
+        let mut original2 = original1.clone();
+        let mut original3 = original1.clone();
+        let mut new1 = vec![4, 5, 6];
+        let mut new2 = new1.clone();
+        let mut new3 = new1.clone();
+        let mut rng1 = StdRng::seed_from_u64(123);
+        let mut rng2 = StdRng::seed_from_u64(234);
+        let mut rng3 = StdRng::seed_from_u64(345);
+        // Operate on the same data multiple times with different RNG seeds.
+        interleave_shuffle(&mut original1, &mut new1, &mut rng1);
+        interleave_shuffle(&mut original2, &mut new2, &mut rng2);
+        interleave_shuffle(&mut original3, &mut new3, &mut rng3);
+        // The result should be different for each seed
+        // and the relative ordering from `original` always preserved/
+        assert_eq!(original1, vec![1, 6, 2, 5, 4, 3]);
+        assert_eq!(original2, vec![1, 5, 4, 2, 6, 3]);
+        assert_eq!(original3, vec![4, 5, 1, 2, 6, 3]);
     }
 }

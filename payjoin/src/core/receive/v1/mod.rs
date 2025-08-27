@@ -332,8 +332,6 @@ mod tests {
     use bitcoin::absolute::{LockTime, Time};
     use bitcoin::bip32::{DerivationPath, Fingerprint, Xpriv, Xpub};
     use bitcoin::hashes::Hash;
-    use bitcoin::key::rand::rngs::StdRng;
-    use bitcoin::key::rand::SeedableRng;
     use bitcoin::psbt::Input;
     use bitcoin::secp256k1::Secp256k1;
     use bitcoin::taproot::LeafVersion;
@@ -346,7 +344,6 @@ mod tests {
     };
 
     use super::*;
-    use crate::receive::common::interleave_shuffle;
     use crate::receive::error::{InternalOutputSubstitutionError, InternalSelectionError};
     use crate::receive::PayloadError;
     use crate::Version;
@@ -798,28 +795,6 @@ mod tests {
             SelectionError::from(InternalSelectionError::UnsupportedOutputLength),
             "Payjoin below minimum allowed outputs for avoid uih and should error"
         );
-    }
-
-    #[test]
-    fn test_interleave_shuffle() {
-        let mut original1 = vec![1, 2, 3];
-        let mut original2 = original1.clone();
-        let mut original3 = original1.clone();
-        let mut new1 = vec![4, 5, 6];
-        let mut new2 = new1.clone();
-        let mut new3 = new1.clone();
-        let mut rng1 = StdRng::seed_from_u64(123);
-        let mut rng2 = StdRng::seed_from_u64(234);
-        let mut rng3 = StdRng::seed_from_u64(345);
-        // Operate on the same data multiple times with different RNG seeds.
-        interleave_shuffle(&mut original1, &mut new1, &mut rng1);
-        interleave_shuffle(&mut original2, &mut new2, &mut rng2);
-        interleave_shuffle(&mut original3, &mut new3, &mut rng3);
-        // The result should be different for each seed
-        // and the relative ordering from `original` always preserved/
-        assert_eq!(original1, vec![1, 6, 2, 5, 4, 3]);
-        assert_eq!(original2, vec![1, 5, 4, 2, 6, 3]);
-        assert_eq!(original3, vec![4, 5, 1, 2, 6, 3]);
     }
 
     /// Add keypath data to psbt to be prepared and verify it is excluded from the final PSBT

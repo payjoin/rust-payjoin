@@ -3,6 +3,7 @@ use crate::persist::SessionPersister;
 use crate::send::v2::{SendSession, V2GetContext};
 use crate::uri::v2::PjParam;
 use crate::ImplementationError;
+// TODO: we could have a shared error type for both receive and send
 /// Errors that can occur when replaying a sender event log
 #[derive(Debug)]
 pub struct ReplayError(InternalReplayError);
@@ -11,10 +12,11 @@ impl std::fmt::Display for ReplayError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use InternalReplayError::*;
         match &self.0 {
-            InvalidStateAndEvent(state, event) => write!(
-                f,
-                "Invalid combination of state ({state:?}) and event ({event:?}) during replay",
-            ),
+            NoEvents => write!(f, "No events found in session"),
+            InvalidEvent(event, session) => match session {
+                Some(session) => write!(f, "Invalid event ({event:?}) for session ({session:?})",),
+                None => write!(f, "Invalid first event ({event:?}) for session",),
+            },
             PersistenceFailure(e) => write!(f, "Persistence failure: {e}"),
         }
     }
@@ -27,8 +29,10 @@ impl From<InternalReplayError> for ReplayError {
 
 #[derive(Debug)]
 pub(crate) enum InternalReplayError {
-    /// Invalid combination of state and event
-    InvalidStateAndEvent(Box<SendSession>, Box<SessionEvent>),
+    /// No events in the event log
+    NoEvents,
+    /// Invalid initial event
+    InvalidEvent(Box<SessionEvent>, Option<Box<SendSession>>),
     /// Application storage error
     PersistenceFailure(ImplementationError),
 }
@@ -39,17 +43,21 @@ where
     P::SessionEvent: Into<SessionEvent> + Clone,
     P::SessionEvent: From<SessionEvent>,
 {
-    let logs = persister
+    let mut logs = persister
         .load()
         .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
-
-    let mut sender = SendSession::Uninitialized;
     let mut history = SessionHistory::default();
+    let first_event = logs.next().ok_or(InternalReplayError::NoEvents)?.into();
+    history.events.push(first_event.clone());
+    let mut sender = match first_event {
+        SessionEvent::CreatedReplyKey(reply_key) => SendSession::new(reply_key),
+        _ => return Err(InternalReplayError::InvalidEvent(Box::new(first_event), None).into()),
+    };
+
     for log in logs {
         let session_event = log.into();
         history.events.push(session_event.clone());
-        let current_sender = std::mem::replace(&mut sender, SendSession::Uninitialized);
-        match current_sender.process_event(session_event) {
+        match sender.clone().process_event(session_event) {
             Ok(next_sender) => sender = next_sender,
             Err(_e) => {
                 persister.close().map_err(|e| {

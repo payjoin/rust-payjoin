@@ -121,14 +121,12 @@ fn short_id_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 }
 
 /// Represents the various states of a Payjoin receiver session during the protocol flow.
-/// Each variant parameterizes a `Receiver` with a specific state type, except for [`ReceiveSession::Uninitialized`] which
-/// has no context yet and [`ReceiveSession::TerminalFailure`] which indicates the session has ended or is invalid.
+/// Each variant parameterizes a `Receiver` with a specific state type, and [`ReceiveSession::TerminalFailure`] which indicates the session has ended or is invalid.
 ///
 /// This provides type erasure for the receive session state, allowing for the session to be replayed
 /// and the state to be updated with the next event over a uniform interface.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReceiveSession {
-    Uninitialized,
     Initialized(Receiver<Initialized>),
     UncheckedOriginalPayload(Receiver<UncheckedOriginalPayload>),
     MaybeInputsOwned(Receiver<MaybeInputsOwned>),
@@ -143,14 +141,12 @@ pub enum ReceiveSession {
 }
 
 impl ReceiveSession {
+    fn new(context: SessionContext) -> Self {
+        ReceiveSession::Initialized(Receiver { state: Initialized {}, session_context: context })
+    }
+
     fn process_event(self, event: SessionEvent) -> Result<ReceiveSession, ReplayError> {
         match (self, event) {
-            (ReceiveSession::Uninitialized, SessionEvent::Created(context)) =>
-                Ok(ReceiveSession::Initialized(Receiver {
-                    state: Initialized {},
-                    session_context: context,
-                })),
-
             (
                 ReceiveSession::Initialized(state),
                 SessionEvent::UncheckedOriginalPayload { original: proposal, reply_key },
@@ -185,9 +181,9 @@ impl ReceiveSession {
             ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
 
             (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiveSession::TerminalFailure),
-            (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
-                Box::new(current_state),
+            (current_state, event) => Err(InternalReplayError::InvalidEvent(
                 Box::new(event),
+                Some(Box::new(current_state)),
             )
             .into()),
         }

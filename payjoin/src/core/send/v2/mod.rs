@@ -211,7 +211,6 @@ impl<State> core::ops::DerefMut for Sender<State> {
 /// and the state to be updated with the next event over a uniform interface.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SendSession {
-    Uninitialized,
     WithReplyKey(Sender<WithReplyKey>),
     V2GetContext(Sender<V2GetContext>),
     ProposalReceived(Psbt),
@@ -219,18 +218,18 @@ pub enum SendSession {
 }
 
 impl SendSession {
+    fn new(context: WithReplyKey) -> Self { SendSession::WithReplyKey(Sender { state: context }) }
+
     fn process_event(self, event: SessionEvent) -> Result<SendSession, ReplayError> {
         match (self, event) {
-            (SendSession::Uninitialized, SessionEvent::CreatedReplyKey(sender_with_reply_key)) =>
-                Ok(SendSession::WithReplyKey(Sender { state: sender_with_reply_key })),
             (SendSession::WithReplyKey(state), SessionEvent::V2GetContext(v2_get_context)) =>
                 Ok(state.apply_v2_get_context(v2_get_context)),
             (SendSession::V2GetContext(_state), SessionEvent::ProposalReceived(proposal)) =>
                 Ok(SendSession::ProposalReceived(proposal)),
             (_, SessionEvent::SessionInvalid(_)) => Ok(SendSession::TerminalFailure),
-            (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
-                Box::new(current_state),
+            (current_state, event) => Err(InternalReplayError::InvalidEvent(
                 Box::new(event),
+                Some(Box::new(current_state)),
             )
             .into()),
         }

@@ -6,7 +6,7 @@
 # --------------
 
 # The path to the database file
-db_path = "payjoin.sled"
+db_path = "payjoin.sqlite"
 
 # The maximum fee rate that the receiver is willing to pay (in sat/vB)
 max_fee_rate = 2.0

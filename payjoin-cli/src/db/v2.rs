@@ -8,18 +8,11 @@ use rusqlite::params;
 use super::*;
 
 #[derive(Debug, Clone)]
-pub enum SessionId {
-    Send(i64),
-    Receive(i64),
-}
+pub struct SessionId(i64);
 
-impl SessionId {
-    pub fn as_integer(&self) -> i64 {
-        match self {
-            SessionId::Send(id) => *id,
-            SessionId::Receive(id) => *id,
-        }
-    }
+impl core::ops::Deref for SessionId {
+    type Target = i64;
+    fn deref(&self) -> &Self::Target { &self.0 }
 }
 
 #[derive(Clone)]
@@ -39,15 +32,11 @@ impl SenderPersister {
             |row| row.get(0),
         )?;
 
-        Ok(Self { db, session_id: SessionId::Send(session_id) })
+        Ok(Self { db, session_id: SessionId(session_id) })
     }
 
     pub fn from_id(db: Arc<Database>, id: SessionId) -> crate::db::Result<Self> {
-        match id {
-            SessionId::Send(_) => Ok(Self { db, session_id: id }),
-            SessionId::Receive(_) =>
-                panic!("Attempted to create SenderPersister with Receive session ID"),
-        }
+        Ok(Self { db, session_id: id })
     }
 }
 
@@ -64,7 +53,7 @@ impl SessionPersister for SenderPersister {
 
         conn.execute(
             "INSERT INTO send_session_events (session_id, event_data, created_at) VALUES (?1, ?2, ?3)",
-            params![self.session_id.as_integer(), event_data, now()],
+            params![*self.session_id, event_data, now()],
         )?;
 
         Ok(())
@@ -79,7 +68,7 @@ impl SessionPersister for SenderPersister {
             "SELECT event_data FROM send_session_events WHERE session_id = ?1 ORDER BY created_at ASC",
         )?;
 
-        let event_rows = stmt.query_map(params![self.session_id.as_integer()], |row| {
+        let event_rows = stmt.query_map(params![*self.session_id], |row| {
             let event_data: String = row.get(0)?;
             Ok(event_data)
         })?;
@@ -100,7 +89,7 @@ impl SessionPersister for SenderPersister {
 
         conn.execute(
             "UPDATE send_sessions SET completed_at = ?1 WHERE session_id = ?2",
-            params![now(), self.session_id.as_integer()],
+            params![now(), *self.session_id],
         )?;
 
         Ok(())
@@ -124,15 +113,11 @@ impl ReceiverPersister {
             |row| row.get(0),
         )?;
 
-        Ok(Self { db, session_id: SessionId::Receive(session_id) })
+        Ok(Self { db, session_id: SessionId(session_id) })
     }
 
     pub fn from_id(db: Arc<Database>, id: SessionId) -> crate::db::Result<Self> {
-        match id {
-            SessionId::Receive(_) => Ok(Self { db, session_id: id }),
-            SessionId::Send(_) =>
-                panic!("Attempted to create ReceiverPersister with Send session ID"),
-        }
+        Ok(Self { db, session_id: id })
     }
 }
 
@@ -149,7 +134,7 @@ impl SessionPersister for ReceiverPersister {
 
         conn.execute(
             "INSERT INTO receive_session_events (session_id, event_data, created_at) VALUES (?1, ?2, ?3)",
-            params![self.session_id.as_integer(), event_data, now()],
+            params![*self.session_id, event_data, now()],
         )?;
 
         Ok(())
@@ -166,7 +151,7 @@ impl SessionPersister for ReceiverPersister {
             "SELECT event_data FROM receive_session_events WHERE session_id = ?1 ORDER BY created_at ASC",
         )?;
 
-        let event_rows = stmt.query_map(params![self.session_id.as_integer()], |row| {
+        let event_rows = stmt.query_map(params![*self.session_id], |row| {
             let event_data: String = row.get(0)?;
             Ok(event_data)
         })?;
@@ -187,7 +172,7 @@ impl SessionPersister for ReceiverPersister {
 
         conn.execute(
             "UPDATE receive_sessions SET completed_at = ?1 WHERE session_id = ?2",
-            params![now(), self.session_id.as_integer()],
+            params![now(), *self.session_id],
         )?;
 
         Ok(())
@@ -202,7 +187,7 @@ impl Database {
 
         let session_rows = stmt.query_map([], |row| {
             let session_id: i64 = row.get(0)?;
-            Ok(SessionId::Receive(session_id))
+            Ok(SessionId(session_id))
         })?;
 
         let mut session_ids = Vec::new();
@@ -221,7 +206,7 @@ impl Database {
 
         let session_rows = stmt.query_map([], |row| {
             let session_id: i64 = row.get(0)?;
-            Ok(SessionId::Send(session_id))
+            Ok(SessionId(session_id))
         })?;
 
         let mut session_ids = Vec::new();

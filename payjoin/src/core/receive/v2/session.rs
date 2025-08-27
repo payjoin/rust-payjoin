@@ -200,8 +200,11 @@ mod tests {
 
         let original = original_from_test_vector();
         let unchecked_proposal = unchecked_receiver_from_test_vector();
-        let maybe_inputs_owned =
-            unchecked_proposal.clone().assume_interactive_receiver().save(&persister).unwrap();
+        let maybe_inputs_owned = unchecked_proposal
+            .clone()
+            .assume_interactive_receiver()
+            .save(&persister)
+            .expect("Save should not fail");
         let maybe_inputs_seen = maybe_inputs_owned
             .clone()
             .check_inputs_not_owned(&mut |_| Ok(false))
@@ -217,10 +220,15 @@ mod tests {
             .identify_receiver_outputs(&mut |_| Ok(true))
             .save(&persister)
             .expect("Outputs should be identified");
-        let wants_inputs = wants_outputs.clone().commit_outputs().save(&persister).unwrap();
-        let wants_fee_range = wants_inputs.clone().commit_inputs().save(&persister).unwrap();
-        let provisional_proposal =
-            wants_fee_range.clone().apply_fee_range(None, None).save(&persister).unwrap();
+        let wants_inputs =
+            wants_outputs.clone().commit_outputs().save(&persister).expect("Save should not fail");
+        let wants_fee_range =
+            wants_inputs.clone().commit_inputs().save(&persister).expect("Save should not fail");
+        let provisional_proposal = wants_fee_range
+            .clone()
+            .apply_fee_range(None, None)
+            .save(&persister)
+            .expect("Save should not fail");
         let payjoin_proposal = provisional_proposal
             .clone()
             .finalize_proposal(|psbt| Ok(psbt.clone()))
@@ -419,8 +427,10 @@ mod tests {
             .identify_receiver_outputs(&mut |_| Ok(true))
             .save(&persister)
             .expect("Outputs should be identified");
-        let wants_inputs = wants_outputs.clone().commit_outputs().save(&persister).unwrap();
-        let wants_fee_range = wants_inputs.clone().commit_inputs().save(&persister).unwrap();
+        let wants_inputs =
+            wants_outputs.clone().commit_outputs().save(&persister).expect("Save should not fail");
+        let wants_fee_range =
+            wants_inputs.clone().commit_inputs().save(&persister).expect("Save should not fail");
         let provisional_proposal = wants_fee_range
             .clone()
             .apply_fee_range(None, None)
@@ -484,8 +494,10 @@ mod tests {
             .identify_receiver_outputs(&mut |_| Ok(true))
             .save(&persister)
             .expect("Outputs should be identified");
-        let wants_inputs = wants_outputs.clone().commit_outputs().save(&persister).unwrap();
-        let wants_fee_range = wants_inputs.clone().commit_inputs().save(&persister).unwrap();
+        let wants_inputs =
+            wants_outputs.clone().commit_outputs().save(&persister).expect("Save should not fail");
+        let wants_fee_range =
+            wants_inputs.clone().commit_inputs().save(&persister).expect("Save should not fail");
         let provisional_proposal = wants_fee_range
             .clone()
             .apply_fee_range(None, None)

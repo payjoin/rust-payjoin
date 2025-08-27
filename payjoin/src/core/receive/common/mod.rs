@@ -483,7 +483,7 @@ impl WantsFeeRange {
     ///
     /// The minimum effective fee limit is the highest of the minimum limit set by the sender in
     /// the original proposal parameters and the limit passed in the `min_fee_rate` parameter.
-    pub(crate) fn _apply_fee_range(
+    pub(super) fn apply_fee_to_psbt_context(
         mut self,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
@@ -867,7 +867,7 @@ mod tests {
         let psbt_context = WantsOutputs::new(original_from_test_vector(), vec![0])
             .commit_outputs()
             .commit_inputs()
-            ._apply_fee_range(None, None)
+            .apply_fee_to_psbt_context(None, None)
             .expect("Contributed inputs should allow for valid fee contributions");
         let payjoin_proposal =
             psbt_context.finalize_proposal(|_| Ok(processed_psbt.clone())).expect("Valid psbt");

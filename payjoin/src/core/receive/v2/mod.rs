@@ -881,16 +881,19 @@ impl Receiver<WantsFeeRange> {
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<ProvisionalProposal>, ReplyableError> {
-        let psbt_context =
-            match self.state.inner._apply_fee_range(min_fee_rate, max_effective_fee_rate) {
-                Ok(inner) => inner,
-                Err(e) => {
-                    return MaybeFatalTransition::fatal(
-                        SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
-                        e,
-                    );
-                }
-            };
+        let psbt_context = match self
+            .state
+            .inner
+            .apply_fee_to_psbt_context(min_fee_rate, max_effective_fee_rate)
+        {
+            Ok(inner) => inner,
+            Err(e) => {
+                return MaybeFatalTransition::fatal(
+                    SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                    e,
+                );
+            }
+        };
         MaybeFatalTransition::success(
             SessionEvent::ProvisionalProposal(psbt_context.clone()),
             Receiver {

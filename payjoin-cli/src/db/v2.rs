@@ -8,7 +8,7 @@ use rusqlite::params;
 use super::*;
 
 #[derive(Debug, Clone)]
-pub struct SessionId(i64);
+pub(crate) struct SessionId(i64);
 
 impl core::ops::Deref for SessionId {
     type Target = i64;

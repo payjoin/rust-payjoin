@@ -1,6 +1,7 @@
 use std::env;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
+use payjoin_directory::metrics::Metrics;
 use payjoin_directory::*;
 use tokio::net::TcpListener;
 use tracing_subscriber::filter::LevelFilter;
@@ -14,6 +15,9 @@ async fn main() -> Result<(), BoxError> {
 
     let dir_port =
         env::var("PJ_DIR_PORT").map_or(DEFAULT_DIR_PORT, |s| s.parse().expect("Invalid port"));
+
+    let metric_port = env::var("PJ_METRIC_PORT")
+        .map_or(DEFAULT_METRIC_PORT, |s| s.parse().expect("invalid metric port"));
 
     let timeout_env = env::var("PJ_DIR_TIMEOUT_SECS")
         .map_or(DEFAULT_TIMEOUT_SECS, |s| s.parse().expect("Invalid timeout"));
@@ -38,9 +42,20 @@ async fn main() -> Result<(), BoxError> {
         }
     };
 
+    // Start metrics server in the background
+    let metrics = Metrics::new();
+    let metrics_listener = bind_port(metric_port).await?;
+
     let listener = bind_port(dir_port).await?;
     let db = DbPool::new(timeout, db_host).await?;
-    let service = Service::new(db, ohttp.into());
+    let service = Service::new(db, ohttp.into(), metrics);
+    let service_clone = service.clone();
+    tokio::spawn(async move {
+        if let Err(e) = payjoin_directory::serve_metrics_tcp(service_clone, metrics_listener).await
+        {
+            eprintln!("Metrics server error: {e}");
+        }
+    });
     service.serve_tcp(listener).await
 }
 

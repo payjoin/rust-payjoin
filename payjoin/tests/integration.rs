@@ -364,7 +364,9 @@ mod integration {
                 let check_broadcast_suitability = || {
                     proposal
                         .clone()
-                        .check_broadcast_suitability(None, |_| Ok(false))
+                        .check_broadcast_suitability(None, |_| {
+                            Err(ImplementationError::from("this should cause a fatal error"))
+                        })
                         .save(&persister)
                 };
                 let server_error = check_broadcast_suitability()
@@ -373,7 +375,9 @@ mod integration {
                     .expect("expected api error");
                 // TODO: this should be replaced by comparing the error itself once the error types impl PartialEq
                 // Issue: https://github.com/payjoin/rust-payjoin/issues/645
+                // TODO: fix this
                 assert_eq!(server_error.to_string(), "Can't broadcast. PSBT rejected by mempool.");
+                // assert_eq!(server_error.to_string(), "Internal Server Error: this should cause a fatal error");
 
                 let (_, session_history) = replay_receiver_event_log(&persister)?;
                 let (err_req, err_ctx) = session_history

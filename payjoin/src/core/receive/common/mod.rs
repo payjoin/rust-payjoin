@@ -38,6 +38,20 @@ pub struct WantsOutputs {
 }
 
 impl WantsOutputs {
+    /// Create a new [`WantsOutputs`] typestate from an [`Original`] typestate and a list of
+    /// owned outputs.
+    ///
+    /// The first output in the `owned_vouts` list is used as the `change_vout`.
+    pub(crate) fn new(original: Original, owned_vouts: Vec<usize>) -> Self {
+        Self {
+            original_psbt: original.psbt.clone(),
+            payjoin_psbt: original.psbt,
+            params: original.params,
+            change_vout: owned_vouts[0],
+            owned_vouts,
+        }
+    }
+
     /// Returns whether the receiver is allowed to substitute original outputs or not.
     pub fn output_substitution(&self) -> OutputSubstitution { self.params.output_substitution }
 
@@ -140,20 +154,6 @@ impl WantsOutputs {
             params: self.params,
             change_vout: self.change_vout,
             receiver_inputs: vec![],
-        }
-    }
-
-    /// Create a new [`WantsOutputs`] typestate from an [`Original`] typestate and a list of
-    /// owned outputs.
-    ///
-    /// The first output in the `owned_vouts` list is used as the `change_vout`.
-    pub(crate) fn new(original: Original, owned_vouts: Vec<usize>) -> Self {
-        Self {
-            original_psbt: original.psbt.clone(),
-            payjoin_psbt: original.psbt,
-            params: original.params,
-            change_vout: owned_vouts[0],
-            owned_vouts,
         }
     }
 }

@@ -495,8 +495,11 @@ impl WantsFeeRange {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use bitcoin::key::rand::rngs::StdRng;
     use bitcoin::key::rand::SeedableRng;
+    use payjoin_test_utils::RECEIVER_INPUT_CONTRIBUTION;
 
     use super::*;
     use crate::receive::tests::original_from_test_vector;
@@ -555,6 +558,31 @@ mod tests {
                 InternalOutputSubstitutionError::ScriptPubKeyChangedWhenDisabled
             ),
             "Payjoin receiver script pubkey has been modified and should error"
+        );
+    }
+
+    #[test]
+    fn test_avoid_uih_one_output() {
+        let original = original_from_test_vector();
+        let proposal_psbt = Psbt::from_str(RECEIVER_INPUT_CONTRIBUTION).unwrap();
+        let input = InputPair::new(
+            proposal_psbt.unsigned_tx.input[1].clone(),
+            proposal_psbt.inputs[1].clone(),
+            None,
+        )
+        .unwrap();
+        let input_iter = [input].into_iter();
+        let mut payjoin = WantsOutputs::new(original, vec![0])
+            .commit_outputs()
+            .contribute_inputs(input_iter.clone())
+            .expect("Failed to contribute inputs");
+
+        payjoin.payjoin_psbt.outputs.pop();
+        let avoid_uih = payjoin.avoid_uih(input_iter);
+        assert_eq!(
+            avoid_uih.unwrap_err(),
+            SelectionError::from(InternalSelectionError::UnsupportedOutputLength),
+            "Payjoin below minimum allowed outputs for avoid uih and should error"
         );
     }
 

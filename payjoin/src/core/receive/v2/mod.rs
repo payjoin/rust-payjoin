@@ -90,9 +90,7 @@ impl SessionContext {
     }
 
     /// The per-session identifier
-    pub(crate) fn id(&self) -> ShortId {
-        sha256::Hash::hash(&self.s.public_key().to_compressed_bytes()).into()
-    }
+    pub(crate) fn id(&self) -> ShortId { short_id_from_pubkey(self.s.public_key()) }
 }
 
 fn deserialize_address_assume_checked<'de, D>(deserializer: D) -> Result<Address, D::Error>

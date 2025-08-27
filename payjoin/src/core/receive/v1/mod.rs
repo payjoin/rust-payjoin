@@ -344,7 +344,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::receive::error::{InternalOutputSubstitutionError, InternalSelectionError};
+    use crate::receive::error::InternalSelectionError;
     use crate::receive::PayloadError;
     use crate::Version;
 
@@ -712,63 +712,6 @@ mod tests {
         assert_eq!(
             p2tr_proposal.additional_input_weight().expect("should calculate input weight"),
             Weight::from_wu(230)
-        );
-    }
-
-    #[test]
-    fn test_pjos_disabled() {
-        let mut proposal = unchecked_proposal_from_test_vector();
-        proposal.original.params.output_substitution = OutputSubstitution::Disabled;
-        let wants_outputs = wants_outputs_from_test_vector(proposal);
-        let script_pubkey = &wants_outputs.original_psbt.unsigned_tx.output
-            [wants_outputs.change_vout]
-            .script_pubkey;
-
-        let output_value =
-            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value;
-        let outputs = vec![TxOut { value: output_value, script_pubkey: script_pubkey.clone() }];
-        let unchanged_amount =
-            wants_outputs.clone().replace_receiver_outputs(outputs, script_pubkey.as_script());
-        assert!(
-            unchanged_amount.is_ok(),
-            "Not touching the receiver output amount is always allowed"
-        );
-        assert_ne!(wants_outputs.payjoin_psbt, unchanged_amount.unwrap().payjoin_psbt);
-
-        let output_value =
-            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value
-                + Amount::ONE_SAT;
-        let outputs = vec![TxOut { value: output_value, script_pubkey: script_pubkey.clone() }];
-        let increased_amount =
-            wants_outputs.clone().replace_receiver_outputs(outputs, script_pubkey.as_script());
-        assert!(
-            increased_amount.is_ok(),
-            "Increasing the receiver output amount is always allowed"
-        );
-        assert_ne!(wants_outputs.payjoin_psbt, increased_amount.unwrap().payjoin_psbt);
-
-        let output_value =
-            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value
-                - Amount::ONE_SAT;
-        let outputs = vec![TxOut { value: output_value, script_pubkey: script_pubkey.clone() }];
-        let decreased_amount =
-            wants_outputs.clone().replace_receiver_outputs(outputs, script_pubkey.as_script());
-        assert_eq!(
-            decreased_amount.unwrap_err(),
-            OutputSubstitutionError::from(
-                InternalOutputSubstitutionError::DecreasedValueWhenDisabled
-            ),
-            "Payjoin receiver amount has been decreased and should error"
-        );
-
-        let script = Script::new();
-        let replace_receiver_script_pubkey = wants_outputs.substitute_receiver_script(script);
-        assert_eq!(
-            replace_receiver_script_pubkey.unwrap_err(),
-            OutputSubstitutionError::from(
-                InternalOutputSubstitutionError::ScriptPubKeyChangedWhenDisabled
-            ),
-            "Payjoin receiver script pubkey has been modified and should error"
         );
     }
 

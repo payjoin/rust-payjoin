@@ -499,6 +499,64 @@ mod tests {
     use bitcoin::key::rand::SeedableRng;
 
     use super::*;
+    use crate::receive::tests::original_from_test_vector;
+
+    #[test]
+    fn test_pjos_disabled() {
+        let mut original = original_from_test_vector();
+        original.params.output_substitution = OutputSubstitution::Disabled;
+        let wants_outputs = WantsOutputs::new(original, vec![0]);
+        let script_pubkey = &wants_outputs.original_psbt.unsigned_tx.output
+            [wants_outputs.change_vout]
+            .script_pubkey;
+
+        let output_value =
+            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value;
+        let outputs = vec![TxOut { value: output_value, script_pubkey: script_pubkey.clone() }];
+        let unchanged_amount =
+            wants_outputs.clone().replace_receiver_outputs(outputs, script_pubkey.as_script());
+        assert!(
+            unchanged_amount.is_ok(),
+            "Not touching the receiver output amount is always allowed"
+        );
+        assert_ne!(wants_outputs.payjoin_psbt, unchanged_amount.unwrap().payjoin_psbt);
+
+        let output_value =
+            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value
+                + Amount::ONE_SAT;
+        let outputs = vec![TxOut { value: output_value, script_pubkey: script_pubkey.clone() }];
+        let increased_amount =
+            wants_outputs.clone().replace_receiver_outputs(outputs, script_pubkey.as_script());
+        assert!(
+            increased_amount.is_ok(),
+            "Increasing the receiver output amount is always allowed"
+        );
+        assert_ne!(wants_outputs.payjoin_psbt, increased_amount.unwrap().payjoin_psbt);
+
+        let output_value =
+            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value
+                - Amount::ONE_SAT;
+        let outputs = vec![TxOut { value: output_value, script_pubkey: script_pubkey.clone() }];
+        let decreased_amount =
+            wants_outputs.clone().replace_receiver_outputs(outputs, script_pubkey.as_script());
+        assert_eq!(
+            decreased_amount.unwrap_err(),
+            OutputSubstitutionError::from(
+                InternalOutputSubstitutionError::DecreasedValueWhenDisabled
+            ),
+            "Payjoin receiver amount has been decreased and should error"
+        );
+
+        let script = Script::new();
+        let replace_receiver_script_pubkey = wants_outputs.substitute_receiver_script(script);
+        assert_eq!(
+            replace_receiver_script_pubkey.unwrap_err(),
+            OutputSubstitutionError::from(
+                InternalOutputSubstitutionError::ScriptPubKeyChangedWhenDisabled
+            ),
+            "Payjoin receiver script pubkey has been modified and should error"
+        );
+    }
 
     #[test]
     fn test_interleave_shuffle() {

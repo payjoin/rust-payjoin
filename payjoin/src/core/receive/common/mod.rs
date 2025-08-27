@@ -497,9 +497,13 @@ impl WantsFeeRange {
 mod tests {
     use std::str::FromStr;
 
+    use bitcoin::absolute::{LockTime, Time};
+    use bitcoin::hashes::Hash;
     use bitcoin::key::rand::rngs::StdRng;
     use bitcoin::key::rand::SeedableRng;
-    use payjoin_test_utils::RECEIVER_INPUT_CONTRIBUTION;
+    use bitcoin::psbt::Input;
+    use bitcoin::{OutPoint, PubkeyHash, ScriptBuf, Sequence, Transaction};
+    use payjoin_test_utils::{DUMMY20, RECEIVER_INPUT_CONTRIBUTION};
 
     use super::*;
     use crate::receive::tests::original_from_test_vector;
@@ -619,5 +623,49 @@ mod tests {
         assert_eq!(original1, vec![1, 6, 2, 5, 4, 3]);
         assert_eq!(original2, vec![1, 5, 4, 2, 6, 3]);
         assert_eq!(original3, vec![4, 5, 1, 2, 6, 3]);
+    }
+
+    #[test]
+    fn test_multiple_contribute_inputs() {
+        let original = original_from_test_vector();
+        let wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        let txout = TxOut {
+            value: Amount::from_sat(123),
+            script_pubkey: ScriptBuf::new_p2pkh(&PubkeyHash::from_byte_array(DUMMY20)),
+        };
+        let tx = Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: LockTime::Seconds(Time::MIN),
+            input: vec![],
+            output: vec![txout.clone()],
+        };
+        let ot1 = OutPoint { txid: tx.compute_txid(), vout: 0 };
+        let ot2 = OutPoint { txid: tx.compute_txid(), vout: 1 };
+
+        let input_pair_1 = InputPair::new(
+            TxIn { previous_output: ot1, sequence: Sequence::MAX, ..Default::default() },
+            Input { witness_utxo: Some(txout.clone()), ..Default::default() },
+            None,
+        )
+        .unwrap();
+        let input_pair_2 = InputPair::new(
+            TxIn { previous_output: ot2, sequence: Sequence::MAX, ..Default::default() },
+            Input { witness_utxo: Some(txout), ..Default::default() },
+            None,
+        )
+        .unwrap();
+
+        let wants_inputs = wants_inputs.contribute_inputs(vec![input_pair_1.clone()]).unwrap();
+        assert_eq!(wants_inputs.receiver_inputs.len(), 1);
+        assert_eq!(wants_inputs.receiver_inputs[0], input_pair_1);
+        // Contribute the same input again, and a new input.
+        // TODO: if we ever decide to fix contribute duplicate inputs, we need to update this test.
+        let wants_inputs = wants_inputs
+            .contribute_inputs(vec![input_pair_2.clone(), input_pair_1.clone()])
+            .unwrap();
+        assert_eq!(wants_inputs.receiver_inputs.len(), 3);
+        assert_eq!(wants_inputs.receiver_inputs[0], input_pair_1);
+        assert_eq!(wants_inputs.receiver_inputs[1], input_pair_2);
+        assert_eq!(wants_inputs.receiver_inputs[2], input_pair_1);
     }
 }

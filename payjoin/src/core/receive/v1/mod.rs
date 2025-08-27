@@ -217,7 +217,7 @@ impl OutputsUnknown {
         // In case of there being multiple outputs paying to the receiver, we select the first one
         // as the `change_vout`, which we will default to when making single output changes in
         // future mutating typestates.
-        Ok(WantsOutputs::from_proposal(self.original, owned_vouts))
+        Ok(WantsOutputs::new(self.original, owned_vouts))
     }
 }
 

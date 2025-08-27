@@ -706,7 +706,7 @@ impl Receiver<OutputsUnknown> {
                 }
             },
         };
-        let inner = common::WantsOutputs::from_proposal(self.state.original, owned_vouts);
+        let inner = common::WantsOutputs::new(self.state.original, owned_vouts);
         MaybeFatalTransition::success(
             SessionEvent::WantsOutputs(inner.clone()),
             Receiver { state: WantsOutputs { inner, session_context: self.state.session_context } },

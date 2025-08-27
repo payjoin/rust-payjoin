@@ -143,11 +143,15 @@ impl WantsOutputs {
         }
     }
 
-    pub(crate) fn from_proposal(proposal: Original, owned_vouts: Vec<usize>) -> Self {
+    /// Create a new [`WantsOutputs`] typestate from an [`Original`] typestate and a list of
+    /// owned outputs.
+    ///
+    /// The first output in the `owned_vouts` list is used as the `change_vout`.
+    pub(crate) fn new(original: Original, owned_vouts: Vec<usize>) -> Self {
         Self {
-            original_psbt: proposal.psbt.clone(),
-            payjoin_psbt: proposal.psbt,
-            params: proposal.params,
+            original_psbt: original.psbt.clone(),
+            payjoin_psbt: original.psbt,
+            params: original.params,
             change_vout: owned_vouts[0],
             owned_vouts,
         }

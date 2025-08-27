@@ -1,4 +1,5 @@
 //! IO-related types and functions. Specifically, fetching OHTTP keys from a payjoin directory.
+use std::time::Duration;
 
 use http::header::ACCEPT;
 use reqwest::{Client, Proxy};
@@ -21,7 +22,12 @@ pub async fn fetch_ohttp_keys(
     let ohttp_keys_url = payjoin_directory.into_url()?.join("/.well-known/ohttp-gateway")?;
     let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
     let client = Client::builder().proxy(proxy).build()?;
-    let res = client.get(ohttp_keys_url).header(ACCEPT, "application/ohttp-keys").send().await?;
+    let res = client
+        .get(ohttp_keys_url)
+        .timeout(Duration::from_secs(10))
+        .header(ACCEPT, "application/ohttp-keys")
+        .send()
+        .await?;
     parse_ohttp_keys_response(res).await
 }
 
@@ -48,7 +54,12 @@ pub async fn fetch_ohttp_keys_with_cert(
         .add_root_certificate(reqwest::tls::Certificate::from_der(&cert_der)?)
         .proxy(proxy)
         .build()?;
-    let res = client.get(ohttp_keys_url).header(ACCEPT, "application/ohttp-keys").send().await?;
+    let res = client
+        .get(ohttp_keys_url)
+        .timeout(Duration::from_secs(10))
+        .header(ACCEPT, "application/ohttp-keys")
+        .send()
+        .await?;
     parse_ohttp_keys_response(res).await
 }
 

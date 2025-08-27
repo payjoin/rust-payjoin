@@ -11,8 +11,6 @@ if [[ "$OS" == "Darwin" ]]; then
     python3 --version
     pip install -r requirements.txt -r requirements-dev.txt
 elif [[ "$OS" == "Linux" ]]; then
-    sudo apt update
-    sudo apt install -y build-essential python3-dev
     LIBNAME=libpayjoin_ffi.so
     PYBIN=$(dirname $(which python))
     PYBIN="$PYBIN" 

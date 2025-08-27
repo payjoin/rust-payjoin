@@ -247,7 +247,7 @@ pub struct PsbtContext {
 
 impl PsbtContext {
     /// Prepare the PSBT by creating a new PSBT and copying only the fields allowed by the [spec](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#senders-payjoin-proposal-checklist)
-    pub(crate) fn prepare_psbt(self, processed_psbt: Psbt) -> Psbt {
+    fn prepare_psbt(self, processed_psbt: Psbt) -> Psbt {
         log::trace!("Original PSBT from callback: {processed_psbt:#?}");
 
         // Create a new PSBT and copy only the allowed fields
@@ -311,7 +311,7 @@ impl PsbtContext {
     /// Finalization consists of two steps:
     ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
     ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
-    pub(crate) fn finalize_proposal(
+    fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> Result<Psbt, FinalizeProposalError> {

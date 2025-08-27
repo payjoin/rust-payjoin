@@ -505,6 +505,19 @@ mod tests {
     use crate::receive::tests::original_from_test_vector;
 
     #[test]
+    fn empty_candidates_inputs() {
+        let original = original_from_test_vector();
+        let wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        let empty_candidate_inputs: Vec<InputPair> = vec![];
+        let result = wants_inputs.try_preserving_privacy(empty_candidate_inputs);
+        assert_eq!(
+            result.unwrap_err(),
+            SelectionError::from(InternalSelectionError::Empty),
+            "try_preserving_privacy should fail with empty candidate inputs"
+        );
+    }
+
+    #[test]
     fn test_pjos_disabled() {
         let mut original = original_from_test_vector();
         original.params.output_substitution = OutputSubstitution::Disabled;

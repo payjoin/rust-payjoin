@@ -344,7 +344,6 @@ mod tests {
     };
 
     use super::*;
-    use crate::receive::error::InternalSelectionError;
     use crate::receive::PayloadError;
     use crate::Version;
 
@@ -535,37 +534,6 @@ mod tests {
             let psbt = payjoin.apply_fee(None, Some(FeeRate::ZERO));
             assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
         }
-    }
-
-    #[test]
-    fn empty_candidates_inputs() {
-        let proposal = unchecked_proposal_from_test_vector();
-        let wants_inputs = proposal
-            .assume_interactive_receiver()
-            .check_inputs_not_owned(&mut |_| Ok(false))
-            .expect("No inputs should be owned")
-            .check_no_inputs_seen_before(&mut |_| Ok(false))
-            .expect("No inputs should be seen before")
-            .identify_receiver_outputs(&mut |script| {
-                let network = Network::Bitcoin;
-                let target_address = Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
-                    .map_err(ImplementationError::new)?
-                    .require_network(network)
-                    .map_err(ImplementationError::new)?;
-
-                let script_address =
-                    Address::from_script(script, network).map_err(ImplementationError::new)?;
-                Ok(script_address == target_address)
-            })
-            .expect("Receiver output should be identified")
-            .commit_outputs();
-        let empty_candidate_inputs: Vec<InputPair> = vec![];
-        let result = wants_inputs.try_preserving_privacy(empty_candidate_inputs);
-        assert_eq!(
-            result.unwrap_err(),
-            SelectionError::from(InternalSelectionError::Empty),
-            "try_preserving_privacy should fail with empty candidate inputs"
-        );
     }
 
     #[test]

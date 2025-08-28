@@ -40,7 +40,8 @@ use url::Url;
 
 use super::error::{Error, InputContributionError};
 use super::{
-    v1, InternalPayloadError, JsonReply, OutputSubstitutionError, ReplyableError, SelectionError,
+    common, InternalPayloadError, JsonReply, OutputSubstitutionError, ReplyableError,
+    SelectionError,
 };
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{
@@ -159,8 +160,8 @@ impl ReceiveSession {
 
             (
                 ReceiveSession::WantsFeeRange(state),
-                SessionEvent::ProvisionalProposal(provisional_proposal),
-            ) => Ok(state.apply_provisional_proposal(provisional_proposal)),
+                SessionEvent::ProvisionalProposal(psbt_context),
+            ) => Ok(state.apply_provisional_proposal(psbt_context)),
 
             (
                 ReceiveSession::ProvisionalProposal(state),
@@ -703,28 +704,23 @@ impl Receiver<OutputsUnknown> {
                 }
             },
         };
-        let wants_outputs = v1::WantsOutputs::from_proposal(self.state.original, owned_vouts);
+        let inner = common::WantsOutputs::new(self.state.original, owned_vouts);
         MaybeFatalTransition::success(
-            SessionEvent::WantsOutputs(wants_outputs.clone()),
-            Receiver {
-                state: WantsOutputs {
-                    v1: wants_outputs,
-                    session_context: self.state.session_context,
-                },
-            },
+            SessionEvent::WantsOutputs(inner.clone()),
+            Receiver { state: WantsOutputs { inner, session_context: self.state.session_context } },
         )
     }
 
-    pub(crate) fn apply_wants_outputs(self, v1: v1::WantsOutputs) -> ReceiveSession {
+    pub(crate) fn apply_wants_outputs(self, inner: common::WantsOutputs) -> ReceiveSession {
         let new_state =
-            Receiver { state: WantsOutputs { v1, session_context: self.state.session_context } };
+            Receiver { state: WantsOutputs { inner, session_context: self.state.session_context } };
         ReceiveSession::WantsOutputs(new_state)
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WantsOutputs {
-    v1: v1::WantsOutputs,
+    inner: common::WantsOutputs,
     session_context: SessionContext,
 }
 
@@ -740,17 +736,15 @@ impl State for WantsOutputs {}
 /// Call [`Receiver<WantsOutputs>::commit_outputs`] to proceed.
 impl Receiver<WantsOutputs> {
     /// Whether the receiver is allowed to substitute original outputs or not.
-    pub fn output_substitution(&self) -> OutputSubstitution { self.v1.output_substitution() }
+    pub fn output_substitution(&self) -> OutputSubstitution { self.inner.output_substitution() }
 
     /// Substitute the receiver output script with the provided script.
     pub fn substitute_receiver_script(
         self,
         output_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
-        let inner = self.state.v1.substitute_receiver_script(output_script)?;
-        Ok(Receiver {
-            state: WantsOutputs { v1: inner, session_context: self.state.session_context },
-        })
+        let inner = self.state.inner.substitute_receiver_script(output_script)?;
+        Ok(Receiver { state: WantsOutputs { inner, session_context: self.state.session_context } })
     }
 
     /// Replaces **all** receiver outputs with the one or more provided `replacement_outputs`, and
@@ -771,35 +765,31 @@ impl Receiver<WantsOutputs> {
         replacement_outputs: impl IntoIterator<Item = TxOut>,
         drain_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
-        let inner = self.state.v1.replace_receiver_outputs(replacement_outputs, drain_script)?;
-        Ok(Receiver {
-            state: WantsOutputs { v1: inner, session_context: self.state.session_context },
-        })
+        let inner = self.state.inner.replace_receiver_outputs(replacement_outputs, drain_script)?;
+        Ok(Receiver { state: WantsOutputs { inner, session_context: self.state.session_context } })
     }
 
     /// Commits the outputs as final, and moves on to the next typestate.
     ///
     /// Outputs cannot be modified after this function is called.
     pub fn commit_outputs(self) -> NextStateTransition<SessionEvent, Receiver<WantsInputs>> {
-        let inner = self.state.v1.clone().commit_outputs();
+        let inner = self.state.inner.clone().commit_outputs();
         NextStateTransition::success(
             SessionEvent::WantsInputs(inner.clone()),
-            Receiver {
-                state: WantsInputs { v1: inner, session_context: self.state.session_context },
-            },
+            Receiver { state: WantsInputs { inner, session_context: self.state.session_context } },
         )
     }
 
-    pub(crate) fn apply_wants_inputs(self, v1: v1::WantsInputs) -> ReceiveSession {
+    pub(crate) fn apply_wants_inputs(self, inner: common::WantsInputs) -> ReceiveSession {
         let new_state =
-            Receiver { state: WantsInputs { v1, session_context: self.state.session_context } };
+            Receiver { state: WantsInputs { inner, session_context: self.state.session_context } };
         ReceiveSession::WantsInputs(new_state)
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WantsInputs {
-    v1: v1::WantsInputs,
+    inner: common::WantsInputs,
     session_context: SessionContext,
 }
 
@@ -820,7 +810,7 @@ impl Receiver<WantsInputs> {
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<InputPair, SelectionError> {
-        self.v1.try_preserving_privacy(candidate_inputs)
+        self.inner.try_preserving_privacy(candidate_inputs)
     }
 
     /// Contributes the provided list of inputs to the transaction at random indices. If the total input
@@ -830,35 +820,34 @@ impl Receiver<WantsInputs> {
         self,
         inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<Self, InputContributionError> {
-        let inner = self.state.v1.contribute_inputs(inputs)?;
-        Ok(Receiver {
-            state: WantsInputs { v1: inner, session_context: self.state.session_context },
-        })
+        let inner = self.state.inner.contribute_inputs(inputs)?;
+        Ok(Receiver { state: WantsInputs { inner, session_context: self.state.session_context } })
     }
 
     /// Commits the inputs as final, and moves on to the next typestate.
     ///
     /// Inputs cannot be modified after this function is called.
     pub fn commit_inputs(self) -> NextStateTransition<SessionEvent, Receiver<WantsFeeRange>> {
-        let inner = self.state.v1.clone().commit_inputs();
+        let inner = self.state.inner.clone().commit_inputs();
         NextStateTransition::success(
             SessionEvent::WantsFeeRange(inner.clone()),
             Receiver {
-                state: WantsFeeRange { v1: inner, session_context: self.state.session_context },
+                state: WantsFeeRange { inner, session_context: self.state.session_context },
             },
         )
     }
 
-    pub(crate) fn apply_wants_fee_range(self, v1: v1::WantsFeeRange) -> ReceiveSession {
-        let new_state =
-            Receiver { state: WantsFeeRange { v1, session_context: self.state.session_context } };
+    pub(crate) fn apply_wants_fee_range(self, inner: common::WantsFeeRange) -> ReceiveSession {
+        let new_state = Receiver {
+            state: WantsFeeRange { inner, session_context: self.state.session_context },
+        };
         ReceiveSession::WantsFeeRange(new_state)
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WantsFeeRange {
-    v1: v1::WantsFeeRange,
+    inner: common::WantsFeeRange,
     session_context: SessionContext,
 }
 
@@ -890,7 +879,11 @@ impl Receiver<WantsFeeRange> {
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<ProvisionalProposal>, ReplyableError> {
-        let inner = match self.state.v1.apply_fee_range(min_fee_rate, max_effective_fee_rate) {
+        let psbt_context = match self
+            .state
+            .inner
+            .apply_fee_to_psbt_context(min_fee_rate, max_effective_fee_rate)
+        {
             Ok(inner) => inner,
             Err(e) => {
                 return MaybeFatalTransition::fatal(
@@ -900,20 +893,20 @@ impl Receiver<WantsFeeRange> {
             }
         };
         MaybeFatalTransition::success(
-            SessionEvent::ProvisionalProposal(inner.clone()),
+            SessionEvent::ProvisionalProposal(psbt_context.clone()),
             Receiver {
                 state: ProvisionalProposal {
-                    psbt_context: inner.psbt_context,
+                    psbt_context,
                     session_context: self.state.session_context.clone(),
                 },
             },
         )
     }
 
-    pub(crate) fn apply_provisional_proposal(self, v1: v1::ProvisionalProposal) -> ReceiveSession {
+    pub(crate) fn apply_provisional_proposal(self, psbt_context: PsbtContext) -> ReceiveSession {
         let new_state = Receiver {
             state: ProvisionalProposal {
-                psbt_context: v1.psbt_context,
+                psbt_context,
                 session_context: self.state.session_context,
             },
         };
@@ -1320,7 +1313,7 @@ pub mod test {
         let context = SessionContext { expiry: now, ..SHARED_CONTEXT.clone() };
         let receiver = Receiver {
             state: UncheckedProposal {
-                original: crate::receive::v1::test::proposal_from_test_vector(),
+                original: crate::receive::tests::original_from_test_vector(),
                 session_context: context.clone(),
             },
         };

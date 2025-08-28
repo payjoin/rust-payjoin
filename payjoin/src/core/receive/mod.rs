@@ -12,16 +12,15 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use bitcoin::hashes::sha256d::Hash;
 use bitcoin::{
     psbt, AddressType, FeeRate, OutPoint, Psbt, Script, ScriptBuf, Sequence, Transaction, TxIn,
     TxOut, Weight,
 };
-pub(crate) use error::InternalPayloadError;
 pub use error::{
     Error, InputContributionError, JsonReply, OutputSubstitutionError, PayloadError,
     ReplyableError, SelectionError,
 };
+pub(crate) use error::{FinalizeProposalError, InternalPayloadError};
 use optional_parameters::Params;
 use serde::{Deserialize, Serialize};
 
@@ -31,14 +30,13 @@ use crate::psbt::{
 };
 use crate::{ImplementationError, Version};
 
+pub(crate) mod common;
 mod error;
 pub(crate) mod optional_parameters;
 
 #[cfg(feature = "v1")]
 #[cfg_attr(docsrs, doc(cfg(feature = "v1")))]
 pub mod v1;
-#[cfg(not(feature = "v1"))]
-pub(crate) mod v1;
 
 #[cfg(feature = "v2")]
 #[cfg_attr(docsrs, doc(cfg(feature = "v2")))]
@@ -242,9 +240,9 @@ pub(crate) fn parse_payload(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct PsbtContext {
+pub struct PsbtContext {
     original_psbt: Psbt,
-    pub(crate) payjoin_psbt: Psbt,
+    payjoin_psbt: Psbt,
 }
 
 impl PsbtContext {
@@ -313,7 +311,7 @@ impl PsbtContext {
     /// Finalization consists of two steps:
     ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
     ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
-    pub(crate) fn finalize_proposal(
+    fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> Result<Psbt, FinalizeProposalError> {
@@ -337,31 +335,10 @@ impl PsbtContext {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum FinalizeProposalError {
-    /// The ntxid of the original PSBT does not match the ntxid of the finalized PSBT.
-    NtxidMismatch(Hash, Hash),
-    /// The implementation of the `wallet_process_psbt` function returned an error.
-    Implementation(ImplementationError),
-}
-
-impl std::fmt::Display for FinalizeProposalError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NtxidMismatch(expected, actual) => {
-                write!(f, "Ntxid mismatch: expected {expected}, got {actual}")
-            }
-            Self::Implementation(e) => write!(f, "Implementation error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for FinalizeProposalError {}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Original {
-    pub(crate) psbt: Psbt,
-    pub(crate) params: Params,
+    psbt: Psbt,
+    params: Params,
 }
 
 impl Original {
@@ -480,7 +457,7 @@ impl Original {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use bitcoin::absolute::{LockTime, Time};
     use bitcoin::hashes::Hash;
     use bitcoin::key::{PublicKey, WPubkeyHash};
@@ -489,7 +466,7 @@ mod tests {
     use bitcoin::{
         witness, Amount, PubkeyHash, ScriptBuf, ScriptHash, Txid, WScriptHash, XOnlyPublicKey,
     };
-    use payjoin_test_utils::{DUMMY20, DUMMY32};
+    use payjoin_test_utils::{DUMMY20, DUMMY32, PARSED_ORIGINAL_PSBT, QUERY_PARAMS};
 
     use super::*;
     use crate::psbt::InternalPsbtInputError::InvalidScriptPubKey;
@@ -497,6 +474,13 @@ mod tests {
     // TODO: this is duplicated in a couple places. In these tests, receiver, and the sender.
     // We should pub(crate) it and moved to a common place.
     const NON_WITNESS_DATA_WEIGHT: Weight = Weight::from_non_witness_data_size(32 + 4 + 4);
+
+    pub(crate) fn original_from_test_vector() -> Original {
+        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
+        let params = Params::from_query_pairs(pairs, &[Version::One])
+            .expect("Could not parse params from query pairs");
+        Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
+    }
 
     #[test]
     fn input_pair_with_expected_weight() {

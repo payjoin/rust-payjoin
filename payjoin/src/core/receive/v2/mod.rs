@@ -1168,6 +1168,22 @@ pub mod test {
         }
     }
 
+    pub(crate) fn mock_err() -> (String, JsonReply) {
+        let noop_persister = NoopSessionPersister::default();
+        let receiver = Receiver { state: unchecked_proposal_v2_from_test_vector() };
+        let server_error = || {
+            receiver
+                .clone()
+                .check_broadcast_suitability(None, |_| Err("mock error".into()))
+                .save(&noop_persister)
+        };
+
+        let error = server_error().expect_err("Server error should be populated with mock error");
+        let res = error.api_error().expect("check_broadcast error should propagate to api error");
+        let actual_json = JsonReply::from(&res);
+        (res.to_string(), actual_json)
+    }
+
     #[test]
     fn test_v2_mutable_receiver_state_closures() {
         let persister = NoopSessionPersister::default();
@@ -1314,27 +1330,16 @@ pub mod test {
 
     #[test]
     fn test_extract_err_req() -> Result<(), BoxError> {
-        let noop_persister = NoopSessionPersister::default();
         let receiver = Receiver { state: unchecked_proposal_v2_from_test_vector() };
-
-        let server_error = || {
-            receiver
-                .clone()
-                .check_broadcast_suitability(None, |_| Err("mock error".into()))
-                .save(&noop_persister)
-        };
-
+        let mock_err = mock_err();
         let expected_json = serde_json::json!({
             "errorCode": "unavailable",
             "message": "Receiver error"
         });
 
-        let error = server_error().expect_err("Server error should be populated with mock error");
-        let res = error.api_error().expect("check_broadcast error should propagate to api error");
-        let actual_json = JsonReply::from(&res);
-        assert_eq!(actual_json.to_json(), expected_json);
+        assert_eq!(mock_err.1.to_json(), expected_json);
 
-        let (_req, _ctx) = extract_err_req(&actual_json, &*EXAMPLE_URL, &receiver.session_context)?;
+        let (_req, _ctx) = extract_err_req(&mock_err.1, &*EXAMPLE_URL, &receiver.session_context)?;
 
         let internal_error: ReplyableError = InternalPayloadError::MissingPayment.into();
         let (_req, _ctx) =

@@ -199,7 +199,7 @@ mod tests {
     use crate::persist::test_utils::InMemoryTestPersister;
     use crate::persist::NoopSessionPersister;
     use crate::receive::tests::original_from_test_vector;
-    use crate::receive::v2::test::SHARED_CONTEXT;
+    use crate::receive::v2::test::{mock_err, SHARED_CONTEXT};
     use crate::receive::v2::{
         Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal, Receiver,
         UncheckedOriginalPayload,
@@ -592,6 +592,79 @@ mod tests {
 
         assert_ne!(uri.extras.pj_param.endpoint(), EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_skipped_session_extract_err_request() -> Result<(), BoxError> {
+        let ohttp_relay = EXAMPLE_URL.clone();
+        let mock_err = mock_err();
+
+        let session_history = SessionHistory { events: vec![SessionEvent::MaybeInputsOwned()] };
+        let err_req = session_history.extract_err_req(&ohttp_relay)?;
+        assert!(err_req.is_none());
+
+        let session_history = SessionHistory {
+            events: vec![
+                SessionEvent::MaybeInputsOwned(),
+                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
+            ],
+        };
+
+        let err_req = session_history.extract_err_req(&ohttp_relay)?;
+        assert!(err_req.is_none());
+
+        let session_history = SessionHistory {
+            events: vec![
+                SessionEvent::Created(SHARED_CONTEXT.clone()),
+                SessionEvent::MaybeInputsOwned(),
+                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
+            ],
+        };
+
+        let err_req = session_history.extract_err_req(&ohttp_relay)?;
+        assert!(err_req.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_session_extract_err_req_reply_key() -> Result<(), BoxError> {
+        let proposal = original_from_test_vector();
+        let ohttp_relay = EXAMPLE_URL.clone();
+        let mock_err = mock_err();
+
+        let session_history_one = SessionHistory {
+            events: vec![
+                SessionEvent::Created(SHARED_CONTEXT.clone()),
+                SessionEvent::UncheckedOriginalPayload((
+                    proposal.clone(),
+                    Some(crate::HpkeKeyPair::gen_keypair().1),
+                )),
+                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
+            ],
+        };
+
+        let err_req_one = session_history_one.extract_err_req(&ohttp_relay)?;
+        assert!(err_req_one.is_some());
+
+        let session_history_two = SessionHistory {
+            events: vec![
+                SessionEvent::Created(SHARED_CONTEXT.clone()),
+                SessionEvent::UncheckedOriginalPayload((
+                    proposal.clone(),
+                    Some(crate::HpkeKeyPair::gen_keypair().1),
+                )),
+                SessionEvent::SessionInvalid(mock_err.0, Some(mock_err.1)),
+            ],
+        };
+
+        let err_req_two = session_history_two.extract_err_req(ohttp_relay)?;
+        assert!(err_req_two.is_some());
+        assert_ne!(
+            session_history_one.session_context().unwrap().reply_key,
+            session_history_two.session_context().unwrap().reply_key
+        );
 
         Ok(())
     }

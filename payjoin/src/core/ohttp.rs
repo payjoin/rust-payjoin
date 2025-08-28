@@ -136,7 +136,11 @@ pub fn ohttp_decapsulate(
         builder = builder.header(field.name(), field.value());
     }
     builder
-        .status(m.control().status().unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR.into()))
+        .status({
+            let code = m.control().status().ok_or(bhttp::Error::InvalidStatus)?;
+
+            http::StatusCode::from_u16(code.code()).map_err(|_| bhttp::Error::InvalidStatus)?
+        })
         .body(m.content().to_vec())
         .map_err(OhttpEncapsulationError::Http)
 }

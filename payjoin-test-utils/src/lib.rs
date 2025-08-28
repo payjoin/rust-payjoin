@@ -61,23 +61,23 @@ impl TestServices {
     pub async fn initialize() -> Result<Self, BoxSendSyncError> {
         // TODO add a UUID, and cleanup guard to delete after on successful run
         let cert = local_cert_key();
-        let cert_der = cert.serialize_der().expect("Failed to serialize cert");
-        let key_der = cert.serialize_private_key_der();
-        let cert_key = (cert_der.clone(), key_der.clone());
+        let cert_der = cert.cert.der().to_vec();
+        let key_der = cert.signing_key.serialize_der();
+        let cert_key = (cert_der.clone(), key_der);
 
         let mut root_store = RootCertStore::empty();
-        root_store.add(CertificateDer::from(cert.serialize_der().unwrap())).unwrap();
+        root_store.add(CertificateDer::from(cert.cert.der().to_vec())).unwrap();
 
         let redis = init_redis().await;
         let db_host = format!("127.0.0.1:{}", redis.0);
-        let directory = init_directory(db_host, cert_key.clone()).await?;
+        let directory = init_directory(db_host, cert_key).await?;
         let gateway_origin =
             ohttp_relay::GatewayUri::from_str(&format!("https://localhost:{}", directory.0))?;
         let ohttp_relay = ohttp_relay::listen_tcp_on_free_port(gateway_origin, root_store).await?;
         let http_agent: Arc<Client> = Arc::new(http_agent(cert_der)?);
 
         Ok(Self {
-            cert,
+            cert: cert.cert,
             redis,
             directory: (directory.0, Some(directory.1)),
             ohttp_relay: (ohttp_relay.0, Some(ohttp_relay.1)),
@@ -85,7 +85,7 @@ impl TestServices {
         })
     }
 
-    pub fn cert(&self) -> Vec<u8> { self.cert.serialize_der().expect("Failed to serialize cert") }
+    pub fn cert(&self) -> Vec<u8> { self.cert.der().to_vec() }
 
     pub fn directory_url(&self) -> Url {
         Url::parse(&format!("https://localhost:{}", self.directory.0)).expect("invalid URL")
@@ -159,7 +159,7 @@ async fn bind_free_port() -> Result<tokio::net::TcpListener, std::io::Error> {
 }
 
 /// generate or get a DER encoded localhost cert and key.
-pub fn local_cert_key() -> rcgen::Certificate {
+pub fn local_cert_key() -> rcgen::CertifiedKey<rcgen::KeyPair> {
     rcgen::generate_simple_self_signed(vec!["0.0.0.0".to_string(), "localhost".to_string()])
         .expect("Failed to generate cert")
 }

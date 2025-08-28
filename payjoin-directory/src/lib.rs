@@ -39,8 +39,8 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[cfg(feature = "_manual-tls")]
 fn init_tls_acceptor(cert_key: (Vec<u8>, Vec<u8>)) -> Result<tokio_rustls::TlsAcceptor> {
-    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-    use rustls::ServerConfig;
+    use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    use tokio_rustls::rustls::ServerConfig;
     use tokio_rustls::TlsAcceptor;
     let (cert, key) = cert_key;
     let cert = CertificateDer::from(cert);
@@ -193,7 +193,10 @@ impl Service {
         let response = self.handle_v2(request).await?;
 
         let (parts, body) = response.into_parts();
-        let mut bhttp_res = bhttp::Message::response(parts.status.as_u16());
+        let mut bhttp_res = bhttp::Message::response(
+            bhttp::StatusCode::try_from(parts.status.as_u16())
+                .map_err(|e| HandlerError::InternalServerError(e.into()))?,
+        );
         for (name, value) in parts.headers.iter() {
             bhttp_res.put_header(name.as_str(), value.to_str().unwrap_or_default());
         }

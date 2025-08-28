@@ -83,15 +83,12 @@ mod e2e {
 
             let cert = local_cert_key();
             let cert_path = &temp_dir.path().join("localhost.crt");
-            tokio::fs::write(
-                cert_path,
-                cert.serialize_der().expect("must be able to serialize self signed certificate"),
-            )
-            .await
-            .expect("must be able to write self signed certificate");
+            tokio::fs::write(cert_path, cert.cert.der().to_vec())
+                .await
+                .expect("must be able to write self signed certificate");
 
             let key_path = &temp_dir.path().join("localhost.key");
-            tokio::fs::write(key_path, cert.serialize_private_key_der())
+            tokio::fs::write(key_path, cert.signing_key.serialize_der())
                 .await
                 .expect("must be able to write self signed certificate");
 
@@ -450,15 +447,12 @@ mod e2e {
             // Set up certificates for v1 receiver (needs local HTTPS server)
             let cert = local_cert_key();
             let cert_path = &temp_dir.path().join("localhost.crt");
-            tokio::fs::write(
-                cert_path,
-                cert.serialize_der().expect("must be able to serialize self signed certificate"),
-            )
-            .await
-            .expect("must be able to write self signed certificate");
+            tokio::fs::write(cert_path, cert.cert.der().to_vec())
+                .await
+                .expect("must be able to write self signed certificate");
 
             let key_path = &temp_dir.path().join("localhost.key");
-            tokio::fs::write(key_path, cert.serialize_private_key_der())
+            tokio::fs::write(key_path, cert.signing_key.serialize_der())
                 .await
                 .expect("must be able to write self signed certificate");
 

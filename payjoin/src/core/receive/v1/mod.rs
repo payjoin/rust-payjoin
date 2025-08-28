@@ -274,7 +274,8 @@ impl crate::receive::common::WantsFeeRange {
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
     ) -> Result<ProvisionalProposal, ReplyableError> {
-        let psbt_context = self.apply_fee_to_psbt_context(min_fee_rate, max_effective_fee_rate)?;
+        let psbt_context =
+            self.calculate_psbt_context_with_fee_range(min_fee_rate, max_effective_fee_rate)?;
         Ok(ProvisionalProposal { psbt_context })
     }
 }

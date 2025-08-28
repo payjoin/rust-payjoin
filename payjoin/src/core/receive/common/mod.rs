@@ -367,11 +367,15 @@ pub struct WantsFeeRange {
 }
 
 impl WantsFeeRange {
-    fn apply_fee(
-        &mut self,
+    /// Calculate the Payjoin PSBT with the specified fee range.
+    ///
+    /// This function is idempotent. It can be called multiple times with the same
+    /// parameters and will produce the same result, as it doesn't mutate the original PSBT.
+    fn calculate_psbt_with_fee_range(
+        &self,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
-    ) -> Result<&Psbt, InternalPayloadError> {
+    ) -> Result<Psbt, InternalPayloadError> {
         let min_fee_rate = min_fee_rate.unwrap_or(FeeRate::BROADCAST_MIN);
         log::trace!("min_fee_rate: {min_fee_rate:?}");
         log::trace!("params.min_fee_rate: {:?}", self.params.min_fee_rate);
@@ -379,6 +383,8 @@ impl WantsFeeRange {
         log::debug!("min_fee_rate: {min_fee_rate:?}");
 
         let max_fee_rate = max_effective_fee_rate.unwrap_or(FeeRate::BROADCAST_MIN);
+
+        let mut payjoin_psbt = self.payjoin_psbt.clone();
 
         // If the sender specified a fee contribution, the receiver is allowed to decrease the
         // sender's fee output to pay for additional input fees. Any fees in excess of
@@ -401,8 +407,7 @@ impl WantsFeeRange {
                 let sender_fee_output =
                     &self.original_psbt.unsigned_tx.output[additional_fee_output_index];
                 // Find the index of that output in the payjoin psbt
-                let sender_fee_vout = self
-                    .payjoin_psbt
+                let sender_fee_vout = payjoin_psbt
                     .unsigned_tx
                     .output
                     .iter()
@@ -412,8 +417,7 @@ impl WantsFeeRange {
                 let sender_additional_fee = min(max_additional_fee_contribution, additional_fee);
                 log::trace!("sender_additional_fee: {sender_additional_fee}");
                 // Remove additional miner fee from the sender's specified output
-                self.payjoin_psbt.unsigned_tx.output[sender_fee_vout].value -=
-                    sender_additional_fee;
+                payjoin_psbt.unsigned_tx.output[sender_fee_vout].value -= sender_additional_fee;
                 receiver_additional_fee -= sender_additional_fee;
             }
         }
@@ -434,9 +438,9 @@ impl WantsFeeRange {
         }
         if receiver_additional_fee >= Amount::ONE_SAT {
             // Remove additional miner fee from the receiver's specified output
-            self.payjoin_psbt.unsigned_tx.output[self.change_vout].value -= receiver_additional_fee;
+            payjoin_psbt.unsigned_tx.output[self.change_vout].value -= receiver_additional_fee;
         }
-        Ok(&self.payjoin_psbt)
+        Ok(payjoin_psbt)
     }
 
     /// Calculate the additional input weight contributed by the receiver.
@@ -463,33 +467,17 @@ impl WantsFeeRange {
         output_contribution_weight
     }
 
-    /// Applies additional fee contribution now that the receiver has contributed inputs
-    /// and may have added new outputs.
+    /// Apply the fee range to produce the common [`PsbtContext`].
     ///
-    /// How much the receiver ends up paying for fees depends on how much the sender stated they
-    /// were willing to pay in the parameters of the original proposal. For additional
-    /// inputs, fees will be subtracted from the sender's outputs as much as possible until we hit
-    /// the limit the sender specified in the Payjoin parameters. Any remaining fees for the new inputs
-    /// will be then subtracted from the change output of the receiver.
-    /// Fees for additional outputs are always subtracted from the receiver's outputs.
-    ///
-    /// `max_effective_fee_rate` is the maximum effective fee rate that the receiver is
-    /// willing to pay for their own input/output contributions. A `max_effective_fee_rate`
-    /// of zero indicates that the receiver is not willing to pay any additional
-    /// fees. Errors if the final effective fee rate exceeds `max_effective_fee_rate`.
-    ///
-    /// If not provided, `min_fee_rate` and `max_effective_fee_rate` default to the
-    /// minimum possible relay fee.
-    ///
-    /// The minimum effective fee limit is the highest of the minimum limit set by the sender in
-    /// the original proposal parameters and the limit passed in the `min_fee_rate` parameter.
-    pub(super) fn apply_fee_to_psbt_context(
-        mut self,
+    /// Use this function to create the higher level application-specific typestate.
+    pub(super) fn calculate_psbt_context_with_fee_range(
+        self,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
     ) -> Result<PsbtContext, ReplyableError> {
-        let psbt = self.apply_fee(min_fee_rate, max_effective_fee_rate)?.clone();
-        Ok(PsbtContext { original_psbt: self.original_psbt, payjoin_psbt: psbt })
+        let payjoin_psbt =
+            self.calculate_psbt_with_fee_range(min_fee_rate, max_effective_fee_rate)?;
+        Ok(PsbtContext { original_psbt: self.original_psbt, payjoin_psbt })
     }
 }
 
@@ -701,10 +689,11 @@ mod tests {
             script_pubkey: payjoin.original_psbt.unsigned_tx.output[0].script_pubkey.clone(),
         };
         payjoin.payjoin_psbt.unsigned_tx.output.push(additional_output);
-        let mut payjoin_clone = payjoin.clone();
-        let psbt = payjoin.apply_fee(None, Some(FeeRate::from_sat_per_vb_unchecked(1000)));
+        let psbt = payjoin
+            .calculate_psbt_with_fee_range(None, Some(FeeRate::from_sat_per_vb_unchecked(1000)));
         assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
-        let psbt = payjoin_clone.apply_fee(None, Some(FeeRate::from_sat_per_vb_unchecked(995)));
+        let psbt = payjoin
+            .calculate_psbt_with_fee_range(None, Some(FeeRate::from_sat_per_vb_unchecked(995)));
         match psbt {
             Err(InternalPayloadError::FeeTooHigh(proposed, max)) => {
                 assert_eq!(FeeRate::from_str("249630").unwrap(), proposed);
@@ -867,7 +856,7 @@ mod tests {
         let psbt_context = WantsOutputs::new(original_from_test_vector(), vec![0])
             .commit_outputs()
             .commit_inputs()
-            .apply_fee_to_psbt_context(None, None)
+            .calculate_psbt_context_with_fee_range(None, None)
             .expect("Contributed inputs should allow for valid fee contributions");
         let payjoin_proposal =
             psbt_context.finalize_proposal(|_| Ok(processed_psbt.clone())).expect("Valid psbt");
@@ -892,13 +881,13 @@ mod tests {
         let proposal = original_from_test_vector();
         let payjoin = WantsOutputs::new(proposal, vec![0]).commit_outputs().commit_inputs();
         {
-            let mut payjoin = payjoin.clone();
-            let psbt = payjoin.apply_fee(None, None);
+            let payjoin = payjoin.clone();
+            let psbt = payjoin.calculate_psbt_with_fee_range(None, None);
             assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
         }
         {
-            let mut payjoin = payjoin.clone();
-            let psbt = payjoin.apply_fee(None, Some(FeeRate::ZERO));
+            let payjoin = payjoin.clone();
+            let psbt = payjoin.calculate_psbt_with_fee_range(None, Some(FeeRate::ZERO));
             assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
         }
     }

@@ -882,7 +882,7 @@ impl Receiver<WantsFeeRange> {
         let psbt_context = match self
             .state
             .inner
-            .apply_fee_to_psbt_context(min_fee_rate, max_effective_fee_rate)
+            .calculate_psbt_context_with_fee_range(min_fee_rate, max_effective_fee_rate)
         {
             Ok(inner) => inner,
             Err(e) => {

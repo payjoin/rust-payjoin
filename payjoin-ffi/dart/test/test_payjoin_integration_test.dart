@@ -134,8 +134,8 @@ payjoin.Initialized create_receiver_context(
     String directory,
     payjoin.OhttpKeys ohttp_keys,
     InMemoryReceiverPersister persister) {
-  var receiver = payjoin.UninitializedReceiver()
-      .createSession(address, directory, ohttp_keys, null, null)
+  var receiver = payjoin.ReceiverBuilder(address, directory, ohttp_keys)
+      .build()
       .save(persister);
   return receiver;
 }

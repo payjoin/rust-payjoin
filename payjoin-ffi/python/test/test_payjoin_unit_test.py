@@ -50,13 +50,11 @@ class TestReceiverPersistence(unittest.TestCase):
     def test_receiver_persistence(self):
         persister = InMemoryReceiverPersister(1)
         address = payjoin.bitcoin.Address("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4", payjoin.bitcoin.Network.SIGNET)
-        payjoin.payjoin_ffi.UninitializedReceiver().create_session(
+        payjoin.payjoin_ffi.ReceiverBuilder(
             address, 
             "https://example.com", 
             payjoin.OhttpKeys.from_string("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC"), 
-            None,
-            None
-        ).save(persister)
+        ).build().save(persister)
         result = payjoin.payjoin_ffi.replay_receiver_event_log(persister)
         self.assertTrue(result.state().is_INITIALIZED())
 
@@ -80,13 +78,11 @@ class TestSenderPersistence(unittest.TestCase):
         # Create a receiver to just get the pj uri
         persister = InMemoryReceiverPersister(1)
         address = payjoin.bitcoin.Address("2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK", payjoin.bitcoin.Network.TESTNET)
-        receiver = payjoin.payjoin_ffi.UninitializedReceiver().create_session(
+        receiver = payjoin.payjoin_ffi.ReceiverBuilder(
             address, 
             "https://example.com", 
             payjoin.OhttpKeys.from_string("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC"), 
-            None,
-            None
-        ).save(persister)
+        ).build().save(persister)
         uri = receiver.pj_uri()
 
         persister = InMemorySenderPersister(1)

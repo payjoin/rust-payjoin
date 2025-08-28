@@ -7,7 +7,7 @@ pub use error::{
     ReplyableError, SelectionError, SessionError,
 };
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::bitcoin::FeeRate;
+use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::{MaybeFatalTransition, NextStateTransition};
 
 use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
@@ -93,7 +93,7 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
     fn from(value: payjoin::receive::v2::ReceiveSession) -> Self {
         use payjoin::receive::v2::ReceiveSession;
         match value {
-            ReceiveSession::Uninitialized(_) => Self::Uninitialized,
+            ReceiveSession::Uninitialized => Self::Uninitialized,
             ReceiveSession::Initialized(inner) =>
                 Self::Initialized { inner: Arc::new(inner.into()) },
             ReceiveSession::UncheckedProposal(inner) =>
@@ -236,47 +236,55 @@ impl InitialReceiveTransition {
     }
 }
 
-#[derive(uniffi::Object)]
-pub struct UninitializedReceiver {}
+#[derive(Clone, Debug, uniffi::Object)]
+pub struct ReceiverBuilder(payjoin::receive::v2::ReceiverBuilder);
 
 #[uniffi::export]
-impl UninitializedReceiver {
-    #[allow(clippy::new_without_default)]
-    #[uniffi::constructor]
-    // TODO: no need for this constructor. `create_session` is the only way to create a receiver.
-    pub fn new() -> Self { Self {} }
-
+impl ReceiverBuilder {
     /// Creates a new [`Initialized`] with the provided parameters.
     ///
     /// # Parameters
     /// - `address`: The Bitcoin address for the payjoin session.
     /// - `directory`: The URL of the store-and-forward payjoin directory.
     /// - `ohttp_keys`: The OHTTP keys used for encrypting and decrypting HTTP requests and responses.
-    /// - `expire_after`: The duration after which the session expires.
-    ///
-    /// # Returns
-    /// A new instance of [`Initialized`].
     ///
     /// # References
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md)
-    pub fn create_session(
-        &self,
+    #[uniffi::constructor]
+    pub fn new(
         address: Arc<Address>,
         directory: String,
         ohttp_keys: Arc<OhttpKeys>,
-        expire_after: Option<u64>,
-        amount: Option<u64>,
-    ) -> Result<InitialReceiveTransition, IntoUrlError> {
-        payjoin::receive::v2::Receiver::create_session(
-            Arc::unwrap_or_clone(address).into(),
-            directory,
-            Arc::unwrap_or_clone(ohttp_keys).into(),
-            expire_after.map(Duration::from_secs),
-            amount.map(payjoin::bitcoin::Amount::from_sat),
-        )
-        .map(|receiver| InitialReceiveTransition(Arc::new(RwLock::new(Some(receiver)))))
-        .map_err(IntoUrlError::from)
+    ) -> Result<Self, IntoUrlError> {
+        Ok(Self(
+            payjoin::receive::v2::ReceiverBuilder::new(
+                Arc::unwrap_or_clone(address).into(),
+                directory,
+                Arc::unwrap_or_clone(ohttp_keys).into(),
+            )
+            .map_err(IntoUrlError::from)?,
+        ))
     }
+
+    pub fn with_amount(&self, amount_sats: u64) -> Self {
+        Self(self.0.clone().with_amount(Amount::from_sat(amount_sats)))
+    }
+
+    pub fn with_expiry(&self, expiry: u64) -> Self {
+        Self(self.0.clone().with_expiry(Duration::from_secs(expiry)))
+    }
+
+    pub fn build(&self) -> InitialReceiveTransition {
+        InitialReceiveTransition(Arc::new(RwLock::new(Some(self.0.clone().build()))))
+    }
+}
+
+impl From<payjoin::receive::v2::ReceiverBuilder> for ReceiverBuilder {
+    fn from(value: payjoin::receive::v2::ReceiverBuilder) -> Self { Self(value) }
+}
+
+impl From<ReceiverBuilder> for payjoin::receive::v2::ReceiverBuilder {
+    fn from(value: ReceiverBuilder) -> Self { value.0 }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Object)]

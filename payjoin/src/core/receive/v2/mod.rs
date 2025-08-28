@@ -115,7 +115,7 @@ fn short_id_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 /// and the state to be updated with the next event over a uniform interface.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReceiveSession {
-    Uninitialized(Receiver<UninitializedReceiver>),
+    Uninitialized,
     Initialized(Receiver<Initialized>),
     UncheckedProposal(Receiver<UncheckedProposal>),
     MaybeInputsOwned(Receiver<MaybeInputsOwned>),
@@ -132,7 +132,7 @@ pub enum ReceiveSession {
 impl ReceiveSession {
     fn process_event(self, event: SessionEvent) -> Result<ReceiveSession, ReplayError> {
         match (self, event) {
-            (ReceiveSession::Uninitialized(_), SessionEvent::Created(context)) =>
+            (ReceiveSession::Uninitialized, SessionEvent::Created(context)) =>
                 Ok(ReceiveSession::Initialized(Receiver { state: Initialized { context } })),
 
             (
@@ -243,14 +243,11 @@ pub fn process_err_res(body: &[u8], context: ohttp::ClientResponse) -> Result<()
     process_post_res(body, context).map_err(|e| InternalSessionError::DirectoryResponse(e).into())
 }
 
-#[derive(Debug, Clone, PartialEq)]
-/// The receiver is not initialized yet, no session context is available yet
-pub struct UninitializedReceiver {}
+#[derive(Debug, Clone)]
+pub struct ReceiverBuilder(SessionContext);
 
-impl State for UninitializedReceiver {}
-
-impl Receiver<UninitializedReceiver> {
-    /// Creates a new [`Receiver<Initialized>`] with the provided parameters.
+impl ReceiverBuilder {
+    /// Creates a new [`ReceiverBuilder`] with the provided parameters.
     ///
     /// This is the beginning of the receiver protocol in Payjoin v2. It uses the passed address,
     /// store-and-forward Payjoin directory URL, and the OHTTP keys to encrypt and decrypt HTTP
@@ -261,28 +258,42 @@ impl Receiver<UninitializedReceiver> {
     ///
     /// See [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md)
     /// for more information on the purpose of each parameter for secure Payjoin v2 functionality.
-    pub fn create_session(
+    pub fn new(
         address: Address,
         directory: impl IntoUrl,
         ohttp_keys: OhttpKeys,
-        expire_after: Option<Duration>,
-        amount: Option<Amount>,
-    ) -> Result<NextStateTransition<SessionEvent, Receiver<Initialized>>, IntoUrlError> {
+    ) -> Result<Self, IntoUrlError> {
         let directory = directory.into_url()?;
         let session_context = SessionContext {
             address,
             directory,
-            mailbox: None,
             ohttp_keys,
-            expiry: SystemTime::now() + expire_after.unwrap_or(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY),
             s: HpkeKeyPair::gen_keypair(),
+            expiry: SystemTime::now() + TWENTY_FOUR_HOURS_DEFAULT_EXPIRY,
+            amount: None,
+            mailbox: None,
             e: None,
-            amount,
         };
-        Ok(NextStateTransition::success(
-            SessionEvent::Created(session_context.clone()),
-            Receiver { state: Initialized { context: session_context } },
-        ))
+        Ok(Self(session_context))
+    }
+
+    pub fn with_expiry(self, expiry: Duration) -> Self {
+        Self(SessionContext { expiry: SystemTime::now() + expiry, ..self.0 })
+    }
+
+    pub fn with_amount(self, amount: Amount) -> Self {
+        Self(SessionContext { amount: Some(amount), ..self.0 })
+    }
+
+    pub fn with_mailbox(self, mailbox: impl IntoUrl) -> Result<Self, IntoUrlError> {
+        Ok(Self(SessionContext { mailbox: Some(mailbox.into_url()?), ..self.0 }))
+    }
+
+    pub fn build(self) -> NextStateTransition<SessionEvent, Receiver<Initialized>> {
+        NextStateTransition::success(
+            SessionEvent::Created(self.0.clone()),
+            Receiver { state: Initialized { context: self.0 } },
+        )
     }
 }
 
@@ -1346,14 +1357,13 @@ pub mod test {
         let now = SystemTime::now();
         let noop_persister = NoopSessionPersister::default();
 
-        let session = Receiver::create_session(
+        let session = ReceiverBuilder::new(
             SHARED_CONTEXT.address.clone(),
             SHARED_CONTEXT.directory.clone(),
             SHARED_CONTEXT.ohttp_keys.clone(),
-            None,
-            None,
         )
         .expect("constructor on test vector should not fail")
+        .build()
         .save(&noop_persister)
         .expect("Noop persister shouldn't fail");
         let session_expiry = session.context.expiry.duration_since(now).unwrap().as_secs();
@@ -1362,6 +1372,27 @@ pub mod test {
             assert_eq!(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY, default_expiry);
             assert_eq!(session_expiry, expected_expiry.duration_since(now).unwrap().as_secs());
         }
+    }
+
+    #[test]
+    fn build_receiver_with_non_default_expiry() {
+        let now = SystemTime::now();
+        let expiry = Duration::from_secs(60);
+        let noop_persister = NoopSessionPersister::default();
+        let receiver = ReceiverBuilder::new(
+            SHARED_CONTEXT.address.clone(),
+            SHARED_CONTEXT.directory.clone(),
+            SHARED_CONTEXT.ohttp_keys.clone(),
+        )
+        .expect("constructor on test vector should not fail")
+        .with_expiry(expiry)
+        .build()
+        .save(&noop_persister)
+        .expect("Noop persister shouldn't fail");
+        assert_eq!(
+            receiver.context.expiry.duration_since(now).unwrap().as_secs(),
+            expiry.as_secs()
+        );
     }
 
     #[test]

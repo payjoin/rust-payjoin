@@ -7,7 +7,8 @@ use payjoin::persist::OptionalTransitionOutcome;
 use payjoin::receive::v2::{
     process_err_res, replay_event_log as replay_receiver_event_log, Initialized, MaybeInputsOwned,
     MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal, ReceiveSession,
-    Receiver, SessionHistory, UncheckedProposal, WantsFeeRange, WantsInputs, WantsOutputs,
+    Receiver, ReceiverBuilder, SessionHistory, UncheckedProposal, WantsFeeRange, WantsInputs,
+    WantsOutputs,
 };
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, SendSession, Sender, SenderBuilder, V2GetContext,
@@ -158,14 +159,12 @@ impl AppTrait for App {
                 .await?
                 .ohttp_keys;
         let persister = ReceiverPersister::new(self.db.clone())?;
-        let session = Receiver::create_session(
-            address,
-            self.config.v2()?.pj_directory.clone(),
-            ohttp_keys,
-            None,
-            Some(amount),
-        )?
-        .save(&persister)?;
+        let session =
+            ReceiverBuilder::new(address, self.config.v2()?.pj_directory.clone(), ohttp_keys)?
+                .with_amount(amount)
+                .build()
+                .save(&persister)?;
+
         println!("Receive session established");
         let pj_uri = session.pj_uri();
         println!("Request Payjoin by sharing this Payjoin Uri:");
@@ -352,7 +351,7 @@ impl App {
                     self.finalize_proposal(proposal, persister).await,
                 ReceiveSession::PayjoinProposal(proposal) =>
                     self.send_payjoin_proposal(proposal, persister).await,
-                ReceiveSession::Uninitialized(_) =>
+                ReceiveSession::Uninitialized =>
                     return Err(anyhow!("Uninitialized receiver session")),
                 ReceiveSession::TerminalFailure =>
                     return Err(anyhow!("Terminal receiver session")),

@@ -268,9 +268,9 @@ impl UninitializedReceiver {
         amount: Option<u64>,
     ) -> Result<InitialReceiveTransition, IntoUrlError> {
         payjoin::receive::v2::Receiver::create_session(
-            (*address).clone().into(),
+            Arc::unwrap_or_clone(address).into(),
             directory,
-            (*ohttp_keys).clone().into(),
+            Arc::unwrap_or_clone(ohttp_keys).into(),
             expire_after.map(Duration::from_secs),
             amount.map(payjoin::bitcoin::Amount::from_sat),
         )
@@ -760,10 +760,8 @@ impl WantsInputs {
         &self,
         candidate_inputs: Vec<Arc<InputPair>>,
     ) -> Result<Arc<InputPair>, SelectionError> {
-        let candidate_inputs: Vec<payjoin::receive::InputPair> = candidate_inputs
-            .into_iter()
-            .map(|pair| Arc::try_unwrap(pair).unwrap_or_else(|arc| (*arc).clone()).into())
-            .collect();
+        let candidate_inputs: Vec<payjoin::receive::InputPair> =
+            candidate_inputs.into_iter().map(|pair| Arc::unwrap_or_clone(pair).into()).collect();
         match self.0.clone().try_preserving_privacy(candidate_inputs) {
             Ok(t) => Ok(Arc::new(t.into())),
             Err(e) => Err(e.into()),
@@ -774,10 +772,8 @@ impl WantsInputs {
         &self,
         replacement_inputs: Vec<Arc<InputPair>>,
     ) -> Result<Arc<WantsInputs>, InputContributionError> {
-        let replacement_inputs: Vec<payjoin::receive::InputPair> = replacement_inputs
-            .into_iter()
-            .map(|pair| Arc::try_unwrap(pair).unwrap_or_else(|arc| (*arc).clone()).into())
-            .collect();
+        let replacement_inputs: Vec<payjoin::receive::InputPair> =
+            replacement_inputs.into_iter().map(|pair| Arc::unwrap_or_clone(pair).into()).collect();
         self.0
             .clone()
             .contribute_inputs(replacement_inputs)

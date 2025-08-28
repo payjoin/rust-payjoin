@@ -24,7 +24,7 @@ fi
 cd ../
 # This is a test script the actual release should not include the test utils feature
 cargo build --features _test-utils --profile release 
-cargo run --features _test-utils --profile release --bin uniffi-bindgen generate --library target/release/$LIBNAME --language python --out-dir python/src/payjoin/
+cargo run --features _test-utils --profile release --bin uniffi-bindgen generate --library ../target/release/$LIBNAME --language python --out-dir python/src/payjoin/
 
 if [[ "$OS" == "Darwin" ]]; then
     echo "Generating native binaries..."
@@ -36,8 +36,8 @@ if [[ "$OS" == "Darwin" ]]; then
 
     echo "Building macos fat library"
     lipo -create -output python/src/payjoin/$LIBNAME \
-        target/aarch64-apple-darwin/release-smaller/$LIBNAME \
-        target/x86_64-apple-darwin/release-smaller/$LIBNAME
+        ../target/aarch64-apple-darwin/release-smaller/$LIBNAME \
+        ../target/x86_64-apple-darwin/release-smaller/$LIBNAME
 
 else
     echo "Generating native binaries..."
@@ -46,7 +46,7 @@ else
     cargo build --profile release-smaller --target x86_64-unknown-linux-gnu --features _test-utils
 
     echo "Copying payjoin_ffi binary"
-    cp target/x86_64-unknown-linux-gnu/release-smaller/$LIBNAME python/src/payjoin/$LIBNAME
+    cp ../target/x86_64-unknown-linux-gnu/release-smaller/$LIBNAME python/src/payjoin/$LIBNAME
 fi
 
 echo "All done!"

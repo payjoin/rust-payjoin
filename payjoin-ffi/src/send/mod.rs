@@ -189,7 +189,7 @@ impl SenderBuilder {
     #[uniffi::constructor]
     pub fn new(psbt: String, uri: Arc<PjUri>) -> Result<Self, BuildSenderError> {
         let psbt = payjoin::bitcoin::psbt::Psbt::from_str(psbt.as_str())?;
-        Ok(payjoin::send::v2::SenderBuilder::new(psbt, (*uri).clone().into()).into())
+        Ok(payjoin::send::v2::SenderBuilder::new(psbt, Arc::unwrap_or_clone(uri).into()).into())
     }
 
     /// Disable output substitution even if the receiver didn't.

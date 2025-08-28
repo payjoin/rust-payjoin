@@ -34,12 +34,8 @@ impl From<PsbtInput> for bitcoin::psbt::Input {
     fn from(psbt_input: PsbtInput) -> Self {
         Self {
             witness_utxo: psbt_input.witness_utxo.map(|s| s.into()),
-            redeem_script: psbt_input
-                .redeem_script
-                .map(|s| Arc::try_unwrap(s).unwrap_or_else(|arc| (*arc).clone()).into()),
-            witness_script: psbt_input
-                .witness_script
-                .map(|s| Arc::try_unwrap(s).unwrap_or_else(|arc| (*arc).clone()).into()),
+            redeem_script: psbt_input.redeem_script.map(|s| Arc::unwrap_or_clone(s).into()),
+            witness_script: psbt_input.witness_script.map(|s| Arc::unwrap_or_clone(s).into()),
             ..Default::default()
         }
     }

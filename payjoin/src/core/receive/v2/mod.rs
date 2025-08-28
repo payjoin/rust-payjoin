@@ -140,9 +140,6 @@ impl ReceiveSession {
 
     fn process_event(self, event: SessionEvent) -> Result<ReceiveSession, ReplayError> {
         match (self, event) {
-            (ReceiveSession::Uninitialized, SessionEvent::Created(context)) =>
-                Ok(ReceiveSession::Initialized(Receiver { state: Initialized { context } })),
-
             (
                 ReceiveSession::Initialized(state),
                 SessionEvent::UncheckedProposal((proposal, reply_key)),

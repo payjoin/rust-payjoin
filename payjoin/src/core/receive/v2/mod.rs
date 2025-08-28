@@ -42,7 +42,9 @@ use super::error::{Error, InputContributionError};
 use super::{
     v1, InternalPayloadError, JsonReply, OutputSubstitutionError, ReplyableError, SelectionError,
 };
-use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
+use crate::hpke::{
+    decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey, PADDED_PLAINTEXT_B_LENGTH,
+};
 use crate::ohttp::{
     ohttp_encapsulate, process_get_res, process_post_res, OhttpEncapsulationError, OhttpKeys,
 };
@@ -1001,14 +1003,20 @@ impl Receiver<PayjoinProposal> {
 
         if let Some(e) = &self.session_context.e {
             // Prepare v2 payload
-            let payjoin_bytes = self.psbt.serialize();
+            let mut payjoin_bytes = self.psbt.serialize();
+            payjoin_bytes.resize(PADDED_PLAINTEXT_B_LENGTH, 0);
             let sender_mailbox = short_id_from_pubkey(e);
             target_resource = self
                 .session_context
                 .directory
                 .join(&sender_mailbox.to_string())
                 .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
-            body = encrypt_message_b(payjoin_bytes, &self.session_context.s, e)?;
+            let payjoin_bytes = payjoin_bytes.try_into().map_err(|_| {
+                Error::ReplyToSender(ReplyableError::Implementation(ImplementationError::new(
+                    std::io::Error::other("failed to pad PSBT to PADDED_B_LENGTH"),
+                )))
+            })?;
+            body = encrypt_message_b(&payjoin_bytes, &self.session_context.s, e)?;
             method = "POST";
         } else {
             // Prepare v2 wrapped and backwards-compatible v1 payload

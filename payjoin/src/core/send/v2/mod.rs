@@ -177,7 +177,18 @@ impl SenderBuilder {
     }
 }
 
-pub trait State {}
+mod sealed {
+    pub trait State {}
+
+    impl State for super::WithReplyKey {}
+    impl State for super::V2GetContext {}
+}
+
+/// Sealed trait for V2 send session states.
+///
+/// This trait is sealed to prevent external implementations. Only types within this crate
+/// can implement this trait, ensuring type safety and protocol integrity.
+pub trait State: sealed::State {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sender<State> {
@@ -237,8 +248,6 @@ pub struct WithReplyKey {
     /// The secret key to decrypt the receiver's reply.
     pub(crate) reply_key: HpkeSecretKey,
 }
-
-impl State for WithReplyKey {}
 
 impl WithReplyKey {
     fn new(pj_param: PjParam, psbt_ctx: PsbtContext) -> Self {
@@ -403,8 +412,6 @@ pub struct V2GetContext {
     pub(crate) psbt_ctx: PsbtContext,
     pub(crate) reply_key: HpkeSecretKey,
 }
-
-impl State for V2GetContext {}
 
 impl Sender<V2GetContext> {
     /// Construct an OHTTP Encapsulated HTTP GET request for the Proposal PSBT

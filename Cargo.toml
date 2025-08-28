@@ -1,7 +1,13 @@
 [workspace]
-members = ["payjoin", "payjoin-cli", "payjoin-directory", "payjoin-test-utils"]
+members = ["payjoin", "payjoin-cli", "payjoin-directory", "payjoin-test-utils", "payjoin-ffi"]
 resolver = "2"
-exclude = ["payjoin-ffi"]
+
+[profile.release-smaller]
+inherits = "release"
+opt-level = 'z'
+lto = true
+codegen-units = 1
+strip = true
 
 [patch.crates-io]
 payjoin = { path = "payjoin" }

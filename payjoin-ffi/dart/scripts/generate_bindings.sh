@@ -20,7 +20,7 @@ fi
 cd ../
 echo "Generating payjoin dart..."
 cargo build --features _test-utils --profile release
-cargo run --features _test-utils --profile release --bin uniffi-bindgen -- --library target/release/$LIBNAME --language dart --out-dir dart/lib/
+cargo run --features _test-utils --profile release --bin uniffi-bindgen -- --library ../target/release/$LIBNAME --language dart --out-dir dart/lib/
 
 if [[ "$OS" == "Darwin" ]]; then
     echo "Generating native binaries..."
@@ -32,8 +32,8 @@ if [[ "$OS" == "Darwin" ]]; then
 
     echo "Building macos fat library"
     lipo -create -output dart/$LIBNAME \
-        target/aarch64-apple-darwin/release-smaller/$LIBNAME \
-        target/x86_64-apple-darwin/release-smaller/$LIBNAME
+        ../target/aarch64-apple-darwin/release-smaller/$LIBNAME \
+        ../target/x86_64-apple-darwin/release-smaller/$LIBNAME
 else
     echo "Generating native binaries..."
     rustup target add x86_64-unknown-linux-gnu
@@ -41,7 +41,7 @@ else
     cargo build --profile release-smaller --target x86_64-unknown-linux-gnu --features _test-utils
 
     echo "Copying payjoin_ffi binary"
-    cp target/x86_64-unknown-linux-gnu/release-smaller/$LIBNAME dart/$LIBNAME
+    cp ../target/x86_64-unknown-linux-gnu/release-smaller/$LIBNAME dart/$LIBNAME
 fi
 
 echo "All done!"

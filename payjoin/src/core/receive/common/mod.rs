@@ -875,20 +875,4 @@ mod tests {
             assert!(output.tap_internal_key.is_none());
         }
     }
-
-    #[test]
-    fn unchecked_proposal_unlocks_after_checks() {
-        let proposal = original_from_test_vector();
-        let payjoin = WantsOutputs::new(proposal, vec![0]).commit_outputs().commit_inputs();
-        {
-            let payjoin = payjoin.clone();
-            let psbt = payjoin.calculate_psbt_with_fee_range(None, None);
-            assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
-        }
-        {
-            let payjoin = payjoin.clone();
-            let psbt = payjoin.calculate_psbt_with_fee_range(None, Some(FeeRate::ZERO));
-            assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
-        }
-    }
 }

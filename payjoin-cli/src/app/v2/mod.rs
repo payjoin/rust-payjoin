@@ -104,26 +104,31 @@ impl AppTrait for App {
                 Ok(())
             }
             PjParam::V2(pj_param) => {
-                // TODO: perhaps we should store pj uri in the session wrapper as to not replay the event log for each session
+                let receiver_pubkey = pj_param.receiver_pubkey();
                 let sender_state =
                     self.db.get_send_session_ids()?.into_iter().find_map(|session_id| {
-                        let sender_persister =
-                            SenderPersister::from_id(self.db.clone(), session_id).ok()?;
-                        let (send_session, session_history) =
-                            replay_sender_event_log(&sender_persister)
+                        let session_receiver_pubkey = self
+                            .db
+                            .get_send_session_receiver_pk(&session_id)
+                            .expect("Receiver pubkey should exist if session id exists");
+                        if session_receiver_pubkey == *receiver_pubkey {
+                            let sender_persister =
+                                SenderPersister::from_id(self.db.clone(), session_id).ok()?;
+                            let (send_session, _) = replay_sender_event_log(&sender_persister)
                                 .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))
                                 .ok()?;
 
-                        let pj_uri = session_history.pj_param().map(|pj_param| pj_param.endpoint());
-                        let sender_state =
-                            pj_uri.filter(|uri| uri == &pj_param.endpoint()).map(|_| send_session);
-                        sender_state.map(|sender_state| (sender_state, sender_persister))
+                            Some((send_session, sender_persister))
+                        } else {
+                            None
+                        }
                     });
 
                 let (sender_state, persister) = match sender_state {
                     Some((sender_state, persister)) => (sender_state, persister),
                     None => {
-                        let persister = SenderPersister::new(self.db.clone())?;
+                        let persister =
+                            SenderPersister::new(self.db.clone(), receiver_pubkey.clone())?;
                         let psbt = self.create_original_psbt(&address, amount, fee_rate)?;
                         let sender =
                             SenderBuilder::from_parts(psbt, pj_param, &address, Some(amount))

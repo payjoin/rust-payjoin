@@ -52,7 +52,7 @@ use crate::persist::{
     MaybeFatalTransition, MaybeFatalTransitionWithNoResults, MaybeSuccessTransition,
     MaybeTransientTransition, NextStateTransition,
 };
-use crate::receive::{parse_payload, InputPair, Original, PsbtContext};
+use crate::receive::{parse_payload, InputPair, OriginalPayload, PsbtContext};
 use crate::uri::ShortId;
 use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
 
@@ -72,8 +72,8 @@ pub struct SessionContext {
     ohttp_keys: OhttpKeys,
     expiry: SystemTime,
     amount: Option<Amount>,
-    s: HpkeKeyPair,
-    e: Option<HpkePublicKey>,
+    receiver_key: HpkeKeyPair,
+    reply_key: Option<HpkePublicKey>,
 }
 
 impl SessionContext {
@@ -90,8 +90,21 @@ impl SessionContext {
             .map_err(|e| InternalSessionError::ParseUrl(e.into()))
     }
 
-    /// The per-session identifier
-    pub(crate) fn id(&self) -> ShortId { short_id_from_pubkey(self.s.public_key()) }
+    /// The mailbox ID where the receiver expects the sender's Original PSBT.
+    pub(crate) fn proposal_mailbox_id(&self) -> ShortId {
+        short_id_from_pubkey(self.receiver_key.public_key())
+    }
+
+    /// The mailbox ID where replies (the Proposal PSBT or errors) should
+    /// be sent. For V1 requests this is the same as the proposal mailbox ID.
+    // FIXME before the UncheckedOriginalPayload typestate is reached, this returns the
+    // proposal mailbox ID. It doesn't make sense to reply before receiving
+    // anything from the sender and at that point it's ambiguous whether it's a
+    // v2 or v1 sender anyway. Ideally this should be impossible leveraging the
+    // typestate machinery
+    pub(crate) fn reply_mailbox_id(&self) -> ShortId {
+        short_id_from_pubkey(self.reply_key.as_ref().unwrap_or(self.receiver_key.public_key()))
+    }
 }
 
 fn deserialize_address_assume_checked<'de, D>(deserializer: D) -> Result<Address, D::Error>
@@ -117,7 +130,7 @@ fn short_id_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 pub enum ReceiveSession {
     Uninitialized,
     Initialized(Receiver<Initialized>),
-    UncheckedProposal(Receiver<UncheckedProposal>),
+    UncheckedOriginalPayload(Receiver<UncheckedOriginalPayload>),
     MaybeInputsOwned(Receiver<MaybeInputsOwned>),
     MaybeInputsSeen(Receiver<MaybeInputsSeen>),
     OutputsUnknown(Receiver<OutputsUnknown>),
@@ -137,10 +150,10 @@ impl ReceiveSession {
 
             (
                 ReceiveSession::Initialized(state),
-                SessionEvent::UncheckedProposal((proposal, reply_key)),
+                SessionEvent::UncheckedOriginalPayload((proposal, reply_key)),
             ) => Ok(state.apply_unchecked_from_payload(proposal, reply_key)?),
 
-            (ReceiveSession::UncheckedProposal(state), SessionEvent::MaybeInputsOwned()) =>
+            (ReceiveSession::UncheckedOriginalPayload(state), SessionEvent::MaybeInputsOwned()) =>
                 Ok(state.apply_maybe_inputs_owned()),
 
             (ReceiveSession::MaybeInputsOwned(state), SessionEvent::MaybeInputsSeen()) =>
@@ -182,7 +195,7 @@ mod sealed {
     pub trait State {}
 
     impl State for super::Initialized {}
-    impl State for super::UncheckedProposal {}
+    impl State for super::UncheckedOriginalPayload {}
     impl State for super::MaybeInputsOwned {}
     impl State for super::MaybeInputsSeen {}
     impl State for super::OutputsUnknown {}
@@ -239,7 +252,7 @@ fn extract_err_req(
     if SystemTime::now() > session_context.expiry {
         return Err(InternalSessionError::Expired(session_context.expiry).into());
     }
-    let mailbox = mailbox_endpoint(&session_context.directory, &session_context.id());
+    let mailbox = mailbox_endpoint(&session_context.directory, &session_context.reply_mailbox_id());
     let (body, ohttp_ctx) = ohttp_encapsulate(
         &mut session_context.ohttp_keys.0.clone(),
         "POST",
@@ -282,11 +295,11 @@ impl ReceiverBuilder {
             address,
             directory,
             ohttp_keys,
-            s: HpkeKeyPair::gen_keypair(),
+            receiver_key: HpkeKeyPair::gen_keypair(),
             expiry: SystemTime::now() + TWENTY_FOUR_HOURS_DEFAULT_EXPIRY,
             amount: None,
             mailbox: None,
-            e: None,
+            reply_key: None,
         };
         Ok(Self(session_context))
     }
@@ -331,15 +344,15 @@ impl Receiver<Initialized> {
         Ok((req, ohttp_ctx))
     }
 
-    /// The response can either be an UncheckedProposal or an ACCEPTED message
-    /// indicating no UncheckedProposal is available yet.
+    /// The response can either be an UncheckedOriginalPayload or an ACCEPTED message
+    /// indicating no UncheckedOriginalPayload is available yet.
     pub fn process_response(
         &mut self,
         body: &[u8],
         context: ohttp::ClientResponse,
     ) -> MaybeFatalTransitionWithNoResults<
         SessionEvent,
-        Receiver<UncheckedProposal>,
+        Receiver<UncheckedOriginalPayload>,
         Receiver<Initialized>,
         Error,
     > {
@@ -353,13 +366,13 @@ impl Receiver<Initialized> {
                 ),
         };
 
-        if let Some(proposal) = proposal {
+        if let Some((proposal, reply_key)) = proposal {
             MaybeFatalTransitionWithNoResults::success(
-                SessionEvent::UncheckedProposal((proposal.clone(), self.context.e.clone())),
+                SessionEvent::UncheckedOriginalPayload((proposal.clone(), reply_key.clone())),
                 Receiver {
-                    state: UncheckedProposal {
+                    state: UncheckedOriginalPayload {
                         original: proposal,
-                        session_context: self.state.context.clone(),
+                        session_context: SessionContext { reply_key, ..self.state.context.clone() },
                     },
                 },
             )
@@ -372,7 +385,7 @@ impl Receiver<Initialized> {
         &mut self,
         body: &[u8],
         context: ohttp::ClientResponse,
-    ) -> Result<Option<Original>, Error> {
+    ) -> Result<Option<(OriginalPayload, Option<HpkePublicKey>)>, Error> {
         let body = match process_get_res(body, context)
             .map_err(InternalSessionError::DirectoryResponse)?
         {
@@ -381,9 +394,13 @@ impl Receiver<Initialized> {
         };
         match std::str::from_utf8(&body) {
             // V1 response bodies are utf8 plaintext
-            Ok(response) => Ok(Some(self.extract_proposal_from_v1(response)?)),
+            Ok(response) =>
+                Ok(Some(self.extract_proposal_from_v1(response).map(|original| (original, None))?)),
             // V2 response bodies are encrypted binary
-            Err(_) => Ok(Some(self.extract_proposal_from_v2(body)?)),
+            Err(_) => Ok(Some(
+                self.extract_proposal_from_v2(body)
+                    .map(|(original, reply_key)| (original, Some(reply_key)))?,
+            )),
         }
     }
 
@@ -393,23 +410,30 @@ impl Receiver<Initialized> {
         ([u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES], ohttp::ClientResponse),
         OhttpEncapsulationError,
     > {
-        let fallback_target = mailbox_endpoint(&self.context.directory, &self.context.id());
+        let fallback_target =
+            mailbox_endpoint(&self.context.directory, &self.context.proposal_mailbox_id());
         ohttp_encapsulate(&mut self.context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
 
-    fn extract_proposal_from_v1(&mut self, response: &str) -> Result<Original, ReplyableError> {
+    fn extract_proposal_from_v1(
+        &mut self,
+        response: &str,
+    ) -> Result<OriginalPayload, ReplyableError> {
         self.unchecked_from_payload(response)
     }
 
-    fn extract_proposal_from_v2(&mut self, response: Vec<u8>) -> Result<Original, Error> {
-        let (payload_bytes, e) = decrypt_message_a(&response, self.context.s.secret_key().clone())?;
-        self.context.e = Some(e);
+    fn extract_proposal_from_v2(
+        &mut self,
+        response: Vec<u8>,
+    ) -> Result<(OriginalPayload, HpkePublicKey), Error> {
+        let (payload_bytes, reply_key) =
+            decrypt_message_a(&response, self.context.receiver_key.secret_key().clone())?;
         let payload = std::str::from_utf8(&payload_bytes)
             .map_err(|e| Error::ReplyToSender(InternalPayloadError::Utf8(e).into()))?;
-        self.unchecked_from_payload(payload).map_err(Error::ReplyToSender)
+        self.unchecked_from_payload(payload).map_err(Error::ReplyToSender).map(|p| (p, reply_key))
     }
 
-    fn unchecked_from_payload(&mut self, payload: &str) -> Result<Original, ReplyableError> {
+    fn unchecked_from_payload(&mut self, payload: &str) -> Result<OriginalPayload, ReplyableError> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
         log::trace!("Received query: {query}, base64: {base64}"); // my guess is no \n so default is wrong
@@ -428,7 +452,7 @@ impl Receiver<Initialized> {
             params.output_substitution = OutputSubstitution::Disabled;
         }
 
-        let inner = Original { psbt, params };
+        let inner = OriginalPayload { psbt, params };
         Ok(inner)
     }
 
@@ -439,7 +463,7 @@ impl Receiver<Initialized> {
 
     pub(crate) fn apply_unchecked_from_payload(
         self,
-        event: Original,
+        event: OriginalPayload,
         reply_key: Option<HpkePublicKey>,
     ) -> Result<ReceiveSession, InternalReplayError> {
         if self.state.context.expiry < SystemTime::now() {
@@ -448,13 +472,13 @@ impl Receiver<Initialized> {
         }
 
         let new_state = Receiver {
-            state: UncheckedProposal {
+            state: UncheckedOriginalPayload {
                 original: event,
-                session_context: SessionContext { e: reply_key, ..self.state.context },
+                session_context: SessionContext { reply_key, ..self.state.context },
             },
         };
 
-        Ok(ReceiveSession::UncheckedProposal(new_state))
+        Ok(ReceiveSession::UncheckedOriginalPayload(new_state))
     }
 }
 
@@ -464,8 +488,8 @@ impl Receiver<Initialized> {
 /// [`Receiver::process_response()`].
 ///
 #[derive(Debug, Clone, PartialEq)]
-pub struct UncheckedProposal {
-    pub(crate) original: Original,
+pub struct UncheckedOriginalPayload {
+    pub(crate) original: OriginalPayload,
     pub(crate) session_context: SessionContext,
 }
 
@@ -478,15 +502,15 @@ pub struct UncheckedProposal {
 /// The recommended usage of this typestate differs based on whether you are implementing an
 /// interactive (where the receiver takes manual actions to respond to the
 /// payjoin proposal) or a non-interactive (ex. a donation page which automatically generates a new QR code
-/// for each visit) payment receiver. For the latter, you should call [`Receiver<UncheckedProposal>::check_broadcast_suitability`] to check
+/// for each visit) payment receiver. For the latter, you should call [`Receiver<UncheckedOriginalPayload>::check_broadcast_suitability`] to check
 /// that the proposal is actually broadcastable (and, optionally, whether the fee rate is above the
 /// minimum limit you have set). These mechanisms protect the receiver against probing attacks, where
 /// a malicious sender can repeatedly send proposals to have the non-interactive receiver reveal the UTXOs
 /// it owns with the proposals it modifies.
 ///
 /// If you are implementing an interactive payment receiver, then such checks are not necessary, and you
-/// can go ahead with calling [`Receiver<UncheckedProposal>::assume_interactive_receiver`] to move on to the next typestate.
-impl Receiver<UncheckedProposal> {
+/// can go ahead with calling [`Receiver<UncheckedOriginalPayload>::assume_interactive_receiver`] to move on to the next typestate.
+impl Receiver<UncheckedOriginalPayload> {
     /// Checks that the original PSBT in the proposal can be broadcasted.
     ///
     /// If the receiver is a non-interactive payment processor (ex. a donation page which generates
@@ -556,7 +580,7 @@ impl Receiver<UncheckedProposal> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsOwned {
-    original: Original,
+    original: OriginalPayload,
     session_context: SessionContext,
 }
 
@@ -622,7 +646,7 @@ impl Receiver<MaybeInputsOwned> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsSeen {
-    original: Original,
+    original: OriginalPayload,
     session_context: SessionContext,
 }
 
@@ -680,7 +704,7 @@ impl Receiver<MaybeInputsSeen> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutputsUnknown {
-    original: Original,
+    original: OriginalPayload,
     session_context: SessionContext,
 }
 
@@ -997,7 +1021,7 @@ impl Receiver<PayjoinProposal> {
         let body: Vec<u8>;
         let method: &str;
 
-        if let Some(e) = &self.session_context.e {
+        if let Some(e) = &self.session_context.reply_key {
             // Prepare v2 payload
             let payjoin_bytes = self.psbt.serialize();
             let sender_mailbox = short_id_from_pubkey(e);
@@ -1006,12 +1030,13 @@ impl Receiver<PayjoinProposal> {
                 .directory
                 .join(&sender_mailbox.to_string())
                 .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
-            body = encrypt_message_b(payjoin_bytes, &self.session_context.s, e)?;
+            body = encrypt_message_b(payjoin_bytes, &self.session_context.receiver_key, e)?;
             method = "POST";
         } else {
             // Prepare v2 wrapped and backwards-compatible v1 payload
             body = self.psbt.to_string().as_bytes().to_vec();
-            let receiver_mailbox = short_id_from_pubkey(self.session_context.s.public_key());
+            let receiver_mailbox =
+                short_id_from_pubkey(self.session_context.receiver_key.public_key());
             target_resource = self
                 .session_context
                 .directory
@@ -1072,10 +1097,10 @@ pub(crate) fn pj_uri<'a>(
     use crate::uri::PayjoinExtras;
     let pj_param = crate::uri::PjParam::V2(crate::uri::v2::PjParam::new(
         session_context.directory.clone(),
-        session_context.id(),
+        session_context.proposal_mailbox_id(),
         session_context.expiry,
         session_context.ohttp_keys.clone(),
-        session_context.s.public_key().clone(),
+        session_context.receiver_key.public_key().clone(),
     ));
     let extras = PayjoinExtras { pj_param, output_substitution };
     let mut uri = bitcoin_uri::Uri::with_extras(session_context.address.clone(), extras);
@@ -1112,18 +1137,21 @@ pub mod test {
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
         ),
         expiry: SystemTime::now() + Duration::from_secs(60),
-        s: HpkeKeyPair::gen_keypair(),
-        e: None,
+        receiver_key: HpkeKeyPair::gen_keypair(),
+        reply_key: None,
         amount: None,
     });
 
-    pub(crate) fn unchecked_proposal_v2_from_test_vector() -> UncheckedProposal {
+    pub(crate) fn unchecked_proposal_v2_from_test_vector() -> UncheckedOriginalPayload {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::Two])
             .expect("Test utils query params should not fail");
-        UncheckedProposal {
-            original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
-            session_context: SHARED_CONTEXT.clone(),
+        UncheckedOriginalPayload {
+            original: OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
+            session_context: SessionContext {
+                reply_key: Some(HpkeKeyPair::gen_keypair().public_key().clone()),
+                ..SHARED_CONTEXT.clone()
+            },
         }
     }
 
@@ -1132,9 +1160,28 @@ pub mod test {
         let params = Params::from_query_pairs(pairs, &[Version::Two])
             .expect("Test utils query params should not fail");
         MaybeInputsOwned {
-            original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
-            session_context: SHARED_CONTEXT.clone(),
+            original: OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
+            session_context: SessionContext {
+                reply_key: Some(HpkeKeyPair::gen_keypair().public_key().clone()),
+                ..SHARED_CONTEXT.clone()
+            },
         }
+    }
+
+    pub(crate) fn mock_err() -> (String, JsonReply) {
+        let noop_persister = NoopSessionPersister::default();
+        let receiver = Receiver { state: unchecked_proposal_v2_from_test_vector() };
+        let server_error = || {
+            receiver
+                .clone()
+                .check_broadcast_suitability(None, |_| Err("mock error".into()))
+                .save(&noop_persister)
+        };
+
+        let error = server_error().expect_err("Server error should be populated with mock error");
+        let res = error.api_error().expect("check_broadcast error should propagate to api error");
+        let actual_json = JsonReply::from(&res);
+        (res.to_string(), actual_json)
     }
 
     #[test]
@@ -1283,31 +1330,20 @@ pub mod test {
 
     #[test]
     fn test_extract_err_req() -> Result<(), BoxError> {
-        let noop_persister = NoopSessionPersister::default();
         let receiver = Receiver { state: unchecked_proposal_v2_from_test_vector() };
-
-        let server_error = || {
-            receiver
-                .clone()
-                .check_broadcast_suitability(None, |_| Err("mock error".into()))
-                .save(&noop_persister)
-        };
-
+        let mock_err = mock_err();
         let expected_json = serde_json::json!({
             "errorCode": "unavailable",
             "message": "Receiver error"
         });
 
-        let error = server_error().expect_err("Server error should be populated with mock error");
-        let res = error.api_error().expect("check_broadcast error should propagate to api error");
-        let actual_json = JsonReply::from(&res);
-        assert_eq!(actual_json.to_json(), expected_json);
+        assert_eq!(mock_err.1.to_json(), expected_json);
 
-        let (_req, _ctx) = extract_err_req(&actual_json, &*EXAMPLE_URL, &SHARED_CONTEXT)?;
+        let (_req, _ctx) = extract_err_req(&mock_err.1, &*EXAMPLE_URL, &receiver.session_context)?;
 
         let internal_error: ReplyableError = InternalPayloadError::MissingPayment.into();
         let (_req, _ctx) =
-            extract_err_req(&(&internal_error).into(), &*EXAMPLE_URL, &SHARED_CONTEXT)?;
+            extract_err_req(&(&internal_error).into(), &*EXAMPLE_URL, &receiver.session_context)?;
         Ok(())
     }
 
@@ -1317,7 +1353,7 @@ pub mod test {
         let noop_persister = NoopSessionPersister::default();
         let context = SessionContext { expiry: now, ..SHARED_CONTEXT.clone() };
         let receiver = Receiver {
-            state: UncheckedProposal {
+            state: UncheckedOriginalPayload {
                 original: crate::receive::tests::original_from_test_vector(),
                 session_context: context.clone(),
             },

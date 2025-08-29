@@ -7,7 +7,7 @@
 //!    using [`build_v1_pj_uri`]
 //! 2. Listen for a sender's request on the `pj` endpoint
 //! 3. Parse the request using
-//!    [`UncheckedProposal::from_request()`]
+//!    [`UncheckedOriginalPayload::from_request()`]
 //! 4. Validate the proposal using the `check` methods to guide you.
 //! 5. Assuming the proposal is valid, augment it into a payjoin with the available
 //!    `try_preserving_privacy` and `contribute` methods
@@ -58,7 +58,7 @@ pub fn build_v1_pj_uri<'a>(
     Ok(bitcoin_uri::Uri::with_extras(address.clone(), extras))
 }
 
-impl UncheckedProposal {
+impl UncheckedOriginalPayload {
     pub fn from_request(
         body: &[u8],
         query: &str,
@@ -71,7 +71,7 @@ impl UncheckedProposal {
         let (psbt, params) = crate::receive::parse_payload(base64, query, SUPPORTED_VERSIONS)
             .map_err(ReplyableError::Payload)?;
 
-        Ok(UncheckedProposal { original: Original { psbt, params } })
+        Ok(Self { original: OriginalPayload { psbt, params } })
     }
 }
 
@@ -93,11 +93,11 @@ impl UncheckedProposal {
 /// If you are implementing an interactive payment receiver, then such checks are not necessary, and you
 /// can go ahead with calling [`Self::assume_interactive_receiver`] to move on to the next typestate.
 #[derive(Debug, Clone)]
-pub struct UncheckedProposal {
-    original: Original,
+pub struct UncheckedOriginalPayload {
+    original: OriginalPayload,
 }
 
-impl UncheckedProposal {
+impl UncheckedOriginalPayload {
     /// Checks that the original PSBT in the proposal can be broadcasted.
     ///
     /// If the receiver is a non-interactive payment processor (ex. a donation page which generates
@@ -136,7 +136,7 @@ impl UncheckedProposal {
 /// Call [`Self::check_inputs_not_owned`] to proceed.
 #[derive(Debug, Clone)]
 pub struct MaybeInputsOwned {
-    pub(crate) original: Original,
+    pub(crate) original: OriginalPayload,
 }
 
 impl MaybeInputsOwned {
@@ -166,7 +166,7 @@ impl MaybeInputsOwned {
 /// Call [`Self::check_no_inputs_seen_before`] to proceed.
 #[derive(Debug, Clone)]
 pub struct MaybeInputsSeen {
-    original: Original,
+    original: OriginalPayload,
 }
 impl MaybeInputsSeen {
     /// Check that the receiver has never seen the inputs in the original proposal before.
@@ -194,7 +194,7 @@ impl MaybeInputsSeen {
 /// Call [`Self::identify_receiver_outputs`] to proceed.
 #[derive(Debug, Clone)]
 pub struct OutputsUnknown {
-    original: Original,
+    original: OriginalPayload,
 }
 
 impl OutputsUnknown {
@@ -387,7 +387,7 @@ mod tests {
         let validated_request = validate_body(headers.clone(), body);
         assert!(validated_request.is_ok());
 
-        let proposal = UncheckedProposal::from_request(body, QUERY_PARAMS, headers)?;
+        let proposal = UncheckedOriginalPayload::from_request(body, QUERY_PARAMS, headers)?;
 
         let witness_utxo = proposal.original.psbt.inputs[0]
             .witness_utxo
@@ -405,21 +405,25 @@ mod tests {
         Ok(())
     }
 
-    fn unchecked_proposal_from_test_vector() -> UncheckedProposal {
+    fn unchecked_proposal_from_test_vector() -> UncheckedOriginalPayload {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");
-        UncheckedProposal { original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params } }
+        UncheckedOriginalPayload {
+            original: OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
+        }
     }
 
     fn maybe_inputs_owned_from_test_vector() -> MaybeInputsOwned {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");
-        MaybeInputsOwned { original: Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params } }
+        MaybeInputsOwned {
+            original: OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
+        }
     }
 
-    fn wants_outputs_from_test_vector(proposal: UncheckedProposal) -> WantsOutputs {
+    fn wants_outputs_from_test_vector(proposal: UncheckedOriginalPayload) -> WantsOutputs {
         proposal
             .assume_interactive_receiver()
             .check_inputs_not_owned(&mut |_| Ok(false))
@@ -437,7 +441,9 @@ mod tests {
             .expect("Receiver output should be identified")
     }
 
-    fn provisional_proposal_from_test_vector(proposal: UncheckedProposal) -> ProvisionalProposal {
+    fn provisional_proposal_from_test_vector(
+        proposal: UncheckedOriginalPayload,
+    ) -> ProvisionalProposal {
         wants_outputs_from_test_vector(proposal)
             .commit_outputs()
             .commit_inputs()

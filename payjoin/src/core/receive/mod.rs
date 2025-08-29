@@ -336,12 +336,12 @@ impl PsbtContext {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Original {
+pub struct OriginalPayload {
     psbt: Psbt,
     params: Params,
 }
 
-impl Original {
+impl OriginalPayload {
     // Calculates the fee rate of the original proposal PSBT.
     fn psbt_fee_rate(&self) -> Result<FeeRate, InternalPayloadError> {
         let original_psbt_fee = self.psbt.fee().map_err(|e| {
@@ -475,11 +475,11 @@ pub(crate) mod tests {
     // We should pub(crate) it and moved to a common place.
     const NON_WITNESS_DATA_WEIGHT: Weight = Weight::from_non_witness_data_size(32 + 4 + 4);
 
-    pub(crate) fn original_from_test_vector() -> Original {
+    pub(crate) fn original_from_test_vector() -> OriginalPayload {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");
-        Original { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
+        OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
     }
 
     #[test]

@@ -13,7 +13,7 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::receive::v1::{PayjoinProposal, UncheckedProposal};
+use payjoin::receive::v1::{PayjoinProposal, UncheckedOriginalPayload};
 use payjoin::receive::ReplyableError::{self, Implementation, V1};
 use payjoin::send::v1::SenderBuilder;
 use payjoin::{ImplementationError, IntoUrl, Uri, UriExt};
@@ -301,7 +301,7 @@ impl App {
             .await
             .map_err(|e| Implementation(ImplementationError::new(e)))?
             .to_bytes();
-        let proposal = UncheckedProposal::from_request(&body, query_string, headers)?;
+        let proposal = UncheckedOriginalPayload::from_request(&body, query_string, headers)?;
 
         let payjoin_proposal = self.process_v1_proposal(proposal)?;
         let psbt = payjoin_proposal.psbt();
@@ -315,7 +315,7 @@ impl App {
 
     fn process_v1_proposal(
         &self,
-        proposal: UncheckedProposal,
+        proposal: UncheckedOriginalPayload,
     ) -> Result<PayjoinProposal, ReplyableError> {
         let wallet = self.wallet();
 

@@ -7,8 +7,8 @@ use payjoin::persist::OptionalTransitionOutcome;
 use payjoin::receive::v2::{
     process_err_res, replay_event_log as replay_receiver_event_log, Initialized, MaybeInputsOwned,
     MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal, ReceiveSession,
-    Receiver, ReceiverBuilder, SessionHistory, UncheckedProposal, WantsFeeRange, WantsInputs,
-    WantsOutputs,
+    Receiver, ReceiverBuilder, SessionHistory, UncheckedOriginalPayload, WantsFeeRange,
+    WantsInputs, WantsOutputs,
 };
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, SendSession, Sender, SenderBuilder, V2GetContext,
@@ -297,7 +297,7 @@ impl App {
         &self,
         session: Receiver<Initialized>,
         persister: &ReceiverPersister,
-    ) -> Result<Receiver<UncheckedProposal>> {
+    ) -> Result<Receiver<UncheckedOriginalPayload>> {
         let ohttp_relay = self
             .unwrap_relay_or_else_fetch(Some(session.pj_uri().extras.endpoint().clone()))
             .await?;
@@ -333,7 +333,7 @@ impl App {
             match session {
                 ReceiveSession::Initialized(proposal) =>
                     self.read_from_directory(proposal, persister).await,
-                ReceiveSession::UncheckedProposal(proposal) =>
+                ReceiveSession::UncheckedOriginalPayload(proposal) =>
                     self.check_proposal(proposal, persister).await,
                 ReceiveSession::MaybeInputsOwned(proposal) =>
                     self.check_inputs_not_owned(proposal, persister).await,
@@ -393,7 +393,7 @@ impl App {
 
     async fn check_proposal(
         &self,
-        proposal: Receiver<UncheckedProposal>,
+        proposal: Receiver<UncheckedOriginalPayload>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let wallet = self.wallet();

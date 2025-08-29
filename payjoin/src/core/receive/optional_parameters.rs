@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 use std::fmt;
 
 use bitcoin::FeeRate;
-use log::warn;
+use tracing::warn;
 
 use crate::output_substitution::OutputSubstitution;
 use crate::Version;
@@ -118,7 +118,7 @@ impl Params {
             additional_fee_output_index,
         );
 
-        log::debug!("parsed optional parameters: {params:?}");
+        tracing::debug!("parsed optional parameters: {params:?}");
         Ok(params)
     }
 }

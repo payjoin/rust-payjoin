@@ -377,10 +377,10 @@ impl WantsFeeRange {
         max_effective_fee_rate: Option<FeeRate>,
     ) -> Result<Psbt, InternalPayloadError> {
         let min_fee_rate = min_fee_rate.unwrap_or(FeeRate::BROADCAST_MIN);
-        log::trace!("min_fee_rate: {min_fee_rate:?}");
-        log::trace!("params.min_fee_rate: {:?}", self.params.min_fee_rate);
+        tracing::trace!("min_fee_rate: {min_fee_rate:?}");
+        tracing::trace!("params.min_fee_rate: {:?}", self.params.min_fee_rate);
         let min_fee_rate = max(min_fee_rate, self.params.min_fee_rate);
-        log::debug!("min_fee_rate: {min_fee_rate:?}");
+        tracing::debug!("min_fee_rate: {min_fee_rate:?}");
 
         let max_fee_rate = max_effective_fee_rate.unwrap_or(FeeRate::BROADCAST_MIN);
 
@@ -391,10 +391,10 @@ impl WantsFeeRange {
         // `max_additional_fee_contribution` must be covered by the receiver.
         let input_contribution_weight = self.additional_input_weight()?;
         let additional_fee = input_contribution_weight * min_fee_rate;
-        log::trace!("additional_fee: {additional_fee}");
+        tracing::trace!("additional_fee: {additional_fee}");
         let mut receiver_additional_fee = additional_fee;
         if additional_fee >= Amount::ONE_SAT {
-            log::trace!(
+            tracing::trace!(
                 "self.params.additional_fee_contribution: {:?}",
                 self.params.additional_fee_contribution
             );
@@ -415,7 +415,7 @@ impl WantsFeeRange {
                     .expect("Sender output is missing from payjoin PSBT");
                 // Determine the additional amount that the sender will pay in fees
                 let sender_additional_fee = min(max_additional_fee_contribution, additional_fee);
-                log::trace!("sender_additional_fee: {sender_additional_fee}");
+                tracing::trace!("sender_additional_fee: {sender_additional_fee}");
                 // Remove additional miner fee from the sender's specified output
                 payjoin_psbt.unsigned_tx.output[sender_fee_vout].value -= sender_additional_fee;
                 receiver_additional_fee -= sender_additional_fee;
@@ -426,11 +426,11 @@ impl WantsFeeRange {
         // any additional outputs must be paid for by the receiver.
         let output_contribution_weight = self.additional_output_weight();
         receiver_additional_fee += output_contribution_weight * min_fee_rate;
-        log::trace!("receiver_additional_fee: {receiver_additional_fee}");
+        tracing::trace!("receiver_additional_fee: {receiver_additional_fee}");
         // Ensure that the receiver does not pay more in fees
         // than they would by building a separate transaction at max_effective_fee_rate instead.
         let max_fee = (input_contribution_weight + output_contribution_weight) * max_fee_rate;
-        log::trace!("max_fee: {max_fee}");
+        tracing::trace!("max_fee: {max_fee}");
         if receiver_additional_fee > max_fee {
             let proposed_fee_rate =
                 receiver_additional_fee / (input_contribution_weight + output_contribution_weight);
@@ -463,7 +463,7 @@ impl WantsFeeRange {
             .iter()
             .fold(Weight::ZERO, |acc, txo| acc + txo.weight());
         let output_contribution_weight = payjoin_outputs_weight - original_outputs_weight;
-        log::trace!("output_contribution_weight : {output_contribution_weight}");
+        tracing::trace!("output_contribution_weight : {output_contribution_weight}");
         output_contribution_weight
     }
 

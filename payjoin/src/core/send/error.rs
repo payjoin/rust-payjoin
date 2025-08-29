@@ -364,6 +364,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(feature = "v1")]
     fn test_parse_json() {
         let known_str_error = r#"{"errorCode":"version-unsupported", "message":"custom message here", "supported": [1, 2]}"#;
         match ResponseError::parse(known_str_error) {

@@ -1,5 +1,4 @@
-use std::time::SystemTime;
-
+use bitcoin::absolute::Time;
 use serde::{Deserialize, Serialize};
 
 use super::{ReceiveSession, SessionContext};
@@ -35,7 +34,7 @@ impl From<InternalReplayError> for ReplayError {
 #[derive(Debug)]
 pub(crate) enum InternalReplayError {
     /// Session expired
-    SessionExpired(SystemTime),
+    SessionExpired(Time),
     /// Invalid combination of state and event
     InvalidStateAndEvent(Box<ReceiveSession>, Box<SessionEvent>),
     /// Application storage error
@@ -324,7 +323,7 @@ mod tests {
 
     #[test]
     fn test_replaying_unchecked_proposal_expiry() {
-        let now = SystemTime::now();
+        let now = crate::uri::v2::now();
         let context = SessionContext { expiry: now, ..SHARED_CONTEXT.clone() };
         let original = original_from_test_vector();
 

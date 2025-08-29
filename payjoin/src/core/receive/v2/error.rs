@@ -1,6 +1,8 @@
 use core::fmt;
 use std::error;
 
+use bitcoin::absolute::Time;
+
 use super::Error::V2;
 use crate::hpke::HpkeError;
 use crate::ohttp::{DirectoryResponseError, OhttpEncapsulationError};
@@ -27,7 +29,7 @@ pub(crate) enum InternalSessionError {
     /// Url parsing failed
     ParseUrl(crate::into_url::Error),
     /// The session has expired
-    Expired(std::time::SystemTime),
+    Expired(Time),
     /// OHTTP Encapsulation failed
     OhttpEncapsulation(OhttpEncapsulationError),
     /// Hybrid Public Key Encryption failed

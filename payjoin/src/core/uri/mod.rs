@@ -441,6 +441,7 @@ mod tests {
 
     /// Test that rejects HTTP URLs that are not onion addresses
     #[test]
+    #[cfg(feature = "v1")]
     fn test_http_non_onion_rejected() {
         // HTTP to regular domain should be rejected
         let url = "http://example.com";

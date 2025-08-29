@@ -1,11 +1,8 @@
 use std::{error, fmt};
 
-use bitcoin::hashes::sha256d::Hash;
-
 use crate::error_codes::ErrorCode::{
     self, NotEnoughMoney, OriginalPsbtRejected, Unavailable, VersionUnsupported,
 };
-use crate::ImplementationError;
 
 /// The top-level error type for the payjoin receiver
 #[derive(Debug)]
@@ -401,27 +398,6 @@ impl error::Error for InputContributionError {
 impl From<InternalInputContributionError> for InputContributionError {
     fn from(value: InternalInputContributionError) -> Self { InputContributionError(value) }
 }
-
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum FinalizeProposalError {
-    /// The ntxid of the original PSBT does not match the ntxid of the finalized PSBT.
-    NtxidMismatch(Hash, Hash),
-    /// The implementation of the `wallet_process_psbt` function returned an error.
-    Implementation(ImplementationError),
-}
-
-impl std::fmt::Display for FinalizeProposalError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NtxidMismatch(expected, actual) => {
-                write!(f, "Ntxid mismatch: expected {expected}, got {actual}")
-            }
-            Self::Implementation(e) => write!(f, "Implementation error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for FinalizeProposalError {}
 
 #[cfg(test)]
 mod tests {

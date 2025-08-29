@@ -16,11 +16,11 @@ use bitcoin::{
     psbt, AddressType, FeeRate, OutPoint, Psbt, Script, ScriptBuf, Sequence, Transaction, TxIn,
     TxOut, Weight,
 };
+pub(crate) use error::InternalPayloadError;
 pub use error::{
     Error, InputContributionError, JsonReply, OutputSubstitutionError, PayloadError,
     ReplyableError, SelectionError,
 };
-pub(crate) use error::{FinalizeProposalError, InternalPayloadError};
 use optional_parameters::Params;
 use serde::{Deserialize, Serialize};
 
@@ -314,7 +314,7 @@ impl PsbtContext {
     fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-    ) -> Result<Psbt, FinalizeProposalError> {
+    ) -> Result<Psbt, ImplementationError> {
         let mut psbt = self.payjoin_psbt.clone();
         // Remove now-invalid sender signatures before applying the receiver signatures
         for i in self.sender_input_indexes() {
@@ -323,12 +323,13 @@ impl PsbtContext {
             psbt.inputs[i].final_script_witness = None;
             psbt.inputs[i].tap_key_sig = None;
         }
-        let finalized_psbt =
-            wallet_process_psbt(&psbt).map_err(FinalizeProposalError::Implementation)?;
+        let finalized_psbt = wallet_process_psbt(&psbt)?;
         let expected_ntxid = self.payjoin_psbt.unsigned_tx.compute_ntxid();
         let actual_ntxid = finalized_psbt.unsigned_tx.compute_ntxid();
         if expected_ntxid != actual_ntxid {
-            return Err(FinalizeProposalError::NtxidMismatch(expected_ntxid, actual_ntxid));
+            return Err(ImplementationError::from(
+                format!("Ntxid mismatch: expected {expected_ntxid}, got {actual_ntxid}").as_str(),
+            ));
         }
         let payjoin_proposal = self.prepare_psbt(finalized_psbt);
         Ok(payjoin_proposal)

@@ -968,13 +968,12 @@ impl Receiver<ProvisionalProposal> {
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-    ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, SessionError> {
+    ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, ImplementationError>
+    {
         let inner = match self.state.psbt_context.finalize_proposal(wallet_process_psbt) {
             Ok(inner) => inner,
             Err(e) => {
-                return MaybeTransientTransition::transient(
-                    InternalSessionError::Implementation(ImplementationError::new(e)).into(),
-                );
+                return MaybeTransientTransition::transient(e);
             }
         };
         let payjoin_proposal =

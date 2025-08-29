@@ -15,7 +15,7 @@ use super::error::{
     InternalSelectionError,
 };
 use super::optional_parameters::Params;
-use super::{InputPair, OutputSubstitutionError, ReplyableError, SelectionError};
+use super::{InputPair, OutputSubstitutionError, SelectionError};
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
 use crate::receive::{InternalPayloadError, OriginalPayload, PsbtContext};
@@ -474,7 +474,7 @@ impl WantsFeeRange {
         self,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
-    ) -> Result<PsbtContext, ReplyableError> {
+    ) -> Result<PsbtContext, InternalPayloadError> {
         let payjoin_psbt =
             self.calculate_psbt_with_fee_range(min_fee_rate, max_effective_fee_rate)?;
         Ok(PsbtContext { original_psbt: self.original_psbt, payjoin_psbt })

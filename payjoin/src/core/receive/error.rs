@@ -226,10 +226,14 @@ impl From<&PayloadError> for JsonReply {
 }
 
 impl fmt::Display for PayloadError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { self.0.fmt(f) }
+}
+
+impl fmt::Display for InternalPayloadError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use InternalPayloadError::*;
 
-        match &self.0 {
+        match &self {
             Utf8(e) => write!(f, "{e}"),
             ParsePsbt(e) => write!(f, "{e}"),
             SenderParams(e) => write!(f, "{e}"),

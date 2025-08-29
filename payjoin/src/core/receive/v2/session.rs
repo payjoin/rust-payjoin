@@ -18,6 +18,9 @@ impl std::fmt::Display for ReplayError {
         use InternalReplayError::*;
         match &self.0 {
             SessionExpired(expiry) => write!(f, "Session expired at {expiry:?}"),
+            NoEvents => write!(f, "No events found in session"),
+            InvalidEventForUninitializedSession(event) =>
+                write!(f, "Invalid event ({event:?}) for uninitialized session",),
             InvalidStateAndEvent(state, event) => write!(
                 f,
                 "Invalid combination of state ({state:?}) and event ({event:?}) during replay",
@@ -36,6 +39,10 @@ impl From<InternalReplayError> for ReplayError {
 pub(crate) enum InternalReplayError {
     /// Session expired
     SessionExpired(SystemTime),
+    /// No events found in session
+    NoEvents,
+    /// Invalid event for uninitialized session
+    InvalidEventForUninitializedSession(Box<SessionEvent>),
     /// Invalid combination of state and event
     InvalidStateAndEvent(Box<ReceiveSession>, Box<SessionEvent>),
     /// Application storage error
@@ -49,10 +56,12 @@ where
     P: SessionPersister,
     P::SessionEvent: Into<SessionEvent> + Clone,
 {
-    let logs = persister
+    let mut logs = persister
         .load()
         .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
-    let mut receiver = ReceiveSession::Uninitialized;
+
+    let mut receiver =
+        ReceiveSession::new(logs.next().ok_or(InternalReplayError::NoEvents)?.into())?;
     let mut history = SessionHistory::default();
 
     for event in logs {

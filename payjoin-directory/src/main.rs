@@ -38,7 +38,8 @@ async fn main() -> Result<(), BoxError> {
     }
 
     let listener = TcpListener::bind(config.listen_addr).await?;
-    service.serve_tcp(listener).await
+    service.serve_tcp(listener).await;
+    Ok(())
 }
 
 fn init_logging() {

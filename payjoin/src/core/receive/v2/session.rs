@@ -1,5 +1,3 @@
-use std::time::SystemTime;
-
 use serde::{Deserialize, Serialize};
 
 use super::{ReceiveSession, SessionContext};
@@ -45,7 +43,7 @@ where
 
     let history = SessionHistory::new(session_events.clone());
     let ctx = history.session_context();
-    if SystemTime::now() > ctx.expiration {
+    if ctx.expiration.elapsed() {
         // Session has expired: close the session and persist a fatal error
         let err = SessionError(InternalSessionError::Expired(ctx.expiration));
         persister
@@ -334,7 +332,7 @@ mod tests {
     #[test]
     fn test_replaying_session_creation_with_expired_session() -> Result<(), BoxError> {
         let session_context = SessionContext {
-            expiration: SystemTime::now() - Duration::from_secs(1),
+            expiration: (SystemTime::now() - Duration::from_secs(1)).try_into().unwrap(),
             ..SHARED_CONTEXT.clone()
         };
         let test = SessionHistoryTest {

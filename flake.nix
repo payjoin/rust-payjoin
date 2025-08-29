@@ -199,7 +199,7 @@
           };
 
           shfmt = simpleCheck rec {
-            name = "shell-checks";
+            name = "shfmt";
             src = pkgs.lib.sources.sourceFilesBySuffices ./. [ ".sh" ];
             nativeBuildInputs = [ pkgs.shfmt ];
             checkPhase = ''
@@ -208,11 +208,14 @@
           };
 
           shellcheck = simpleCheck rec {
-            name = "shell-checks";
+            name = "shellcheck";
             src = pkgs.lib.sources.sourceFilesBySuffices ./. [ ".sh" ];
-            nativeBuildInputs = [ pkgs.shellcheck ];
+            nativeBuildInputs = [
+              pkgs.shellcheck
+              pkgs.findutils
+            ];
             checkPhase = ''
-              shellcheck -x ${src}
+              find "${src}" -name '*.sh' -print0 | xargs -0 shellcheck -x
             '';
           };
         };

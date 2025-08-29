@@ -170,7 +170,7 @@ pub fn init_bitcoind() -> Result<bitcoind::BitcoinD, BoxError> {
         .or_else(|| bitcoind::downloaded_exe_path().ok())
         .expect("bitcoind not found");
     let mut conf = bitcoind::Conf::default();
-    conf.view_stdout = tracing::enabled!(Level::DEBUG);
+    conf.view_stdout = tracing::enabled!(target: "bitcoind", Level::TRACE);
     let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &conf)?;
     Ok(bitcoind)
 }

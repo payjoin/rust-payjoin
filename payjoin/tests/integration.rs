@@ -7,6 +7,7 @@ mod integration {
     use bitcoin::{Amount, FeeRate, OutPoint, TxIn, TxOut, Weight};
     use payjoin::receive::v1::build_v1_pj_uri;
     use payjoin::receive::InputPair;
+    use payjoin::time::Time;
     use payjoin::{ImplementationError, OutputSubstitution, PjUri, Request, Uri};
     use payjoin_test_utils::corepc_node::vtype::ListUnspentItem;
     use payjoin_test_utils::corepc_node::AddressType;
@@ -190,7 +191,7 @@ mod integration {
     #[cfg(all(feature = "io", feature = "v2", feature = "v1", feature = "_manual-tls"))]
     mod v2 {
         use std::sync::Arc;
-        use std::time::Duration;
+        use std::time::{Duration, SystemTime};
 
         use bitcoin::Address;
         use http::StatusCode;
@@ -274,9 +275,11 @@ mod integration {
                 // Inside the Receiver:
                 let address = receiver.new_address()?;
                 // test session with expiry in the past
+                let expiry = Time::try_from(SystemTime::now() - Duration::from_secs(1))
+                    .expect("time in the past should be representable");
                 let mut expired_receiver =
                     ReceiverBuilder::new(address, services.directory_url().as_str(), ohttp_keys)?
-                        .with_expiry(Duration::from_secs(0))
+                        .with_expiry(expiry)
                         .build()
                         .save(&recv_noop_persister)?;
                 match expired_receiver.create_poll_request(services.ohttp_relay_url().as_str()) {

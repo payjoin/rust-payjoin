@@ -39,7 +39,7 @@ where
 
     let history = SessionHistory::new(session_events);
     let pj_param = history.pj_param();
-    if std::time::SystemTime::now() > pj_param.expiration() {
+    if pj_param.expiration().elapsed() {
         // Session has expired: close the session and persist a fatal error
         persister
             .save_event(SessionEvent::SessionInvalid("Session expired".to_string()).into())
@@ -107,10 +107,11 @@ mod tests {
     use super::*;
     use crate::output_substitution::OutputSubstitution;
     use crate::persist::test_utils::InMemoryTestPersister;
+    #[cfg(feature = "v1")]
     use crate::send::v1::SenderBuilder;
     use crate::send::v2::Sender;
     use crate::send::PsbtContext;
-    use crate::{HpkeKeyPair, Uri, UriExt};
+    use crate::{HpkeKeyPair, Time, Uri, UriExt};
 
     const PJ_URI: &str =
         "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/";
@@ -120,10 +121,12 @@ mod tests {
         let keypair = HpkeKeyPair::gen_keypair();
         let id = crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id");
         let endpoint = url::Url::parse("http://localhost:1234").expect("valid url");
+        let expiry =
+            Time::from_now(std::time::Duration::from_secs(60)).expect("expiry should be valid");
         let pj_param = crate::uri::v2::PjParam::new(
             endpoint,
             id,
-            std::time::SystemTime::now() + std::time::Duration::from_secs(60),
+            expiry,
             crate::OhttpKeys(
                 ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
             ),
@@ -213,7 +216,7 @@ mod tests {
         let pj_param = crate::uri::v2::PjParam::new(
             endpoint,
             id,
-            std::time::SystemTime::now() - std::time::Duration::from_secs(1),
+            (std::time::SystemTime::now() - std::time::Duration::from_secs(1)).try_into().unwrap(),
             crate::OhttpKeys(
                 ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
             ),
@@ -233,6 +236,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "v1")]
     fn test_sender_session_history_with_reply_key_event() {
         let psbt = PARSED_ORIGINAL_PSBT.clone();
         let sender = SenderBuilder::new(
@@ -249,10 +253,11 @@ mod tests {
         let endpoint = sender.endpoint().clone();
         let fallback_tx = sender.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
         let id = crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id");
+        let expiry = Time::from_now(std::time::Duration::from_secs(60)).expect("Valid expiry");
         let pj_param = crate::uri::v2::PjParam::new(
             endpoint,
             id,
-            std::time::SystemTime::now() + std::time::Duration::from_secs(60),
+            expiry,
             crate::OhttpKeys(
                 ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
             ),

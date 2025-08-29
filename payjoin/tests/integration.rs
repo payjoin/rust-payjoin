@@ -639,7 +639,9 @@ mod integration {
                 let receiver: Arc<bitcoincore_rpc::Client> = Arc::new(receiver);
                 let receiver_clone = receiver.clone();
                 let ohttp_relay = services.ohttp_relay_url();
+                tracing::info!("starting receiver");
                 let receiver_loop = tokio::task::spawn(async move {
+                    tracing::info!("started receiver");
                     let agent_clone = agent_clone.clone();
                     let proposal = loop {
                         let (req, ctx) = session.create_poll_request(&ohttp_relay)?;

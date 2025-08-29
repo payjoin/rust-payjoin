@@ -54,7 +54,12 @@
           name: rust-bin: (crane.mkLib pkgs).overrideToolchain (_: rust-bin)
         ) rustVersions;
         craneLib = craneLibVersions.nightly;
-        src = craneLib.cleanCargoSource ./.;
+        src = nixpkgs.lib.cleanSourceWith {
+          src = ./.;
+          filter =
+            path: type: (builtins.match ".*.udl" path != null) || (craneLib.filterCargoSources path type);
+          name = "source";
+        };
         commonArgs = {
           inherit src;
           strictDeps = true;

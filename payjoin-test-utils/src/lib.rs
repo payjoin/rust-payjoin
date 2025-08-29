@@ -9,7 +9,6 @@ use bitcoin::{Amount, Psbt};
 use bitcoind::bitcoincore_rpc::json::AddressType;
 use bitcoind::bitcoincore_rpc::{self, RpcApi};
 use http::StatusCode;
-use log::{log_enabled, Level};
 use ohttp::hpke::{Aead, Kdf, Kem};
 use ohttp::{KeyId, SymmetricSuite};
 use once_cell::sync::{Lazy, OnceCell};
@@ -24,6 +23,7 @@ use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::ContainerAsync;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
+use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 use url::Url;
 
@@ -170,7 +170,7 @@ pub fn init_bitcoind() -> Result<bitcoind::BitcoinD, BoxError> {
         .or_else(|| bitcoind::downloaded_exe_path().ok())
         .expect("bitcoind not found");
     let mut conf = bitcoind::Conf::default();
-    conf.view_stdout = log_enabled!(Level::Debug);
+    conf.view_stdout = tracing::enabled!(target: "bitcoind", Level::TRACE);
     let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &conf)?;
     Ok(bitcoind)
 }

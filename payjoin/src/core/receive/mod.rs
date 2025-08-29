@@ -229,12 +229,12 @@ pub(crate) fn parse_payload(
     let unchecked_psbt = Psbt::from_str(base64).map_err(InternalPayloadError::ParsePsbt)?;
 
     let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
-    log::debug!("Received original psbt: {psbt:?}");
+    tracing::debug!("Received original psbt: {psbt:?}");
 
     let pairs = url::form_urlencoded::parse(query.as_bytes());
     let params = Params::from_query_pairs(pairs, supported_versions)
         .map_err(InternalPayloadError::SenderParams)?;
-    log::debug!("Received request with params: {params:?}");
+    tracing::debug!("Received request with params: {params:?}");
 
     Ok((psbt, params))
 }
@@ -248,7 +248,7 @@ pub struct PsbtContext {
 impl PsbtContext {
     /// Prepare the PSBT by creating a new PSBT and copying only the fields allowed by the [spec](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#senders-payjoin-proposal-checklist)
     fn prepare_psbt(self, processed_psbt: Psbt) -> Psbt {
-        log::trace!("Original PSBT from callback: {processed_psbt:#?}");
+        tracing::trace!("Original PSBT from callback: {processed_psbt:#?}");
 
         // Create a new PSBT and copy only the allowed fields
         let mut filtered_psbt = Psbt {
@@ -279,7 +279,7 @@ impl PsbtContext {
             filtered_psbt.outputs.push(bitcoin::psbt::Output::default());
         }
 
-        log::trace!("Filtered PSBT: {filtered_psbt:#?}");
+        tracing::trace!("Filtered PSBT: {filtered_psbt:#?}");
 
         filtered_psbt
     }
@@ -291,7 +291,7 @@ impl PsbtContext {
         let mut sender_input_indexes = vec![];
         for (i, input) in self.payjoin_psbt.input_pairs().enumerate() {
             if let Some(original) = original_inputs.peek() {
-                log::trace!(
+                tracing::trace!(
                     "match previous_output: {} == {}",
                     input.txin.previous_output,
                     original.txin.previous_output
@@ -318,7 +318,7 @@ impl PsbtContext {
         let mut psbt = self.payjoin_psbt.clone();
         // Remove now-invalid sender signatures before applying the receiver signatures
         for i in self.sender_input_indexes() {
-            log::trace!("Clearing sender input {i}");
+            tracing::trace!("Clearing sender input {i}");
             psbt.inputs[i].final_script_sig = None;
             psbt.inputs[i].final_script_witness = None;
             psbt.inputs[i].tap_key_sig = None;
@@ -412,7 +412,7 @@ impl OriginalPayload {
             match is_known(&input.txin.previous_output) {
                 Ok(false) => Ok::<(), ReplyableError>(()),
                 Ok(true) =>  {
-                    log::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
+                    tracing::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
                     Err(InternalPayloadError::InputSeen(input.txin.previous_output))?
                 },
                 Err(e) => Err(ReplyableError::Implementation(e))?,

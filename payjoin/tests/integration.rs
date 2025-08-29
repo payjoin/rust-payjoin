@@ -16,9 +16,9 @@ mod integration {
     const EXAMPLE_URL: &str = "https://example.com";
     #[cfg(feature = "v1")]
     mod v1 {
-        use log::debug;
         use payjoin::send::v1::SenderBuilder;
         use payjoin::UriExt;
+        use tracing::debug;
 
         use super::*;
 
@@ -339,7 +339,7 @@ mod integration {
                     req_ctx.create_v2_post_request(ohttp_relay.to_owned())?;
                 let response =
                     agent.post(url).header("Content-Type", content_type).body(body).send().await?;
-                log::info!("Response: {:#?}", &response);
+                tracing::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success(), "error response: {}", response.status());
                 // POST Original PSBT
 
@@ -457,7 +457,7 @@ mod integration {
                     req_ctx.create_v2_post_request(ohttp_relay.to_owned())?;
                 let response =
                     agent.post(url).header("Content-Type", content_type).body(body).send().await?;
-                log::info!("Response: {:#?}", &response);
+                tracing::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success(), "error response: {}", response.status());
                 let send_ctx = req_ctx
                     .process_response(&response.bytes().await?, send_ctx)
@@ -500,7 +500,7 @@ mod integration {
                     send_ctx.create_poll_request(ohttp_relay.to_owned())?;
                 let response =
                     agent.post(url).header("Content-Type", content_type).body(body).send().await?;
-                log::info!("Response: {:#?}", &response);
+                tracing::info!("Response: {:#?}", &response);
                 let response = send_ctx
                     .process_response(&response.bytes().await?, ohttp_ctx)
                     .save(&send_persister)
@@ -510,7 +510,7 @@ mod integration {
                     response.success().expect("psbt should exist").clone();
                 let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
-                log::info!("sent");
+                tracing::info!("sent");
 
                 // Check resulting transaction and balances
                 let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
@@ -624,7 +624,7 @@ mod integration {
                     )?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
                     req_ctx.create_v1_post_request();
-                log::info!("send fallback v1 to offline receiver fail");
+                tracing::info!("send fallback v1 to offline receiver fail");
                 let res = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -658,12 +658,12 @@ mod integration {
                             if let Some(unchecked_proposal) = proposal.success() {
                                 break unchecked_proposal.clone();
                             } else {
-                                log::info!(
+                                tracing::info!(
                                     "No response yet for POST payjoin request, retrying some seconds"
                                 );
                             }
                         } else {
-                            log::error!("Unexpected response status: {}", response.status());
+                            tracing::error!("Unexpected response status: {}", response.status());
                             panic!("Unexpected response status: {}", response.status())
                         }
                     };
@@ -688,17 +688,17 @@ mod integration {
 
                 // **********************
                 // send fallback v1 to online receiver
-                log::info!("send fallback v1 to online receiver should succeed");
+                tracing::info!("send fallback v1 to online receiver should succeed");
                 let response =
                     agent.post(url).header("Content-Type", content_type).body(body).send().await?;
-                log::info!("Response: {:#?}", &response);
+                tracing::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success(), "error response: {}", response.status());
 
                 let checked_payjoin_proposal_psbt =
                     send_ctx.process_response(&response.bytes().await?)?;
                 let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
-                log::info!("sent");
+                tracing::info!("sent");
                 assert!(
                     receiver_loop.await.is_ok(),
                     "The spawned task panicked or returned an error"
@@ -889,7 +889,7 @@ mod integration {
                 .check_pj_supported()
                 .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
-            log::debug!("Original psbt: {psbt:#?}");
+            tracing::debug!("Original psbt: {psbt:#?}");
             let max_additional_fee = Amount::from_sat(1000);
             let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)
                 .build_with_additional_fee(max_additional_fee, None, FeeRate::ZERO, false)?
@@ -967,7 +967,7 @@ mod integration {
                 .check_pj_supported()
                 .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
-            log::debug!("Original psbt: {psbt:#?}");
+            tracing::debug!("Original psbt: {psbt:#?}");
             let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .create_v1_post_request();

@@ -27,7 +27,7 @@ mod e2e {
         })
         .await
         .expect("payjoin-cli receiver should output a bitcoin URI");
-        log::debug!("Got bip21 {}", &bip21);
+        tracing::debug!("Got bip21 {}", &bip21);
 
         terminate(cli_receiver).await.expect("Failed to kill payjoin-cli");
         bip21
@@ -136,7 +136,7 @@ mod e2e {
                     break;
                 }
             }
-            log::debug!("Got bip21 {}", &bip21);
+            tracing::debug!("Got bip21 {}", &bip21);
 
             let mut cli_sender = Command::new(payjoin_cli)
                 .arg("--root-certificate")
@@ -513,7 +513,7 @@ mod e2e {
                     break;
                 }
             }
-            log::debug!("Got v1 bip21 from receiver: {}", &bip21);
+            tracing::debug!("Got v1 bip21 from receiver: {}", &bip21);
 
             // Start v2 sender (default behavior without --bip78)
             // This will detect the v1 URI and automatically use v1 protocol

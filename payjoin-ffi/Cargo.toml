@@ -5,10 +5,6 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 exclude = ["tests"]
 
-[features]
-_test-utils = ["payjoin-test-utils", "tokio", "bitcoind"]
-_manual-tls = ["payjoin/_manual-tls"]
-
 [lib]
 name = "payjoin_ffi"
 crate-type = ["lib", "staticlib", "cdylib"]
@@ -17,14 +13,14 @@ crate-type = ["lib", "staticlib", "cdylib"]
 name = "uniffi-bindgen"
 path = "uniffi-bindgen.rs"
 
-[build-dependencies]
-uniffi = { version = "0.29.1", features = ["build", "cli"] }
-uniffi-dart = { git = "https://github.com/Uniffi-Dart/uniffi-dart.git", rev = "b6186bc", features = ["build"] }
+[features]
+_test-utils = ["payjoin-test-utils", "tokio", "bitcoind"]
+_manual-tls = ["payjoin/_manual-tls"]
 
 [dependencies]
 base64 = "0.22.1"
-bitcoind = { version = "0.36.1", features = ["0_21_2"], optional = true }
 bitcoin-ffi = { git = "https://github.com/benalleng/bitcoin-ffi.git", rev = "8e3a23b" }
+bitcoind = { version = "0.36.1", features = ["0_21_2"], optional = true }
 hex = "0.4.3"
 lazy_static = "1.5.0"
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }
@@ -38,6 +34,17 @@ uniffi = { version = "0.29.4" }
 uniffi-dart = { git = "https://github.com/Uniffi-Dart/uniffi-dart.git", rev = "b6186bc" }
 url = "2.5.4"
 
+[build-dependencies]
+uniffi = { version = "0.29.1", features = ["build", "cli"] }
+uniffi-dart = { git = "https://github.com/Uniffi-Dart/uniffi-dart.git", rev = "b6186bc", features = [
+  "build",
+] }
+
 [dev-dependencies]
-bdk = { version = "0.29.0", features = ["all-keys", "use-esplora-ureq", "keys-bip39", "rpc"] }
+bdk = { version = "0.29.0", features = [
+  "all-keys",
+  "use-esplora-ureq",
+  "keys-bip39",
+  "rpc",
+] }
 bitcoincore-rpc = "0.19.0"

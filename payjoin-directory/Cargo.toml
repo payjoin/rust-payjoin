@@ -19,24 +19,32 @@ _manual-tls = ["hyper-rustls", "tokio-rustls"]
 
 [dependencies]
 anyhow = "1.0.99"
-bitcoin = { version = "0.32.7", features = ["base64", "rand-std"] }
 bhttp = { version = "0.6.1", features = ["http"] }
+bitcoin = { version = "0.32.7", features = ["base64", "rand-std"] }
+clap = { version = "4.5.45", features = ["derive", "env"] }
+config = "0.15.14"
 futures = "0.3.31"
 http-body-util = "0.1.3"
 hyper = { version = "1.6.0", features = ["http1", "server"] }
-hyper-rustls = { version = "0.27.7", default-features=false, features = ["webpki-roots", "http1", "ring"], optional=true }
+hyper-rustls = { version = "0.27.7", default-features = false, features = [
+  "webpki-roots",
+  "http1",
+  "ring",
+], optional = true }
 hyper-util = { version = "0.1.16", features = ["tokio"] }
-ohttp = { package = "bitcoin-ohttp", version = "0.6.0"}
-payjoin = { version = "0.24.0", features = ["directory"], default-features = false }
+ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }
+payjoin = { version = "0.24.0", features = [
+  "directory",
+], default-features = false }
+prometheus = "0.13.4"
 redis = { version = "0.32.5", features = ["aio", "tokio-comp"] }
+serde = { version = "1.0.219", features = ["derive"] }
 tokio = { version = "1.23.31", features = ["full"] }
-tokio-rustls = { version = "0.26.2", features = ["ring"], default-features = false, optional = true }
+tokio-rustls = { version = "0.26.2", features = [
+  "ring",
+], default-features = false, optional = true }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-prometheus = "0.13.4"
-clap = { version = "4.5.45", features = ["derive", "env"] }
-config = "0.15.14"
-serde = { version = "1.0.219", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3.20.0"

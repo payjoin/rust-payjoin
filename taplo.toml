@@ -1,0 +1,11 @@
+[formatting]
+indent_style = "space"
+indent_size = 2
+
+# Exclude paths that shouldn't be formatted
+exclude = [
+  ".direnv/**",
+  "target/**",
+  "vendor/**",
+  ".git/**"
+]

@@ -21,7 +21,6 @@ pub struct Cli {
 
     #[arg(
         long,
-        short = 'p',
         env = "PJ_METRIC_PORT",
         default_value = "9090",
         help = "The port to bind for prometheus metrics export"

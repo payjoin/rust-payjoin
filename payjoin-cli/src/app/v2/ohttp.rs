@@ -103,7 +103,7 @@ async fn fetch_ohttp_keys(
                 return Err(payjoin::io::Error::UnexpectedStatusCode(e).into());
             }
             Err(e) => {
-                log::debug!("Failed to connect to relay: {selected_relay}, {e:?}");
+                tracing::debug!("Failed to connect to relay: {selected_relay}, {e:?}");
                 relay_manager
                     .lock()
                     .expect("Lock should not be poisoned")

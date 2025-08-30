@@ -364,7 +364,7 @@ pub(crate) fn extract_request(
 
     let (body, ohttp_ctx) = ohttp_encapsulate(ohttp_keys, "POST", url.as_str(), Some(&body))
         .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
-    log::debug!("ohttp_relay_url: {ohttp_relay:?}");
+    tracing::debug!("ohttp_relay_url: {ohttp_relay:?}");
     let directory_base = url.join("/").map_err(|e| InternalCreateRequestError::Url(e.into()))?;
     let full_ohttp_relay = ohttp_relay
         .join(&format!("/{directory_base}"))

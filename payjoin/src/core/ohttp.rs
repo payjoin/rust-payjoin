@@ -117,7 +117,7 @@ fn process_ohttp_res(
 ) -> Result<http::Response<Vec<u8>>, DirectoryResponseError> {
     let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
         res.try_into().map_err(|_| DirectoryResponseError::InvalidSize(res.len()))?;
-    log::trace!("decapsulating directory response");
+    tracing::trace!("decapsulating directory response");
     let res = ohttp_decapsulate(ohttp_context, response_array)
         .map_err(DirectoryResponseError::OhttpDecapsulation)?;
     Ok(res)

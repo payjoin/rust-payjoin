@@ -436,7 +436,7 @@ impl Receiver<Initialized> {
     fn unchecked_from_payload(&mut self, payload: &str) -> Result<OriginalPayload, ReplyableError> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
-        log::trace!("Received query: {query}, base64: {base64}"); // my guess is no \n so default is wrong
+        tracing::trace!("Received query: {query}, base64: {base64}"); // my guess is no \n so default is wrong
         let (psbt, mut params) =
             parse_payload(base64, query, SUPPORTED_VERSIONS).map_err(ReplyableError::Payload)?;
 
@@ -1044,7 +1044,7 @@ impl Receiver<PayjoinProposal> {
                 .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
             method = "PUT";
         }
-        log::debug!("Payjoin PSBT target: {}", target_resource.as_str());
+        tracing::debug!("Payjoin PSBT target: {}", target_resource.as_str());
         let (body, ctx) = ohttp_encapsulate(
             &mut self.session_context.ohttp_keys,
             method,

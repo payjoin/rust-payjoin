@@ -97,7 +97,7 @@ impl AppTrait for App {
                     payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
                 );
                 let psbt = ctx.process_response(&response.bytes().await?).map_err(|e| {
-                    log::debug!("Error processing response: {e:?}");
+                    tracing::debug!("Error processing response: {e:?}");
                     anyhow!("Failed to process response {e}")
                 })?;
 
@@ -286,7 +286,7 @@ impl App {
                 }
                 Err(re) => {
                     println!("{re}");
-                    log::debug!("{re:?}");
+                    tracing::debug!("{re:?}");
                     return Err(anyhow!("Response error").context(re));
                 }
             }

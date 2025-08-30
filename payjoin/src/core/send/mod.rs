@@ -130,7 +130,7 @@ impl PsbtContextBuilder {
 
             let recommended_additional_fee = min_fee_rate * input_weight;
             if fee_available < recommended_additional_fee {
-                log::warn!("Insufficient funds to maintain specified minimum feerate.");
+                tracing::warn!("Insufficient funds to maintain specified minimum feerate.");
                 return self.build_with_additional_fee(
                     fee_available,
                     Some(additional_fee_index),

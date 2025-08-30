@@ -3,6 +3,8 @@ use app::config::Config;
 use app::App as AppTrait;
 use clap::Parser;
 use cli::{Cli, Commands};
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::EnvFilter;
 
 mod app;
 mod cli;
@@ -13,7 +15,9 @@ compile_error!("At least one of the features ['v1', 'v2'] must be enabled");
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init();
+    let env_filter =
+        EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy();
+    tracing_subscriber::fmt().with_target(true).with_level(true).with_env_filter(env_filter).init();
 
     let cli = Cli::parse();
     let config = Config::new(&cli)?;

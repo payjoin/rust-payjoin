@@ -87,7 +87,7 @@ impl AppTrait for App {
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
         );
         let psbt = ctx.process_response(&response.bytes().await?).map_err(|e| {
-            log::debug!("Error processing response: {e:?}");
+            tracing::debug!("Error processing response: {e:?}");
             anyhow!("Failed to process response {e}")
         })?;
 
@@ -162,7 +162,7 @@ impl App {
                 let stream = match tls_acceptor.accept(stream).await {
                     Ok(tls_stream) => tls_stream,
                     Err(e) => {
-                        log::error!("TLS accept error: {e}");
+                        tracing::error!("TLS accept error: {e}");
                         return;
                     }
                 };
@@ -218,11 +218,11 @@ impl App {
         self,
         req: Request<Incoming>,
     ) -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
-        log::debug!("Received request: {req:?}");
+        tracing::debug!("Received request: {req:?}");
         let mut response = match (req.method(), req.uri().path()) {
             (&Method::GET, "/bip21") => {
                 let query_string = req.uri().query().unwrap_or("");
-                log::debug!("{:?}, {query_string:?}", req.method());
+                tracing::debug!("{:?}, {query_string:?}", req.method());
                 let query_params: HashMap<_, _> =
                     url::form_urlencoded::parse(query_string.as_bytes()).into_owned().collect();
                 let amount = query_params.get("amount").map(|amt| {
@@ -230,7 +230,7 @@ impl App {
                 });
                 self.handle_get_bip21(amount)
                     .map_err(|e| {
-                        log::error!("Error handling request: {e}");
+                        tracing::error!("Error handling request: {e}");
                         Response::builder().status(500).body(full(e.to_string())).unwrap()
                     })
                     .unwrap_or_else(|err_resp| err_resp)
@@ -240,11 +240,11 @@ impl App {
                 .await
                 .map_err(|e| match e {
                     V1(e) => {
-                        log::error!("Error handling request: {e}");
+                        tracing::error!("Error handling request: {e}");
                         Response::builder().status(400).body(full(e.to_string())).unwrap()
                     }
                     e => {
-                        log::error!("Error handling request: {e}");
+                        tracing::error!("Error handling request: {e}");
                         Response::builder().status(500).body(full(e.to_string())).unwrap()
                     }
                 })
@@ -325,7 +325,7 @@ impl App {
                 .can_broadcast(tx)
                 .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
         })?;
-        log::trace!("check1");
+        tracing::trace!("check1");
 
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
@@ -334,13 +334,13 @@ impl App {
         let proposal = proposal.check_inputs_not_owned(&mut |input| {
             wallet.is_mine(input).map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
         })?;
-        log::trace!("check2");
+        tracing::trace!("check2");
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let payjoin = proposal.check_no_inputs_seen_before(&mut |input| {
             Ok(self.db.insert_input_seen_before(*input)?)
         })?;
-        log::trace!("check3");
+        tracing::trace!("check3");
 
         let payjoin = payjoin.identify_receiver_outputs(&mut |output_script| {
             wallet

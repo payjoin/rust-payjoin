@@ -45,6 +45,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: "Run formatting check"
         run: cargo fmt --all -- --check
+
+      - name: Install taplo-cli
+        run: cargo install taplo-cli
+      - name: Check TOML formatting with Taplo
+        run: taplo format --check
   
   Format-FFI:
     runs-on: ubuntu-latest

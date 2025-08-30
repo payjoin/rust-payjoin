@@ -36,12 +36,11 @@ pub struct Cli {
     pub timeout: u64,
 
     #[arg(
-        long = "db-host",
-        env = "PJ_DB_HOST",
-        default_value = "localhost:6379",
-        help = "The redis host to connect to"
+        long = "storage-dir",
+        env = "PJ_STORAGE_DIR",
+        help = "A directory for writing mailbox data."
     )]
-    pub db_host: String,
+    pub storage_dir: PathBuf,
 
     #[arg(
         long = "ohttp-keys",

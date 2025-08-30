@@ -8,9 +8,9 @@ dart --version
 dart pub get
 
 # Install Rust targets if on macOS
-if [[ "$OS" == "Darwin" ]]; then
+if [[ $OS == "Darwin" ]]; then
     LIBNAME=libpayjoin_ffi.dylib
-elif [[ "$OS" == "Linux" ]]; then
+elif [[ $OS == "Linux" ]]; then
     LIBNAME=libpayjoin_ffi.so
 else
     echo "Unsupported os: $OS"
@@ -22,7 +22,7 @@ echo "Generating payjoin dart..."
 cargo build --features _test-utils --profile dev
 cargo run --features _test-utils --profile dev --bin uniffi-bindgen -- --library ../target/debug/$LIBNAME --language dart --out-dir dart/lib/
 
-if [[ "$OS" == "Darwin" ]]; then
+if [[ $OS == "Darwin" ]]; then
     echo "Generating native binaries..."
     rustup target add aarch64-apple-darwin x86_64-apple-darwin
     # This is a test script the actual release should not include the test utils feature

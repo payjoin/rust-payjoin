@@ -1,0 +1,13 @@
+# Exclude paths from formatting
+exclude = ["target/**", ".direnv/**", ".git/**"]
+
+[formatting]
+indent_style = "space"
+indent_size = 2
+
+[[rule]]
+include = ["**/Cargo.toml"]
+keys = ["dependencies", "*-dependencies", "workspace"]
+[rule.formatting]
+reorder_keys = true
+align_comments = true

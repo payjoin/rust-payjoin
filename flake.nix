@@ -100,6 +100,7 @@
               cargo-nextest
               cargo-watch
               rust-analyzer
+              taplo-cli
             ] ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [
               cargo-llvm-cov
             ];

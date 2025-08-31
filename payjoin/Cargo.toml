@@ -6,19 +6,34 @@ description = "Payjoin Library implementing BIP 78 and BIP 77 batching protocols
 repository = "https://github.com/payjoin/rust-payjoin"
 readme = "../README.md"
 keywords = ["bip78", "payjoin", "bitcoin"]
-categories = ["api-bindings", "cryptography::cryptocurrencies", "network-programming"]
+categories = [
+  "api-bindings",
+  "cryptography::cryptocurrencies",
+  "network-programming",
+]
 license = "MITNFA"
 resolver = "2"
 edition = "2021"
 rust-version = "1.85"
 exclude = ["tests"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
 default = ["v2"]
 #[doc = "Core features for payjoin state machines"]
-_core = ["bitcoin/rand-std", "serde_json", "url/serde", "bitcoin_uri", "serde", "bitcoin/serde"]
+_core = [
+  "bitcoin/rand-std",
+  "serde_json",
+  "url/serde",
+  "bitcoin_uri",
+  "serde",
+  "bitcoin/serde",
+]
 directory = []
 v1 = ["_core"]
 v2 = ["_core", "hpke", "dep:http", "bhttp", "ohttp", "directory"]
@@ -28,26 +43,24 @@ _manual-tls = ["reqwest/rustls-tls", "rustls"]
 _test-utils = []
 
 [dependencies]
+bhttp = { version = "0.6.1", optional = true }
 bitcoin = { version = "0.32.7", features = ["base64"] }
 bitcoin_uri = { version = "0.1.0", optional = true }
 hpke = { package = "bitcoin-hpke", version = "0.13.0", optional = true }
 http = { version = "1.3.1", optional = true }
-bhttp = { version = "0.6.1", optional = true }
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0", optional = true }
-serde = { version = "1.0.219", default-features = false, optional = true }
 reqwest = { version = "0.12.23", default-features = false, optional = true }
-rustls = { version = "0.23.31", optional = true, default-features=false, features = ["ring"] }
-url = { version = "2.5.4", optional = true }
+rustls = { version = "0.23.31", optional = true, default-features = false, features = [
+  "ring",
+] }
+serde = { version = "1.0.219", default-features = false, optional = true }
 serde_json = { version = "1.0.142", optional = true }
 tracing = "0.1.41"
+url = { version = "2.5.4", optional = true }
 
 [dev-dependencies]
 bitcoind = { version = "0.36.1", features = ["0_21_2"] }
-payjoin-test-utils = { version = "0.0.1" }
 once_cell = "1.21.3"
+payjoin-test-utils = { version = "0.0.1" }
 tokio = { version = "1.47.1", features = ["full"] }
 tracing = "0.1.41"
-
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]

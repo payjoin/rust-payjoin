@@ -101,6 +101,17 @@ impl JsonReply {
 
         serde_json::Value::Object(map)
     }
+
+    /// Get the HTTP status code for the error
+    pub fn status_code(&self) -> u16 {
+        match self.error_code {
+            ErrorCode::Unavailable => http::StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCode::NotEnoughMoney
+            | ErrorCode::VersionUnsupported
+            | ErrorCode::OriginalPsbtRejected => http::StatusCode::BAD_REQUEST,
+        }
+        .as_u16()
+    }
 }
 
 impl From<&ReplyableError> for JsonReply {
@@ -448,5 +459,32 @@ mod tests {
                 "message": "Receiver error",
             })
         );
+    }
+
+    #[test]
+    /// Create an implementation error that returns INTERNAL_SERVER_ERROR
+    fn test_json_reply_with_500_status_code() {
+        let error = ReplyableError::Implementation(ImplementationError::from("test error"));
+        let reply = JsonReply::from(&error);
+
+        assert_eq!(reply.status_code(), http::StatusCode::INTERNAL_SERVER_ERROR.as_u16());
+
+        let json = reply.to_json();
+        assert_eq!(json["errorCode"], "unavailable");
+        assert_eq!(json["message"], "Receiver error");
+    }
+
+    #[test]
+    /// Create a payload error that returns BAD_REQUEST
+    fn test_json_reply_with_400_status_code() {
+        let payload_error = PayloadError(InternalPayloadError::MissingPayment);
+        let error = ReplyableError::Payload(payload_error);
+        let reply = JsonReply::from(&error);
+
+        assert_eq!(reply.status_code(), http::StatusCode::BAD_REQUEST.as_u16());
+
+        let json = reply.to_json();
+        assert_eq!(json["errorCode"], "original-psbt-rejected");
+        assert_eq!(json["message"], "Missing payment.");
     }
 }

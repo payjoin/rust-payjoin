@@ -14,7 +14,7 @@ use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v1::{PayjoinProposal, UncheckedOriginalPayload};
-use payjoin::receive::ReplyableError::{self, Implementation, V1};
+use payjoin::receive::ReplyableError::{self, Implementation};
 use payjoin::send::v1::SenderBuilder;
 use payjoin::{ImplementationError, IntoUrl, Uri, UriExt};
 use tokio::net::TcpListener;
@@ -238,15 +238,13 @@ impl App {
             (&Method::POST, _) => self
                 .handle_payjoin_post(req)
                 .await
-                .map_err(|e| match e {
-                    V1(e) => {
-                        tracing::error!("Error handling request: {e}");
-                        Response::builder().status(400).body(full(e.to_string())).unwrap()
-                    }
-                    e => {
-                        tracing::error!("Error handling request: {e}");
-                        Response::builder().status(500).body(full(e.to_string())).unwrap()
-                    }
+                .map_err(|e| {
+                    let json = payjoin::receive::JsonReply::from(&e);
+                    tracing::error!("Error handling request: {e}");
+                    Response::builder()
+                        .status(json.status_code())
+                        .body(full(json.to_json().to_string()))
+                        .unwrap()
                 })
                 .unwrap_or_else(|err_resp| err_resp),
             _ => Response::builder().status(StatusCode::NOT_FOUND).body(full("Not found")).unwrap(),

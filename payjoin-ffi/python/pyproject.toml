@@ -16,6 +16,4 @@ package-dir = { "payjoin" = "src/payjoin" }
 include-package-data = true
 
 [tool.pytest.ini_options]
-pythonpath = [
-  "."
-]
+pythonpath = ["."]

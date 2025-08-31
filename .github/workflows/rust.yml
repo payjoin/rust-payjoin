@@ -37,6 +37,9 @@ jobs:
     steps:
       - name: "Checkout repo"
         uses: actions/checkout@v4
+      - name: "Install formatting tools"
+        run: |
+          cargo install taplo-cli --quiet
       - name: "Install nightly toolchain"
         uses: dtolnay/rust-toolchain@nightly
         with:
@@ -45,6 +48,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: "Run formatting check"
         run: cargo fmt --all -- --check
+      - name: "Check TOML formatting"
+        run: taplo format --check
+
   
   Format-FFI:
     runs-on: ubuntu-latest
@@ -117,9 +123,9 @@ jobs:
         uses: coverallsapp/github-action@v2
   
   CodeSpell: 
-    name: Code spell check
-    runs-on: ubuntu-latest
-    steps:
+      name: Code spell check
+      runs-on: ubuntu-latest
+      steps:
       - uses: actions/checkout@v4
       - uses: codespell-project/actions-codespell@v2
 
@@ -132,7 +138,7 @@ jobs:
       - name: "Checkout repo"
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # required for full diff context
+          fetch-depth: 0
       - name: Fetch base branch for diff
         run: git fetch origin ${{ github.base_ref }}
       - name: Relative diff

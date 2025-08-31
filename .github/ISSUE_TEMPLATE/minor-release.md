@@ -2,9 +2,8 @@
 name: Minor Release
 about: Checklist for releasing a new minor version bump
 title: Release MAJOR.MINOR+1.0
-labels: ''
-assignees: ''
-
+labels: ""
+assignees: ""
 ---
 
 ## Create a new minor release
@@ -24,7 +23,7 @@ assignees: ''
 ### Checklist
 
 Release numbering must follow [Semantic Versioning]. These steps assume the current `master`
-branch **development** version is *MAJOR.MINOR.0*.
+branch **development** version is _MAJOR.MINOR.0_.
 
 #### On the day of the feature freeze
 
@@ -41,7 +40,7 @@ Change the `master` branch to the next MINOR+1 version:
   - Title PR "Bump CRATE version to MAJOR.MINOR+1.0".
 - [ ] Merge the `bump-CRATE-MAJOR-MINOR+1` branch to `master`.
 
-If any issues need to be fixed before the *MAJOR.MINOR+1.0* version is released:
+If any issues need to be fixed before the _MAJOR.MINOR+1.0_ version is released:
 
 - [ ] Merge fix PRs to the `master` branch.
 - [ ] Git cherry-pick fix commits to the `bump-CRATE-MAJOR.MINOR+1` branch.

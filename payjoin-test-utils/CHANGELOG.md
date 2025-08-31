@@ -2,7 +2,7 @@
 
 ## 0.0.1
 
-- Export InMemoryTestPersister under _test-utils [#761](https://github.com/payjoin/rust-payjoin/pull/761)
+- Export InMemoryTestPersister under \_test-utils [#761](https://github.com/payjoin/rust-payjoin/pull/761)
 - Introduce constructors for SegWit input pairs [#712](https://github.com/payjoin/rust-payjoin/pull/712)
 - Move testing constants to payjoin-test-utils [#613](https://github.com/payjoin/rust-payjoin/pull/613)
 - Specify the versions for deps more precisely in the cargo toml [#696](https://github.com/payjoin/rust-payjoin/pull/696)

@@ -7,7 +7,6 @@ Welcome to the JavaScript language bindings for the [Payjoin Dev Kit](https://pa
 Follow these steps to clone the repository and run the tests.
 This assumes you already have Rust and Node.js installed.
 
-
 ```shell
 git clone https://github.com/payjoin/rust-payjoin.git
 cd rust-payjoin/payjoin-ffi/javascript

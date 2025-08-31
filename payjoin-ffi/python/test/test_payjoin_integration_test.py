@@ -16,6 +16,7 @@ sys.path.insert(
 import unittest
 from pprint import *
 
+
 class InMemoryReceiverSessionEventLog(JsonReceiverSessionPersister):
     def __init__(self, id):
         self.id = id
@@ -30,6 +31,7 @@ class InMemoryReceiverSessionEventLog(JsonReceiverSessionPersister):
 
     def close(self):
         self.closed = True
+
 
 class InMemorySenderPersister(JsonSenderSessionPersister):
     def __init__(self, id):
@@ -55,9 +57,16 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         cls.receiver = cls.env.get_receiver()
         cls.sender = cls.env.get_sender()
 
-    async def process_receiver_proposal(self, receiver: ReceiveSession, recv_persister: InMemoryReceiverSessionEventLog, ohttp_relay: str) -> Optional[ReceiveSession]:
+    async def process_receiver_proposal(
+        self,
+        receiver: ReceiveSession,
+        recv_persister: InMemoryReceiverSessionEventLog,
+        ohttp_relay: str,
+    ) -> Optional[ReceiveSession]:
         if receiver.is_INITIALIZED():
-            res = await self.retrieve_receiver_proposal(receiver.inner, recv_persister, ohttp_relay)
+            res = await self.retrieve_receiver_proposal(
+                receiver.inner, recv_persister, ohttp_relay
+            )
             if res is None:
                 return None
             return res
@@ -77,64 +86,126 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         if receiver.is_WANTS_FEE_RANGE():
             return await self.process_wants_fee_range(receiver.inner, recv_persister)
         if receiver.is_PROVISIONAL_PROPOSAL():
-            return await self.process_provisional_proposal(receiver.inner, recv_persister)
+            return await self.process_provisional_proposal(
+                receiver.inner, recv_persister
+            )
         if receiver.is_PAYJOIN_PROPOSAL():
             return receiver
 
         raise Exception(f"Unknown receiver state: {receiver}")
 
-    def create_receiver_context(self, receiver_address: bitcoinffi.Address, directory: str, ohttp_keys: OhttpKeys, recv_persister: InMemoryReceiverSessionEventLog) -> Initialized:
-        receiver = ReceiverBuilder(address=receiver_address, directory=directory, ohttp_keys=ohttp_keys).build().save(recv_persister)
+    def create_receiver_context(
+        self,
+        receiver_address: bitcoinffi.Address,
+        directory: str,
+        ohttp_keys: OhttpKeys,
+        recv_persister: InMemoryReceiverSessionEventLog,
+    ) -> Initialized:
+        receiver = (
+            ReceiverBuilder(
+                address=receiver_address, directory=directory, ohttp_keys=ohttp_keys
+            )
+            .build()
+            .save(recv_persister)
+        )
         return receiver
 
-    async def retrieve_receiver_proposal(self, receiver: Initialized, recv_persister: InMemoryReceiverSessionEventLog, ohttp_relay: str):
+    async def retrieve_receiver_proposal(
+        self,
+        receiver: Initialized,
+        recv_persister: InMemoryReceiverSessionEventLog,
+        ohttp_relay: str,
+    ):
         agent = httpx.AsyncClient()
         request: RequestResponse = receiver.create_poll_request(ohttp_relay)
         response = await agent.post(
             url=request.request.url,
             headers={"Content-Type": request.request.content_type},
-            content=request.request.body
+            content=request.request.body,
         )
-        res = receiver.process_response(response.content, request.client_response).save(recv_persister)
+        res = receiver.process_response(response.content, request.client_response).save(
+            recv_persister
+        )
         if res.is_STASIS():
             return None
         return await self.process_unchecked_proposal(res.inner, recv_persister)
 
-    async def process_unchecked_proposal(self, proposal: UncheckedOriginalPayload, recv_persister: InMemoryReceiverSessionEventLog) :
-        receiver = proposal.check_broadcast_suitability(None, MempoolAcceptanceCallback(self.receiver)).save(recv_persister)
+    async def process_unchecked_proposal(
+        self,
+        proposal: UncheckedOriginalPayload,
+        recv_persister: InMemoryReceiverSessionEventLog,
+    ):
+        receiver = proposal.check_broadcast_suitability(
+            None, MempoolAcceptanceCallback(self.receiver)
+        ).save(recv_persister)
         return await self.process_maybe_inputs_owned(receiver, recv_persister)
 
-    async def process_maybe_inputs_owned(self, proposal: MaybeInputsOwned, recv_persister: InMemoryReceiverSessionEventLog):
-        maybe_inputs_owned = proposal.check_inputs_not_owned(IsScriptOwnedCallback(self.receiver)).save(recv_persister)
+    async def process_maybe_inputs_owned(
+        self,
+        proposal: MaybeInputsOwned,
+        recv_persister: InMemoryReceiverSessionEventLog,
+    ):
+        maybe_inputs_owned = proposal.check_inputs_not_owned(
+            IsScriptOwnedCallback(self.receiver)
+        ).save(recv_persister)
         return await self.process_maybe_inputs_seen(maybe_inputs_owned, recv_persister)
 
-    async def process_maybe_inputs_seen(self, proposal: MaybeInputsSeen, recv_persister: InMemoryReceiverSessionEventLog):
-        outputs_unknown = proposal.check_no_inputs_seen_before(CheckInputsNotSeenCallback(self.receiver)).save(recv_persister)
+    async def process_maybe_inputs_seen(
+        self, proposal: MaybeInputsSeen, recv_persister: InMemoryReceiverSessionEventLog
+    ):
+        outputs_unknown = proposal.check_no_inputs_seen_before(
+            CheckInputsNotSeenCallback(self.receiver)
+        ).save(recv_persister)
         return await self.process_outputs_unknown(outputs_unknown, recv_persister)
 
-    async def process_outputs_unknown(self, proposal: OutputsUnknown, recv_persister: InMemoryReceiverSessionEventLog):
-        wants_outputs = proposal.identify_receiver_outputs(IsScriptOwnedCallback(self.receiver)).save(recv_persister)
+    async def process_outputs_unknown(
+        self, proposal: OutputsUnknown, recv_persister: InMemoryReceiverSessionEventLog
+    ):
+        wants_outputs = proposal.identify_receiver_outputs(
+            IsScriptOwnedCallback(self.receiver)
+        ).save(recv_persister)
         return await self.process_wants_outputs(wants_outputs, recv_persister)
 
-    async def process_wants_outputs(self, proposal: WantsOutputs, recv_persister: InMemoryReceiverSessionEventLog):
+    async def process_wants_outputs(
+        self, proposal: WantsOutputs, recv_persister: InMemoryReceiverSessionEventLog
+    ):
         wants_inputs = proposal.commit_outputs().save(recv_persister)
         return await self.process_wants_inputs(wants_inputs, recv_persister)
 
-    async def process_wants_inputs(self, proposal: WantsInputs, recv_persister: InMemoryReceiverSessionEventLog):
-        provisional_proposal = proposal.contribute_inputs(get_inputs(self.receiver)).commit_inputs().save(recv_persister)
+    async def process_wants_inputs(
+        self, proposal: WantsInputs, recv_persister: InMemoryReceiverSessionEventLog
+    ):
+        provisional_proposal = (
+            proposal.contribute_inputs(get_inputs(self.receiver))
+            .commit_inputs()
+            .save(recv_persister)
+        )
         return await self.process_wants_fee_range(provisional_proposal, recv_persister)
-    
-    async def process_wants_fee_range(self, proposal: WantsFeeRange, recv_persister: InMemoryReceiverSessionEventLog):
-        provisional_proposal = proposal.apply_fee_range(1, 10).save(recv_persister)
-        return await self.process_provisional_proposal(provisional_proposal, recv_persister)
 
-    async def process_provisional_proposal(self, proposal: ProvisionalProposal, recv_persister: InMemoryReceiverSessionEventLog):
-        payjoin_proposal = proposal.finalize_proposal(ProcessPsbtCallback(self.receiver)).save(recv_persister)
+    async def process_wants_fee_range(
+        self, proposal: WantsFeeRange, recv_persister: InMemoryReceiverSessionEventLog
+    ):
+        provisional_proposal = proposal.apply_fee_range(1, 10).save(recv_persister)
+        return await self.process_provisional_proposal(
+            provisional_proposal, recv_persister
+        )
+
+    async def process_provisional_proposal(
+        self,
+        proposal: ProvisionalProposal,
+        recv_persister: InMemoryReceiverSessionEventLog,
+    ):
+        payjoin_proposal = proposal.finalize_proposal(
+            ProcessPsbtCallback(self.receiver)
+        ).save(recv_persister)
         return ReceiveSession.PAYJOIN_PROPOSAL(payjoin_proposal)
 
     async def test_integration_v2_to_v2(self):
         try:
-            receiver_address = bitcoinffi.Address(json.loads(self.receiver.call("getnewaddress", [])), bitcoinffi.Network.REGTEST)
+            receiver_address = bitcoinffi.Address(
+                json.loads(self.receiver.call("getnewaddress", [])),
+                bitcoinffi.Network.REGTEST,
+            )
             init_tracing()
             services = TestServices.initialize()
 
@@ -148,8 +219,12 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             # Inside the Receiver:
             recv_persister = InMemoryReceiverSessionEventLog(1)
             sender_persister = InMemorySenderPersister(1)
-            session = self.create_receiver_context(receiver_address, directory, ohttp_keys, recv_persister)
-            process_response = await self.process_receiver_proposal(ReceiveSession.INITIALIZED(session), recv_persister, ohttp_relay)
+            session = self.create_receiver_context(
+                receiver_address, directory, ohttp_keys, recv_persister
+            )
+            process_response = await self.process_receiver_proposal(
+                ReceiveSession.INITIALIZED(session), recv_persister, ohttp_relay
+            )
             self.assertIsNone(process_response)
 
             # **********************
@@ -157,21 +232,29 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             # Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
             pj_uri = session.pj_uri()
             psbt = build_sweep_psbt(self.sender, pj_uri)
-            req_ctx: WithReplyKey = SenderBuilder(psbt, pj_uri).build_recommended(1000).save(sender_persister)
+            req_ctx: WithReplyKey = (
+                SenderBuilder(psbt, pj_uri)
+                .build_recommended(1000)
+                .save(sender_persister)
+            )
             request: RequestOhttpContext = req_ctx.create_v2_post_request(ohttp_relay)
             response = await agent.post(
                 url=request.request.url,
                 headers={"Content-Type": request.request.content_type},
-                content=request.request.body
+                content=request.request.body,
             )
-            send_ctx: PollingForProposal = req_ctx.process_response(response.content, request.ohttp_ctx).save(sender_persister)
+            send_ctx: PollingForProposal = req_ctx.process_response(
+                response.content, request.ohttp_ctx
+            ).save(sender_persister)
             # POST Original PSBT
 
             # **********************
             # Inside the Receiver:
 
             # GET fallback psbt
-            payjoin_proposal = await self.process_receiver_proposal(ReceiveSession.INITIALIZED(session), recv_persister, ohttp_relay)
+            payjoin_proposal = await self.process_receiver_proposal(
+                ReceiveSession.INITIALIZED(session), recv_persister, ohttp_relay
+            )
             self.assertIsNotNone(payjoin_proposal)
             self.assertEqual(payjoin_proposal.is_PAYJOIN_PROPOSAL(), True)
 
@@ -180,7 +263,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             response = await agent.post(
                 url=request.request.url,
                 headers={"Content-Type": request.request.content_type},
-                content=request.request.body
+                content=request.request.body,
             )
             payjoin_proposal.process_response(response.content, request.client_response)
 
@@ -192,39 +275,76 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             response = await agent.post(
                 url=request.request.url,
                 headers={"Content-Type": request.request.content_type},
-                content=request.request.body
+                content=request.request.body,
             )
-            checked_payjoin_proposal_psbt = send_ctx.process_response(response.content, request.ohttp_ctx).save(sender_persister).inner
+            checked_payjoin_proposal_psbt = (
+                send_ctx.process_response(response.content, request.ohttp_ctx)
+                .save(sender_persister)
+                .inner
+            )
             print(f"checked_payjoin_proposal_psbt: {checked_payjoin_proposal_psbt}")
             self.assertIsNotNone(checked_payjoin_proposal_psbt)
-            payjoin_psbt = json.loads(self.sender.call("walletprocesspsbt", [checked_payjoin_proposal_psbt.serialize_base64()]))["psbt"]
-            final_psbt = json.loads(self.sender.call("finalizepsbt", [payjoin_psbt, json.dumps(False)]))["psbt"]
+            payjoin_psbt = json.loads(
+                self.sender.call(
+                    "walletprocesspsbt",
+                    [checked_payjoin_proposal_psbt.serialize_base64()],
+                )
+            )["psbt"]
+            final_psbt = json.loads(
+                self.sender.call("finalizepsbt", [payjoin_psbt, json.dumps(False)])
+            )["psbt"]
             payjoin_tx = bitcoinffi.Psbt.deserialize_base64(final_psbt).extract_tx()
-            self.sender.call("sendrawtransaction", [json.dumps(payjoin_tx.serialize().hex())])
+            self.sender.call(
+                "sendrawtransaction", [json.dumps(payjoin_tx.serialize().hex())]
+            )
 
             # Check resulting transaction and balances
             network_fees = bitcoinffi.Psbt.deserialize_base64(final_psbt).fee().to_btc()
             # Sender sent the entire value of their utxo to receiver (minus fees)
-            self.assertEqual(len(payjoin_tx.input()), 2);
-            self.assertEqual(len(payjoin_tx.output()), 1);
-            self.assertEqual(float(json.loads(self.receiver.call("getbalances", []))["mine"]["untrusted_pending"]), 100 - network_fees)
+            self.assertEqual(len(payjoin_tx.input()), 2)
+            self.assertEqual(len(payjoin_tx.output()), 1)
+            self.assertEqual(
+                float(
+                    json.loads(self.receiver.call("getbalances", []))["mine"][
+                        "untrusted_pending"
+                    ]
+                ),
+                100 - network_fees,
+            )
             self.assertEqual(float(self.sender.call("getbalance", [])), 0)
             return
         except Exception as e:
             print("Caught:", e)
             raise
 
+
 def build_sweep_psbt(sender: RpcClient, pj_uri: PjUri) -> bitcoinffi.Psbt:
     outputs = {}
     outputs[pj_uri.address()] = 50
-    psbt = json.loads(sender.call(
-        "walletcreatefundedpsbt",
-        [json.dumps([]),
-        json.dumps(outputs),
-        json.dumps(0),
-        json.dumps({"lockUnspents": True, "fee_rate": 10, "subtractFeeFromOutputs": [0]})
-        ]))["psbt"]
-    return json.loads(sender.call("walletprocesspsbt", [psbt, json.dumps(True), json.dumps("ALL"), json.dumps(False)]))["psbt"]
+    psbt = json.loads(
+        sender.call(
+            "walletcreatefundedpsbt",
+            [
+                json.dumps([]),
+                json.dumps(outputs),
+                json.dumps(0),
+                json.dumps(
+                    {
+                        "lockUnspents": True,
+                        "fee_rate": 10,
+                        "subtractFeeFromOutputs": [0],
+                    }
+                ),
+            ],
+        )
+    )["psbt"]
+    return json.loads(
+        sender.call(
+            "walletprocesspsbt",
+            [psbt, json.dumps(True), json.dumps("ALL"), json.dumps(False)],
+        )
+    )["psbt"]
+
 
 def get_inputs(rpc_connection: RpcClient) -> list[InputPair]:
     utxos = json.loads(rpc_connection.call("listunspent", []))
@@ -234,31 +354,42 @@ def get_inputs(rpc_connection: RpcClient) -> list[InputPair]:
             previous_output=bitcoinffi.OutPoint(txid=utxo["txid"], vout=utxo["vout"]),
             script_sig=bitcoinffi.Script(bytes()),
             sequence=0,
-            witness=[]
+            witness=[],
         )
-        raw_tx = json.loads(rpc_connection.call("gettransaction", [json.dumps(utxo["txid"]), json.dumps(True), json.dumps(True)]))
+        raw_tx = json.loads(
+            rpc_connection.call(
+                "gettransaction",
+                [json.dumps(utxo["txid"]), json.dumps(True), json.dumps(True)],
+            )
+        )
         prev_out = raw_tx["decoded"]["vout"][utxo["vout"]]
         prev_spk = bitcoinffi.Script(bytes.fromhex(prev_out["scriptPubKey"]["hex"]))
         prev_amount = bitcoinffi.Amount.from_btc(prev_out["value"])
         tx_out = bitcoinffi.TxOut(value=prev_amount, script_pubkey=prev_spk)
-        psbt_in = PsbtInput(witness_utxo=tx_out, redeem_script=None, witness_script=None)
+        psbt_in = PsbtInput(
+            witness_utxo=tx_out, redeem_script=None, witness_script=None
+        )
         inputs.append(InputPair(txin=txin, psbtin=psbt_in, expected_weight=None))
 
     return inputs
+
 
 class MempoolAcceptanceCallback(CanBroadcast):
     def __init__(self, connection: RpcClient):
         self.connection = connection
 
     def callback(self, tx):
-          try:
-                res = json.loads(self.connection.call("testmempoolaccept", [json.dumps([bytes(tx).hex()])]))[0][
-                    "allowed"
-                ]
-                return res
-          except Exception as e:
+        try:
+            res = json.loads(
+                self.connection.call(
+                    "testmempoolaccept", [json.dumps([bytes(tx).hex()])]
+                )
+            )[0]["allowed"]
+            return res
+        except Exception as e:
             print(f"An error occurred: {e}")
             return None
+
 
 class IsScriptOwnedCallback(IsScriptOwned):
     def __init__(self, connection: RpcClient):
@@ -266,11 +397,16 @@ class IsScriptOwnedCallback(IsScriptOwned):
 
     def callback(self, script):
         try:
-            address = bitcoinffi.Address.from_script(bitcoinffi.Script(script), bitcoinffi.Network.REGTEST)
-            return json.loads(self.connection.call("getaddressinfo", [str(address)]))["ismine"]
+            address = bitcoinffi.Address.from_script(
+                bitcoinffi.Script(script), bitcoinffi.Network.REGTEST
+            )
+            return json.loads(self.connection.call("getaddressinfo", [str(address)]))[
+                "ismine"
+            ]
         except Exception as e:
             print(f"An error occurred: {e}")
             return None
+
 
 class CheckInputsNotSeenCallback(IsOutputKnown):
     def __init__(self, connection: RpcClient):
@@ -279,13 +415,15 @@ class CheckInputsNotSeenCallback(IsOutputKnown):
     def callback(self, _outpoint):
         return False
 
+
 class ProcessPsbtCallback(ProcessPsbt):
     def __init__(self, connection: RpcClient):
         self.connection = connection
 
     def callback(self, psbt: str):
         res = json.loads(self.connection.call("walletprocesspsbt", [psbt]))
-        return res['psbt']
+        return res["psbt"]
+
 
 if __name__ == "__main__":
     unittest.main()

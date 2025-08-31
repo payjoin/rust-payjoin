@@ -131,15 +131,15 @@ jobs:
         run: bash contrib/coverage.sh
       - name: "Upload report to coveralls"
         uses: coverallsapp/github-action@v2
-  
-  CodeSpell: 
+
+  CodeSpell:
     name: Code spell check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: codespell-project/actions-codespell@v2
 
-  DiffMutants: 
+  DiffMutants:
     name: Diff cargo-mutants
     runs-on: ubuntu-latest
     env:
@@ -172,4 +172,3 @@ jobs:
         with:
           name: mutants-incremental-cargo.out
           path: mutants.out
-

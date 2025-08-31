@@ -1,6 +1,6 @@
 name: Weekly cargo-mutants
-on: 
-  schedule: 
+on:
+  schedule:
     - cron: "0 0 * * 0" # runs weekly on Sunday at 00:00
   workflow_dispatch: # allows manual triggering
 jobs:

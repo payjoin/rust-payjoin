@@ -1,3 +1,1 @@
-fn main() {
-    napi_build::setup();
-}
+fn main() { napi_build::setup(); }

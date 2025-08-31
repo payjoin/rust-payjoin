@@ -65,6 +65,7 @@ touch sender/config.toml receiver/config.toml
 Edit the `config.toml` files.
 
 #### `sender/config.toml`
+
 ```toml
 # Nigiri uses the following RPC credentials
 [bitcoind]
@@ -79,6 +80,7 @@ ohttp_relays = ["https://pj.benalleng.com", "https://pj.bobspacebkk.com", "https
 ```
 
 #### `receiver/config.toml`
+
 ```toml
 # Nigiri uses the following RPC credentials
 [bitcoind]

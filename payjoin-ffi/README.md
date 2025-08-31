@@ -10,11 +10,11 @@ Each supported language is in its own directory. The Rust code in this project i
 
 The directories below include instructions for using, building, and publishing the native language bindings for [Payjoin Dev Kit] supported by this project.
 
-| Language | Platform              | Repository | Published Package | 
-|----------|-----------------------|-------------------|------------------------------------|
-| Python   | linux, macOS          | [payjoin-ffi/python](python) | [payjoin](https://pypi.org/project/payjoin/) |
-| Dart     | linux, macOS          | [payjoin-ffi/dart](dart)     | N/A |
-| JavaScript | linux, macOS        | [payjoin-ffi/javascript](javascript)     | N/A |
+| Language   | Platform     | Repository                           | Published Package                            |
+| ---------- | ------------ | ------------------------------------ | -------------------------------------------- |
+| Python     | linux, macOS | [payjoin-ffi/python](python)         | [payjoin](https://pypi.org/project/payjoin/) |
+| Dart       | linux, macOS | [payjoin-ffi/dart](dart)             | N/A                                          |
+| JavaScript | linux, macOS | [payjoin-ffi/javascript](javascript) | N/A                                          |
 
 ## Minimum Supported Rust Version (MSRV)
 

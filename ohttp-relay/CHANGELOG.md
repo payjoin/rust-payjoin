@@ -41,9 +41,10 @@ requests to Gateways that do not support an allowed purpose.
 - Gateway opt-in was introduced in [#58](https://github.com/payjoin/ohttp-relay/pull/58)
 
 ### Gateway Probing and BIP77 Support
+
 - Added gateway probing functionality with caching mechanism for improved performance [#46](https://github.com/payjoin/ohttp-relay/pull/46)
-Implemented BIP77 purpose string detection in allowed purposes response #47
-Added ALPN-encoded format parsing for gateway allowed purposes #50
+  Implemented BIP77 purpose string detection in allowed purposes response #47
+  Added ALPN-encoded format parsing for gateway allowed purposes #50
 
 - https://github.com/payjoin/ohttp-relay/pull/46
 - https://github.com/payjoin/ohttp-relay/pull/47

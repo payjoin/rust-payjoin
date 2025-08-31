@@ -1,6 +1,7 @@
 import unittest
 import payjoin
-import payjoin.bitcoin 
+import payjoin.bitcoin
+
 
 class TestURIs(unittest.TestCase):
     def test_todo_url_encoded(self):
@@ -31,6 +32,7 @@ class TestURIs(unittest.TestCase):
                 except Exception as e:
                     self.fail(f"Failed to create a valid Uri for {uri}. Error: {e}")
 
+
 class InMemoryReceiverPersister(payjoin.JsonReceiverSessionPersister):
     def __init__(self, id):
         self.id = id
@@ -46,17 +48,25 @@ class InMemoryReceiverPersister(payjoin.JsonReceiverSessionPersister):
     def close(self):
         self.closed = True
 
+
 class TestReceiverPersistence(unittest.TestCase):
     def test_receiver_persistence(self):
         persister = InMemoryReceiverPersister(1)
-        address = payjoin.bitcoin.Address("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4", payjoin.bitcoin.Network.SIGNET)
+        address = payjoin.bitcoin.Address(
+            "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4", payjoin.bitcoin.Network.SIGNET
+        )
         payjoin.ReceiverBuilder(
-            address, 
-            "https://example.com", 
-            payjoin.OhttpKeys.decode(bytes.fromhex("01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003")),
-            ).build().save(persister)
+            address,
+            "https://example.com",
+            payjoin.OhttpKeys.decode(
+                bytes.fromhex(
+                    "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"
+                )
+            ),
+        ).build().save(persister)
         result = payjoin.replay_receiver_event_log(persister)
         self.assertTrue(result.state().is_INITIALIZED())
+
 
 class InMemorySenderPersister(payjoin.JsonSenderSessionPersister):
     def __init__(self, id):
@@ -73,21 +83,35 @@ class InMemorySenderPersister(payjoin.JsonSenderSessionPersister):
     def close(self):
         self.closed = True
 
+
 class TestSenderPersistence(unittest.TestCase):
     def test_sender_persistence(self):
         # Create a receiver to just get the pj uri
         persister = InMemoryReceiverPersister(1)
-        address = payjoin.bitcoin.Address("2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK", payjoin.bitcoin.Network.TESTNET)
-        receiver = payjoin.ReceiverBuilder(
-            address, 
-            "https://example.com", 
-            payjoin.OhttpKeys.decode(bytes.fromhex("01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003")),
-        ).build().save(persister)
+        address = payjoin.bitcoin.Address(
+            "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK", payjoin.bitcoin.Network.TESTNET
+        )
+        receiver = (
+            payjoin.ReceiverBuilder(
+                address,
+                "https://example.com",
+                payjoin.OhttpKeys.decode(
+                    bytes.fromhex(
+                        "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"
+                    )
+                ),
+            )
+            .build()
+            .save(persister)
+        )
         uri = receiver.pj_uri()
 
         persister = InMemorySenderPersister(1)
         psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA="
-        with_reply_key = payjoin.SenderBuilder(psbt, uri).build_recommended(1000).save(persister)
-            
+        with_reply_key = (
+            payjoin.SenderBuilder(psbt, uri).build_recommended(1000).save(persister)
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

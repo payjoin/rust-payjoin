@@ -6,7 +6,6 @@ Welcome to the Dart language bindings for the [Payjoin Dev Kit](https://payjoind
 
 Follow these steps to clone the repository and run the tests.
 
-
 ```shell
 git clone https://github.com/payjoin/rust-payjoin.git
 cd rust-payjoin/payjoin-ffi/dart

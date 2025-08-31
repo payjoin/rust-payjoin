@@ -1029,11 +1029,7 @@ impl Receiver<PayjoinProposal> {
             // Prepare v2 payload
             let payjoin_bytes = self.psbt.serialize();
             let sender_mailbox = short_id_from_pubkey(e);
-            target_resource = self
-                .session_context
-                .directory
-                .join(&sender_mailbox.to_string())
-                .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
+            target_resource = mailbox_endpoint(&self.session_context.directory, &sender_mailbox);
             body = encrypt_message_b(payjoin_bytes, &self.session_context.receiver_key, e)?;
             method = "POST";
         } else {
@@ -1041,11 +1037,7 @@ impl Receiver<PayjoinProposal> {
             body = self.psbt.to_string().as_bytes().to_vec();
             let receiver_mailbox =
                 short_id_from_pubkey(self.session_context.receiver_key.public_key());
-            target_resource = self
-                .session_context
-                .directory
-                .join(&receiver_mailbox.to_string())
-                .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
+            target_resource = mailbox_endpoint(&self.session_context.directory, &receiver_mailbox);
             method = "PUT";
         }
         tracing::debug!("Payjoin PSBT target: {}", target_resource.as_str());

@@ -59,17 +59,13 @@ pub fn build_v1_pj_uri<'a>(
 }
 
 impl UncheckedOriginalPayload {
-    pub fn from_request(
-        body: &[u8],
-        query: &str,
-        headers: impl Headers,
-    ) -> Result<Self, ReplyableError> {
-        let validated_body = validate_body(headers, body).map_err(ReplyableError::V1)?;
+    pub fn from_request(body: &[u8], query: &str, headers: impl Headers) -> Result<Self, Error> {
+        let validated_body = validate_body(headers, body).map_err(ProtocolError::V1)?;
 
         let base64 = std::str::from_utf8(validated_body).map_err(InternalPayloadError::Utf8)?;
 
         let (psbt, params) = crate::receive::parse_payload(base64, query, SUPPORTED_VERSIONS)
-            .map_err(ReplyableError::Payload)?;
+            .map_err(ProtocolError::OriginalPayload)?;
 
         Ok(Self { original: OriginalPayload { psbt, params } })
     }
@@ -113,7 +109,7 @@ impl UncheckedOriginalPayload {
         self,
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
-    ) -> Result<MaybeInputsOwned, ReplyableError> {
+    ) -> Result<MaybeInputsOwned, Error> {
         self.original.check_broadcast_suitability(min_fee_rate, can_broadcast)?;
         Ok(MaybeInputsOwned { original: self.original })
     }
@@ -155,7 +151,7 @@ impl MaybeInputsOwned {
     pub fn check_inputs_not_owned(
         self,
         is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<MaybeInputsSeen, ReplyableError> {
+    ) -> Result<MaybeInputsSeen, Error> {
         self.original.check_inputs_not_owned(is_owned)?;
         Ok(MaybeInputsSeen { original: self.original })
     }
@@ -180,7 +176,7 @@ impl MaybeInputsSeen {
     pub fn check_no_inputs_seen_before(
         self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
-    ) -> Result<OutputsUnknown, ReplyableError> {
+    ) -> Result<OutputsUnknown, Error> {
         self.original.check_no_inputs_seen_before(is_known)?;
         Ok(OutputsUnknown { original: self.original })
     }
@@ -212,7 +208,7 @@ impl OutputsUnknown {
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<WantsOutputs, ReplyableError> {
+    ) -> Result<WantsOutputs, Error> {
         let owned_vouts = self.original.identify_receiver_outputs(is_receiver_output)?;
         // In case of there being multiple outputs paying to the receiver, we select the first one
         // as the `change_vout`, which we will default to when making single output changes in
@@ -273,7 +269,7 @@ impl crate::receive::common::WantsFeeRange {
         self,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
-    ) -> Result<ProvisionalProposal, ReplyableError> {
+    ) -> Result<ProvisionalProposal, Error> {
         let psbt_context =
             self.calculate_psbt_context_with_fee_range(min_fee_rate, max_effective_fee_rate)?;
         Ok(ProvisionalProposal { psbt_context })
@@ -300,11 +296,11 @@ impl ProvisionalProposal {
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-    ) -> Result<PayjoinProposal, ReplyableError> {
+    ) -> Result<PayjoinProposal, Error> {
         let finalized_psbt = self
             .psbt_context
             .finalize_proposal(wallet_process_psbt)
-            .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
+            .map_err(|e| Error::Implementation(ImplementationError::new(e)))?;
         Ok(PayjoinProposal { payjoin_psbt: finalized_psbt })
     }
 }
@@ -335,7 +331,6 @@ mod tests {
     use payjoin_test_utils::{ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT, QUERY_PARAMS};
 
     use super::*;
-    use crate::receive::PayloadError;
     use crate::Version;
 
     #[derive(Debug, Clone)]
@@ -504,15 +499,19 @@ mod tests {
         assert_eq!(proposal.original.psbt_fee_rate().unwrap(), min_fee_rate);
 
         let min_fee_rate = FeeRate::MAX;
-        let expected_err =
-            ReplyableError::Payload(PayloadError(InternalPayloadError::PsbtBelowFeeRate(
-                proposal.original.psbt_fee_rate().unwrap(),
-                min_fee_rate,
-            )));
         let proposal_below_min_fee = proposal
+            .clone()
             .check_broadcast_suitability(Some(min_fee_rate), |_| Ok(true))
             .expect_err("Broadcast suitability with min_fee_rate below minimum should fail");
-        assert_eq!(proposal_below_min_fee.to_string(), expected_err.to_string());
+        match proposal_below_min_fee {
+            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                InternalPayloadError::PsbtBelowFeeRate(original_fee_rate, min_fee_rate_param),
+            ))) => {
+                assert_eq!(original_fee_rate, proposal.original.psbt_fee_rate().unwrap());
+                assert_eq!(min_fee_rate_param, min_fee_rate);
+            }
+            _ => panic!("Expected PsbtBelowFeeRate error, got: {proposal_below_min_fee:?}"),
+        }
     }
 
     #[test]
@@ -530,7 +529,7 @@ mod tests {
         assert_eq!(
             err.to_string(),
             format!(
-                "Internal Server Error: Ntxid mismatch: expected {}, got {}",
+                "Implementation error: Ntxid mismatch: expected {}, got {}",
                 provisional.psbt_context.payjoin_psbt.unsigned_tx.compute_txid(),
                 other_psbt.unsigned_tx.compute_txid()
             )

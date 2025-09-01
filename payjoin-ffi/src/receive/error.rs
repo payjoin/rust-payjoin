@@ -9,12 +9,14 @@ use crate::uri::error::IntoUrlError;
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[non_exhaustive]
 pub enum ReceiverError {
-    /// Errors that can be replied to the sender
-    #[error("Replyable error: {0}")]
-    ReplyToSender(Arc<ReplyableError>),
-    /// V2-specific errors that are infeasable to reply to the sender
-    #[error("Unreplyable error: {0}")]
-    V2(Arc<SessionError>),
+    /// Error in underlying protocol function
+    #[error("Protocol error: {0}")]
+    Protocol(Arc<ProtocolError>),
+    /// Error arising due to the specific receiver implementation
+    ///
+    /// e.g. database errors, network failures, wallet errors
+    #[error("Implementation error: {0}")]
+    Implementation(Arc<ImplementationError>),
     /// Error that may occur when converting a some type to a URL
     #[error("IntoUrl error: {0}")]
     IntoUrl(Arc<IntoUrlError>),
@@ -28,8 +30,9 @@ impl From<receive::Error> for ReceiverError {
         use ReceiverError::*;
 
         match value {
-            receive::Error::ReplyToSender(e) => ReplyToSender(Arc::new(ReplyableError(e))),
-            receive::Error::V2(e) => V2(Arc::new(SessionError(e))),
+            receive::Error::Protocol(e) => Protocol(Arc::new(ProtocolError(e))),
+            receive::Error::Implementation(e) =>
+                Implementation(Arc::new(ImplementationError::from(e))),
             _ => Unexpected,
         }
     }
@@ -75,12 +78,8 @@ macro_rules! impl_persisted_error_from {
     };
 }
 
-impl_persisted_error_from!(receive::ReplyableError, |api_err: receive::ReplyableError| {
-    ReceiverError::ReplyToSender(Arc::new(api_err.into()))
-});
-
-impl_persisted_error_from!(receive::v2::SessionError, |api_err: receive::v2::SessionError| {
-    ReceiverError::V2(Arc::new(api_err.into()))
+impl_persisted_error_from!(receive::ProtocolError, |api_err: receive::ProtocolError| {
+    ReceiverError::Protocol(Arc::new(api_err.into()))
 });
 
 impl_persisted_error_from!(receive::Error, |api_err: receive::Error| api_err.into());
@@ -100,7 +99,7 @@ impl_persisted_error_from!(payjoin::IntoUrlError, |api_err: payjoin::IntoUrlErro
 ///    after conversion into [`JsonReply`]
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-pub struct ReplyableError(#[from] receive::ReplyableError);
+pub struct ProtocolError(#[from] receive::ProtocolError);
 
 /// The standard format for errors that can be replied as JSON.
 ///
@@ -122,8 +121,8 @@ impl From<receive::JsonReply> for JsonReply {
     fn from(value: receive::JsonReply) -> Self { Self(value) }
 }
 
-impl From<ReplyableError> for JsonReply {
-    fn from(value: ReplyableError) -> Self { Self((&value.0).into()) }
+impl From<ProtocolError> for JsonReply {
+    fn from(value: ProtocolError) -> Self { Self((&value.0).into()) }
 }
 
 /// Error that may occur during a v2 session typestate change

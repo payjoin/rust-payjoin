@@ -18,8 +18,8 @@ use bitcoin::{
 };
 pub(crate) use error::InternalPayloadError;
 pub use error::{
-    Error, InputContributionError, JsonReply, OutputSubstitutionError, PayloadError,
-    ReplyableError, SelectionError,
+    Error, InputContributionError, JsonReply, OutputSubstitutionError, PayloadError, ProtocolError,
+    SelectionError,
 };
 use optional_parameters::Params;
 use serde::{Deserialize, Serialize};
@@ -355,7 +355,7 @@ impl OriginalPayload {
         &self,
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
-    ) -> Result<(), ReplyableError> {
+    ) -> Result<(), Error> {
         let original_psbt_fee_rate = self.psbt_fee_rate()?;
         if let Some(min_fee_rate) = min_fee_rate {
             if original_psbt_fee_rate < min_fee_rate {
@@ -367,7 +367,7 @@ impl OriginalPayload {
             }
         }
         if can_broadcast(&self.psbt.clone().extract_tx_unchecked_fee_rate())
-            .map_err(ReplyableError::Implementation)?
+            .map_err(Error::Implementation)?
         {
             Ok(())
         } else {
@@ -381,8 +381,8 @@ impl OriginalPayload {
     pub fn check_inputs_not_owned(
         &self,
         is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<(), ReplyableError> {
-        let mut err: Result<(), ReplyableError> = Ok(());
+    ) -> Result<(), Error> {
+        let mut err: Result<(), Error> = Ok(());
         if let Some(e) = self
             .psbt
             .input_pairs()
@@ -396,7 +396,7 @@ impl OriginalPayload {
             .find_map(|script| match is_owned(&script) {
                 Ok(false) => None,
                 Ok(true) => Some(InternalPayloadError::InputOwned(script).into()),
-                Err(e) => Some(ReplyableError::Implementation(e)),
+                Err(e) => Some(Error::Implementation(e)),
             })
         {
             return Err(e);
@@ -408,15 +408,15 @@ impl OriginalPayload {
     pub fn check_no_inputs_seen_before(
         &self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
-    ) -> Result<(), ReplyableError> {
+    ) -> Result<(), Error> {
         self.psbt.input_pairs().try_for_each(|input| {
             match is_known(&input.txin.previous_output) {
-                Ok(false) => Ok::<(), ReplyableError>(()),
+                Ok(false) => Ok::<(), Error>(()),
                 Ok(true) =>  {
                     tracing::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
                     Err(InternalPayloadError::InputSeen(input.txin.previous_output))?
                 },
-                Err(e) => Err(ReplyableError::Implementation(e))?,
+                Err(e) => Err(Error::Implementation(e))?,
             }
         })?;
         Ok(())
@@ -425,7 +425,7 @@ impl OriginalPayload {
     pub fn identify_receiver_outputs(
         &self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<Vec<usize>, ReplyableError> {
+    ) -> Result<Vec<usize>, Error> {
         let owned_vouts: Vec<usize> = self
             .psbt
             .unsigned_tx
@@ -438,7 +438,7 @@ impl OriginalPayload {
                 Err(e) => Some(Err(e)),
             })
             .collect::<Result<Vec<_>, _>>()
-            .map_err(ReplyableError::Implementation)?;
+            .map_err(Error::Implementation)?;
 
         if owned_vouts.is_empty() {
             return Err(InternalPayloadError::MissingPayment.into());

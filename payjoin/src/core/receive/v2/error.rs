@@ -1,10 +1,10 @@
 use core::fmt;
 use std::error;
 
-use super::Error::V2;
 use crate::hpke::HpkeError;
 use crate::ohttp::{DirectoryResponseError, OhttpEncapsulationError};
 use crate::receive::error::Error;
+use crate::receive::ProtocolError;
 
 /// Error that may occur during a v2 session typestate change
 ///
@@ -18,7 +18,7 @@ impl From<InternalSessionError> for SessionError {
 }
 
 impl From<InternalSessionError> for Error {
-    fn from(e: InternalSessionError) -> Self { V2(e.into()) }
+    fn from(e: InternalSessionError) -> Self { Error::Protocol(ProtocolError::V2(e.into())) }
 }
 
 #[derive(Debug)]

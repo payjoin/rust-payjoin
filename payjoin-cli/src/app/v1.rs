@@ -14,7 +14,7 @@ use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v1::{PayjoinProposal, UncheckedOriginalPayload};
-use payjoin::receive::ReplyableError::{self, Implementation};
+use payjoin::receive::Error;
 use payjoin::send::v1::SenderBuilder;
 use payjoin::{ImplementationError, IntoUrl, Uri, UriExt};
 use tokio::net::TcpListener;
@@ -258,15 +258,13 @@ impl App {
     fn handle_get_bip21(
         &self,
         amount: Option<Amount>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, ReplyableError> {
-        let v1_config = self
-            .config
-            .v1()
-            .map_err(|e| Implementation(ImplementationError::from(e.into_boxed_dyn_error())))?;
-        let address = self
-            .wallet
-            .get_new_address()
-            .map_err(|e| Implementation(ImplementationError::from(e.into_boxed_dyn_error())))?;
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error> {
+        let v1_config = self.config.v1().map_err(|e| {
+            Error::Implementation(ImplementationError::from(e.into_boxed_dyn_error()))
+        })?;
+        let address = self.wallet.get_new_address().map_err(|e| {
+            Error::Implementation(ImplementationError::from(e.into_boxed_dyn_error()))
+        })?;
         let uri_string = if let Some(amount) = amount {
             format!(
                 "{}?amount={}&pj={}",
@@ -278,7 +276,7 @@ impl App {
             format!("{}?pj={}", address.to_qr_uri(), v1_config.pj_endpoint)
         };
         let uri = Uri::try_from(uri_string.clone()).map_err(|_| {
-            Implementation(ImplementationError::from(
+            Error::Implementation(ImplementationError::from(
                 anyhow!("Could not parse payjoin URI string.").into_boxed_dyn_error(),
             ))
         })?;
@@ -290,14 +288,14 @@ impl App {
     async fn handle_payjoin_post(
         &self,
         req: Request<Incoming>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, ReplyableError> {
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error> {
         let (parts, body) = req.into_parts();
         let headers = Headers(&parts.headers);
         let query_string = parts.uri.query().unwrap_or("");
         let body = body
             .collect()
             .await
-            .map_err(|e| Implementation(ImplementationError::new(e)))?
+            .map_err(|e| Error::Implementation(ImplementationError::new(e)))?
             .to_bytes();
         let proposal = UncheckedOriginalPayload::from_request(&body, query_string, headers)?;
 
@@ -314,7 +312,7 @@ impl App {
     fn process_v1_proposal(
         &self,
         proposal: UncheckedOriginalPayload,
-    ) -> Result<PayjoinProposal, ReplyableError> {
+    ) -> Result<PayjoinProposal, Error> {
         let wallet = self.wallet();
 
         // Receive Check 1: Can Broadcast
@@ -352,15 +350,15 @@ impl App {
                     .wallet
                     .get_new_address()
                     .map_err(|e| {
-                        Implementation(ImplementationError::from(e.into_boxed_dyn_error()))
+                        Error::Implementation(ImplementationError::from(e.into_boxed_dyn_error()))
                     })?
                     .script_pubkey(),
             )
-            .map_err(|e| Implementation(ImplementationError::new(e)))?
+            .map_err(|e| Error::Implementation(ImplementationError::new(e)))?
             .commit_outputs();
 
         let wants_fee_range = try_contributing_inputs(payjoin.clone(), &self.wallet)
-            .map_err(ReplyableError::Implementation)?;
+            .map_err(Error::Implementation)?;
         let provisional_payjoin =
             wants_fee_range.apply_fee_range(None, self.config.max_fee_rate)?;
 

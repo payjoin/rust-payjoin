@@ -32,8 +32,8 @@ impl From<InternalRequestError> for RequestError {
     fn from(value: InternalRequestError) -> Self { RequestError(value) }
 }
 
-impl From<InternalRequestError> for super::ReplyableError {
-    fn from(e: InternalRequestError) -> Self { super::ReplyableError::V1(e.into()) }
+impl From<InternalRequestError> for super::ProtocolError {
+    fn from(e: InternalRequestError) -> Self { super::ProtocolError::V1(e.into()) }
 }
 
 impl From<&RequestError> for JsonReply {

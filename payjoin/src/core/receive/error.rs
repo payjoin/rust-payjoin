@@ -8,23 +8,32 @@ use crate::error_codes::ErrorCode::{
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
-    /// Errors that can be replied to the sender
-    ReplyToSender(ReplyableError),
-    #[cfg(feature = "v2")]
-    /// V2-specific errors that are infeasable to reply to the sender
-    V2(crate::receive::v2::SessionError),
+    /// Error in underlying protocol function
+    Protocol(ProtocolError),
+    /// Error arising due to the specific receiver implementation
+    ///
+    /// e.g. database errors, network failures, wallet errors
+    Implementation(crate::ImplementationError),
 }
 
-impl From<ReplyableError> for Error {
-    fn from(e: ReplyableError) -> Self { Error::ReplyToSender(e) }
+impl From<&Error> for JsonReply {
+    fn from(e: &Error) -> Self {
+        match e {
+            Error::Protocol(e) => e.into(),
+            Error::Implementation(_) => JsonReply::new(Unavailable, "Receiver error"),
+        }
+    }
+}
+
+impl From<ProtocolError> for Error {
+    fn from(e: ProtocolError) -> Self { Error::Protocol(e) }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::ReplyToSender(e) => write!(f, "replyable error: {e}"),
-            #[cfg(feature = "v2")]
-            Error::V2(e) => write!(f, "unreplyable error: {e}"),
+            Error::Protocol(e) => write!(f, "Protocol error: {e}"),
+            Error::Implementation(e) => write!(f, "Implementation error: {e}"),
         }
     }
 }
@@ -32,15 +41,14 @@ impl fmt::Display for Error {
 impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
-            Error::ReplyToSender(e) => e.source(),
-            #[cfg(feature = "v2")]
-            Error::V2(e) => e.source(),
+            Error::Protocol(e) => e.source(),
+            Error::Implementation(e) => e.source(),
         }
     }
 }
 
-/// The replyable error type for the payjoin receiver, representing failures need to be
-/// returned to the sender.
+/// The protocolerror type for the payjoin receiver, representing failures in
+/// the internal protocol operation.
 ///
 /// The error handling is designed to:
 /// 1. Provide structured error responses for protocol-level failures
@@ -49,16 +57,15 @@ impl error::Error for Error {
 /// 4. Provide errors according to BIP-78 JSON error specifications for return
 ///    after conversion into [`JsonReply`]
 #[derive(Debug)]
-pub enum ReplyableError {
+pub enum ProtocolError {
     /// Error arising from validation of the original PSBT payload
-    Payload(PayloadError),
+    OriginalPayload(PayloadError),
     /// Protocol-specific errors for BIP-78 v1 requests (e.g. HTTP request validation, parameter checks)
     #[cfg(feature = "v1")]
     V1(crate::receive::v1::RequestError),
-    /// Error arising due to the specific receiver implementation
-    ///
-    /// e.g. database errors, network failures, wallet errors
-    Implementation(crate::ImplementationError),
+    #[cfg(feature = "v2")]
+    /// V2-specific errors that are infeasable to reply to the sender
+    V2(crate::receive::v2::SessionError),
 }
 
 /// The standard format for errors that can be replied as JSON.
@@ -114,42 +121,47 @@ impl JsonReply {
     }
 }
 
-impl From<&ReplyableError> for JsonReply {
-    fn from(e: &ReplyableError) -> Self {
-        use ReplyableError::*;
+impl From<&ProtocolError> for JsonReply {
+    fn from(e: &ProtocolError) -> Self {
+        use ProtocolError::*;
         match e {
-            Payload(e) => e.into(),
+            OriginalPayload(e) => e.into(),
             #[cfg(feature = "v1")]
             V1(e) => e.into(),
-            Implementation(_) => JsonReply::new(Unavailable, "Receiver error"),
+            #[cfg(feature = "v2")]
+            V2(_) => JsonReply::new(Unavailable, "Receiver error"),
         }
     }
 }
 
-impl fmt::Display for ReplyableError {
+impl fmt::Display for ProtocolError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
-            Self::Payload(e) => e.fmt(f),
+            Self::OriginalPayload(e) => e.fmt(f),
             #[cfg(feature = "v1")]
             Self::V1(e) => e.fmt(f),
-            Self::Implementation(e) => write!(f, "Internal Server Error: {e}"),
+            #[cfg(feature = "v2")]
+            Self::V2(e) => e.fmt(f),
         }
     }
 }
 
-impl error::Error for ReplyableError {
+impl error::Error for ProtocolError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
-            Self::Payload(e) => e.source(),
+            Self::OriginalPayload(e) => e.source(),
             #[cfg(feature = "v1")]
             Self::V1(e) => e.source(),
-            Self::Implementation(e) => e.source(),
+            #[cfg(feature = "v2")]
+            Self::V2(e) => e.source(),
         }
     }
 }
 
-impl From<InternalPayloadError> for ReplyableError {
-    fn from(e: InternalPayloadError) -> Self { ReplyableError::Payload(e.into()) }
+impl From<InternalPayloadError> for Error {
+    fn from(e: InternalPayloadError) -> Self {
+        Error::Protocol(ProtocolError::OriginalPayload(e.into()))
+    }
 }
 
 /// An error that occurs during validation of the original PSBT payload sent by the sender.
@@ -442,7 +454,7 @@ mod tests {
         }
         // Use a panicking error to ensure conversion does not touch internal formatting
         let internal = AlwaysPanics;
-        let error = ReplyableError::Implementation(ImplementationError::new(internal));
+        let error = Error::Implementation(ImplementationError::new(internal));
         let reply = JsonReply::from(&error);
         let expected = JsonReply {
             error_code: ErrorCode::Unavailable,

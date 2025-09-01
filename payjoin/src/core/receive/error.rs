@@ -476,7 +476,7 @@ mod tests {
     #[test]
     /// Create an implementation error that returns INTERNAL_SERVER_ERROR
     fn test_json_reply_with_500_status_code() {
-        let error = ReplyableError::Implementation(ImplementationError::from("test error"));
+        let error = Error::Implementation(ImplementationError::from("test error"));
         let reply = JsonReply::from(&error);
 
         assert_eq!(reply.status_code(), http::StatusCode::INTERNAL_SERVER_ERROR.as_u16());
@@ -490,7 +490,7 @@ mod tests {
     /// Create a payload error that returns BAD_REQUEST
     fn test_json_reply_with_400_status_code() {
         let payload_error = PayloadError(InternalPayloadError::MissingPayment);
-        let error = ReplyableError::Payload(payload_error);
+        let error = Error::Protocol(ProtocolError::OriginalPayload(payload_error));
         let reply = JsonReply::from(&error);
 
         assert_eq!(reply.status_code(), http::StatusCode::BAD_REQUEST.as_u16());

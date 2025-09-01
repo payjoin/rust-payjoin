@@ -527,25 +527,22 @@ impl Receiver<UncheckedOriginalPayload> {
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<MaybeInputsOwned>, Error> {
         match self.state.original.check_broadcast_suitability(min_fee_rate, can_broadcast) {
-            Ok(v1) => v1,
-            Err(e) => match e {
-                Error::Implementation(_) => return MaybeFatalTransition::transient(e),
-                _ =>
-                    return MaybeFatalTransition::fatal(
-                        SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
-                        e,
-                    ),
-            },
-        };
-        MaybeFatalTransition::success(
-            SessionEvent::MaybeInputsOwned(),
-            Receiver {
-                state: MaybeInputsOwned {
-                    original: self.original.clone(),
-                    session_context: self.session_context.clone(),
+            Ok(()) => MaybeFatalTransition::success(
+                SessionEvent::MaybeInputsOwned(),
+                Receiver {
+                    state: MaybeInputsOwned {
+                        original: self.original.clone(),
+                        session_context: self.session_context.clone(),
+                    },
                 },
-            },
-        )
+            ),
+            Err(Error::Implementation(e)) =>
+                MaybeFatalTransition::transient(Error::Implementation(e)),
+            Err(e) => MaybeFatalTransition::fatal(
+                SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                e,
+            ),
+        }
     }
 
     /// Moves on to the next typestate without any of the current typestate's validations.

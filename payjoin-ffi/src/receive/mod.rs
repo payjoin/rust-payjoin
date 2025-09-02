@@ -3,8 +3,8 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 pub use error::{
-    InputContributionError, JsonReply, OutputSubstitutionError, PsbtInputError, ReceiverError,
-    ReplyableError, SelectionError, SessionError,
+    InputContributionError, JsonReply, OutputSubstitutionError, ProtocolError, PsbtInputError,
+    ReceiverError, SelectionError, SessionError,
 };
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
@@ -443,7 +443,7 @@ pub struct UncheckedOriginalPayloadTransition(
                 MaybeFatalTransition<
                     payjoin::receive::v2::SessionEvent,
                     payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsOwned>,
-                    payjoin::receive::ReplyableError,
+                    payjoin::receive::Error,
                 >,
             >,
         >,
@@ -531,7 +531,7 @@ pub struct MaybeInputsOwnedTransition(
                 MaybeFatalTransition<
                     payjoin::receive::v2::SessionEvent,
                     payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsSeen>,
-                    payjoin::receive::ReplyableError,
+                    payjoin::receive::Error,
                 >,
             >,
         >,
@@ -587,7 +587,7 @@ pub struct MaybeInputsSeenTransition(
                 MaybeFatalTransition<
                     payjoin::receive::v2::SessionEvent,
                     payjoin::receive::v2::Receiver<payjoin::receive::v2::OutputsUnknown>,
-                    payjoin::receive::ReplyableError,
+                    payjoin::receive::Error,
                 >,
             >,
         >,
@@ -639,7 +639,7 @@ pub struct OutputsUnknownTransition(
                 MaybeFatalTransition<
                     payjoin::receive::v2::SessionEvent,
                     payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsOutputs>,
-                    payjoin::receive::ReplyableError,
+                    payjoin::receive::Error,
                 >,
             >,
         >,
@@ -830,7 +830,7 @@ pub struct WantsFeeRangeTransition(
                 payjoin::persist::MaybeFatalTransition<
                     payjoin::receive::v2::SessionEvent,
                     payjoin::receive::v2::Receiver<payjoin::receive::v2::ProvisionalProposal>,
-                    payjoin::receive::ReplyableError,
+                    payjoin::receive::ProtocolError,
                 >,
             >,
         >,
@@ -906,7 +906,7 @@ pub struct ProvisionalProposalTransition(
                 payjoin::persist::MaybeTransientTransition<
                     payjoin::receive::v2::SessionEvent,
                     payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>,
-                    payjoin::receive::v2::SessionError,
+                    payjoin::ImplementationError,
                 >,
             >,
         >,

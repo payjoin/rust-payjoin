@@ -15,7 +15,7 @@ use super::error::{
     InternalSelectionError,
 };
 use super::optional_parameters::Params;
-use super::{InputPair, OutputSubstitutionError, ReplyableError, SelectionError};
+use super::{InputPair, OutputSubstitutionError, SelectionError};
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
 use crate::receive::{InternalPayloadError, OriginalPayload, PsbtContext};
@@ -389,7 +389,7 @@ impl WantsFeeRange {
         // If the sender specified a fee contribution, the receiver is allowed to decrease the
         // sender's fee output to pay for additional input fees. Any fees in excess of
         // `max_additional_fee_contribution` must be covered by the receiver.
-        let input_contribution_weight = self.additional_input_weight()?;
+        let input_contribution_weight = self.additional_input_weight();
         let additional_fee = input_contribution_weight * min_fee_rate;
         tracing::trace!("additional_fee: {additional_fee}");
         let mut receiver_additional_fee = additional_fee;
@@ -444,8 +444,8 @@ impl WantsFeeRange {
     }
 
     /// Calculate the additional input weight contributed by the receiver.
-    fn additional_input_weight(&self) -> Result<Weight, InternalPayloadError> {
-        Ok(self.receiver_inputs.iter().map(|input_pair| input_pair.expected_weight).sum())
+    fn additional_input_weight(&self) -> Weight {
+        self.receiver_inputs.iter().map(|input_pair| input_pair.expected_weight).sum()
     }
 
     /// Calculate the additional output weight contributed by the receiver.
@@ -474,7 +474,7 @@ impl WantsFeeRange {
         self,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
-    ) -> Result<PsbtContext, ReplyableError> {
+    ) -> Result<PsbtContext, InternalPayloadError> {
         let payjoin_psbt =
             self.calculate_psbt_with_fee_range(min_fee_rate, max_effective_fee_rate)?;
         Ok(PsbtContext { original_psbt: self.original_psbt, payjoin_psbt })
@@ -729,10 +729,7 @@ mod tests {
                     }, None)
                 .unwrap()],
         };
-        assert_eq!(
-            p2pkh_proposal.additional_input_weight().expect("should calculate input weight"),
-            Weight::from_wu(592)
-        );
+        assert_eq!(p2pkh_proposal.additional_input_weight(), Weight::from_wu(592));
 
         // Input weight for a single nested P2WPKH (nested segwit) receiver input
         let nested_p2wpkh_proposal = WantsFeeRange {
@@ -756,12 +753,7 @@ mod tests {
                     }, None)
                 .unwrap()],
         };
-        assert_eq!(
-            nested_p2wpkh_proposal
-                .additional_input_weight()
-                .expect("should calculate input weight"),
-            Weight::from_wu(364)
-        );
+        assert_eq!(nested_p2wpkh_proposal.additional_input_weight(), Weight::from_wu(364));
 
         // Input weight for a single P2WPKH (native segwit) receiver input
         let p2wpkh_proposal = WantsFeeRange {
@@ -783,10 +775,7 @@ mod tests {
                     }, None)
                 .unwrap()],
         };
-        assert_eq!(
-            p2wpkh_proposal.additional_input_weight().expect("should calculate input weight"),
-            Weight::from_wu(272)
-        );
+        assert_eq!(p2wpkh_proposal.additional_input_weight(), Weight::from_wu(272));
 
         // Input weight for a single P2TR (taproot) receiver input
         let p2tr_proposal = WantsFeeRange {
@@ -808,10 +797,7 @@ mod tests {
                     }, None)
                 .unwrap()],
         };
-        assert_eq!(
-            p2tr_proposal.additional_input_weight().expect("should calculate input weight"),
-            Weight::from_wu(230)
-        );
+        assert_eq!(p2tr_proposal.additional_input_weight(), Weight::from_wu(230));
     }
 
     #[test]

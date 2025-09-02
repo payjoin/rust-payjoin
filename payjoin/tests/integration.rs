@@ -373,7 +373,10 @@ mod integration {
                     .expect("expected api error");
                 // TODO: this should be replaced by comparing the error itself once the error types impl PartialEq
                 // Issue: https://github.com/payjoin/rust-payjoin/issues/645
-                assert_eq!(server_error.to_string(), "Can't broadcast. PSBT rejected by mempool.");
+                assert_eq!(
+                    server_error.to_string(),
+                    "Protocol error: Can't broadcast. PSBT rejected by mempool."
+                );
 
                 let (_, session_history) = replay_receiver_event_log(&persister)?;
                 let (err_req, err_ctx) = session_history

@@ -1,11 +1,10 @@
 use core::fmt;
 use std::error;
 
-use super::Error::V2;
 use crate::hpke::HpkeError;
 use crate::ohttp::{DirectoryResponseError, OhttpEncapsulationError};
 use crate::receive::error::Error;
-use crate::ImplementationError;
+use crate::receive::ProtocolError;
 
 /// Error that may occur during a v2 session typestate change
 ///
@@ -19,7 +18,7 @@ impl From<InternalSessionError> for SessionError {
 }
 
 impl From<InternalSessionError> for Error {
-    fn from(e: InternalSessionError) -> Self { V2(e.into()) }
+    fn from(e: InternalSessionError) -> Self { Error::Protocol(ProtocolError::V2(e.into())) }
 }
 
 #[derive(Debug)]
@@ -34,8 +33,6 @@ pub(crate) enum InternalSessionError {
     Hpke(HpkeError),
     /// The directory returned a bad response
     DirectoryResponse(DirectoryResponseError),
-    /// Implementation error
-    Implementation(ImplementationError),
 }
 
 impl From<OhttpEncapsulationError> for Error {
@@ -58,7 +55,6 @@ impl fmt::Display for SessionError {
             OhttpEncapsulation(e) => write!(f, "OHTTP Encapsulation Error: {e}"),
             Hpke(e) => write!(f, "Hpke decryption failed: {e}"),
             DirectoryResponse(e) => write!(f, "Directory response error: {e}"),
-            Implementation(e) => write!(f, "Implementation error: {e}"),
         }
     }
 }
@@ -73,7 +69,6 @@ impl error::Error for SessionError {
             OhttpEncapsulation(e) => Some(e),
             Hpke(e) => Some(e),
             DirectoryResponse(e) => Some(e),
-            Implementation(e) => Some(e),
         }
     }
 }

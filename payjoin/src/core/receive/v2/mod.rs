@@ -40,8 +40,7 @@ use url::Url;
 
 use super::error::{Error, InputContributionError};
 use super::{
-    common, InternalPayloadError, JsonReply, OutputSubstitutionError, ReplyableError,
-    SelectionError,
+    common, InternalPayloadError, JsonReply, OutputSubstitutionError, ProtocolError, SelectionError,
 };
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{
@@ -418,7 +417,7 @@ impl Receiver<Initialized> {
     fn extract_proposal_from_v1(
         &mut self,
         response: &str,
-    ) -> Result<OriginalPayload, ReplyableError> {
+    ) -> Result<OriginalPayload, ProtocolError> {
         self.unchecked_from_payload(response)
     }
 
@@ -429,16 +428,16 @@ impl Receiver<Initialized> {
         let (payload_bytes, reply_key) =
             decrypt_message_a(&response, self.context.receiver_key.secret_key().clone())?;
         let payload = std::str::from_utf8(&payload_bytes)
-            .map_err(|e| Error::ReplyToSender(InternalPayloadError::Utf8(e).into()))?;
-        self.unchecked_from_payload(payload).map_err(Error::ReplyToSender).map(|p| (p, reply_key))
+            .map_err(|e| ProtocolError::OriginalPayload(InternalPayloadError::Utf8(e).into()))?;
+        self.unchecked_from_payload(payload).map_err(Error::Protocol).map(|p| (p, reply_key))
     }
 
-    fn unchecked_from_payload(&mut self, payload: &str) -> Result<OriginalPayload, ReplyableError> {
+    fn unchecked_from_payload(&mut self, payload: &str) -> Result<OriginalPayload, ProtocolError> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
         tracing::trace!("Received query: {query}, base64: {base64}"); // my guess is no \n so default is wrong
-        let (psbt, mut params) =
-            parse_payload(base64, query, SUPPORTED_VERSIONS).map_err(ReplyableError::Payload)?;
+        let (psbt, mut params) = parse_payload(base64, query, SUPPORTED_VERSIONS)
+            .map_err(ProtocolError::OriginalPayload)?;
 
         // Output substitution must be disabled for V1 sessions in V2 contexts.
         //
@@ -526,27 +525,24 @@ impl Receiver<UncheckedOriginalPayload> {
         self,
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
-    ) -> MaybeFatalTransition<SessionEvent, Receiver<MaybeInputsOwned>, ReplyableError> {
+    ) -> MaybeFatalTransition<SessionEvent, Receiver<MaybeInputsOwned>, Error> {
         match self.state.original.check_broadcast_suitability(min_fee_rate, can_broadcast) {
-            Ok(v1) => v1,
-            Err(e) => match e {
-                ReplyableError::Implementation(_) => return MaybeFatalTransition::transient(e),
-                _ =>
-                    return MaybeFatalTransition::fatal(
-                        SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
-                        e,
-                    ),
-            },
-        };
-        MaybeFatalTransition::success(
-            SessionEvent::MaybeInputsOwned(),
-            Receiver {
-                state: MaybeInputsOwned {
-                    original: self.original.clone(),
-                    session_context: self.session_context.clone(),
+            Ok(()) => MaybeFatalTransition::success(
+                SessionEvent::MaybeInputsOwned(),
+                Receiver {
+                    state: MaybeInputsOwned {
+                        original: self.original.clone(),
+                        session_context: self.session_context.clone(),
+                    },
                 },
-            },
-        )
+            ),
+            Err(Error::Implementation(e)) =>
+                MaybeFatalTransition::transient(Error::Implementation(e)),
+            Err(e) => MaybeFatalTransition::fatal(
+                SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                e,
+            ),
+        }
     }
 
     /// Moves on to the next typestate without any of the current typestate's validations.
@@ -607,11 +603,11 @@ impl Receiver<MaybeInputsOwned> {
     pub fn check_inputs_not_owned(
         self,
         is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
-    ) -> MaybeFatalTransition<SessionEvent, Receiver<MaybeInputsSeen>, ReplyableError> {
+    ) -> MaybeFatalTransition<SessionEvent, Receiver<MaybeInputsSeen>, Error> {
         match self.state.original.check_inputs_not_owned(is_owned) {
             Ok(inner) => inner,
             Err(e) => match e {
-                ReplyableError::Implementation(_) => {
+                Error::Implementation(_) => {
                     return MaybeFatalTransition::transient(e);
                 }
                 _ => {
@@ -665,11 +661,11 @@ impl Receiver<MaybeInputsSeen> {
     pub fn check_no_inputs_seen_before(
         self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
-    ) -> MaybeFatalTransition<SessionEvent, Receiver<OutputsUnknown>, ReplyableError> {
+    ) -> MaybeFatalTransition<SessionEvent, Receiver<OutputsUnknown>, Error> {
         match self.state.original.check_no_inputs_seen_before(is_known) {
             Ok(inner) => inner,
             Err(e) => match e {
-                ReplyableError::Implementation(_) => {
+                Error::Implementation(_) => {
                     return MaybeFatalTransition::transient(e);
                 }
                 _ => {
@@ -728,11 +724,11 @@ impl Receiver<OutputsUnknown> {
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
-    ) -> MaybeFatalTransition<SessionEvent, Receiver<WantsOutputs>, ReplyableError> {
+    ) -> MaybeFatalTransition<SessionEvent, Receiver<WantsOutputs>, Error> {
         let owned_vouts = match self.state.original.identify_receiver_outputs(is_receiver_output) {
             Ok(inner) => inner,
             Err(e) => match e {
-                ReplyableError::Implementation(_) => {
+                Error::Implementation(_) => {
                     return MaybeFatalTransition::transient(e);
                 }
                 _ => {
@@ -911,7 +907,7 @@ impl Receiver<WantsFeeRange> {
         self,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
-    ) -> MaybeFatalTransition<SessionEvent, Receiver<ProvisionalProposal>, ReplyableError> {
+    ) -> MaybeFatalTransition<SessionEvent, Receiver<ProvisionalProposal>, ProtocolError> {
         let psbt_context = match self
             .state
             .inner
@@ -919,9 +915,14 @@ impl Receiver<WantsFeeRange> {
         {
             Ok(inner) => inner,
             Err(e) => {
+                // FIXME: follow up by returning a terminal error rather than replyable error
+                let payload_error = super::PayloadError::from(e);
                 return MaybeFatalTransition::fatal(
-                    SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
-                    e,
+                    SessionEvent::SessionInvalid(
+                        payload_error.to_string(),
+                        Some(JsonReply::from(&payload_error)),
+                    ),
+                    ProtocolError::OriginalPayload(payload_error),
                 );
             }
         };
@@ -968,13 +969,12 @@ impl Receiver<ProvisionalProposal> {
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-    ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, SessionError> {
+    ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, ImplementationError>
+    {
         let inner = match self.state.psbt_context.finalize_proposal(wallet_process_psbt) {
             Ok(inner) => inner,
             Err(e) => {
-                return MaybeTransientTransition::transient(
-                    InternalSessionError::Implementation(ImplementationError::new(e)).into(),
-                );
+                return MaybeTransientTransition::transient(e);
             }
         };
         let payjoin_proposal =
@@ -1025,11 +1025,7 @@ impl Receiver<PayjoinProposal> {
             // Prepare v2 payload
             let payjoin_bytes = self.psbt.serialize();
             let sender_mailbox = short_id_from_pubkey(e);
-            target_resource = self
-                .session_context
-                .directory
-                .join(&sender_mailbox.to_string())
-                .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
+            target_resource = mailbox_endpoint(&self.session_context.directory, &sender_mailbox);
             body = encrypt_message_b(payjoin_bytes, &self.session_context.receiver_key, e)?;
             method = "POST";
         } else {
@@ -1037,11 +1033,7 @@ impl Receiver<PayjoinProposal> {
             body = self.psbt.to_string().as_bytes().to_vec();
             let receiver_mailbox =
                 short_id_from_pubkey(self.session_context.receiver_key.public_key());
-            target_resource = self
-                .session_context
-                .directory
-                .join(&receiver_mailbox.to_string())
-                .map_err(|e| ReplyableError::Implementation(ImplementationError::new(e)))?;
+            target_resource = mailbox_endpoint(&self.session_context.directory, &receiver_mailbox);
             method = "PUT";
         }
         tracing::debug!("Payjoin PSBT target: {}", target_resource.as_str());
@@ -1124,7 +1116,7 @@ pub mod test {
     use crate::output_substitution::OutputSubstitution;
     use crate::persist::{NoopSessionPersister, RejectTransient, Rejection};
     use crate::receive::optional_parameters::Params;
-    use crate::receive::{v2, ReplyableError};
+    use crate::receive::v2;
     use crate::ImplementationError;
 
     pub(crate) static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
@@ -1221,15 +1213,15 @@ pub mod test {
         let receiver = v2::Receiver { state: unchecked_proposal };
 
         let unchecked_proposal = receiver.check_broadcast_suitability(Some(FeeRate::MIN), |_| {
-            Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
+            Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
 
         match unchecked_proposal {
             MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
-                ReplyableError::Implementation(error),
+                Error::Implementation(error),
             )))) => assert_eq!(
                 error.to_string(),
-                ReplyableError::Implementation("mock error".into()).to_string()
+                Error::Implementation("mock error".into()).to_string()
             ),
             _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
         }
@@ -1248,15 +1240,15 @@ pub mod test {
             .save(&persister)
             .expect("Noop persister shouldn't fail");
         let maybe_inputs_seen = maybe_inputs_owned.check_inputs_not_owned(&mut |_| {
-            Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
+            Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
 
         match maybe_inputs_seen {
             MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
-                ReplyableError::Implementation(error),
+                Error::Implementation(error),
             )))) => assert_eq!(
                 error.to_string(),
-                ReplyableError::Implementation("mock error".into()).to_string()
+                Error::Implementation("mock error".into()).to_string()
             ),
             _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
         }
@@ -1279,14 +1271,14 @@ pub mod test {
             .save(&persister)
             .expect("Noop persister shouldn't fail");
         let outputs_unknown = maybe_inputs_seen.check_no_inputs_seen_before(&mut |_| {
-            Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
+            Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
         match outputs_unknown {
             MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
-                ReplyableError::Implementation(error),
+                Error::Implementation(error),
             )))) => assert_eq!(
                 error.to_string(),
-                ReplyableError::Implementation("mock error".into()).to_string()
+                Error::Implementation("mock error".into()).to_string()
             ),
             _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
         }
@@ -1313,14 +1305,14 @@ pub mod test {
             .save(&persister)
             .expect("Noop persister should not fail");
         let wants_outputs = outputs_unknown.identify_receiver_outputs(&mut |_| {
-            Err(ImplementationError::new(ReplyableError::Implementation("mock error".into())))
+            Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
         match wants_outputs {
             MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
-                ReplyableError::Implementation(error),
+                Error::Implementation(error),
             )))) => assert_eq!(
                 error.to_string(),
-                ReplyableError::Implementation("mock error".into()).to_string()
+                Error::Implementation("mock error".into()).to_string()
             ),
             _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
         }
@@ -1341,7 +1333,7 @@ pub mod test {
 
         let (_req, _ctx) = extract_err_req(&mock_err.1, &*EXAMPLE_URL, &receiver.session_context)?;
 
-        let internal_error: ReplyableError = InternalPayloadError::MissingPayment.into();
+        let internal_error: Error = InternalPayloadError::MissingPayment.into();
         let (_req, _ctx) =
             extract_err_req(&(&internal_error).into(), &*EXAMPLE_URL, &receiver.session_context)?;
         Ok(())

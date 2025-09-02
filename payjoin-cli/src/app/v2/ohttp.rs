@@ -1,8 +1,15 @@
+use std::fs;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 
 use super::Config;
+
+// 6 months
+const CACHE_DURATION: Duration = Duration::from_secs(6 * 30 * 24 * 60 * 60);
 
 #[derive(Debug, Clone)]
 pub struct RelayManager {
@@ -38,12 +45,24 @@ pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
             ohttp_keys,
             relay_url: config.v2()?.ohttp_relays[0].clone(),
         });
-    } else {
-        println!("Bootstrapping private network transport over Oblivious HTTP");
-        let fetched_keys = fetch_ohttp_keys(config, directory, relay_manager).await?;
-
-        Ok(fetched_keys)
     }
+
+    if let Some(cached_keys) = read_cached_ohttp_keys() {
+        if !is_expired(&cached_keys) {
+            println!("Using cached OHTTP keys");
+            return Ok(ValidatedOhttpKeys {
+                ohttp_keys: cached_keys.keys,
+                relay_url: cached_keys.relay_url,
+            });
+        }
+    }
+    println!("Bootstrapping private network transport over Oblivious HTTP");
+    let fetched_keys = fetch_ohttp_keys(config, directory, relay_manager).await?;
+
+    // save the keys to cache
+    cache_ohttp_keys(&fetched_keys.ohttp_keys, &fetched_keys.relay_url)?;
+
+    Ok(fetched_keys)
 }
 
 async fn fetch_ohttp_keys(
@@ -111,4 +130,48 @@ async fn fetch_ohttp_keys(
             }
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct CachedOhttpKeys {
+    keys: payjoin::OhttpKeys,
+    relay_url: payjoin::Url,
+    fetched_at: u64,
+}
+
+fn get_cache_file() -> PathBuf {
+    let dir = dirs::cache_dir().unwrap();
+    println!("Getting cache file {:?}", dir);
+    dirs::cache_dir().unwrap().join("payjoin-cli").join("ohttp-keys.json")
+}
+
+fn read_cached_ohttp_keys() -> Option<CachedOhttpKeys> {
+    let cache_file = get_cache_file();
+    if !cache_file.exists() {
+        return None;
+    }
+    let data = fs::read_to_string(cache_file).ok().unwrap();
+    serde_json::from_str(&data).ok()
+}
+
+fn cache_ohttp_keys(ohttp_keys: &payjoin::OhttpKeys, relay_url: &payjoin::Url) -> Result<()> {
+    let cached = CachedOhttpKeys {
+        keys: ohttp_keys.clone(),
+        relay_url: relay_url.clone(),
+        fetched_at: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
+    };
+
+    let serialized = serde_json::to_string(&cached)?;
+    let path = get_cache_file();
+    fs::create_dir_all(path.parent().unwrap())?;
+    fs::write(path, serialized)?;
+    Ok(())
+}
+
+fn is_expired(cached_keys: &CachedOhttpKeys) -> bool {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_secs();
+    now.saturating_sub(cached_keys.fetched_at) > CACHE_DURATION.as_secs()
 }

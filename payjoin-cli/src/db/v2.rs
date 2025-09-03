@@ -36,9 +36,7 @@ impl SenderPersister {
         Ok(Self { db, session_id: SessionId(session_id) })
     }
 
-    pub fn from_id(db: Arc<Database>, id: SessionId) -> crate::db::Result<Self> {
-        Ok(Self { db, session_id: id })
-    }
+    pub fn from_id(db: Arc<Database>, id: SessionId) -> Self { Self { db, session_id: id } }
 }
 
 impl SessionPersister for SenderPersister {
@@ -117,9 +115,7 @@ impl ReceiverPersister {
         Ok(Self { db, session_id: SessionId(session_id) })
     }
 
-    pub fn from_id(db: Arc<Database>, id: SessionId) -> crate::db::Result<Self> {
-        Ok(Self { db, session_id: id })
-    }
+    pub fn from_id(db: Arc<Database>, id: SessionId) -> Self { Self { db, session_id: id } }
 }
 
 impl SessionPersister for ReceiverPersister {

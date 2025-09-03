@@ -1,7 +1,5 @@
 mod integration {
     #[cfg(feature = "v1")]
-    const EXAMPLE_URL: &str = "https://example.com";
-    #[cfg(feature = "v1")]
     mod v1 {
         use std::collections::HashMap;
         use std::str::FromStr;
@@ -16,10 +14,10 @@ mod integration {
         use payjoin::receive::InputPair;
         use payjoin::send::v1::SenderBuilder;
         use payjoin::{ImplementationError, OutputSubstitution, PjUri, Request, Uri, UriExt};
-        use payjoin_test_utils::{init_bitcoind_sender_receiver, init_tracing, BoxError};
+        use payjoin_test_utils::{
+            init_bitcoind_sender_receiver, init_tracing, BoxError, EXAMPLE_URL,
+        };
         use tracing::debug;
-
-        use super::*;
 
         #[test]
         fn v1_to_v1_p2pkh() -> Result<(), BoxError> {
@@ -69,8 +67,11 @@ mod integration {
         ) -> Result<(), BoxError> {
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let mut pj_uri =
-                build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
+            let mut pj_uri = build_v1_pj_uri(
+                &pj_receiver_address,
+                EXAMPLE_URL.clone(),
+                OutputSubstitution::Enabled,
+            )?;
             pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************
@@ -134,8 +135,11 @@ mod integration {
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let mut pj_uri =
-                build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
+            let mut pj_uri = build_v1_pj_uri(
+                &pj_receiver_address,
+                EXAMPLE_URL.clone(),
+                OutputSubstitution::Enabled,
+            )?;
             pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************
@@ -404,12 +408,11 @@ mod integration {
         };
         use payjoin_test_utils::{
             init_bitcoind_sender_receiver, init_tracing, BoxError, BoxSendSyncError,
-            InMemoryTestPersister, TestServices,
+            InMemoryTestPersister, TestServices, EXAMPLE_URL,
         };
         use reqwest::{Client, Response};
 
         use super::v1::*;
-        use super::*;
 
         #[tokio::test]
         async fn test_bad_ohttp_keys() -> Result<(), BoxSendSyncError> {
@@ -766,8 +769,11 @@ mod integration {
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let mut pj_uri =
-                build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
+            let mut pj_uri = build_v1_pj_uri(
+                &pj_receiver_address,
+                EXAMPLE_URL.clone(),
+                OutputSubstitution::Enabled,
+            )?;
             pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************
@@ -1092,10 +1098,11 @@ mod integration {
         use payjoin::receive::v1::build_v1_pj_uri;
         use payjoin::send::v1::SenderBuilder;
         use payjoin::{OutputSubstitution, Uri, UriExt};
-        use payjoin_test_utils::{init_bitcoind_sender_receiver, init_tracing, BoxError};
+        use payjoin_test_utils::{
+            init_bitcoind_sender_receiver, init_tracing, BoxError, EXAMPLE_URL,
+        };
 
         use super::v1::*;
-        use super::*;
 
         // In this test the receiver consolidates a bunch of UTXOs into the destination output
         #[test]
@@ -1116,8 +1123,11 @@ mod integration {
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let mut pj_uri =
-                build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
+            let mut pj_uri = build_v1_pj_uri(
+                &pj_receiver_address,
+                EXAMPLE_URL.clone(),
+                OutputSubstitution::Enabled,
+            )?;
             pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************
@@ -1194,8 +1204,11 @@ mod integration {
 
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
-            let mut pj_uri =
-                build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
+            let mut pj_uri = build_v1_pj_uri(
+                &pj_receiver_address,
+                EXAMPLE_URL.clone(),
+                OutputSubstitution::Enabled,
+            )?;
             pj_uri.amount = Some(Amount::ONE_BTC);
 
             // **********************

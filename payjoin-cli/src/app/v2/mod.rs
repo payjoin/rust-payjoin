@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
@@ -22,10 +23,15 @@ use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, RelayManager};
 use crate::app::{handle_interrupt, http_agent};
-use crate::db::v2::{ReceiverPersister, SenderPersister};
+use crate::db::v2::{ReceiverPersister, SenderPersister, SessionId};
 use crate::db::Database;
 
 mod ohttp;
+
+const W_ID: usize = 12;
+const W_ROLE: usize = 25;
+const W_DONE: usize = 15;
+const W_STATUS: usize = 15;
 
 #[derive(Clone)]
 pub(crate) struct App {
@@ -34,6 +40,85 @@ pub(crate) struct App {
     wallet: BitcoindWallet,
     interrupt: watch::Receiver<()>,
     relay_manager: Arc<Mutex<RelayManager>>,
+}
+
+trait StatusText {
+    fn status_text(&self) -> &'static str;
+}
+
+impl StatusText for SendSession {
+    fn status_text(&self) -> &'static str {
+        match self {
+            SendSession::WithReplyKey(_) | SendSession::V2GetContext(_) => "Waiting for proposal",
+            SendSession::ProposalReceived(_) => "Proposal received",
+            SendSession::TerminalFailure => "Session failure",
+        }
+    }
+}
+
+impl StatusText for ReceiveSession {
+    fn status_text(&self) -> &'static str {
+        match self {
+            ReceiveSession::Initialized(_) => "Waiting for original proposal",
+            ReceiveSession::UncheckedOriginalPayload(_)
+            | ReceiveSession::MaybeInputsOwned(_)
+            | ReceiveSession::MaybeInputsSeen(_)
+            | ReceiveSession::OutputsUnknown(_)
+            | ReceiveSession::WantsOutputs(_)
+            | ReceiveSession::WantsInputs(_)
+            | ReceiveSession::WantsFeeRange(_)
+            | ReceiveSession::ProvisionalProposal(_) => "Processing original proposal",
+            ReceiveSession::PayjoinProposal(_) => "Payjoin proposal sent",
+            ReceiveSession::TerminalFailure => "Session failure",
+        }
+    }
+}
+
+fn print_header() {
+    println!(
+        "{:<W_ID$} {:<W_ROLE$} {:<W_DONE$} {:<W_STATUS$}",
+        "Session ID", "Sender/Receiver", "Completed At", "Status"
+    );
+}
+
+enum Role {
+    Sender,
+    Receiver,
+}
+impl Role {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Role::Sender => "Sender",
+            Role::Receiver => "Receiver",
+        }
+    }
+}
+
+struct SessionHistoryRow<Status> {
+    session_id: SessionId,
+    role: Role,
+    status: Status,
+    completed_at: Option<u64>,
+    error_message: Option<String>,
+}
+
+impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{:<W_ID$} {:<W_ROLE$} {:<W_DONE$} {:<W_STATUS$}",
+            self.session_id.to_string(),
+            self.role.as_str(),
+            match self.completed_at {
+                None => "Not Completed".to_string(),
+                Some(secs) => {
+                    // TODO: human readable time
+                    secs.to_string()
+                }
+            },
+            self.error_message.as_deref().unwrap_or(self.status.status_text())
+        )
+    }
 }
 
 #[async_trait::async_trait]
@@ -223,6 +308,87 @@ impl AppTrait for App {
                 println!("Resumed sessions were interrupted.");
             }
         }
+        Ok(())
+    }
+
+    #[cfg(feature = "v2")]
+    async fn history(&self) -> Result<()> {
+        print_header();
+        let mut send_rows = vec![];
+        let mut recv_rows = vec![];
+        self.db.get_send_session_ids()?.into_iter().try_for_each(|session_id| {
+            let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
+            if let Ok((sender_state, _)) = replay_sender_event_log(&persister) {
+                let row = SessionHistoryRow {
+                    session_id,
+                    role: Role::Sender,
+                    status: sender_state,
+                    completed_at: None,
+                    error_message: None,
+                };
+                send_rows.push(row);
+            }
+            Ok::<_, anyhow::Error>(())
+        })?;
+
+        self.db.get_recv_session_ids()?.into_iter().try_for_each(|session_id| {
+            let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
+            if let Ok((receiver_state, _)) = replay_receiver_event_log(&persister) {
+                let row = SessionHistoryRow {
+                    session_id,
+                    role: Role::Receiver,
+                    status: receiver_state,
+                    completed_at: None,
+                    error_message: None,
+                };
+                recv_rows.push(row);
+            }
+            Ok::<_, anyhow::Error>(())
+        })?;
+
+        self.db.get_inactive_send_session_ids()?.into_iter().try_for_each(
+            |(session_id, completed_at)| {
+                let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
+                if let Ok((sender_state, session_history)) = replay_sender_event_log(&persister) {
+                    let row = SessionHistoryRow {
+                        session_id,
+                        role: Role::Sender,
+                        status: sender_state,
+                        completed_at: Some(completed_at),
+                        error_message: session_history.terminal_error(),
+                    };
+                    send_rows.push(row);
+                }
+                Ok::<_, anyhow::Error>(())
+            },
+        )?;
+
+        self.db.get_inactive_recv_session_ids()?.into_iter().try_for_each(
+            |(session_id, completed_at)| {
+                let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
+                if let Ok((receiver_state, session_history)) = replay_receiver_event_log(&persister)
+                {
+                    let row = SessionHistoryRow {
+                        session_id,
+                        role: Role::Receiver,
+                        status: receiver_state,
+                        completed_at: Some(completed_at),
+                        error_message: session_history.terminal_error().map(|e| e.0),
+                    };
+                    recv_rows.push(row);
+                }
+                Ok::<_, anyhow::Error>(())
+            },
+        )?;
+
+        // Print receiver and sender rows separately
+        for row in send_rows {
+            println!("{}", row);
+        }
+        for row in recv_rows {
+            println!("{}", row);
+        }
+
         Ok(())
     }
 }

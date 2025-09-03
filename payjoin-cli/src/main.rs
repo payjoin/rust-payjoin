@@ -71,6 +71,10 @@ async fn main() -> Result<()> {
         Commands::Resume => {
             app.resume_payjoins().await?;
         }
+        #[cfg(feature = "v2")]
+        Commands::History => {
+            app.history().await?;
+        }
     };
 
     Ok(())

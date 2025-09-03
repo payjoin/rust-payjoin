@@ -106,24 +106,16 @@ impl AppTrait for App {
             }
             PjParam::V2(pj_param) => {
                 let receiver_pubkey = pj_param.receiver_pubkey();
-                let sender_state =
-                    self.db.get_send_session_ids()?.into_iter().find_map(|session_id| {
-                        let session_receiver_pubkey = self
-                            .db
-                            .get_send_session_receiver_pk(&session_id)
-                            .expect("Receiver pubkey should exist if session id exists");
-                        if session_receiver_pubkey == *receiver_pubkey {
-                            let sender_persister =
-                                SenderPersister::from_id(self.db.clone(), session_id).ok()?;
-                            let (send_session, _) = replay_sender_event_log(&sender_persister)
-                                .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))
-                                .ok()?;
-
-                            Some((send_session, sender_persister))
-                        } else {
-                            None
-                        }
-                    });
+                let session_id = self.db.get_send_session_id_with_receiver_pk(receiver_pubkey)?;
+                let sender_state = match session_id {
+                    Some(session_id) => {
+                        let sender_persister =
+                            SenderPersister::from_id(self.db.clone(), session_id)?;
+                        let (send_session, _) = replay_sender_event_log(&sender_persister)?;
+                        Some((send_session, sender_persister))
+                    }
+                    None => None,
+                };
 
                 let (sender_state, persister) = match sender_state {
                     Some((sender_state, persister)) => (sender_state, persister),

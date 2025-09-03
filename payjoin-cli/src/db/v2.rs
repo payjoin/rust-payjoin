@@ -4,7 +4,7 @@ use payjoin::persist::SessionPersister;
 use payjoin::receive::v2::SessionEvent as ReceiverSessionEvent;
 use payjoin::send::v2::SessionEvent as SenderSessionEvent;
 use payjoin::HpkePublicKey;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use super::*;
 
@@ -219,14 +219,16 @@ impl Database {
         Ok(session_ids)
     }
 
-    pub(crate) fn get_send_session_receiver_pk(
+    pub(crate) fn get_send_session_id_with_receiver_pk(
         &self,
-        session_id: &SessionId,
-    ) -> Result<HpkePublicKey> {
+        receiver_pk: &HpkePublicKey,
+    ) -> Result<Option<SessionId>> {
         let conn = self.get_connection()?;
         let mut stmt =
-            conn.prepare("SELECT receiver_pubkey FROM send_sessions WHERE session_id = ?1")?;
-        let receiver_pubkey: Vec<u8> = stmt.query_row(params![session_id.0], |row| row.get(0))?;
-        Ok(HpkePublicKey::from_compressed_bytes(&receiver_pubkey).expect("Valid receiver pubkey"))
+            conn.prepare("SELECT session_id FROM send_sessions WHERE receiver_pubkey = ?1")?;
+        let session_id = stmt
+            .query_row(params![receiver_pk.to_compressed_bytes()], |row| row.get(0))
+            .optional()?;
+        Ok(session_id.map(SessionId))
     }
 }

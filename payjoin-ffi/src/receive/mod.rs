@@ -15,7 +15,7 @@ use crate::error::ForeignError;
 pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::OhttpKeys;
 use crate::receive::error::{ReceiverPersistedError, ReceiverReplayError};
-use crate::uri::error::IntoUrlError;
+use crate::uri::error::{FeeRateError, IntoUrlError};
 use crate::{ClientResponse, OutputSubstitution, Request};
 
 pub mod error;
@@ -272,6 +272,16 @@ impl ReceiverBuilder {
 
     pub fn with_expiry(&self, expiry: u64) -> Self {
         Self(self.0.clone().with_expiry(Duration::from_secs(expiry)))
+    }
+
+    /// Set the maximum effective fee rate the receiver is willing to pay for their own input/output contributions
+    pub fn with_max_fee_rate(
+        &self,
+        max_effective_fee_rate_sat_per_vb: u64,
+    ) -> Result<Self, FeeRateError> {
+        let fee_rate = bitcoin_ffi::FeeRate::from_sat_per_vb(max_effective_fee_rate_sat_per_vb)
+            .map_err(FeeRateError::from)?;
+        Ok(Self(self.0.clone().with_max_fee_rate(fee_rate.into())))
     }
 
     pub fn build(&self) -> InitialReceiveTransition {

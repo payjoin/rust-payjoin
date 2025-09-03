@@ -73,6 +73,7 @@ pub struct SessionContext {
     amount: Option<Amount>,
     receiver_key: HpkeKeyPair,
     reply_key: Option<HpkePublicKey>,
+    max_fee_rate: FeeRate,
 }
 
 impl SessionContext {
@@ -299,6 +300,7 @@ impl ReceiverBuilder {
             amount: None,
             mailbox: None,
             reply_key: None,
+            max_fee_rate: FeeRate::BROADCAST_MIN,
         };
         Ok(Self(session_context))
     }
@@ -313,6 +315,11 @@ impl ReceiverBuilder {
 
     pub fn with_mailbox(self, mailbox: impl IntoUrl) -> Result<Self, IntoUrlError> {
         Ok(Self(SessionContext { mailbox: Some(mailbox.into_url()?), ..self.0 }))
+    }
+
+    /// Set the maximum effective fee rate the receiver is willing to pay for their own input/output contributions
+    pub fn with_max_fee_rate(self, max_fee_rate: FeeRate) -> Self {
+        Self(SessionContext { max_fee_rate, ..self.0 })
     }
 
     pub fn build(self) -> NextStateTransition<SessionEvent, Receiver<Initialized>> {
@@ -908,6 +915,8 @@ impl Receiver<WantsFeeRange> {
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<ProvisionalProposal>, ProtocolError> {
+        let max_effective_fee_rate =
+            max_effective_fee_rate.or(Some(self.state.session_context.max_fee_rate));
         let psbt_context = match self
             .state
             .inner
@@ -1132,6 +1141,7 @@ pub mod test {
         receiver_key: HpkeKeyPair::gen_keypair(),
         reply_key: None,
         amount: None,
+        max_fee_rate: FeeRate::BROADCAST_MIN,
     });
 
     pub(crate) fn unchecked_proposal_v2_from_test_vector() -> UncheckedOriginalPayload {
@@ -1394,6 +1404,36 @@ pub mod test {
             assert_eq!(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY, default_expiry);
             assert_eq!(session_expiry, expected_expiry.duration_since(now).unwrap().as_secs());
         }
+    }
+
+    #[test]
+    fn default_max_fee_rate() {
+        let noop_persister = NoopSessionPersister::default();
+        let receiver = ReceiverBuilder::new(
+            SHARED_CONTEXT.address.clone(),
+            SHARED_CONTEXT.directory.clone(),
+            SHARED_CONTEXT.ohttp_keys.clone(),
+        )
+        .expect("constructor on test vector should not fail")
+        .build()
+        .save(&noop_persister)
+        .expect("Noop persister shouldn't fail");
+
+        assert_eq!(receiver.context.max_fee_rate, FeeRate::BROADCAST_MIN);
+
+        let non_default_max_fee_rate =
+            FeeRate::from_sat_per_vb(1000).expect("Fee rate should be valid");
+        let receiver = ReceiverBuilder::new(
+            SHARED_CONTEXT.address.clone(),
+            SHARED_CONTEXT.directory.clone(),
+            SHARED_CONTEXT.ohttp_keys.clone(),
+        )
+        .expect("constructor on test vector should not fail")
+        .with_max_fee_rate(non_default_max_fee_rate)
+        .build()
+        .save(&noop_persister)
+        .expect("Noop persister shouldn't fail");
+        assert_eq!(receiver.context.max_fee_rate, non_default_max_fee_rate);
     }
 
     #[test]

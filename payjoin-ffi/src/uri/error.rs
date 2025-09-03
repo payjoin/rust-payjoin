@@ -25,3 +25,7 @@ pub struct UrlParseError(#[from] payjoin::ParseError);
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
 pub struct IntoUrlError(#[from] payjoin::IntoUrlError);
+
+#[derive(Debug, thiserror::Error, uniffi::Object)]
+#[error(transparent)]
+pub struct FeeRateError(#[from] bitcoin_ffi::error::FeeRateError);

@@ -403,12 +403,11 @@ impl WellKnownError {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
-    use super::*;
-
     #[test]
+    #[cfg(feature = "v1")]
     fn test_parse_json() {
+        use super::*;
+
         let known_str_error = r#"{"errorCode":"version-unsupported", "message":"custom message here", "supported": [1, 2]}"#;
         match ResponseError::parse(known_str_error) {
             ResponseError::WellKnown(e) => {
@@ -426,7 +425,7 @@ mod tests {
             ResponseError::parse(unrecognized_error),
             ResponseError::Unrecognized { .. }
         ));
-        let invalid_json_error = json!({
+        let invalid_json_error = serde_json::json!({
             "err": "random",
             "message": "This version of payjoin is not supported."
         });

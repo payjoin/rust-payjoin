@@ -1,23 +1,22 @@
 mod integration {
-    use std::collections::HashMap;
-    use std::str::FromStr;
-
-    use bitcoin::policy::DEFAULT_MIN_RELAY_TX_FEE;
-    use bitcoin::psbt::{Input as PsbtInput, Psbt};
-    use bitcoin::transaction::InputWeightPrediction;
-    use bitcoin::{Amount, FeeRate, OutPoint, TxIn, TxOut, Weight};
-    use bitcoind::bitcoincore_rpc::json::{AddressType, WalletProcessPsbtResult};
-    use bitcoind::bitcoincore_rpc::{self, RpcApi};
-    use payjoin::receive::v1::build_v1_pj_uri;
-    use payjoin::receive::InputPair;
-    use payjoin::{ImplementationError, OutputSubstitution, PjUri, Request, Uri};
-    use payjoin_test_utils::{init_bitcoind_sender_receiver, init_tracing, BoxError};
-
+    #[cfg(feature = "v1")]
     const EXAMPLE_URL: &str = "https://example.com";
     #[cfg(feature = "v1")]
     mod v1 {
+        use std::collections::HashMap;
+        use std::str::FromStr;
+
+        use bitcoin::policy::DEFAULT_MIN_RELAY_TX_FEE;
+        use bitcoin::psbt::{Input as PsbtInput, Psbt};
+        use bitcoin::transaction::InputWeightPrediction;
+        use bitcoin::{Amount, FeeRate, OutPoint, TxIn, TxOut, Weight};
+        use bitcoind::bitcoincore_rpc::json::{AddressType, WalletProcessPsbtResult};
+        use bitcoind::bitcoincore_rpc::{self, RpcApi};
+        use payjoin::receive::v1::build_v1_pj_uri;
+        use payjoin::receive::InputPair;
         use payjoin::send::v1::SenderBuilder;
-        use payjoin::UriExt;
+        use payjoin::{ImplementationError, OutputSubstitution, PjUri, Request, Uri, UriExt};
+        use payjoin_test_utils::{init_bitcoind_sender_receiver, init_tracing, BoxError};
         use tracing::debug;
 
         use super::*;
@@ -160,26 +159,256 @@ mod integration {
             assert!(handle_v1_pj_request(req, headers, &receiver, None, None, None).is_ok());
             Ok(())
         }
+
+        pub(super) fn build_original_psbt(
+            sender: &bitcoincore_rpc::Client,
+            pj_uri: &PjUri,
+        ) -> Result<Psbt, BoxError> {
+            let mut outputs = HashMap::with_capacity(1);
+            outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap_or(Amount::ONE_BTC));
+            let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
+                lock_unspent: Some(true),
+                // The minimum relay feerate ensures that tests fail if the receiver would add inputs/outputs
+                // that cannot be covered by the sender's additional fee contributions.
+                fee_rate: Some(Amount::from_sat(DEFAULT_MIN_RELAY_TX_FEE.into())),
+                ..Default::default()
+            };
+            let psbt = sender
+                .wallet_create_funded_psbt(
+                    &[], // inputs
+                    &outputs,
+                    None, // locktime
+                    Some(options),
+                    Some(true), // check that the sender properly clears keypaths
+                )?
+                .psbt;
+            let psbt = sender.wallet_process_psbt(&psbt, None, None, None)?.psbt;
+            Ok(Psbt::from_str(&psbt)?)
+        }
+
+        // Receiver receive and process original_psbt from a sender
+        // In production it it will come in as an HTTP request (over ssl or onion)
+        pub(super) fn handle_v1_pj_request(
+            req: Request,
+            headers: impl payjoin::receive::v1::Headers,
+            receiver: &bitcoincore_rpc::Client,
+            custom_outputs: Option<Vec<TxOut>>,
+            drain_script: Option<&bitcoin::Script>,
+            custom_inputs: Option<Vec<InputPair>>,
+        ) -> Result<String, BoxError> {
+            // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
+            let proposal = payjoin::receive::v1::UncheckedOriginalPayload::from_request(
+                req.body.as_slice(),
+                req.url.query().unwrap_or(""),
+                headers,
+            )?;
+            let proposal =
+                handle_proposal(proposal, receiver, custom_outputs, drain_script, custom_inputs)?;
+            let psbt = proposal.psbt();
+            tracing::debug!("Receiver's Payjoin proposal PSBT: {psbt:#?}");
+            Ok(psbt.to_string())
+        }
+
+        pub(super) fn handle_proposal(
+            proposal: payjoin::receive::v1::UncheckedOriginalPayload,
+            receiver: &bitcoincore_rpc::Client,
+            custom_outputs: Option<Vec<TxOut>>,
+            drain_script: Option<&bitcoin::Script>,
+            custom_inputs: Option<Vec<InputPair>>,
+        ) -> Result<payjoin::receive::v1::PayjoinProposal, BoxError> {
+            // Receive Check 1: Can Broadcast
+            let proposal = proposal.check_broadcast_suitability(None, |tx| {
+                Ok(receiver
+                    .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
+                    .map_err(ImplementationError::new)?
+                    .first()
+                    .ok_or(ImplementationError::from("testmempoolaccept should return a result"))?
+                    .allowed)
+            })?;
+            // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
+            let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
+
+            // Receive Check 2: receiver can't sign for proposal inputs
+            let proposal = proposal.check_inputs_not_owned(&mut |input| {
+                let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
+                    .map_err(ImplementationError::new)?;
+                receiver
+                    .get_address_info(&address)
+                    .map(|info| info.is_mine.unwrap_or(false))
+                    .map_err(ImplementationError::new)
+            })?;
+
+            // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
+            let payjoin = proposal
+                .check_no_inputs_seen_before(&mut |_| Ok(false))?
+                .identify_receiver_outputs(&mut |output_script| {
+                    let address =
+                        bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
+                            .map_err(ImplementationError::new)?;
+                    receiver
+                        .get_address_info(&address)
+                        .map(|info| info.is_mine.unwrap_or(false))
+                        .map_err(ImplementationError::new)
+                })?;
+
+            let payjoin = match custom_outputs {
+                Some(txos) => payjoin.replace_receiver_outputs(
+                    txos,
+                    drain_script.expect("drain_script should be provided with custom_outputs"),
+                )?,
+                None => payjoin.substitute_receiver_script(
+                    &receiver.get_new_address(None, None)?.assume_checked().script_pubkey(),
+                )?,
+            }
+            .commit_outputs();
+
+            let inputs = match custom_inputs {
+                Some(inputs) => inputs,
+                None => {
+                    let candidate_inputs = receiver
+                        .list_unspent(None, None, None, None, None)?
+                        .into_iter()
+                        .map(input_pair_from_list_unspent);
+                    let selected_input =
+                        payjoin.try_preserving_privacy(candidate_inputs).map_err(|e| {
+                            format!("Failed to make privacy preserving selection: {e:?}")
+                        })?;
+                    vec![selected_input]
+                }
+            };
+            let payjoin = payjoin
+                .contribute_inputs(inputs)
+                .map_err(|e| format!("Failed to contribute inputs: {e:?}"))?
+                .commit_inputs();
+            let payjoin = payjoin.apply_fee_range(
+                Some(FeeRate::BROADCAST_MIN),
+                Some(FeeRate::from_sat_per_vb_unchecked(2)),
+            )?;
+
+            let payjoin_proposal = payjoin.finalize_proposal(|psbt: &Psbt| {
+                receiver
+                    .wallet_process_psbt(
+                        &psbt.to_string(),
+                        None,
+                        None,
+                        Some(true), // check that the receiver properly clears keypaths
+                    )
+                    .map(|res: WalletProcessPsbtResult| {
+                        Psbt::from_str(&res.psbt).expect("psbt should be valid")
+                    })
+                    .map_err(ImplementationError::new)
+            })?;
+            Ok(payjoin_proposal)
+        }
+
+        pub(super) fn extract_pj_tx(
+            sender: &bitcoincore_rpc::Client,
+            psbt: Psbt,
+        ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
+            let payjoin_psbt =
+                sender.wallet_process_psbt(&psbt.to_string(), None, None, None)?.psbt;
+            let payjoin_psbt = sender
+                .finalize_psbt(&payjoin_psbt, Some(false))?
+                .psbt
+                .expect("should contain a PSBT");
+            let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
+            tracing::debug!("Sender's Payjoin PSBT: {payjoin_psbt:#?}");
+
+            Ok(payjoin_psbt.extract_tx()?)
+        }
+
+        /// Simplified input weight predictions for a fully-signed transaction
+        pub(super) fn predicted_tx_weight(tx: &bitcoin::Transaction) -> Weight {
+            let input_weight_predictions = tx.input.iter().map(|txin| {
+                // See https://bitcoin.stackexchange.com/a/107873
+                match (txin.script_sig.is_empty(), txin.witness.is_empty()) {
+                    // witness is empty: legacy input
+                    (false, true) => InputWeightPrediction::P2PKH_COMPRESSED_MAX,
+                    // script sig is empty: native segwit input
+                    (true, false) => match txin.witness.len() {
+                        // <signature>
+                        1 => InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH,
+                        // <signature> <public_key>
+                        2 => InputWeightPrediction::P2WPKH_MAX,
+                        _ => panic!("unsupported witness"),
+                    },
+                    // neither are empty: nested segwit (p2wpkh-in-p2sh) input
+                    (false, false) => InputWeightPrediction::from_slice(23, &[72, 33]),
+                    _ => panic!("one of script_sig or witness should be non-empty"),
+                }
+            });
+            bitcoin::transaction::predict_weight(input_weight_predictions, tx.script_pubkey_lens())
+        }
+
+        pub(super) fn input_pair_from_list_unspent(
+            utxo: bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry,
+        ) -> InputPair {
+            let psbtin = PsbtInput {
+                // NOTE: non_witness_utxo is not necessary because bitcoin-cli always supplies
+                // witness_utxo, even for non-witness inputs
+                witness_utxo: Some(TxOut {
+                    value: utxo.amount,
+                    script_pubkey: utxo.script_pub_key.clone(),
+                }),
+                redeem_script: utxo.redeem_script.clone(),
+                witness_script: utxo.witness_script.clone(),
+                ..Default::default()
+            };
+            let txin = TxIn {
+                previous_output: OutPoint { txid: utxo.txid, vout: utxo.vout },
+                ..Default::default()
+            };
+            InputPair::new(txin, psbtin, None).expect("Input pair should be valid")
+        }
+
+        pub(super) struct HeaderMock(HashMap<String, String>);
+
+        impl payjoin::receive::v1::Headers for HeaderMock {
+            fn get_header(&self, key: &str) -> Option<&str> { self.0.get(key).map(|e| e.as_str()) }
+        }
+
+        impl HeaderMock {
+            pub(super) fn new(body: &[u8], content_type: &str) -> HeaderMock {
+                let mut h = HashMap::new();
+                h.insert("content-type".to_string(), content_type.to_string());
+                h.insert("content-length".to_string(), body.len().to_string());
+                HeaderMock(h)
+            }
+        }
     }
 
     // not all needs v1
     #[cfg(all(feature = "io", feature = "v2", feature = "v1", feature = "_manual-tls"))]
     mod v2 {
+        use std::collections::HashMap;
+        use std::str::FromStr;
         use std::sync::Arc;
         use std::time::Duration;
 
-        use bitcoin::Address;
+        use bitcoin::policy::DEFAULT_MIN_RELAY_TX_FEE;
+        use bitcoin::{Address, Amount, FeeRate, Psbt};
+        use bitcoind::bitcoincore_rpc;
+        use bitcoind::bitcoincore_rpc::json::WalletProcessPsbtResult;
+        use bitcoind::bitcoincore_rpc::RpcApi;
         use http::StatusCode;
         use payjoin::persist::NoopSessionPersister;
+        use payjoin::receive::v1::build_v1_pj_uri;
         use payjoin::receive::v2::{
             replay_event_log as replay_receiver_event_log, PayjoinProposal, Receiver,
             ReceiverBuilder, UncheckedOriginalPayload,
         };
+        use payjoin::receive::InputPair;
         use payjoin::send::v2::SenderBuilder;
-        use payjoin::{OhttpKeys, PjUri, UriExt};
-        use payjoin_test_utils::{BoxSendSyncError, InMemoryTestPersister, TestServices};
+        use payjoin::{
+            ImplementationError, OhttpKeys, OutputSubstitution, PjUri, Request, Uri, UriExt,
+        };
+        use payjoin_test_utils::{
+            init_bitcoind_sender_receiver, init_tracing, BoxError, BoxSendSyncError,
+            InMemoryTestPersister, TestServices,
+        };
         use reqwest::{Client, Response};
 
+        use super::v1::*;
         use super::*;
 
         #[tokio::test]
@@ -855,9 +1084,17 @@ mod integration {
 
     #[cfg(feature = "v1")]
     mod batching {
-        use payjoin::send::v1::SenderBuilder;
-        use payjoin::UriExt;
+        use std::str::FromStr;
 
+        use bitcoin::{Amount, FeeRate, TxOut};
+        use bitcoind::bitcoincore_rpc::json::AddressType;
+        use bitcoind::bitcoincore_rpc::RpcApi;
+        use payjoin::receive::v1::build_v1_pj_uri;
+        use payjoin::send::v1::SenderBuilder;
+        use payjoin::{OutputSubstitution, Uri, UriExt};
+        use payjoin_test_utils::{init_bitcoind_sender_receiver, init_tracing, BoxError};
+
+        use super::v1::*;
         use super::*;
 
         // In this test the receiver consolidates a bunch of UTXOs into the destination output
@@ -1032,218 +1269,6 @@ mod integration {
             // created by their wallet
             assert_eq!(sender.get_balances()?.mine.trusted, Amount::from_btc(49.0)? - sender_fee);
             Ok(())
-        }
-    }
-
-    fn build_original_psbt(
-        sender: &bitcoincore_rpc::Client,
-        pj_uri: &PjUri,
-    ) -> Result<Psbt, BoxError> {
-        let mut outputs = HashMap::with_capacity(1);
-        outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap_or(Amount::ONE_BTC));
-        let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
-            lock_unspent: Some(true),
-            // The minimum relay feerate ensures that tests fail if the receiver would add inputs/outputs
-            // that cannot be covered by the sender's additional fee contributions.
-            fee_rate: Some(Amount::from_sat(DEFAULT_MIN_RELAY_TX_FEE.into())),
-            ..Default::default()
-        };
-        let psbt = sender
-            .wallet_create_funded_psbt(
-                &[], // inputs
-                &outputs,
-                None, // locktime
-                Some(options),
-                Some(true), // check that the sender properly clears keypaths
-            )?
-            .psbt;
-        let psbt = sender.wallet_process_psbt(&psbt, None, None, None)?.psbt;
-        Ok(Psbt::from_str(&psbt)?)
-    }
-
-    // Receiver receive and process original_psbt from a sender
-    // In production it it will come in as an HTTP request (over ssl or onion)
-    fn handle_v1_pj_request(
-        req: Request,
-        headers: impl payjoin::receive::v1::Headers,
-        receiver: &bitcoincore_rpc::Client,
-        custom_outputs: Option<Vec<TxOut>>,
-        drain_script: Option<&bitcoin::Script>,
-        custom_inputs: Option<Vec<InputPair>>,
-    ) -> Result<String, BoxError> {
-        // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
-        let proposal = payjoin::receive::v1::UncheckedOriginalPayload::from_request(
-            req.body.as_slice(),
-            req.url.query().unwrap_or(""),
-            headers,
-        )?;
-        let proposal =
-            handle_proposal(proposal, receiver, custom_outputs, drain_script, custom_inputs)?;
-        let psbt = proposal.psbt();
-        tracing::debug!("Receiver's Payjoin proposal PSBT: {psbt:#?}");
-        Ok(psbt.to_string())
-    }
-
-    fn handle_proposal(
-        proposal: payjoin::receive::v1::UncheckedOriginalPayload,
-        receiver: &bitcoincore_rpc::Client,
-        custom_outputs: Option<Vec<TxOut>>,
-        drain_script: Option<&bitcoin::Script>,
-        custom_inputs: Option<Vec<InputPair>>,
-    ) -> Result<payjoin::receive::v1::PayjoinProposal, BoxError> {
-        // Receive Check 1: Can Broadcast
-        let proposal = proposal.check_broadcast_suitability(None, |tx| {
-            Ok(receiver
-                .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
-                .map_err(ImplementationError::new)?
-                .first()
-                .ok_or(ImplementationError::from("testmempoolaccept should return a result"))?
-                .allowed)
-        })?;
-        // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
-        let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
-
-        // Receive Check 2: receiver can't sign for proposal inputs
-        let proposal = proposal.check_inputs_not_owned(&mut |input| {
-            let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
-                .map_err(ImplementationError::new)?;
-            receiver
-                .get_address_info(&address)
-                .map(|info| info.is_mine.unwrap_or(false))
-                .map_err(ImplementationError::new)
-        })?;
-
-        // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
-        let payjoin = proposal
-            .check_no_inputs_seen_before(&mut |_| Ok(false))?
-            .identify_receiver_outputs(&mut |output_script| {
-                let address =
-                    bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
-                        .map_err(ImplementationError::new)?;
-                receiver
-                    .get_address_info(&address)
-                    .map(|info| info.is_mine.unwrap_or(false))
-                    .map_err(ImplementationError::new)
-            })?;
-
-        let payjoin = match custom_outputs {
-            Some(txos) => payjoin.replace_receiver_outputs(
-                txos,
-                drain_script.expect("drain_script should be provided with custom_outputs"),
-            )?,
-            None => payjoin.substitute_receiver_script(
-                &receiver.get_new_address(None, None)?.assume_checked().script_pubkey(),
-            )?,
-        }
-        .commit_outputs();
-
-        let inputs = match custom_inputs {
-            Some(inputs) => inputs,
-            None => {
-                let candidate_inputs = receiver
-                    .list_unspent(None, None, None, None, None)?
-                    .into_iter()
-                    .map(input_pair_from_list_unspent);
-                let selected_input = payjoin
-                    .try_preserving_privacy(candidate_inputs)
-                    .map_err(|e| format!("Failed to make privacy preserving selection: {e:?}"))?;
-                vec![selected_input]
-            }
-        };
-        let payjoin = payjoin
-            .contribute_inputs(inputs)
-            .map_err(|e| format!("Failed to contribute inputs: {e:?}"))?
-            .commit_inputs();
-        let payjoin = payjoin.apply_fee_range(
-            Some(FeeRate::BROADCAST_MIN),
-            Some(FeeRate::from_sat_per_vb_unchecked(2)),
-        )?;
-
-        let payjoin_proposal = payjoin.finalize_proposal(|psbt: &Psbt| {
-            receiver
-                .wallet_process_psbt(
-                    &psbt.to_string(),
-                    None,
-                    None,
-                    Some(true), // check that the receiver properly clears keypaths
-                )
-                .map(|res: WalletProcessPsbtResult| {
-                    Psbt::from_str(&res.psbt).expect("psbt should be valid")
-                })
-                .map_err(ImplementationError::new)
-        })?;
-        Ok(payjoin_proposal)
-    }
-
-    fn extract_pj_tx(
-        sender: &bitcoincore_rpc::Client,
-        psbt: Psbt,
-    ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
-        let payjoin_psbt = sender.wallet_process_psbt(&psbt.to_string(), None, None, None)?.psbt;
-        let payjoin_psbt =
-            sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.expect("should contain a PSBT");
-        let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
-        tracing::debug!("Sender's Payjoin PSBT: {payjoin_psbt:#?}");
-
-        Ok(payjoin_psbt.extract_tx()?)
-    }
-
-    /// Simplified input weight predictions for a fully-signed transaction
-    fn predicted_tx_weight(tx: &bitcoin::Transaction) -> Weight {
-        let input_weight_predictions = tx.input.iter().map(|txin| {
-            // See https://bitcoin.stackexchange.com/a/107873
-            match (txin.script_sig.is_empty(), txin.witness.is_empty()) {
-                // witness is empty: legacy input
-                (false, true) => InputWeightPrediction::P2PKH_COMPRESSED_MAX,
-                // script sig is empty: native segwit input
-                (true, false) => match txin.witness.len() {
-                    // <signature>
-                    1 => InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH,
-                    // <signature> <public_key>
-                    2 => InputWeightPrediction::P2WPKH_MAX,
-                    _ => panic!("unsupported witness"),
-                },
-                // neither are empty: nested segwit (p2wpkh-in-p2sh) input
-                (false, false) => InputWeightPrediction::from_slice(23, &[72, 33]),
-                _ => panic!("one of script_sig or witness should be non-empty"),
-            }
-        });
-        bitcoin::transaction::predict_weight(input_weight_predictions, tx.script_pubkey_lens())
-    }
-
-    fn input_pair_from_list_unspent(
-        utxo: bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry,
-    ) -> InputPair {
-        let psbtin = PsbtInput {
-            // NOTE: non_witness_utxo is not necessary because bitcoin-cli always supplies
-            // witness_utxo, even for non-witness inputs
-            witness_utxo: Some(TxOut {
-                value: utxo.amount,
-                script_pubkey: utxo.script_pub_key.clone(),
-            }),
-            redeem_script: utxo.redeem_script.clone(),
-            witness_script: utxo.witness_script.clone(),
-            ..Default::default()
-        };
-        let txin = TxIn {
-            previous_output: OutPoint { txid: utxo.txid, vout: utxo.vout },
-            ..Default::default()
-        };
-        InputPair::new(txin, psbtin, None).expect("Input pair should be valid")
-    }
-
-    struct HeaderMock(HashMap<String, String>);
-
-    impl payjoin::receive::v1::Headers for HeaderMock {
-        fn get_header(&self, key: &str) -> Option<&str> { self.0.get(key).map(|e| e.as_str()) }
-    }
-
-    impl HeaderMock {
-        fn new(body: &[u8], content_type: &str) -> HeaderMock {
-            let mut h = HashMap::new();
-            h.insert("content-type".to_string(), content_type.to_string());
-            h.insert("content-length".to_string(), body.len().to_string());
-            HeaderMock(h)
         }
     }
 }

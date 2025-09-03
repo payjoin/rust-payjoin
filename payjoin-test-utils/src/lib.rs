@@ -18,9 +18,7 @@ use rcgen::Certificate;
 use reqwest::{Client, ClientBuilder};
 use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
-use testcontainers_modules::redis::{Redis, REDIS_PORT};
-use testcontainers_modules::testcontainers::runners::AsyncRunner;
-use testcontainers_modules::testcontainers::ContainerAsync;
+use tempfile::tempdir;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tracing::Level;
@@ -50,8 +48,6 @@ pub fn init_tracing() {
 pub struct TestServices {
     cert: Certificate,
     /// redis is an implicit dependency of the directory service
-    #[allow(dead_code)]
-    redis: (u16, ContainerAsync<Redis>),
     directory: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
     ohttp_relay: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
     http_agent: Arc<Client>,
@@ -68,9 +64,8 @@ impl TestServices {
         let mut root_store = RootCertStore::empty();
         root_store.add(CertificateDer::from(cert.cert.der().to_vec())).unwrap();
 
-        let redis = init_redis().await;
-        let db_host = format!("127.0.0.1:{}", redis.0);
-        let directory = init_directory(db_host, cert_key).await?;
+        let directory = init_directory(cert_key).await?;
+
         let gateway_origin =
             ohttp_relay::GatewayUri::from_str(&format!("https://localhost:{}", directory.0))?;
         let ohttp_relay = ohttp_relay::listen_tcp_on_free_port(gateway_origin, root_store).await?;
@@ -78,7 +73,6 @@ impl TestServices {
 
         Ok(Self {
             cert: cert.cert,
-            redis,
             directory: (directory.0, Some(directory.1)),
             ohttp_relay: (ohttp_relay.0, Some(ohttp_relay.1)),
             http_agent,
@@ -121,17 +115,7 @@ impl TestServices {
     }
 }
 
-pub async fn init_redis() -> (u16, ContainerAsync<Redis>) {
-    let redis_instance = Redis::default().start().await.expect("redis container should start");
-    let host_port = redis_instance
-        .get_host_port_ipv4(REDIS_PORT)
-        .await
-        .expect("redis instance should have port");
-    (host_port, redis_instance)
-}
-
 pub async fn init_directory(
-    db_host: String,
     local_cert_key: (Vec<u8>, Vec<u8>),
 ) -> std::result::Result<
     (u16, tokio::task::JoinHandle<std::result::Result<(), BoxSendSyncError>>),
@@ -140,15 +124,19 @@ pub async fn init_directory(
     let timeout = Duration::from_secs(2);
     let ohttp_server = payjoin_directory::gen_ohttp_server_config()?;
 
-    println!("Database running on {db_host}");
-    let db = payjoin_directory::DbPool::new(timeout, db_host).await?;
     let metrics = payjoin_directory::metrics::Metrics::new();
+    let tempdir = tempdir()?;
+    let db = payjoin_directory::FilesDb::init(timeout, tempdir.path().to_path_buf()).await?;
+
     let service = payjoin_directory::Service::new(db, ohttp_server.into(), metrics);
 
     let listener = bind_free_port().await?;
     let port = listener.local_addr()?.port();
 
-    let handle = tokio::spawn(service.serve_tls(listener, local_cert_key));
+    let handle = tokio::spawn(async move {
+        let _tempdir = tempdir; // keep the tempdir until the directory shuts down
+        service.serve_tls(listener, local_cert_key).await
+    });
 
     Ok((port, handle))
 }

@@ -472,11 +472,6 @@ impl Receiver<Initialized> {
         event: OriginalPayload,
         reply_key: Option<HpkePublicKey>,
     ) -> Result<ReceiveSession, InternalReplayError> {
-        if self.state.context.expiry < SystemTime::now() {
-            // Session is expired, close the session
-            return Err(InternalReplayError::SessionExpired(self.state.context.expiry));
-        }
-
         let new_state = Receiver {
             state: UncheckedOriginalPayload {
                 original: event,

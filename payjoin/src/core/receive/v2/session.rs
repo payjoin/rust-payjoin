@@ -1,5 +1,3 @@
-use std::time::SystemTime;
-
 use serde::{Deserialize, Serialize};
 
 use super::{ReceiveSession, SessionContext};
@@ -17,7 +15,6 @@ impl std::fmt::Display for ReplayError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use InternalReplayError::*;
         match &self.0 {
-            SessionExpired(expiry) => write!(f, "Session expired at {expiry:?}"),
             InvalidStateAndEvent(state, event) => write!(
                 f,
                 "Invalid combination of state ({state:?}) and event ({event:?}) during replay",
@@ -34,8 +31,6 @@ impl From<InternalReplayError> for ReplayError {
 
 #[derive(Debug)]
 pub(crate) enum InternalReplayError {
-    /// Session expired
-    SessionExpired(SystemTime),
     /// Invalid combination of state and event
     InvalidStateAndEvent(Box<ReceiveSession>, Box<SessionEvent>),
     /// Application storage error
@@ -346,40 +341,6 @@ mod tests {
             }),
         };
         run_session_history_test(test)
-    }
-
-    #[test]
-    fn test_replaying_unchecked_proposal_expiry() {
-        let now = SystemTime::now();
-        let session_context = SessionContext { expiry: now, ..SHARED_CONTEXT.clone() };
-        let original = original_from_test_vector();
-        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
-
-        let test = SessionHistoryTest {
-            events: vec![
-                SessionEvent::Created(session_context.clone()),
-                SessionEvent::UncheckedOriginalPayload((original.clone(), reply_key.clone())),
-            ],
-            expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: None,
-                fallback_tx: None,
-            },
-            expected_receiver_state: ReceiveSession::UncheckedOriginalPayload(Receiver {
-                state: UncheckedOriginalPayload {
-                    original,
-                    session_context: SessionContext { reply_key, ..session_context },
-                },
-            }),
-        };
-        let session_history = run_session_history_test(test);
-
-        match session_history {
-            Err(error) => assert_eq!(
-                error.to_string(),
-                ReplayError::from(InternalReplayError::SessionExpired(now)).to_string()
-            ),
-            Ok(_) => panic!("Expected session expiry error, got success"),
-        }
     }
 
     #[test]

@@ -139,29 +139,14 @@ impl From<payjoin::receive::v2::SessionHistory> for SessionHistory {
     fn from(value: payjoin::receive::v2::SessionHistory) -> Self { Self(value) }
 }
 
-#[derive(uniffi::Object)]
-pub struct TerminalErr {
-    error: String,
-    reply: Option<JsonReply>,
-}
-
-#[uniffi::export]
-impl TerminalErr {
-    pub fn error(&self) -> String { self.error.clone() }
-
-    pub fn reply(&self) -> Option<Arc<JsonReply>> { self.reply.clone().map(Arc::new) }
-}
-
 #[uniffi::export]
 impl SessionHistory {
     /// Receiver session Payjoin URI
     pub fn pj_uri(&self) -> Arc<crate::PjUri> { Arc::new(self.0.pj_uri().into()) }
 
     /// Terminal error from the session if present
-    pub fn terminal_error(&self) -> Option<Arc<TerminalErr>> {
-        self.0.terminal_error().map(|(error, reply)| {
-            Arc::new(TerminalErr { error, reply: reply.map(|reply| reply.into()) })
-        })
+    pub fn terminal_error(&self) -> Option<Arc<JsonReply>> {
+        self.0.terminal_error().map(|reply| Arc::new(reply.into()))
     }
 
     /// Fallback transaction from the session if present
@@ -943,7 +928,7 @@ pub struct PayjoinProposalTransition(
                 payjoin::persist::MaybeSuccessTransition<
                     payjoin::receive::v2::SessionEvent,
                     (),
-                    payjoin::receive::Error,
+                    payjoin::receive::ProtocolError,
                 >,
             >,
         >,

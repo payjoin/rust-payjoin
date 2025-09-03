@@ -374,7 +374,9 @@ impl AppTrait for App {
                         role: Role::Receiver,
                         status: receiver_state,
                         completed_at: Some(completed_at),
-                        error_message: session_history.terminal_error().map(|e| e.0),
+                        error_message: session_history
+                            .terminal_error()
+                            .map(|e| e.to_json().to_string()),
                     };
                     recv_rows.push(row);
                 }
@@ -707,7 +709,7 @@ impl App {
         session_history: &SessionHistory,
     ) -> Result<()> {
         let e = match session_history.terminal_error() {
-            Some((_, Some(e))) => e,
+            Some(e) => e,
             _ => return Ok(()),
         };
         let (err_req, err_ctx) = session_history

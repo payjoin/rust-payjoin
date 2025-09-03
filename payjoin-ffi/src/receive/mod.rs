@@ -85,7 +85,7 @@ pub enum ReceiveSession {
     WantsFeeRange { inner: Arc<WantsFeeRange> },
     ProvisionalProposal { inner: Arc<ProvisionalProposal> },
     PayjoinProposal { inner: Arc<PayjoinProposal> },
-    TerminalFailure,
+    TerminalFailure { inner: Arc<JsonReply> },
 }
 
 impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
@@ -112,7 +112,8 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
                 Self::ProvisionalProposal { inner: Arc::new(inner.into()) },
             ReceiveSession::PayjoinProposal(inner) =>
                 Self::PayjoinProposal { inner: Arc::new(inner.into()) },
-            ReceiveSession::TerminalFailure => Self::TerminalFailure,
+            ReceiveSession::TerminalFailure(inner) =>
+                Self::TerminalFailure { inner: Arc::new(inner.into()) },
         }
     }
 }
@@ -146,19 +147,6 @@ impl From<payjoin::receive::v2::SessionHistory> for SessionHistory {
     fn from(value: payjoin::receive::v2::SessionHistory) -> Self { Self(value) }
 }
 
-#[derive(uniffi::Object)]
-pub struct TerminalErr {
-    error: String,
-    reply: Option<JsonReply>,
-}
-
-#[uniffi::export]
-impl TerminalErr {
-    pub fn error(&self) -> String { self.error.clone() }
-
-    pub fn reply(&self) -> Option<Arc<JsonReply>> { self.reply.clone().map(Arc::new) }
-}
-
 #[uniffi::export]
 impl SessionHistory {
     /// Receiver session Payjoin URI
@@ -172,10 +160,8 @@ impl SessionHistory {
     }
 
     /// Terminal error from the session if present
-    pub fn terminal_error(&self) -> Option<Arc<TerminalErr>> {
-        self.0.terminal_error().map(|(error, reply)| {
-            Arc::new(TerminalErr { error, reply: reply.map(|reply| reply.into()) })
-        })
+    pub fn terminal_error(&self) -> Option<Arc<JsonReply>> {
+        self.0.terminal_error().map(|reply| Arc::new(reply.into()))
     }
 
     /// Fallback transaction from the session if present

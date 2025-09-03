@@ -127,9 +127,9 @@ impl SessionHistory {
     }
 
     /// Terminal error from the session if present
-    pub fn terminal_error(&self) -> Option<(String, Option<JsonReply>)> {
+    pub fn terminal_error(&self) -> Option<JsonReply> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::SessionInvalid(err_str, reply) => Some((err_str.clone(), reply.clone())),
+            SessionEvent::TerminalFailure(reply) => Some(reply.clone()),
             _ => None,
         })
     }
@@ -153,7 +153,7 @@ impl SessionHistory {
             None => return Ok(None),
         };
         let json_reply = match self.terminal_error() {
-            Some((_, Some(json_reply))) => json_reply,
+            Some(json_reply) => json_reply,
             _ => return Ok(None),
         };
         let (req, ctx) = extract_err_req(&json_reply, ohttp_relay, &session_context)?;
@@ -193,11 +193,7 @@ pub enum SessionEvent {
     WantsFeeRange(common::WantsFeeRange),
     ProvisionalProposal(PsbtContext),
     PayjoinProposal(bitcoin::Psbt),
-    /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
-    /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
-    /// Reason being in some cases we still want to preserve the error b/c we can action on it. For now this is a terminal state and there is nothing to replay and is saved to be displayed.
-    /// b/c its a terminal state and there is nothing to replay. So serialization will be lossy and that is fine.
-    SessionInvalid(String, Option<JsonReply>),
+    TerminalFailure(JsonReply),
 }
 
 #[cfg(test)]
@@ -617,7 +613,7 @@ mod tests {
         let session_history = SessionHistory {
             events: vec![
                 SessionEvent::MaybeInputsOwned(),
-                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 
@@ -628,7 +624,7 @@ mod tests {
             events: vec![
                 SessionEvent::Created(SHARED_CONTEXT.clone()),
                 SessionEvent::MaybeInputsOwned(),
-                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 
@@ -650,7 +646,7 @@ mod tests {
                     proposal.clone(),
                     Some(crate::HpkeKeyPair::gen_keypair().1),
                 )),
-                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 
@@ -664,7 +660,7 @@ mod tests {
                     proposal.clone(),
                     Some(crate::HpkeKeyPair::gen_keypair().1),
                 )),
-                SessionEvent::SessionInvalid(mock_err.0, Some(mock_err.1)),
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 

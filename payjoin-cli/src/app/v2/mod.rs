@@ -352,8 +352,8 @@ impl App {
                     self.finalize_proposal(proposal, persister).await,
                 ReceiveSession::PayjoinProposal(proposal) =>
                     self.send_payjoin_proposal(proposal, persister).await,
-                ReceiveSession::TerminalFailure =>
-                    return Err(anyhow!("Terminal receiver session")),
+                ReceiveSession::TerminalFailure(e) =>
+                    return Err(anyhow!("Terminal receiver session {e:?}")),
             }
         };
 
@@ -543,7 +543,7 @@ impl App {
         session_history: &SessionHistory,
     ) -> Result<()> {
         let e = match session_history.terminal_error() {
-            Some((_, Some(e))) => e,
+            Some(e) => e,
             _ => return Ok(()),
         };
         let (err_req, err_ctx) = session_history

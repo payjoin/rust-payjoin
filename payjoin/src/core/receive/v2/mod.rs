@@ -184,7 +184,7 @@ impl ReceiveSession {
                 SessionEvent::PayjoinProposal(payjoin_proposal),
             ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
 
-            (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiveSession::TerminalFailure),
+            (_, SessionEvent::TerminalFailure(_)) => Ok(ReceiveSession::TerminalFailure),
 
             (current_state, SessionEvent::Closed(_)) => Ok(current_state),
 
@@ -372,7 +372,7 @@ impl Receiver<Initialized> {
             Ok(proposal) => proposal,
             Err(e) =>
                 return MaybeFatalTransitionWithNoResults::fatal(
-                    SessionEvent::SessionInvalid(e.to_string(), None),
+                    SessionEvent::TerminalFailure((&e).into()),
                     e,
                 ),
         };
@@ -540,10 +540,7 @@ impl Receiver<UncheckedOriginalPayload> {
             ),
             Err(Error::Implementation(e)) =>
                 MaybeFatalTransition::transient(Error::Implementation(e)),
-            Err(e) => MaybeFatalTransition::fatal(
-                SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
-                e,
-            ),
+            Err(e) => MaybeFatalTransition::fatal(SessionEvent::TerminalFailure((&e).into()), e),
         }
     }
 
@@ -609,7 +606,7 @@ impl Receiver<MaybeInputsOwned> {
                 }
                 _ => {
                     return MaybeFatalTransition::fatal(
-                        SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                        SessionEvent::TerminalFailure((&e).into()),
                         e,
                     );
                 }
@@ -662,7 +659,7 @@ impl Receiver<MaybeInputsSeen> {
                 }
                 _ => {
                     return MaybeFatalTransition::fatal(
-                        SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                        SessionEvent::TerminalFailure((&e).into()),
                         e,
                     );
                 }
@@ -720,7 +717,7 @@ impl Receiver<OutputsUnknown> {
                 }
                 _ => {
                     return MaybeFatalTransition::fatal(
-                        SessionEvent::SessionInvalid(e.to_string(), Some(JsonReply::from(&e))),
+                        SessionEvent::TerminalFailure((&e).into()),
                         e,
                     );
                 }
@@ -901,10 +898,7 @@ impl Receiver<WantsFeeRange> {
                 // FIXME: follow up by returning a terminal error rather than replyable error
                 let payload_error = super::PayloadError::from(e);
                 return MaybeFatalTransition::fatal(
-                    SessionEvent::SessionInvalid(
-                        payload_error.to_string(),
-                        Some(JsonReply::from(&payload_error)),
-                    ),
+                    SessionEvent::TerminalFailure(JsonReply::from(&payload_error)),
                     ProtocolError::OriginalPayload(payload_error),
                 );
             }
@@ -1129,7 +1123,7 @@ pub mod test {
         }
     }
 
-    pub(crate) fn mock_err() -> (String, JsonReply) {
+    pub(crate) fn mock_err() -> JsonReply {
         let noop_persister = NoopSessionPersister::default();
         let receiver = Receiver {
             state: unchecked_proposal_v2_from_test_vector(),
@@ -1144,8 +1138,7 @@ pub mod test {
 
         let error = server_error().expect_err("Server error should be populated with mock error");
         let res = error.api_error().expect("check_broadcast error should propagate to api error");
-        let actual_json = JsonReply::from(&res);
-        (res.to_string(), actual_json)
+        JsonReply::from(&res)
     }
 
     #[test]
@@ -1309,10 +1302,10 @@ pub mod test {
             "message": "Receiver error"
         });
 
-        assert_eq!(mock_err.1.to_json(), expected_json);
+        assert_eq!(mock_err.to_json(), expected_json);
 
         let (_req, _ctx) =
-            extract_err_req(&mock_err.1, EXAMPLE_URL.as_str(), &receiver.session_context)?;
+            extract_err_req(&mock_err, EXAMPLE_URL.as_str(), &receiver.session_context)?;
 
         let internal_error: Error = InternalPayloadError::MissingPayment.into();
         let (_req, _ctx) = extract_err_req(

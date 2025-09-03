@@ -707,7 +707,7 @@ impl App {
         session_history: &SessionHistory,
     ) -> Result<()> {
         let e = match session_history.terminal_error() {
-            Some((_, Some(e))) => e,
+            Some(e) => e,
             _ => return Ok(()),
         };
         let (err_req, err_ctx) = session_history

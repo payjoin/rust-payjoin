@@ -99,7 +99,7 @@ impl SessionHistory {
 
     fn get_unchecked_proposal(&self) -> Option<OriginalPayload> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::UncheckedOriginalPayload(proposal) => Some(proposal.0.clone()),
+            SessionEvent::UncheckedOriginalPayload { original, .. } => Some(original.clone()),
             _ => None,
         })
     }
@@ -161,7 +161,9 @@ impl SessionHistory {
     }
 
     fn received_sender_proposal(&self) -> bool {
-        self.events.iter().any(|event| matches!(event, SessionEvent::UncheckedOriginalPayload(_)))
+        self.events
+            .iter()
+            .any(|event| matches!(event, SessionEvent::UncheckedOriginalPayload { .. }))
     }
 
     fn session_context(&self) -> Option<SessionContext> {
@@ -171,7 +173,7 @@ impl SessionHistory {
         })?;
 
         initial_session_context.reply_key = self.events.iter().find_map(|event| match event {
-            SessionEvent::UncheckedOriginalPayload((_proposal, reply_key)) => reply_key.clone(),
+            SessionEvent::UncheckedOriginalPayload { reply_key, .. } => reply_key.clone(),
             _ => None,
         });
 
@@ -184,7 +186,7 @@ impl SessionHistory {
 /// Each event can be used to transition the receiver state machine to a new state
 pub enum SessionEvent {
     Created(SessionContext),
-    UncheckedOriginalPayload((OriginalPayload, Option<crate::HpkePublicKey>)),
+    UncheckedOriginalPayload { original: OriginalPayload, reply_key: Option<crate::HpkePublicKey> },
     MaybeInputsOwned(),
     MaybeInputsSeen(),
     OutputsUnknown(),
@@ -262,11 +264,11 @@ mod tests {
 
         let test_cases = vec![
             SessionEvent::Created(SHARED_CONTEXT.clone()),
-            SessionEvent::UncheckedOriginalPayload((original.clone(), None)),
-            SessionEvent::UncheckedOriginalPayload((
+            SessionEvent::UncheckedOriginalPayload { original: original.clone(), reply_key: None },
+            SessionEvent::UncheckedOriginalPayload {
                 original,
-                Some(crate::HpkeKeyPair::gen_keypair().1),
-            )),
+                reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
+            },
             SessionEvent::MaybeInputsOwned(),
             SessionEvent::MaybeInputsSeen(),
             SessionEvent::OutputsUnknown(),
@@ -337,7 +339,10 @@ mod tests {
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
-                SessionEvent::UncheckedOriginalPayload((original.clone(), reply_key.clone())),
+                SessionEvent::UncheckedOriginalPayload {
+                    original: original.clone(),
+                    reply_key: reply_key.clone(),
+                },
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
@@ -363,7 +368,10 @@ mod tests {
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
-                SessionEvent::UncheckedOriginalPayload((original.clone(), reply_key.clone())),
+                SessionEvent::UncheckedOriginalPayload {
+                    original: original.clone(),
+                    reply_key: reply_key.clone(),
+                },
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
@@ -396,7 +404,10 @@ mod tests {
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
-                SessionEvent::UncheckedOriginalPayload((original.clone(), reply_key.clone())),
+                SessionEvent::UncheckedOriginalPayload {
+                    original: original.clone(),
+                    reply_key: reply_key.clone(),
+                },
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
@@ -426,7 +437,10 @@ mod tests {
         let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedOriginalPayload((original.clone(), reply_key.clone())));
+        events.push(SessionEvent::UncheckedOriginalPayload {
+            original: original.clone(),
+            reply_key: reply_key.clone(),
+        });
         events.push(SessionEvent::MaybeInputsOwned());
 
         let test = SessionHistoryTest {
@@ -484,7 +498,10 @@ mod tests {
         let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedOriginalPayload((original.clone(), reply_key.clone())));
+        events.push(SessionEvent::UncheckedOriginalPayload {
+            original: original.clone(),
+            reply_key: reply_key.clone(),
+        });
         events.push(SessionEvent::MaybeInputsOwned());
         events.push(SessionEvent::MaybeInputsSeen());
         events.push(SessionEvent::OutputsUnknown());
@@ -557,7 +574,10 @@ mod tests {
         let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedOriginalPayload((original.clone(), reply_key.clone())));
+        events.push(SessionEvent::UncheckedOriginalPayload {
+            original: original.clone(),
+            reply_key: reply_key.clone(),
+        });
         events.push(SessionEvent::MaybeInputsOwned());
         events.push(SessionEvent::MaybeInputsSeen());
         events.push(SessionEvent::OutputsUnknown());
@@ -642,10 +662,10 @@ mod tests {
         let session_history_one = SessionHistory {
             events: vec![
                 SessionEvent::Created(SHARED_CONTEXT.clone()),
-                SessionEvent::UncheckedOriginalPayload((
-                    proposal.clone(),
-                    Some(crate::HpkeKeyPair::gen_keypair().1),
-                )),
+                SessionEvent::UncheckedOriginalPayload {
+                    original: proposal.clone(),
+                    reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
+                },
                 SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
@@ -656,10 +676,10 @@ mod tests {
         let session_history_two = SessionHistory {
             events: vec![
                 SessionEvent::Created(SHARED_CONTEXT.clone()),
-                SessionEvent::UncheckedOriginalPayload((
-                    proposal.clone(),
-                    Some(crate::HpkeKeyPair::gen_keypair().1),
-                )),
+                SessionEvent::UncheckedOriginalPayload {
+                    original: proposal.clone(),
+                    reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
+                },
                 SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };

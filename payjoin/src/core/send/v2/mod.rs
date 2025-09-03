@@ -571,7 +571,7 @@ mod test {
     }
 
     #[test]
-    fn test_extract_v2_success() -> Result<(), BoxError> {
+    fn test_create_v2_post_request_success() -> Result<(), BoxError> {
         let sender = create_sender_context(SystemTime::now() + Duration::from_secs(60))?;
         let ohttp_relay = EXAMPLE_URL.clone();
         let result = sender.create_v2_post_request(ohttp_relay);
@@ -586,7 +586,7 @@ mod test {
     }
 
     #[test]
-    fn test_extract_v2_fails_when_expired() -> Result<(), BoxError> {
+    fn test_create_v2_post_request_fails_when_expired() -> Result<(), BoxError> {
         let expected_error = "session expired at SystemTime";
         let sender = create_sender_context(SystemTime::now() - Duration::from_secs(60))?;
         let ohttp_relay = EXAMPLE_URL.clone();

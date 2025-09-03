@@ -74,6 +74,13 @@ impl SessionHistory {
             _ => None,
         })
     }
+
+    pub fn terminal_error(&self) -> Option<String> {
+        self.events.iter().find_map(|event| match event {
+            SessionEvent::SessionInvalid(error) => Some(error.clone()),
+            _ => None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

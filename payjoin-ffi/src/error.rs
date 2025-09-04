@@ -13,12 +13,12 @@ impl ImplementationError {
     }
 }
 
-impl From<String> for ImplementationError {
-    fn from(value: String) -> Self {
-        let error = Box::<dyn error::Error + Send + Sync>::from(value);
-        Self(payjoin::ImplementationError::from(error))
-    }
-}
+// Removed custom FFI error types to keep FFI API aligned with core API.
+
+/// Deprecated: Avoid converting arbitrary Strings into `ImplementationError`.
+/// Prefer using `ImplementationError::new(e)` with a concrete error type.
+/// Tracked in issue #737.
+// Removed From<String> to prevent accidental string-to-typed error conversions.
 
 impl From<ImplementationError> for payjoin::ImplementationError {
     fn from(value: ImplementationError) -> Self { value.0 }

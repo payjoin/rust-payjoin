@@ -4,6 +4,10 @@ pub struct PjParseError {
     msg: String,
 }
 
+impl From<payjoin::PjParseError> for PjParseError {
+    fn from(value: payjoin::PjParseError) -> Self { PjParseError { msg: value.to_string() } }
+}
+
 impl From<String> for PjParseError {
     fn from(msg: String) -> Self { PjParseError { msg } }
 }
@@ -12,6 +16,12 @@ impl From<String> for PjParseError {
 #[error("URI doesn't support payjoin: {msg}")]
 pub struct PjNotSupported {
     msg: String,
+}
+
+impl<'a> From<Box<payjoin::Uri<'a, payjoin::bitcoin::address::NetworkChecked>>> for PjNotSupported {
+    fn from(uri: Box<payjoin::Uri<'a, payjoin::bitcoin::address::NetworkChecked>>) -> Self {
+        PjNotSupported { msg: uri.to_string() }
+    }
 }
 
 impl From<String> for PjNotSupported {

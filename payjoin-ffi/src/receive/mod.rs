@@ -490,9 +490,9 @@ impl UncheckedOriginalPayload {
             self.0.clone().check_broadcast_suitability(
                 min_fee_rate.map(FeeRate::from_sat_per_kwu),
                 |transaction| {
-                    Ok(can_broadcast
+                    can_broadcast
                         .callback(payjoin::bitcoin::consensus::encode::serialize(transaction))
-                        .map_err(|e| payjoin::ImplementationError::new(e))?)
+                        .map_err(payjoin::ImplementationError::new)
                 },
             ),
         ))))
@@ -564,9 +564,9 @@ impl MaybeInputsOwned {
     ) -> MaybeInputsOwnedTransition {
         MaybeInputsOwnedTransition(Arc::new(RwLock::new(Some(
             self.0.clone().check_inputs_not_owned(&mut |input| {
-                Ok(is_owned
+                is_owned
                     .callback(input.to_bytes())
-                    .map_err(|e| payjoin::ImplementationError::new(e))?)
+                    .map_err(payjoin::ImplementationError::new)
             }),
         ))))
     }
@@ -614,9 +614,9 @@ impl MaybeInputsSeen {
     ) -> MaybeInputsSeenTransition {
         MaybeInputsSeenTransition(Arc::new(RwLock::new(Some(
             self.0.clone().check_no_inputs_seen_before(&mut |outpoint| {
-                Ok(is_known
+                is_known
                     .callback((*outpoint).into())
-                    .map_err(|e| payjoin::ImplementationError::new(e))?)
+                    .map_err(payjoin::ImplementationError::new)
             }),
         ))))
     }
@@ -662,9 +662,9 @@ impl OutputsUnknown {
     ) -> OutputsUnknownTransition {
         OutputsUnknownTransition(Arc::new(RwLock::new(Some(
             self.0.clone().identify_receiver_outputs(&mut |input| {
-                Ok(is_receiver_output
+                is_receiver_output
                     .callback(input.to_bytes())
-                    .map_err(|e| payjoin::ImplementationError::new(e))?)
+                    .map_err(payjoin::ImplementationError::new)
             }),
         ))))
     }
@@ -935,7 +935,7 @@ impl ProvisionalProposal {
             self.0.clone().finalize_proposal(|pre_processed| {
                 let psbt = process_psbt
                     .callback(pre_processed.to_string())
-                    .map_err(|e| ImplementationError::new(e))?;
+                    .map_err(ImplementationError::new)?;
                 Ok(Psbt::from_str(&psbt).map_err(ImplementationError::new)?)
             }),
         ))))

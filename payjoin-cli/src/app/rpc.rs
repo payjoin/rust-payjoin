@@ -82,12 +82,12 @@ impl AsyncBitcoinRpc {
             .basic_auth(&self.username, Some(&self.password));
 
         let response =
-            request.send().await.with_context(|| format!("RPC '{}': connection failed", method))?;
+            request.send().await.with_context(|| format!("RPC '{method}': connection failed"))?;
 
         let json = response
             .json::<RpcResponse<T>>()
             .await
-            .with_context(|| format!("RPC '{}': invalid response", method))?;
+            .with_context(|| format!("RPC '{method}': invalid response"))?;
 
         match json {
             RpcResponse::Success { result, .. } => Ok(result),

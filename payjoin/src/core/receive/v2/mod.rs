@@ -144,7 +144,7 @@ impl ReceiveSession {
     fn new(event: SessionEvent) -> Result<Self, ReplayError> {
         match event {
             SessionEvent::Created(context) =>
-                Ok(ReceiveSession::Initialized(Receiver { state: Initialized { context } })),
+                Ok(ReceiveSession::Initialized(Receiver { context, state: Initialized {} })),
             _ =>
                 Err(InternalReplayError::InvalidEventForUninitializedSession(Box::new(event))
                     .into()),
@@ -233,6 +233,7 @@ pub trait State: sealed::State {}
 /// information on the typestate pattern, see [The Typestate Pattern in Rust](https://cliffle.com/blog/rust-typestate/).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receiver<State> {
+    pub(crate) context: SessionContext,
     /// Data associated with the current state of the receiver.
     pub(crate) state: State,
 }
@@ -330,15 +331,13 @@ impl ReceiverBuilder {
     pub fn build(self) -> NextStateTransition<SessionEvent, Receiver<Initialized>> {
         NextStateTransition::success(
             SessionEvent::Created(self.0.clone()),
-            Receiver { state: Initialized { context: self.0 } },
+            Receiver { context: self.0, state: Initialized {} },
         )
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Initialized {
-    context: SessionContext,
-}
+pub struct Initialized {}
 
 impl Receiver<Initialized> {
     /// construct an OHTTP Encapsulated HTTP GET request for the Original PSBT
@@ -384,10 +383,8 @@ impl Receiver<Initialized> {
                     reply_key: reply_key.clone(),
                 },
                 Receiver {
-                    state: UncheckedOriginalPayload {
-                        original: proposal,
-                        session_context: SessionContext { reply_key, ..self.state.context.clone() },
-                    },
+                    context: SessionContext { reply_key, ..self.context.clone() },
+                    state: UncheckedOriginalPayload { original: proposal },
                 },
             )
         } else {
@@ -480,16 +477,14 @@ impl Receiver<Initialized> {
         event: OriginalPayload,
         reply_key: Option<HpkePublicKey>,
     ) -> Result<ReceiveSession, InternalReplayError> {
-        if self.state.context.expiry < SystemTime::now() {
+        if self.context.expiry < SystemTime::now() {
             // Session is expired, close the session
-            return Err(InternalReplayError::SessionExpired(self.state.context.expiry));
+            return Err(InternalReplayError::SessionExpired(self.context.expiry));
         }
 
         let new_state = Receiver {
-            state: UncheckedOriginalPayload {
-                original: event,
-                session_context: SessionContext { reply_key, ..self.state.context },
-            },
+            context: SessionContext { reply_key, ..self.context },
+            state: UncheckedOriginalPayload { original: event },
         };
 
         Ok(ReceiveSession::UncheckedOriginalPayload(new_state))
@@ -504,7 +499,6 @@ impl Receiver<Initialized> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UncheckedOriginalPayload {
     pub(crate) original: OriginalPayload,
-    pub(crate) session_context: SessionContext,
 }
 
 /// The original PSBT and the optional parameters received from the sender.
@@ -545,10 +539,8 @@ impl Receiver<UncheckedOriginalPayload> {
             Ok(()) => MaybeFatalTransition::success(
                 SessionEvent::MaybeInputsOwned(),
                 Receiver {
-                    state: MaybeInputsOwned {
-                        original: self.original.clone(),
-                        session_context: self.session_context.clone(),
-                    },
+                    context: self.context.clone(),
+                    state: MaybeInputsOwned { original: self.original.clone() },
                 },
             ),
             Err(Error::Implementation(e)) =>
@@ -567,20 +559,16 @@ impl Receiver<UncheckedOriginalPayload> {
         NextStateTransition::success(
             SessionEvent::MaybeInputsOwned(),
             Receiver {
-                state: MaybeInputsOwned {
-                    original: self.original.clone(),
-                    session_context: self.state.session_context,
-                },
+                context: self.context.clone(),
+                state: MaybeInputsOwned { original: self.original.clone() },
             },
         )
     }
 
     pub(crate) fn apply_maybe_inputs_owned(self) -> ReceiveSession {
         let new_state = Receiver {
-            state: MaybeInputsOwned {
-                original: self.original.clone(),
-                session_context: self.state.session_context,
-            },
+            context: self.context.clone(),
+            state: MaybeInputsOwned { original: self.original.clone() },
         };
         ReceiveSession::MaybeInputsOwned(new_state)
     }
@@ -589,7 +577,6 @@ impl Receiver<UncheckedOriginalPayload> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsOwned {
     original: OriginalPayload,
-    session_context: SessionContext,
 }
 
 /// Typestate to check that the original PSBT has no inputs owned by the receiver.
@@ -633,20 +620,16 @@ impl Receiver<MaybeInputsOwned> {
         MaybeFatalTransition::success(
             SessionEvent::MaybeInputsSeen(),
             Receiver {
-                state: MaybeInputsSeen {
-                    original: self.original.clone(),
-                    session_context: self.state.session_context,
-                },
+                context: self.context.clone(),
+                state: MaybeInputsSeen { original: self.original.clone() },
             },
         )
     }
 
     pub(crate) fn apply_maybe_inputs_seen(self) -> ReceiveSession {
         let new_state = Receiver {
-            state: MaybeInputsSeen {
-                original: self.original.clone(),
-                session_context: self.state.session_context,
-            },
+            context: self.context.clone(),
+            state: MaybeInputsSeen { original: self.original.clone() },
         };
         ReceiveSession::MaybeInputsSeen(new_state)
     }
@@ -655,7 +638,6 @@ impl Receiver<MaybeInputsOwned> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsSeen {
     original: OriginalPayload,
-    session_context: SessionContext,
 }
 
 /// Typestate to check that the original PSBT has no inputs that the receiver has seen before.
@@ -691,20 +673,16 @@ impl Receiver<MaybeInputsSeen> {
         MaybeFatalTransition::success(
             SessionEvent::OutputsUnknown(),
             Receiver {
-                state: OutputsUnknown {
-                    original: self.original.clone(),
-                    session_context: self.state.session_context,
-                },
+                context: self.context.clone(),
+                state: OutputsUnknown { original: self.original.clone() },
             },
         )
     }
 
     pub(crate) fn apply_outputs_unknown(self) -> ReceiveSession {
         let new_state = Receiver {
-            state: OutputsUnknown {
-                original: self.original.clone(),
-                session_context: self.state.session_context,
-            },
+            context: self.context.clone(),
+            state: OutputsUnknown { original: self.original.clone() },
         };
         ReceiveSession::OutputsUnknown(new_state)
     }
@@ -713,7 +691,6 @@ impl Receiver<MaybeInputsSeen> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutputsUnknown {
     original: OriginalPayload,
-    session_context: SessionContext,
 }
 
 /// Typestate to check that the outputs of the original PSBT actually pay to the receiver.
@@ -754,13 +731,12 @@ impl Receiver<OutputsUnknown> {
         let inner = common::WantsOutputs::new(self.state.original, owned_vouts);
         MaybeFatalTransition::success(
             SessionEvent::WantsOutputs(inner.clone()),
-            Receiver { state: WantsOutputs { inner, session_context: self.state.session_context } },
+            Receiver { context: self.context.clone(), state: WantsOutputs { inner } },
         )
     }
 
     pub(crate) fn apply_wants_outputs(self, inner: common::WantsOutputs) -> ReceiveSession {
-        let new_state =
-            Receiver { state: WantsOutputs { inner, session_context: self.state.session_context } };
+        let new_state = Receiver { context: self.context, state: WantsOutputs { inner } };
         ReceiveSession::WantsOutputs(new_state)
     }
 }
@@ -768,7 +744,6 @@ impl Receiver<OutputsUnknown> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct WantsOutputs {
     inner: common::WantsOutputs,
-    session_context: SessionContext,
 }
 
 /// Typestate which the receiver may substitute or add outputs to.
@@ -789,7 +764,7 @@ impl Receiver<WantsOutputs> {
         output_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
         let inner = self.state.inner.substitute_receiver_script(output_script)?;
-        Ok(Receiver { state: WantsOutputs { inner, session_context: self.state.session_context } })
+        Ok(Receiver { context: self.context.clone(), state: WantsOutputs { inner } })
     }
 
     /// Replaces **all** receiver outputs with the one or more provided `replacement_outputs`, and
@@ -811,7 +786,7 @@ impl Receiver<WantsOutputs> {
         drain_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
         let inner = self.state.inner.replace_receiver_outputs(replacement_outputs, drain_script)?;
-        Ok(Receiver { state: WantsOutputs { inner, session_context: self.state.session_context } })
+        Ok(Receiver { context: self.context.clone(), state: WantsOutputs { inner } })
     }
 
     /// Commits the outputs as final, and moves on to the next typestate.
@@ -821,13 +796,12 @@ impl Receiver<WantsOutputs> {
         let inner = self.state.inner.clone().commit_outputs();
         NextStateTransition::success(
             SessionEvent::WantsInputs(inner.clone()),
-            Receiver { state: WantsInputs { inner, session_context: self.state.session_context } },
+            Receiver { context: self.context.clone(), state: WantsInputs { inner } },
         )
     }
 
     pub(crate) fn apply_wants_inputs(self, inner: common::WantsInputs) -> ReceiveSession {
-        let new_state =
-            Receiver { state: WantsInputs { inner, session_context: self.state.session_context } };
+        let new_state = Receiver { context: self.context.clone(), state: WantsInputs { inner } };
         ReceiveSession::WantsInputs(new_state)
     }
 }
@@ -835,7 +809,6 @@ impl Receiver<WantsOutputs> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct WantsInputs {
     inner: common::WantsInputs,
-    session_context: SessionContext,
 }
 
 /// Typestate for a checked proposal which the receiver may contribute inputs to.
@@ -864,7 +837,7 @@ impl Receiver<WantsInputs> {
         inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<Self, InputContributionError> {
         let inner = self.state.inner.contribute_inputs(inputs)?;
-        Ok(Receiver { state: WantsInputs { inner, session_context: self.state.session_context } })
+        Ok(Receiver { context: self.context.clone(), state: WantsInputs { inner } })
     }
 
     /// Commits the inputs as final, and moves on to the next typestate.
@@ -874,16 +847,12 @@ impl Receiver<WantsInputs> {
         let inner = self.state.inner.clone().commit_inputs();
         NextStateTransition::success(
             SessionEvent::WantsFeeRange(inner.clone()),
-            Receiver {
-                state: WantsFeeRange { inner, session_context: self.state.session_context },
-            },
+            Receiver { context: self.context.clone(), state: WantsFeeRange { inner } },
         )
     }
 
     pub(crate) fn apply_wants_fee_range(self, inner: common::WantsFeeRange) -> ReceiveSession {
-        let new_state = Receiver {
-            state: WantsFeeRange { inner, session_context: self.state.session_context },
-        };
+        let new_state = Receiver { context: self.context.clone(), state: WantsFeeRange { inner } };
         ReceiveSession::WantsFeeRange(new_state)
     }
 }
@@ -891,7 +860,6 @@ impl Receiver<WantsInputs> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct WantsFeeRange {
     inner: common::WantsFeeRange,
-    session_context: SessionContext,
 }
 
 impl Receiver<WantsFeeRange> {
@@ -920,8 +888,7 @@ impl Receiver<WantsFeeRange> {
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<ProvisionalProposal>, ProtocolError> {
-        let max_effective_fee_rate =
-            max_effective_fee_rate.or(Some(self.state.session_context.max_fee_rate));
+        let max_effective_fee_rate = max_effective_fee_rate.or(Some(self.context.max_fee_rate));
         let psbt_context = match self
             .state
             .inner
@@ -939,22 +906,13 @@ impl Receiver<WantsFeeRange> {
         };
         MaybeFatalTransition::success(
             SessionEvent::ProvisionalProposal(psbt_context.clone()),
-            Receiver {
-                state: ProvisionalProposal {
-                    psbt_context,
-                    session_context: self.state.session_context.clone(),
-                },
-            },
+            Receiver { context: self.context.clone(), state: ProvisionalProposal { psbt_context } },
         )
     }
 
     pub(crate) fn apply_provisional_proposal(self, psbt_context: PsbtContext) -> ReceiveSession {
-        let new_state = Receiver {
-            state: ProvisionalProposal {
-                psbt_context,
-                session_context: self.state.session_context,
-            },
-        };
+        let new_state =
+            Receiver { context: self.context.clone(), state: ProvisionalProposal { psbt_context } };
         ReceiveSession::ProvisionalProposal(new_state)
     }
 }
@@ -962,7 +920,6 @@ impl Receiver<WantsFeeRange> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProvisionalProposal {
     psbt_context: PsbtContext,
-    session_context: SessionContext,
 }
 
 /// Typestate for a checked proposal which had both the outputs and the inputs modified
@@ -988,18 +945,15 @@ impl Receiver<ProvisionalProposal> {
                 return MaybeTransientTransition::transient(e);
             }
         };
-        let payjoin_proposal =
-            PayjoinProposal { psbt: inner.clone(), session_context: self.state.session_context };
+        let payjoin_proposal = PayjoinProposal { psbt: inner.clone() };
         MaybeTransientTransition::success(
             SessionEvent::PayjoinProposal(inner),
-            Receiver { state: payjoin_proposal },
+            Receiver { context: self.context.clone(), state: payjoin_proposal },
         )
     }
 
     pub(crate) fn apply_payjoin_proposal(self, psbt: Psbt) -> ReceiveSession {
-        let new_state = Receiver {
-            state: PayjoinProposal { psbt, session_context: self.state.session_context },
-        };
+        let new_state = Receiver { context: self.context.clone(), state: PayjoinProposal { psbt } };
         ReceiveSession::PayjoinProposal(new_state)
     }
 }
@@ -1007,7 +961,6 @@ impl Receiver<ProvisionalProposal> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PayjoinProposal {
     psbt: Psbt,
-    session_context: SessionContext,
 }
 
 /// A finalized Payjoin proposal, complete with fees and receiver signatures, that the sender
@@ -1032,30 +985,29 @@ impl Receiver<PayjoinProposal> {
         let body: Vec<u8>;
         let method: &str;
 
-        if let Some(e) = &self.session_context.reply_key {
+        if let Some(e) = &self.context.reply_key {
             // Prepare v2 payload
             let payjoin_bytes = self.psbt.serialize();
             let sender_mailbox = short_id_from_pubkey(e);
-            target_resource = mailbox_endpoint(&self.session_context.directory, &sender_mailbox);
-            body = encrypt_message_b(payjoin_bytes, &self.session_context.receiver_key, e)?;
+            target_resource = mailbox_endpoint(&self.context.directory, &sender_mailbox);
+            body = encrypt_message_b(payjoin_bytes, &self.context.receiver_key, e)?;
             method = "POST";
         } else {
             // Prepare v2 wrapped and backwards-compatible v1 payload
             body = self.psbt.to_string().as_bytes().to_vec();
-            let receiver_mailbox =
-                short_id_from_pubkey(self.session_context.receiver_key.public_key());
-            target_resource = mailbox_endpoint(&self.session_context.directory, &receiver_mailbox);
+            let receiver_mailbox = short_id_from_pubkey(self.context.receiver_key.public_key());
+            target_resource = mailbox_endpoint(&self.context.directory, &receiver_mailbox);
             method = "PUT";
         }
         tracing::debug!("Payjoin PSBT target: {}", target_resource.as_str());
         let (body, ctx) = ohttp_encapsulate(
-            &mut self.session_context.ohttp_keys,
+            &mut self.context.ohttp_keys,
             method,
             target_resource.as_str(),
             Some(&body),
         )?;
 
-        let req = Request::new_v2(&self.session_context.full_relay_url(ohttp_relay)?, &body);
+        let req = Request::new_v2(&self.context.full_relay_url(ohttp_relay)?, &body);
         Ok((req, ctx))
     }
 
@@ -1127,7 +1079,6 @@ pub mod test {
     use crate::output_substitution::OutputSubstitution;
     use crate::persist::{NoopSessionPersister, RejectTransient, Rejection};
     use crate::receive::optional_parameters::Params;
-    use crate::receive::v2;
     use crate::ImplementationError;
 
     pub(crate) static SHARED_CONTEXT: Lazy<SessionContext> = Lazy::new(|| SessionContext {
@@ -1146,35 +1097,39 @@ pub mod test {
         max_fee_rate: FeeRate::BROADCAST_MIN,
     });
 
-    pub(crate) fn unchecked_proposal_v2_from_test_vector() -> UncheckedOriginalPayload {
+    pub(crate) fn unchecked_proposal_v2_from_test_vector() -> Receiver<UncheckedOriginalPayload> {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::Two])
             .expect("Test utils query params should not fail");
-        UncheckedOriginalPayload {
-            original: OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
-            session_context: SessionContext {
+        Receiver {
+            context: SessionContext {
                 reply_key: Some(HpkeKeyPair::gen_keypair().public_key().clone()),
                 ..SHARED_CONTEXT.clone()
+            },
+            state: UncheckedOriginalPayload {
+                original: OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
             },
         }
     }
 
-    pub(crate) fn maybe_inputs_owned_v2_from_test_vector() -> MaybeInputsOwned {
+    pub(crate) fn maybe_inputs_owned_v2_from_test_vector() -> Receiver<MaybeInputsOwned> {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::Two])
             .expect("Test utils query params should not fail");
-        MaybeInputsOwned {
-            original: OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
-            session_context: SessionContext {
+        Receiver {
+            context: SessionContext {
                 reply_key: Some(HpkeKeyPair::gen_keypair().public_key().clone()),
                 ..SHARED_CONTEXT.clone()
+            },
+            state: MaybeInputsOwned {
+                original: OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params },
             },
         }
     }
 
     pub(crate) fn mock_err() -> JsonReply {
         let noop_persister = NoopSessionPersister::default();
-        let receiver = Receiver { state: unchecked_proposal_v2_from_test_vector() };
+        let receiver = unchecked_proposal_v2_from_test_vector();
         let server_error = || {
             receiver
                 .clone()
@@ -1191,8 +1146,7 @@ pub mod test {
     fn test_v2_mutable_receiver_state_closures() {
         let persister = NoopSessionPersister::default();
         let mut call_count = 0;
-        let maybe_inputs_owned = maybe_inputs_owned_v2_from_test_vector();
-        let receiver = v2::Receiver { state: maybe_inputs_owned };
+        let receiver = maybe_inputs_owned_v2_from_test_vector();
 
         fn mock_callback(call_count: &mut usize, ret: bool) -> Result<bool, ImplementationError> {
             *call_count += 1;
@@ -1220,8 +1174,7 @@ pub mod test {
 
     #[test]
     fn test_unchecked_proposal_transient_error() -> Result<(), BoxError> {
-        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
-        let receiver = v2::Receiver { state: unchecked_proposal };
+        let receiver = unchecked_proposal_v2_from_test_vector();
 
         let unchecked_proposal = receiver.check_broadcast_suitability(Some(FeeRate::MIN), |_| {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
@@ -1243,8 +1196,7 @@ pub mod test {
     #[test]
     fn test_maybe_inputs_seen_transient_error() -> Result<(), BoxError> {
         let persister = NoopSessionPersister::default();
-        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
-        let receiver = v2::Receiver { state: unchecked_proposal };
+        let receiver = unchecked_proposal_v2_from_test_vector();
 
         let maybe_inputs_owned = receiver
             .assume_interactive_receiver()
@@ -1270,8 +1222,7 @@ pub mod test {
     #[test]
     fn test_outputs_unknown_transient_error() -> Result<(), BoxError> {
         let persister = NoopSessionPersister::default();
-        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
-        let receiver = v2::Receiver { state: unchecked_proposal };
+        let receiver = unchecked_proposal_v2_from_test_vector();
 
         let maybe_inputs_owned = receiver
             .assume_interactive_receiver()
@@ -1300,8 +1251,7 @@ pub mod test {
     #[test]
     fn test_wants_outputs_transient_error() -> Result<(), BoxError> {
         let persister = NoopSessionPersister::default();
-        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
-        let receiver = v2::Receiver { state: unchecked_proposal };
+        let receiver = unchecked_proposal_v2_from_test_vector();
 
         let maybe_inputs_owned = receiver
             .assume_interactive_receiver()
@@ -1333,7 +1283,7 @@ pub mod test {
 
     #[test]
     fn test_extract_err_req() -> Result<(), BoxError> {
-        let receiver = Receiver { state: unchecked_proposal_v2_from_test_vector() };
+        let receiver = unchecked_proposal_v2_from_test_vector();
         let mock_err = mock_err();
         let expected_json = serde_json::json!({
             "errorCode": "unavailable",
@@ -1342,11 +1292,11 @@ pub mod test {
 
         assert_eq!(mock_err.to_json(), expected_json);
 
-        let (_req, _ctx) = extract_err_req(&mock_err, &*EXAMPLE_URL, &receiver.session_context)?;
+        let (_req, _ctx) = extract_err_req(&mock_err, &*EXAMPLE_URL, &receiver.context)?;
 
         let internal_error: Error = InternalPayloadError::MissingPayment.into();
         let (_req, _ctx) =
-            extract_err_req(&(&internal_error).into(), &*EXAMPLE_URL, &receiver.session_context)?;
+            extract_err_req(&(&internal_error).into(), &*EXAMPLE_URL, &receiver.context)?;
         Ok(())
     }
 
@@ -1356,9 +1306,9 @@ pub mod test {
         let noop_persister = NoopSessionPersister::default();
         let context = SessionContext { expiry: now, ..SHARED_CONTEXT.clone() };
         let receiver = Receiver {
+            context: context.clone(),
             state: UncheckedOriginalPayload {
                 original: crate::receive::tests::original_from_test_vector(),
-                session_context: context.clone(),
             },
         };
 
@@ -1460,7 +1410,7 @@ pub mod test {
 
     #[test]
     fn test_v2_pj_uri() {
-        let uri = Receiver { state: Initialized { context: SHARED_CONTEXT.clone() } }.pj_uri();
+        let uri = Receiver { context: SHARED_CONTEXT.clone(), state: Initialized {} }.pj_uri();
         assert_ne!(uri.extras.pj_param.endpoint(), EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
     }
@@ -1471,7 +1421,7 @@ pub mod test {
         let base64 = ORIGINAL_PSBT;
         let query = "v=1";
         let payload = format!("{base64}\n{query}");
-        let mut receiver = Receiver { state: Initialized { context: SHARED_CONTEXT.clone() } };
+        let mut receiver = Receiver { context: SHARED_CONTEXT.clone(), state: Initialized {} };
         let proposal = receiver
             .unchecked_from_payload(&payload)
             .expect("unchecked_from_payload should parse valid v1 PSBT payload");

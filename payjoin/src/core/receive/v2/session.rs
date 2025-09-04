@@ -214,10 +214,8 @@ mod tests {
 
     fn unchecked_receiver_from_test_vector() -> Receiver<UncheckedOriginalPayload> {
         Receiver {
-            state: UncheckedOriginalPayload {
-                original: original_from_test_vector(),
-                session_context: SHARED_CONTEXT.clone(),
-            },
+            context: SHARED_CONTEXT.clone(),
+            state: UncheckedOriginalPayload { original: original_from_test_vector() },
         }
     }
 
@@ -324,7 +322,8 @@ mod tests {
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::Initialized(Receiver {
-                state: Initialized { context: session_context },
+                context: session_context,
+                state: Initialized {},
             }),
         };
         run_session_history_test(test)
@@ -349,10 +348,8 @@ mod tests {
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedOriginalPayload(Receiver {
-                state: UncheckedOriginalPayload {
-                    original,
-                    session_context: SessionContext { reply_key, ..session_context },
-                },
+                context: SessionContext { reply_key, ..session_context },
+                state: UncheckedOriginalPayload { original },
             }),
         };
         run_session_history_test(test)
@@ -378,10 +375,8 @@ mod tests {
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedOriginalPayload(Receiver {
-                state: UncheckedOriginalPayload {
-                    original,
-                    session_context: SessionContext { reply_key, ..session_context },
-                },
+                context: SessionContext { reply_key, ..session_context },
+                state: UncheckedOriginalPayload { original },
             }),
         };
         let session_history = run_session_history_test(test);
@@ -414,10 +409,8 @@ mod tests {
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedOriginalPayload(Receiver {
-                state: UncheckedOriginalPayload {
-                    original,
-                    session_context: SessionContext { reply_key, ..session_context },
-                },
+                context: SessionContext { reply_key, ..session_context },
+                state: UncheckedOriginalPayload { original },
             }),
         };
         run_session_history_test(test)
@@ -450,10 +443,8 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::MaybeInputsOwned(Receiver {
-                state: MaybeInputsOwned {
-                    original,
-                    session_context: SessionContext { reply_key, ..session_context },
-                },
+                context: SessionContext { reply_key, ..session_context },
+                state: MaybeInputsOwned { original },
             }),
         };
         run_session_history_test(test)
@@ -521,9 +512,9 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::ProvisionalProposal(Receiver {
+                context: SessionContext { reply_key, ..session_context },
                 state: ProvisionalProposal {
                     psbt_context: provisional_proposal.state.psbt_context.clone(),
-                    session_context: SessionContext { reply_key, ..session_context },
                 },
             }),
         };
@@ -598,10 +589,8 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {
-                state: PayjoinProposal {
-                    psbt: payjoin_proposal.psbt().clone(),
-                    session_context: SessionContext { reply_key, ..session_context },
-                },
+                context: SessionContext { reply_key, ..session_context },
+                state: PayjoinProposal { psbt: payjoin_proposal.psbt().clone() },
             }),
         };
         run_session_history_test(test)

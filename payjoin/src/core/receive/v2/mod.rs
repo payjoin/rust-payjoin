@@ -34,14 +34,14 @@ pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
-use session::InternalReplayError;
-pub use session::{replay_event_log, ReplayError, SessionEvent, SessionHistory};
+pub use session::{replay_event_log, SessionEvent, SessionHistory};
 use url::Url;
 
 use super::error::{Error, InputContributionError};
 use super::{
     common, InternalPayloadError, JsonReply, OutputSubstitutionError, ProtocolError, SelectionError,
 };
+use crate::error::{InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{
     ohttp_encapsulate, process_get_res, process_post_res, OhttpEncapsulationError, OhttpKeys,
@@ -145,7 +145,10 @@ impl ReceiveSession {
         ReceiveSession::Initialized(Receiver { state: Initialized {}, session_context: context })
     }
 
-    fn process_event(self, event: SessionEvent) -> Result<ReceiveSession, ReplayError> {
+    fn process_event(
+        self,
+        event: SessionEvent,
+    ) -> Result<ReceiveSession, ReplayError<Self, SessionEvent>> {
         match (self, event) {
             (
                 ReceiveSession::Initialized(state),

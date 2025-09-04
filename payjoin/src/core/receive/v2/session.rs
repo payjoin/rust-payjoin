@@ -3,48 +3,18 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 
 use super::{ReceiveSession, SessionContext};
+use crate::error::{InternalReplayError, ReplayError};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
 use crate::receive::v2::{extract_err_req, InternalSessionError, SessionError};
 use crate::receive::{common, JsonReply, OriginalPayload, PsbtContext};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
-// TODO: we could have a shared error type for both receive and send
-/// Errors that can occur when replaying a receiver event log
-#[derive(Debug)]
-pub struct ReplayError(InternalReplayError);
-
-impl std::fmt::Display for ReplayError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use InternalReplayError::*;
-        match &self.0 {
-            NoEvents => write!(f, "No events found in session"),
-            InvalidEvent(event, session) => match session {
-                Some(session) => write!(f, "Invalid event ({event:?}) for session ({session:?})",),
-                None => write!(f, "Invalid first event ({event:?}) for session",),
-            },
-            PersistenceFailure(e) => write!(f, "Persistence failure: {e}"),
-        }
-    }
-}
-impl std::error::Error for ReplayError {}
-
-impl From<InternalReplayError> for ReplayError {
-    fn from(e: InternalReplayError) -> Self { ReplayError(e) }
-}
-
-#[derive(Debug)]
-pub(crate) enum InternalReplayError {
-    /// No events found in session
-    NoEvents,
-    InvalidEvent(Box<SessionEvent>, Option<Box<ReceiveSession>>),
-    /// Application storage error
-    PersistenceFailure(ImplementationError),
-}
-
 /// Replay a receiver event log to get the receiver in its current state [ReceiveSession]
 /// and a session history [SessionHistory]
-pub fn replay_event_log<P>(persister: &P) -> Result<(ReceiveSession, SessionHistory), ReplayError>
+pub fn replay_event_log<P>(
+    persister: &P,
+) -> Result<(ReceiveSession, SessionHistory), ReplayError<ReceiveSession, SessionEvent>>
 where
     P: SessionPersister,
     P::SessionEvent: Into<SessionEvent> + Clone,
@@ -219,7 +189,7 @@ pub enum SessionEvent {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime};
 
     use payjoin_test_utils::{BoxError, EXAMPLE_URL};
 

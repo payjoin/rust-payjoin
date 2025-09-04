@@ -34,17 +34,17 @@ pub use error::{CreateRequestError, EncapsulationError};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
 use serde::{Deserialize, Serialize};
-pub use session::{replay_event_log, ReplayError, SessionEvent, SessionHistory};
+pub use session::{replay_event_log, SessionEvent, SessionHistory};
 use url::Url;
 
 use super::error::BuildSenderError;
 use super::*;
+use crate::error::{InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
 use crate::persist::{
     MaybeFatalTransition, MaybeSuccessTransitionWithNoResults, NextStateTransition,
 };
-use crate::send::v2::session::InternalReplayError;
 use crate::uri::v2::PjParam;
 use crate::uri::ShortId;
 use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
@@ -220,7 +220,10 @@ pub enum SendSession {
 impl SendSession {
     fn new(context: WithReplyKey) -> Self { SendSession::WithReplyKey(Sender { state: context }) }
 
-    fn process_event(self, event: SessionEvent) -> Result<SendSession, ReplayError> {
+    fn process_event(
+        self,
+        event: SessionEvent,
+    ) -> Result<SendSession, ReplayError<Self, SessionEvent>> {
         match (self, event) {
             (SendSession::WithReplyKey(state), SessionEvent::V2GetContext(v2_get_context)) =>
                 Ok(state.apply_v2_get_context(v2_get_context)),

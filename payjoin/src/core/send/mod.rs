@@ -16,6 +16,8 @@
 //! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
 //! but request reuse makes correlation trivial for the relay.
 
+use std::str::FromStr;
+
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
 pub use error::{BuildSenderError, ResponseError, ValidationError, WellKnownError};
@@ -24,7 +26,7 @@ use url::Url;
 
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
-use crate::Version;
+use crate::{Version, MAX_CONTENT_LENGTH};
 
 // See usize casts
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -674,6 +676,32 @@ fn serialize_url(
     url
 }
 
+/// Data required to validate the response.
+///
+/// This type is used to process a BIP78 response.
+/// Call [`Self::process_response`] on it to continue the BIP78 flow.
+#[derive(Debug, Clone)]
+pub struct V1Context {
+    psbt_context: PsbtContext,
+}
+
+impl V1Context {
+    /// Decodes and validates the response.
+    ///
+    /// Call this method with response from receiver to continue BIP78 flow. If the response is
+    /// valid you will get appropriate PSBT that you should sign and broadcast.
+    #[inline]
+    pub fn process_response(self, response: &[u8]) -> Result<Psbt, ResponseError> {
+        if response.len() > MAX_CONTENT_LENGTH {
+            return Err(ResponseError::from(InternalValidationError::ContentTooLarge));
+        }
+
+        let res_str = std::str::from_utf8(response).map_err(|_| InternalValidationError::Parse)?;
+        let proposal = Psbt::from_str(res_str).map_err(|_| ResponseError::parse(res_str))?;
+        self.psbt_context.process_proposal(proposal).map_err(Into::into)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use bitcoin::absolute::LockTime;
@@ -707,6 +735,62 @@ mod test {
             min_fee_rate: FeeRate::ZERO,
             payee,
         })
+    }
+
+    #[test]
+    fn response_len_under_limit_is_not_content_too_large() -> Result<(), BoxError> {
+        let ctx = V1Context { psbt_context: create_psbt_context()? };
+
+        let psbt_str = PARSED_ORIGINAL_PSBT.clone().to_string();
+        assert!(psbt_str.len() < MAX_CONTENT_LENGTH);
+
+        let result = ctx.clone().process_response(psbt_str.as_bytes());
+
+        let err_str = result.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
+        assert_ne!(
+            err_str,
+            "The receiver sent an invalid response: The response body is too large"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn response_len_equal_limit_is_not_content_too_large() -> Result<(), BoxError> {
+        let ctx = V1Context { psbt_context: create_psbt_context()? };
+
+        let mut psbt_str = PARSED_ORIGINAL_PSBT.clone().to_string();
+
+        if psbt_str.len() < MAX_CONTENT_LENGTH {
+            psbt_str.push_str(&" ".repeat(MAX_CONTENT_LENGTH - psbt_str.len()));
+        }
+        assert_eq!(psbt_str.len(), MAX_CONTENT_LENGTH);
+
+        let result = ctx.clone().process_response(psbt_str.as_bytes());
+
+        let err_str = result.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
+        assert_ne!(
+            err_str,
+            "The receiver sent an invalid response: The response body is too large"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn response_len_over_limit_is_content_too_large() -> Result<(), BoxError> {
+        let ctx = V1Context { psbt_context: create_psbt_context()? };
+
+        let too_long = vec![b'a'; MAX_CONTENT_LENGTH + 1];
+        let result = ctx.process_response(&too_long);
+
+        let err_str = result.unwrap_err().to_string();
+        assert_eq!(
+            err_str,
+            "The receiver sent an invalid response: The response body is too large"
+        );
+
+        Ok(())
     }
 
     #[test]

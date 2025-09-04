@@ -1,43 +1,13 @@
 use super::WithReplyKey;
+use crate::error::{InternalReplayError, ReplayError};
 use crate::persist::SessionPersister;
 use crate::send::v2::{SendSession, V2GetContext};
 use crate::uri::v2::PjParam;
 use crate::ImplementationError;
-// TODO: we could have a shared error type for both receive and send
-/// Errors that can occur when replaying a sender event log
-#[derive(Debug)]
-pub struct ReplayError(InternalReplayError);
 
-impl std::fmt::Display for ReplayError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use InternalReplayError::*;
-        match &self.0 {
-            NoEvents => write!(f, "No events found in session"),
-            InvalidEvent(event, session) => match session {
-                Some(session) => write!(f, "Invalid event ({event:?}) for session ({session:?})",),
-                None => write!(f, "Invalid first event ({event:?}) for session",),
-            },
-            PersistenceFailure(e) => write!(f, "Persistence failure: {e}"),
-        }
-    }
-}
-impl std::error::Error for ReplayError {}
-
-impl From<InternalReplayError> for ReplayError {
-    fn from(e: InternalReplayError) -> Self { ReplayError(e) }
-}
-
-#[derive(Debug)]
-pub(crate) enum InternalReplayError {
-    /// No events in the event log
-    NoEvents,
-    /// Invalid initial event
-    InvalidEvent(Box<SessionEvent>, Option<Box<SendSession>>),
-    /// Application storage error
-    PersistenceFailure(ImplementationError),
-}
-
-pub fn replay_event_log<P>(persister: &P) -> Result<(SendSession, SessionHistory), ReplayError>
+pub fn replay_event_log<P>(
+    persister: &P,
+) -> Result<(SendSession, SessionHistory), ReplayError<SendSession, SessionEvent>>
 where
     P: SessionPersister + Clone,
     P::SessionEvent: Into<SessionEvent> + Clone,

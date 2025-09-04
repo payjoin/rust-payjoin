@@ -6,12 +6,13 @@ mod integration {
     use bitcoin::psbt::{Input as PsbtInput, Psbt};
     use bitcoin::transaction::InputWeightPrediction;
     use bitcoin::{Amount, FeeRate, OutPoint, TxIn, TxOut, Weight};
-    use bitcoind::bitcoincore_rpc::json::{AddressType, WalletProcessPsbtResult};
-    use bitcoind::bitcoincore_rpc::{self, RpcApi};
     use payjoin::receive::v1::build_v1_pj_uri;
     use payjoin::receive::InputPair;
     use payjoin::{ImplementationError, OutputSubstitution, PjUri, Request, Uri};
-    use payjoin_test_utils::{init_bitcoind_sender_receiver, init_tracing, BoxError};
+    use payjoin_test_utils::corepc_node::vtype::ListUnspentItem;
+    use payjoin_test_utils::corepc_node::AddressType;
+    use payjoin_test_utils::{corepc_node, init_bitcoind_sender_receiver, init_tracing, BoxError};
+    use serde_json::json;
 
     const EXAMPLE_URL: &str = "https://example.com";
     #[cfg(feature = "v1")]
@@ -64,12 +65,12 @@ mod integration {
         }
 
         fn do_v1_to_v1(
-            sender: bitcoincore_rpc::Client,
-            receiver: bitcoincore_rpc::Client,
+            sender: corepc_node::Client,
+            receiver: corepc_node::Client,
             is_p2pkh: bool,
         ) -> Result<(), BoxError> {
             // Receiver creates the payjoin URI
-            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
+            let pj_receiver_address = receiver.new_address()?;
             let mut pj_uri =
                 build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
             pj_uri.amount = Some(Amount::ONE_BTC);
@@ -117,9 +118,12 @@ mod integration {
             let network_fees = predicted_tx_weight * FeeRate::BROADCAST_MIN;
             assert_eq!(payjoin_tx.input.len(), 2);
             assert_eq!(payjoin_tx.output.len(), 2);
-            assert_eq!(receiver.get_balances()?.mine.untrusted_pending, Amount::from_btc(51.0)?);
             assert_eq!(
-                sender.get_balances()?.mine.untrusted_pending,
+                receiver.get_balances()?.into_model()?.mine.untrusted_pending,
+                Amount::from_btc(51.0)?
+            );
+            assert_eq!(
+                sender.get_balances()?.into_model()?.mine.untrusted_pending,
                 Amount::from_btc(49.0)? - network_fees
             );
             Ok(())
@@ -134,7 +138,7 @@ mod integration {
             )?;
 
             // Receiver creates the payjoin URI
-            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
+            let pj_receiver_address = receiver.new_address()?;
             let mut pj_uri =
                 build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
             pj_uri.amount = Some(Amount::ONE_BTC);
@@ -248,7 +252,7 @@ mod integration {
                 let send_noop_persister = NoopSessionPersister::default();
                 // **********************
                 // Inside the Receiver:
-                let address = receiver.get_new_address(None, None)?.assume_checked();
+                let address = receiver.new_address()?;
                 // test session with expiry in the past
                 let mut expired_receiver = ReceiverBuilder::new(address, directory, ohttp_keys)?
                     .with_expiry(Duration::from_secs(0))
@@ -301,7 +305,7 @@ mod integration {
                 let sender_persister = NoopSessionPersister::default();
                 // **********************
                 // Inside the Receiver:
-                let address = receiver.get_new_address(None, None)?.assume_checked();
+                let address = receiver.new_address()?;
 
                 let mut session = ReceiverBuilder::new(address, directory, ohttp_keys)?
                     .build()
@@ -421,7 +425,7 @@ mod integration {
                 let send_persister = NoopSessionPersister::default();
                 // **********************
                 // Inside the Receiver:
-                let address = receiver.get_new_address(None, None)?.assume_checked();
+                let address = receiver.new_address()?;
 
                 // test session with expiry in the future
                 let mut session = ReceiverBuilder::new(address, directory, ohttp_keys)?
@@ -521,10 +525,13 @@ mod integration {
                 assert_eq!(payjoin_tx.input.len(), 2);
                 assert_eq!(payjoin_tx.output.len(), 1);
                 assert_eq!(
-                    receiver.get_balances()?.mine.untrusted_pending,
+                    receiver.get_balances()?.into_model()?.mine.untrusted_pending,
                     Amount::from_btc(100.0)? - network_fees
                 );
-                assert_eq!(sender.get_balances()?.mine.untrusted_pending, Amount::from_btc(0.0)?);
+                assert_eq!(
+                    sender.get_balances()?.into_model()?.mine.untrusted_pending,
+                    Amount::from_btc(0.0)?
+                );
                 Ok(())
             }
 
@@ -536,7 +543,7 @@ mod integration {
             init_tracing();
             let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
             // Receiver creates the payjoin URI
-            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
+            let pj_receiver_address = receiver.new_address()?;
             let mut pj_uri =
                 build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
             pj_uri.amount = Some(Amount::ONE_BTC);
@@ -576,9 +583,12 @@ mod integration {
             let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
             assert_eq!(payjoin_tx.input.len(), 2);
             assert_eq!(payjoin_tx.output.len(), 2);
-            assert_eq!(receiver.get_balances()?.mine.untrusted_pending, Amount::from_btc(51.0)?);
             assert_eq!(
-                sender.get_balances()?.mine.untrusted_pending,
+                receiver.get_balances()?.into_model()?.mine.untrusted_pending,
+                Amount::from_btc(51.0)?
+            );
+            assert_eq!(
+                sender.get_balances()?.into_model()?.mine.untrusted_pending,
                 Amount::from_btc(49.0)? - network_fees
             );
             Ok(())
@@ -603,7 +613,7 @@ mod integration {
                 let directory = services.directory_url();
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let recv_persister = NoopSessionPersister::default();
-                let address = receiver.get_new_address(None, None)?.assume_checked();
+                let address = receiver.new_address()?;
                 let mut session =
                     ReceiverBuilder::new(address, directory.clone(), ohttp_keys.clone())?
                         .build()
@@ -639,7 +649,7 @@ mod integration {
                 // **********************
                 // Inside the Receiver:
                 let agent_clone: Arc<Client> = agent.clone();
-                let receiver: Arc<bitcoincore_rpc::Client> = Arc::new(receiver);
+                let receiver: Arc<corepc_node::Client> = Arc::new(receiver);
                 let receiver_clone = receiver.clone();
                 let ohttp_relay = services.ohttp_relay_url();
                 let receiver_loop = tokio::task::spawn(async move {
@@ -712,11 +722,11 @@ mod integration {
                 assert_eq!(payjoin_tx.input.len(), 2);
                 assert_eq!(payjoin_tx.output.len(), 2);
                 assert_eq!(
-                    receiver.get_balances()?.mine.untrusted_pending,
+                    receiver.get_balances()?.into_model()?.mine.untrusted_pending,
                     Amount::from_btc(51.0)?
                 );
                 assert_eq!(
-                    sender.get_balances()?.mine.untrusted_pending,
+                    sender.get_balances()?.into_model()?.mine.untrusted_pending,
                     Amount::from_btc(49.0)? - network_fees
                 );
                 Ok(())
@@ -726,7 +736,7 @@ mod integration {
         }
 
         fn handle_directory_proposal(
-            receiver: &bitcoincore_rpc::Client,
+            receiver: &corepc_node::Client,
             proposal: Receiver<UncheckedOriginalPayload>,
             custom_inputs: Option<Vec<InputPair>>,
         ) -> Result<Receiver<PayjoinProposal>, BoxError> {
@@ -736,8 +746,9 @@ mod integration {
             let proposal = proposal
                 .check_broadcast_suitability(None, |tx| {
                     Ok(receiver
-                        .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
+                        .test_mempool_accept(std::slice::from_ref(tx))
                         .map_err(ImplementationError::new)?
+                        .0
                         .first()
                         .ok_or(ImplementationError::from(
                             "testmempoolaccept should return a result",
@@ -756,7 +767,7 @@ mod integration {
                         .map_err(ImplementationError::new)?;
                     receiver
                         .get_address_info(&address)
-                        .map(|info| info.is_mine.unwrap_or(false))
+                        .map(|info| info.is_mine)
                         .map_err(ImplementationError::new)
                 })
                 .save(&noop_persister)?;
@@ -771,7 +782,7 @@ mod integration {
                             .map_err(ImplementationError::new)?;
                     receiver
                         .get_address_info(&address)
-                        .map(|info| info.is_mine.unwrap_or(false))
+                        .map(|info| info.is_mine)
                         .map_err(ImplementationError::new)
                 })
                 .save(&noop_persister)?;
@@ -782,8 +793,9 @@ mod integration {
                 Some(inputs) => inputs,
                 None => {
                     let candidate_inputs = receiver
-                        .list_unspent(None, None, None, None, None)
+                        .list_unspent()
                         .map_err(ImplementationError::new)?
+                        .0
                         .into_iter()
                         .map(input_pair_from_list_unspent);
                     let selected_input =
@@ -810,15 +822,17 @@ mod integration {
             let payjoin = payjoin
                 .finalize_proposal(|psbt: &Psbt| {
                     receiver
-                        .wallet_process_psbt(
-                            &psbt.to_string(),
-                            None,
-                            None,
-                            Some(true), // check that the receiver properly clears keypaths
+                        // call RPC manually to pass custom options
+                        .call::<corepc_node::vtype::WalletProcessPsbt>(
+                            "walletprocesspsbt",
+                            &[
+                                json!(psbt.to_string()),
+                                json!(None as Option<bool>),
+                                json!(None as Option<&str>),
+                                json!(Some(true)), // check that the receiver properly clears keypaths
+                            ],
                         )
-                        .map(|res: WalletProcessPsbtResult| {
-                            Psbt::from_str(&res.psbt).expect("psbt should be valid")
-                        })
+                        .map(|res| Psbt::from_str(&res.psbt).expect("psbt should be valid"))
                         .map_err(ImplementationError::new)
                 })
                 .save(&noop_persister)?;
@@ -826,29 +840,32 @@ mod integration {
         }
 
         pub fn build_sweep_psbt(
-            sender: &bitcoincore_rpc::Client,
+            sender: &corepc_node::Client,
             pj_uri: &PjUri,
         ) -> Result<Psbt, BoxError> {
             let mut outputs = HashMap::with_capacity(1);
-            outputs.insert(pj_uri.address.to_string(), Amount::from_btc(50.0)?);
-            let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
-                lock_unspent: Some(true),
+            outputs.insert(pj_uri.address.to_string(), Amount::from_btc(50.0)?.to_btc());
+            let options = serde_json::json!({
+                "lockUnspents": true,
                 // The minimum relay feerate ensures that tests fail if the receiver would add inputs/outputs
                 // that cannot be covered by the sender's additional fee contributions.
-                fee_rate: Some(Amount::from_sat(DEFAULT_MIN_RELAY_TX_FEE.into())),
-                subtract_fee_from_outputs: vec![0],
-                ..Default::default()
-            };
+                "feeRate": Amount::from_sat(DEFAULT_MIN_RELAY_TX_FEE.into()).to_btc(),
+                "subtractFeeFromOutputs": [0],
+            });
             let psbt = sender
-                .wallet_create_funded_psbt(
-                    &[], // inputs
-                    &outputs,
-                    None, // locktime
-                    Some(options),
-                    Some(true), // check that the sender properly clears keypaths
+                // call RPC manually to pass custom options
+                .call::<corepc_node::vtype::WalletCreateFundedPsbt>(
+                    "walletcreatefundedpsbt",
+                    &[
+                        json!(&[] as &[serde_json::Value]), // inputs
+                        json!(&outputs),
+                        json!(None as Option<u64>), // locktime
+                        json!(options),
+                        json!(Some(true)), // check that the sender properly clears keypaths
+                    ],
                 )?
                 .psbt;
-            let psbt = sender.wallet_process_psbt(&psbt, None, None, None)?.psbt;
+            let psbt = sender.wallet_process_psbt(&Psbt::from_str(&psbt)?)?.psbt;
             Ok(Psbt::from_str(&psbt)?)
         }
     }
@@ -866,19 +883,18 @@ mod integration {
             init_tracing();
             let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
             // Generate more UTXOs for the receiver
-            let receiver_address =
-                receiver.get_new_address(None, Some(AddressType::Bech32))?.assume_checked();
+            let receiver_address = receiver.new_address_with_type(AddressType::Bech32)?;
             bitcoind.client.generate_to_address(199, &receiver_address)?;
-            let receiver_utxos = receiver.list_unspent(None, None, None, None, None)?;
+            let receiver_utxos = receiver.list_unspent()?.0;
             assert_eq!(100, receiver_utxos.len(), "receiver doesn't have enough UTXOs");
             assert_eq!(
                 Amount::from_btc(3650.0)?, // 50 (starting receiver balance) + 46*50.0 + 52*25.0 (halving occurs every 150 blocks)
-                receiver.get_balances()?.mine.trusted,
+                receiver.get_balances()?.into_model()?.mine.trusted,
                 "receiver doesn't have enough bitcoin"
             );
 
             // Receiver creates the payjoin URI
-            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
+            let pj_receiver_address = receiver.new_address()?;
             let mut pj_uri =
                 build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
             pj_uri.amount = Some(Amount::ONE_BTC);
@@ -904,10 +920,7 @@ mod integration {
             // this data would transit from one party to another over the network in production
             let outputs = vec![TxOut {
                 value: Amount::from_btc(3650.0)?,
-                script_pubkey: receiver
-                    .get_new_address(None, None)?
-                    .assume_checked()
-                    .script_pubkey(),
+                script_pubkey: receiver.new_address()?.script_pubkey(),
             }];
             let drain_script = outputs[0].script_pubkey.clone();
             let inputs = receiver_utxos.into_iter().map(input_pair_from_list_unspent).collect();
@@ -938,11 +951,11 @@ mod integration {
             assert_eq!(payjoin_tx.input.len(), 101);
             assert_eq!(payjoin_tx.output.len(), 2);
             assert_eq!(
-                receiver.get_balances()?.mine.untrusted_pending,
+                receiver.get_balances()?.into_model()?.mine.untrusted_pending,
                 Amount::from_btc(3651.0)? - receiver_fee
             );
             assert_eq!(
-                sender.get_balances()?.mine.untrusted_pending,
+                sender.get_balances()?.into_model()?.mine.untrusted_pending,
                 Amount::from_btc(49.0)? - sender_fee
             );
             Ok(())
@@ -956,7 +969,7 @@ mod integration {
             let third_party = bitcoind.create_wallet("third-party")?;
 
             // Receiver creates the payjoin URI
-            let pj_receiver_address = receiver.get_new_address(None, None)?.assume_checked();
+            let pj_receiver_address = receiver.new_address()?;
             let mut pj_uri =
                 build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
             pj_uri.amount = Some(Amount::ONE_BTC);
@@ -982,17 +995,11 @@ mod integration {
             let outputs = vec![
                 TxOut {
                     value: Amount::from_sat(10000000),
-                    script_pubkey: third_party
-                        .get_new_address(None, None)?
-                        .assume_checked()
-                        .script_pubkey(),
+                    script_pubkey: third_party.new_address()?.script_pubkey(),
                 },
                 TxOut {
                     value: Amount::from_sat(90000000),
-                    script_pubkey: receiver
-                        .get_new_address(None, None)?
-                        .assume_checked()
-                        .script_pubkey(),
+                    script_pubkey: receiver.new_address()?.script_pubkey(),
                 },
             ];
             let drain_script = outputs[1].script_pubkey.clone();
@@ -1024,40 +1031,47 @@ mod integration {
             assert_eq!(payjoin_tx.input.len(), 1);
             assert_eq!(payjoin_tx.output.len(), 3);
             assert_eq!(
-                receiver.get_balances()?.mine.untrusted_pending,
+                receiver.get_balances()?.into_model()?.mine.untrusted_pending,
                 Amount::from_btc(0.9)? - receiver_fee
             );
-            assert_eq!(third_party.get_balances()?.mine.untrusted_pending, Amount::from_btc(0.1)?);
+            assert_eq!(
+                third_party.get_balances()?.into_model()?.mine.untrusted_pending,
+                Amount::from_btc(0.1)?
+            );
             // sender balance is considered "trusted" because all inputs in the transaction were
             // created by their wallet
-            assert_eq!(sender.get_balances()?.mine.trusted, Amount::from_btc(49.0)? - sender_fee);
+            assert_eq!(
+                sender.get_balances()?.into_model()?.mine.trusted,
+                Amount::from_btc(49.0)? - sender_fee
+            );
             Ok(())
         }
     }
 
-    fn build_original_psbt(
-        sender: &bitcoincore_rpc::Client,
-        pj_uri: &PjUri,
-    ) -> Result<Psbt, BoxError> {
+    fn build_original_psbt(sender: &corepc_node::Client, pj_uri: &PjUri) -> Result<Psbt, BoxError> {
         let mut outputs = HashMap::with_capacity(1);
-        outputs.insert(pj_uri.address.to_string(), pj_uri.amount.unwrap_or(Amount::ONE_BTC));
-        let options = bitcoincore_rpc::json::WalletCreateFundedPsbtOptions {
-            lock_unspent: Some(true),
+        outputs
+            .insert(pj_uri.address.to_string(), pj_uri.amount.unwrap_or(Amount::ONE_BTC).to_btc());
+        let options = json!({
+            "lockUnspents": true,
             // The minimum relay feerate ensures that tests fail if the receiver would add inputs/outputs
             // that cannot be covered by the sender's additional fee contributions.
-            fee_rate: Some(Amount::from_sat(DEFAULT_MIN_RELAY_TX_FEE.into())),
-            ..Default::default()
-        };
+            "feeRate": Amount::from_sat(DEFAULT_MIN_RELAY_TX_FEE.into()).to_btc(),
+        });
         let psbt = sender
-            .wallet_create_funded_psbt(
-                &[], // inputs
-                &outputs,
-                None, // locktime
-                Some(options),
-                Some(true), // check that the sender properly clears keypaths
+            // call RPC manually to pass custom options
+            .call::<corepc_node::vtype::WalletCreateFundedPsbt>(
+                "walletcreatefundedpsbt",
+                &[
+                    json!(&[] as &[serde_json::Value]), // inputs
+                    json!(&outputs),
+                    json!(None as Option<u64>), // locktime
+                    json!(options),
+                    json!(Some(true)), // check that the sender properly clears keypaths
+                ],
             )?
             .psbt;
-        let psbt = sender.wallet_process_psbt(&psbt, None, None, None)?.psbt;
+        let psbt = sender.wallet_process_psbt(&Psbt::from_str(&psbt)?)?.psbt;
         Ok(Psbt::from_str(&psbt)?)
     }
 
@@ -1066,7 +1080,7 @@ mod integration {
     fn handle_v1_pj_request(
         req: Request,
         headers: impl payjoin::receive::v1::Headers,
-        receiver: &bitcoincore_rpc::Client,
+        receiver: &corepc_node::Client,
         custom_outputs: Option<Vec<TxOut>>,
         drain_script: Option<&bitcoin::Script>,
         custom_inputs: Option<Vec<InputPair>>,
@@ -1086,7 +1100,7 @@ mod integration {
 
     fn handle_proposal(
         proposal: payjoin::receive::v1::UncheckedOriginalPayload,
-        receiver: &bitcoincore_rpc::Client,
+        receiver: &corepc_node::Client,
         custom_outputs: Option<Vec<TxOut>>,
         drain_script: Option<&bitcoin::Script>,
         custom_inputs: Option<Vec<InputPair>>,
@@ -1094,8 +1108,9 @@ mod integration {
         // Receive Check 1: Can Broadcast
         let proposal = proposal.check_broadcast_suitability(None, |tx| {
             Ok(receiver
-                .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])
+                .test_mempool_accept(std::slice::from_ref(tx))
                 .map_err(ImplementationError::new)?
+                .0
                 .first()
                 .ok_or(ImplementationError::from("testmempoolaccept should return a result"))?
                 .allowed)
@@ -1109,7 +1124,7 @@ mod integration {
                 .map_err(ImplementationError::new)?;
             receiver
                 .get_address_info(&address)
-                .map(|info| info.is_mine.unwrap_or(false))
+                .map(|info| info.is_mine)
                 .map_err(ImplementationError::new)
         })?;
 
@@ -1122,7 +1137,7 @@ mod integration {
                         .map_err(ImplementationError::new)?;
                 receiver
                     .get_address_info(&address)
-                    .map(|info| info.is_mine.unwrap_or(false))
+                    .map(|info| info.is_mine)
                     .map_err(ImplementationError::new)
             })?;
 
@@ -1131,19 +1146,15 @@ mod integration {
                 txos,
                 drain_script.expect("drain_script should be provided with custom_outputs"),
             )?,
-            None => payjoin.substitute_receiver_script(
-                &receiver.get_new_address(None, None)?.assume_checked().script_pubkey(),
-            )?,
+            None => payjoin.substitute_receiver_script(&receiver.new_address()?.script_pubkey())?,
         }
         .commit_outputs();
 
         let inputs = match custom_inputs {
             Some(inputs) => inputs,
             None => {
-                let candidate_inputs = receiver
-                    .list_unspent(None, None, None, None, None)?
-                    .into_iter()
-                    .map(input_pair_from_list_unspent);
+                let candidate_inputs =
+                    receiver.list_unspent()?.0.into_iter().map(input_pair_from_list_unspent);
                 let selected_input = payjoin
                     .try_preserving_privacy(candidate_inputs)
                     .map_err(|e| format!("Failed to make privacy preserving selection: {e:?}"))?;
@@ -1161,27 +1172,31 @@ mod integration {
 
         let payjoin_proposal = payjoin.finalize_proposal(|psbt: &Psbt| {
             receiver
-                .wallet_process_psbt(
-                    &psbt.to_string(),
-                    None,
-                    None,
-                    Some(true), // check that the receiver properly clears keypaths
+                // call RPC manually to pass custom options
+                .call::<corepc_node::vtype::WalletProcessPsbt>(
+                    "walletprocesspsbt",
+                    &[
+                        json!(psbt.to_string()),
+                        json!(None as Option<bool>),
+                        json!(None as Option<&str>),
+                        json!(Some(true)), // check that the receiver properly clears keypaths
+                    ],
                 )
-                .map(|res: WalletProcessPsbtResult| {
-                    Psbt::from_str(&res.psbt).expect("psbt should be valid")
-                })
+                .map(|res| Psbt::from_str(&res.psbt).expect("psbt should be valid"))
                 .map_err(ImplementationError::new)
         })?;
         Ok(payjoin_proposal)
     }
 
     fn extract_pj_tx(
-        sender: &bitcoincore_rpc::Client,
+        sender: &corepc_node::Client,
         psbt: Psbt,
     ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
-        let payjoin_psbt = sender.wallet_process_psbt(&psbt.to_string(), None, None, None)?.psbt;
-        let payjoin_psbt =
-            sender.finalize_psbt(&payjoin_psbt, Some(false))?.psbt.expect("should contain a PSBT");
+        let payjoin_psbt = sender.wallet_process_psbt(&psbt)?.psbt;
+        let payjoin_psbt = sender
+            .finalize_psbt(&Psbt::from_str(&payjoin_psbt)?)?
+            .psbt
+            .expect("should contain a PSBT");
         let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
         tracing::debug!("Sender's Payjoin PSBT: {payjoin_psbt:#?}");
 
@@ -1211,18 +1226,18 @@ mod integration {
         bitcoin::transaction::predict_weight(input_weight_predictions, tx.script_pubkey_lens())
     }
 
-    fn input_pair_from_list_unspent(
-        utxo: bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry,
-    ) -> InputPair {
+    fn input_pair_from_list_unspent(utxo: ListUnspentItem) -> InputPair {
+        let utxo = utxo.into_model().expect("listunspent utxo should be convertible to model type");
         let psbtin = PsbtInput {
             // NOTE: non_witness_utxo is not necessary because bitcoin-cli always supplies
             // witness_utxo, even for non-witness inputs
             witness_utxo: Some(TxOut {
-                value: utxo.amount,
-                script_pubkey: utxo.script_pub_key.clone(),
+                value: utxo.amount.to_unsigned().expect("amount should be unsigned"),
+                script_pubkey: utxo.script_pubkey,
             }),
-            redeem_script: utxo.redeem_script.clone(),
-            witness_script: utxo.witness_script.clone(),
+            redeem_script: utxo.redeem_script,
+            //FIXME needs later corepc_node bitcoin version
+            //witness_script: utxo.witness_script.clone(),
             ..Default::default()
         };
         let txin = TxIn {

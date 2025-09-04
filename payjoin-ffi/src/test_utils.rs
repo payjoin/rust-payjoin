@@ -2,14 +2,12 @@ use std::io;
 use std::sync::Arc;
 
 use bitcoin_ffi::Psbt;
-use bitcoincore_rpc::RpcApi;
-use bitcoind::bitcoincore_rpc;
-use bitcoind::bitcoincore_rpc::json::AddressType;
 use lazy_static::lazy_static;
+use payjoin_test_utils::corepc_node::AddressType;
 use payjoin_test_utils::{
-    EXAMPLE_URL, INVALID_PSBT, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL,
-    PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO, PAYJOIN_PROPOSAL, PAYJOIN_PROPOSAL_WITH_SENDER_INFO,
-    QUERY_PARAMS, RECEIVER_INPUT_CONTRIBUTION,
+    corepc_node, EXAMPLE_URL, INVALID_PSBT, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT,
+    PARSED_PAYJOIN_PROPOSAL, PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO, PAYJOIN_PROPOSAL,
+    PAYJOIN_PROPOSAL_WITH_SENDER_INFO, QUERY_PARAMS, RECEIVER_INPUT_CONTRIBUTION,
 };
 use serde_json::Value;
 use tokio::runtime::Runtime;
@@ -40,12 +38,12 @@ impl BitcoindEnv {
 
 #[derive(uniffi::Object)]
 pub struct BitcoindInstance {
-    _inner: bitcoind::BitcoinD,
+    _inner: corepc_node::Node,
 }
 
 #[derive(uniffi::Object)]
 pub struct RpcClient {
-    inner: bitcoincore_rpc::Client,
+    inner: corepc_node::Client,
 }
 
 #[uniffi::export]

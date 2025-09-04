@@ -6,3 +6,6 @@ resolver = "2"
 payjoin = { path = "payjoin" }
 payjoin-directory = { path = "payjoin-directory" }
 payjoin-test-utils = { path = "payjoin-test-utils" }
+# TODO: Remove these patches once a new version (>0.8.0) is released to crates.io
+corepc-client = { git = "https://github.com/rust-bitcoin/corepc.git", rev = "0e3f028" }
+corepc-types = { git = "https://github.com/rust-bitcoin/corepc.git", rev = "0e3f028" }

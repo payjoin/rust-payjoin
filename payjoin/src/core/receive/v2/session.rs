@@ -1,60 +1,33 @@
-use std::time::SystemTime;
-
 use serde::{Deserialize, Serialize};
 
 use super::{ReceiveSession, SessionContext};
+use crate::error::{InternalReplayError, ReplayError};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
 use crate::receive::v2::{extract_err_req, SessionError};
 use crate::receive::{common, JsonReply, OriginalPayload, PsbtContext};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
-/// Errors that can occur when replaying a receiver event log
-#[derive(Debug)]
-pub struct ReplayError(InternalReplayError);
-
-impl std::fmt::Display for ReplayError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use InternalReplayError::*;
-        match &self.0 {
-            SessionExpired(expiry) => write!(f, "Session expired at {expiry:?}"),
-            InvalidStateAndEvent(state, event) => write!(
-                f,
-                "Invalid combination of state ({state:?}) and event ({event:?}) during replay",
-            ),
-            PersistenceFailure(e) => write!(f, "Persistence failure: {e}"),
-        }
-    }
-}
-impl std::error::Error for ReplayError {}
-
-impl From<InternalReplayError> for ReplayError {
-    fn from(e: InternalReplayError) -> Self { ReplayError(e) }
-}
-
-#[derive(Debug)]
-pub(crate) enum InternalReplayError {
-    /// Session expired
-    SessionExpired(SystemTime),
-    /// Invalid combination of state and event
-    InvalidStateAndEvent(Box<ReceiveSession>, Box<SessionEvent>),
-    /// Application storage error
-    PersistenceFailure(ImplementationError),
-}
-
 /// Replay a receiver event log to get the receiver in its current state [ReceiveSession]
 /// and a session history [SessionHistory]
-pub fn replay_event_log<P>(persister: &P) -> Result<(ReceiveSession, SessionHistory), ReplayError>
+pub fn replay_event_log<P>(
+    persister: &P,
+) -> Result<(ReceiveSession, SessionHistory), ReplayError<ReceiveSession, SessionEvent>>
 where
     P: SessionPersister,
     P::SessionEvent: Into<SessionEvent> + Clone,
 {
-    let logs = persister
+    let mut logs = persister
         .load()
         .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
-    let mut receiver = ReceiveSession::Uninitialized;
-    let mut history = SessionHistory::default();
 
+    let mut history = SessionHistory::default();
+    let first_event = logs.next().ok_or(InternalReplayError::NoEvents)?.into();
+    history.events.push(first_event.clone());
+    let mut receiver = match first_event {
+        SessionEvent::Created(context) => ReceiveSession::new(context),
+        _ => return Err(InternalReplayError::InvalidEvent(Box::new(first_event), None).into()),
+    };
     for event in logs {
         history.events.push(event.clone().into());
         receiver = receiver.process_event(event.into()).map_err(|e| {
@@ -193,6 +166,8 @@ pub enum SessionEvent {
 
 #[cfg(test)]
 mod tests {
+    use std::time::SystemTime;
+
     use payjoin_test_utils::{BoxError, EXAMPLE_URL};
 
     use super::*;
@@ -376,7 +351,10 @@ mod tests {
         match session_history {
             Err(error) => assert_eq!(
                 error.to_string(),
-                ReplayError::from(InternalReplayError::SessionExpired(now)).to_string()
+                ReplayError::<ReceiveSession, SessionEvent>::from(
+                    InternalReplayError::SessionExpired(now)
+                )
+                .to_string()
             ),
             Ok(_) => panic!("Expected session expiry error, got success"),
         }

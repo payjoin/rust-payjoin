@@ -352,8 +352,6 @@ impl App {
                     self.finalize_proposal(proposal, persister).await,
                 ReceiveSession::PayjoinProposal(proposal) =>
                     self.send_payjoin_proposal(proposal, persister).await,
-                ReceiveSession::Uninitialized =>
-                    return Err(anyhow!("Uninitialized receiver session")),
                 ReceiveSession::TerminalFailure =>
                     return Err(anyhow!("Terminal receiver session")),
             }

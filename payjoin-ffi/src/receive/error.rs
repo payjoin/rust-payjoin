@@ -153,4 +153,6 @@ pub struct PsbtInputError(#[from] receive::PsbtInputError);
 /// Error that may occur when a receiver event log is replayed
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-pub struct ReceiverReplayError(#[from] receive::v2::ReplayError);
+pub struct ReceiverReplayError(
+    #[from] payjoin::error::ReplayError<receive::v2::ReceiveSession, receive::v2::SessionEvent>,
+);

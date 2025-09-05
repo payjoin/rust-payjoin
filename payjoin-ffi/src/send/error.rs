@@ -85,7 +85,9 @@ pub struct WellKnownError(#[from] send::WellKnownError);
 /// Error that may occur when the sender session event log is replayed
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-pub struct SenderReplayError(#[from] send::v2::ReplayError);
+pub struct SenderReplayError(
+    #[from] payjoin::error::ReplayError<send::v2::SendSession, send::v2::SessionEvent>,
+);
 
 /// Error that may occur during state machine transitions
 #[derive(Debug, thiserror::Error, uniffi::Error)]

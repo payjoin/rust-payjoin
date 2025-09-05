@@ -37,6 +37,7 @@ pub fn replay_event_log<P>(persister: &P) -> Result<(SendSession, SessionHistory
 where
     P: SessionPersister + Clone,
     P::SessionEvent: Into<SessionEvent> + Clone,
+    P::SessionEvent: From<SessionEvent>,
 {
     let logs = persister
         .load()
@@ -59,6 +60,18 @@ where
         }
     }
 
+    let pj_param = history.pj_param().expect("pj_param should be present");
+    if std::time::SystemTime::now() > pj_param.expiration() {
+        // Session has expired: close the session and persist a fatal error
+        persister
+            .save_event(SessionEvent::SessionInvalid("Session expired".to_string()).into())
+            .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
+        persister
+            .close()
+            .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
+
+        return Ok((SendSession::TerminalFailure, history));
+    }
     Ok((sender, history))
 }
 

@@ -11,6 +11,9 @@ impl std::fmt::Display for ReplayError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use InternalReplayError::*;
         match &self.0 {
+            NoEvents => write!(f, "No events found in session"),
+            InvalidEventForUninitializedSession(event) =>
+                write!(f, "Invalid event ({event:?}) for uninitialized session",),
             InvalidStateAndEvent(state, event) => write!(
                 f,
                 "Invalid combination of state ({state:?}) and event ({event:?}) during replay",
@@ -27,6 +30,10 @@ impl From<InternalReplayError> for ReplayError {
 
 #[derive(Debug)]
 pub(crate) enum InternalReplayError {
+    /// No events in the event log
+    NoEvents,
+    /// Invalid initial event
+    InvalidEventForUninitializedSession(Box<SessionEvent>),
     /// Invalid combination of state and event
     InvalidStateAndEvent(Box<SendSession>, Box<SessionEvent>),
     /// Application storage error
@@ -38,17 +45,18 @@ where
     P: SessionPersister + Clone,
     P::SessionEvent: Into<SessionEvent> + Clone,
 {
-    let logs = persister
+    let mut logs = persister
         .load()
         .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
-
-    let mut sender = SendSession::Uninitialized;
     let mut history = SessionHistory::default();
+    let first_event = logs.next().ok_or(InternalReplayError::NoEvents)?.into();
+    history.events.push(first_event.clone());
+    let mut sender = SendSession::new(first_event)?;
+
     for log in logs {
         let session_event = log.into();
         history.events.push(session_event.clone());
-        let current_sender = std::mem::replace(&mut sender, SendSession::Uninitialized);
-        match current_sender.process_event(session_event) {
+        match sender.clone().process_event(session_event) {
             Ok(next_sender) => sender = next_sender,
             Err(_e) => {
                 persister.close().map_err(|e| {

@@ -5,9 +5,8 @@ use serde::{Deserialize, Serialize};
 use super::{ReceiveSession, SessionContext};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
-use crate::receive::v2::{extract_err_req, SessionError};
 use crate::receive::{common, JsonReply, OriginalPayload, PsbtContext};
-use crate::{ImplementationError, IntoUrl, PjUri, Request};
+use crate::{ImplementationError, PjUri};
 
 /// Errors that can occur when replaying a receiver event log
 #[derive(Debug)]
@@ -18,6 +17,9 @@ impl std::fmt::Display for ReplayError {
         use InternalReplayError::*;
         match &self.0 {
             SessionExpired(expiry) => write!(f, "Session expired at {expiry:?}"),
+            NoEvents => write!(f, "No events found in session"),
+            InvalidEventForUninitializedSession(event) =>
+                write!(f, "Invalid event ({event:?}) for uninitialized session",),
             InvalidStateAndEvent(state, event) => write!(
                 f,
                 "Invalid combination of state ({state:?}) and event ({event:?}) during replay",
@@ -36,6 +38,10 @@ impl From<InternalReplayError> for ReplayError {
 pub(crate) enum InternalReplayError {
     /// Session expired
     SessionExpired(SystemTime),
+    /// No events found in session
+    NoEvents,
+    /// Invalid event for uninitialized session
+    InvalidEventForUninitializedSession(Box<SessionEvent>),
     /// Invalid combination of state and event
     InvalidStateAndEvent(Box<ReceiveSession>, Box<SessionEvent>),
     /// Application storage error
@@ -49,12 +55,14 @@ where
     P: SessionPersister,
     P::SessionEvent: Into<SessionEvent> + Clone,
 {
-    let logs = persister
+    let mut logs = persister
         .load()
         .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
-    let mut receiver = ReceiveSession::Uninitialized;
-    let mut history = SessionHistory::default();
 
+    let mut history = SessionHistory::default();
+    let first_event = logs.next().ok_or(InternalReplayError::NoEvents)?.into();
+    history.events.push(first_event.clone());
+    let mut receiver = ReceiveSession::new(first_event)?;
     for event in logs {
         history.events.push(event.clone().into());
         receiver = receiver.process_event(event.into()).map_err(|e| {
@@ -90,7 +98,7 @@ impl SessionHistory {
 
     fn get_unchecked_proposal(&self) -> Option<OriginalPayload> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::UncheckedOriginalPayload(proposal) => Some(proposal.0.clone()),
+            SessionEvent::UncheckedOriginalPayload { original, .. } => Some(original.clone()),
             _ => None,
         })
     }
@@ -118,55 +126,11 @@ impl SessionHistory {
     }
 
     /// Terminal error from the session if present
-    pub fn terminal_error(&self) -> Option<(String, Option<JsonReply>)> {
+    pub fn terminal_error(&self) -> Option<JsonReply> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::SessionInvalid(err_str, reply) => Some((err_str.clone(), reply.clone())),
+            SessionEvent::TerminalFailure(reply) => Some(reply.clone()),
             _ => None,
         })
-    }
-
-    /// Construct the error request to be posted on the directory if an error occurred.
-    /// To process the response, use [crate::receive::v2::process_err_res]
-    pub fn extract_err_req(
-        &self,
-        ohttp_relay: impl IntoUrl,
-    ) -> Result<Option<(Request, ohttp::ClientResponse)>, SessionError> {
-        // FIXME ideally this should be more like a method of
-        // Receiver<UncheckedOriginalPayload> and subsequent states instead of the
-        // history as a whole since it doesn't make sense to call it before,
-        // reaching that state.
-        if !self.received_sender_proposal() {
-            return Ok(None);
-        }
-
-        let session_context = match self.session_context() {
-            Some(session_context) => session_context,
-            None => return Ok(None),
-        };
-        let json_reply = match self.terminal_error() {
-            Some((_, Some(json_reply))) => json_reply,
-            _ => return Ok(None),
-        };
-        let (req, ctx) = extract_err_req(&json_reply, ohttp_relay, &session_context)?;
-        Ok(Some((req, ctx)))
-    }
-
-    fn received_sender_proposal(&self) -> bool {
-        self.events.iter().any(|event| matches!(event, SessionEvent::UncheckedOriginalPayload(_)))
-    }
-
-    fn session_context(&self) -> Option<SessionContext> {
-        let mut initial_session_context = self.events.iter().find_map(|event| match event {
-            SessionEvent::Created(session_context) => Some(session_context.clone()),
-            _ => None,
-        })?;
-
-        initial_session_context.reply_key = self.events.iter().find_map(|event| match event {
-            SessionEvent::UncheckedOriginalPayload((_proposal, reply_key)) => reply_key.clone(),
-            _ => None,
-        });
-
-        Some(initial_session_context)
     }
 }
 
@@ -175,7 +139,10 @@ impl SessionHistory {
 /// Each event can be used to transition the receiver state machine to a new state
 pub enum SessionEvent {
     Created(SessionContext),
-    UncheckedOriginalPayload((OriginalPayload, Option<crate::HpkePublicKey>)),
+    UncheckedOriginalPayload {
+        original: OriginalPayload,
+        reply_key: Option<crate::HpkePublicKey>,
+    },
     MaybeInputsOwned(),
     MaybeInputsSeen(),
     OutputsUnknown(),
@@ -184,11 +151,7 @@ pub enum SessionEvent {
     WantsFeeRange(common::WantsFeeRange),
     ProvisionalProposal(PsbtContext),
     PayjoinProposal(bitcoin::Psbt),
-    /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
-    /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
-    /// Reason being in some cases we still want to preserve the error b/c we can action on it. For now this is a terminal state and there is nothing to replay and is saved to be displayed.
-    /// b/c its a terminal state and there is nothing to replay. So serialization will be lossy and that is fine.
-    SessionInvalid(String, Option<JsonReply>),
+    TerminalFailure(JsonReply),
 }
 
 #[cfg(test)]
@@ -207,10 +170,8 @@ mod tests {
 
     fn unchecked_receiver_from_test_vector() -> Receiver<UncheckedOriginalPayload> {
         Receiver {
-            state: UncheckedOriginalPayload {
-                original: original_from_test_vector(),
-                session_context: SHARED_CONTEXT.clone(),
-            },
+            context: SHARED_CONTEXT.clone(),
+            state: UncheckedOriginalPayload { original: original_from_test_vector() },
         }
     }
 
@@ -257,11 +218,11 @@ mod tests {
 
         let test_cases = vec![
             SessionEvent::Created(SHARED_CONTEXT.clone()),
-            SessionEvent::UncheckedOriginalPayload((original.clone(), None)),
-            SessionEvent::UncheckedOriginalPayload((
+            SessionEvent::UncheckedOriginalPayload { original: original.clone(), reply_key: None },
+            SessionEvent::UncheckedOriginalPayload {
                 original,
-                Some(crate::HpkeKeyPair::gen_keypair().1),
-            )),
+                reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
+            },
             SessionEvent::MaybeInputsOwned(),
             SessionEvent::MaybeInputsSeen(),
             SessionEvent::OutputsUnknown(),
@@ -270,6 +231,7 @@ mod tests {
             SessionEvent::WantsFeeRange(wants_fee_range.state.inner.clone()),
             SessionEvent::ProvisionalProposal(provisional_proposal.state.psbt_context.clone()),
             SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()),
+            SessionEvent::ErrorResponseProcessed,
         ];
 
         for event in test_cases {
@@ -317,7 +279,8 @@ mod tests {
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::Initialized(Receiver {
-                state: Initialized { context: session_context },
+                context: session_context,
+                state: Initialized {},
             }),
         };
         run_session_history_test(test)
@@ -332,17 +295,18 @@ mod tests {
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
-                SessionEvent::UncheckedOriginalPayload((original.clone(), reply_key.clone())),
+                SessionEvent::UncheckedOriginalPayload {
+                    original: original.clone(),
+                    reply_key: reply_key.clone(),
+                },
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedOriginalPayload(Receiver {
-                state: UncheckedOriginalPayload {
-                    original,
-                    session_context: SessionContext { reply_key, ..session_context },
-                },
+                context: SessionContext { reply_key, ..session_context },
+                state: UncheckedOriginalPayload { original },
             }),
         };
         run_session_history_test(test)
@@ -358,17 +322,18 @@ mod tests {
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
-                SessionEvent::UncheckedOriginalPayload((original.clone(), reply_key.clone())),
+                SessionEvent::UncheckedOriginalPayload {
+                    original: original.clone(),
+                    reply_key: reply_key.clone(),
+                },
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedOriginalPayload(Receiver {
-                state: UncheckedOriginalPayload {
-                    original,
-                    session_context: SessionContext { reply_key, ..session_context },
-                },
+                context: SessionContext { reply_key, ..session_context },
+                state: UncheckedOriginalPayload { original },
             }),
         };
         let session_history = run_session_history_test(test);
@@ -391,17 +356,18 @@ mod tests {
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
-                SessionEvent::UncheckedOriginalPayload((original.clone(), reply_key.clone())),
+                SessionEvent::UncheckedOriginalPayload {
+                    original: original.clone(),
+                    reply_key: reply_key.clone(),
+                },
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
             expected_receiver_state: ReceiveSession::UncheckedOriginalPayload(Receiver {
-                state: UncheckedOriginalPayload {
-                    original,
-                    session_context: SessionContext { reply_key, ..session_context },
-                },
+                context: SessionContext { reply_key, ..session_context },
+                state: UncheckedOriginalPayload { original },
             }),
         };
         run_session_history_test(test)
@@ -421,7 +387,10 @@ mod tests {
         let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedOriginalPayload((original.clone(), reply_key.clone())));
+        events.push(SessionEvent::UncheckedOriginalPayload {
+            original: original.clone(),
+            reply_key: reply_key.clone(),
+        });
         events.push(SessionEvent::MaybeInputsOwned());
 
         let test = SessionHistoryTest {
@@ -431,10 +400,8 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::MaybeInputsOwned(Receiver {
-                state: MaybeInputsOwned {
-                    original,
-                    session_context: SessionContext { reply_key, ..session_context },
-                },
+                context: SessionContext { reply_key, ..session_context },
+                state: MaybeInputsOwned { original },
             }),
         };
         run_session_history_test(test)
@@ -479,7 +446,10 @@ mod tests {
         let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedOriginalPayload((original.clone(), reply_key.clone())));
+        events.push(SessionEvent::UncheckedOriginalPayload {
+            original: original.clone(),
+            reply_key: reply_key.clone(),
+        });
         events.push(SessionEvent::MaybeInputsOwned());
         events.push(SessionEvent::MaybeInputsSeen());
         events.push(SessionEvent::OutputsUnknown());
@@ -499,9 +469,9 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::ProvisionalProposal(Receiver {
+                context: SessionContext { reply_key, ..session_context },
                 state: ProvisionalProposal {
                     psbt_context: provisional_proposal.state.psbt_context.clone(),
-                    session_context: SessionContext { reply_key, ..session_context },
                 },
             }),
         };
@@ -552,7 +522,10 @@ mod tests {
         let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedOriginalPayload((original.clone(), reply_key.clone())));
+        events.push(SessionEvent::UncheckedOriginalPayload {
+            original: original.clone(),
+            reply_key: reply_key.clone(),
+        });
         events.push(SessionEvent::MaybeInputsOwned());
         events.push(SessionEvent::MaybeInputsSeen());
         events.push(SessionEvent::OutputsUnknown());
@@ -573,10 +546,8 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {
-                state: PayjoinProposal {
-                    psbt: payjoin_proposal.psbt().clone(),
-                    session_context: SessionContext { reply_key, ..session_context },
-                },
+                context: SessionContext { reply_key, ..session_context },
+                state: PayjoinProposal { psbt: payjoin_proposal.psbt().clone() },
             }),
         };
         run_session_history_test(test)
@@ -608,7 +579,7 @@ mod tests {
         let session_history = SessionHistory {
             events: vec![
                 SessionEvent::MaybeInputsOwned(),
-                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 
@@ -619,7 +590,7 @@ mod tests {
             events: vec![
                 SessionEvent::Created(SHARED_CONTEXT.clone()),
                 SessionEvent::MaybeInputsOwned(),
-                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 
@@ -637,11 +608,11 @@ mod tests {
         let session_history_one = SessionHistory {
             events: vec![
                 SessionEvent::Created(SHARED_CONTEXT.clone()),
-                SessionEvent::UncheckedOriginalPayload((
-                    proposal.clone(),
-                    Some(crate::HpkeKeyPair::gen_keypair().1),
-                )),
-                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
+                SessionEvent::UncheckedOriginalPayload {
+                    original: proposal.clone(),
+                    reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
+                },
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 
@@ -651,11 +622,11 @@ mod tests {
         let session_history_two = SessionHistory {
             events: vec![
                 SessionEvent::Created(SHARED_CONTEXT.clone()),
-                SessionEvent::UncheckedOriginalPayload((
-                    proposal.clone(),
-                    Some(crate::HpkeKeyPair::gen_keypair().1),
-                )),
-                SessionEvent::SessionInvalid(mock_err.0, Some(mock_err.1)),
+                SessionEvent::UncheckedOriginalPayload {
+                    original: proposal.clone(),
+                    reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
+                },
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 

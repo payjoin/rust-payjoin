@@ -68,7 +68,6 @@ impl SenderSessionEvent {
 
 #[derive(Clone, uniffi::Enum)]
 pub enum SendSession {
-    Uninitialized,
     WithReplyKey { inner: Arc<WithReplyKey> },
     V2GetContext { inner: Arc<V2GetContext> },
     ProposalReceived { inner: Arc<Psbt> },
@@ -79,7 +78,6 @@ impl From<payjoin::send::v2::SendSession> for SendSession {
     fn from(value: payjoin::send::v2::SendSession) -> Self {
         use payjoin::send::v2::SendSession;
         match value {
-            SendSession::Uninitialized => Self::Uninitialized,
             SendSession::WithReplyKey(inner) =>
                 Self::WithReplyKey { inner: Arc::new(inner.into()) },
             SendSession::V2GetContext(inner) =>

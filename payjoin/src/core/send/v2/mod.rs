@@ -211,7 +211,6 @@ impl<State> core::ops::DerefMut for Sender<State> {
 /// and the state to be updated with the next event over a uniform interface.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SendSession {
-    Uninitialized,
     WithReplyKey(Sender<WithReplyKey>),
     V2GetContext(Sender<V2GetContext>),
     ProposalReceived(Psbt),
@@ -219,10 +218,17 @@ pub enum SendSession {
 }
 
 impl SendSession {
+    pub fn new(event: SessionEvent) -> Result<Self, ReplayError> {
+        match event {
+            SessionEvent::CreatedReplyKey(sender_with_reply_key) =>
+                Ok(SendSession::WithReplyKey(Sender { state: sender_with_reply_key })),
+            _ =>
+                Err(InternalReplayError::InvalidEventForUninitializedSession(Box::new(event))
+                    .into()),
+        }
+    }
     fn process_event(self, event: SessionEvent) -> Result<SendSession, ReplayError> {
         match (self, event) {
-            (SendSession::Uninitialized, SessionEvent::CreatedReplyKey(sender_with_reply_key)) =>
-                Ok(SendSession::WithReplyKey(Sender { state: sender_with_reply_key })),
             (SendSession::WithReplyKey(state), SessionEvent::V2GetContext(v2_get_context)) =>
                 Ok(state.apply_v2_get_context(v2_get_context)),
             (SendSession::V2GetContext(_state), SessionEvent::ProposalReceived(proposal)) =>
@@ -565,7 +571,7 @@ mod test {
     }
 
     #[test]
-    fn test_extract_v2_success() -> Result<(), BoxError> {
+    fn test_create_v2_post_request_success() -> Result<(), BoxError> {
         let sender = create_sender_context(SystemTime::now() + Duration::from_secs(60))?;
         let ohttp_relay = EXAMPLE_URL.clone();
         let result = sender.create_v2_post_request(ohttp_relay);
@@ -580,7 +586,7 @@ mod test {
     }
 
     #[test]
-    fn test_extract_v2_fails_when_expired() -> Result<(), BoxError> {
+    fn test_create_v2_post_request_fails_when_expired() -> Result<(), BoxError> {
         let expected_error = "session expired at SystemTime";
         let sender = create_sender_context(SystemTime::now() - Duration::from_secs(60))?;
         let ohttp_relay = EXAMPLE_URL.clone();

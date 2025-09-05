@@ -4,7 +4,6 @@ mod integration {
 
     use bitcoin::policy::DEFAULT_MIN_RELAY_TX_FEE;
     use bitcoin::psbt::{Input as PsbtInput, Psbt};
-    use bitcoin::transaction::InputWeightPrediction;
     use bitcoin::{Amount, FeeRate, OutPoint, TxIn, TxOut, Weight};
     use payjoin::receive::v1::build_v1_pj_uri;
     use payjoin::receive::InputPair;
@@ -15,6 +14,16 @@ mod integration {
     use serde_json::json;
 
     const EXAMPLE_URL: &str = "https://example.com";
+    /// Transaction weight components for fee calculation
+    /// Useful resource: https://bitcoin.stackexchange.com/a/84006
+    const TX_HEADER_LEGACY_WEIGHT: u64 = 40;
+    const TX_HEADER_WEIGHT: u64 = 42;
+    const P2PKH_INPUT_WEIGHT: u64 = 592;
+    const NESTED_P2WPKH_INPUT_WEIGHT: u64 = 364;
+    const P2WPKH_INPUT_WEIGHT: u64 = 272;
+    const P2TR_INPUT_WEIGHT: u64 = 230;
+    const P2WPKH_OUTPUT_WEIGHT: u64 = 124;
+
     #[cfg(feature = "v1")]
     mod v1 {
         use payjoin::send::v1::SenderBuilder;
@@ -30,7 +39,13 @@ mod integration {
                 Some(AddressType::Legacy),
                 Some(AddressType::Legacy),
             )?;
-            do_v1_to_v1(sender, receiver, true)
+            let expected_weight = Weight::from_wu(
+                TX_HEADER_LEGACY_WEIGHT + (P2PKH_INPUT_WEIGHT * 2) + (P2WPKH_OUTPUT_WEIGHT * 2),
+            )
+            // bitcoin-cli wallet uses signature grinding to save one vbyte on the original PSBT.
+            // subtract it here
+            - Weight::from_vb_unchecked(1);
+            do_v1_to_v1(sender, receiver, expected_weight)
         }
 
         #[test]
@@ -40,7 +55,10 @@ mod integration {
                 Some(AddressType::P2shSegwit),
                 Some(AddressType::P2shSegwit),
             )?;
-            do_v1_to_v1(sender, receiver, false)
+            let expected_weight = Weight::from_wu(
+                TX_HEADER_WEIGHT + (NESTED_P2WPKH_INPUT_WEIGHT * 2) + (P2WPKH_OUTPUT_WEIGHT * 2),
+            );
+            do_v1_to_v1(sender, receiver, expected_weight)
         }
 
         #[test]
@@ -50,7 +68,10 @@ mod integration {
                 Some(AddressType::Bech32),
                 Some(AddressType::Bech32),
             )?;
-            do_v1_to_v1(sender, receiver, false)
+            let expected_weight = Weight::from_wu(
+                TX_HEADER_WEIGHT + (P2WPKH_INPUT_WEIGHT * 2) + (P2WPKH_OUTPUT_WEIGHT * 2),
+            );
+            do_v1_to_v1(sender, receiver, expected_weight)
         }
 
         #[ignore] // TODO: Not supported by bitcoind 0_21_2. Later versions fail for unknown reasons
@@ -61,13 +82,15 @@ mod integration {
                 Some(AddressType::Bech32m),
                 Some(AddressType::Bech32m),
             )?;
-            do_v1_to_v1(sender, receiver, false)
+            // FIXME: properly calculate taproot expected fee
+            let expected_weight = Weight::ZERO;
+            do_v1_to_v1(sender, receiver, expected_weight)
         }
 
         fn do_v1_to_v1(
             sender: corepc_node::Client,
             receiver: corepc_node::Client,
-            is_p2pkh: bool,
+            expected_weight: Weight,
         ) -> Result<(), BoxError> {
             // Receiver creates the payjoin URI
             let pj_receiver_address = receiver.new_address()?;
@@ -100,22 +123,13 @@ mod integration {
             // Inside the Sender:
             // Sender checks, signs, finalizes, extracts, and broadcasts
             let checked_payjoin_proposal_psbt = ctx.process_response(response.as_bytes())?;
+            let network_fees = checked_payjoin_proposal_psbt.fee()?;
+            let expected_fee = expected_weight * FeeRate::BROADCAST_MIN;
+            assert_eq!(network_fees, expected_fee);
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
 
             // Check resulting transaction and balances
-            let mut predicted_tx_weight = predicted_tx_weight(&payjoin_tx);
-            if is_p2pkh {
-                // HACK:
-                // bitcoin-cli always grinds signatures to save 1 byte (4WU) and simplify fee
-                // estimates. This results in the original PSBT having a fee of 219 sats
-                // instead of the "worst case" 220 sats assuming a maximum-size signature.
-                // Note that this also affects weight predictions for segwit inputs, but the
-                // resulting signatures are only 1WU smaller (.25 bytes) and therefore don't
-                // affect our weight predictions for the original sender inputs.
-                predicted_tx_weight -= Weight::from_non_witness_data_size(1);
-            }
-            let network_fees = predicted_tx_weight * FeeRate::BROADCAST_MIN;
             assert_eq!(payjoin_tx.input.len(), 2);
             assert_eq!(payjoin_tx.output.len(), 2);
             assert_eq!(
@@ -515,12 +529,17 @@ mod integration {
 
                 let checked_payjoin_proposal_psbt =
                     response.success().expect("psbt should exist").clone();
+                let network_fees = checked_payjoin_proposal_psbt.fee()?;
+                let expected_weight = Weight::from_wu(
+                    TX_HEADER_WEIGHT + (P2WPKH_INPUT_WEIGHT * 2) + (P2WPKH_OUTPUT_WEIGHT),
+                );
+                let expected_fee = expected_weight * FeeRate::BROADCAST_MIN;
+                assert_eq!(network_fees, expected_fee);
                 let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
                 tracing::info!("sent");
 
                 // Check resulting transaction and balances
-                let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
                 // Sender sent the entire value of their utxo to receiver (minus fees)
                 assert_eq!(payjoin_tx.input.len(), 2);
                 assert_eq!(payjoin_tx.output.len(), 1);
@@ -576,11 +595,16 @@ mod integration {
             // Inside the Sender:
             // Sender checks, signs, finalizes, constructs, and broadcasts
             let checked_payjoin_proposal_psbt = ctx.process_response(response.as_bytes())?;
+            let network_fees = checked_payjoin_proposal_psbt.fee()?;
+            let expected_weight = Weight::from_wu(
+                TX_HEADER_WEIGHT + (P2WPKH_INPUT_WEIGHT * 2) + (P2WPKH_OUTPUT_WEIGHT * 2),
+            );
+            let expected_fee = expected_weight * FeeRate::BROADCAST_MIN;
+            assert_eq!(network_fees, expected_fee);
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
 
             // Check resulting transaction and balances
-            let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
             assert_eq!(payjoin_tx.input.len(), 2);
             assert_eq!(payjoin_tx.output.len(), 2);
             assert_eq!(
@@ -709,6 +733,12 @@ mod integration {
 
                 let checked_payjoin_proposal_psbt =
                     send_ctx.process_response(&response.bytes().await?)?;
+                let network_fees = checked_payjoin_proposal_psbt.fee()?;
+                let expected_weight = Weight::from_wu(
+                    TX_HEADER_WEIGHT + (P2WPKH_INPUT_WEIGHT * 2) + (P2WPKH_OUTPUT_WEIGHT * 2),
+                );
+                let expected_fee = expected_weight * FeeRate::BROADCAST_MIN;
+                assert_eq!(network_fees, expected_fee);
                 let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
                 sender.send_raw_transaction(&payjoin_tx)?;
                 tracing::info!("sent");
@@ -718,7 +748,6 @@ mod integration {
                 );
 
                 // Check resulting transaction and balances
-                let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
                 assert_eq!(payjoin_tx.input.len(), 2);
                 assert_eq!(payjoin_tx.output.len(), 2);
                 assert_eq!(
@@ -938,11 +967,16 @@ mod integration {
             // Inside the Sender:
             // Sender checks, signs, finalizes, extracts, and broadcasts
             let checked_payjoin_proposal_psbt = ctx.process_response(response.as_bytes())?;
+            let network_fees = checked_payjoin_proposal_psbt.fee()?;
+            let expected_weight = Weight::from_wu(
+                TX_HEADER_WEIGHT + (P2WPKH_INPUT_WEIGHT * 101) + (P2WPKH_OUTPUT_WEIGHT * 2),
+            );
+            let expected_fee = expected_weight * FeeRate::BROADCAST_MIN;
+            assert_eq!(network_fees, expected_fee);
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
 
             // Check resulting transaction and balances
-            let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
             // The sender pays (original tx fee + max additional fee)
             let original_tx_fee = psbt.fee()?;
             let sender_fee = original_tx_fee + max_additional_fee;
@@ -1018,11 +1052,16 @@ mod integration {
             // Inside the Sender:
             // Sender checks, signs, finalizes, extracts, and broadcasts
             let checked_payjoin_proposal_psbt = ctx.process_response(response.as_bytes())?;
+            let network_fees = checked_payjoin_proposal_psbt.fee()?;
+            let expected_weight = Weight::from_wu(
+                TX_HEADER_WEIGHT + (P2WPKH_INPUT_WEIGHT) + (P2WPKH_OUTPUT_WEIGHT * 3),
+            );
+            let expected_fee = expected_weight * FeeRate::BROADCAST_MIN;
+            assert_eq!(network_fees, expected_fee);
             let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
             sender.send_raw_transaction(&payjoin_tx)?;
 
             // Check resulting transaction and balances
-            let network_fees = predicted_tx_weight(&payjoin_tx) * FeeRate::BROADCAST_MIN;
             // The sender pays original tx fee
             let original_tx_fee = psbt.fee()?;
             let sender_fee = original_tx_fee;
@@ -1201,29 +1240,6 @@ mod integration {
         tracing::debug!("Sender's Payjoin PSBT: {payjoin_psbt:#?}");
 
         Ok(payjoin_psbt.extract_tx()?)
-    }
-
-    /// Simplified input weight predictions for a fully-signed transaction
-    fn predicted_tx_weight(tx: &bitcoin::Transaction) -> Weight {
-        let input_weight_predictions = tx.input.iter().map(|txin| {
-            // See https://bitcoin.stackexchange.com/a/107873
-            match (txin.script_sig.is_empty(), txin.witness.is_empty()) {
-                // witness is empty: legacy input
-                (false, true) => InputWeightPrediction::P2PKH_COMPRESSED_MAX,
-                // script sig is empty: native segwit input
-                (true, false) => match txin.witness.len() {
-                    // <signature>
-                    1 => InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH,
-                    // <signature> <public_key>
-                    2 => InputWeightPrediction::P2WPKH_MAX,
-                    _ => panic!("unsupported witness"),
-                },
-                // neither are empty: nested segwit (p2wpkh-in-p2sh) input
-                (false, false) => InputWeightPrediction::from_slice(23, &[72, 33]),
-                _ => panic!("one of script_sig or witness should be non-empty"),
-            }
-        });
-        bitcoin::transaction::predict_weight(input_weight_predictions, tx.script_pubkey_lens())
     }
 
     fn input_pair_from_list_unspent(utxo: ListUnspentItem) -> InputPair {

@@ -74,7 +74,6 @@ mod integration {
             do_v1_to_v1(sender, receiver, expected_weight)
         }
 
-        #[ignore] // TODO: Not supported by bitcoind 0_21_2. Later versions fail for unknown reasons
         #[test]
         fn v1_to_v1_taproot() -> Result<(), BoxError> {
             init_tracing();
@@ -82,8 +81,15 @@ mod integration {
                 Some(AddressType::Bech32m),
                 Some(AddressType::Bech32m),
             )?;
-            // FIXME: properly calculate taproot expected fee
-            let expected_weight = Weight::ZERO;
+            let expected_weight = Weight::from_wu(
+                TX_HEADER_WEIGHT
+                    + (P2TR_INPUT_WEIGHT * 2)
+                    + (P2WPKH_OUTPUT_WEIGHT * 2),
+            )
+            // bitcoin-cli wallet overestimates taproot inputs in the original PSBT by one vbyte:
+            // https://github.com/payjoin/rust-payjoin/issues/369#issuecomment-2657539591
+            // add it here
+            + Weight::from_vb_unchecked(1);
             do_v1_to_v1(sender, receiver, expected_weight)
         }
 

@@ -5,9 +5,9 @@ use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::OptionalTransitionOutcome;
 use payjoin::receive::v2::{
-    process_err_res, replay_event_log as replay_receiver_event_log, Initialized, MaybeInputsOwned,
-    MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal, ReceiveSession,
-    Receiver, ReceiverBuilder, SessionHistory, UncheckedOriginalPayload, WantsFeeRange,
+    replay_event_log as replay_receiver_event_log, Initialized, MaybeInputsOwned, MaybeInputsSeen,
+    OutputsUnknown, PayjoinProposal, ProvisionalProposal, ReceiveSession, Receiver,
+    ReceiverBuilder, ToHandleError, UncheckedOriginalPayload, WantsFeeRange,
     WantsInputs, WantsOutputs,
 };
 use payjoin::send::v2::{
@@ -330,46 +330,31 @@ impl App {
         session: ReceiveSession,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        let res = {
-            match session {
-                ReceiveSession::Initialized(proposal) =>
-                    self.read_from_directory(proposal, persister).await,
-                ReceiveSession::UncheckedOriginalPayload(proposal) =>
-                    self.check_proposal(proposal, persister).await,
-                ReceiveSession::MaybeInputsOwned(proposal) =>
-                    self.check_inputs_not_owned(proposal, persister).await,
-                ReceiveSession::MaybeInputsSeen(proposal) =>
-                    self.check_no_inputs_seen_before(proposal, persister).await,
-                ReceiveSession::OutputsUnknown(proposal) =>
-                    self.identify_receiver_outputs(proposal, persister).await,
-                ReceiveSession::WantsOutputs(proposal) =>
-                    self.commit_outputs(proposal, persister).await,
-                ReceiveSession::WantsInputs(proposal) =>
-                    self.contribute_inputs(proposal, persister).await,
-                ReceiveSession::WantsFeeRange(proposal) =>
-                    self.apply_fee_range(proposal, persister).await,
-                ReceiveSession::ProvisionalProposal(proposal) =>
-                    self.finalize_proposal(proposal, persister).await,
-                ReceiveSession::PayjoinProposal(proposal) =>
-                    self.send_payjoin_proposal(proposal, persister).await,
-                ReceiveSession::TerminalFailure(e) =>
-                    return Err(anyhow!("Terminal receiver session {e:?}")),
-            }
-        };
-
-        match res {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                let (_, session_history) = replay_receiver_event_log(persister)?;
-                let pj_uri = match session_history.pj_uri() {
-                    Some(uri) => Some(uri.extras.endpoint().clone()),
-                    None => None,
-                };
-                let ohttp_relay = self.unwrap_relay_or_else_fetch(pj_uri).await?;
-                self.handle_recoverable_error(&ohttp_relay, &session_history).await?;
-
-                Err(e)
-            }
+        match session {
+            ReceiveSession::Initialized(proposal) =>
+                self.read_from_directory(proposal, persister).await,
+            ReceiveSession::UncheckedOriginalPayload(proposal) =>
+                self.check_proposal(proposal, persister).await,
+            ReceiveSession::MaybeInputsOwned(proposal) =>
+                self.check_inputs_not_owned(proposal, persister).await,
+            ReceiveSession::MaybeInputsSeen(proposal) =>
+                self.check_no_inputs_seen_before(proposal, persister).await,
+            ReceiveSession::OutputsUnknown(proposal) =>
+                self.identify_receiver_outputs(proposal, persister).await,
+            ReceiveSession::WantsOutputs(proposal) =>
+                self.commit_outputs(proposal, persister).await,
+            ReceiveSession::WantsInputs(proposal) =>
+                self.contribute_inputs(proposal, persister).await,
+            ReceiveSession::WantsFeeRange(proposal) =>
+                self.apply_fee_range(proposal, persister).await,
+            ReceiveSession::ProvisionalProposal(proposal) =>
+                self.finalize_proposal(proposal, persister).await,
+            ReceiveSession::PayjoinProposal(proposal) =>
+                self.send_payjoin_proposal(proposal, persister).await,
+            ReceiveSession::HasErrorToHandle(error_handler) =>
+                self.handle_recoverable_error(error_handler, persister).await,
+            ReceiveSession::TerminalFailure(e) =>
+                return Err(anyhow!("Terminal receiver session {e:?}")),
         }
     }
 
@@ -539,17 +524,13 @@ impl App {
     /// Handle request error by sending an error response over the directory
     async fn handle_recoverable_error(
         &self,
-        ohttp_relay: &payjoin::Url,
-        session_history: &SessionHistory,
+        session: Receiver<ToHandleError>,
+        persister: &ReceiverPersister,
     ) -> Result<()> {
-        let e = match session_history.terminal_error() {
-            Some(e) => e,
-            _ => return Ok(()),
-        };
-        let (err_req, err_ctx) = session_history
-            .extract_err_req(ohttp_relay)?
-            .expect("If JsonReply is Some, then err_req and err_ctx should be Some");
-        let to_return = anyhow!("Replied with error: {}", e.to_json().to_string());
+        // FIXME fetch directory from session
+        let ohttp_relay = self.unwrap_relay_or_else_fetch(None).await?;
+
+        let (err_req, err_ctx) = session.extract_err_req(ohttp_relay)?;
 
         let err_response = match self.post_request(err_req).await {
             Ok(response) => response,
@@ -561,11 +542,13 @@ impl App {
             Err(e) => return Err(anyhow!("Failed to get error response bytes: {}", e)),
         };
 
-        if let Err(e) = process_err_res(&err_bytes, err_ctx) {
+        if let Err(e) =
+            Receiver::<ToHandleError>::process_err_res(&err_bytes, err_ctx).save(persister)
+        {
             return Err(anyhow!("Failed to process error response: {}", e));
         }
 
-        Err(to_return)
+        Ok(())
     }
 
     async fn post_request(&self, req: payjoin::Request) -> Result<reqwest::Response> {

@@ -137,6 +137,7 @@ pub enum ReceiveSession {
     WantsFeeRange(Receiver<WantsFeeRange>),
     ProvisionalProposal(Receiver<ProvisionalProposal>),
     PayjoinProposal(Receiver<PayjoinProposal>),
+    HasErrorToHandle(Receiver<ToHandleError>),
     TerminalFailure(JsonReply),
 }
 
@@ -186,7 +187,7 @@ impl ReceiveSession {
                 SessionEvent::PayjoinProposal(payjoin_proposal),
             ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
 
-            (_, SessionEvent::TerminalError(e)) => Ok(ReceiveSession::TerminalFailure(e)),
+            (_, SessionEvent::TerminalFailure(e)) => Ok(ReceiveSession::TerminalFailure(e)),
             (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
                 Box::new(current_state),
                 Box::new(event),
@@ -209,6 +210,7 @@ mod sealed {
     impl State for super::WantsFeeRange {}
     impl State for super::ProvisionalProposal {}
     impl State for super::PayjoinProposal {}
+    impl State for super::ToHandleError {}
 }
 
 /// Sealed trait for V2 receive session states.
@@ -238,6 +240,10 @@ pub struct Receiver<State> {
     pub(crate) state: State,
 }
 
+impl<State> Receiver<State> {
+    pub fn context(&self) -> &SessionContext { &self.context }
+}
+
 impl<State> core::ops::Deref for Receiver<State> {
     type Target = State;
 
@@ -246,34 +252,6 @@ impl<State> core::ops::Deref for Receiver<State> {
 
 impl<State> core::ops::DerefMut for Receiver<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
-}
-
-/// Construct an OHTTP Encapsulated HTTP POST request to return
-/// a Receiver Error Response
-fn extract_err_req(
-    err: &JsonReply,
-    ohttp_relay: impl IntoUrl,
-    session_context: &SessionContext,
-) -> Result<(Request, ohttp::ClientResponse), SessionError> {
-    if SystemTime::now() > session_context.expiry {
-        return Err(InternalSessionError::Expired(session_context.expiry).into());
-    }
-    let mailbox = mailbox_endpoint(&session_context.directory, &session_context.reply_mailbox_id());
-    let (body, ohttp_ctx) = ohttp_encapsulate(
-        &mut session_context.ohttp_keys.0.clone(),
-        "POST",
-        mailbox.as_str(),
-        Some(err.to_json().to_string().as_bytes()),
-    )
-    .map_err(InternalSessionError::OhttpEncapsulation)?;
-    let req = Request::new_v2(&session_context.full_relay_url(ohttp_relay)?, &body);
-    Ok((req, ohttp_ctx))
-}
-
-/// Process an OHTTP Encapsulated HTTP POST Error response
-/// to ensure it has been posted properly
-pub fn process_err_res(body: &[u8], context: ohttp::ClientResponse) -> Result<(), SessionError> {
-    process_post_res(body, context).map_err(|e| InternalSessionError::DirectoryResponse(e).into())
 }
 
 #[derive(Debug, Clone)]
@@ -371,7 +349,7 @@ impl Receiver<Initialized> {
             Ok(proposal) => proposal,
             Err(e) =>
                 return MaybeFatalTransitionWithNoResults::fatal(
-                    SessionEvent::TerminalError((&e).into()),
+                    SessionEvent::TerminalFailure((&e).into()),
                     e,
                 ),
         };
@@ -545,7 +523,7 @@ impl Receiver<UncheckedOriginalPayload> {
             ),
             Err(Error::Implementation(e)) =>
                 MaybeFatalTransition::transient(Error::Implementation(e)),
-            Err(e) => MaybeFatalTransition::fatal(SessionEvent::TerminalError((&e).into()), e),
+            Err(e) => MaybeFatalTransition::fatal(SessionEvent::TerminalFailure((&e).into()), e),
         }
     }
 
@@ -611,7 +589,7 @@ impl Receiver<MaybeInputsOwned> {
                 }
                 _ => {
                     return MaybeFatalTransition::fatal(
-                        SessionEvent::TerminalError((&e).into()),
+                        SessionEvent::TerminalFailure((&e).into()),
                         e,
                     );
                 }
@@ -664,7 +642,7 @@ impl Receiver<MaybeInputsSeen> {
                 }
                 _ => {
                     return MaybeFatalTransition::fatal(
-                        SessionEvent::TerminalError((&e).into()),
+                        SessionEvent::TerminalFailure((&e).into()),
                         e,
                     );
                 }
@@ -722,7 +700,7 @@ impl Receiver<OutputsUnknown> {
                 }
                 _ => {
                     return MaybeFatalTransition::fatal(
-                        SessionEvent::TerminalError((&e).into()),
+                        SessionEvent::TerminalFailure((&e).into()),
                         e,
                     );
                 }
@@ -899,7 +877,7 @@ impl Receiver<WantsFeeRange> {
                 // FIXME: follow up by returning a terminal error rather than replyable error
                 let payload_error = super::PayloadError::from(e);
                 return MaybeFatalTransition::fatal(
-                    SessionEvent::TerminalError(JsonReply::from(&payload_error)),
+                    SessionEvent::TerminalFailure(JsonReply::from(&payload_error)),
                     ProtocolError::OriginalPayload(payload_error),
                 );
             }
@@ -1028,6 +1006,51 @@ impl Receiver<PayjoinProposal> {
         {
             Ok(_) => MaybeSuccessTransition::success(()),
             Err(e) => MaybeSuccessTransition::transient(e),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToHandleError {
+    json_reply: JsonReply,
+}
+
+impl Receiver<ToHandleError> {
+    /// Construct an OHTTP Encapsulated HTTP POST request to return
+    /// a Receiver Error Response
+    pub fn extract_err_req(
+        &self,
+        ohttp_relay: impl IntoUrl,
+    ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
+        if SystemTime::now() > self.context.expiry {
+            return Err(InternalSessionError::Expired(self.context.expiry).into());
+        }
+        let mailbox = mailbox_endpoint(&self.context.directory, &self.context.reply_mailbox_id());
+        let (body, ohttp_ctx) = ohttp_encapsulate(
+            &mut self.context.ohttp_keys.0.clone(),
+            "POST",
+            mailbox.as_str(),
+            Some(self.json_reply.to_json().to_string().as_bytes()),
+        )
+        .map_err(InternalSessionError::OhttpEncapsulation)?;
+        let req = Request::new_v2(&self.context.full_relay_url(ohttp_relay)?, &body);
+        Ok((req, ohttp_ctx))
+    }
+
+    /// Process an OHTTP Encapsulated HTTP POST Error response
+    /// to ensure it has been posted properly
+    // pub fn process_err_res(body: &[u8], context: ohttp::ClientResponse) -> Result<(), SessionError> {
+    //     process_post_res(body, context).map_err(|e| InternalSessionError::DirectoryResponse(e).into())
+    // }
+
+    pub fn process_err_res(
+        body: &[u8],
+        context: ohttp::ClientResponse,
+    ) -> MaybeSuccessTransition<SessionEvent, SessionError> {
+        match process_post_res(body, context) {
+            Ok(()) => MaybeSuccessTransition::success(SessionEvent::ErrorResponseProcessed),
+            Err(e) =>
+                MaybeSuccessTransition::transient(InternalSessionError::DirectoryResponse(e).into()),
         }
     }
 }
@@ -1279,6 +1302,14 @@ pub mod test {
         }
 
         Ok(())
+    }
+
+    fn receiver_has_error_to_handle() -> Receiver<ToHandleError> {
+        let receiver = unchecked_proposal_v2_from_test_vector();
+        let mock_err = mock_err();
+        let receiver = receiver.check_broadcast_suitability(None, |_| Err("mock error".into()))
+            .save(&NoopSessionPersister::default())
+            .expect("Noop persister shouldn't fail");
     }
 
     #[test]

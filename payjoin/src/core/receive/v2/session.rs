@@ -5,9 +5,8 @@ use serde::{Deserialize, Serialize};
 use super::{ReceiveSession, SessionContext};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
-use crate::receive::v2::{extract_err_req, SessionError};
 use crate::receive::{common, JsonReply, OriginalPayload, PsbtContext};
-use crate::{ImplementationError, IntoUrl, PjUri, Request};
+use crate::{ImplementationError, PjUri};
 
 /// Errors that can occur when replaying a receiver event log
 #[derive(Debug)]
@@ -129,55 +128,9 @@ impl SessionHistory {
     /// Terminal error from the session if present
     pub fn terminal_error(&self) -> Option<JsonReply> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::TerminalError(reply) => Some(reply.clone()),
+            SessionEvent::TerminalFailure(reply) => Some(reply.clone()),
             _ => None,
         })
-    }
-
-    /// Construct the error request to be posted on the directory if an error occurred.
-    /// To process the response, use [crate::receive::v2::process_err_res]
-    pub fn extract_err_req(
-        &self,
-        ohttp_relay: impl IntoUrl,
-    ) -> Result<Option<(Request, ohttp::ClientResponse)>, SessionError> {
-        // FIXME ideally this should be more like a method of
-        // Receiver<UncheckedOriginalPayload> and subsequent states instead of the
-        // history as a whole since it doesn't make sense to call it before,
-        // reaching that state.
-        if !self.received_sender_proposal() {
-            return Ok(None);
-        }
-
-        let session_context = match self.session_context() {
-            Some(session_context) => session_context,
-            None => return Ok(None),
-        };
-        let json_reply = match self.terminal_error() {
-            Some(json_reply) => json_reply,
-            _ => return Ok(None),
-        };
-        let (req, ctx) = extract_err_req(&json_reply, ohttp_relay, &session_context)?;
-        Ok(Some((req, ctx)))
-    }
-
-    fn received_sender_proposal(&self) -> bool {
-        self.events
-            .iter()
-            .any(|event| matches!(event, SessionEvent::UncheckedOriginalPayload { .. }))
-    }
-
-    fn session_context(&self) -> Option<SessionContext> {
-        let mut initial_session_context = self.events.iter().find_map(|event| match event {
-            SessionEvent::Created(session_context) => Some(session_context.clone()),
-            _ => None,
-        })?;
-
-        initial_session_context.reply_key = self.events.iter().find_map(|event| match event {
-            SessionEvent::UncheckedOriginalPayload { reply_key, .. } => reply_key.clone(),
-            _ => None,
-        });
-
-        Some(initial_session_context)
     }
 }
 
@@ -186,7 +139,10 @@ impl SessionHistory {
 /// Each event can be used to transition the receiver state machine to a new state
 pub enum SessionEvent {
     Created(SessionContext),
-    UncheckedOriginalPayload { original: OriginalPayload, reply_key: Option<crate::HpkePublicKey> },
+    UncheckedOriginalPayload {
+        original: OriginalPayload,
+        reply_key: Option<crate::HpkePublicKey>,
+    },
     MaybeInputsOwned(),
     MaybeInputsSeen(),
     OutputsUnknown(),
@@ -195,8 +151,7 @@ pub enum SessionEvent {
     WantsFeeRange(common::WantsFeeRange),
     ProvisionalProposal(PsbtContext),
     PayjoinProposal(bitcoin::Psbt),
-    ReplyableError(JsonReply),
-    TerminalError(JsonReply),
+    TerminalFailure(JsonReply),
 }
 
 #[cfg(test)]
@@ -276,6 +231,7 @@ mod tests {
             SessionEvent::WantsFeeRange(wants_fee_range.state.inner.clone()),
             SessionEvent::ProvisionalProposal(provisional_proposal.state.psbt_context.clone()),
             SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()),
+            SessionEvent::ErrorResponseProcessed,
         ];
 
         for event in test_cases {
@@ -623,7 +579,7 @@ mod tests {
         let session_history = SessionHistory {
             events: vec![
                 SessionEvent::MaybeInputsOwned(),
-                SessionEvent::TerminalError(mock_err.clone()),
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 
@@ -634,7 +590,7 @@ mod tests {
             events: vec![
                 SessionEvent::Created(SHARED_CONTEXT.clone()),
                 SessionEvent::MaybeInputsOwned(),
-                SessionEvent::TerminalError(mock_err.clone()),
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 
@@ -656,7 +612,7 @@ mod tests {
                     original: proposal.clone(),
                     reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
                 },
-                SessionEvent::TerminalError(mock_err.clone()),
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 
@@ -670,7 +626,7 @@ mod tests {
                     original: proposal.clone(),
                     reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
                 },
-                SessionEvent::TerminalError(mock_err.clone()),
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 

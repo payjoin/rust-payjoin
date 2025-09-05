@@ -114,6 +114,8 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
                 Self::PayjoinProposal { inner: Arc::new(inner.into()) },
             ReceiveSession::TerminalFailure(inner) =>
                 Self::TerminalFailure { inner: Arc::new(inner.into()) },
+            ReceiveSession::HasErrorToHandle(inner) =>
+                Self::HasErrorToHandle { inner: Arc::new(inner.into()) },
         }
     }
 }

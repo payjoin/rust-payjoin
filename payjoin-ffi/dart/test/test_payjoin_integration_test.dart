@@ -150,7 +150,7 @@ String build_sweep_psbt(payjoin.RpcClient sender, payjoin.PjUri pj_uri) {
     jsonEncode({
       "lockUnspents": true,
       "fee_rate": 10,
-      "subtract_fee_from_outputs": [0]
+      "subtractFeeFromOutputs": [0]
     })
   ]))["psbt"];
   return jsonDecode(sender.call("walletprocesspsbt",

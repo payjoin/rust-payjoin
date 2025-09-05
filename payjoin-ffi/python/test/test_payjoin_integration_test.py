@@ -223,7 +223,7 @@ def build_sweep_psbt(sender: RpcClient, pj_uri: PjUri) -> bitcoinffi.Psbt:
         [json.dumps([]),
         json.dumps(outputs),
         json.dumps(0),
-        json.dumps({"lockUnspents": True, "fee_rate": 10, "subtract_fee_from_outputs": [0]})
+        json.dumps({"lockUnspents": True, "fee_rate": 10, "subtractFeeFromOutputs": [0]})
         ]))["psbt"]
     return json.loads(sender.call("walletprocesspsbt", [psbt, json.dumps(True), json.dumps("ALL"), json.dumps(False)]))["psbt"]
 

@@ -186,7 +186,7 @@ impl ReceiveSession {
                 SessionEvent::PayjoinProposal(payjoin_proposal),
             ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
 
-            (_, SessionEvent::TerminalFailure(e)) => Ok(ReceiveSession::TerminalFailure(e)),
+            (_, SessionEvent::TerminalError(e)) => Ok(ReceiveSession::TerminalFailure(e)),
             (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
                 Box::new(current_state),
                 Box::new(event),
@@ -371,7 +371,7 @@ impl Receiver<Initialized> {
             Ok(proposal) => proposal,
             Err(e) =>
                 return MaybeFatalTransitionWithNoResults::fatal(
-                    SessionEvent::TerminalFailure((&e).into()),
+                    SessionEvent::TerminalError((&e).into()),
                     e,
                 ),
         };
@@ -545,7 +545,7 @@ impl Receiver<UncheckedOriginalPayload> {
             ),
             Err(Error::Implementation(e)) =>
                 MaybeFatalTransition::transient(Error::Implementation(e)),
-            Err(e) => MaybeFatalTransition::fatal(SessionEvent::TerminalFailure((&e).into()), e),
+            Err(e) => MaybeFatalTransition::fatal(SessionEvent::TerminalError((&e).into()), e),
         }
     }
 
@@ -611,7 +611,7 @@ impl Receiver<MaybeInputsOwned> {
                 }
                 _ => {
                     return MaybeFatalTransition::fatal(
-                        SessionEvent::TerminalFailure((&e).into()),
+                        SessionEvent::TerminalError((&e).into()),
                         e,
                     );
                 }
@@ -664,7 +664,7 @@ impl Receiver<MaybeInputsSeen> {
                 }
                 _ => {
                     return MaybeFatalTransition::fatal(
-                        SessionEvent::TerminalFailure((&e).into()),
+                        SessionEvent::TerminalError((&e).into()),
                         e,
                     );
                 }
@@ -722,7 +722,7 @@ impl Receiver<OutputsUnknown> {
                 }
                 _ => {
                     return MaybeFatalTransition::fatal(
-                        SessionEvent::TerminalFailure((&e).into()),
+                        SessionEvent::TerminalError((&e).into()),
                         e,
                     );
                 }
@@ -899,7 +899,7 @@ impl Receiver<WantsFeeRange> {
                 // FIXME: follow up by returning a terminal error rather than replyable error
                 let payload_error = super::PayloadError::from(e);
                 return MaybeFatalTransition::fatal(
-                    SessionEvent::TerminalFailure(JsonReply::from(&payload_error)),
+                    SessionEvent::TerminalError(JsonReply::from(&payload_error)),
                     ProtocolError::OriginalPayload(payload_error),
                 );
             }

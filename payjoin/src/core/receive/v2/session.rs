@@ -129,7 +129,7 @@ impl SessionHistory {
     /// Terminal error from the session if present
     pub fn terminal_error(&self) -> Option<JsonReply> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::TerminalFailure(reply) => Some(reply.clone()),
+            SessionEvent::TerminalError(reply) => Some(reply.clone()),
             _ => None,
         })
     }
@@ -195,7 +195,8 @@ pub enum SessionEvent {
     WantsFeeRange(common::WantsFeeRange),
     ProvisionalProposal(PsbtContext),
     PayjoinProposal(bitcoin::Psbt),
-    TerminalFailure(JsonReply),
+    ReplyableError(JsonReply),
+    TerminalError(JsonReply),
 }
 
 #[cfg(test)]
@@ -622,7 +623,7 @@ mod tests {
         let session_history = SessionHistory {
             events: vec![
                 SessionEvent::MaybeInputsOwned(),
-                SessionEvent::TerminalFailure(mock_err.clone()),
+                SessionEvent::TerminalError(mock_err.clone()),
             ],
         };
 
@@ -633,7 +634,7 @@ mod tests {
             events: vec![
                 SessionEvent::Created(SHARED_CONTEXT.clone()),
                 SessionEvent::MaybeInputsOwned(),
-                SessionEvent::TerminalFailure(mock_err.clone()),
+                SessionEvent::TerminalError(mock_err.clone()),
             ],
         };
 
@@ -655,7 +656,7 @@ mod tests {
                     original: proposal.clone(),
                     reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
                 },
-                SessionEvent::TerminalFailure(mock_err.clone()),
+                SessionEvent::TerminalError(mock_err.clone()),
             ],
         };
 
@@ -669,7 +670,7 @@ mod tests {
                     original: proposal.clone(),
                     reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
                 },
-                SessionEvent::TerminalFailure(mock_err.clone()),
+                SessionEvent::TerminalError(mock_err.clone()),
             ],
         };
 

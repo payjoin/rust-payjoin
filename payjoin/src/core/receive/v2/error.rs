@@ -11,7 +11,7 @@ use crate::receive::ProtocolError;
 /// This is currently opaque type because we aren't sure which variants will stay.
 /// You can only display it.
 #[derive(Debug)]
-pub struct SessionError(InternalSessionError);
+pub struct SessionError(pub(super) InternalSessionError);
 
 impl From<InternalSessionError> for SessionError {
     fn from(value: InternalSessionError) -> Self { SessionError(value) }

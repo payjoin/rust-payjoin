@@ -1,9 +1,11 @@
+use std::time::SystemTime;
+
 use serde::{Deserialize, Serialize};
 
 use super::{ReceiveSession, SessionContext};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
-use crate::receive::v2::{extract_err_req, SessionError};
+use crate::receive::v2::{extract_err_req, InternalSessionError, SessionError};
 use crate::receive::{common, JsonReply, OriginalPayload, PsbtContext};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
@@ -43,6 +45,7 @@ pub fn replay_event_log<P>(persister: &P) -> Result<(ReceiveSession, SessionHist
 where
     P: SessionPersister,
     P::SessionEvent: Into<SessionEvent> + Clone,
+    P::SessionEvent: From<SessionEvent>,
 {
     let logs = persister
         .load()
@@ -61,6 +64,21 @@ where
             }
             e
         })?;
+    }
+
+    let ctx =
+        history.session_context().expect("Session context should be present after the first event");
+    if SystemTime::now() > ctx.expiry {
+        // Session has expired: close the session and persist a fatal error
+        let err = SessionError(InternalSessionError::Expired(ctx.expiry));
+        persister
+            .save_event(SessionEvent::SessionInvalid(err.to_string(), None).into())
+            .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
+        persister
+            .close()
+            .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
+
+        return Ok((ReceiveSession::TerminalFailure, history));
     }
 
     Ok((receiver, history))

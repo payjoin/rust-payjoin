@@ -29,18 +29,19 @@ macro_rules! impl_save_for_transition {
                 persister: Arc<dyn JsonReceiverSessionPersister>,
             ) -> Result<$next_state, ReceiverPersistedError> {
                 let adapter = CallbackPersisterAdapter::new(persister);
-                let mut inner = self
-                    .0
-                    .write()
-                    .map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
+                let mut inner = self.0.write().map_err(|e| {
+                    ImplementationError::new(ForeignError::InternalError(e.to_string()))
+                })?;
 
                 let value = inner.take().ok_or_else(|| {
-                    ImplementationError::from("Already saved or moved".to_string())
+                    ImplementationError::new(ForeignError::InternalError(
+                        "Already saved or moved".to_string(),
+                    ))
                 })?;
 
                 let res = value.save(&adapter).map_err(|e| {
-                    ReceiverPersistedError::Storage(Arc::new(ImplementationError::from(
-                        e.to_string(),
+                    ReceiverPersistedError::Storage(Arc::new(ImplementationError::new(
+                        crate::error::ForeignError::InternalError(e.to_string()),
                     )))
                 })?;
                 Ok(res.into())
@@ -334,12 +335,16 @@ impl InitializedTransition {
         persister: Arc<dyn JsonReceiverSessionPersister>,
     ) -> Result<InitializedTransitionOutcome, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
+        let mut inner = self
+            .0
+            .write()
+            .map_err(|e| ImplementationError::new(ForeignError::InternalError(e.to_string())))?;
 
-        let value = inner
-            .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
+        let value = inner.take().ok_or_else(|| {
+            ImplementationError::new(ForeignError::InternalError(
+                "Already saved or moved".to_string(),
+            ))
+        })?;
 
         let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
@@ -497,7 +502,7 @@ impl UncheckedOriginalPayload {
                 |transaction| {
                     can_broadcast
                         .callback(payjoin::bitcoin::consensus::encode::serialize(transaction))
-                        .map_err(|e| ImplementationError::from(e.to_string()).into())
+                        .map_err(payjoin::ImplementationError::new)
                 },
             ),
         ))))
@@ -571,7 +576,7 @@ impl MaybeInputsOwned {
             self.0.clone().check_inputs_not_owned(&mut |input| {
                 is_owned
                     .callback(input.to_bytes())
-                    .map_err(|e| ImplementationError::from(e.to_string()).into())
+                    .map_err(payjoin::ImplementationError::new)
             }),
         ))))
     }
@@ -621,7 +626,7 @@ impl MaybeInputsSeen {
             self.0.clone().check_no_inputs_seen_before(&mut |outpoint| {
                 is_known
                     .callback((*outpoint).into())
-                    .map_err(|e| ImplementationError::from(e.to_string()).into())
+                    .map_err(payjoin::ImplementationError::new)
             }),
         ))))
     }
@@ -669,7 +674,7 @@ impl OutputsUnknown {
             self.0.clone().identify_receiver_outputs(&mut |input| {
                 is_receiver_output
                     .callback(input.to_bytes())
-                    .map_err(|e| ImplementationError::from(e.to_string()).into())
+                    .map_err(payjoin::ImplementationError::new)
             }),
         ))))
     }
@@ -940,7 +945,7 @@ impl ProvisionalProposal {
             self.0.clone().finalize_proposal(|pre_processed| {
                 let psbt = process_psbt
                     .callback(pre_processed.to_string())
-                    .map_err(|e| ImplementationError::from(e.to_string()))?;
+                    .map_err(ImplementationError::new)?;
                 Ok(Psbt::from_str(&psbt).map_err(ImplementationError::new)?)
             }),
         ))))
@@ -978,12 +983,16 @@ impl PayjoinProposalTransition {
         persister: Arc<dyn JsonReceiverSessionPersister>,
     ) -> Result<(), ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
+        let mut inner = self
+            .0
+            .write()
+            .map_err(|e| ImplementationError::new(ForeignError::InternalError(e.to_string())))?;
 
-        let value = inner
-            .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
+        let value = inner.take().ok_or_else(|| {
+            ImplementationError::new(ForeignError::InternalError(
+                "Already saved or moved".to_string(),
+            ))
+        })?;
 
         value.save(&adapter).map_err(ReceiverPersistedError::from)?;
         Ok(())

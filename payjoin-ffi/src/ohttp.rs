@@ -9,6 +9,7 @@ pub mod error {
     impl From<ohttp::Error> for OhttpError {
         fn from(value: ohttp::Error) -> Self { OhttpError { message: format!("{value:?}") } }
     }
+    /// Deprecated: prefer constructing a typed error explicitly.
     impl From<String> for OhttpError {
         fn from(value: String) -> Self { OhttpError { message: value } }
     }

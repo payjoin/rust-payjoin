@@ -49,14 +49,51 @@ class InMemorySenderPersister implements payjoin.JsonSenderSessionPersister {
   }
 }
 
+class FailingReceiverPersister implements payjoin.JsonReceiverSessionPersister {
+  @override
+  void save(String event) {
+    throw Exception("db down");
+  }
+
+  @override
+  List<String> load() {
+    throw Exception("db down");
+  }
+
+  @override
+  void close() {
+    throw Exception("db down");
+  }
+}
+
+class FailingSenderPersister implements payjoin.JsonSenderSessionPersister {
+  @override
+  void save(String event) {
+    throw Exception("db down");
+  }
+
+  @override
+  List<String> load() {
+    throw Exception("db down");
+  }
+
+  @override
+  void close() {
+    throw Exception("db down");
+  }
+}
+
 void main() {
   group('Test URIs', () {
     test('Test todo url encoded', () {
       var uri =
           "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao";
       final result = payjoin.Url.parse(uri);
-      expect(result, isA<payjoin.Url>(),
-          reason: "pj url should be url encoded");
+      expect(
+        result,
+        isA<payjoin.Url>(),
+        reason: "pj url should be url encoded",
+      );
     });
 
     test('Test valid url', () {
@@ -102,40 +139,137 @@ void main() {
     test("Test receiver persistence", () {
       var persister = InMemoryReceiverPersister("1");
       var address = bitcoin.Address(
-          "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4", bitcoin.Network.signet);
+        "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+        bitcoin.Network.signet,
+      );
       payjoin.ReceiverBuilder(
         address,
         "https://example.com",
         payjoin.OhttpKeys.fromString(
-            "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC"),
+          "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC",
+        ),
       ).build().save(persister);
       final result = payjoin.replayReceiverEventLog(persister);
-      expect(result, isA<payjoin.ReplayResult>(),
-          reason: "persistence should return a replay result");
+      expect(
+        result,
+        isA<payjoin.ReplayResult>(),
+        reason: "persistence should return a replay result",
+      );
     });
 
     test("Test sender persistence", () {
       var receiver_persister = InMemoryReceiverPersister("1");
       var address = bitcoin.Address(
-          "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK", bitcoin.Network.testnet);
+        "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
+        bitcoin.Network.testnet,
+      );
       var receiver = payjoin.ReceiverBuilder(
-              address,
-              "https://example.com",
-              payjoin.OhttpKeys.fromString(
-                  "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC"),
-        )
-        .build()
-        .save(receiver_persister);
+        address,
+        "https://example.com",
+        payjoin.OhttpKeys.fromString(
+          "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC",
+        ),
+      ).build().save(receiver_persister);
       var uri = receiver.pjUri();
 
       var sender_persister = InMemorySenderPersister("1");
       var psbt =
           "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
-      final result = payjoin.SenderBuilder(psbt, uri)
-          .buildRecommended(1000)
-          .save(sender_persister);
-      expect(result, isA<payjoin.WithReplyKey>(),
-          reason: "persistence should return a reply key");
+      final result = payjoin.SenderBuilder(
+        psbt,
+        uri,
+      ).buildRecommended(1000).save(sender_persister);
+      expect(
+        result,
+        isA<payjoin.WithReplyKey>(),
+        reason: "persistence should return a reply key",
+      );
+    });
+  });
+
+  group("Persistence error mapping", () {
+    test("Receiver failing persister surfaces as error", () {
+      final persister = FailingReceiverPersister();
+      final address = bitcoin.Address(
+        "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+        bitcoin.Network.signet,
+      );
+      expect(
+        () => payjoin.ReceiverBuilder(
+          address,
+          "https://example.com",
+          payjoin.OhttpKeys.fromString(
+            "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC",
+          ),
+        ).build().save(persister),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('Unexpected Uniffi callback error'),
+          ),
+        ),
+      );
+    });
+
+    test("Sender failing persister surfaces as error", () {
+      final receiver_persister = InMemoryReceiverPersister("1");
+      final address = bitcoin.Address(
+        "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
+        bitcoin.Network.testnet,
+      );
+      final receiver = payjoin.ReceiverBuilder(
+        address,
+        "https://example.com",
+        payjoin.OhttpKeys.fromString(
+          "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC",
+        ),
+      ).build().save(receiver_persister);
+      final uri = receiver.pjUri();
+      final sender_persister = FailingSenderPersister();
+      final psbt =
+          "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+      expect(
+        () => payjoin.SenderBuilder(
+          psbt,
+          uri,
+        ).buildRecommended(1000).save(sender_persister),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('Unexpected Uniffi callback error'),
+          ),
+        ),
+      );
+    });
+
+    test("Receiver second save surfaces 'Already saved or moved'", () {
+      final persister = InMemoryReceiverPersister("twice");
+      final address = bitcoin.Address(
+        "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+        bitcoin.Network.signet,
+      );
+      final transition = payjoin.ReceiverBuilder(
+        address,
+        "https://example.com",
+        payjoin.OhttpKeys.fromString(
+          "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC",
+        ),
+      ).build();
+      // First save should succeed
+      final _initialized = transition.save(persister);
+      // Second save should error with our invariant message
+      expect(
+        () => transition.save(persister),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('Already saved or moved'),
+          ),
+        ),
+      );
     });
   });
 }

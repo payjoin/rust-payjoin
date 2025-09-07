@@ -11,9 +11,9 @@ use crate::uri::error::InternalPjParseError;
 
 pub mod error;
 #[cfg(feature = "v1")]
-pub(crate) mod v1;
+pub mod v1;
 #[cfg(feature = "v2")]
-pub(crate) mod v2;
+pub mod v2;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]

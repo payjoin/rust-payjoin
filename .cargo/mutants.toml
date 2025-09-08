@@ -11,13 +11,13 @@ exclude_re = [
 	"Iterator",
 	".*Error",
 
-    # ---------------------Crate-specific exculsions---------------------
+    # ---------------------Crate-specific exclusions ---------------------
     # Timeout loops
     # src/receive/v1/mod.rs
     "interleave_shuffle", # Replacing index += 1 with index *= 1 in a loop causes a timeout due to an infinite loop
 
     # Trivial mutations
-    # These exlusions are allowing code blocks to run with artithmetic involving zero and as a result are no-ops
+    # These exclusions are allowing code blocks to run with arithmetic involving zero and as a result are no-ops
     # payjoin/src/core/send/mod.rs
     "replace < with <= in PsbtContext::check_outputs",
     "replace > with >= in PsbtContext::check_fees",
@@ -26,8 +26,9 @@ exclude_re = [
 
     # Async SystemTime comparison
     # checking if the system time is equal to the expiry is difficult to reasonably test
+    # payjoin/src/core/receive/v2/session.rs and payjoin/src/core/send/v2/session.rs
+    "replace > with >= in replay_event_log",
     # payjoin/src/core/receive/v2/mod.rs
-    "replace < with <= in Receiver<Initialized>::apply_unchecked_from_payload",
     "replace > with >= in Receiver<Initialized>::create_poll_request",
     "replace > with >= in extract_err_req",
     # payjoin/src/core/send/v2/mod.rs

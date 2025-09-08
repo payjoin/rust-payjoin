@@ -37,6 +37,7 @@ pub fn replay_event_log<P>(persister: &P) -> Result<(SendSession, SessionHistory
 where
     P: SessionPersister + Clone,
     P::SessionEvent: Into<SessionEvent> + Clone,
+    P::SessionEvent: From<SessionEvent>,
 {
     let logs = persister
         .load()
@@ -59,6 +60,18 @@ where
         }
     }
 
+    let pj_param = history.pj_param().expect("pj_param should be present");
+    if std::time::SystemTime::now() > pj_param.expiration() {
+        // Session has expired: close the session and persist a fatal error
+        persister
+            .save_event(SessionEvent::SessionInvalid("Session expired".to_string()).into())
+            .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
+        persister
+            .close()
+            .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
+
+        return Ok((SendSession::TerminalFailure, history));
+    }
     Ok((sender, history))
 }
 
@@ -188,6 +201,49 @@ mod tests {
         assert_eq!(sender, test.expected_sender_state);
         assert_eq!(session_history.fallback_tx(), test.expected_session_history.fallback_tx);
         assert_eq!(session_history.pj_param().cloned(), test.expected_session_history.pj_param);
+    }
+
+    #[test]
+    fn test_sender_session_history_with_expired_session() {
+        // TODO(armins): how can we reduce the boilerplate for these tests?
+        let psbt = PARSED_ORIGINAL_PSBT.clone();
+        let sender = SenderBuilder::new(
+            psbt.clone(),
+            Uri::try_from(PJ_URI)
+                .expect("Valid uri")
+                .assume_checked()
+                .check_pj_supported()
+                .expect("Payjoin to be supported"),
+        )
+        .build_recommended(FeeRate::BROADCAST_MIN)
+        .unwrap();
+        let reply_key = HpkeKeyPair::gen_keypair();
+        let endpoint = sender.endpoint().clone();
+        let fallback_tx = sender.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
+        let id = crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id");
+        let pj_param = crate::uri::v2::PjParam::new(
+            endpoint,
+            id,
+            std::time::SystemTime::now() - std::time::Duration::from_secs(1),
+            crate::OhttpKeys(
+                ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
+            ),
+            reply_key.1,
+        );
+        let with_reply_key = WithReplyKey {
+            pj_param: pj_param.clone(),
+            psbt_ctx: sender.psbt_ctx.clone(),
+            reply_key: reply_key.0,
+        };
+        let test = SessionHistoryTest {
+            events: vec![SessionEvent::CreatedReplyKey(with_reply_key)],
+            expected_session_history: SessionHistoryExpectedOutcome {
+                fallback_tx: Some(fallback_tx),
+                pj_param: Some(pj_param),
+            },
+            expected_sender_state: SendSession::TerminalFailure,
+        };
+        run_session_history_test(test);
     }
 
     #[test]

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::{ReceiveSession, SessionContext};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
-use crate::receive::v2::{extract_err_req, SessionError};
+use crate::receive::v2::{extract_err_req, InternalSessionError, SessionError};
 use crate::receive::{common, JsonReply, OriginalPayload, PsbtContext};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
@@ -17,7 +17,6 @@ impl std::fmt::Display for ReplayError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use InternalReplayError::*;
         match &self.0 {
-            SessionExpired(expiry) => write!(f, "Session expired at {expiry:?}"),
             InvalidStateAndEvent(state, event) => write!(
                 f,
                 "Invalid combination of state ({state:?}) and event ({event:?}) during replay",
@@ -34,8 +33,6 @@ impl From<InternalReplayError> for ReplayError {
 
 #[derive(Debug)]
 pub(crate) enum InternalReplayError {
-    /// Session expired
-    SessionExpired(SystemTime),
     /// Invalid combination of state and event
     InvalidStateAndEvent(Box<ReceiveSession>, Box<SessionEvent>),
     /// Application storage error
@@ -48,6 +45,7 @@ pub fn replay_event_log<P>(persister: &P) -> Result<(ReceiveSession, SessionHist
 where
     P: SessionPersister,
     P::SessionEvent: Into<SessionEvent> + Clone,
+    P::SessionEvent: From<SessionEvent>,
 {
     let logs = persister
         .load()
@@ -66,6 +64,21 @@ where
             }
             e
         })?;
+    }
+
+    let ctx =
+        history.session_context().expect("Session context should be present after the first event");
+    if SystemTime::now() > ctx.expiry {
+        // Session has expired: close the session and persist a fatal error
+        let err = SessionError(InternalSessionError::Expired(ctx.expiry));
+        persister
+            .save_event(SessionEvent::SessionInvalid(err.to_string(), None).into())
+            .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
+        persister
+            .close()
+            .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
+
+        return Ok((ReceiveSession::TerminalFailure, history));
     }
 
     Ok((receiver, history))
@@ -193,6 +206,8 @@ pub enum SessionEvent {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use payjoin_test_utils::{BoxError, EXAMPLE_URL};
 
     use super::*;
@@ -324,6 +339,24 @@ mod tests {
     }
 
     #[test]
+    fn test_replaying_session_creation_with_expired_session() -> Result<(), BoxError> {
+        let session_context = SessionContext {
+            expiry: SystemTime::now() - Duration::from_secs(1),
+            ..SHARED_CONTEXT.clone()
+        };
+        let test = SessionHistoryTest {
+            events: vec![SessionEvent::Created(session_context.clone())],
+            expected_session_history: SessionHistoryExpectedOutcome {
+                psbt_with_fee_contributions: None,
+                fallback_tx: None,
+            },
+            expected_receiver_state: ReceiveSession::TerminalFailure,
+        };
+        // TODO: should check for the expired error message off the session history
+        run_session_history_test(test)
+    }
+
+    #[test]
     fn test_replaying_unchecked_proposal() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
         let original = original_from_test_vector();
@@ -346,40 +379,6 @@ mod tests {
             }),
         };
         run_session_history_test(test)
-    }
-
-    #[test]
-    fn test_replaying_unchecked_proposal_expiry() {
-        let now = SystemTime::now();
-        let session_context = SessionContext { expiry: now, ..SHARED_CONTEXT.clone() };
-        let original = original_from_test_vector();
-        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
-
-        let test = SessionHistoryTest {
-            events: vec![
-                SessionEvent::Created(session_context.clone()),
-                SessionEvent::UncheckedOriginalPayload((original.clone(), reply_key.clone())),
-            ],
-            expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: None,
-                fallback_tx: None,
-            },
-            expected_receiver_state: ReceiveSession::UncheckedOriginalPayload(Receiver {
-                state: UncheckedOriginalPayload {
-                    original,
-                    session_context: SessionContext { reply_key, ..session_context },
-                },
-            }),
-        };
-        let session_history = run_session_history_test(test);
-
-        match session_history {
-            Err(error) => assert_eq!(
-                error.to_string(),
-                ReplayError::from(InternalReplayError::SessionExpired(now)).to_string()
-            ),
-            Ok(_) => panic!("Expected session expiry error, got success"),
-        }
     }
 
     #[test]

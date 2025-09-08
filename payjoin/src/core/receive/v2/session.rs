@@ -206,6 +206,8 @@ pub enum SessionEvent {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use payjoin_test_utils::{BoxError, EXAMPLE_URL};
 
     use super::*;
@@ -333,6 +335,24 @@ mod tests {
                 state: Initialized { context: session_context },
             }),
         };
+        run_session_history_test(test)
+    }
+
+    #[test]
+    fn test_replaying_session_creation_with_expired_session() -> Result<(), BoxError> {
+        let session_context = SessionContext {
+            expiry: SystemTime::now() - Duration::from_secs(1),
+            ..SHARED_CONTEXT.clone()
+        };
+        let test = SessionHistoryTest {
+            events: vec![SessionEvent::Created(session_context.clone())],
+            expected_session_history: SessionHistoryExpectedOutcome {
+                psbt_with_fee_contributions: None,
+                fallback_tx: None,
+            },
+            expected_receiver_state: ReceiveSession::TerminalFailure,
+        };
+        // TODO: should check for the expired error message off the session history
         run_session_history_test(test)
     }
 

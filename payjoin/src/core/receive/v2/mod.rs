@@ -150,7 +150,7 @@ impl ReceiveSession {
 
             (
                 ReceiveSession::Initialized(state),
-                SessionEvent::UncheckedOriginalPayload((proposal, reply_key)),
+                SessionEvent::UncheckedOriginalPayload { original: proposal, reply_key },
             ) => Ok(state.apply_unchecked_from_payload(proposal, reply_key)?),
 
             (ReceiveSession::UncheckedOriginalPayload(state), SessionEvent::MaybeInputsOwned()) =>
@@ -374,7 +374,10 @@ impl Receiver<Initialized> {
 
         if let Some((proposal, reply_key)) = proposal {
             MaybeFatalTransitionWithNoResults::success(
-                SessionEvent::UncheckedOriginalPayload((proposal.clone(), reply_key.clone())),
+                SessionEvent::UncheckedOriginalPayload {
+                    original: proposal.clone(),
+                    reply_key: reply_key.clone(),
+                },
                 Receiver {
                     state: UncheckedOriginalPayload {
                         original: proposal,

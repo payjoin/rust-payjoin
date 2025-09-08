@@ -151,7 +151,7 @@ impl ReceiveSession {
             (
                 ReceiveSession::Initialized(state),
                 SessionEvent::UncheckedOriginalPayload { original: proposal, reply_key },
-            ) => Ok(state.apply_unchecked_from_payload(proposal, reply_key)?),
+            ) => Ok(state.apply_unchecked_from_payload(proposal, reply_key)),
 
             (ReceiveSession::UncheckedOriginalPayload(state), SessionEvent::MaybeInputsOwned()) =>
                 Ok(state.apply_maybe_inputs_owned()),
@@ -474,7 +474,7 @@ impl Receiver<Initialized> {
         self,
         event: OriginalPayload,
         reply_key: Option<HpkePublicKey>,
-    ) -> Result<ReceiveSession, InternalReplayError> {
+    ) -> ReceiveSession {
         let new_state = Receiver {
             state: UncheckedOriginalPayload {
                 original: event,
@@ -482,7 +482,7 @@ impl Receiver<Initialized> {
             },
         };
 
-        Ok(ReceiveSession::UncheckedOriginalPayload(new_state))
+        ReceiveSession::UncheckedOriginalPayload(new_state)
     }
 }
 

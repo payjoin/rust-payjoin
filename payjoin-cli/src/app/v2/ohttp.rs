@@ -141,7 +141,6 @@ struct CachedOhttpKeys {
 
 fn get_cache_file() -> PathBuf {
     let dir = dirs::cache_dir().unwrap();
-    println!("Getting cache file {:?}", dir);
     dirs::cache_dir().unwrap().join("payjoin-cli").join("ohttp-keys.json")
 }
 

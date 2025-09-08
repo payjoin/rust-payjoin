@@ -24,6 +24,7 @@
 //! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
 //! but request reuse makes correlation trivial for the relay.
 
+use std::io::Write;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
@@ -42,7 +43,9 @@ use super::error::{Error, InputContributionError};
 use super::{
     common, InternalPayloadError, JsonReply, OutputSubstitutionError, ProtocolError, SelectionError,
 };
-use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
+use crate::hpke::{
+    decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey, PADDED_PLAINTEXT_B_LENGTH,
+};
 use crate::ohttp::{
     ohttp_encapsulate, process_get_res, process_post_res, OhttpEncapsulationError, OhttpKeys,
 };
@@ -1030,7 +1033,17 @@ impl Receiver<PayjoinProposal> {
             let payjoin_bytes = self.psbt.serialize();
             let sender_mailbox = short_id_from_pubkey(e);
             target_resource = mailbox_endpoint(&self.session_context.directory, &sender_mailbox);
-            body = encrypt_message_b(payjoin_bytes, &self.session_context.receiver_key, e)?;
+
+            let mut buf = [0u8; PADDED_PLAINTEXT_B_LENGTH];
+
+            (&mut &mut buf[..]).write_all(&payjoin_bytes).map_err(|e| {
+                assert!(e.kind() == std::io::ErrorKind::WriteZero);
+                Error::PayloadTooLarge {
+                    actual: payjoin_bytes.len(),
+                    max: PADDED_PLAINTEXT_B_LENGTH,
+                }
+            })?;
+            body = encrypt_message_b(&buf, &self.session_context.receiver_key, e)?;
             method = "POST";
         } else {
             // Prepare v2 wrapped and backwards-compatible v1 payload

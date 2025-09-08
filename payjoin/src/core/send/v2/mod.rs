@@ -28,6 +28,8 @@
 //! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
 //! but request reuse makes correlation trivial for the relay.
 
+use std::io::Write;
+
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::Address;
 pub use error::{CreateRequestError, EncapsulationError};
@@ -39,7 +41,7 @@ use url::Url;
 
 use super::error::BuildSenderError;
 use super::*;
-use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
+use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey, PADDED_PLAINTEXT_A_LENGTH};
 use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
 use crate::persist::{
     MaybeFatalTransition, MaybeSuccessTransitionWithNoResults, NextStateTransition,
@@ -286,7 +288,7 @@ impl Sender<WithReplyKey> {
         let (request, ohttp_ctx) = extract_request(
             ohttp_relay,
             self.reply_key.clone(),
-            body,
+            &body,
             base_url,
             self.pj_param.receiver_pubkey().clone(),
             &mut ohttp_keys,
@@ -349,7 +351,7 @@ impl Sender<WithReplyKey> {
 pub(crate) fn extract_request(
     ohttp_relay: impl IntoUrl,
     reply_key: HpkeSecretKey,
-    body: Vec<u8>,
+    body: &[u8; PADDED_PLAINTEXT_A_LENGTH],
     url: Url,
     receiver_pubkey: HpkePublicKey,
     ohttp_keys: &mut OhttpKeys,
@@ -378,7 +380,7 @@ pub(crate) fn serialize_v2_body(
     output_substitution: OutputSubstitution,
     fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
-) -> Result<Vec<u8>, CreateRequestError> {
+) -> Result<[u8; PADDED_PLAINTEXT_A_LENGTH], CreateRequestError> {
     // Grug say localhost base be discarded anyway. no big brain needed.
     let base_url = Url::parse("http://localhost").expect("invalid URL");
 
@@ -386,7 +388,23 @@ pub(crate) fn serialize_v2_body(
         serialize_url(base_url, output_substitution, fee_contribution, min_fee_rate, Version::Two);
     let query_params = placeholder_url.query().unwrap_or_default();
     let base64 = psbt.to_string();
-    Ok(format!("{base64}\n{query_params}").into_bytes())
+
+    let mut buf = [0u8; PADDED_PLAINTEXT_A_LENGTH];
+    // The body length needs an additional byte added to account for the newline between the
+    // base64 body and query params
+    let body_len = base64.len() + 1 + query_params.len();
+
+    write!(&mut &mut buf[..], "{base64}\n{query_params}").map_err(|e| {
+        assert!(e.kind() == std::io::ErrorKind::WriteZero);
+        CreateRequestError::from(InternalCreateRequestError::Hpke(
+            crate::hpke::HpkeError::PayloadTooLarge {
+                actual: body_len,
+                max: PADDED_PLAINTEXT_A_LENGTH,
+            },
+        ))
+    })?;
+
+    Ok(buf)
 }
 
 /// Data required to validate the POST response.
@@ -430,7 +448,7 @@ impl Sender<V2GetContext> {
             .join(&mailbox.to_string())
             .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
         let body = encrypt_message_a(
-            Vec::new(),
+            &[0u8; PADDED_PLAINTEXT_A_LENGTH],
             &HpkeKeyPair::from_secret_key(&self.reply_key).public_key().clone(),
             &self.pj_param.receiver_pubkey().clone(),
         )
@@ -513,6 +531,7 @@ mod test {
     use std::time::{Duration, SystemTime};
 
     use bitcoin::hex::FromHex;
+    use bitcoin::psbt::raw;
     use bitcoin::Address;
     use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, PARSED_ORIGINAL_PSBT, SYMMETRIC};
 
@@ -559,8 +578,64 @@ mod test {
             sender.psbt_ctx.output_substitution,
             sender.psbt_ctx.fee_contribution,
             sender.psbt_ctx.min_fee_rate,
+        )?;
+
+        let expected_bytes = <Vec<u8> as FromHex>::from_hex(SERIALIZED_BODY_V2)?;
+        let expected_len = expected_bytes.len();
+        assert_eq!(&body[..expected_len], &expected_bytes[..]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_serialize_body_length() -> Result<(), BoxError> {
+        let sender = create_sender_context(SystemTime::now() + Duration::from_secs(60))?;
+        let mut padded_psbt = sender.psbt_ctx.original_psbt.clone();
+        let base_url = Url::parse("http://localhost").expect("invalid URL");
+
+        let placeholder_url = serialize_url(
+            base_url,
+            sender.psbt_ctx.output_substitution,
+            sender.psbt_ctx.fee_contribution,
+            sender.psbt_ctx.min_fee_rate,
+            Version::Two,
         );
-        assert_eq!(body.as_ref().unwrap(), &<Vec<u8> as FromHex>::from_hex(SERIALIZED_BODY_V2)?,);
+        let query_params = placeholder_url.query().unwrap_or_default();
+        let dummy_key = raw::ProprietaryKey { prefix: vec![0], subtype: 0, key: vec![0] };
+
+        let dummy_value = vec![0u8; 4952];
+        padded_psbt.proprietary.insert(dummy_key.clone(), dummy_value.clone());
+        let body = serialize_v2_body(
+            &padded_psbt,
+            sender.psbt_ctx.output_substitution,
+            sender.psbt_ctx.fee_contribution,
+            sender.psbt_ctx.min_fee_rate,
+        );
+        assert!(body.is_ok());
+
+        let dummy_value = vec![0u8; PADDED_PLAINTEXT_A_LENGTH];
+        padded_psbt.proprietary.insert(dummy_key, dummy_value);
+        let body = serialize_v2_body(
+            &padded_psbt,
+            sender.psbt_ctx.output_substitution,
+            sender.psbt_ctx.fee_contribution,
+            sender.psbt_ctx.min_fee_rate,
+        );
+        let padded_psbt_length = format!("{}\n{}", padded_psbt, query_params).len();
+        match body {
+            Err(e) => {
+                assert_eq!(
+                    e.to_string(),
+                    CreateRequestError::from(InternalCreateRequestError::Hpke(
+                        crate::hpke::HpkeError::PayloadTooLarge {
+                            actual: padded_psbt_length,
+                            max: PADDED_PLAINTEXT_A_LENGTH
+                        },
+                    ))
+                    .to_string()
+                )
+            }
+            Ok(_) => panic!("Expected error, got Ok"),
+        }
         Ok(())
     }
 

@@ -127,7 +127,7 @@ impl From<&ProtocolError> for JsonReply {
         match e {
             OriginalPayload(e) => e.into(),
             #[cfg(feature = "v1")]
-            V1(e) => e.into(),
+            V1(e) => JsonReply::new(OriginalPsbtRejected, e),
             #[cfg(feature = "v2")]
             V2(_) => JsonReply::new(Unavailable, "Receiver error"),
         }

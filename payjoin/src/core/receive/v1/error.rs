@@ -1,8 +1,6 @@
 use core::fmt;
 use std::error;
 
-use crate::receive::JsonReply;
-
 /// Error that occurs during validation of an incoming v1 payjoin request.
 ///
 /// This type provides a stable public API for v1 request validation errors while keeping internal
@@ -34,20 +32,6 @@ impl From<InternalRequestError> for RequestError {
 
 impl From<InternalRequestError> for super::ProtocolError {
     fn from(e: InternalRequestError) -> Self { super::ProtocolError::V1(e.into()) }
-}
-
-impl From<&RequestError> for JsonReply {
-    fn from(e: &RequestError) -> Self {
-        use InternalRequestError::*;
-
-        match &e.0 {
-            MissingHeader(_)
-            | InvalidContentType(_)
-            | InvalidContentLength(_)
-            | ContentLengthMismatch { .. } =>
-                JsonReply::new(crate::error_codes::ErrorCode::OriginalPsbtRejected, e),
-        }
-    }
 }
 
 impl fmt::Display for RequestError {

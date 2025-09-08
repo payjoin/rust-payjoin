@@ -126,14 +126,10 @@ impl From<SenderSessionHistory> for payjoin::send::v2::SessionHistory {
 
 #[uniffi::export]
 impl SenderSessionHistory {
-    pub fn endpoint(&self) -> Option<Arc<Url>> {
-        self.0.pj_param().map(|pj_param| Arc::new(pj_param.endpoint().into()))
-    }
+    pub fn endpoint(&self) -> Arc<Url> { Arc::new(self.0.pj_param().endpoint().into()) }
 
     /// Fallback transaction from the session if present
-    pub fn fallback_tx(&self) -> Option<Arc<crate::Transaction>> {
-        self.0.fallback_tx().map(|tx| Arc::new(tx.into()))
-    }
+    pub fn fallback_tx(&self) -> Arc<crate::Transaction> { Arc::new(self.0.fallback_tx().into()) }
 }
 
 #[derive(uniffi::Object)]

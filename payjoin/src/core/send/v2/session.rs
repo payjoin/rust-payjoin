@@ -60,7 +60,7 @@ where
         }
     }
 
-    let pj_param = history.pj_param().expect("pj_param should be present");
+    let pj_param = history.pj_param();
     if std::time::SystemTime::now() > pj_param.expiration() {
         // Session has expired: close the session and persist a fatal error
         persister
@@ -81,20 +81,26 @@ pub struct SessionHistory {
 }
 
 impl SessionHistory {
-    /// Fallback transaction from the session if present
-    pub fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
-        self.events.iter().find_map(|event| match event {
-            SessionEvent::CreatedReplyKey(proposal) =>
-                Some(proposal.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate()),
-            _ => None,
-        })
+    /// Fallback transaction from the session
+    pub fn fallback_tx(&self) -> bitcoin::Transaction {
+        self.events
+            .iter()
+            .find_map(|event| match event {
+                SessionEvent::CreatedReplyKey(proposal) =>
+                    Some(proposal.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate()),
+                _ => None,
+            })
+            .expect("Session event log must contain at least one event with fallback_tx")
     }
 
-    pub fn pj_param(&self) -> Option<&PjParam> {
-        self.events.iter().find_map(|event| match event {
-            SessionEvent::CreatedReplyKey(proposal) => Some(&proposal.pj_param),
-            _ => None,
-        })
+    pub fn pj_param(&self) -> &PjParam {
+        self.events
+            .iter()
+            .find_map(|event| match event {
+                SessionEvent::CreatedReplyKey(proposal) => Some(&proposal.pj_param),
+                _ => None,
+            })
+            .expect("Session event log must contain at least one event with pj_param")
     }
 }
 
@@ -180,8 +186,8 @@ mod tests {
     }
 
     struct SessionHistoryExpectedOutcome {
-        fallback_tx: Option<bitcoin::Transaction>,
-        pj_param: Option<PjParam>,
+        fallback_tx: bitcoin::Transaction,
+        pj_param: PjParam,
     }
 
     struct SessionHistoryTest {
@@ -200,7 +206,7 @@ mod tests {
             replay_event_log(&persister).expect("In memory persister shouldn't fail");
         assert_eq!(sender, test.expected_sender_state);
         assert_eq!(session_history.fallback_tx(), test.expected_session_history.fallback_tx);
-        assert_eq!(session_history.pj_param().cloned(), test.expected_session_history.pj_param);
+        assert_eq!(*session_history.pj_param(), test.expected_session_history.pj_param);
     }
 
     #[test]
@@ -237,10 +243,7 @@ mod tests {
         };
         let test = SessionHistoryTest {
             events: vec![SessionEvent::CreatedReplyKey(with_reply_key)],
-            expected_session_history: SessionHistoryExpectedOutcome {
-                fallback_tx: Some(fallback_tx),
-                pj_param: Some(pj_param),
-            },
+            expected_session_history: SessionHistoryExpectedOutcome { fallback_tx, pj_param },
             expected_sender_state: SendSession::TerminalFailure,
         };
         run_session_history_test(test);
@@ -280,10 +283,7 @@ mod tests {
         let sender = Sender { state: with_reply_key.clone() };
         let test = SessionHistoryTest {
             events: vec![SessionEvent::CreatedReplyKey(with_reply_key)],
-            expected_session_history: SessionHistoryExpectedOutcome {
-                fallback_tx: Some(fallback_tx),
-                pj_param: Some(pj_param),
-            },
+            expected_session_history: SessionHistoryExpectedOutcome { fallback_tx, pj_param },
             expected_sender_state: SendSession::WithReplyKey(sender),
         };
         run_session_history_test(test);

@@ -11,13 +11,13 @@ exclude_re = [
 	"Iterator",
 	".*Error",
 
-    # ---------------------Crate-specific exculsions---------------------
+    # ---------------------Crate-specific exclusions ---------------------
     # Timeout loops
     # src/receive/v1/mod.rs
     "interleave_shuffle", # Replacing index += 1 with index *= 1 in a loop causes a timeout due to an infinite loop
 
     # Trivial mutations
-    # These exlusions are allowing code blocks to run with artithmetic involving zero and as a result are no-ops
+    # These exclusions are allowing code blocks to run with arithmetic involving zero and as a result are no-ops
     # payjoin/src/core/send/mod.rs
     "replace < with <= in PsbtContext::check_outputs",
     "replace > with >= in PsbtContext::check_fees",

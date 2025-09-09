@@ -75,7 +75,6 @@ impl ReceiverSessionEvent {
 
 #[derive(Clone, uniffi::Enum)]
 pub enum ReceiveSession {
-    Uninitialized,
     Initialized { inner: Arc<Initialized> },
     UncheckedOriginalPayload { inner: Arc<UncheckedOriginalPayload> },
     MaybeInputsOwned { inner: Arc<MaybeInputsOwned> },
@@ -93,7 +92,6 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
     fn from(value: payjoin::receive::v2::ReceiveSession) -> Self {
         use payjoin::receive::v2::ReceiveSession;
         match value {
-            ReceiveSession::Uninitialized => Self::Uninitialized,
             ReceiveSession::Initialized(inner) =>
                 Self::Initialized { inner: Arc::new(inner.into()) },
             ReceiveSession::UncheckedOriginalPayload(inner) =>

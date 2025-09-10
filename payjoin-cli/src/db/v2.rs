@@ -170,6 +170,7 @@ impl SessionPersister for ReceiverPersister {
 
     fn close(&self) -> std::result::Result<(), Self::InternalStorageError> {
         let conn = self.db.get_connection()?;
+        println!("Closing receiver session {}", *self.session_id);
 
         conn.execute(
             "UPDATE receive_sessions SET completed_at = ?1 WHERE session_id = ?2",

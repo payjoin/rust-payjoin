@@ -7,9 +7,9 @@ use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::OptionalTransitionOutcome;
 use payjoin::receive::v2::{
     replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
-    MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal,
-    ReceiveSession, Receiver, ReceiverBuilder, UncheckedOriginalPayload, WantsFeeRange,
-    WantsInputs, WantsOutputs,
+    MaybeInputsOwned, MaybeInputsSeen, Monitor, OutputsUnknown, PayjoinProposal,
+    ProvisionalProposal, ReceiveSession, Receiver, ReceiverBuilder, UncheckedOriginalPayload,
+    WantsFeeRange, WantsInputs, WantsOutputs,
 };
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, PollingForProposal, SendSession, Sender,
@@ -71,6 +71,7 @@ impl StatusText for ReceiveSession {
             | ReceiveSession::ProvisionalProposal(_) => "Processing original proposal",
             ReceiveSession::PayjoinProposal(_) => "Payjoin proposal sent",
             ReceiveSession::HasReplyableError(_) => "Session failure",
+            ReceiveSession::Monitor(_) => "Monitoring payjoin proposal",
         }
     }
 }
@@ -523,6 +524,8 @@ impl App {
                     self.send_payjoin_proposal(proposal, persister).await,
                 ReceiveSession::HasReplyableError(error) =>
                     self.handle_error(error, persister).await,
+                ReceiveSession::Monitor(proposal) =>
+                    self.monitor_payjoin_proposal(proposal, persister).await,
             }
         };
         res
@@ -667,11 +670,35 @@ impl App {
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         let res = self.post_request(req).await?;
         let payjoin_psbt = proposal.psbt().clone();
-        proposal.process_response(&res.bytes().await?, ohttp_ctx).save(persister)?;
+        let session = proposal.process_response(&res.bytes().await?, ohttp_ctx).save(persister)?;
         println!(
             "Response successful. Watch mempool for successful Payjoin. TXID: {}",
             payjoin_psbt.extract_tx_unchecked_fee_rate().compute_txid()
         );
+
+        return self.monitor_payjoin_proposal(session, persister).await;
+    }
+
+    async fn monitor_payjoin_proposal(
+        &self,
+        proposal: Receiver<Monitor>,
+        persister: &ReceiverPersister,
+    ) -> Result<()> {
+        // On a session resumption, the receiver will resume again in this state.
+        let _ = proposal
+            .check_payment(
+                |txid| {
+                    self.wallet()
+                        .get_raw_transaction(&txid)
+                        .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+                },
+                |outpoint| {
+                    self.wallet()
+                        .is_outpoint_spent(&outpoint)
+                        .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+                },
+            )
+            .save(persister)?;
         Ok(())
     }
 

@@ -153,6 +153,7 @@ pub fn init_bitcoind() -> Result<corepc_node::Node, BoxError> {
     let bitcoind_exe = corepc_node::exe_path()?;
     let mut conf = corepc_node::Conf::default();
     conf.view_stdout = tracing::enabled!(target: "corepc", Level::TRACE);
+    // conf.args.push("-txindex");
     let bitcoind = corepc_node::Node::with_conf(bitcoind_exe, &conf)?;
     Ok(bitcoind)
 }

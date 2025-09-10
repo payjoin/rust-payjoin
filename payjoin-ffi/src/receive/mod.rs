@@ -6,6 +6,7 @@ pub use error::{
     InputContributionError, JsonReply, OutputSubstitutionError, ProtocolError, PsbtInputError,
     ReceiverError, SelectionError, SessionError,
 };
+use payjoin::bitcoin::consensus::Decodable;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::{MaybeFatalTransition, NextStateTransition};
@@ -85,6 +86,7 @@ pub enum ReceiveSession {
     WantsFeeRange { inner: Arc<WantsFeeRange> },
     ProvisionalProposal { inner: Arc<ProvisionalProposal> },
     PayjoinProposal { inner: Arc<PayjoinProposal> },
+    Monitor { inner: Arc<Monitor> },
     TerminalFailure,
 }
 
@@ -112,6 +114,7 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
                 Self::ProvisionalProposal { inner: Arc::new(inner.into()) },
             ReceiveSession::PayjoinProposal(inner) =>
                 Self::PayjoinProposal { inner: Arc::new(inner.into()) },
+            ReceiveSession::Monitor(inner) => Self::Monitor { inner: Arc::new(inner.into()) },
             ReceiveSession::TerminalFailure => Self::TerminalFailure,
         }
     }
@@ -954,13 +957,14 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>>
 }
 
 #[derive(uniffi::Object)]
+#[allow(clippy::type_complexity)]
 pub struct PayjoinProposalTransition(
     Arc<
         RwLock<
             Option<
-                payjoin::persist::MaybeSuccessTransition<
+                payjoin::persist::MaybeTransientTransition<
                     payjoin::receive::v2::SessionEvent,
-                    (),
+                    payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>,
                     payjoin::receive::Error,
                 >,
             >,
@@ -968,24 +972,7 @@ pub struct PayjoinProposalTransition(
     >,
 );
 
-#[uniffi::export]
-impl PayjoinProposalTransition {
-    pub fn save(
-        &self,
-        persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<(), ReceiverPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner =
-            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
-
-        let value = inner
-            .take()
-            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
-
-        value.save(&adapter).map_err(ReceiverPersistedError::from)?;
-        Ok(())
-    }
-}
+impl_save_for_transition!(PayjoinProposalTransition, Monitor);
 
 #[uniffi::export]
 impl PayjoinProposal {
@@ -1033,6 +1020,92 @@ impl PayjoinProposal {
         PayjoinProposalTransition(Arc::new(RwLock::new(Some(
             self.0.clone().process_response(body, ohttp_context.into()),
         ))))
+    }
+}
+
+#[uniffi::export(with_foreign)]
+pub trait TransactionExists: Send + Sync {
+    // TODO: Is there an ffi exported txid type that we can use here?
+    // TODO: Is there a ffi type for the serialized tx?
+    fn callback(&self, txid: String) -> Result<Option<Vec<u8>>, ForeignError>;
+}
+
+#[uniffi::export(with_foreign)]
+pub trait OutpointSpent: Send + Sync {
+    fn callback(&self, outpoint: OutPoint) -> Result<bool, ForeignError>;
+}
+
+#[allow(clippy::type_complexity)]
+#[derive(uniffi::Object)]
+pub struct MonitorTransition(
+    Arc<
+        RwLock<
+            Option<
+                payjoin::persist::MaybeFatalOrSuccessTransition<
+                    payjoin::receive::v2::SessionEvent,
+                    payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>,
+                    payjoin::receive::Error,
+                >,
+            >,
+        >,
+    >,
+);
+
+#[uniffi::export]
+impl MonitorTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<(), ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let mut inner =
+            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
+
+        let value = inner
+            .take()
+            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
+
+        value.save(&adapter).map_err(ReceiverPersistedError::from)?;
+        Ok(())
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct Monitor(pub payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>);
+
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>> for Monitor {
+    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>) -> Self {
+        Self(value)
+    }
+}
+
+fn try_deserialize_tx(
+    buf: Vec<u8>,
+) -> Result<payjoin::bitcoin::transaction::Transaction, ForeignError> {
+    payjoin::bitcoin::transaction::Transaction::consensus_decode(&mut buf.as_slice())
+        .map_err(|e| ForeignError::InternalError(e.to_string()))
+}
+
+#[uniffi::export]
+impl Monitor {
+    pub fn monitor(
+        &self,
+        transaction_exists: Arc<dyn TransactionExists>,
+        outpoint_spent: Arc<dyn OutpointSpent>,
+    ) -> MonitorTransition {
+        MonitorTransition(Arc::new(RwLock::new(Some(self.0.clone().monitor(
+            |txid| {
+                transaction_exists
+                    .callback(txid.to_string())
+                    .and_then(|buf| buf.map(try_deserialize_tx).transpose())
+                    .map_err(|e| ImplementationError::from(e.to_string()).into())
+            },
+            |outpoint| {
+                Ok(outpoint_spent
+                    .callback(outpoint.into())
+                    .map_err(|e| ImplementationError::from(e.to_string()))?)
+            },
+        )))))
     }
 }
 

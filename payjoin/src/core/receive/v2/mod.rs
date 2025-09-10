@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
-use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut};
+use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut, Txid};
 pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
 use serde::de::Deserializer;
@@ -48,7 +48,7 @@ use crate::ohttp::{
 };
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
-    MaybeFatalTransition, MaybeFatalTransitionWithNoResults, MaybeSuccessTransition,
+    MaybeFatalOrSuccessTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
     MaybeTransientTransition, NextStateTransition,
 };
 use crate::receive::v2::session::SessionOutcome;
@@ -138,6 +138,7 @@ pub enum ReceiveSession {
     WantsFeeRange(Receiver<WantsFeeRange>),
     ProvisionalProposal(Receiver<ProvisionalProposal>),
     PayjoinProposal(Receiver<PayjoinProposal>),
+    Monitor(Receiver<Monitor>),
     TerminalFailure,
 }
 
@@ -184,6 +185,9 @@ impl ReceiveSession {
                 SessionEvent::PayjoinProposal(payjoin_proposal),
             ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
 
+            (ReceiveSession::PayjoinProposal(state), SessionEvent::PayjoinPosted()) =>
+                Ok(state.apply_payjoin_posted()),
+
             (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiveSession::TerminalFailure),
 
             (current_state, SessionEvent::Closed(_)) => Ok(current_state),
@@ -210,6 +214,7 @@ mod sealed {
     impl State for super::WantsFeeRange {}
     impl State for super::ProvisionalProposal {}
     impl State for super::PayjoinProposal {}
+    impl State for super::Monitor {}
 }
 
 /// Sealed trait for V2 receive session states.
@@ -989,29 +994,37 @@ impl Receiver<ProvisionalProposal> {
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, ImplementationError>
     {
+        let original_psbt = self.state.psbt_context.original_psbt.clone();
         let inner = match self.state.psbt_context.finalize_proposal(wallet_process_psbt) {
             Ok(inner) => inner,
             Err(e) => {
                 return MaybeTransientTransition::transient(e);
             }
         };
-        let payjoin_proposal = PayjoinProposal { psbt: inner.clone() };
+        let psbt_context = PsbtContext { payjoin_psbt: inner.clone(), original_psbt };
+        let payjoin_proposal = PayjoinProposal { psbt_context: psbt_context.clone() };
         MaybeTransientTransition::success(
             SessionEvent::PayjoinProposal(inner),
             Receiver { state: payjoin_proposal, session_context: self.session_context },
         )
     }
 
-    pub(crate) fn apply_payjoin_proposal(self, psbt: Psbt) -> ReceiveSession {
-        let new_state =
-            Receiver { state: PayjoinProposal { psbt }, session_context: self.session_context };
+    pub(crate) fn apply_payjoin_proposal(self, payjoin_psbt: Psbt) -> ReceiveSession {
+        let psbt_context = PsbtContext {
+            payjoin_psbt,
+            original_psbt: self.state.psbt_context.original_psbt.clone(),
+        };
+        let new_state = Receiver {
+            state: PayjoinProposal { psbt_context },
+            session_context: self.session_context,
+        };
         ReceiveSession::PayjoinProposal(new_state)
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PayjoinProposal {
-    psbt: Psbt,
+    psbt_context: PsbtContext,
 }
 
 /// A finalized Payjoin proposal, complete with fees and receiver signatures, that the sender
@@ -1021,11 +1034,11 @@ impl Receiver<PayjoinProposal> {
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
         // TODO: de-duplicate this with the v1 implementation
         // It would make more sense if the payjoin proposal was only available after utxos are locked via session persister
-        self.psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
+        self.psbt_context.payjoin_psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
     }
 
     /// The Payjoin Proposal PSBT.
-    pub fn psbt(&self) -> &Psbt { &self.psbt }
+    pub fn psbt(&self) -> &Psbt { &self.psbt_context.payjoin_psbt }
 
     /// Construct an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
     pub fn create_post_request(
@@ -1038,14 +1051,14 @@ impl Receiver<PayjoinProposal> {
 
         if let Some(e) = &self.session_context.reply_key {
             // Prepare v2 payload
-            let payjoin_bytes = self.psbt.serialize();
+            let payjoin_bytes = self.psbt().serialize();
             let sender_mailbox = short_id_from_pubkey(e);
             target_resource = mailbox_endpoint(&self.session_context.directory, &sender_mailbox);
             body = encrypt_message_b(payjoin_bytes, &self.session_context.receiver_key, e)?;
             method = "POST";
         } else {
             // Prepare v2 wrapped and backwards-compatible v1 payload
-            body = self.psbt.to_string().as_bytes().to_vec();
+            body = self.psbt().to_string().as_bytes().to_vec();
             let receiver_mailbox =
                 short_id_from_pubkey(self.session_context.receiver_key.public_key());
             target_resource = mailbox_endpoint(&self.session_context.directory, &receiver_mailbox);
@@ -1074,22 +1087,113 @@ impl Receiver<PayjoinProposal> {
         self,
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
-    ) -> MaybeSuccessTransition<SessionEvent, (), Error> {
-        match process_post_res(res, ohttp_context) {
-            Ok(_) =>
-                MaybeSuccessTransition::success(SessionEvent::Closed(SessionOutcome::Success), ()),
-            Err(e) =>
-                if e.is_fatal() {
-                    MaybeSuccessTransition::fatal(
-                        SessionEvent::SessionInvalid(e.to_string(), None),
-                        InternalSessionError::DirectoryResponse(e).into(),
-                    )
-                } else {
-                    MaybeSuccessTransition::transient(
-                        InternalSessionError::DirectoryResponse(e).into(),
-                    )
+    ) -> MaybeTransientTransition<SessionEvent, Receiver<Monitor>, Error> {
+        match process_post_res(res, ohttp_context)
+            .map_err(|e| InternalSessionError::DirectoryResponse(e).into())
+        {
+            Ok(_) => MaybeTransientTransition::success(
+                SessionEvent::PayjoinPosted(),
+                Receiver {
+                    state: Monitor { psbt_context: self.state.psbt_context.clone() },
+                    session_context: self.session_context.clone(),
                 },
+            ),
+            Err(e) => MaybeTransientTransition::transient(e),
         }
+    }
+
+    pub(crate) fn apply_payjoin_posted(self) -> ReceiveSession {
+        let new_state = Receiver {
+            state: Monitor { psbt_context: self.state.psbt_context.clone() },
+            session_context: self.session_context,
+        };
+        ReceiveSession::Monitor(new_state)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Monitor {
+    psbt_context: PsbtContext,
+}
+
+impl Receiver<Monitor> {
+    pub fn monitor(
+        &self,
+        transaction_exists: impl Fn(Txid) -> Result<Option<bitcoin::Transaction>, ImplementationError>,
+        outpoint_spent: impl Fn(OutPoint) -> Result<bool, ImplementationError>,
+    ) -> MaybeFatalOrSuccessTransition<SessionEvent, Self, Error> {
+        let payjoin_proposal = &self.state.psbt_context.payjoin_psbt;
+        let payjoin_txid = payjoin_proposal.unsigned_tx.compute_txid();
+        // If we have a payjoin transaction with segwit inputs, we can check for the txid
+        match transaction_exists(payjoin_txid) {
+            Ok(Some(tx)) => {
+                let tx_id = tx.compute_txid();
+                if tx_id != payjoin_txid {
+                    return MaybeFatalOrSuccessTransition::transient(Error::Implementation(
+                        ImplementationError::from(format!("Payjoin transaction ID mismatch. Expected: {payjoin_txid}, Got: {tx_id}").as_str()),
+                    ));
+                }
+                // TODO: should we check for witness and scriptsig on the tx?
+                let mut sender_witnesses = vec![];
+
+                for i in self.state.psbt_context.sender_input_indexes() {
+                    let input =
+                        tx.input.get(i).expect("sender_input_indexes should return valid indices");
+                    sender_witnesses.push((input.script_sig.clone(), input.witness.clone()));
+                }
+                // Payjoin transaction with segwit inputs was detected. Log the signatures and complete the session
+                return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+                    SessionOutcome::Success(sender_witnesses),
+                ));
+            }
+            Ok(None) => {}
+            Err(e) => return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e)),
+        }
+
+        // Check for fallback being broadcasted
+        let fallback_tx = self
+            .state
+            .psbt_context
+            .original_psbt
+            .clone()
+            .extract_tx_fee_rate_limit()
+            .expect("Checked earlier in the typestate");
+        match transaction_exists(fallback_tx.compute_txid()) {
+            Ok(Some(_)) =>
+                return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+                    SessionOutcome::FallbackBroadcasted,
+                )),
+            Ok(None) => {}
+            Err(e) => return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e)),
+        }
+
+        let mut outpoints_spend = vec![];
+        for ot in payjoin_proposal.unsigned_tx.input.iter() {
+            match outpoint_spent(ot.previous_output) {
+                Ok(false) => {}
+                Ok(true) => outpoints_spend.push(ot.previous_output),
+                Err(e) =>
+                    return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e)),
+            }
+        }
+
+        if outpoints_spend.len() == payjoin_proposal.unsigned_tx.input.len() {
+            // All the payjoin proposal outpoints were spent. This means our payjoin proposal has non-segwit inputs and is broadcasted.
+            return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+                // TODO: there seems to be not great way to get the tx of the tx that spent these outpoints.
+                SessionOutcome::Success(vec![]),
+            ));
+        } else if !outpoints_spend.is_empty() {
+            // Some outpoints were spent but not in the payjoin proposal. This is a double spend.
+            let error = Error::Protocol(ProtocolError::V2(
+                // TODO: Should list all the outpoints that were spent in error
+                InternalSessionError::FallbackOutpointsSpent(outpoints_spend).into(),
+            ));
+            let event = SessionEvent::SessionInvalid(error.to_string(), None);
+            return MaybeFatalOrSuccessTransition::fatal(event, error);
+        }
+
+        MaybeFatalOrSuccessTransition::no_results(self.clone())
     }
 }
 
@@ -1132,13 +1236,16 @@ pub mod test {
     use bitcoin::FeeRate;
     use once_cell::sync::Lazy;
     use payjoin_test_utils::{
-        BoxError, EXAMPLE_URL, KEM, KEY_ID, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT, QUERY_PARAMS,
-        SYMMETRIC,
+        BoxError, EXAMPLE_URL, KEM, KEY_ID, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT,
+        PARSED_PAYJOIN_PROPOSAL, QUERY_PARAMS, SYMMETRIC,
     };
 
     use super::*;
     use crate::output_substitution::OutputSubstitution;
-    use crate::persist::{NoopSessionPersister, RejectTransient, Rejection};
+    use crate::persist::test_utils::InMemoryTestPersister;
+    use crate::persist::{
+        NoopSessionPersister, OptionalTransitionOutcome, RejectTransient, Rejection,
+    };
     use crate::receive::optional_parameters::Params;
     use crate::receive::v2;
     use crate::ImplementationError;
@@ -1193,6 +1300,109 @@ pub mod test {
         let res = error.api_error().expect("check_broadcast error should propagate to api error");
         let actual_json = JsonReply::from(&res);
         (res.to_string(), actual_json)
+    }
+
+    #[test]
+    fn test_monitor_typestate() -> Result<(), BoxError> {
+        let psbt_ctx = PsbtContext {
+            original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+            payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
+        };
+        let monitor = Receiver {
+            state: Monitor { psbt_context: psbt_ctx },
+            session_context: SHARED_CONTEXT.clone(),
+        };
+
+        let payjoin_tx = PARSED_PAYJOIN_PROPOSAL.clone().unsigned_tx;
+        let original_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx().expect("valid tx");
+
+        // Nothing was spent, should be in the same state
+        let persister = InMemoryTestPersister::default();
+        let res = monitor
+            .monitor(|_| Ok(None), |_| Ok(false))
+            .save(&persister)
+            .expect("InMemoryTestPersister shouldn't fail");
+        assert!(matches!(res, OptionalTransitionOutcome::Stasis(_)));
+        assert!(!persister.inner.read().expect("Shouldn't be poisoned").is_closed);
+        assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 0);
+
+        // Payjoin was broadcasted, should progress to success
+        let persister = InMemoryTestPersister::default();
+        let res = monitor
+            .monitor(|_| Ok(Some(payjoin_tx.clone())), |_| Ok(false))
+            .save(&persister)
+            .expect("InMemoryTestPersister shouldn't fail");
+
+        assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
+        assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
+        assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 1);
+        // TODO: check for exact events
+
+        // fallback was broadcasted, should progress to success
+        let persister = InMemoryTestPersister::default();
+        let res = monitor
+            .monitor(
+                |txid| {
+                    // Emulate if one of the fallback outpoints was double spent
+                    if txid == original_tx.compute_txid() {
+                        Ok(Some(original_tx.clone()))
+                    } else {
+                        Ok(None)
+                    }
+                },
+                |_| Ok(false),
+            )
+            .save(&persister)
+            .expect("InMemoryTestPersister shouldn't fail");
+
+        assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
+        assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
+        assert_eq!(
+            persister.inner.read().expect("Shouldn't be poisoned").events.last(),
+            Some(&SessionEvent::Closed(SessionOutcome::FallbackBroadcasted))
+        );
+
+        let persister = InMemoryTestPersister::default();
+        let res = monitor
+            .monitor(|_| Ok(None), |_| Ok(true))
+            .save(&persister)
+            .expect("InMemoryTestPersister shouldn't fail");
+
+        assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
+        assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
+        assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 1);
+
+        let persister = InMemoryTestPersister::default();
+        let err = monitor
+            .monitor(
+                |_| Ok(None),
+                |outpoint| {
+                    if outpoint == payjoin_tx.input[0].previous_output {
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
+                },
+            )
+            .save(&persister)
+            .expect_err("Should fail as double spend")
+            .api_error()
+            .expect("should fail as double spend");
+
+        assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
+        assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 1);
+        assert_eq!(
+            err.to_string(),
+            Error::Protocol(ProtocolError::V2(
+                InternalSessionError::FallbackOutpointsSpent(vec![
+                    payjoin_tx.input[0].previous_output
+                ],)
+                .into()
+            ))
+            .to_string()
+        );
+
+        Ok(())
     }
 
     #[test]

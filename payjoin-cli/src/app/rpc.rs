@@ -161,6 +161,23 @@ impl AsyncBitcoinRpc {
         self.call_rpc("getaddressinfo", params).await
     }
 
+    pub async fn get_txout(
+        &self,
+        outpoint: &payjoin::bitcoin::OutPoint,
+        include_mempool: bool,
+    ) -> Result<Option<TransactionInfo>> {
+        let params = json!([outpoint.txid.to_string(), outpoint.vout, include_mempool]);
+        self.call_rpc("gettxout", params).await
+    }
+
+    pub async fn get_raw_transaction(
+        &self,
+        txid: &Txid,
+    ) -> Result<Option<payjoin::bitcoin::Transaction>> {
+        let params = json!([txid.to_string()]);
+        self.call_rpc("getrawtransaction", params).await
+    }
+
     pub async fn get_new_address(
         &self,
         label: Option<&str>,
@@ -250,6 +267,25 @@ pub struct ListUnspentResult {
     #[serde(rename = "redeemScript")]
     pub redeem_script: Option<String>,
     // Ignore additional fields that Bitcoin Core v29+ may include
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TransactionInfo {
+    pub bestblock: String,
+    pub confirmations: u32,
+    pub value: f64,
+    pub script_pub_key: ScriptPubKey,
+    pub coinbase: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ScriptPubKey {
+    pub asm: String,
+    pub desc: String,
+    pub hex: String,
+    #[serde(rename = "type")]
+    pub script_type: String,
+    pub address: Option<String>,
 }
 
 /// Result type for finalizepsbt RPC call - compatible with both v26 and v29+

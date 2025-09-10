@@ -197,6 +197,76 @@ impl<Event, NextState> NextStateTransition<Event, NextState> {
     }
 }
 
+pub enum MaybeSuccessOrCurrentState<SuccessValue, CurrentState> {
+    Success(SuccessValue),
+    NoResults(CurrentState),
+}
+
+impl<SuccessValue, CurrentState> MaybeSuccessOrCurrentState<SuccessValue, CurrentState> {
+    pub fn sucess(self) -> Option<SuccessValue> {
+        if let MaybeSuccessOrCurrentState::Success(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    pub fn no_results(self) -> Option<CurrentState> {
+        if let MaybeSuccessOrCurrentState::NoResults(state) = self {
+            Some(state)
+        } else {
+            None
+        }
+    }
+}
+
+pub enum MaybeFatalOrSuccessTransition<Event, SuccessValue, CurrentState, Err> {
+    Success(Event, SuccessValue),
+    NoResults(CurrentState),
+    Transient(RejectTransient<Err>),
+    Fatal(RejectFatal<Event, Err>),
+}
+
+impl<Event, SuccessValue, CurrentState, Err>
+    MaybeFatalOrSuccessTransition<Event, SuccessValue, CurrentState, Err>
+where
+    Err: std::error::Error,
+{
+    #[inline]
+    pub(crate) fn success(event: Event, success_value: SuccessValue) -> Self {
+        MaybeFatalOrSuccessTransition::Success(event, success_value)
+    }
+
+    #[inline]
+    pub(crate) fn fatal(event: Event, error: Err) -> Self {
+        MaybeFatalOrSuccessTransition::Fatal(RejectFatal(event, error))
+    }
+
+    #[inline]
+    pub(crate) fn transient(error: Err) -> Self {
+        MaybeFatalOrSuccessTransition::Transient(RejectTransient(error))
+    }
+
+    #[inline]
+    pub(crate) fn no_results(current_state: CurrentState) -> Self {
+        MaybeFatalOrSuccessTransition::NoResults(current_state)
+    }
+
+    pub fn save<P>(
+        self,
+        persister: &P,
+    ) -> Result<
+        MaybeSuccessOrCurrentState<SuccessValue, CurrentState>,
+        PersistedError<Err, P::InternalStorageError>,
+    >
+    where
+        P: SessionPersister<SessionEvent = Event>,
+        Err: std::error::Error,
+    {
+        persister.save_maybe_fatal_or_success_transition(self)
+    }
+}
+
 /// Wrapper that marks the progression of a state machine
 pub struct AcceptNextState<Event, NextState>(Event, NextState);
 /// Wrapper that marks the success of a state machine with a value that was returned
@@ -369,6 +439,42 @@ pub trait SessionPersister {
 /// Internal logic for processing specific state transitions. Each method is strongly typed to the state transition type.
 /// Methods are not meant to be called directly, but are invoked through a state transition object's `save` method.
 trait InternalSessionPersister: SessionPersister {
+    fn save_maybe_fatal_or_success_transition<SuccessValue, CurrentState, Err>(
+        &self,
+        state_transition: MaybeFatalOrSuccessTransition<
+            Self::SessionEvent,
+            SuccessValue,
+            CurrentState,
+            Err,
+        >,
+    ) -> Result<
+        MaybeSuccessOrCurrentState<SuccessValue, CurrentState>,
+        PersistedError<Err, Self::InternalStorageError>,
+    >
+    where
+        Err: std::error::Error,
+    {
+        match state_transition {
+            MaybeFatalOrSuccessTransition::Success(success_event, success_value) => {
+                // Success value here would be the something to save
+                self.save_event(success_event).map_err(InternalPersistedError::Storage)?;
+                self.close().map_err(InternalPersistedError::Storage)?;
+                Ok(MaybeSuccessOrCurrentState::Success(success_value))
+            }
+            MaybeFatalOrSuccessTransition::NoResults(current_state) => {
+                // No event to save for no results
+                Ok(MaybeSuccessOrCurrentState::NoResults(current_state))
+            }
+            MaybeFatalOrSuccessTransition::Fatal(RejectFatal(event, error)) => {
+                self.handle_fatal_reject(event)?;
+                Err(InternalPersistedError::Fatal(error).into())
+            }
+            MaybeFatalOrSuccessTransition::Transient(RejectTransient(err)) => {
+                return Err(InternalPersistedError::Transient(err).into());
+            }
+        }
+    }
+
     /// Save state transition where state transition does not return an error
     /// Only returns an error if the storage fails
     fn save_progression_transition<NextState>(

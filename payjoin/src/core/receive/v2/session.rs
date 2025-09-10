@@ -180,6 +180,9 @@ pub enum SessionEvent {
     WantsFeeRange(common::WantsFeeRange),
     ProvisionalProposal(PsbtContext),
     PayjoinProposal(bitcoin::Psbt),
+    PayjoinPosted(),
+    // TODO: do we save the entire tx or just the witness/sigscript of the sender inputs
+    PayjoinTransactionDetected(bitcoin::Transaction),
     /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
     /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
     /// Reason being in some cases we still want to preserve the error b/c we can action on it. For now this is a terminal state and there is nothing to replay and is saved to be displayed.
@@ -563,7 +566,9 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
             },
             expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {
-                state: PayjoinProposal { psbt: payjoin_proposal.psbt().clone() },
+                state: PayjoinProposal {
+                    psbt_context: payjoin_proposal.state.psbt_context.clone(),
+                },
                 session_context: SessionContext { reply_key, ..session_context },
             }),
         };

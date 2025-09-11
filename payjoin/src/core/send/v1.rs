@@ -286,7 +286,7 @@ mod test {
     use bitcoin::psbt::raw::ProprietaryKey;
     use bitcoin::{psbt, FeeRate, NetworkKind, XOnlyPublicKey};
     use payjoin_test_utils::{
-        BoxError, INVALID_PSBT, MULTIPARTY_ORIGINAL_PSBT_ONE, PARSED_ORIGINAL_PSBT,
+        BoxError, EXAMPLE_URL, INVALID_PSBT, MULTIPARTY_ORIGINAL_PSBT_ONE, PARSED_ORIGINAL_PSBT,
         PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO, PAYJOIN_PROPOSAL,
     };
 
@@ -350,7 +350,7 @@ mod test {
         map.insert(unknown_key, value);
         psbt_ctx.original_psbt.unknown = map;
 
-        let sender = Sender { endpoint: Url::from_str("HTTPS://EXAMPLE.COM/")?, psbt_ctx };
+        let sender = Sender { endpoint: EXAMPLE_URL.clone(), psbt_ctx };
 
         let body = sender.create_v1_post_request().0.body;
         let res_str = std::str::from_utf8(&body)?;

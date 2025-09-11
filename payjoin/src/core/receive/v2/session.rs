@@ -219,9 +219,10 @@ mod tests {
     use crate::receive::tests::original_from_test_vector;
     use crate::receive::v2::test::{mock_err, SHARED_CONTEXT};
     use crate::receive::v2::{
-        Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal, Receiver,
-        UncheckedOriginalPayload,
+        HasReplyableError, Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal,
+        Receiver, UncheckedOriginalPayload,
     };
+    use crate::receive::{InternalPayloadError, PayloadError};
 
     fn unchecked_receiver_from_test_vector() -> Receiver<UncheckedOriginalPayload> {
         Receiver {
@@ -585,6 +586,80 @@ mod tests {
             },
             expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {
                 state: PayjoinProposal { psbt: payjoin_proposal.psbt().clone() },
+                session_context: SessionContext { reply_key, ..session_context },
+            }),
+        };
+        run_session_history_test(test)
+    }
+
+    #[test]
+    fn test_session_fatal_error() -> Result<(), BoxError> {
+        let persister = NoopSessionPersister::<SessionEvent>::default();
+        let session_context = SHARED_CONTEXT.clone();
+        let mut events = vec![];
+
+        let original = original_from_test_vector();
+        // Original PSBT is not broadcastable
+        let _unbroadcastable = unchecked_receiver_from_test_vector()
+            .check_broadcast_suitability(None, |_| Ok(false))
+            .save(&persister)
+            .expect_err("Unbroadcastable should error");
+        // NOTE: it would be good to assert against the internal error type but InternalPersistedError is private
+        let expected_error = PayloadError(InternalPayloadError::OriginalPsbtNotBroadcastable);
+        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
+
+        events.push(SessionEvent::Created(session_context.clone()));
+        events.push(SessionEvent::RetrievedOriginalPayload {
+            original: original.clone(),
+            reply_key: reply_key.clone(),
+        });
+        events.push(SessionEvent::GotReplyableError((&expected_error).into()));
+        events.push(SessionEvent::Closed(SessionOutcome::Failure));
+
+        let test = SessionHistoryTest {
+            events,
+            expected_session_history: SessionHistoryExpectedOutcome {
+                fallback_tx: None,
+                expected_status: SessionStatus::Failed,
+            },
+            expected_receiver_state: ReceiveSession::HasReplyableError(Receiver {
+                state: HasReplyableError { error_reply: (&expected_error).into() },
+                session_context: SessionContext { reply_key, ..session_context },
+            }),
+        };
+        run_session_history_test(test)
+    }
+
+    #[test]
+    fn test_session_transient_error() -> Result<(), BoxError> {
+        let persister = NoopSessionPersister::<SessionEvent>::default();
+        let session_context = SHARED_CONTEXT.clone();
+        let mut events = vec![];
+
+        let original = original_from_test_vector();
+        // Mock some implementation error
+        let _maybe_broadcastable = unchecked_receiver_from_test_vector()
+            .check_broadcast_suitability(None, |_| Err("mock error".into()))
+            .save(&persister)
+            .expect_err("Mock error should error");
+        // NOTE: it would be good to assert against the internal error type but InternalPersistedError is private
+
+        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
+
+        events.push(SessionEvent::Created(session_context.clone()));
+        events.push(SessionEvent::RetrievedOriginalPayload {
+            original: original.clone(),
+            reply_key: reply_key.clone(),
+        });
+
+        let test = SessionHistoryTest {
+            events,
+            expected_session_history: SessionHistoryExpectedOutcome {
+                fallback_tx: None,
+                expected_status: SessionStatus::Active,
+            },
+            expected_receiver_state: ReceiveSession::UncheckedOriginalPayload(Receiver {
+                state: UncheckedOriginalPayload { original },
                 session_context: SessionContext { reply_key, ..session_context },
             }),
         };

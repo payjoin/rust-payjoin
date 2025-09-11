@@ -231,7 +231,7 @@ impl<Event, Err> Rejection<Event, Err> {
 
 /// Represents a fatal rejection of a state transition.
 /// When this error occurs, the session must be closed and cannot be resumed.
-pub struct RejectFatal<Event, Err>(Event, Err);
+pub struct RejectFatal<Event, Err>(pub(crate) Event, pub(crate) Err);
 /// Represents a transient rejection of a state transition.
 /// When this error occurs, the session should resume from its current state.
 pub struct RejectTransient<Err>(pub(crate) Err);

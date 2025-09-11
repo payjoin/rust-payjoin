@@ -1198,7 +1198,7 @@ pub mod test {
 
     use super::*;
     use crate::output_substitution::OutputSubstitution;
-    use crate::persist::{NoopSessionPersister, RejectTransient, Rejection};
+    use crate::persist::{NoopSessionPersister, RejectFatal, RejectTransient, Rejection};
     use crate::receive::optional_parameters::Params;
     use crate::receive::v2;
     use crate::ImplementationError;
@@ -1305,6 +1305,41 @@ pub mod test {
             ),
             _ => panic!("Expected Implementation error"),
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_unchecked_proposal_fatal_error() -> Result<(), BoxError> {
+        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
+        let receiver =
+            v2::Receiver { state: unchecked_proposal, session_context: SHARED_CONTEXT.clone() };
+
+        let receive_session = ReceiveSession::UncheckedOriginalPayload(receiver.clone());
+        let unchecked_proposal =
+            receiver.check_broadcast_suitability(Some(FeeRate::MIN), |_| Ok(false));
+
+        let event = match &unchecked_proposal {
+            MaybeFatalTransition(Err(Rejection::Fatal(RejectFatal(
+                event,
+                Error::Protocol(error),
+            )))) => {
+                assert_eq!(
+                    error.to_string(),
+                    InternalPayloadError::OriginalPsbtNotBroadcastable.to_string()
+                );
+                event.clone()
+            }
+            _ => panic!("Expected fatal error"),
+        };
+
+        let has_error = match receive_session.process_event(event) {
+            Ok(ReceiveSession::HasReplyableError(r)) => r,
+            _ => panic!("Expected HasError"),
+        };
+
+        let _err_req = has_error.create_error_request(EXAMPLE_URL)?;
+        // TODO: assert process_error_response terminally closes session
 
         Ok(())
     }

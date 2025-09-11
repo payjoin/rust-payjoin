@@ -44,8 +44,7 @@ where
         })?;
     }
 
-    let ctx =
-        history.session_context().expect("Session context should be present after the first event");
+    let ctx = history.session_context();
     if SystemTime::now() > ctx.expiry {
         // Session has expired: close the session and persist a fatal error
         let err = SessionError(InternalSessionError::Expired(ctx.expiry));
@@ -71,12 +70,15 @@ pub struct SessionHistory {
 
 impl SessionHistory {
     /// Receiver session Payjoin URI
-    pub fn pj_uri<'a>(&self) -> Option<PjUri<'a>> {
-        self.events.iter().find_map(|event| match event {
-            SessionEvent::Created(session_context) =>
-                Some(crate::receive::v2::pj_uri(session_context, OutputSubstitution::Disabled)),
-            _ => None,
-        })
+    pub fn pj_uri<'a>(&self) -> PjUri<'a> {
+        self.events
+            .iter()
+            .find_map(|event| match event {
+                SessionEvent::Created(session_context) =>
+                    Some(crate::receive::v2::pj_uri(session_context, OutputSubstitution::Disabled)),
+                _ => None,
+            })
+            .expect("Session event log must contain at least one event with pj_uri")
     }
 
     fn get_unchecked_proposal(&self) -> Option<OriginalPayload> {
@@ -130,10 +132,7 @@ impl SessionHistory {
             return Ok(None);
         }
 
-        let session_context = match self.session_context() {
-            Some(session_context) => session_context,
-            None => return Ok(None),
-        };
+        let session_context = self.session_context();
         let json_reply = match self.terminal_error() {
             Some((_, Some(json_reply))) => json_reply,
             _ => return Ok(None),
@@ -148,18 +147,22 @@ impl SessionHistory {
             .any(|event| matches!(event, SessionEvent::UncheckedOriginalPayload { .. }))
     }
 
-    fn session_context(&self) -> Option<SessionContext> {
-        let mut initial_session_context = self.events.iter().find_map(|event| match event {
-            SessionEvent::Created(session_context) => Some(session_context.clone()),
-            _ => None,
-        })?;
+    fn session_context(&self) -> SessionContext {
+        let mut initial_session_context = self
+            .events
+            .iter()
+            .find_map(|event| match event {
+                SessionEvent::Created(session_context) => Some(session_context.clone()),
+                _ => None,
+            })
+            .expect("Session event log must contain at least one event with session_context");
 
         initial_session_context.reply_key = self.events.iter().find_map(|event| match event {
             SessionEvent::UncheckedOriginalPayload { reply_key, .. } => reply_key.clone(),
             _ => None,
         });
 
-        Some(initial_session_context)
+        initial_session_context
     }
 }
 
@@ -575,8 +578,7 @@ mod tests {
         let session_context = SHARED_CONTEXT.clone();
         let events = vec![SessionEvent::Created(session_context.clone())];
 
-        let uri =
-            SessionHistory { events }.pj_uri().expect("SHARED_CONTEXT should contain valid uri");
+        let uri = SessionHistory { events }.pj_uri();
 
         assert_ne!(uri.extras.pj_param.endpoint(), EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
@@ -650,8 +652,8 @@ mod tests {
         let err_req_two = session_history_two.extract_err_req(ohttp_relay)?;
         assert!(err_req_two.is_some());
         assert_ne!(
-            session_history_one.session_context().unwrap().reply_key,
-            session_history_two.session_context().unwrap().reply_key
+            session_history_one.session_context().reply_key,
+            session_history_two.session_context().reply_key
         );
 
         Ok(())

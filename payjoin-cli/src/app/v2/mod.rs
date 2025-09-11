@@ -361,11 +361,8 @@ impl App {
             Ok(_) => Ok(()),
             Err(e) => {
                 let (_, session_history) = replay_receiver_event_log(persister)?;
-                let pj_uri = match session_history.pj_uri() {
-                    Some(uri) => Some(uri.extras.endpoint().clone()),
-                    None => None,
-                };
-                let ohttp_relay = self.unwrap_relay_or_else_fetch(pj_uri).await?;
+                let pj_uri = session_history.pj_uri().extras.endpoint().clone();
+                let ohttp_relay = self.unwrap_relay_or_else_fetch(Some(pj_uri)).await?;
                 self.handle_recoverable_error(&ohttp_relay, &session_history).await?;
 
                 Err(e)

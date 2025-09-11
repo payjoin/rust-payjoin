@@ -162,9 +162,7 @@ impl TerminalErr {
 #[uniffi::export]
 impl SessionHistory {
     /// Receiver session Payjoin URI
-    pub fn pj_uri(&self) -> Option<Arc<crate::PjUri>> {
-        self.0.pj_uri().map(|pj_uri| Arc::new(pj_uri.into()))
-    }
+    pub fn pj_uri(&self) -> Arc<crate::PjUri> { Arc::new(self.0.pj_uri().into()) }
 
     /// Psbt With fee contributions applied
     pub fn psbt_ready_for_signing(&self) -> Option<Arc<crate::Psbt>> {

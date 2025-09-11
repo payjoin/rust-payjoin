@@ -24,15 +24,14 @@ where
         .load()
         .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
 
-    let mut history = SessionHistory::default();
     let first_event = logs.next().ok_or(InternalReplayError::NoEvents)?.into();
-    history.events.push(first_event.clone());
+    let mut session_events = vec![first_event.clone()];
     let mut receiver = match first_event {
         SessionEvent::Created(context) => ReceiveSession::new(context),
         _ => return Err(InternalReplayError::InvalidEvent(Box::new(first_event), None).into()),
     };
     for event in logs {
-        history.events.push(event.clone().into());
+        session_events.push(event.clone().into());
         receiver = receiver.process_event(event.into()).map_err(|e| {
             if let Err(storage_err) = persister.close() {
                 return InternalReplayError::PersistenceFailure(ImplementationError::new(
@@ -44,6 +43,7 @@ where
         })?;
     }
 
+    let history = SessionHistory::new(session_events);
     let ctx = history.session_context();
     if SystemTime::now() > ctx.expiry {
         // Session has expired: close the session and persist a fatal error
@@ -63,12 +63,17 @@ where
 
 /// A collection of events that have occurred during a receiver's session.
 /// It is obtained by calling [replay_event_log].
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct SessionHistory {
     events: Vec<SessionEvent>,
 }
 
 impl SessionHistory {
+    pub(crate) fn new(events: Vec<SessionEvent>) -> Self {
+        debug_assert!(!events.is_empty(), "Session event log must contain at least one event");
+        Self { events }
+    }
+
     /// Receiver session Payjoin URI
     pub fn pj_uri<'a>(&self) -> PjUri<'a> {
         self.events

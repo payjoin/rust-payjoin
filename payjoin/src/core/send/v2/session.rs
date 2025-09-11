@@ -16,9 +16,8 @@ where
     let mut logs = persister
         .load()
         .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
-    let mut history = SessionHistory::default();
     let first_event = logs.next().ok_or(InternalReplayError::NoEvents)?.into();
-    history.events.push(first_event.clone());
+    let mut session_events = vec![first_event.clone()];
     let mut sender = match first_event {
         SessionEvent::CreatedReplyKey(reply_key) => SendSession::new(reply_key),
         _ => return Err(InternalReplayError::InvalidEvent(Box::new(first_event), None).into()),
@@ -26,7 +25,7 @@ where
 
     for log in logs {
         let session_event = log.into();
-        history.events.push(session_event.clone());
+        session_events.push(session_event.clone());
         match sender.clone().process_event(session_event) {
             Ok(next_sender) => sender = next_sender,
             Err(_e) => {
@@ -38,6 +37,7 @@ where
         }
     }
 
+    let history = SessionHistory::new(session_events);
     let pj_param = history.pj_param();
     if std::time::SystemTime::now() > pj_param.expiration() {
         // Session has expired: close the session and persist a fatal error
@@ -53,12 +53,17 @@ where
     Ok((sender, history))
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct SessionHistory {
     events: Vec<SessionEvent>,
 }
 
 impl SessionHistory {
+    pub(crate) fn new(events: Vec<SessionEvent>) -> Self {
+        debug_assert!(!events.is_empty(), "Session event log must contain at least one event");
+        Self { events }
+    }
+
     /// Fallback transaction from the session
     pub fn fallback_tx(&self) -> bitcoin::Transaction {
         self.events

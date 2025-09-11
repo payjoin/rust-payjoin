@@ -139,7 +139,7 @@ pub fn replay_receiver_event_log(
     Ok(ReplayResult { state: state.into(), session_history: session_history.into() })
 }
 
-#[derive(Default, Clone, uniffi::Object)]
+#[derive(Clone, uniffi::Object)]
 pub struct SessionHistory(pub payjoin::receive::v2::SessionHistory);
 
 impl From<payjoin::receive::v2::SessionHistory> for SessionHistory {

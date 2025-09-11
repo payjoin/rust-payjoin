@@ -96,7 +96,7 @@ pub struct PjParam {
 }
 
 impl PjParam {
-    pub fn new(
+    pub(crate) fn new(
         directory: Url,
         id: ShortId,
         expiration: std::time::SystemTime,
@@ -106,7 +106,7 @@ impl PjParam {
         Self { directory, id, expiration, ohttp_keys, receiver_pubkey }
     }
 
-    pub(crate) fn parse(url: Url) -> Result<Self, PjParseError> {
+    pub(super) fn parse(url: Url) -> Result<Self, PjParseError> {
         let path_segments: Vec<&str> = url.path_segments().map(|c| c.collect()).unwrap_or_default();
         let id = if path_segments.len() == 1 {
             ShortId::from_str(path_segments[0]).map_err(|_| PjParseError::NotV2)?
@@ -252,7 +252,7 @@ fn set_param(url: &mut Url, new_param: &str) {
 }
 
 #[derive(Debug)]
-pub(crate) enum PjParseError {
+pub(super) enum PjParseError {
     NotV2,
     LowercaseFragment,
     InvalidReceiverPubkey(ParseReceiverPubkeyParamError),
@@ -285,7 +285,7 @@ impl std::error::Error for PjParseError {
 }
 
 #[derive(Debug)]
-pub(crate) enum ParseOhttpKeysParamError {
+pub(super) enum ParseOhttpKeysParamError {
     MissingOhttpKeys,
     InvalidOhttpKeys(crate::ohttp::ParseOhttpKeysError),
     InvalidFragment(ParseFragmentError),
@@ -315,7 +315,7 @@ impl std::error::Error for ParseOhttpKeysParamError {
 }
 
 #[derive(Debug)]
-pub(crate) enum ParseExpParamError {
+pub(super) enum ParseExpParamError {
     MissingExp,
     InvalidHrp(bitcoin::bech32::Hrp),
     DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
@@ -352,7 +352,7 @@ impl std::error::Error for ParseExpParamError {
 }
 
 #[derive(Debug)]
-pub(crate) enum ParseReceiverPubkeyParamError {
+pub(super) enum ParseReceiverPubkeyParamError {
     MissingPubkey,
     InvalidHrp(bitcoin::bech32::Hrp),
     DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),

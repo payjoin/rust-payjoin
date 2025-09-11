@@ -11,7 +11,7 @@ pub struct PjParam(Url);
 
 impl PjParam {
     /// Parse a new v1 PjParam from a URL
-    pub(crate) fn parse(url: Url) -> Result<Self, PjParseError> {
+    pub(super) fn parse(url: Url) -> Result<Self, PjParseError> {
         if url.scheme() == "https"
             || url.scheme() == "http" && url.domain().unwrap_or_default().ends_with(".onion")
         {

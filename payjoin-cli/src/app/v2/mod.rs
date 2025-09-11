@@ -160,7 +160,7 @@ impl AppTrait for App {
                 .ohttp_keys;
         let persister = ReceiverPersister::new(self.db.clone())?;
         let session =
-            ReceiverBuilder::new(address, self.config.v2()?.pj_directory.clone(), ohttp_keys)?
+            ReceiverBuilder::new(address, self.config.v2()?.pj_directory.as_str(), ohttp_keys)?
                 .with_amount(amount)
                 .with_max_fee_rate(self.config.max_fee_rate.unwrap_or(FeeRate::BROADCAST_MIN))
                 .build()
@@ -253,7 +253,7 @@ impl App {
         persister: &SenderPersister,
     ) -> Result<()> {
         let (req, ctx) = sender.create_v2_post_request(
-            self.unwrap_relay_or_else_fetch(Some(sender.endpoint().clone())).await?,
+            self.unwrap_relay_or_else_fetch(Some(sender.endpoint().clone())).await?.as_str(),
         )?;
         let response = self.post_request(req).await?;
         println!("Posted original proposal...");
@@ -270,7 +270,7 @@ impl App {
         // Long poll until we get a response
         loop {
             let (req, ctx) = session.create_poll_request(
-                self.unwrap_relay_or_else_fetch(Some(session.endpoint().clone())).await?,
+                self.unwrap_relay_or_else_fetch(Some(session.endpoint().clone())).await?.as_str(),
             )?;
             let response = self.post_request(req).await?;
             let res = session.process_response(&response.bytes().await?, ctx).save(persister);
@@ -305,7 +305,7 @@ impl App {
 
         let mut session = session;
         loop {
-            let (req, context) = session.create_poll_request(&ohttp_relay)?;
+            let (req, context) = session.create_poll_request(ohttp_relay.as_str())?;
             println!("Polling receive request...");
             let ohttp_response = self.post_request(req).await?;
             let state_transition = session
@@ -505,7 +505,7 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let (req, ohttp_ctx) = proposal
-            .create_post_request(&self.unwrap_relay_or_else_fetch(None).await?)
+            .create_post_request(self.unwrap_relay_or_else_fetch(None).await?.as_str())
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         let res = self.post_request(req).await?;
         let payjoin_psbt = proposal.psbt().clone();
@@ -544,7 +544,7 @@ impl App {
             _ => return Ok(()),
         };
         let (err_req, err_ctx) = session_history
-            .extract_err_req(ohttp_relay)?
+            .extract_err_req(ohttp_relay.as_str())?
             .expect("If JsonReply is Some, then err_req and err_ctx should be Some");
         let to_return = anyhow!("Replied with error: {}", e.to_json().to_string());
 

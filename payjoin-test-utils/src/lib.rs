@@ -116,7 +116,12 @@ impl TestServices {
     }
 
     pub async fn fetch_ohttp_keys(&self) -> Result<OhttpKeys, IOError> {
-        fetch_ohttp_keys_with_cert(self.ohttp_relay_url(), self.directory_url(), self.cert()).await
+        fetch_ohttp_keys_with_cert(
+            self.ohttp_relay_url().as_str(),
+            self.directory_url().as_str(),
+            self.cert(),
+        )
+        .await
     }
 }
 

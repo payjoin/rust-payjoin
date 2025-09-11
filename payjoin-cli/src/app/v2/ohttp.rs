@@ -83,17 +83,21 @@ async fn fetch_ohttp_keys(
                 if let Some(cert_path) = config.root_certificate.as_ref() {
                     let cert_der = std::fs::read(cert_path)?;
                     payjoin::io::fetch_ohttp_keys_with_cert(
-                        &selected_relay,
-                        &payjoin_directory,
+                        selected_relay.as_str(),
+                        payjoin_directory.as_str(),
                         cert_der,
                     )
                     .await
                 } else {
-                    payjoin::io::fetch_ohttp_keys(&selected_relay, &payjoin_directory).await
+                    payjoin::io::fetch_ohttp_keys(
+                        selected_relay.as_str(),
+                        payjoin_directory.as_str(),
+                    )
+                    .await
                 }
             }
             #[cfg(not(feature = "_manual-tls"))]
-            payjoin::io::fetch_ohttp_keys(&selected_relay, &payjoin_directory).await
+            payjoin::io::fetch_ohttp_keys(selected_relay.as_str(), payjoin_directory.as_str()).await
         };
 
         match ohttp_keys {

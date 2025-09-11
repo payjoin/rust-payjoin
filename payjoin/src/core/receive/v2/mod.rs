@@ -1314,11 +1314,15 @@ pub mod test {
 
         assert_eq!(mock_err.1.to_json(), expected_json);
 
-        let (_req, _ctx) = extract_err_req(&mock_err.1, &*EXAMPLE_URL, &receiver.session_context)?;
+        let (_req, _ctx) =
+            extract_err_req(&mock_err.1, EXAMPLE_URL.as_str(), &receiver.session_context)?;
 
         let internal_error: Error = InternalPayloadError::MissingPayment.into();
-        let (_req, _ctx) =
-            extract_err_req(&(&internal_error).into(), &*EXAMPLE_URL, &receiver.session_context)?;
+        let (_req, _ctx) = extract_err_req(
+            &(&internal_error).into(),
+            EXAMPLE_URL.as_str(),
+            &receiver.session_context,
+        )?;
         Ok(())
     }
 
@@ -1345,7 +1349,7 @@ pub mod test {
         let res = error.api_error().expect("check_broadcast error should propagate to api error");
         let actual_json = JsonReply::from(&res);
 
-        let expiry = extract_err_req(&actual_json, &*EXAMPLE_URL, &context);
+        let expiry = extract_err_req(&actual_json, EXAMPLE_URL.as_str(), &context);
 
         match expiry {
             Err(error) => assert_eq!(
@@ -1364,7 +1368,7 @@ pub mod test {
 
         let session = ReceiverBuilder::new(
             SHARED_CONTEXT.address.clone(),
-            SHARED_CONTEXT.directory.clone(),
+            SHARED_CONTEXT.directory.as_str(),
             SHARED_CONTEXT.ohttp_keys.clone(),
         )
         .expect("constructor on test vector should not fail")
@@ -1384,7 +1388,7 @@ pub mod test {
         let noop_persister = NoopSessionPersister::default();
         let receiver = ReceiverBuilder::new(
             SHARED_CONTEXT.address.clone(),
-            SHARED_CONTEXT.directory.clone(),
+            SHARED_CONTEXT.directory.as_str(),
             SHARED_CONTEXT.ohttp_keys.clone(),
         )
         .expect("constructor on test vector should not fail")
@@ -1398,7 +1402,7 @@ pub mod test {
             FeeRate::from_sat_per_vb(1000).expect("Fee rate should be valid");
         let receiver = ReceiverBuilder::new(
             SHARED_CONTEXT.address.clone(),
-            SHARED_CONTEXT.directory.clone(),
+            SHARED_CONTEXT.directory.as_str(),
             SHARED_CONTEXT.ohttp_keys.clone(),
         )
         .expect("constructor on test vector should not fail")
@@ -1416,7 +1420,7 @@ pub mod test {
         let noop_persister = NoopSessionPersister::default();
         let receiver = ReceiverBuilder::new(
             SHARED_CONTEXT.address.clone(),
-            SHARED_CONTEXT.directory.clone(),
+            SHARED_CONTEXT.directory.as_str(),
             SHARED_CONTEXT.ohttp_keys.clone(),
         )
         .expect("constructor on test vector should not fail")

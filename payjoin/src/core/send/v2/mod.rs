@@ -569,7 +569,7 @@ mod test {
     #[test]
     fn test_create_v2_post_request_success() -> Result<(), BoxError> {
         let sender = create_sender_context(SystemTime::now() + Duration::from_secs(60))?;
-        let ohttp_relay = EXAMPLE_URL.clone();
+        let ohttp_relay = EXAMPLE_URL.as_str();
         let result = sender.create_v2_post_request(ohttp_relay);
         let (request, context) = result.expect("Result should be ok");
         assert!(!request.body.is_empty(), "Request body should not be empty");
@@ -585,7 +585,7 @@ mod test {
     fn test_create_v2_post_request_fails_when_expired() -> Result<(), BoxError> {
         let expected_error = "session expired at SystemTime";
         let sender = create_sender_context(SystemTime::now() - Duration::from_secs(60))?;
-        let ohttp_relay = EXAMPLE_URL.clone();
+        let ohttp_relay = EXAMPLE_URL.as_str();
         let result = sender.create_v2_post_request(ohttp_relay);
         assert!(result.is_err(), "Extract v2 expected expiry error, but it succeeded");
 
@@ -606,7 +606,7 @@ mod test {
         let address = Address::from_str("2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7")
             .expect("valid address")
             .assume_checked();
-        let directory = EXAMPLE_URL.clone();
+        let directory = EXAMPLE_URL.as_str();
         let ohttp_keys = OhttpKeys(
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
         );

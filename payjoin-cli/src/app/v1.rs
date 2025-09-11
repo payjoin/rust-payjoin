@@ -142,7 +142,7 @@ impl App {
                 .expect("setting port must succeed");
         }
 
-        let pj_uri_string = self.construct_payjoin_uri(amount, endpoint)?;
+        let pj_uri_string = self.construct_payjoin_uri(amount, endpoint.as_str())?;
         println!(
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
             listener.local_addr()?

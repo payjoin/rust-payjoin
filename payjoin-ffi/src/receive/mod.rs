@@ -85,6 +85,7 @@ pub enum ReceiveSession {
     WantsFeeRange { inner: Arc<WantsFeeRange> },
     ProvisionalProposal { inner: Arc<ProvisionalProposal> },
     PayjoinProposal { inner: Arc<PayjoinProposal> },
+    HasError { inner: Arc<HasError> },
     TerminalFailure,
 }
 
@@ -112,6 +113,7 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
                 Self::ProvisionalProposal { inner: Arc::new(inner.into()) },
             ReceiveSession::PayjoinProposal(inner) =>
                 Self::PayjoinProposal { inner: Arc::new(inner.into()) },
+            ReceiveSession::HasError(inner) => Self::HasError { inner: Arc::new(inner.into()) },
             ReceiveSession::TerminalFailure => Self::TerminalFailure,
         }
     }
@@ -1017,6 +1019,75 @@ impl PayjoinProposal {
     ) -> PayjoinProposalTransition {
         PayjoinProposalTransition(Arc::new(RwLock::new(Some(
             self.0.clone().process_response(body, ohttp_context.into()),
+        ))))
+    }
+}
+
+#[derive(Clone, uniffi::Object)]
+pub struct HasError(pub payjoin::receive::v2::Receiver<payjoin::receive::v2::HasError>);
+
+impl From<HasError> for payjoin::receive::v2::Receiver<payjoin::receive::v2::HasError> {
+    fn from(value: HasError) -> Self { value.0 }
+}
+
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::HasError>> for HasError {
+    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::HasError>) -> Self {
+        Self(value)
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct HasErrorTransition(
+    Arc<
+        RwLock<
+            Option<
+                payjoin::persist::MaybeSuccessTransition<
+                    payjoin::receive::v2::SessionEvent,
+                    (),
+                    payjoin::receive::Error,
+                >,
+            >,
+        >,
+    >,
+);
+
+#[uniffi::export]
+impl HasErrorTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<(), ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let mut inner =
+            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
+
+        let value = inner
+            .take()
+            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
+
+        value.save(&adapter).map_err(ReceiverPersistedError::from)?;
+        Ok(())
+    }
+}
+
+#[uniffi::export]
+impl HasError {
+    pub fn create_error_request(
+        &self,
+        ohttp_relay: String,
+    ) -> Result<RequestResponse, SessionError> {
+        self.0.clone().create_error_request(ohttp_relay).map_err(Into::into).map(|(req, ctx)| {
+            RequestResponse { request: req.into(), client_response: Arc::new(ctx.into()) }
+        })
+    }
+
+    pub fn process_error_response(
+        &self,
+        body: &[u8],
+        ohttp_context: &ClientResponse,
+    ) -> PayjoinProposalTransition {
+        PayjoinProposalTransition(Arc::new(RwLock::new(Some(
+            self.0.clone().process_error_response(body, ohttp_context.into()),
         ))))
     }
 }

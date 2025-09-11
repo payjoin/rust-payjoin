@@ -1200,7 +1200,7 @@ pub mod test {
                 error.to_string(),
                 Error::Implementation("mock error".into()).to_string()
             ),
-            _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
+            _ => panic!("Expected Implementation error"),
         }
 
         Ok(())
@@ -1228,7 +1228,7 @@ pub mod test {
                 error.to_string(),
                 Error::Implementation("mock error".into()).to_string()
             ),
-            _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
+            _ => panic!("Expected Implementation error"),
         }
 
         Ok(())
@@ -1259,7 +1259,7 @@ pub mod test {
                 error.to_string(),
                 Error::Implementation("mock error".into()).to_string()
             ),
-            _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
+            _ => panic!("Expected Implementation error"),
         }
 
         Ok(())
@@ -1294,7 +1294,7 @@ pub mod test {
                 error.to_string(),
                 Error::Implementation("mock error".into()).to_string()
             ),
-            _ => panic!("Expected ReplyableError but got unexpected error or Ok"),
+            _ => panic!("Expected Implementation error"),
         }
 
         Ok(())

@@ -11,7 +11,7 @@ pub(crate) use crate::directory::ShortId;
 use crate::output_substitution::OutputSubstitution;
 use crate::uri::error::InternalPjParseError;
 
-pub mod error;
+mod error;
 #[cfg(feature = "v1")]
 pub mod v1;
 #[cfg(feature = "v2")]

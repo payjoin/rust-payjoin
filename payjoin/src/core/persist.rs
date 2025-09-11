@@ -424,10 +424,8 @@ trait InternalSessionPersister: SessionPersister {
             }
             Ok(AcceptOptionalTransition::NoResults(current_state)) =>
                 Ok(OptionalTransitionOutcome::Stasis(current_state)),
-            Err(Rejection::Fatal(RejectFatal(event, error))) => {
-                self.handle_fatal_reject(event)?;
-                Err(InternalPersistedError::Fatal(error).into())
-            }
+            Err(Rejection::Fatal(reject_fatal)) =>
+                Err(self.handle_fatal_reject(reject_fatal).into()),
             Err(Rejection::Transient(RejectTransient(err))) =>
                 Err(InternalPersistedError::Transient(err).into()),
         }
@@ -459,10 +457,8 @@ trait InternalSessionPersister: SessionPersister {
             }
             Ok(AcceptOptionalTransition::NoResults(current_state)) =>
                 Ok(OptionalTransitionOutcome::Stasis(current_state)),
-            Err(Rejection::Fatal(RejectFatal(event, error))) => {
-                self.handle_fatal_reject(event)?;
-                Err(InternalPersistedError::Fatal(error).into())
-            }
+            Err(Rejection::Fatal(reject_fatal)) =>
+                Err(self.handle_fatal_reject(reject_fatal).into()),
             Err(Rejection::Transient(RejectTransient(err))) =>
                 Err(InternalPersistedError::Transient(err).into()),
         }
@@ -500,10 +496,8 @@ trait InternalSessionPersister: SessionPersister {
             }
             Err(e) => {
                 match e {
-                    Rejection::Fatal(RejectFatal(event, error)) => {
-                        self.handle_fatal_reject(event)?;
-                        Err(InternalPersistedError::Fatal(error).into())
-                    }
+                    Rejection::Fatal(reject_fatal) =>
+                        Err(self.handle_fatal_reject(reject_fatal).into()),
                     Rejection::Transient(RejectTransient(err)) => {
                         // No event to store for transient errors
                         Err(InternalPersistedError::Transient(err).into())
@@ -515,14 +509,21 @@ trait InternalSessionPersister: SessionPersister {
 
     fn handle_fatal_reject<Err>(
         &self,
-        event: Self::SessionEvent,
-    ) -> Result<(), InternalPersistedError<Err, Self::InternalStorageError>>
+        reject_fatal: RejectFatal<Self::SessionEvent, Err>,
+    ) -> InternalPersistedError<Err, Self::InternalStorageError>
     where
         Err: std::error::Error,
     {
-        self.save_event(event).map_err(InternalPersistedError::Storage)?;
+        let RejectFatal(event, error) = reject_fatal;
+        if let Err(e) = self.save_event(event) {
+            return InternalPersistedError::Storage(e);
+        }
         // Session is in a terminal state, close it
-        self.close().map_err(InternalPersistedError::Storage)
+        if let Err(e) = self.close() {
+            return InternalPersistedError::Storage(e);
+        }
+
+        InternalPersistedError::Fatal(error)
     }
 }
 

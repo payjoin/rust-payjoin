@@ -111,7 +111,7 @@ pub fn replay_sender_event_log(
     Ok(SenderReplayResult { state: state.into(), session_history: session_history.into() })
 }
 
-#[derive(uniffi::Object, Default, Clone)]
+#[derive(uniffi::Object, Clone)]
 pub struct SenderSessionHistory(pub payjoin::send::v2::SessionHistory);
 
 impl From<payjoin::send::v2::SessionHistory> for SenderSessionHistory {

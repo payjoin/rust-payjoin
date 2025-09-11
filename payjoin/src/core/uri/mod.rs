@@ -1,3 +1,5 @@
+//! Payjoin URI parsing and validation
+
 use std::borrow::Cow;
 
 use bitcoin::address::NetworkChecked;

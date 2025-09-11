@@ -1,3 +1,5 @@
+//! Payjoin v2 URI functionality
+
 use std::collections::BTreeMap;
 use std::str::FromStr;
 

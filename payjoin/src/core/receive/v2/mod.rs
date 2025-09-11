@@ -138,6 +138,7 @@ pub enum ReceiveSession {
     WantsFeeRange(Receiver<WantsFeeRange>),
     ProvisionalProposal(Receiver<ProvisionalProposal>),
     PayjoinProposal(Receiver<PayjoinProposal>),
+    HasReplyableError(Receiver<HasReplyableError>),
     TerminalFailure,
 }
 
@@ -188,7 +189,25 @@ impl ReceiveSession {
                 SessionEvent::FinalizedProposal(payjoin_proposal),
             ) => Ok(state.apply_finalized_proposal(payjoin_proposal)),
 
-            (_, SessionEvent::GotReplyableError(_)) => Ok(ReceiveSession::TerminalFailure),
+            (session, SessionEvent::GotReplyableError(error)) =>
+                Ok(ReceiveSession::HasReplyableError(Receiver {
+                    state: HasReplyableError { error_reply: error.clone() },
+                    session_context: match session {
+                        ReceiveSession::Initialized(r) => r.session_context,
+                        ReceiveSession::UncheckedOriginalPayload(r) => r.session_context,
+                        ReceiveSession::MaybeInputsOwned(r) => r.session_context,
+                        ReceiveSession::MaybeInputsSeen(r) => r.session_context,
+                        ReceiveSession::OutputsUnknown(r) => r.session_context,
+                        ReceiveSession::WantsOutputs(r) => r.session_context,
+                        ReceiveSession::WantsInputs(r) => r.session_context,
+                        ReceiveSession::WantsFeeRange(r) => r.session_context,
+                        ReceiveSession::ProvisionalProposal(r) => r.session_context,
+                        ReceiveSession::PayjoinProposal(r) => r.session_context,
+                        ReceiveSession::HasReplyableError(r) => r.session_context,
+                        ReceiveSession::TerminalFailure =>
+                            return Ok(ReceiveSession::TerminalFailure),
+                    },
+                })),
 
             (current_state, SessionEvent::Closed(_)) => Ok(current_state),
 
@@ -214,6 +233,7 @@ mod sealed {
     impl State for super::WantsFeeRange {}
     impl State for super::ProvisionalProposal {}
     impl State for super::PayjoinProposal {}
+    impl State for super::HasReplyableError {}
 }
 
 /// Sealed trait for V2 receive session states.
@@ -1085,6 +1105,42 @@ impl Receiver<PayjoinProposal> {
         match process_post_res(res, ohttp_context) {
             Ok(_) =>
                 MaybeSuccessTransition::success(SessionEvent::Closed(SessionOutcome::Success), ()),
+            Err(e) =>
+                if e.is_fatal() {
+                    MaybeSuccessTransition::fatal(
+                        SessionEvent::Closed(SessionOutcome::Failure),
+                        ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()),
+                    )
+                } else {
+                    MaybeSuccessTransition::transient(ProtocolError::V2(
+                        InternalSessionError::DirectoryResponse(e).into(),
+                    ))
+                },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HasReplyableError {
+    error_reply: JsonReply,
+}
+
+impl Receiver<HasReplyableError> {
+    pub fn create_error_request(
+        &self,
+        ohttp_relay: impl IntoUrl,
+    ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
+        extract_err_req(&self.error_reply, ohttp_relay, &self.session_context)
+    }
+
+    pub fn process_error_response(
+        &self,
+        res: &[u8],
+        ohttp_context: ohttp::ClientResponse,
+    ) -> MaybeSuccessTransition<SessionEvent, (), ProtocolError> {
+        match process_post_res(res, ohttp_context) {
+            Ok(_) =>
+                MaybeSuccessTransition::success(SessionEvent::Closed(SessionOutcome::Failure), ()),
             Err(e) =>
                 if e.is_fatal() {
                     MaybeSuccessTransition::fatal(

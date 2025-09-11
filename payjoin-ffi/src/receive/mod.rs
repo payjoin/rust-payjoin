@@ -78,6 +78,7 @@ pub enum ReceiveSession {
     WantsFeeRange { inner: Arc<WantsFeeRange> },
     ProvisionalProposal { inner: Arc<ProvisionalProposal> },
     PayjoinProposal { inner: Arc<PayjoinProposal> },
+    HasReplyableError { inner: Arc<HasReplyableError> },
     TerminalFailure,
 }
 
@@ -105,6 +106,8 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
                 Self::ProvisionalProposal { inner: Arc::new(inner.into()) },
             ReceiveSession::PayjoinProposal(inner) =>
                 Self::PayjoinProposal { inner: Arc::new(inner.into()) },
+            ReceiveSession::HasReplyableError(inner) =>
+                Self::HasReplyableError { inner: Arc::new(inner.into()) },
             ReceiveSession::TerminalFailure => Self::TerminalFailure,
         }
     }
@@ -996,6 +999,80 @@ impl PayjoinProposal {
     ) -> PayjoinProposalTransition {
         PayjoinProposalTransition(Arc::new(RwLock::new(Some(
             self.0.clone().process_response(body, ohttp_context.into()),
+        ))))
+    }
+}
+
+#[derive(Clone, uniffi::Object)]
+pub struct HasReplyableError(
+    pub payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError>,
+);
+
+impl From<HasReplyableError>
+    for payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError>
+{
+    fn from(value: HasReplyableError) -> Self { value.0 }
+}
+
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError>>
+    for HasReplyableError
+{
+    fn from(
+        value: payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError>,
+    ) -> Self {
+        Self(value)
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct HasReplyableErrorTransition(
+    Arc<
+        RwLock<
+            Option<
+                payjoin::persist::MaybeSuccessTransition<
+                    payjoin::receive::v2::SessionEvent,
+                    (),
+                    payjoin::receive::Error,
+                >,
+            >,
+        >,
+    >,
+);
+
+#[uniffi::export]
+impl HasReplyableErrorTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<(), ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let mut inner = self.0.write().expect("Lock should not be poisoned");
+
+        let value = inner.take().expect("Already saved or moved");
+
+        value.save(&adapter).map_err(ReceiverPersistedError::from)?;
+        Ok(())
+    }
+}
+
+#[uniffi::export]
+impl HasReplyableError {
+    pub fn create_error_request(
+        &self,
+        ohttp_relay: String,
+    ) -> Result<RequestResponse, SessionError> {
+        self.0.clone().create_error_request(ohttp_relay).map_err(Into::into).map(|(req, ctx)| {
+            RequestResponse { request: req.into(), client_response: Arc::new(ctx.into()) }
+        })
+    }
+
+    pub fn process_error_response(
+        &self,
+        body: &[u8],
+        ohttp_context: &ClientResponse,
+    ) -> PayjoinProposalTransition {
+        PayjoinProposalTransition(Arc::new(RwLock::new(Some(
+            self.0.clone().process_error_response(body, ohttp_context.into()),
         ))))
     }
 }

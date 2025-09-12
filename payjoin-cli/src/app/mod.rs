@@ -7,7 +7,6 @@ use tokio::signal;
 use tokio::sync::watch;
 
 pub mod config;
-pub mod rpc;
 pub mod wallet;
 use crate::app::config::Config;
 use crate::app::wallet::BitcoindWallet;
@@ -45,7 +44,7 @@ pub trait App: Send + Sync {
         tracing::debug!("Proposed psbt: {psbt:#?}");
 
         let signed = self.wallet().process_psbt(&psbt)?;
-        let tx = self.wallet().finalize_psbt(&signed)?;
+        let tx = signed.extract_tx()?;
 
         let txid = self.wallet().broadcast_tx(&tx)?;
 

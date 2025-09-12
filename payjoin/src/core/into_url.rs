@@ -34,8 +34,6 @@ type Result<T> = core::result::Result<T, Error>;
 /// see <https://docs.rs/reqwest/latest/reqwest/trait.IntoUrl.html>
 pub trait IntoUrl: IntoUrlSealed {}
 
-impl IntoUrl for &Url {}
-impl IntoUrl for Url {}
 impl IntoUrl for &str {}
 impl IntoUrl for &String {}
 impl IntoUrl for String {}

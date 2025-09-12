@@ -228,16 +228,18 @@ mod integration {
             ) -> Result<Response, BoxSendSyncError> {
                 let agent = services.http_agent();
                 services.wait_for_services_ready().await?;
-                let directory = services.directory_url();
-                let ohttp_relay = services.ohttp_relay_url();
                 let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")?
                     .assume_checked();
                 let noop_persister = NoopSessionPersister::default();
-                let mut bad_initializer =
-                    ReceiverBuilder::new(mock_address, directory, bad_ohttp_keys)?
-                        .build()
-                        .save(&noop_persister)?;
-                let (req, _ctx) = bad_initializer.create_poll_request(&ohttp_relay)?;
+                let mut bad_initializer = ReceiverBuilder::new(
+                    mock_address,
+                    services.directory_url().as_str(),
+                    bad_ohttp_keys,
+                )?
+                .build()
+                .save(&noop_persister)?;
+                let (req, _ctx) =
+                    bad_initializer.create_poll_request(services.ohttp_relay_url().as_str())?;
                 agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -265,8 +267,6 @@ mod integration {
             async fn do_expiration_tests(services: &TestServices) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
                 services.wait_for_services_ready().await?;
-                let directory = services.directory_url();
-                let ohttp_relay = services.ohttp_relay_url();
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let recv_noop_persister = NoopSessionPersister::default();
                 let send_noop_persister = NoopSessionPersister::default();
@@ -274,11 +274,12 @@ mod integration {
                 // Inside the Receiver:
                 let address = receiver.new_address()?;
                 // test session with expiry in the past
-                let mut expired_receiver = ReceiverBuilder::new(address, directory, ohttp_keys)?
-                    .with_expiry(Duration::from_secs(0))
-                    .build()
-                    .save(&recv_noop_persister)?;
-                match expired_receiver.create_poll_request(&ohttp_relay) {
+                let mut expired_receiver =
+                    ReceiverBuilder::new(address, services.directory_url().as_str(), ohttp_keys)?
+                        .with_expiry(Duration::from_secs(0))
+                        .build()
+                        .save(&recv_noop_persister)?;
+                match expired_receiver.create_poll_request(services.ohttp_relay_url().as_str()) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
                     _ => panic!("Expired receive session should error"),
@@ -292,7 +293,7 @@ mod integration {
                     .build_non_incentivizing(FeeRate::BROADCAST_MIN)?
                     .save(&send_noop_persister)?;
 
-                match expired_req_ctx.create_v2_post_request(ohttp_relay) {
+                match expired_req_ctx.create_v2_post_request(services.ohttp_relay_url().as_str()) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
                     _ => panic!("Expired send session should error"),
@@ -319,7 +320,6 @@ mod integration {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
                 let agent = services.http_agent();
                 services.wait_for_services_ready().await?;
-                let directory = services.directory_url();
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let persister = InMemoryTestPersister::default();
                 let sender_persister = NoopSessionPersister::default();
@@ -327,13 +327,14 @@ mod integration {
                 // Inside the Receiver:
                 let address = receiver.new_address()?;
 
-                let mut session = ReceiverBuilder::new(address, directory, ohttp_keys)?
-                    .build()
-                    .save(&persister)?;
+                let mut session =
+                    ReceiverBuilder::new(address, services.directory_url().as_str(), ohttp_keys)?
+                        .build()
+                        .save(&persister)?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
-                let ohttp_relay = services.ohttp_relay_url();
-                let (req, ctx) = session.create_poll_request(&ohttp_relay)?;
+                let (req, ctx) =
+                    session.create_poll_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -360,7 +361,7 @@ mod integration {
                     .build_recommended(FeeRate::BROADCAST_MIN)?
                     .save(&sender_persister)?;
                 let (Request { url, body, content_type, .. }, _send_ctx) =
-                    req_ctx.create_v2_post_request(ohttp_relay.to_owned())?;
+                    req_ctx.create_v2_post_request(services.ohttp_relay_url().as_str())?;
                 let response =
                     agent.post(url).header("Content-Type", content_type).body(body).send().await?;
                 tracing::info!("Response: {:#?}", &response);
@@ -371,7 +372,8 @@ mod integration {
                 // Inside the Receiver:
 
                 // GET fallback psbt
-                let (req, ctx) = session.create_poll_request(&ohttp_relay)?;
+                let (req, ctx) =
+                    session.create_poll_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -404,7 +406,7 @@ mod integration {
 
                 let (_, session_history) = replay_receiver_event_log(&persister)?;
                 let (err_req, err_ctx) = session_history
-                    .extract_err_req(ohttp_relay)?
+                    .extract_err_req(services.ohttp_relay_url().as_str())?
                     .expect("error request should exist");
                 let err_response = agent
                     .post(err_req.url)
@@ -439,7 +441,6 @@ mod integration {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
                 let agent = services.http_agent();
                 services.wait_for_services_ready().await?;
-                let directory = services.directory_url();
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let recv_persister = NoopSessionPersister::default();
                 let send_persister = NoopSessionPersister::default();
@@ -448,13 +449,14 @@ mod integration {
                 let address = receiver.new_address()?;
 
                 // test session with expiry in the future
-                let mut session = ReceiverBuilder::new(address, directory, ohttp_keys)?
-                    .build()
-                    .save(&recv_persister)?;
+                let mut session =
+                    ReceiverBuilder::new(address, services.directory_url().as_str(), ohttp_keys)?
+                        .build()
+                        .save(&recv_persister)?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
-                let ohttp_relay = services.ohttp_relay_url();
-                let (req, ctx) = session.create_poll_request(&ohttp_relay)?;
+                let (req, ctx) =
+                    session.create_poll_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -481,7 +483,7 @@ mod integration {
                     .build_recommended(FeeRate::BROADCAST_MIN)?
                     .save(&send_persister)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
-                    req_ctx.create_v2_post_request(ohttp_relay.to_owned())?;
+                    req_ctx.create_v2_post_request(services.ohttp_relay_url().as_str())?;
                 let response =
                     agent.post(url).header("Content-Type", content_type).body(body).send().await?;
                 tracing::info!("Response: {:#?}", &response);
@@ -495,7 +497,8 @@ mod integration {
                 // Inside the Receiver:
 
                 // GET fallback psbt
-                let (req, ctx) = session.create_poll_request(&ohttp_relay)?;
+                let (req, ctx) =
+                    session.create_poll_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -508,7 +511,8 @@ mod integration {
                     .save(&recv_persister)?;
                 let proposal = outcome.success().expect("proposal should exist").clone();
                 let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None)?;
-                let (req, ctx) = payjoin_proposal.create_post_request(&ohttp_relay)?;
+                let (req, ctx) =
+                    payjoin_proposal.create_post_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
                     .post(req.url)
                     .header("Content-Type", req.content_type)
@@ -524,7 +528,7 @@ mod integration {
                 // Sender checks, signs, finalizes, constructs, and broadcasts
                 // Replay post fallback to get the response
                 let (Request { url, body, content_type, .. }, ohttp_ctx) =
-                    send_ctx.create_poll_request(ohttp_relay.to_owned())?;
+                    send_ctx.create_poll_request(services.ohttp_relay_url().as_str())?;
                 let response =
                     agent.post(url).header("Content-Type", content_type).body(body).send().await?;
                 tracing::info!("Response: {:#?}", &response);
@@ -640,14 +644,16 @@ mod integration {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
                 let agent = services.http_agent();
                 services.wait_for_services_ready().await?;
-                let directory = services.directory_url();
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let recv_persister = NoopSessionPersister::default();
                 let address = receiver.new_address()?;
-                let mut session =
-                    ReceiverBuilder::new(address, directory.clone(), ohttp_keys.clone())?
-                        .build()
-                        .save(&recv_persister)?;
+                let mut session = ReceiverBuilder::new(
+                    address,
+                    services.directory_url().as_str(),
+                    ohttp_keys.clone(),
+                )?
+                .build()
+                .save(&recv_persister)?;
 
                 // **********************
                 // Inside the V1 Sender:
@@ -681,7 +687,7 @@ mod integration {
                 let agent_clone: Arc<Client> = agent.clone();
                 let receiver: Arc<corepc_node::Client> = Arc::new(receiver);
                 let receiver_clone = receiver.clone();
-                let ohttp_relay = services.ohttp_relay_url();
+                let ohttp_relay = services.ohttp_relay_url().to_string();
                 let receiver_loop = tokio::task::spawn(async move {
                     let agent_clone = agent_clone.clone();
                     let proposal = loop {
@@ -715,7 +721,7 @@ mod integration {
                             .map_err(|e| e.to_string())?;
                     // Respond with payjoin psbt within the time window the sender is willing to wait
                     // this response would be returned as http response to the sender
-                    let (req, ctx) = payjoin_proposal.create_post_request(&ohttp_relay)?;
+                    let (req, ctx) = payjoin_proposal.create_post_request(ohttp_relay)?;
                     let response = agent_clone
                         .post(req.url)
                         .header("Content-Type", req.content_type)

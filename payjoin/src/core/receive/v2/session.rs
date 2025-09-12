@@ -593,11 +593,11 @@ mod tests {
 
     #[test]
     fn test_skipped_session_extract_err_request() -> Result<(), BoxError> {
-        let ohttp_relay = EXAMPLE_URL.clone();
+        let ohttp_relay = EXAMPLE_URL.as_str();
         let mock_err = mock_err();
 
         let session_history = SessionHistory { events: vec![SessionEvent::MaybeInputsOwned()] };
-        let err_req = session_history.extract_err_req(&ohttp_relay)?;
+        let err_req = session_history.extract_err_req(ohttp_relay)?;
         assert!(err_req.is_none());
 
         let session_history = SessionHistory {
@@ -607,7 +607,7 @@ mod tests {
             ],
         };
 
-        let err_req = session_history.extract_err_req(&ohttp_relay)?;
+        let err_req = session_history.extract_err_req(ohttp_relay)?;
         assert!(err_req.is_none());
 
         let session_history = SessionHistory {
@@ -618,7 +618,7 @@ mod tests {
             ],
         };
 
-        let err_req = session_history.extract_err_req(&ohttp_relay)?;
+        let err_req = session_history.extract_err_req(ohttp_relay)?;
         assert!(err_req.is_none());
         Ok(())
     }
@@ -626,7 +626,7 @@ mod tests {
     #[test]
     fn test_session_extract_err_req_reply_key() -> Result<(), BoxError> {
         let proposal = original_from_test_vector();
-        let ohttp_relay = EXAMPLE_URL.clone();
+        let ohttp_relay = EXAMPLE_URL.as_str();
         let mock_err = mock_err();
 
         let session_history_one = SessionHistory {
@@ -640,7 +640,7 @@ mod tests {
             ],
         };
 
-        let err_req_one = session_history_one.extract_err_req(&ohttp_relay)?;
+        let err_req_one = session_history_one.extract_err_req(ohttp_relay)?;
         assert!(err_req_one.is_some());
 
         let session_history_two = SessionHistory {

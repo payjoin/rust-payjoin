@@ -32,14 +32,14 @@ impl PjParam {
         let endpoint = endpoint.into_url().map_err(InternalPjParseError::IntoUrl)?;
 
         #[cfg(feature = "v2")]
-        match v2::PjParam::parse(endpoint.clone()) {
+        match v2::PjParam::parse(endpoint.0.clone()) {
             Err(v2::PjParseError::NotV2) => (), // continue
             Ok(v2) => return Ok(PjParam::V2(v2)),
             Err(e) => return Err(InternalPjParseError::V2(e).into()),
         }
 
         #[cfg(feature = "v1")]
-        return Ok(PjParam::V1(v1::PjParam::parse(endpoint)?));
+        return Ok(PjParam::V1(v1::PjParam::parse(endpoint.0)?));
 
         #[cfg(all(not(feature = "v1"), feature = "v2"))]
         return Err(InternalPjParseError::V2(v2::PjParseError::NotV2).into());

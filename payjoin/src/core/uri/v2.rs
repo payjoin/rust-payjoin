@@ -439,7 +439,7 @@ mod tests {
         ));
 
         let too_long_ohttp_url =
-            Url::parse("https://example.com?pj=https://test-payjoin-url#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQCC")
+            url::Url::parse("https://example.com?pj=https://test-payjoin-url#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQCC")
                 .unwrap();
         assert!(matches!(
             ohttp(&too_long_ohttp_url),
@@ -449,7 +449,7 @@ mod tests {
         ));
 
         let too_short_ohttp_url =
-            Url::parse("https://example.com?pj=https://test-payjoin-url#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQ")
+            url::Url::parse("https://example.com?pj=https://test-payjoin-url#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQ")
                 .unwrap();
         assert!(matches!(
             ohttp(&too_short_ohttp_url),
@@ -491,7 +491,7 @@ mod tests {
         // Since the HRP is everything to the left of the right-most separator, the invalid url in
         // this test would have it's HRP being parsed as EX101 instead of the expected EX1
         let invalid_hrp_exp_url =
-            Url::parse("http://example.com?pj=https://test-payjoin-url#EX1010").unwrap();
+            url::Url::parse("http://example.com?pj=https://test-payjoin-url#EX1010").unwrap();
         assert!(matches!(exp(&invalid_hrp_exp_url), Err(ParseExpParamError::InvalidFormat)));
 
         // Not enough data to decode into a u32

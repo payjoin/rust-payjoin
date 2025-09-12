@@ -374,6 +374,7 @@ pub(crate) fn extract_request(
     tracing::debug!("ohttp_relay_url: {ohttp_relay:?}");
     let directory_base = url.join("/").map_err(|e| InternalCreateRequestError::Url(e.into()))?;
     let full_ohttp_relay = ohttp_relay
+        .0
         .join(&format!("/{directory_base}"))
         .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
     let request = Request::new_v2(&full_ohttp_relay, &body);
@@ -447,7 +448,7 @@ impl Sender<PollingForProposal> {
             ohttp_encapsulate(&mut ohttp_keys, "GET", url.as_str(), Some(&body))
                 .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
 
-        let url = ohttp_relay.into_url().map_err(InternalCreateRequestError::Url)?;
+        let url = ohttp_relay.into_url().map_err(InternalCreateRequestError::Url)?.0;
         Ok((Request::new_v2(&url, &body), ohttp_ctx))
     }
 

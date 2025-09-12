@@ -19,7 +19,7 @@ pub async fn fetch_ohttp_keys(
     ohttp_relay: impl IntoUrl,
     payjoin_directory: impl IntoUrl,
 ) -> Result<OhttpKeys, Error> {
-    let ohttp_keys_url = payjoin_directory.into_url()?.join("/.well-known/ohttp-gateway")?;
+    let ohttp_keys_url = payjoin_directory.into_url()?.0.join("/.well-known/ohttp-gateway")?;
     let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
     let client = Client::builder().proxy(proxy).build()?;
     let res = client
@@ -47,7 +47,7 @@ pub async fn fetch_ohttp_keys_with_cert(
     payjoin_directory: impl IntoUrl,
     cert_der: Vec<u8>,
 ) -> Result<OhttpKeys, Error> {
-    let ohttp_keys_url = payjoin_directory.into_url()?.join("/.well-known/ohttp-gateway")?;
+    let ohttp_keys_url = payjoin_directory.into_url()?.0.join("/.well-known/ohttp-gateway")?;
     let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
     let client = Client::builder()
         .use_rustls_tls()

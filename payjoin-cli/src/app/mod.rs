@@ -44,7 +44,7 @@ pub trait App: Send + Sync {
         tracing::debug!("Proposed psbt: {psbt:#?}");
 
         let signed = self.wallet().process_psbt(&psbt)?;
-        let tx = self.wallet().finalize_psbt(&signed)?;
+        let tx = signed.extract_tx()?;
 
         let txid = self.wallet().broadcast_tx(&tx)?;
 

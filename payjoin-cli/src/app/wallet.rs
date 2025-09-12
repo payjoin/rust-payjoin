@@ -99,18 +99,6 @@ impl BitcoindWallet {
         processed.psbt.ok_or_else(|| anyhow!("Insane PSBT"))
     }
 
-    /// Finalize a PSBT and extract the transaction
-    pub fn finalize_psbt(&self, psbt: &Psbt) -> Result<Transaction> {
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                self.rpc.wallet_process_psbt(&psbt.to_string(), Some(true), None, None).await
-            })
-        })?;
-        let psbt = result.psbt.ok_or_else(|| anyhow!("Incomplete PSBT"))?;
-        let tx = psbt.extract_tx()?;
-        Ok(tx)
-    }
-
     pub fn can_broadcast(&self, tx: &Transaction) -> Result<bool> {
         let mempool_results = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()

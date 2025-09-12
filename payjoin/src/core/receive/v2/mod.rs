@@ -35,7 +35,6 @@ pub use error::SessionError;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 pub use session::{replay_event_log, SessionEvent, SessionHistory};
-use url::Url;
 
 use super::error::{Error, InputContributionError};
 use super::{
@@ -79,7 +78,7 @@ pub struct SessionContext {
 }
 
 impl SessionContext {
-    fn full_relay_url(&self, ohttp_relay: impl IntoUrl) -> Result<Url, InternalSessionError> {
+    fn full_relay_url(&self, ohttp_relay: impl IntoUrl) -> Result<url::Url, InternalSessionError> {
         let relay_base = ohttp_relay.into_url().map_err(InternalSessionError::ParseUrl)?;
 
         // Only reveal scheme and authority to the relay
@@ -88,6 +87,7 @@ impl SessionContext {
 
         // Append that information as a path to the relay URL
         relay_base
+            .0
             .join(&format!("/{directory_base}"))
             .map_err(|e| InternalSessionError::ParseUrl(e.into()))
     }
@@ -268,7 +268,7 @@ fn extract_err_req(
         Some(err.to_json().to_string().as_bytes()),
     )
     .map_err(InternalSessionError::OhttpEncapsulation)?;
-    let req = Request::new_v2(&session_context.full_relay_url(ohttp_relay)?, &body);
+    let req = Request::new_v2(session_context.full_relay_url(ohttp_relay)?.as_str(), &body);
     Ok((req, ohttp_ctx))
 }
 
@@ -298,7 +298,7 @@ impl ReceiverBuilder {
         directory: impl IntoUrl,
         ohttp_keys: OhttpKeys,
     ) -> Result<Self, IntoUrlError> {
-        let directory = directory.into_url()?;
+        let directory = directory.into_url()?.0;
         let session_context = SessionContext {
             address,
             directory,
@@ -327,7 +327,7 @@ impl ReceiverBuilder {
     }
 
     pub fn with_mailbox(self, mailbox: impl IntoUrl) -> Result<Self, IntoUrlError> {
-        Ok(Self(SessionContext { mailbox: Some(mailbox.into_url()?), ..self.0 }))
+        Ok(Self(SessionContext { mailbox: Some(mailbox.into_url()?.0), ..self.0 }))
     }
 
     /// Set the maximum effective fee rate the receiver is willing to pay for their own input/output contributions
@@ -357,7 +357,8 @@ impl Receiver<Initialized> {
         }
         let (body, ohttp_ctx) =
             self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulation)?;
-        let req = Request::new_v2(&self.session_context.full_relay_url(ohttp_relay)?, &body);
+        let req =
+            Request::new_v2(self.session_context.full_relay_url(ohttp_relay)?.as_str(), &body);
         Ok((req, ohttp_ctx))
     }
 
@@ -1029,7 +1030,7 @@ impl Receiver<PayjoinProposal> {
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), Error> {
-        let target_resource: Url;
+        let target_resource: url::Url;
         let body: Vec<u8>;
         let method: &str;
 
@@ -1056,7 +1057,8 @@ impl Receiver<PayjoinProposal> {
             Some(&body),
         )?;
 
-        let req = Request::new_v2(&self.session_context.full_relay_url(ohttp_relay)?, &body);
+        let req =
+            Request::new_v2(self.session_context.full_relay_url(ohttp_relay)?.as_str(), &body);
         Ok((req, ctx))
     }
 
@@ -1092,7 +1094,7 @@ impl Receiver<PayjoinProposal> {
 
 /// Derive a mailbox endpoint on a directory given a [`ShortId`].
 /// It consists of a directory URL and the session ShortID in the path.
-fn mailbox_endpoint(directory: &Url, id: &ShortId) -> Url {
+fn mailbox_endpoint(directory: &url::Url, id: &ShortId) -> url::Url {
     let mut url = directory.clone();
     {
         let mut path_segments =
@@ -1473,7 +1475,7 @@ pub mod test {
     fn test_v2_pj_uri() {
         let uri =
             Receiver { state: Initialized {}, session_context: SHARED_CONTEXT.clone() }.pj_uri();
-        assert_ne!(uri.extras.pj_param.endpoint(), EXAMPLE_URL.clone());
+        assert_ne!(uri.extras.pj_param.endpoint().0, EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
     }
 

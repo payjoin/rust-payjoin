@@ -4,10 +4,10 @@ use std::borrow::Cow;
 
 use bitcoin::address::NetworkChecked;
 pub use error::PjParseError;
-use url::Url;
 
 #[cfg(feature = "v2")]
 pub(crate) use crate::directory::ShortId;
+use crate::into_url::Url;
 use crate::output_substitution::OutputSubstitution;
 use crate::uri::error::InternalPjParseError;
 
@@ -29,7 +29,7 @@ pub enum PjParam {
 
 impl PjParam {
     pub fn parse(endpoint: impl super::IntoUrl) -> Result<Self, PjParseError> {
-        let endpoint = endpoint.into_url().map_err(InternalPjParseError::IntoUrl)?;
+        let endpoint = endpoint.into_url().map_err(InternalPjParseError::IntoUrl)?.0;
 
         #[cfg(feature = "v2")]
         match v2::PjParam::parse(endpoint.clone()) {
@@ -63,8 +63,8 @@ impl std::fmt::Display for PjParam {
         // normalizing to uppercase enables QR alphanumeric mode encoding
         // unfortunately Url normalizes these to be lowercase
         let endpoint = self.endpoint();
-        let scheme = endpoint.scheme();
-        let host = endpoint.host_str().expect("host must be set");
+        let scheme = endpoint.0.scheme();
+        let host = endpoint.0.host_str().expect("host must be set");
         let endpoint_str = self
             .endpoint()
             .as_str()

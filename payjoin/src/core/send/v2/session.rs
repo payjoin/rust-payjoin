@@ -212,7 +212,7 @@ mod tests {
         .build_recommended(FeeRate::BROADCAST_MIN)
         .unwrap();
         let reply_key = HpkeKeyPair::gen_keypair();
-        let endpoint = sender.endpoint().clone();
+        let endpoint = sender.endpoint().0.clone();
         let id = crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id");
         let expiration =
             (std::time::SystemTime::now() - std::time::Duration::from_secs(1)).try_into().unwrap();
@@ -256,7 +256,7 @@ mod tests {
         .build_recommended(FeeRate::BROADCAST_MIN)
         .unwrap();
         let reply_key = HpkeKeyPair::gen_keypair();
-        let endpoint = sender.endpoint().clone();
+        let endpoint = sender.endpoint().0.clone();
         let fallback_tx = sender.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
         let id = crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id");
         let expiration =

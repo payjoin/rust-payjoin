@@ -6,7 +6,6 @@ use config::{ConfigError, File, FileFormat};
 use payjoin::bitcoin::FeeRate;
 use payjoin::Version;
 use serde::Deserialize;
-use url::Url;
 
 use crate::cli::{Cli, Commands};
 use crate::db;
@@ -17,7 +16,7 @@ type Builder = config::builder::ConfigBuilder<DefaultState>;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BitcoindConfig {
-    pub rpchost: Url,
+    pub rpchost: payjoin::Url,
     pub cookie: Option<PathBuf>,
     pub rpcuser: String,
     pub rpcpassword: String,
@@ -27,7 +26,7 @@ pub struct BitcoindConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct V1Config {
     pub port: u16,
-    pub pj_endpoint: Url,
+    pub pj_endpoint: payjoin::Url,
 }
 
 #[cfg(feature = "v2")]
@@ -35,8 +34,8 @@ pub struct V1Config {
 pub struct V2Config {
     #[serde(deserialize_with = "deserialize_ohttp_keys_from_path")]
     pub ohttp_keys: Option<payjoin::OhttpKeys>,
-    pub ohttp_relays: Vec<Url>,
-    pub pj_directory: Url,
+    pub ohttp_relays: Vec<payjoin::Url>,
+    pub pj_directory: payjoin::Url,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -157,7 +156,12 @@ impl Config {
                 {
                     match built_config.get::<V1Config>("v1") {
                         Ok(v1) => {
-                            if v1.pj_endpoint.port().is_none() != (v1.port == 0) {
+                            if url::Url::parse(v1.pj_endpoint.as_str())
+                                .expect("could not parse Url")
+                                .port()
+                                .is_none()
+                                != (v1.port == 0)
+                            {
                                 return Err(ConfigError::Message(
                                     "If --port is 0, --pj-endpoint may not have a port".to_owned(),
                                 ));

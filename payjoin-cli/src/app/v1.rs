@@ -137,7 +137,8 @@ impl App {
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
         let listener = TcpListener::bind(addr).await?;
 
-        let mut endpoint = self.config.v1()?.pj_endpoint.clone();
+        let mut endpoint =
+            url::Url::parse(self.config.v1()?.pj_endpoint.as_str()).expect("could not parse Url");
 
         // If --port 0 is specified, a free port is chosen, so we need to set it
         // on the endpoint which must not have a port.

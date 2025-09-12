@@ -26,10 +26,10 @@ use std::str::FromStr;
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, Amount, FeeRate};
 use error::BuildSenderError;
-use url::Url;
 
 use super::*;
 use crate::error_codes::ErrorCode;
+use crate::into_url::Url;
 pub use crate::output_substitution::OutputSubstitution;
 use crate::uri::v1::PjParam;
 use crate::{PjUri, Request, MAX_CONTENT_LENGTH};
@@ -37,7 +37,7 @@ use crate::{PjUri, Request, MAX_CONTENT_LENGTH};
 /// A builder to construct the properties of a `Sender`.
 #[derive(Clone)]
 pub struct SenderBuilder {
-    pub(crate) endpoint: Url,
+    pub(crate) endpoint: url::Url,
     pub(crate) output_substitution: OutputSubstitution,
     pub(crate) psbt_ctx_builder: PsbtContextBuilder,
 }
@@ -49,7 +49,7 @@ impl SenderBuilder {
     /// to create a [`Sender`]
     pub fn new(psbt: Psbt, uri: PjUri) -> Self {
         Self {
-            endpoint: uri.extras.pj_param.endpoint().clone(),
+            endpoint: uri.extras.pj_param.endpoint().0.clone(),
             // Adopt the output substitution preference from the URI
             output_substitution: uri.extras.output_substitution,
             psbt_ctx_builder: PsbtContextBuilder::new(
@@ -71,7 +71,7 @@ impl SenderBuilder {
         amount: Option<Amount>,
     ) -> Self {
         Self {
-            endpoint: pj_param.endpoint().clone(),
+            endpoint: pj_param.endpoint().0.clone(),
             // Default to enabled output substitution for v1 when not specified via URI
             output_substitution: OutputSubstitution::Enabled,
             psbt_ctx_builder: PsbtContextBuilder::new(psbt, address.script_pubkey(), amount),
@@ -158,7 +158,7 @@ impl SenderBuilder {
 #[cfg_attr(feature = "v2", derive(PartialEq, Eq, serde::Serialize, serde::Deserialize))]
 pub struct Sender {
     /// The endpoint in the Payjoin URI
-    pub(crate) endpoint: Url,
+    pub(crate) endpoint: url::Url,
     /// The original PSBT.
     pub(crate) psbt_ctx: PsbtContext,
 }
@@ -177,7 +177,7 @@ impl Sender {
         clear_unneeded_fields(&mut sanitized_psbt);
         let body = sanitized_psbt.to_string().as_bytes().to_vec();
         (
-            Request::new_v1(&url, &body),
+            Request::new_v1(url.as_str(), &body),
             V1Context {
                 psbt_context: PsbtContext {
                     original_psbt: self.psbt_ctx.original_psbt.clone(),
@@ -191,7 +191,7 @@ impl Sender {
     }
 
     /// The endpoint in the Payjoin URI
-    pub fn endpoint(&self) -> &Url { &self.endpoint }
+    pub fn endpoint(&self) -> Url { Url(self.endpoint.clone()) }
 }
 
 /// Data required to validate the response.

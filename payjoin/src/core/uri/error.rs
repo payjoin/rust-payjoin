@@ -1,8 +1,8 @@
 #[derive(Debug)]
-pub struct PjParseError(pub(crate) InternalPjParseError);
+pub struct PjParseError(pub(super) InternalPjParseError);
 
 #[derive(Debug)]
-pub(crate) enum InternalPjParseError {
+pub(super) enum InternalPjParseError {
     BadPjOs,
     DuplicateParams(&'static str),
     MissingEndpoint,

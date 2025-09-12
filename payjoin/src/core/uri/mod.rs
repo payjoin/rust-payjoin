@@ -1,3 +1,5 @@
+//! Payjoin URI parsing and validation
+
 use std::borrow::Cow;
 
 use bitcoin::address::NetworkChecked;
@@ -9,11 +11,11 @@ pub(crate) use crate::directory::ShortId;
 use crate::output_substitution::OutputSubstitution;
 use crate::uri::error::InternalPjParseError;
 
-pub mod error;
+mod error;
 #[cfg(feature = "v1")]
-pub(crate) mod v1;
+pub mod v1;
 #[cfg(feature = "v2")]
-pub(crate) mod v2;
+pub mod v2;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
@@ -26,6 +28,26 @@ pub enum PjParam {
 }
 
 impl PjParam {
+    pub fn parse(endpoint: impl super::IntoUrl) -> Result<Self, PjParseError> {
+        let endpoint = endpoint.into_url().map_err(InternalPjParseError::IntoUrl)?;
+
+        #[cfg(feature = "v2")]
+        match v2::PjParam::parse(endpoint.clone()) {
+            Err(v2::PjParseError::NotV2) => (), // continue
+            Ok(v2) => return Ok(PjParam::V2(v2)),
+            Err(e) => return Err(InternalPjParseError::V2(e).into()),
+        }
+
+        #[cfg(feature = "v1")]
+        return Ok(PjParam::V1(v1::PjParam::parse(endpoint)?));
+
+        #[cfg(all(not(feature = "v1"), feature = "v2"))]
+        return Err(InternalPjParseError::V2(v2::PjParseError::NotV2).into());
+
+        #[cfg(all(not(feature = "v1"), not(feature = "v2")))]
+        compile_error!("Either v1 or v2 feature must be enabled");
+    }
+
     pub fn endpoint(&self) -> Url {
         match self {
             #[cfg(feature = "v1")]
@@ -49,38 +71,6 @@ impl std::fmt::Display for PjParam {
             .replacen(scheme, &scheme.to_uppercase(), 1)
             .replacen(host, &host.to_uppercase(), 1);
         write!(f, "{endpoint_str}")
-    }
-}
-
-impl TryFrom<&str> for PjParam {
-    type Error = PjParseError;
-
-    fn try_from(endpoint: &str) -> Result<Self, Self::Error> {
-        let url = Url::parse(endpoint)
-            .map_err(|e| InternalPjParseError::IntoUrl(crate::IntoUrlError::ParseError(e)))?;
-        PjParam::try_from(url)
-    }
-}
-
-impl TryFrom<Url> for PjParam {
-    type Error = PjParseError;
-
-    fn try_from(endpoint: Url) -> Result<Self, Self::Error> {
-        #[cfg(feature = "v2")]
-        match v2::PjParam::parse(endpoint.clone()) {
-            Err(v2::PjParseError::NotV2) => (), // continue
-            Ok(v2) => return Ok(PjParam::V2(v2)),
-            Err(e) => return Err(InternalPjParseError::V2(e).into()),
-        }
-
-        #[cfg(feature = "v1")]
-        return Ok(PjParam::V1(v1::PjParam::parse(endpoint)?));
-
-        #[cfg(all(not(feature = "v1"), feature = "v2"))]
-        return Err(InternalPjParseError::V2(v2::PjParseError::NotV2).into());
-
-        #[cfg(all(not(feature = "v1"), not(feature = "v2")))]
-        compile_error!("Either v1 or v2 feature must be enabled");
     }
 }
 
@@ -214,7 +204,7 @@ impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
         match key {
             "pj" if self.pj.is_none() => {
                 let endpoint = Cow::try_from(value).map_err(|_| InternalPjParseError::NotUtf8)?;
-                let pj_param = PjParam::try_from(endpoint.as_ref())?;
+                let pj_param = PjParam::parse(endpoint.as_ref())?;
                 self.pj = Some(pj_param);
 
                 Ok(bitcoin_uri::de::ParamKind::Known)
@@ -444,7 +434,7 @@ mod tests {
     fn test_http_non_onion_rejected() {
         // HTTP to regular domain should be rejected
         let url = "http://example.com";
-        let result = PjParam::try_from(url);
+        let result = PjParam::parse(url);
         assert!(
             matches!(result, Err(PjParseError(InternalPjParseError::UnsecureEndpoint))),
             "Expected UnsecureEndpoint error for HTTP to non-onion domain"
@@ -452,7 +442,7 @@ mod tests {
 
         // HTTPS to subdomain should be accepted
         let url = "https://example.com";
-        let result = PjParam::try_from(url);
+        let result = PjParam::parse(url);
         assert!(
             matches!(result, Ok(PjParam::V1(_))),
             "Expected PjParam::V1 for HTTPS to non-onion domain without fragment"
@@ -460,7 +450,7 @@ mod tests {
 
         // HTTP to domain ending in .onion should be accepted
         let url = "http://example.onion";
-        let result = PjParam::try_from(url);
+        let result = PjParam::parse(url);
         assert!(
             matches!(result, Ok(PjParam::V1(_))),
             "Expected PjParam::V1 for HTTP to onion domain without fragment"

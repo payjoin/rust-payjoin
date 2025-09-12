@@ -117,12 +117,12 @@ impl From<ImplementationError> for SenderPersistedError {
 impl<S> From<payjoin::persist::PersistedError<send::v2::EncapsulationError, S>>
     for SenderPersistedError
 where
-    S: std::error::Error,
+    S: std::error::Error + Send + Sync + 'static,
 {
     fn from(err: payjoin::persist::PersistedError<send::v2::EncapsulationError, S>) -> Self {
         if let Some(storage_err) = err.storage_error_ref() {
-            return SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                storage_err.to_string(),
+            return SenderPersistedError::Storage(Arc::new(ImplementationError::new(
+                crate::error::ForeignError::InternalError(storage_err.to_string()),
             )));
         }
         if let Some(api_err) = err.api_error() {
@@ -134,12 +134,12 @@ where
 
 impl<S> From<payjoin::persist::PersistedError<send::ResponseError, S>> for SenderPersistedError
 where
-    S: std::error::Error,
+    S: std::error::Error + Send + Sync + 'static,
 {
     fn from(err: payjoin::persist::PersistedError<send::ResponseError, S>) -> Self {
         if let Some(storage_err) = err.storage_error_ref() {
-            return SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                storage_err.to_string(),
+            return SenderPersistedError::Storage(Arc::new(ImplementationError::new(
+                crate::error::ForeignError::InternalError(storage_err.to_string()),
             )));
         }
         if let Some(api_err) = err.api_error() {
@@ -151,12 +151,12 @@ where
 
 impl<S> From<payjoin::persist::PersistedError<send::BuildSenderError, S>> for SenderPersistedError
 where
-    S: std::error::Error,
+    S: std::error::Error + Send + Sync + 'static,
 {
     fn from(err: payjoin::persist::PersistedError<send::BuildSenderError, S>) -> Self {
         if let Some(storage_err) = err.storage_error_ref() {
-            return SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                storage_err.to_string(),
+            return SenderPersistedError::Storage(Arc::new(ImplementationError::new(
+                crate::error::ForeignError::InternalError(storage_err.to_string()),
             )));
         }
         if let Some(api_err) = err.api_error() {

@@ -23,15 +23,15 @@ macro_rules! impl_save_for_transition {
                 persister: Arc<dyn JsonSenderSessionPersister>,
             ) -> Result<$next_state, SenderPersistedError> {
                 let adapter = CallbackPersisterAdapter::new(persister);
-                let mut inner = self.0.write().map_err(|_| {
-                    SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                        "Lock poisoned".to_string(),
+                let mut inner = self.0.write().map_err(|e| {
+                    SenderPersistedError::Storage(Arc::new(ImplementationError::new(
+                        ForeignError::InternalError(e.to_string()),
                     )))
                 })?;
 
                 let value = inner.take().ok_or_else(|| {
-                    SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                        "Already saved or moved".to_string(),
+                    SenderPersistedError::Storage(Arc::new(ImplementationError::new(
+                        ForeignError::InternalError("Already saved or moved".to_string()),
                     )))
                 })?;
 
@@ -294,15 +294,15 @@ impl WithReplyKeyTransition {
         persister: Arc<dyn JsonSenderSessionPersister>,
     ) -> Result<V2GetContext, SenderPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner = self.0.write().map_err(|_| {
-            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                "Lock poisoned".to_string(),
+        let mut inner = self.0.write().map_err(|e| {
+            SenderPersistedError::Storage(Arc::new(ImplementationError::new(
+                ForeignError::InternalError(e.to_string()),
             )))
         })?;
 
         let value = inner.take().ok_or_else(|| {
-            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                "Already saved or moved".to_string(),
+            SenderPersistedError::Storage(Arc::new(ImplementationError::new(
+                ForeignError::InternalError("Already saved or moved".to_string()),
             )))
         })?;
 

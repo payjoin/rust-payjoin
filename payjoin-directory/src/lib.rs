@@ -2,12 +2,14 @@ use std::pin::Pin;
 use std::str::FromStr;
 
 use anyhow::Result;
+use axum::body::Bytes;
+use axum::extract::{Path, Query, State};
+use axum::http::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post, put};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, Full};
-use hyper::body::{Body, Bytes, Incoming};
-use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
-use hyper::server::conn::http1;
-use hyper::{Method, Request, Response, StatusCode, Uri};
 use hyper_util::rt::TokioIo;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tracing::{debug, error, trace, warn};
@@ -58,21 +60,6 @@ pub struct Service {
     pool: DbPool,
     ohttp: ohttp::Server,
     metrics: Metrics,
-}
-
-impl hyper::service::Service<Request<Incoming>> for Service {
-    type Response = Response<BoxBody<Bytes, hyper::Error>>;
-    type Error = anyhow::Error;
-    type Future =
-        Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn call(&self, req: Request<Incoming>) -> Self::Future {
-        let pool = self.pool.clone();
-        let ohttp = self.ohttp.clone();
-        let metrics = self.metrics.clone();
-        let this = Service::new(pool, ohttp, metrics);
-        Box::pin(async move { this.serve_request(req).await })
-    }
 }
 
 impl Service {
@@ -469,56 +456,41 @@ enum HandlerError {
     BadRequest(anyhow::Error),
 }
 
-impl HandlerError {
-    fn to_response(&self) -> Response<BoxBody<Bytes, hyper::Error>> {
-        let mut res = Response::new(empty());
+impl IntoResponse for HandlerError {
+    fn into_response(self) -> Response {
         match self {
-            HandlerError::PayloadTooLarge => *res.status_mut() = StatusCode::PAYLOAD_TOO_LARGE,
+            HandlerError::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE.into_response(),
             HandlerError::InternalServerError(e) => {
                 error!("Internal server error: {}", e);
-                *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
+
             HandlerError::OhttpKeyRejection(e) => {
                 const OHTTP_KEY_REJECTION_RES_JSON: &str = r#"{"type":"https://iana.org/assignments/http-problem-types#ohttp-key", "title": "key identifier unknown"}"#;
-
                 warn!("Bad request: Key configuration rejected: {}", e);
-                *res.status_mut() = StatusCode::BAD_REQUEST;
-                res.headers_mut()
-                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                *res.body_mut() = full(OHTTP_KEY_REJECTION_RES_JSON);
+
+                let mut headers = HeaderMap::new();
+                headers
+                    .insert("content-type", HeaderValue::from_static("application/problem+json"));
+                (StatusCode::BAD_REQUEST, headers, OHTTP_KEY_REJECTION_RES_JSON).into_response()
             }
+
             HandlerError::BadRequest(e) => {
                 warn!("Bad request: {}", e);
-                *res.status_mut() = StatusCode::BAD_REQUEST
+                StatusCode::BAD_REQUEST.into_response()
             }
-        };
-
-        res
+        }
     }
 }
 
-impl From<hyper::http::Error> for HandlerError {
-    fn from(e: hyper::http::Error) -> Self { HandlerError::InternalServerError(e.into()) }
+impl From<axum::http::Error> for HandlerError {
+    fn from(e: axum::http::Error) -> Self { HandlerError::InternalServerError(e.into()) }
 }
 
 impl From<ShortIdError> for HandlerError {
     fn from(_: ShortIdError) -> Self {
         HandlerError::BadRequest(anyhow::anyhow!("mailbox ID must be 13 bech32 characters"))
     }
-}
-
-fn not_found() -> Response<BoxBody<Bytes, hyper::Error>> {
-    let mut res = Response::default();
-    *res.status_mut() = StatusCode::NOT_FOUND;
-    res
-}
-
-fn empty() -> BoxBody<Bytes, hyper::Error> {
-    Empty::<Bytes>::new().map_err(|never| match never {}).boxed()
-}
-
-fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
-    Full::new(chunk.into()).map_err(|never| match never {}).boxed()
 }
 
 pub async fn serve_metrics_tcp(

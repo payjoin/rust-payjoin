@@ -19,6 +19,26 @@ pub struct Cli {
     )]
     pub port: u16, // TODO tokio_listener::ListenerAddressLFlag
 
+    #[cfg(feature = "acme")]
+    #[arg(long, help = "The domain for which to request a certificate using ACME")]
+    pub acme_domain: String,
+
+    #[cfg(feature = "acme")]
+    #[arg(long, help = "Contact information for ACME usage (e.g. 'mailto:admin@example.com')")]
+    pub acme_contact: String,
+
+    #[cfg(feature = "acme")]
+    #[arg(
+        long,
+        // default_value_t = true, // FIXME doesn't generate a --no-lets-encrypt-production flag, needs workaround
+        help = "Whether to use the staging or production environment"
+    )]
+    pub lets_encrypt_production: bool,
+
+    #[cfg(feature = "acme")]
+    #[arg(long, help = "Whether to use the staging or production environment", value_parser = value_parser!(PathBuf))]
+    pub acme_cache_dir: PathBuf, // TODO Option?
+
     #[arg(
         long,
         env = "PJ_METRIC_PORT",

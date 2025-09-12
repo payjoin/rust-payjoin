@@ -16,6 +16,7 @@ resolver = "2"
 
 [features]
 _manual-tls = ["hyper-rustls", "tokio-rustls"]
+acme = ["tokio-rustls-acme"]
 
 [dependencies]
 anyhow = "1.0.99"
@@ -37,6 +38,8 @@ prometheus = "0.13.4"
 clap = { version = "4.5.45", features = ["derive", "env"] }
 config = "0.15.14"
 serde = { version = "1.0.219", features = ["derive"] }
+tokio-rustls-acme = { version = "0.7.1", optional = true }
+tokio-stream = { version = "0.1.17", features = ["net"] }
 
 [dev-dependencies]
 tempfile = "3.20.0"

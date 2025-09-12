@@ -43,7 +43,14 @@ async fn main() -> Result<(), BoxError> {
     }
 
     let listener = TcpListener::bind(config.listen_addr).await?;
-    service.serve_tcp(listener).await
+
+    #[cfg(feature = "acme")]
+    service.serve_acme(listener, config.acme.into()).await;
+
+    #[cfg(not(feature = "acme"))]
+    service.serve_tcp(listener).await;
+
+    Ok(())
 }
 
 fn init_logging() {

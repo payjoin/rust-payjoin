@@ -7,7 +7,6 @@ use tokio::signal;
 use tokio::sync::watch;
 
 pub mod config;
-pub mod rpc;
 pub mod wallet;
 use crate::app::config::Config;
 use crate::app::wallet::BitcoindWallet;

@@ -319,6 +319,20 @@ mod e2e {
                 .expect("Failed to execute payjoin-cli");
             check_payjoin_sent(cli_send_resumer).await?;
 
+            // Need to mine a few blocks
+            let funding_address = bitcoind
+                .client
+                .get_new_address(None, None)?
+                .address()
+                .expect("address should be valid")
+                .assume_checked();
+            bitcoind.client.generate_to_address(1, &funding_address)?;
+            let best_block_hash = bitcoind.client.get_best_block_hash()?.block_hash().unwrap();
+            let best_block = bitcoind.client.get_block(best_block_hash)?;
+            println!("Best block: {:?}", best_block.txdata.len());
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
             // Check that neither the sender or the receiver have sessions to resume
             let cli_receive_resumer = Command::new(payjoin_cli)
                 .arg("--root-certificate")
@@ -336,6 +350,26 @@ mod e2e {
                 .stderr(Stdio::inherit())
                 .spawn()
                 .expect("Failed to execute payjoin-cli");
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            // Need to ensure that we passed the monitoring state
+            let cli_receive_resumer = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&receiver_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&receiver_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relay)
+                .arg("resume")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli");
+
             check_resume_has_no_sessions(cli_receive_resumer).await?;
             let cli_send_resumer = Command::new(payjoin_cli)
                 .arg("--root-certificate")

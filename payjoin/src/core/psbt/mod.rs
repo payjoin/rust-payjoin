@@ -170,6 +170,14 @@ impl InternalInputPair<'_> {
         }
     }
 
+    pub(crate) fn is_segwit_input(&self) -> Result<bool, AddressTypeError> {
+        match self.address_type()? {
+            AddressType::P2wpkh | AddressType::P2wsh | AddressType::P2tr | AddressType::P2a =>
+                Ok(true),
+            _ => Ok(false),
+        }
+    }
+
     /// Returns the scriptPubKey address type of the UTXO this input is pointing to.
     pub fn address_type(&self) -> Result<AddressType, AddressTypeError> {
         let txo = self.previous_txout()?;

@@ -144,6 +144,27 @@ impl BitcoindWallet {
         }
     }
 
+    pub fn is_outpoint_spent(&self, outpoint: &OutPoint) -> Result<bool> {
+        let txout = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.rpc.get_txout(&outpoint, true).await })
+        })
+        .context("Failed to get tx out info")?;
+        Ok(txout.is_some())
+    }
+
+    pub fn get_raw_transaction(
+        &self,
+        txid: &Txid,
+    ) -> Result<Option<payjoin::bitcoin::Transaction>> {
+        let raw_tx = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.rpc.get_raw_transaction(&txid).await })
+        })
+        .context("Failed to get raw transaction")?;
+        Ok(raw_tx)
+    }
+
     /// Get a new address from the wallet
     pub fn get_new_address(&self) -> Result<Address> {
         let addr = tokio::task::block_in_place(|| {

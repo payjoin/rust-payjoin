@@ -204,6 +204,22 @@ impl OhttpKeys {
     pub fn decode(bytes: &[u8]) -> Result<Self, ohttp::Error> {
         ohttp::KeyConfig::decode(bytes).map(Self)
     }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>, ohttp::Error> {
+        let bytes = self.encode()?;
+
+        let key_id = bytes[0];
+        let uncompressed_pubkey = &bytes[3..68];
+
+        let compressed_pubkey = bitcoin::secp256k1::PublicKey::from_slice(uncompressed_pubkey)
+            .expect("serialization of public key should be deserializable without error")
+            .serialize();
+
+        let mut buf = vec![key_id];
+        buf.extend_from_slice(&compressed_pubkey);
+
+        Ok(buf)
+    }
 }
 
 const KEM_ID: &[u8] = b"\x00\x16"; // DHKEM(secp256k1, HKDF-SHA256)
@@ -212,15 +228,7 @@ const SYMMETRIC_KDF_AEAD: &[u8] = b"\x00\x01\x00\x03"; // KDF(HKDF-SHA256), AEAD
 
 impl fmt::Display for OhttpKeys {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let bytes = self.encode().map_err(|_| fmt::Error)?;
-        let key_id = bytes[0];
-        let pubkey = &bytes[3..68];
-
-        let compressed_pubkey =
-            bitcoin::secp256k1::PublicKey::from_slice(pubkey).map_err(|_| fmt::Error)?.serialize();
-
-        let mut buf = vec![key_id];
-        buf.extend_from_slice(&compressed_pubkey);
+        let buf = self.to_bytes().map_err(|_| fmt::Error)?;
 
         let oh_hrp: bech32::Hrp = bech32::Hrp::parse("OH").unwrap();
 
@@ -235,8 +243,11 @@ impl TryFrom<&[u8]> for OhttpKeys {
     type Error = ParseOhttpKeysError;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let key_id = *bytes.first().ok_or(ParseOhttpKeysError::InvalidFormat)?;
-        let compressed_pk = bytes.get(1..34).ok_or(ParseOhttpKeysError::InvalidFormat)?;
+        let buf: [u8; 34] =
+            bytes.try_into().map_err(|_| ParseOhttpKeysError::IncorrectLength(bytes.len()))?;
+
+        let key_id = buf[0];
+        let compressed_pk = &buf[1..];
 
         let pubkey = bitcoin::secp256k1::PublicKey::from_slice(compressed_pk)
             .map_err(|_| ParseOhttpKeysError::InvalidPublicKey)?;
@@ -251,17 +262,17 @@ impl TryFrom<&[u8]> for OhttpKeys {
     }
 }
 
+#[cfg(test)]
 impl std::str::FromStr for OhttpKeys {
     type Err = ParseOhttpKeysError;
 
     /// Parses a base64URL-encoded string into OhttpKeys.
     /// The string format is: key_id || compressed_public_key
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // TODO extract to utility function
         let oh_hrp: bech32::Hrp = bech32::Hrp::parse("OH").unwrap();
 
         let (hrp, bytes) =
-            crate::bech32::nochecksum::decode(s).map_err(ParseOhttpKeysError::DecodeBech32)?;
+            crate::bech32::nochecksum::decode(s).map_err(|_| ParseOhttpKeysError::InvalidFormat)?;
 
         if hrp != oh_hrp {
             return Err(ParseOhttpKeysError::InvalidFormat);
@@ -315,29 +326,34 @@ impl serde::Serialize for OhttpKeys {
 
 #[derive(Debug)]
 pub enum ParseOhttpKeysError {
-    InvalidFormat,
+    IncorrectLength(usize),
     InvalidPublicKey,
-    DecodeBech32(bech32::primitives::decode::CheckedHrpstringError),
     DecodeKeyConfig(ohttp::Error),
+    #[cfg(test)]
+    InvalidFormat,
 }
 
 impl std::fmt::Display for ParseOhttpKeysError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ParseOhttpKeysError::*;
         match self {
-            ParseOhttpKeysError::InvalidFormat => write!(f, "Invalid format"),
-            ParseOhttpKeysError::InvalidPublicKey => write!(f, "Invalid public key"),
-            ParseOhttpKeysError::DecodeBech32(e) => write!(f, "Failed to decode bech32: {e}"),
-            ParseOhttpKeysError::DecodeKeyConfig(e) => write!(f, "Failed to decode KeyConfig: {e}"),
+            IncorrectLength(l) => write!(f, "Invalid length, got {l} expected 34"),
+            InvalidPublicKey => write!(f, "Invalid public key"),
+            DecodeKeyConfig(e) => write!(f, "Failed to decode KeyConfig: {e}"),
+            #[cfg(test)]
+            InvalidFormat => write!(f, "Invalid format"),
         }
     }
 }
 
 impl std::error::Error for ParseOhttpKeysError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use ParseOhttpKeysError::*;
         match self {
-            ParseOhttpKeysError::DecodeBech32(e) => Some(e),
-            ParseOhttpKeysError::DecodeKeyConfig(e) => Some(e),
-            ParseOhttpKeysError::InvalidFormat | ParseOhttpKeysError::InvalidPublicKey => None,
+            DecodeKeyConfig(e) => Some(e),
+            IncorrectLength(_) | InvalidPublicKey => None,
+            #[cfg(test)]
+            InvalidFormat => None,
         }
     }
 }
@@ -350,30 +366,26 @@ mod test {
 
     #[test]
     fn test_ohttp_keys_roundtrip() {
-        use std::str::FromStr;
-
         let keys = OhttpKeys(ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap());
-        let serialized = &keys.to_string();
-        let deserialized = OhttpKeys::from_str(serialized).unwrap();
+        let serialized = keys.to_bytes().unwrap();
+        let deserialized = OhttpKeys::try_from(&serialized[..]).unwrap();
         assert!(keys.eq(&deserialized));
     }
 
     #[test]
     fn test_ohttp_keys_equality() {
-        use std::str::FromStr;
-
         use ohttp::KeyId;
         const KEY_ID_ONE: KeyId = 1;
         let keys_one =
             OhttpKeys(ohttp::KeyConfig::new(KEY_ID_ONE, KEM, Vec::from(SYMMETRIC)).unwrap());
-        let serialized_one = &keys_one.to_string();
-        let deserialized_one = OhttpKeys::from_str(serialized_one).unwrap();
+        let serialized_one = &keys_one.to_bytes().unwrap();
+        let deserialized_one = OhttpKeys::try_from(&serialized_one[..]).unwrap();
 
         const KEY_ID_TWO: KeyId = 2;
         let keys_two =
             OhttpKeys(ohttp::KeyConfig::new(KEY_ID_TWO, KEM, Vec::from(SYMMETRIC)).unwrap());
-        let serialized_two = &keys_two.to_string();
-        let deserialized_two = OhttpKeys::from_str(serialized_two).unwrap();
+        let serialized_two = &keys_two.to_bytes().unwrap();
+        let deserialized_two = OhttpKeys::try_from(&serialized_two[..]).unwrap();
         assert!(keys_one.eq(&deserialized_one));
         assert!(keys_two.eq(&deserialized_two));
         assert!(!keys_one.eq(&deserialized_two));

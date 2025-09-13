@@ -45,7 +45,16 @@ fn ohttp(url: &Url) -> Result<OhttpKeys, ParseOhttpKeysParamError> {
     let value = get_param(url, "OH1")
         .map_err(ParseOhttpKeysParamError::InvalidFragment)?
         .ok_or(ParseOhttpKeysParamError::MissingOhttpKeys)?;
-    OhttpKeys::from_str(value).map_err(ParseOhttpKeysParamError::InvalidOhttpKeys)
+
+    let (hrp, bytes) =
+        crate::bech32::nochecksum::decode(value).map_err(ParseOhttpKeysParamError::DecodeBech32)?;
+
+    let oh_hrp: Hrp = Hrp::parse("OH").unwrap();
+    if hrp != oh_hrp {
+        return Err(ParseOhttpKeysParamError::InvalidHrp(hrp));
+    }
+
+    OhttpKeys::try_from(&bytes[..]).map_err(ParseOhttpKeysParamError::InvalidOhttpKeys)
 }
 
 /// Set the ohttp parameter in the URL fragment
@@ -289,6 +298,8 @@ impl std::error::Error for PjParseError {
 #[derive(Debug)]
 pub(super) enum ParseOhttpKeysParamError {
     MissingOhttpKeys,
+    InvalidHrp(bitcoin::bech32::Hrp),
+    DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
     InvalidOhttpKeys(crate::ohttp::ParseOhttpKeysError),
     InvalidFragment(ParseFragmentError),
 }
@@ -301,6 +312,8 @@ impl std::fmt::Display for ParseOhttpKeysParamError {
             MissingOhttpKeys => write!(f, "ohttp keys are missing"),
             InvalidOhttpKeys(o) => write!(f, "invalid ohttp keys: {o}"),
             InvalidFragment(e) => write!(f, "invalid URL fragment: {e}"),
+            InvalidHrp(h) => write!(f, "incorrect hrp for exp: {h}"),
+            DecodeBech32(d) => write!(f, "exp is not valid bech32: {d}"),
         }
     }
 }
@@ -310,6 +323,8 @@ impl std::error::Error for ParseOhttpKeysParamError {
         use ParseOhttpKeysParamError::*;
         match &self {
             MissingOhttpKeys => None,
+            InvalidHrp(_) => None,
+            DecodeBech32(e) => Some(e),
             InvalidOhttpKeys(e) => Some(e),
             InvalidFragment(e) => Some(e),
         }
@@ -427,6 +442,26 @@ mod tests {
         assert!(matches!(
             ohttp(&invalid_ohttp_url),
             Err(ParseOhttpKeysParamError::InvalidFragment(_))
+        ));
+
+        let invalid_ohttp_url =
+            Url::parse("https://example.com?pj=https://test-payjoin-url#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQCC")
+                .unwrap();
+        assert!(matches!(
+            ohttp(&invalid_ohttp_url),
+            Err(ParseOhttpKeysParamError::InvalidOhttpKeys(
+                crate::ohttp::ParseOhttpKeysError::IncorrectLength(_)
+            ))
+        ));
+
+        let invalid_ohttp_url =
+            Url::parse("https://example.com?pj=https://test-payjoin-url#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQ")
+                .unwrap();
+        assert!(matches!(
+            ohttp(&invalid_ohttp_url),
+            Err(ParseOhttpKeysParamError::InvalidOhttpKeys(
+                crate::ohttp::ParseOhttpKeysError::IncorrectLength(_)
+            ))
         ));
     }
 

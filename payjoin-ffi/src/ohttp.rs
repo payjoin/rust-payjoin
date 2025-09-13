@@ -30,17 +30,8 @@ impl OhttpKeys {
     pub fn decode(bytes: Vec<u8>) -> Result<Self, OhttpError> {
         payjoin::OhttpKeys::decode(bytes.as_slice()).map(Into::into).map_err(Into::into)
     }
-
-    /// Create an OHTTP KeyConfig from a string
-    #[uniffi::constructor]
-    pub fn from_string(s: String) -> Result<Self, OhttpError> {
-        let res = payjoin::OhttpKeys::from_str(s.as_str())
-            .map_err(|e| OhttpError::from(e.to_string()))?;
-        Ok(Self(res))
-    }
 }
 
-use std::str::FromStr;
 use std::sync::Mutex;
 
 #[derive(uniffi::Object)]

@@ -2,6 +2,8 @@ mod integration {
     use std::collections::HashMap;
     use std::str::FromStr;
 
+    use bitcoin::bech32::primitives::decode::CheckedHrpstring;
+    use bitcoin::bech32::NoChecksum;
     use bitcoin::policy::DEFAULT_MIN_RELAY_TX_FEE;
     use bitcoin::psbt::{Input as PsbtInput, Psbt};
     use bitcoin::{Amount, FeeRate, OutPoint, TxIn, TxOut, Weight};
@@ -208,9 +210,13 @@ mod integration {
 
         #[tokio::test]
         async fn test_bad_ohttp_keys() -> Result<(), BoxSendSyncError> {
-            let bad_ohttp_keys =
-                OhttpKeys::from_str("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
-                    .expect("Invalid OhttpKeys");
+            let bytes = CheckedHrpstring::new::<NoChecksum>(
+                "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC",
+            )?
+            .byte_iter()
+            .collect::<Vec<u8>>();
+            let bad_ohttp_keys = OhttpKeys::try_from(&bytes[..]).expect("Invalid OhttpKeys");
+
             let mut services = TestServices::initialize().await?;
             let result = tokio::select!(
             err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),

@@ -43,7 +43,7 @@ where
         })?;
     }
 
-    let history = SessionHistory::new(session_events);
+    let history = SessionHistory::new(session_events.clone());
     let ctx = history.session_context();
     if SystemTime::now() > ctx.expiry {
         // Session has expired: close the session and persist a fatal error
@@ -54,6 +54,9 @@ where
         persister
             .close()
             .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
+
+        session_events.push(SessionEvent::SessionInvalid(err.to_string(), None));
+        let history = SessionHistory::new(session_events);
 
         return Ok((ReceiveSession::TerminalFailure, history));
     }

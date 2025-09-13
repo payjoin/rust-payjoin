@@ -29,7 +29,7 @@ async fn main() -> Result<(), BoxError> {
     let db = DbPool::new(config.timeout, config.db_host).await?;
     let metrics = Metrics::new();
 
-    let service = Service::new(db, ohttp.into(), metrics);
+    let service = AppState::new(db, ohttp.into(), metrics);
 
     // Start metrics server in the background
     let metrics_listener = TcpListener::bind(config.metrics_listen_addr).await?;

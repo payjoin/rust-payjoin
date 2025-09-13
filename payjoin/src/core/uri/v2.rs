@@ -45,7 +45,16 @@ fn ohttp(url: &Url) -> Result<OhttpKeys, ParseOhttpKeysParamError> {
     let value = get_param(url, "OH1")
         .map_err(ParseOhttpKeysParamError::InvalidFragment)?
         .ok_or(ParseOhttpKeysParamError::MissingOhttpKeys)?;
-    OhttpKeys::from_str(value).map_err(ParseOhttpKeysParamError::InvalidOhttpKeys)
+
+    let (hrp, bytes) =
+        crate::bech32::nochecksum::decode(value).map_err(ParseExpParamError::DecodeBech32)?;
+
+    let oh_hrp: Hrp = Hrp::parse("OH").unwrap();
+    if hrp != oh_hrp {
+        return Err(ParseOhttpKeysParamError::InvalidHrp(hrp));
+    }
+
+    OhttpKeys::from_bytes(bytes).map_err(ParseOhttpKeysParamError::InvalidOhttpKeys)
 }
 
 /// Set the ohttp parameter in the URL fragment
@@ -289,6 +298,8 @@ impl std::error::Error for PjParseError {
 #[derive(Debug)]
 pub(super) enum ParseOhttpKeysParamError {
     MissingOhttpKeys,
+    InvalidHrp(bitcoin::bech32::Hrp),
+    DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
     InvalidOhttpKeys(crate::ohttp::ParseOhttpKeysError),
     InvalidFragment(ParseFragmentError),
 }

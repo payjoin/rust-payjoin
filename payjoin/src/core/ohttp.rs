@@ -243,8 +243,11 @@ impl TryFrom<&[u8]> for OhttpKeys {
     type Error = ParseOhttpKeysError;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let key_id = *bytes.first().ok_or(ParseOhttpKeysError::InvalidFormat)?;
-        let compressed_pk = bytes.get(1..34).ok_or(ParseOhttpKeysError::InvalidFormat)?;
+        let buf: [u8; 34] =
+            bytes.try_into().map_err(|_| ParseOhttpKeysError::IncorrectLength(bytes.len()))?;
+
+        let key_id = buf[0];
+        let compressed_pk = &buf[1..];
 
         let pubkey = bitcoin::secp256k1::PublicKey::from_slice(compressed_pk)
             .map_err(|_| ParseOhttpKeysError::InvalidPublicKey)?;
@@ -323,18 +326,22 @@ impl serde::Serialize for OhttpKeys {
 
 #[derive(Debug)]
 pub enum ParseOhttpKeysError {
-    InvalidFormat,
+    IncorrectLength(usize),
     InvalidPublicKey,
     DecodeKeyConfig(ohttp::Error),
+    #[cfg(test)]
+    InvalidFormat,
 }
 
 impl std::fmt::Display for ParseOhttpKeysError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use ParseOhttpKeysError::*;
         match self {
-            InvalidFormat => write!(f, "Invalid format"),
+            IncorrectLength(l) => write!(f, "Invalid length, got {l} expected 34"),
             InvalidPublicKey => write!(f, "Invalid public key"),
             DecodeKeyConfig(e) => write!(f, "Failed to decode KeyConfig: {e}"),
+            #[cfg(test)]
+            InvalidFormat => write!(f, "Invalid format"),
         }
     }
 }
@@ -344,7 +351,9 @@ impl std::error::Error for ParseOhttpKeysError {
         use ParseOhttpKeysError::*;
         match self {
             DecodeKeyConfig(e) => Some(e),
-            InvalidFormat | InvalidPublicKey => None,
+            IncorrectLength(_) | InvalidPublicKey => None,
+            #[cfg(test)]
+            InvalidFormat => None,
         }
     }
 }

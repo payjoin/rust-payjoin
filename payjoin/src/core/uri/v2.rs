@@ -443,6 +443,26 @@ mod tests {
             ohttp(&invalid_ohttp_url),
             Err(ParseOhttpKeysParamError::InvalidFragment(_))
         ));
+
+        let invalid_ohttp_url =
+            Url::parse("https://example.com?pj=https://test-payjoin-url#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQCC")
+                .unwrap();
+        assert!(matches!(
+            ohttp(&invalid_ohttp_url),
+            Err(ParseOhttpKeysParamError::InvalidOhttpKeys(
+                crate::ohttp::ParseOhttpKeysError::IncorrectLength(_)
+            ))
+        ));
+
+        let invalid_ohttp_url =
+            Url::parse("https://example.com?pj=https://test-payjoin-url#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQ")
+                .unwrap();
+        assert!(matches!(
+            ohttp(&invalid_ohttp_url),
+            Err(ParseOhttpKeysParamError::InvalidOhttpKeys(
+                crate::ohttp::ParseOhttpKeysError::IncorrectLength(_)
+            ))
+        ));
     }
 
     #[test]

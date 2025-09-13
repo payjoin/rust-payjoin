@@ -45,7 +45,16 @@ fn ohttp(url: &Url) -> Result<OhttpKeys, ParseOhttpKeysParamError> {
     let value = get_param(url, "OH1")
         .map_err(ParseOhttpKeysParamError::InvalidFragment)?
         .ok_or(ParseOhttpKeysParamError::MissingOhttpKeys)?;
-    OhttpKeys::from_str(value).map_err(ParseOhttpKeysParamError::InvalidOhttpKeys)
+
+    let (hrp, bytes) = crate::bech32::nochecksum::decode(value)
+        .map_err(|_| ParseOhttpKeysParamError::InvalidFormat)?;
+
+    let oh_hrp: Hrp = Hrp::parse("OH").unwrap();
+    if hrp != oh_hrp {
+        return Err(ParseOhttpKeysParamError::InvalidFormat);
+    }
+
+    OhttpKeys::try_from(&bytes[..]).map_err(ParseOhttpKeysParamError::InvalidOhttpKeys)
 }
 
 /// Set the ohttp parameter in the URL fragment
@@ -289,6 +298,7 @@ impl std::error::Error for PjParseError {
 #[derive(Debug)]
 pub(super) enum ParseOhttpKeysParamError {
     MissingOhttpKeys,
+    InvalidFormat,
     InvalidOhttpKeys(crate::ohttp::ParseOhttpKeysError),
     InvalidFragment(ParseFragmentError),
 }
@@ -301,6 +311,7 @@ impl std::fmt::Display for ParseOhttpKeysParamError {
             MissingOhttpKeys => write!(f, "ohttp keys are missing"),
             InvalidOhttpKeys(o) => write!(f, "invalid ohttp keys: {o}"),
             InvalidFragment(e) => write!(f, "invalid URL fragment: {e}"),
+            InvalidFormat => write!(f, "invalid format"),
         }
     }
 }
@@ -310,6 +321,7 @@ impl std::error::Error for ParseOhttpKeysParamError {
         use ParseOhttpKeysParamError::*;
         match &self {
             MissingOhttpKeys => None,
+            InvalidFormat => None,
             InvalidOhttpKeys(e) => Some(e),
             InvalidFragment(e) => Some(e),
         }

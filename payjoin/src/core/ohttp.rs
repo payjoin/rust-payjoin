@@ -261,7 +261,7 @@ impl std::str::FromStr for OhttpKeys {
         let oh_hrp: bech32::Hrp = bech32::Hrp::parse("OH").unwrap();
 
         let (hrp, bytes) =
-            crate::bech32::nochecksum::decode(s).map_err(ParseOhttpKeysError::DecodeBech32)?;
+            crate::bech32::nochecksum::decode(s).map_err(|_| ParseOhttpKeysError::InvalidFormat)?;
 
         if hrp != oh_hrp {
             return Err(ParseOhttpKeysError::InvalidFormat);
@@ -317,27 +317,26 @@ impl serde::Serialize for OhttpKeys {
 pub enum ParseOhttpKeysError {
     InvalidFormat,
     InvalidPublicKey,
-    DecodeBech32(bech32::primitives::decode::CheckedHrpstringError),
     DecodeKeyConfig(ohttp::Error),
 }
 
 impl std::fmt::Display for ParseOhttpKeysError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ParseOhttpKeysError::*;
         match self {
-            ParseOhttpKeysError::InvalidFormat => write!(f, "Invalid format"),
-            ParseOhttpKeysError::InvalidPublicKey => write!(f, "Invalid public key"),
-            ParseOhttpKeysError::DecodeBech32(e) => write!(f, "Failed to decode bech32: {e}"),
-            ParseOhttpKeysError::DecodeKeyConfig(e) => write!(f, "Failed to decode KeyConfig: {e}"),
+            InvalidFormat => write!(f, "Invalid format"),
+            InvalidPublicKey => write!(f, "Invalid public key"),
+            DecodeKeyConfig(e) => write!(f, "Failed to decode KeyConfig: {e}"),
         }
     }
 }
 
 impl std::error::Error for ParseOhttpKeysError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use ParseOhttpKeysError::*;
         match self {
-            ParseOhttpKeysError::DecodeBech32(e) => Some(e),
-            ParseOhttpKeysError::DecodeKeyConfig(e) => Some(e),
-            ParseOhttpKeysError::InvalidFormat | ParseOhttpKeysError::InvalidPublicKey => None,
+            DecodeKeyConfig(e) => Some(e),
+            InvalidFormat | InvalidPublicKey => None,
         }
     }
 }

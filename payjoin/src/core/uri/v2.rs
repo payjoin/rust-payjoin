@@ -434,6 +434,26 @@ mod tests {
             ohttp(&invalid_ohttp_url),
             Err(ParseOhttpKeysParamError::InvalidFragment(_))
         ));
+
+        let too_long_ohttp_url =
+            Url::parse("https://example.com?pj=https://test-payjoin-url#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQCC")
+                .unwrap();
+        assert!(matches!(
+            ohttp(&too_long_ohttp_url),
+            Err(ParseOhttpKeysParamError::InvalidOhttpKeys(
+                crate::ohttp::ParseOhttpKeysError::IncorrectLength(_)
+            ))
+        ));
+
+        let too_short_ohttp_url =
+            Url::parse("https://example.com?pj=https://test-payjoin-url#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQ")
+                .unwrap();
+        assert!(matches!(
+            ohttp(&too_short_ohttp_url),
+            Err(ParseOhttpKeysParamError::InvalidOhttpKeys(
+                crate::ohttp::ParseOhttpKeysError::IncorrectLength(_)
+            ))
+        ));
     }
 
     #[test]

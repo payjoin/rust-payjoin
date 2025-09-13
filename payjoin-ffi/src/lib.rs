@@ -10,6 +10,7 @@ pub mod request;
 pub mod send;
 #[cfg(feature = "_test-utils")]
 pub mod test_utils;
+pub mod time;
 pub mod uri;
 
 pub use payjoin::persist::NoopSessionPersister;
@@ -22,5 +23,6 @@ pub use crate::request::Request;
 pub use crate::send::*;
 #[cfg(feature = "_test-utils")]
 pub use crate::test_utils::*;
+pub use crate::time::Time;
 pub use crate::uri::{PjUri, Uri, Url};
 uniffi::setup_scaffolding!();

@@ -1,6 +1,7 @@
 use core::fmt;
 
 use crate::ohttp::DirectoryResponseError;
+use crate::Time;
 
 /// Error returned when request could not be created.
 ///
@@ -15,7 +16,7 @@ pub(crate) enum InternalCreateRequestError {
     Url(crate::into_url::Error),
     Hpke(crate::hpke::HpkeError),
     OhttpEncapsulation(crate::ohttp::OhttpEncapsulationError),
-    Expired(std::time::SystemTime),
+    Expired(Time),
 }
 
 impl fmt::Display for CreateRequestError {
@@ -26,7 +27,7 @@ impl fmt::Display for CreateRequestError {
             Url(e) => write!(f, "cannot parse url: {e:#?}"),
             Hpke(e) => write!(f, "v2 error: {e}"),
             OhttpEncapsulation(e) => write!(f, "v2 error: {e}"),
-            Expired(expiry) => write!(f, "session expired at {expiry:?}"),
+            Expired(_expiry) => write!(f, "session expired"),
         }
     }
 }

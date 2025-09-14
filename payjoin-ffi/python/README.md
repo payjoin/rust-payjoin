@@ -26,7 +26,7 @@ uv venv
 # python -m venv venv
 source .venv/bin/activate
 
-PYBIN="./venv/bin/" bash ./scripts/generate_bindings.sh
+# PYBIN="./venv/bin/" bash ./scripts/generate_bindings.sh
 
 # Build the wheel
 uv build --wheel

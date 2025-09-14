@@ -14,20 +14,17 @@ if [[ "$OS" == "Darwin" ]]; then
   LIBNAME=libpayjoin_ffi.dylib
   # FIXME: why does darwin not assume pybin has been set?
   # are we just assuming the python3 binary is installed on the system?
-  uv python3 --version
-  uv pip install -r requirements.txt -r requirements-dev.txt
 elif [[ "$OS" == "Linux" ]]; then
   # sudo apt update
   # sudo apt install -y build-essential python3-dev
   LIBNAME=libpayjoin_ffi.so
-  PYBIN=$(dirname $(which python))
-  PYBIN="$PYBIN"
-  ${PYBIN}/python --version
-  # ${PYBIN}/pip install -r requirements.txt -r requirements-dev.txt
 else
   echo "Unsupported os: $OS"
   exit 1
 fi
+
+# FIXME: change to uv style
+uv pip install -r requirements.txt -r requirements-dev.txt
 
 # FIXME: should we not use pushd and popd to ensure robustness here
 cd ../
@@ -56,6 +53,7 @@ else
 
   echo "Copying payjoin_ffi binary"
   # FIXME: only works on x86_64 arch's?
+  # TODO: is there a tool for creating universal linux binaries like lipo with mac?
   cp target/x86_64-unknown-linux-gnu/release-smaller/$LIBNAME python/src/payjoin/$LIBNAME
 fi
 

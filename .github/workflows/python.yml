@@ -39,7 +39,7 @@ jobs:
         run: bash ./scripts/generate_bindings.sh
 
       - name: "Build wheel"
-        run: uv build
+        run: uv build --wheel
 
       - name: "Install wheel"
         run: uv pip install ./dist/*.whl

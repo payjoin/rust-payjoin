@@ -7,32 +7,36 @@ Welcome to the Python language bindings for the [Payjoin Dev Kit](https://payjoi
 Grab the latest release with a simple:
 
 ```shell
-pip install payjoin
+uv pip install payjoin
 ```
 
 ## Running Tests
 
 Follow these steps to clone the repository and run the tests.
 
-
 ```shell
+# TODO: one command where nix does all the uv stuff
 git clone https://github.com/payjoin/rust-payjoin.git
 cd rust-payjoin/payjoin-ffi/python
 
+# TODO: nix will take care of installing uv and running these commands, uv will do the rest
+
 # Setup a python virtual environment
-python -m venv venv
-source venv/bin/activate
+uv venv
+# python -m venv venv
+source .venv/bin/activate
 
 PYBIN="./venv/bin/" bash ./scripts/generate_bindings.sh
 
 # Build the wheel
-python -m build --wheel
+uv build --wheel
+# python -m build --wheel
 
 # Force reinstall payjoin
-pip install ./dist/payjoin-<version>.whl --force-reinstall
+uv pip install ./dist/payjoin-<version>.whl --force-reinstall
 
 # Run all tests
-python -m unittest --verbose
+uv python -m unittest --verbose
 ```
 
 Note that you'll need Docker to run the integration tests. If you get a "Failed to start container" error, ensure the Docker engine is running on your machine.

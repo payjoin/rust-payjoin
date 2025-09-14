@@ -9,6 +9,7 @@ echo "Running on $OS"
 # Or should we keep this and make nix optional?
 # FIXME: pin the versions between the darwin and linux
 
+# let nix handle the deps?
 # Install Rust targets if on macOS
 if [[ "$OS" == "Darwin" ]]; then
   LIBNAME=libpayjoin_ffi.dylib
@@ -30,7 +31,8 @@ uv pip install -r requirements.txt -r requirements-dev.txt
 cd ../
 # This is a test script the actual release should not include the test utils feature
 cargo build --features _test-utils --profile release
-cargo run --features _test-utils --profile release --bin uniffi-bindgen generate --library target/release/$LIBNAME --language python --out-dir python/src/payjoin/
+cargo run --features _test-utils --profile release --bin uniffi-bindgen generate \
+  --library target/release/$LIBNAME --language python --out-dir python/src/payjoin/
 
 if [[ "$OS" == "Darwin" ]]; then
   echo "Generating native binaries..."

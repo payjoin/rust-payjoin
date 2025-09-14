@@ -74,6 +74,15 @@ impl AppState {
             .layer(ServiceBuilder::new().layer(CorsLayer::permissive()))
             .with_state(self)
     }
+
+    pub async fn serve_tcp(self, listener: tokio::net::TcpListener) -> Result<(), BoxError> {
+
+        let router = self.main_router();
+        axum::serve(listener,router).await?;
+        Ok(())
+
+
+    }
 }
 
 

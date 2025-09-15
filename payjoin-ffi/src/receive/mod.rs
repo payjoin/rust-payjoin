@@ -955,7 +955,17 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>>
 
 #[derive(uniffi::Object)]
 pub struct PayjoinProposalTransition(
-    Arc<RwLock<Option<payjoin::persist::MaybeSuccessTransition<(), payjoin::receive::Error>>>>,
+    Arc<
+        RwLock<
+            Option<
+                payjoin::persist::MaybeSuccessTransition<
+                    payjoin::receive::v2::SessionEvent,
+                    (),
+                    payjoin::receive::Error,
+                >,
+            >,
+        >,
+    >,
 );
 
 #[uniffi::export]

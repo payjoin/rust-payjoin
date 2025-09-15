@@ -16,6 +16,10 @@ impl core::ops::Deref for SessionId {
     fn deref(&self) -> &Self::Target { &self.0 }
 }
 
+impl std::fmt::Display for SessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) }
+}
+
 #[derive(Clone)]
 pub(crate) struct SenderPersister {
     db: Arc<Database>,
@@ -224,5 +228,43 @@ impl Database {
             conn.prepare("SELECT receiver_pubkey FROM send_sessions WHERE session_id = ?1")?;
         let receiver_pubkey: Vec<u8> = stmt.query_row(params![session_id.0], |row| row.get(0))?;
         Ok(HpkePublicKey::from_compressed_bytes(&receiver_pubkey).expect("Valid receiver pubkey"))
+    }
+
+    pub(crate) fn get_inactive_send_session_ids(&self) -> Result<Vec<(SessionId, u64)>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT session_id, completed_at FROM send_sessions WHERE completed_at IS NOT NULL",
+        )?;
+        let session_rows = stmt.query_map([], |row| {
+            let session_id: i64 = row.get(0)?;
+            let completed_at: u64 = row.get(1)?;
+            Ok((SessionId(session_id), completed_at))
+        })?;
+
+        let mut session_ids = Vec::new();
+        for session_row in session_rows {
+            let (session_id, completed_at) = session_row?;
+            session_ids.push((session_id, completed_at));
+        }
+        Ok(session_ids)
+    }
+
+    pub(crate) fn get_inactive_recv_session_ids(&self) -> Result<Vec<(SessionId, u64)>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT session_id, completed_at FROM receive_sessions WHERE completed_at IS NOT NULL",
+        )?;
+        let session_rows = stmt.query_map([], |row| {
+            let session_id: i64 = row.get(0)?;
+            let completed_at: u64 = row.get(1)?;
+            Ok((SessionId(session_id), completed_at))
+        })?;
+
+        let mut session_ids = Vec::new();
+        for session_row in session_rows {
+            let (session_id, completed_at) = session_row?;
+            session_ids.push((session_id, completed_at));
+        }
+        Ok(session_ids)
     }
 }

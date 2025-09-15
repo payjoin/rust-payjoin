@@ -26,6 +26,8 @@ pub trait App: Send + Sync {
     async fn receive_payjoin(&self, amount: Amount) -> Result<()>;
     #[cfg(feature = "v2")]
     async fn resume_payjoins(&self) -> Result<()>;
+    #[cfg(feature = "v2")]
+    async fn history(&self) -> Result<()>;
 
     fn create_original_psbt(
         &self,

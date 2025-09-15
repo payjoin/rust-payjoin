@@ -37,16 +37,20 @@ where
         }
     }
 
-    let history = SessionHistory::new(session_events);
+    let history = SessionHistory::new(session_events.clone());
     let pj_param = history.pj_param();
     if std::time::SystemTime::now() > pj_param.expiration() {
         // Session has expired: close the session and persist a fatal error
+        let session_event = SessionEvent::SessionInvalid("Session expired".to_string());
         persister
-            .save_event(SessionEvent::SessionInvalid("Session expired".to_string()).into())
+            .save_event(session_event.clone().into())
             .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
         persister
             .close()
             .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
+
+        session_events.push(session_event);
+        let history = SessionHistory::new(session_events);
 
         return Ok((SendSession::TerminalFailure, history));
     }
@@ -84,6 +88,13 @@ impl SessionHistory {
                 _ => None,
             })
             .expect("Session event log must contain at least one event with pj_param")
+    }
+
+    pub fn terminal_error(&self) -> Option<String> {
+        self.events.iter().find_map(|event| match event {
+            SessionEvent::SessionInvalid(error) => Some(error.clone()),
+            _ => None,
+        })
     }
 }
 
@@ -177,6 +188,7 @@ mod tests {
         events: Vec<SessionEvent>,
         expected_session_history: SessionHistoryExpectedOutcome,
         expected_sender_state: SendSession,
+        expected_error: Option<String>,
     }
 
     fn run_session_history_test(test: SessionHistoryTest) {
@@ -190,6 +202,7 @@ mod tests {
         assert_eq!(sender, test.expected_sender_state);
         assert_eq!(session_history.fallback_tx(), test.expected_session_history.fallback_tx);
         assert_eq!(*session_history.pj_param(), test.expected_session_history.pj_param);
+        assert_eq!(session_history.terminal_error(), test.expected_error);
     }
 
     #[test]
@@ -228,6 +241,7 @@ mod tests {
             events: vec![SessionEvent::CreatedReplyKey(with_reply_key)],
             expected_session_history: SessionHistoryExpectedOutcome { fallback_tx, pj_param },
             expected_sender_state: SendSession::TerminalFailure,
+            expected_error: Some("Session expired".to_string()),
         };
         run_session_history_test(test);
     }
@@ -268,6 +282,7 @@ mod tests {
             events: vec![SessionEvent::CreatedReplyKey(with_reply_key)],
             expected_session_history: SessionHistoryExpectedOutcome { fallback_tx, pj_param },
             expected_sender_state: SendSession::WithReplyKey(sender),
+            expected_error: None,
         };
         run_session_history_test(test);
     }

@@ -19,11 +19,11 @@ fn receiver_pubkey(url: &Url) -> Result<HpkePublicKey, ParseReceiverPubkeyParamE
         .ok_or(ParseReceiverPubkeyParamError::MissingPubkey)?;
 
     let (hrp, bytes) = crate::bech32::nochecksum::decode(value)
-        .map_err(ParseReceiverPubkeyParamError::DecodeBech32)?;
+        .map_err(|_| ParseReceiverPubkeyParamError::InvalidFormat)?;
 
     let rk_hrp: Hrp = Hrp::parse("RK").unwrap();
     if hrp != rk_hrp {
-        return Err(ParseReceiverPubkeyParamError::InvalidHrp(hrp));
+        return Err(ParseReceiverPubkeyParamError::InvalidFormat);
     }
 
     HpkePublicKey::from_compressed_bytes(&bytes[..])
@@ -58,11 +58,11 @@ fn exp(url: &Url) -> Result<std::time::SystemTime, ParseExpParamError> {
         .ok_or(ParseExpParamError::MissingExp)?;
 
     let (hrp, bytes) =
-        crate::bech32::nochecksum::decode(value).map_err(ParseExpParamError::DecodeBech32)?;
+        crate::bech32::nochecksum::decode(value).map_err(|_| ParseExpParamError::InvalidFormat)?;
 
     let ex_hrp: Hrp = Hrp::parse("EX").unwrap();
     if hrp != ex_hrp {
-        return Err(ParseExpParamError::InvalidHrp(hrp));
+        return Err(ParseExpParamError::InvalidFormat);
     }
 
     u32::consensus_decode(&mut &bytes[..])
@@ -319,8 +319,7 @@ impl std::error::Error for ParseOhttpKeysParamError {
 #[derive(Debug)]
 pub(super) enum ParseExpParamError {
     MissingExp,
-    InvalidHrp(bitcoin::bech32::Hrp),
-    DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
+    InvalidFormat,
     InvalidExp(bitcoin::consensus::encode::Error),
     InvalidFragment(ParseFragmentError),
 }
@@ -331,8 +330,7 @@ impl std::fmt::Display for ParseExpParamError {
 
         match &self {
             MissingExp => write!(f, "exp is missing"),
-            InvalidHrp(h) => write!(f, "incorrect hrp for exp: {h}"),
-            DecodeBech32(d) => write!(f, "exp is not valid bech32: {d}"),
+            InvalidFormat => write!(f, "invalid format"),
             InvalidExp(i) =>
                 write!(f, "exp param does not contain a bitcoin consensus encoded u32: {i}"),
             InvalidFragment(e) => write!(f, "invalid URL fragment: {e}"),
@@ -345,8 +343,7 @@ impl std::error::Error for ParseExpParamError {
         use ParseExpParamError::*;
         match &self {
             MissingExp => None,
-            InvalidHrp(_) => None,
-            DecodeBech32(e) => Some(e),
+            InvalidFormat => None,
             InvalidExp(e) => Some(e),
             InvalidFragment(e) => Some(e),
         }
@@ -356,8 +353,7 @@ impl std::error::Error for ParseExpParamError {
 #[derive(Debug)]
 pub(super) enum ParseReceiverPubkeyParamError {
     MissingPubkey,
-    InvalidHrp(bitcoin::bech32::Hrp),
-    DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
+    InvalidFormat,
     InvalidPubkey(crate::hpke::HpkeError),
     InvalidFragment(ParseFragmentError),
 }
@@ -368,8 +364,7 @@ impl std::fmt::Display for ParseReceiverPubkeyParamError {
 
         match &self {
             MissingPubkey => write!(f, "receiver public key is missing"),
-            InvalidHrp(h) => write!(f, "incorrect hrp for receiver key: {h}"),
-            DecodeBech32(e) => write!(f, "receiver public is not valid base64: {e}"),
+            InvalidFormat => write!(f, "invalid format"),
             InvalidPubkey(e) =>
                 write!(f, "receiver public key does not represent a valid pubkey: {e}"),
             InvalidFragment(e) => write!(f, "invalid URL fragment: {e}"),
@@ -383,8 +378,7 @@ impl std::error::Error for ParseReceiverPubkeyParamError {
 
         match &self {
             MissingPubkey => None,
-            InvalidHrp(_) => None,
-            DecodeBech32(error) => Some(error),
+            InvalidFormat => None,
             InvalidPubkey(error) => Some(error),
             InvalidFragment(error) => Some(error),
         }
@@ -457,13 +451,13 @@ mod tests {
 
         let invalid_bech32_exp_url =
             Url::parse("http://example.com?pj=https://test-payjoin-url#EX1INVALIDBECH32").unwrap();
-        assert!(matches!(exp(&invalid_bech32_exp_url), Err(ParseExpParamError::DecodeBech32(_))));
+        assert!(matches!(exp(&invalid_bech32_exp_url), Err(ParseExpParamError::InvalidFormat)));
 
         // Since the HRP is everything to the left of the right-most separator, the invalid url in
         // this test would have it's HRP being parsed as EX101 instead of the expected EX1
         let invalid_hrp_exp_url =
             Url::parse("http://example.com?pj=https://test-payjoin-url#EX1010").unwrap();
-        assert!(matches!(exp(&invalid_hrp_exp_url), Err(ParseExpParamError::InvalidHrp(_))));
+        assert!(matches!(exp(&invalid_hrp_exp_url), Err(ParseExpParamError::InvalidFormat)));
 
         // Not enough data to decode into a u32
         let invalid_timestamp_exp_url =
@@ -491,7 +485,7 @@ mod tests {
             Url::parse("http://example.com?pj=https://test-payjoin-url#RK1INVALIDBECH32").unwrap();
         assert!(matches!(
             receiver_pubkey(&invalid_bech32_receiver_pubkey_url),
-            Err(ParseReceiverPubkeyParamError::DecodeBech32(_))
+            Err(ParseReceiverPubkeyParamError::InvalidFormat)
         ));
 
         // Since the HRP is everything to the left of the right-most separator, the invalid url in
@@ -500,7 +494,7 @@ mod tests {
             Url::parse("http://example.com?pj=https://test-payjoin-url#RK101").unwrap();
         assert!(matches!(
             receiver_pubkey(&invalid_hrp_receiver_pubkey_url),
-            Err(ParseReceiverPubkeyParamError::InvalidHrp(_))
+            Err(ParseReceiverPubkeyParamError::InvalidFormat)
         ));
 
         // Not enough data to decode into a u32

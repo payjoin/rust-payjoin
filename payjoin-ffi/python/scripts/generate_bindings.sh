@@ -5,33 +5,22 @@ OS=$(uname -s)
 
 echo "Running on $OS"
 
-# TODO: is this necessary if we're reliant on nix for the env?
-# Or should we keep this and make nix optional?
-# FIXME: pin the versions between the darwin and linux
-
-# let nix handle the deps?
 # Install Rust targets if on macOS
 if [[ "$OS" == "Darwin" ]]; then
   LIBNAME=libpayjoin_ffi.dylib
-  # FIXME: why does darwin not assume pybin has been set?
-  # are we just assuming the python3 binary is installed on the system?
 elif [[ "$OS" == "Linux" ]]; then
-  # sudo apt update
-  # TODO: ensure these are provided in the nix-shell?
-  # sudo apt install -y build-essential python3-dev
+  # NOTE: The build-essential and python3-dev dependencies are required for Linux
   LIBNAME=libpayjoin_ffi.so
 else
   echo "Unsupported os: $OS"
   exit 1
 fi
 
-# FIXME: change to uv style
-# uv run pip install -r requirements.txt -r requirements-dev.txt
-# Install both main dependencies and develop
+# Install both main and dev dependencies
 uv sync --all-extras
 
-# FIXME: should we not use pushd and popd to ensure robustness here
 cd ../
+
 # This is a test script the actual release should not include the test utils feature
 cargo build --features _test-utils --profile release
 cargo run --features _test-utils --profile release --bin uniffi-bindgen generate \
@@ -46,7 +35,6 @@ if [[ "$OS" == "Darwin" ]]; then
   wait
 
   echo "Building macos fat library"
-  # NOTE: requires xcode?
   lipo -create -output python/src/payjoin/$LIBNAME \
     target/aarch64-apple-darwin/release-smaller/$LIBNAME \
     target/x86_64-apple-darwin/release-smaller/$LIBNAME
@@ -57,8 +45,6 @@ else
   cargo build --profile release-smaller --target x86_64-unknown-linux-gnu --features _test-utils
 
   echo "Copying payjoin_ffi binary"
-  # FIXME: only works on x86_64 arch's?
-  # TODO: is there a tool for creating universal linux binaries like lipo with mac?
   cp target/x86_64-unknown-linux-gnu/release-smaller/$LIBNAME python/src/payjoin/$LIBNAME
 fi
 

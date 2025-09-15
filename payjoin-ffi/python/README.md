@@ -15,10 +15,10 @@ uv add payjoin
 Follow these steps to clone the repository and run the tests.
 
 ```shell
-# FIXME: ensure user has build-essential and python3-dev installed
-# TODO: nix will take care of installing uv and running these commands, uv will do the rest
+# If on Linux, ensure the following are installed:
+# build-essential python3-dev
 
-# Setup virtual environment/install all packages
+# Setup virtual environment/install all packages (including developer packages)
 uv sync --all-extras
 
 bash ./scripts/generate_bindings.sh
@@ -29,15 +29,9 @@ uv build --wheel
 # Force reinstall payjoin with <version>
 uv pip install ./dist/payjoin-*.whl --force-reinstall
 
-# Example:
-# uv pip install ./dist/payjoin-0.24.0-cp313-cp313-linux_x86_64.whl
-
 # Run all tests
 uv run python -m unittest --verbose
 ```
-
-Note that you'll need Docker to run the integration tests. If you get a "Failed to start container" error, ensure the Docker engine is running on your machine.
-You can [filter which tests](https://docs.python.org/3/library/unittest.html#command-line-interface) to run by passing a file or test name as argument.
 
 ## Building the Package
 

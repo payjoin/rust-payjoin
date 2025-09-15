@@ -354,7 +354,7 @@ impl Receiver<Initialized> {
     /// The response can either be an UncheckedOriginalPayload or an ACCEPTED message
     /// indicating no UncheckedOriginalPayload is available yet.
     pub fn process_response(
-        &mut self,
+        self,
         body: &[u8],
         context: ohttp::ClientResponse,
     ) -> MaybeFatalTransitionWithNoResults<
@@ -381,7 +381,7 @@ impl Receiver<Initialized> {
                 },
                 Receiver {
                     state: UncheckedOriginalPayload { original: proposal },
-                    session_context: SessionContext { reply_key, ..self.session_context.clone() },
+                    session_context: SessionContext { reply_key, ..current_state.session_context },
                 },
             )
         } else {
@@ -390,7 +390,7 @@ impl Receiver<Initialized> {
     }
 
     fn inner_process_res(
-        &mut self,
+        self,
         body: &[u8],
         context: ohttp::ClientResponse,
     ) -> Result<Option<(OriginalPayload, Option<HpkePublicKey>)>, Error> {
@@ -430,15 +430,12 @@ impl Receiver<Initialized> {
         )
     }
 
-    fn extract_proposal_from_v1(
-        &mut self,
-        response: &str,
-    ) -> Result<OriginalPayload, ProtocolError> {
+    fn extract_proposal_from_v1(self, response: &str) -> Result<OriginalPayload, ProtocolError> {
         self.unchecked_from_payload(response)
     }
 
     fn extract_proposal_from_v2(
-        &mut self,
+        self,
         response: Vec<u8>,
     ) -> Result<(OriginalPayload, HpkePublicKey), Error> {
         let (payload_bytes, reply_key) =
@@ -448,7 +445,7 @@ impl Receiver<Initialized> {
         self.unchecked_from_payload(payload).map_err(Error::Protocol).map(|p| (p, reply_key))
     }
 
-    fn unchecked_from_payload(&mut self, payload: &str) -> Result<OriginalPayload, ProtocolError> {
+    fn unchecked_from_payload(self, payload: &str) -> Result<OriginalPayload, ProtocolError> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
         tracing::trace!("Received query: {query}, base64: {base64}"); // my guess is no \n so default is wrong
@@ -1448,8 +1445,7 @@ pub mod test {
         let base64 = ORIGINAL_PSBT;
         let query = "v=1";
         let payload = format!("{base64}\n{query}");
-        let mut receiver =
-            Receiver { state: Initialized {}, session_context: SHARED_CONTEXT.clone() };
+        let receiver = Receiver { state: Initialized {}, session_context: SHARED_CONTEXT.clone() };
         let proposal = receiver
             .unchecked_from_payload(&payload)
             .expect("unchecked_from_payload should parse valid v1 PSBT payload");

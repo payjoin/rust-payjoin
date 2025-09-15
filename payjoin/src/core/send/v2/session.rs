@@ -1,7 +1,7 @@
 use super::WithReplyKey;
 use crate::error::{InternalReplayError, ReplayError};
 use crate::persist::SessionPersister;
-use crate::send::v2::{SendSession, V2GetContext};
+use crate::send::v2::{PollingForProposal, SendSession};
 use crate::uri::v2::PjParam;
 use crate::ImplementationError;
 
@@ -103,7 +103,7 @@ pub enum SessionEvent {
     /// Sender was created with a HPKE key pair
     CreatedReplyKey(WithReplyKey),
     /// Sender POST'd the original PSBT, and waiting to receive a Proposal PSBT using GET context
-    V2GetContext(V2GetContext),
+    PollingForProposal(PollingForProposal),
     /// Sender received a Proposal PSBT
     ProposalReceived(bitcoin::Psbt),
     /// Invalid session
@@ -152,7 +152,7 @@ mod tests {
             reply_key: keypair.0.clone(),
         };
 
-        let v2_get_context = V2GetContext {
+        let polling_for_proposal = PollingForProposal {
             pj_param: pj_param.clone(),
             psbt_ctx: PsbtContext {
                 original_psbt: PARSED_ORIGINAL_PSBT.clone(),
@@ -166,7 +166,7 @@ mod tests {
 
         let test_cases = vec![
             SessionEvent::CreatedReplyKey(sender_with_reply_key.clone()),
-            SessionEvent::V2GetContext(v2_get_context.clone()),
+            SessionEvent::PollingForProposal(polling_for_proposal.clone()),
             SessionEvent::ProposalReceived(PARSED_ORIGINAL_PSBT.clone()),
             SessionEvent::SessionInvalid("error message".to_string()),
         ];

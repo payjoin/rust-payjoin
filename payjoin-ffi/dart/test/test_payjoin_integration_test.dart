@@ -345,7 +345,7 @@ void main() {
       var response = await agent.post(Uri.parse(request.request.url.asString()),
           headers: {"Content-Type": request.request.contentType},
           body: request.request.body);
-      payjoin.V2GetContext send_ctx = req_ctx
+      payjoin.PollingForProposal send_ctx = req_ctx
           .processResponse(response.bodyBytes, request.context)
           .save(sender_persister);
       // POST Original PSBT

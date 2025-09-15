@@ -165,7 +165,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
                 headers={"Content-Type": request.request.content_type},
                 content=request.request.body
             )
-            send_ctx: V2GetContext = req_ctx.process_response(response.content, request.context).save(sender_persister)
+            send_ctx: PollingForProposal = req_ctx.process_response(response.content, request.context).save(sender_persister)
             # POST Original PSBT
 
             # **********************

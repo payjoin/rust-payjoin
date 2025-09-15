@@ -19,14 +19,19 @@ Follow these steps to clone the repository and run the tests.
 git clone https://github.com/payjoin/rust-payjoin.git
 cd rust-payjoin/payjoin-ffi/python
 
+# FIXME: ensure user has build-essential and python3-dev installed
+# install deps and sync venv (with dev deps installed)
+# uv sync --all-extras
+
 # TODO: nix will take care of installing uv and running these commands, uv will do the rest
 
 # Setup a python virtual environment
-uv venv
 # python -m venv venv
-source .venv/bin/activate
-
+# source .venv/bin/activate
 # PYBIN="./venv/bin/" bash ./scripts/generate_bindings.sh
+# PYBIN="./venv/bin/" bash ./scripts/generate_bindings.sh
+
+
 
 # Build the wheel
 uv build --wheel

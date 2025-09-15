@@ -17,6 +17,7 @@ if [[ "$OS" == "Darwin" ]]; then
   # are we just assuming the python3 binary is installed on the system?
 elif [[ "$OS" == "Linux" ]]; then
   # sudo apt update
+  # TODO: ensure these are provided in the nix-shell?
   # sudo apt install -y build-essential python3-dev
   LIBNAME=libpayjoin_ffi.so
 else
@@ -25,7 +26,9 @@ else
 fi
 
 # FIXME: change to uv style
-uv pip install -r requirements.txt -r requirements-dev.txt
+# uv run pip install -r requirements.txt -r requirements-dev.txt
+# Install both main dependencies and develop
+uv sync --all-extras
 
 # FIXME: should we not use pushd and popd to ensure robustness here
 cd ../

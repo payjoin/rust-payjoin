@@ -107,13 +107,12 @@ mod tests {
     use super::*;
     use crate::output_substitution::OutputSubstitution;
     use crate::persist::test_utils::InMemoryTestPersister;
-    use crate::send::v1::SenderBuilder;
-    use crate::send::v2::Sender;
+    use crate::persist::NoopSessionPersister;
+    use crate::send::v2::{Sender, SenderBuilder};
     use crate::send::PsbtContext;
     use crate::{HpkeKeyPair, Uri, UriExt};
 
-    const PJ_URI: &str =
-        "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/";
+    const PJ_URI: &str = "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/TXJCGKTKXLUUZ%23EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV";
 
     #[test]
     fn test_sender_session_event_serialization_roundtrip() {
@@ -196,19 +195,31 @@ mod tests {
     fn test_sender_session_history_with_expired_session() {
         // TODO(armins): how can we reduce the boilerplate for these tests?
         let psbt = PARSED_ORIGINAL_PSBT.clone();
-        let sender = SenderBuilder::new(
-            psbt.clone(),
-            Uri::try_from(PJ_URI)
-                .expect("Valid uri")
-                .assume_checked()
-                .check_pj_supported()
-                .expect("Payjoin to be supported"),
-        )
-        .build_recommended(FeeRate::BROADCAST_MIN)
-        .unwrap();
+        let uri = Uri::try_from(PJ_URI)
+            .expect("Valid uri")
+            .assume_checked()
+            .check_pj_supported()
+            .expect("Payjoin to be supported");
+        let sender = SenderBuilder::new(psbt.clone(), uri);
         let reply_key = HpkeKeyPair::gen_keypair();
-        let endpoint = sender.endpoint().clone();
-        let fallback_tx = sender.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
+        let endpoint = sender
+            .clone()
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .unwrap()
+            .save(&NoopSessionPersister::default())
+            .unwrap()
+            .endpoint()
+            .clone();
+        let fallback_tx = sender
+            .clone()
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .unwrap()
+            .save(&NoopSessionPersister::default())
+            .unwrap()
+            .psbt_ctx
+            .original_psbt
+            .clone()
+            .extract_tx_unchecked_fee_rate();
         let id = crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id");
         let pj_param = crate::uri::v2::PjParam::new(
             endpoint,
@@ -221,7 +232,14 @@ mod tests {
         );
         let with_reply_key = WithReplyKey {
             pj_param: pj_param.clone(),
-            psbt_ctx: sender.psbt_ctx.clone(),
+            psbt_ctx: sender
+                .clone()
+                .build_recommended(FeeRate::BROADCAST_MIN)
+                .unwrap()
+                .save(&NoopSessionPersister::default())
+                .unwrap()
+                .psbt_ctx
+                .clone(),
             reply_key: reply_key.0,
         };
         let test = SessionHistoryTest {
@@ -235,19 +253,31 @@ mod tests {
     #[test]
     fn test_sender_session_history_with_reply_key_event() {
         let psbt = PARSED_ORIGINAL_PSBT.clone();
-        let sender = SenderBuilder::new(
-            psbt.clone(),
-            Uri::try_from(PJ_URI)
-                .expect("Valid uri")
-                .assume_checked()
-                .check_pj_supported()
-                .expect("Payjoin to be supported"),
-        )
-        .build_recommended(FeeRate::BROADCAST_MIN)
-        .unwrap();
+        let uri = Uri::try_from(PJ_URI)
+            .expect("Valid uri")
+            .assume_checked()
+            .check_pj_supported()
+            .expect("Payjoin to be supported");
+        let sender = SenderBuilder::new(psbt.clone(), uri);
         let reply_key = HpkeKeyPair::gen_keypair();
-        let endpoint = sender.endpoint().clone();
-        let fallback_tx = sender.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
+        let endpoint = sender
+            .clone()
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .unwrap()
+            .save(&NoopSessionPersister::default())
+            .unwrap()
+            .endpoint()
+            .clone();
+        let fallback_tx = sender
+            .clone()
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .unwrap()
+            .save(&NoopSessionPersister::default())
+            .unwrap()
+            .psbt_ctx
+            .original_psbt
+            .clone()
+            .extract_tx_unchecked_fee_rate();
         let id = crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id");
         let pj_param = crate::uri::v2::PjParam::new(
             endpoint,
@@ -260,7 +290,14 @@ mod tests {
         );
         let with_reply_key = WithReplyKey {
             pj_param: pj_param.clone(),
-            psbt_ctx: sender.psbt_ctx.clone(),
+            psbt_ctx: sender
+                .clone()
+                .build_recommended(FeeRate::BROADCAST_MIN)
+                .unwrap()
+                .save(&NoopSessionPersister::default())
+                .unwrap()
+                .psbt_ctx
+                .clone(),
             reply_key: reply_key.0,
         };
         let sender = Sender { state: with_reply_key.clone() };

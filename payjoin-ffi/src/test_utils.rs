@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use bitcoin_ffi::Psbt;
 use lazy_static::lazy_static;
+use payjoin::into_url::IntoUrlSealed;
 use payjoin_test_utils::corepc_node::AddressType;
 use payjoin_test_utils::{
     corepc_node, EXAMPLE_URL, INVALID_PSBT, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT,
@@ -130,7 +131,16 @@ impl TestServices {
 
     pub fn directory_url(&self) -> Url {
         let runtime = RUNTIME.lock().expect("Lock should not be poisoned");
-        runtime.block_on(async { self.0.lock().await.directory_url().into() })
+        runtime.block_on(async {
+            Url(self
+                .0
+                .lock()
+                .await
+                .directory_url()
+                .as_str()
+                .into_url()
+                .expect("Could not parse Url"))
+        })
     }
 
     pub fn take_directory_handle(&self) -> JoinHandle {
@@ -141,12 +151,30 @@ impl TestServices {
 
     pub fn ohttp_relay_url(&self) -> Url {
         let runtime = RUNTIME.lock().expect("Lock should not be poisoned");
-        runtime.block_on(async { self.0.lock().await.ohttp_relay_url().into() })
+        runtime.block_on(async {
+            Url(self
+                .0
+                .lock()
+                .await
+                .ohttp_relay_url()
+                .as_str()
+                .into_url()
+                .expect("Could not parse Url"))
+        })
     }
 
     pub fn ohttp_gateway_url(&self) -> Url {
         let runtime = RUNTIME.lock().expect("Lock should not be poisoned");
-        runtime.block_on(async { self.0.lock().await.ohttp_gateway_url().into() })
+        runtime.block_on(async {
+            Url(self
+                .0
+                .lock()
+                .await
+                .ohttp_gateway_url()
+                .as_str()
+                .into_url()
+                .expect("Could not parse Url"))
+        })
     }
 
     pub fn take_ohttp_relay_handle(&self) -> JoinHandle {
@@ -191,7 +219,9 @@ pub fn init_bitcoind_sender_receiver() -> Result<Arc<BitcoindEnv>, FfiError> {
 }
 
 #[uniffi::export]
-pub fn example_url() -> Url { EXAMPLE_URL.clone().into() }
+pub fn example_url() -> Url {
+    Url(EXAMPLE_URL.clone().as_str().into_url().expect("Could not parse Url"))
+}
 
 #[uniffi::export]
 pub fn query_params() -> String { QUERY_PARAMS.to_string() }

@@ -20,7 +20,7 @@ impl From<String> for PjNotSupported {
 
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-pub struct UrlParseError(#[from] payjoin::ParseError);
+pub struct UrlParseError(#[from] url::ParseError);
 
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]

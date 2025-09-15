@@ -3,7 +3,10 @@ use std::sync::Arc;
 
 pub use error::{PjNotSupported, PjParseError, UrlParseError};
 use payjoin::bitcoin::address::NetworkChecked;
+use payjoin::into_url::IntoUrlSealed;
 use payjoin::UriExt;
+
+use crate::uri::error::IntoUrlError;
 
 pub mod error;
 #[derive(Clone, uniffi::Object)]
@@ -74,23 +77,28 @@ impl PjUri {
     pub fn as_string(&self) -> String { self.0.clone().to_string() }
 }
 
-impl From<payjoin::Url> for Url {
-    fn from(value: payjoin::Url) -> Self { Self(value) }
+#[derive(Clone, Debug, uniffi::Object)]
+pub struct Url(pub payjoin::into_url::Url);
+
+impl From<payjoin::into_url::Url> for Url {
+    fn from(value: payjoin::into_url::Url) -> Self { Self(value) }
 }
 
-impl From<Url> for payjoin::Url {
+impl From<Url> for payjoin::into_url::Url {
     fn from(value: Url) -> Self { value.0 }
 }
-
-#[derive(Clone, Debug, uniffi::Object)]
-pub struct Url(payjoin::Url);
 
 #[uniffi::export]
 impl Url {
     #[uniffi::constructor]
-    pub fn parse(input: String) -> Result<Url, UrlParseError> {
-        payjoin::Url::parse(input.as_str()).map_err(Into::into).map(Self)
+    pub fn parse(input: String) -> Result<Url, IntoUrlError> {
+        input.into_url().map_err(Into::into).map(Self)
     }
-    pub fn query(&self) -> Option<String> { self.0.query().map(|x| x.to_string()) }
+    pub fn query(&self) -> Option<String> {
+        url::Url::parse(self.0.as_str())
+            .expect("could not parse Url")
+            .query()
+            .map(|x| x.to_string())
+    }
     pub fn as_string(&self) -> String { self.0.to_string() }
 }

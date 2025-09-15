@@ -1,3 +1,6 @@
+use std::fmt;
+
+use serde::{de, Deserialize, Deserializer};
 use url::ParseError;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -26,7 +29,7 @@ impl From<ParseError> for Error {
 type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Url(pub url::Url);
+pub struct Url(pub(crate) url::Url);
 
 impl Url {
     pub fn as_str(&self) -> &str { self.0.as_ref() }

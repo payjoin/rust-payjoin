@@ -1439,7 +1439,7 @@ pub mod test {
     fn test_v2_pj_uri() {
         let uri =
             Receiver { state: Initialized {}, session_context: SHARED_CONTEXT.clone() }.pj_uri();
-        assert_ne!(uri.extras.pj_param.endpoint(), EXAMPLE_URL.clone());
+        assert_ne!(uri.extras.pj_param.endpoint().0, EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
     }
 

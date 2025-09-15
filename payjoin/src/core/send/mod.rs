@@ -20,7 +20,6 @@ use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
 pub use error::{BuildSenderError, ResponseError, ValidationError, WellKnownError};
 pub(crate) use error::{InternalBuildSenderError, InternalProposalError, InternalValidationError};
-use url::Url;
 
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
@@ -650,12 +649,12 @@ fn determine_fee_contribution(
 }
 
 fn serialize_url(
-    endpoint: Url,
+    endpoint: url::Url,
     output_substitution: OutputSubstitution,
     fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
     version: Version,
-) -> Url {
+) -> url::Url {
     let mut url = endpoint;
     url.query_pairs_mut().append_pair("v", &version.to_string());
     if output_substitution == OutputSubstitution::Disabled {
@@ -687,7 +686,6 @@ mod test {
         BoxError, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL,
         PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO,
     };
-    use url::Url;
 
     use super::*;
     use crate::output_substitution::OutputSubstitution;
@@ -1044,42 +1042,42 @@ mod test {
     #[test]
     fn test_disable_output_substitution_query_param() -> Result<(), BoxError> {
         let url = serialize_url(
-            Url::parse("http://localhost")?,
+            url::Url::parse("http://localhost")?,
             OutputSubstitution::Disabled,
             None,
             FeeRate::ZERO,
             Version::Two,
         );
-        assert_eq!(url, Url::parse("http://localhost?v=2&disableoutputsubstitution=true")?);
+        assert_eq!(url, url::Url::parse("http://localhost?v=2&disableoutputsubstitution=true")?);
 
         let url = serialize_url(
-            Url::parse("http://localhost")?,
+            url::Url::parse("http://localhost")?,
             OutputSubstitution::Enabled,
             None,
             FeeRate::ZERO,
             Version::Two,
         );
-        assert_eq!(url, Url::parse("http://localhost?v=2")?);
+        assert_eq!(url, url::Url::parse("http://localhost?v=2")?);
         Ok(())
     }
 
     #[test]
     fn test_min_feerate_query_param() -> Result<(), BoxError> {
         let url = serialize_url(
-            Url::parse("http://localhost")?,
+            url::Url::parse("http://localhost")?,
             OutputSubstitution::Enabled,
             None,
             FeeRate::from_sat_per_vb(10).expect("Could not parse feerate"),
             Version::Two,
         );
-        assert_eq!(url, Url::parse("http://localhost?v=2&minfeerate=10")?);
+        assert_eq!(url, url::Url::parse("http://localhost?v=2&minfeerate=10")?);
         Ok(())
     }
 
     #[test]
     fn test_additional_fee_contribution_query_param() -> Result<(), BoxError> {
         let url = serialize_url(
-            Url::parse("http://localhost")?,
+            url::Url::parse("http://localhost")?,
             OutputSubstitution::Enabled,
             Some(AdditionalFeeContribution { max_amount: Amount::from_sat(1000), vout: 0 }),
             FeeRate::ZERO,
@@ -1087,7 +1085,7 @@ mod test {
         );
         assert_eq!(
             url,
-            Url::parse(
+            url::Url::parse(
                 "http://localhost?v=2&additionalfeeoutputindex=0&maxadditionalfeecontribution=1000"
             )?
         );

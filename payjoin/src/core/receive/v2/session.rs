@@ -194,6 +194,7 @@ pub enum SessionEvent {
     /// Reason being in some cases we still want to preserve the error b/c we can action on it. For now this is a terminal state and there is nothing to replay and is saved to be displayed.
     /// b/c its a terminal state and there is nothing to replay. So serialization will be lossy and that is fine.
     SessionInvalid(String, Option<JsonReply>),
+    Closed,
 }
 
 #[cfg(test)]

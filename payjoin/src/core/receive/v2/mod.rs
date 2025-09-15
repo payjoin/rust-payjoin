@@ -185,6 +185,9 @@ impl ReceiveSession {
             ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
 
             (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiveSession::TerminalFailure),
+
+            (current_state, SessionEvent::Closed) => Ok(current_state),
+
             (current_state, event) => Err(InternalReplayError::InvalidEvent(
                 Box::new(event),
                 Some(Box::new(current_state)),
@@ -1046,11 +1049,11 @@ impl Receiver<PayjoinProposal> {
         self,
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
-    ) -> MaybeSuccessTransition<(), Error> {
+    ) -> MaybeSuccessTransition<SessionEvent, (), Error> {
         match process_post_res(res, ohttp_context)
             .map_err(|e| InternalSessionError::DirectoryResponse(e).into())
         {
-            Ok(_) => MaybeSuccessTransition::success(()),
+            Ok(_) => MaybeSuccessTransition::success(SessionEvent::Closed, ()),
             Err(e) => MaybeSuccessTransition::transient(e),
         }
     }

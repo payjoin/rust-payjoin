@@ -1032,7 +1032,7 @@ impl Receiver<PayjoinProposal> {
     /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or
     /// choose to broadcast the original PSBT.
     pub fn process_response(
-        &self,
+        self,
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
     ) -> MaybeSuccessTransition<(), Error> {

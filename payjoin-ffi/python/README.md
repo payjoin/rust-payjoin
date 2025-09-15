@@ -7,6 +7,9 @@ Welcome to the Python language bindings for the [Payjoin Dev Kit](https://payjoi
 Grab the latest release with a simple:
 
 ```shell
+pip install payjoin
+
+# Or, for uv:
 uv add payjoin
 ```
 
@@ -15,6 +18,9 @@ uv add payjoin
 Follow these steps to clone the repository and run the tests.
 
 ```shell
+# Ensure you have uv installed:
+# https://docs.astral.sh/uv/getting-started/installation/
+
 # If on Linux, ensure the following are installed:
 # build-essential python3-dev
 

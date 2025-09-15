@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::str::FromStr;
 
 use anyhow::Result;
@@ -76,29 +75,96 @@ impl AppState {
     }
 
     pub async fn serve_tcp(self, listener: tokio::net::TcpListener) -> Result<(), BoxError> {
-
         let router = self.main_router();
-        axum::serve(listener,router).await?;
+        axum::serve(listener, router).await?;
         Ok(())
-
-
     }
 }
 
+async fn get_mailbox(state: &AppState, mailbox_id: &str) -> Result<Response, HandlerError> {
+    trace!("get_mailbox");
+    let mailbox_id = ShortId::from_str(&mailbox_id)?;
 
-async fn get_ohttp_allowed_purposes() -> Response {
-        // Encode the magic string in the same format as a TLS ALPN protocol list (a
-        // U16BE length encoded list of U8 length encoded strings).
-        //
-        // The string is just "BIP77" followed by a UUID, that signals to relays
-        // that this OHTTP gateway will accept any requests associated with this
-        // purpose.
-        let body  = Bytes::from_static(b"\x00\x01\x2aBIP77 454403bb-9f7b-4385-b31f-acd2dae20b7e");
-        let mut headers = HeaderMap::new();
-        headers.insert("content-type", HeaderValue::from_static("application/x-ohttp-allowed-purposes"));
-        (StatusCode::OK, headers,body).into_response()
+    match state.pool.peek_default(&mailbox_id).await {
+        Ok(buffered_req) => Ok((StatusCode::OK, buffered_req).into_response()),
+        Err(e) => match e {
+            db::Error::Redis(re) => {
+                error!("Redis error: {}", re);
+                Err(HandlerError::InternalServerError(anyhow::Error::msg("Internal server error")))
+            }
+            db::Error::Timeout(_) => Ok(StatusCode::ACCEPTED.into_response()),
+        },
+    }
 }
 
+async fn post_mailbox(
+    state: &AppState,
+    mailbox_id: &str,
+    body: Bytes,
+) -> Result<Response, HandlerError> {
+    let none_response = StatusCode::OK.into_response();
+    trace!("post_mailbox");
+
+    let mailbox_id = ShortId::from_str(&mailbox_id)?;
+
+    if body.len() > V1_MAX_BUFFER_SIZE {
+        return Err(HandlerError::PayloadTooLarge);
+    }
+
+    match state.pool.push_default(&mailbox_id, body.to_vec()).await {
+        Ok(_) => Ok(none_response),
+        Err(e) => Err(HandlerError::InternalServerError(e.into())),
+    }
+}
+
+async fn put_payjoin_v1(
+    state: &AppState,
+    mailbox_id: &str,
+    body: Bytes,
+) -> Result<Response, HandlerError> {
+    trace!("put_payjoin_v1");
+    let none_response = StatusCode::OK.into_response();
+
+    let mailbox_id = ShortId::from_str(&mailbox_id)?;
+
+    if body.len() > V1_MAX_BUFFER_SIZE {
+        return Err(HandlerError::PayloadTooLarge);
+    }
+
+    match state.pool.push_v1(&mailbox_id, body.to_vec()).await {
+        Ok(_) => Ok(none_response),
+        Err(e) => Err(HandlerError::InternalServerError(e.into())),
+    }
+}
+
+async fn get_ohttp_keys(State(state): State<AppState>) -> Result<Response, HandlerError> {
+    get_ohttp_keys_func(&state).await
+}
+
+// Since only routers can inject state , only handlers that are called by the router can access the state
+// This is both called  by router and in another handler . So we need to pass the state as a parameter to the handler
+async fn get_ohttp_keys_func(state: &AppState) -> Result<Response, HandlerError> {
+    let ohttp_keys =
+        state.ohttp.config().encode().map_err(|e| HandlerError::InternalServerError(e.into()))?;
+
+    let mut headers = HeaderMap::new();
+    headers.insert("content-type", HeaderValue::from_static("application/ohttp-keys"));
+    Ok((StatusCode::OK, headers, ohttp_keys).into_response())
+}
+
+async fn get_ohttp_allowed_purposes() -> Response {
+    // Encode the magic string in the same format as a TLS ALPN protocol list (a
+    // U16BE length encoded list of U8 length encoded strings).
+    //
+    // The string is just "BIP77" followed by a UUID, that signals to relays
+    // that this OHTTP gateway will accept any requests associated with this
+    // purpose.
+    let body = Bytes::from_static(b"\x00\x01\x2aBIP77 454403bb-9f7b-4385-b31f-acd2dae20b7e");
+    let mut headers = HeaderMap::new();
+    headers
+        .insert("content-type", HeaderValue::from_static("application/x-ohttp-allowed-purposes"));
+    (StatusCode::OK, headers, body).into_response()
+}
 
 async fn handle_metrics(State(state): State<AppState>) -> Response {
     match state.metrics.generate_metrics() {

@@ -147,7 +147,7 @@ pub async fn init_directory(
     println!("Database running on {db_host}");
     let db = payjoin_directory::DbPool::new(timeout, db_host).await?;
     let metrics = payjoin_directory::metrics::Metrics::new();
-    let service = payjoin_directory::Service::new(db, ohttp_server.into(), metrics);
+    let service = payjoin_directory::AppState::new(db, ohttp_server.into(), metrics);
 
     let listener = bind_free_port().await?;
     let port = listener.local_addr()?.port();

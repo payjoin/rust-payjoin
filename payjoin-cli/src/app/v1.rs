@@ -378,6 +378,15 @@ fn try_contributing_inputs(
     let candidate_inputs =
         wallet.list_unspent().map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
 
+    if candidate_inputs.is_empty() {
+        return Err(ImplementationError::from(
+            anyhow::anyhow!(
+                "No spendable UTXOs available in wallet. Please fund your wallet before resuming this session"
+            )
+            .into_boxed_dyn_error(),
+        ));
+    }
+
     let selected_input =
         payjoin.try_preserving_privacy(candidate_inputs).map_err(ImplementationError::new)?;
 

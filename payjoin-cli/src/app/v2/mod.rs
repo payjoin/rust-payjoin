@@ -473,6 +473,12 @@ impl App {
         let wallet = self.wallet();
         let candidate_inputs = wallet.list_unspent()?;
 
+        if candidate_inputs.is_empty() {
+            return Err(anyhow::anyhow!(
+                "No spendable UTXOs available in wallet. Cannot contribute inputs to payjoin."
+            ));
+        }
+
         let selected_input = proposal.try_preserving_privacy(candidate_inputs)?;
         let proposal =
             proposal.contribute_inputs(vec![selected_input])?.commit_inputs().save(persister)?;

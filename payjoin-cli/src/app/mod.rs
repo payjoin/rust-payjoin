@@ -34,6 +34,13 @@ pub trait App: Send + Sync {
         amount: Amount,
         fee_rate: FeeRate,
     ) -> Result<Psbt> {
+        // Check if wallet has spendable UTXOs before attempting to create PSBT
+        if !self.wallet().has_spendable_utxos()? {
+            return Err(anyhow::anyhow!(
+                "No spendable UTXOs available in wallet. Please ensure your wallet has confirmed funds."
+            ));
+        }
+
         // wallet_create_funded_psbt requires a HashMap<address: String, Amount>
         let mut outputs = HashMap::with_capacity(1);
         outputs.insert(address.to_string(), amount);

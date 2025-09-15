@@ -7,7 +7,7 @@ Welcome to the Python language bindings for the [Payjoin Dev Kit](https://payjoi
 Grab the latest release with a simple:
 
 ```shell
-uv pip install payjoin
+uv add payjoin
 ```
 
 ## Running Tests
@@ -15,33 +15,25 @@ uv pip install payjoin
 Follow these steps to clone the repository and run the tests.
 
 ```shell
-# TODO: one command where nix does all the uv stuff
-git clone https://github.com/payjoin/rust-payjoin.git
-cd rust-payjoin/payjoin-ffi/python
-
 # FIXME: ensure user has build-essential and python3-dev installed
-# install deps and sync venv (with dev deps installed)
-# uv sync --all-extras
-
 # TODO: nix will take care of installing uv and running these commands, uv will do the rest
 
-# Setup a python virtual environment
-# python -m venv venv
-# source .venv/bin/activate
-# PYBIN="./venv/bin/" bash ./scripts/generate_bindings.sh
-# PYBIN="./venv/bin/" bash ./scripts/generate_bindings.sh
+# Setup virtual environment/install all packages
+uv sync --all-extras
 
-
+bash ./scripts/generate_bindings.sh
 
 # Build the wheel
 uv build --wheel
-# python -m build --wheel
 
-# Force reinstall payjoin
-uv pip install ./dist/payjoin-<version>.whl --force-reinstall
+# Force reinstall payjoin with <version>
+uv pip install ./dist/payjoin-*.whl --force-reinstall
+
+# Example:
+# uv pip install ./dist/payjoin-0.24.0-cp313-cp313-linux_x86_64.whl
 
 # Run all tests
-uv python -m unittest --verbose
+uv run python -m unittest --verbose
 ```
 
 Note that you'll need Docker to run the integration tests. If you get a "Failed to start container" error, ensure the Docker engine is running on your machine.
@@ -50,13 +42,20 @@ You can [filter which tests](https://docs.python.org/3/library/unittest.html#com
 ## Building the Package
 
 ```shell
-# Setup a python virtual environment
-python -m venv venv
-source venv/bin/activate
+# Setup virtual environment/install packages for release
+uv sync
 
-PYBIN="./venv/bin/" bash ./scripts/generate_bindings.sh
+bash ./scripts/generate_bindings.sh
 
 # Build the wheel
-python -m build --wheel
+uv build --wheel
 
+# Force reinstall payjoin with <version>
+uv pip install ./dist/payjoin-*.whl --force-reinstall
+
+# Example:
+# uv pip install ./dist/payjoin-0.24.0-cp313-cp313-linux_x86_64.whl
+
+# Run all tests
+uv run python -m unittest --verbose
 ```

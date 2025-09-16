@@ -30,7 +30,8 @@ impl ShortId {
 
 impl std::fmt::Display for ShortId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let id_hrp = bitcoin::bech32::Hrp::parse("ID").unwrap();
+        let id_hrp = bitcoin::bech32::Hrp::parse("ID")
+            .expect("parsing a valid HRP constant should never fail");
         f.write_str(
             crate::bech32::nochecksum::encode(id_hrp, &self.0)
                 .expect("bech32 encoding of short ID must succeed")

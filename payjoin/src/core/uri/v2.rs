@@ -21,7 +21,7 @@ fn receiver_pubkey(url: &Url) -> Result<HpkePublicKey, ParseReceiverPubkeyParamE
     let (hrp, bytes) = crate::bech32::nochecksum::decode(value)
         .map_err(|_| ParseReceiverPubkeyParamError::InvalidFormat)?;
 
-    let rk_hrp: Hrp = Hrp::parse("RK").unwrap();
+    let rk_hrp: Hrp = Hrp::parse("RK").expect("parsing a valid HRP constant should never fail");
     if hrp != rk_hrp {
         return Err(ParseReceiverPubkeyParamError::InvalidFormat);
     }
@@ -32,7 +32,7 @@ fn receiver_pubkey(url: &Url) -> Result<HpkePublicKey, ParseReceiverPubkeyParamE
 
 /// Set the receiver's public key in the URL fragment
 fn set_receiver_pubkey(url: &mut Url, pubkey: &HpkePublicKey) {
-    let rk_hrp: Hrp = Hrp::parse("RK").unwrap();
+    let rk_hrp: Hrp = Hrp::parse("RK").expect("parsing a valid HRP constant should never fail");
     set_param(
         url,
         &crate::bech32::nochecksum::encode(rk_hrp, &pubkey.to_compressed_bytes())
@@ -49,7 +49,7 @@ fn ohttp(url: &Url) -> Result<OhttpKeys, ParseOhttpKeysParamError> {
     let (hrp, bytes) = crate::bech32::nochecksum::decode(value)
         .map_err(|_| ParseOhttpKeysParamError::InvalidFormat)?;
 
-    let oh_hrp: Hrp = Hrp::parse("OH").unwrap();
+    let oh_hrp: Hrp = Hrp::parse("OH").expect("parsing a valid HRP constant should never fail");
     if hrp != oh_hrp {
         return Err(ParseOhttpKeysParamError::InvalidFormat);
     }
@@ -69,7 +69,7 @@ fn exp(url: &Url) -> Result<std::time::SystemTime, ParseExpParamError> {
     let (hrp, bytes) =
         crate::bech32::nochecksum::decode(value).map_err(|_| ParseExpParamError::InvalidFormat)?;
 
-    let ex_hrp: Hrp = Hrp::parse("EX").unwrap();
+    let ex_hrp: Hrp = Hrp::parse("EX").expect("parsing a valid HRP constant should never fail");
     if hrp != ex_hrp {
         return Err(ParseExpParamError::InvalidFormat);
     }
@@ -89,7 +89,7 @@ fn set_exp(url: &mut Url, exp: &std::time::SystemTime) {
     let mut buf = [0u8; 4];
     t.consensus_encode(&mut &mut buf[..]).unwrap(); // TODO no unwrap
 
-    let ex_hrp: Hrp = Hrp::parse("EX").unwrap();
+    let ex_hrp: Hrp = Hrp::parse("EX").expect("parsing a valid HRP constant should never fail");
 
     let exp_str = crate::bech32::nochecksum::encode(ex_hrp, &buf)
         .expect("encoding u32 timestamp should never fail");

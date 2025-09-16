@@ -253,12 +253,16 @@ Future<payjoin.ReceiveSession?> retrieve_receiver_proposal(
   var res = receiver
       .processResponse(response.bodyBytes, request.clientResponse)
       .save(recv_persister);
-  if (res.isNone()) {
+
+  if (res is payjoin.StasisInitializedTransitionOutcome) {
     return null;
+  } else if (res is payjoin.ProgressInitializedTransitionOutcome) {
+    var proposal = res.inner;
+    return await process_unchecked_proposal(
+        proposal, recv_persister);
   }
-  var proposal = res.success();
-  return await process_unchecked_proposal(
-      proposal as payjoin.UncheckedOriginalPayload, recv_persister);
+
+  throw Exception("Unknown initialized transition outcome: $res");
 }
 
 Future<payjoin.ReceiveSession?> process_receiver_proposal(
@@ -386,11 +390,13 @@ void main() {
       var checked_payjoin_proposal_psbt = send_ctx
           .processResponse(
               final_response.bodyBytes, ohttp_context_request.ohttpCtx)
-          .save(sender_persister)
-          .success();
+          .save(sender_persister);
       expect(checked_payjoin_proposal_psbt, isNotNull);
+      var checked_payjoin_proposal_psbt_inner =
+          (checked_payjoin_proposal_psbt as payjoin.ProgressPollingForProposalTransitionOutcome)
+              .inner;
       var payjoin_psbt = jsonDecode(sender.call("walletprocesspsbt",
-          [checked_payjoin_proposal_psbt!.serializeBase64()]))["psbt"];
+          [checked_payjoin_proposal_psbt_inner.serializeBase64()]))["psbt"];
       var final_psbt = jsonDecode(sender
           .call("finalizepsbt", [payjoin_psbt, jsonEncode(false)]))["psbt"];
       var payjoin_tx = bitcoin.Psbt.deserializeBase64(final_psbt).extractTx();

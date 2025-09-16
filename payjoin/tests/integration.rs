@@ -346,7 +346,6 @@ mod integration {
                     .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
                     .save(&persister)?;
                 // No proposal yet since sender has not responded
-                assert!(response_body.is_none());
                 let mut session =
                     if let OptionalTransitionOutcome::Stasis(current_state) = response_body {
                         current_state
@@ -390,7 +389,11 @@ mod integration {
                 let outcome = session
                     .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
                     .save(&persister)?;
-                let proposal = outcome.success().expect("proposal should exist");
+                let proposal = if let OptionalTransitionOutcome::Progress(psbt) = outcome {
+                    psbt
+                } else {
+                    panic!("proposal should exist");
+                };
 
                 // Generate replyable error
                 let check_broadcast_suitability = || {
@@ -474,7 +477,6 @@ mod integration {
                     .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
                     .save(&recv_persister)?;
                 // No proposal yet since sender has not responded
-                assert!(response_body.is_none());
                 let mut session =
                     if let OptionalTransitionOutcome::Stasis(current_state) = response_body {
                         current_state
@@ -521,7 +523,11 @@ mod integration {
                 let outcome = session
                     .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
                     .save(&recv_persister)?;
-                let proposal = outcome.success().expect("proposal should exist").clone();
+                let proposal = if let OptionalTransitionOutcome::Progress(psbt) = outcome {
+                    psbt
+                } else {
+                    panic!("proposal should exist");
+                };
                 let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None)?;
                 let (req, ctx) =
                     payjoin_proposal.create_post_request(services.ohttp_relay_url().as_str())?;
@@ -550,7 +556,11 @@ mod integration {
                     .expect("psbt should exist");
 
                 let checked_payjoin_proposal_psbt =
-                    response.success().expect("psbt should exist").clone();
+                    if let OptionalTransitionOutcome::Progress(psbt) = response {
+                        psbt
+                    } else {
+                        panic!("psbt should exist");
+                    };
                 let network_fees = checked_payjoin_proposal_psbt.fee()?;
                 let expected_weight = Weight::from_wu(
                     TX_HEADER_WEIGHT + (P2WPKH_INPUT_WEIGHT * 2) + (P2WPKH_OUTPUT_WEIGHT),
@@ -716,7 +726,9 @@ mod integration {
                                 .clone()
                                 .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
                                 .save(&recv_persister)?;
-                            if let Some(unchecked_proposal) = proposal.success() {
+                            if let OptionalTransitionOutcome::Progress(unchecked_proposal) =
+                                proposal
+                            {
                                 break unchecked_proposal.clone();
                             } else {
                                 tracing::info!(

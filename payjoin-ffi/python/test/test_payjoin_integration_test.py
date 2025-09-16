@@ -96,10 +96,9 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             content=request.request.body
         )
         res = receiver.process_response(response.content, request.client_response).save(recv_persister)
-        if res.is_none():
+        if res.is_STASIS():
             return None
-        proposal = res.success()
-        return await self.process_unchecked_proposal(proposal, recv_persister)
+        return await self.process_unchecked_proposal(res.inner, recv_persister)
 
     async def process_unchecked_proposal(self, proposal: UncheckedOriginalPayload, recv_persister: InMemoryReceiverSessionEventLog) :
         receiver = proposal.check_broadcast_suitability(None, MempoolAcceptanceCallback(self.receiver)).save(recv_persister)
@@ -195,7 +194,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
                 headers={"Content-Type": request.request.content_type},
                 content=request.request.body
             )
-            checked_payjoin_proposal_psbt = send_ctx.process_response(response.content, request.ohttp_ctx).save(sender_persister).success()
+            checked_payjoin_proposal_psbt = send_ctx.process_response(response.content, request.ohttp_ctx).save(sender_persister).inner
             print(f"checked_payjoin_proposal_psbt: {checked_payjoin_proposal_psbt}")
             self.assertIsNotNone(checked_payjoin_proposal_psbt)
             payjoin_psbt = json.loads(self.sender.call("walletprocesspsbt", [checked_payjoin_proposal_psbt.serialize_base64()]))["psbt"]

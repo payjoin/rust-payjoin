@@ -137,6 +137,44 @@ async fn put_payjoin_v1(
     }
 }
 
+async fn post_fallback_v1(
+    State(state): State<AppState>,
+    Path(mailbox_id): Path<String>,
+    uri: Uri,
+    body: Bytes,
+) -> Result<Response, HandlerError> {
+    trace!("post_fallback_v1");
+
+    let none_response = (StatusCode::SERVICE_UNAVAILABLE, V1_UNAVAILABLE_RES_JSON);
+    let bad_request_body_res = (StatusCode::BAD_REQUEST, V1_REJECT_RES_JSON);
+
+    let body_str = match String::from_utf8(body.to_vec()) {
+        Ok(body_str) => body_str,
+        Err(_) => return Ok(bad_request_body_res.into_response()),
+    };
+
+    let query = uri.query().unwrap_or_default();
+
+    let v2_compact_body = format!("{body_str}\n{query}");
+    let id = ShortId::from_str(&mailbox_id)?;
+
+    state
+        .pool
+        .push_default(&id, v2_compact_body.clone().into_bytes())
+        .await
+        .map_err(|e| HandlerError::BadRequest(e.into()))?;
+
+    match state.pool.peek_v1(&id).await {
+        Ok(buffered_req) => Ok((StatusCode::OK, buffered_req).into_response()),
+        Err(e) => match e {
+            db::Error::Redis(re) => {
+                error!("Redis error: {}", re);
+                Err(HandlerError::InternalServerError(anyhow::Error::msg("Internal server error")))
+            }
+            db::Error::Timeout(_) => Ok(none_response.into_response()),
+        },
+    }
+}
 async fn get_ohttp_keys(State(state): State<AppState>) -> Result<Response, HandlerError> {
     get_ohttp_keys_func(&state).await
 }
@@ -164,6 +202,16 @@ async fn get_ohttp_allowed_purposes() -> Response {
     headers
         .insert("content-type", HeaderValue::from_static("application/x-ohttp-allowed-purposes"));
     (StatusCode::OK, headers, body).into_response()
+}
+
+async fn handle_ohttp_gateway_get(
+    State(state): State<AppState>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, HandlerError> {
+    match params.get("allowed_purposes") {
+        Some(_) => Ok(get_ohttp_allowed_purposes().await),
+        None => get_ohttp_keys_func(&state).await,
+    }
 }
 
 async fn handle_metrics(State(state): State<AppState>) -> Response {

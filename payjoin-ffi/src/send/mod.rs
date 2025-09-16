@@ -69,7 +69,7 @@ impl SenderSessionEvent {
 #[derive(Clone, uniffi::Enum)]
 pub enum SendSession {
     WithReplyKey { inner: Arc<WithReplyKey> },
-    V2GetContext { inner: Arc<V2GetContext> },
+    PollingForProposal { inner: Arc<PollingForProposal> },
     ProposalReceived { inner: Arc<Psbt> },
     TerminalFailure,
 }
@@ -80,8 +80,8 @@ impl From<payjoin::send::v2::SendSession> for SendSession {
         match value {
             SendSession::WithReplyKey(inner) =>
                 Self::WithReplyKey { inner: Arc::new(inner.into()) },
-            SendSession::V2GetContext(inner) =>
-                Self::V2GetContext { inner: Arc::new(inner.into()) },
+            SendSession::PollingForProposal(inner) =>
+                Self::PollingForProposal { inner: Arc::new(inner.into()) },
             SendSession::ProposalReceived(inner) =>
                 Self::ProposalReceived { inner: Arc::new(inner.into()) },
             SendSession::TerminalFailure => Self::TerminalFailure,
@@ -279,7 +279,7 @@ pub struct WithReplyKeyTransition(
             Option<
                 payjoin::persist::MaybeFatalTransition<
                     payjoin::send::v2::SessionEvent,
-                    payjoin::send::v2::Sender<payjoin::send::v2::V2GetContext>,
+                    payjoin::send::v2::Sender<payjoin::send::v2::PollingForProposal>,
                     payjoin::send::v2::EncapsulationError,
                 >,
             >,
@@ -292,7 +292,7 @@ impl WithReplyKeyTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonSenderSessionPersister>,
-    ) -> Result<V2GetContext, SenderPersistedError> {
+    ) -> Result<PollingForProposal, SenderPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner = self.0.write().map_err(|_| {
             SenderPersistedError::Storage(Arc::new(ImplementationError::from(
@@ -393,24 +393,24 @@ pub struct RequestOhttpContext {
 }
 
 #[derive(uniffi::Object)]
-pub struct V2GetContext(payjoin::send::v2::Sender<payjoin::send::v2::V2GetContext>);
+pub struct PollingForProposal(payjoin::send::v2::Sender<payjoin::send::v2::PollingForProposal>);
 
-impl From<payjoin::send::v2::Sender<payjoin::send::v2::V2GetContext>> for V2GetContext {
-    fn from(value: payjoin::send::v2::Sender<payjoin::send::v2::V2GetContext>) -> Self {
+impl From<payjoin::send::v2::Sender<payjoin::send::v2::PollingForProposal>> for PollingForProposal {
+    fn from(value: payjoin::send::v2::Sender<payjoin::send::v2::PollingForProposal>) -> Self {
         Self(value)
     }
 }
 
 #[derive(uniffi::Object)]
-pub struct V2GetContextTransitionOutcome(
+pub struct PollingForProposalTransitionOutcome(
     payjoin::persist::OptionalTransitionOutcome<
         payjoin::bitcoin::Psbt,
-        payjoin::send::v2::Sender<payjoin::send::v2::V2GetContext>,
+        payjoin::send::v2::Sender<payjoin::send::v2::PollingForProposal>,
     >,
 );
 
 #[uniffi::export]
-impl V2GetContextTransitionOutcome {
+impl PollingForProposalTransitionOutcome {
     pub fn is_none(&self) -> bool { self.0.is_none() }
 
     pub fn is_success(&self) -> bool { self.0.is_success() }
@@ -424,14 +424,14 @@ impl
     From<
         payjoin::persist::OptionalTransitionOutcome<
             payjoin::bitcoin::Psbt,
-            payjoin::send::v2::Sender<payjoin::send::v2::V2GetContext>,
+            payjoin::send::v2::Sender<payjoin::send::v2::PollingForProposal>,
         >,
-    > for V2GetContextTransitionOutcome
+    > for PollingForProposalTransitionOutcome
 {
     fn from(
         value: payjoin::persist::OptionalTransitionOutcome<
             payjoin::bitcoin::Psbt,
-            payjoin::send::v2::Sender<payjoin::send::v2::V2GetContext>,
+            payjoin::send::v2::Sender<payjoin::send::v2::PollingForProposal>,
         >,
     ) -> Self {
         Self(value)
@@ -440,14 +440,14 @@ impl
 
 #[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
-pub struct V2GetContextTransition(
+pub struct PollingForProposalTransition(
     Arc<
         RwLock<
             Option<
                 payjoin::persist::MaybeSuccessTransitionWithNoResults<
                     payjoin::send::v2::SessionEvent,
                     payjoin::bitcoin::Psbt,
-                    payjoin::send::v2::Sender<payjoin::send::v2::V2GetContext>,
+                    payjoin::send::v2::Sender<payjoin::send::v2::PollingForProposal>,
                     payjoin::send::ResponseError,
                 >,
             >,
@@ -455,10 +455,10 @@ pub struct V2GetContextTransition(
     >,
 );
 
-impl_save_for_transition!(V2GetContextTransition, V2GetContextTransitionOutcome);
+impl_save_for_transition!(PollingForProposalTransition, PollingForProposalTransitionOutcome);
 
 #[uniffi::export]
-impl V2GetContext {
+impl PollingForProposal {
     pub fn create_poll_request(
         &self,
         ohttp_relay: String,
@@ -479,8 +479,8 @@ impl V2GetContext {
         &self,
         response: &[u8],
         ohttp_ctx: &ClientResponse,
-    ) -> V2GetContextTransition {
-        V2GetContextTransition(Arc::new(RwLock::new(Some(
+    ) -> PollingForProposalTransition {
+        PollingForProposalTransition(Arc::new(RwLock::new(Some(
             self.0.process_response(response, ohttp_ctx.into()),
         ))))
     }

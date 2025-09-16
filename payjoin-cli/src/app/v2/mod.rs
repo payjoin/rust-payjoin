@@ -12,8 +12,8 @@ use payjoin::receive::v2::{
     WantsInputs, WantsOutputs,
 };
 use payjoin::send::v2::{
-    replay_event_log as replay_sender_event_log, SendSession, Sender, SenderBuilder, V2GetContext,
-    WithReplyKey,
+    replay_event_log as replay_sender_event_log, PollingForProposal, SendSession, Sender,
+    SenderBuilder, WithReplyKey,
 };
 use payjoin::{ImplementationError, PjParam, Uri};
 use tokio::sync::watch;
@@ -49,7 +49,8 @@ trait StatusText {
 impl StatusText for SendSession {
     fn status_text(&self) -> &'static str {
         match self {
-            SendSession::WithReplyKey(_) | SendSession::V2GetContext(_) => "Waiting for proposal",
+            SendSession::WithReplyKey(_) | SendSession::PollingForProposal(_) =>
+                "Waiting for proposal",
             SendSession::ProposalReceived(_) => "Proposal received",
             SendSession::TerminalFailure => "Session failure",
         }
@@ -402,7 +403,7 @@ impl App {
         match session {
             SendSession::WithReplyKey(context) =>
                 self.post_original_proposal(context, persister).await?,
-            SendSession::V2GetContext(context) =>
+            SendSession::PollingForProposal(context) =>
                 self.get_proposed_payjoin_psbt(context, persister).await?,
             SendSession::ProposalReceived(proposal) => {
                 self.process_pj_response(proposal)?;
@@ -429,7 +430,7 @@ impl App {
 
     async fn get_proposed_payjoin_psbt(
         &self,
-        sender: Sender<V2GetContext>,
+        sender: Sender<PollingForProposal>,
         persister: &SenderPersister,
     ) -> Result<()> {
         let mut session = sender.clone();

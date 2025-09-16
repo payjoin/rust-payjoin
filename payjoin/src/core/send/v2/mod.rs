@@ -181,7 +181,7 @@ mod sealed {
     pub trait State {}
 
     impl State for super::WithReplyKey {}
-    impl State for super::V2GetContext {}
+    impl State for super::PollingForProposal {}
 }
 
 /// Sealed trait for V2 send session states.
@@ -212,7 +212,7 @@ impl<State> core::ops::DerefMut for Sender<State> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SendSession {
     WithReplyKey(Sender<WithReplyKey>),
-    V2GetContext(Sender<V2GetContext>),
+    PollingForProposal(Sender<PollingForProposal>),
     ProposalReceived(Psbt),
     TerminalFailure,
 }
@@ -225,9 +225,11 @@ impl SendSession {
         event: SessionEvent,
     ) -> Result<SendSession, ReplayError<Self, SessionEvent>> {
         match (self, event) {
-            (SendSession::WithReplyKey(state), SessionEvent::V2GetContext(v2_get_context)) =>
-                Ok(state.apply_v2_get_context(v2_get_context)),
-            (SendSession::V2GetContext(_state), SessionEvent::ProposalReceived(proposal)) =>
+            (
+                SendSession::WithReplyKey(state),
+                SessionEvent::PollingForProposal(polling_for_proposal),
+            ) => Ok(state.apply_polling_for_proposal(polling_for_proposal)),
+            (SendSession::PollingForProposal(_state), SessionEvent::ProposalReceived(proposal)) =>
                 Ok(SendSession::ProposalReceived(proposal)),
             (_, SessionEvent::SessionInvalid(_)) => Ok(SendSession::TerminalFailure),
             (current_state, event) => Err(InternalReplayError::InvalidEvent(
@@ -313,12 +315,12 @@ impl Sender<WithReplyKey> {
     /// returns an error with the encapsulated response status code.
     ///
     /// After this function is called, the sender can poll for a Proposal PSBT
-    /// from the receiver using the returned [`V2GetContext`].
+    /// from the receiver using the returned [`PollingForProposal`].
     pub fn process_response(
         self,
         response: &[u8],
         post_ctx: V2PostContext,
-    ) -> MaybeFatalTransition<SessionEvent, Sender<V2GetContext>, EncapsulationError> {
+    ) -> MaybeFatalTransition<SessionEvent, Sender<PollingForProposal>, EncapsulationError> {
         match process_post_res(response, post_ctx.ohttp_ctx) {
             Ok(()) => {}
             Err(e) => {
@@ -329,22 +331,25 @@ impl Sender<WithReplyKey> {
             }
         }
 
-        let v2_get_context = V2GetContext {
+        let polling_for_proposal = PollingForProposal {
             pj_param: post_ctx.pj_param,
             psbt_ctx: post_ctx.psbt_ctx,
             reply_key: post_ctx.reply_key,
         };
         MaybeFatalTransition::success(
-            SessionEvent::V2GetContext(v2_get_context.clone()),
-            Sender { state: v2_get_context },
+            SessionEvent::PollingForProposal(polling_for_proposal.clone()),
+            Sender { state: polling_for_proposal },
         )
     }
 
     /// The endpoint in the Payjoin URI
     pub fn endpoint(&self) -> Url { self.pj_param.endpoint().clone() }
 
-    pub(crate) fn apply_v2_get_context(self, v2_get_context: V2GetContext) -> SendSession {
-        SendSession::V2GetContext(Sender { state: v2_get_context })
+    pub(crate) fn apply_polling_for_proposal(
+        self,
+        polling_for_proposal: PollingForProposal,
+    ) -> SendSession {
+        SendSession::PollingForProposal(Sender { state: polling_for_proposal })
     }
 }
 
@@ -406,16 +411,16 @@ pub struct V2PostContext {
 /// Data required to validate the GET response.
 ///
 /// This type is used to make a BIP77 GET request and process the response.
-/// Call [`Sender<V2GetContext>::process_response`] on it to continue the BIP77 flow.
+/// Call [`Sender<PollingForProposal>::process_response`] on it to continue the BIP77 flow.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct V2GetContext {
+pub struct PollingForProposal {
     /// The endpoint in the Payjoin URI
     pub(crate) pj_param: PjParam,
     pub(crate) psbt_ctx: PsbtContext,
     pub(crate) reply_key: HpkeSecretKey,
 }
 
-impl Sender<V2GetContext> {
+impl Sender<PollingForProposal> {
     /// Construct an OHTTP Encapsulated HTTP GET request for the Proposal PSBT
     pub fn create_poll_request(
         &self,
@@ -460,8 +465,12 @@ impl Sender<V2GetContext> {
         &self,
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
-    ) -> MaybeSuccessTransitionWithNoResults<SessionEvent, Psbt, Sender<V2GetContext>, ResponseError>
-    {
+    ) -> MaybeSuccessTransitionWithNoResults<
+        SessionEvent,
+        Psbt,
+        Sender<PollingForProposal>,
+        ResponseError,
+    > {
         let body = match process_get_res(response, ohttp_ctx) {
             Ok(Some(body)) => body,
             Ok(None) => return MaybeSuccessTransitionWithNoResults::no_results(self.clone()),

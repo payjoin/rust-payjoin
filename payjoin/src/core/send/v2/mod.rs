@@ -286,14 +286,14 @@ impl Sender<WithReplyKey> {
             self.psbt_ctx.min_fee_rate,
         )?;
         let base_url = self.pj_param.endpoint().clone();
-        let mut ohttp_keys = self.pj_param.ohttp_keys().clone();
+        let ohttp_keys = self.pj_param.ohttp_keys();
         let (request, ohttp_ctx) = extract_request(
             ohttp_relay,
             self.reply_key.clone(),
             body,
             base_url,
             self.pj_param.receiver_pubkey().clone(),
-            &mut ohttp_keys,
+            ohttp_keys,
         )?;
         Ok((
             request,
@@ -359,7 +359,7 @@ pub(crate) fn extract_request(
     body: Vec<u8>,
     url: Url,
     receiver_pubkey: HpkePublicKey,
-    ohttp_keys: &mut OhttpKeys,
+    ohttp_keys: &OhttpKeys,
 ) -> Result<(Request, ClientResponse), CreateRequestError> {
     let ohttp_relay = ohttp_relay.into_url()?;
     let body = encrypt_message_a(
@@ -442,10 +442,9 @@ impl Sender<PollingForProposal> {
             &self.pj_param.receiver_pubkey().clone(),
         )
         .map_err(InternalCreateRequestError::Hpke)?;
-        let mut ohttp_keys = self.pj_param.ohttp_keys().clone();
-        let (body, ohttp_ctx) =
-            ohttp_encapsulate(&mut ohttp_keys, "GET", url.as_str(), Some(&body))
-                .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
+        let ohttp_keys = self.pj_param.ohttp_keys().clone();
+        let (body, ohttp_ctx) = ohttp_encapsulate(&ohttp_keys, "GET", url.as_str(), Some(&body))
+            .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
 
         let url = ohttp_relay.into_url().map_err(InternalCreateRequestError::Url)?;
         Ok((Request::new_v2(&url, &body), ohttp_ctx))

@@ -14,14 +14,15 @@ pub const PADDED_BHTTP_REQ_BYTES: usize =
     ENCAPSULATED_MESSAGE_BYTES - (N_ENC + N_T + OHTTP_REQ_HEADER_BYTES);
 
 pub fn ohttp_encapsulate(
-    ohttp_keys: &mut ohttp::KeyConfig,
+    ohttp_keys: &ohttp::KeyConfig,
     method: &str,
     target_resource: &str,
     body: Option<&[u8]>,
 ) -> Result<([u8; ENCAPSULATED_MESSAGE_BYTES], ohttp::ClientResponse), OhttpEncapsulationError> {
     use std::fmt::Write;
+    let mut ohttp_keys = ohttp_keys.clone();
 
-    let ctx = ohttp::ClientRequest::from_config(ohttp_keys)?;
+    let ctx = ohttp::ClientRequest::from_config(&mut ohttp_keys)?;
     let url = url::Url::parse(target_resource)?;
     let authority_bytes = url.host().map_or_else(Vec::new, |host| {
         let mut authority = host.to_string();

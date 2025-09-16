@@ -237,7 +237,7 @@ mod integration {
                 let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")?
                     .assume_checked();
                 let noop_persister = NoopSessionPersister::default();
-                let mut bad_initializer = ReceiverBuilder::new(
+                let bad_initializer = ReceiverBuilder::new(
                     mock_address,
                     services.directory_url().as_str(),
                     bad_ohttp_keys,
@@ -280,7 +280,7 @@ mod integration {
                 // Inside the Receiver:
                 let address = receiver.new_address()?;
                 // test session with expiry in the past
-                let mut expired_receiver =
+                let expired_receiver =
                     ReceiverBuilder::new(address, services.directory_url().as_str(), ohttp_keys)?
                         .with_expiry(Duration::from_secs(0))
                         .build()
@@ -333,7 +333,7 @@ mod integration {
                 // Inside the Receiver:
                 let address = receiver.new_address()?;
 
-                let mut session =
+                let session =
                     ReceiverBuilder::new(address, services.directory_url().as_str(), ohttp_keys)?
                         .build()
                         .save(&persister)?;
@@ -352,7 +352,7 @@ mod integration {
                     .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
                     .save(&persister)?;
                 // No proposal yet since sender has not responded
-                let mut session =
+                let session =
                     if let OptionalTransitionOutcome::Stasis(current_state) = response_body {
                         current_state
                     } else {
@@ -464,7 +464,7 @@ mod integration {
                 let address = receiver.new_address()?;
 
                 // test session with expiry in the future
-                let mut session =
+                let session =
                     ReceiverBuilder::new(address, services.directory_url().as_str(), ohttp_keys)?
                         .build()
                         .save(&recv_persister)?;
@@ -483,7 +483,7 @@ mod integration {
                     .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
                     .save(&recv_persister)?;
                 // No proposal yet since sender has not responded
-                let mut session =
+                let session =
                     if let OptionalTransitionOutcome::Stasis(current_state) = response_body {
                         current_state
                     } else {
@@ -534,7 +534,7 @@ mod integration {
                 } else {
                     panic!("proposal should exist");
                 };
-                let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None)?;
+                let payjoin_proposal = handle_directory_proposal(&receiver, proposal, None)?;
                 let (req, ctx) =
                     payjoin_proposal.create_post_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
@@ -675,7 +675,7 @@ mod integration {
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let recv_persister = NoopSessionPersister::default();
                 let address = receiver.new_address()?;
-                let mut session = ReceiverBuilder::new(
+                let session = ReceiverBuilder::new(
                     address,
                     services.directory_url().as_str(),
                     ohttp_keys.clone(),
@@ -746,7 +746,7 @@ mod integration {
                             panic!("Unexpected response status: {}", response.status())
                         }
                     };
-                    let mut payjoin_proposal =
+                    let payjoin_proposal =
                         handle_directory_proposal(&receiver_clone, proposal, None)
                             .map_err(|e| e.to_string())?;
                     // Respond with payjoin psbt within the time window the sender is willing to wait

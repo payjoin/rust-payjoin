@@ -142,13 +142,16 @@ impl PjParam {
         Ok(Self::new(url, id, ex, oh, rk))
     }
 
+    /// The receiver's ephemeral public key. This field is accessible outside of
+    /// the crate so that applications can ensure the value hasn't been
+    /// previously seen, as it should not be reused across different sessions.
     pub fn receiver_pubkey(&self) -> &HpkePublicKey { &self.receiver_pubkey }
 
-    pub fn ohttp_keys(&self) -> &OhttpKeys { &self.ohttp_keys }
+    pub(crate) fn ohttp_keys(&self) -> &OhttpKeys { &self.ohttp_keys }
 
-    pub fn expiration(&self) -> std::time::SystemTime { self.expiration }
+    pub(crate) fn expiration(&self) -> std::time::SystemTime { self.expiration }
 
-    pub fn endpoint(&self) -> Url {
+    pub(crate) fn endpoint(&self) -> Url {
         let mut endpoint = self.directory.clone().join(&self.id.to_string()).unwrap();
         set_receiver_pubkey(&mut endpoint, &self.receiver_pubkey);
         set_ohttp(&mut endpoint, &self.ohttp_keys);

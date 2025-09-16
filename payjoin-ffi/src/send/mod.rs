@@ -481,7 +481,7 @@ impl PollingForProposal {
         ohttp_ctx: &ClientResponse,
     ) -> PollingForProposalTransition {
         PollingForProposalTransition(Arc::new(RwLock::new(Some(
-            self.0.process_response(response, ohttp_ctx.into()),
+            self.0.clone().process_response(response, ohttp_ctx.into()),
         ))))
     }
 }

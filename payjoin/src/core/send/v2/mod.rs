@@ -462,7 +462,7 @@ impl Sender<PollingForProposal> {
     /// After this function is called, the sender can sign and finalize the
     /// PSBT and broadcast the resulting Payjoin transaction to the network.
     pub fn process_response(
-        &self,
+        self,
         response: &[u8],
         ohttp_ctx: ohttp::ClientResponse,
     ) -> MaybeSuccessTransitionWithNoResults<

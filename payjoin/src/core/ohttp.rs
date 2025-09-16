@@ -230,7 +230,8 @@ impl fmt::Display for OhttpKeys {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let buf = self.to_bytes().map_err(|_| fmt::Error)?;
 
-        let oh_hrp: bech32::Hrp = bech32::Hrp::parse("OH").unwrap();
+        let oh_hrp: bech32::Hrp =
+            bech32::Hrp::parse("OH").expect("parsing a valid HRP constant should never fail");
 
         crate::bech32::nochecksum::encode_to_fmt(f, oh_hrp, &buf).map_err(|e| match e {
             EncodeError::Fmt(e) => e,
@@ -269,7 +270,8 @@ impl std::str::FromStr for OhttpKeys {
     /// Parses a base64URL-encoded string into OhttpKeys.
     /// The string format is: key_id || compressed_public_key
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let oh_hrp: bech32::Hrp = bech32::Hrp::parse("OH").unwrap();
+        let oh_hrp: bech32::Hrp =
+            bech32::Hrp::parse("OH").expect("parsing a valid HRP constant should never fail");
 
         let (hrp, bytes) =
             crate::bech32::nochecksum::decode(s).map_err(|_| ParseOhttpKeysError::InvalidFormat)?;

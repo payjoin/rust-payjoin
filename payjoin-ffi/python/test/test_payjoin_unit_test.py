@@ -53,8 +53,8 @@ class TestReceiverPersistence(unittest.TestCase):
         payjoin.payjoin_ffi.ReceiverBuilder(
             address, 
             "https://example.com", 
-            payjoin.OhttpKeys.from_string("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC"), 
-        ).build().save(persister)
+            payjoin.OhttpKeys.decode(bytes.fromhex("01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003")),
+            ).build().save(persister)
         result = payjoin.payjoin_ffi.replay_receiver_event_log(persister)
         self.assertTrue(result.state().is_INITIALIZED())
 
@@ -81,7 +81,7 @@ class TestSenderPersistence(unittest.TestCase):
         receiver = payjoin.payjoin_ffi.ReceiverBuilder(
             address, 
             "https://example.com", 
-            payjoin.OhttpKeys.from_string("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC"), 
+            payjoin.OhttpKeys.decode(bytes.fromhex("01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003")),
         ).build().save(persister)
         uri = receiver.pj_uri()
 

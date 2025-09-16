@@ -10,7 +10,6 @@ use crate::ohttp::ClientResponse;
 use crate::request::Request;
 use crate::send::error::{SenderPersistedError, SenderReplayError};
 use crate::uri::PjUri;
-use crate::Url;
 
 pub mod error;
 
@@ -124,8 +123,6 @@ impl From<SenderSessionHistory> for payjoin::send::v2::SessionHistory {
 
 #[uniffi::export]
 impl SenderSessionHistory {
-    pub fn endpoint(&self) -> Arc<Url> { Arc::new(self.0.pj_param().endpoint().into()) }
-
     /// Fallback transaction from the session if present
     pub fn fallback_tx(&self) -> Arc<crate::Transaction> { Arc::new(self.0.fallback_tx().into()) }
 }

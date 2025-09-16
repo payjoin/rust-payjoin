@@ -401,23 +401,10 @@ impl From<payjoin::send::v2::Sender<payjoin::send::v2::PollingForProposal>> for 
     }
 }
 
-#[derive(uniffi::Object)]
-pub struct PollingForProposalTransitionOutcome(
-    payjoin::persist::OptionalTransitionOutcome<
-        payjoin::bitcoin::Psbt,
-        payjoin::send::v2::Sender<payjoin::send::v2::PollingForProposal>,
-    >,
-);
-
-#[uniffi::export]
-impl PollingForProposalTransitionOutcome {
-    pub fn is_none(&self) -> bool { self.0.is_none() }
-
-    pub fn is_success(&self) -> bool { self.0.is_success() }
-
-    pub fn success(&self) -> Option<Arc<Psbt>> {
-        self.0.success().map(|r| Arc::new(r.clone().into()))
-    }
+#[derive(uniffi::Enum)]
+pub enum PollingForProposalTransitionOutcome {
+    Progress { inner: Arc<Psbt> },
+    Stasis { inner: Arc<PollingForProposal> },
 }
 
 impl
@@ -434,7 +421,12 @@ impl
             payjoin::send::v2::Sender<payjoin::send::v2::PollingForProposal>,
         >,
     ) -> Self {
-        Self(value)
+        match value {
+            payjoin::persist::OptionalTransitionOutcome::Progress(psbt) =>
+                Self::Progress { inner: Arc::new(psbt.into()) },
+            payjoin::persist::OptionalTransitionOutcome::Stasis(state) =>
+                Self::Stasis { inner: Arc::new(state.into()) },
+        }
     }
 }
 

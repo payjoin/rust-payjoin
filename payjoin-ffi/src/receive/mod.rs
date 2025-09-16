@@ -342,23 +342,10 @@ impl InitializedTransition {
     }
 }
 
-#[derive(uniffi::Object)]
-pub struct InitializedTransitionOutcome(
-    payjoin::persist::OptionalTransitionOutcome<
-        payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedOriginalPayload>,
-        payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>,
-    >,
-);
-
-#[uniffi::export]
-impl InitializedTransitionOutcome {
-    pub fn is_none(&self) -> bool { self.0.is_none() }
-
-    pub fn is_success(&self) -> bool { self.0.is_success() }
-
-    pub fn success(&self) -> Option<Arc<UncheckedOriginalPayload>> {
-        self.0.success().map(|r| Arc::new(r.clone().into()))
-    }
+#[derive(uniffi::Enum)]
+pub enum InitializedTransitionOutcome {
+    Progress { inner: Arc<UncheckedOriginalPayload> },
+    Stasis { inner: Arc<Initialized> },
 }
 
 impl
@@ -375,7 +362,12 @@ impl
             payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>,
         >,
     ) -> Self {
-        Self(value)
+        match value {
+            payjoin::persist::OptionalTransitionOutcome::Progress(payload) =>
+                Self::Progress { inner: Arc::new(payload.into()) },
+            payjoin::persist::OptionalTransitionOutcome::Stasis(state) =>
+                Self::Stasis { inner: Arc::new(state.into()) },
+        }
     }
 }
 

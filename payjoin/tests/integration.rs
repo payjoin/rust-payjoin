@@ -194,7 +194,7 @@ mod integration {
 
         use bitcoin::Address;
         use http::StatusCode;
-        use payjoin::persist::NoopSessionPersister;
+        use payjoin::persist::{NoopSessionPersister, OptionalTransitionOutcome};
         use payjoin::receive::v2::{
             replay_event_log as replay_receiver_event_log, PayjoinProposal, Receiver,
             ReceiverBuilder, UncheckedOriginalPayload,
@@ -347,6 +347,12 @@ mod integration {
                     .save(&persister)?;
                 // No proposal yet since sender has not responded
                 assert!(response_body.is_none());
+                let mut session =
+                    if let OptionalTransitionOutcome::Stasis(current_state) = response_body {
+                        current_state
+                    } else {
+                        panic!("Should still be in initialized state")
+                    };
 
                 // **********************
                 // Inside the Sender:
@@ -469,6 +475,12 @@ mod integration {
                     .save(&recv_persister)?;
                 // No proposal yet since sender has not responded
                 assert!(response_body.is_none());
+                let mut session =
+                    if let OptionalTransitionOutcome::Stasis(current_state) = response_body {
+                        current_state
+                    } else {
+                        panic!("Should still be in initialized state")
+                    };
 
                 // **********************
                 // Inside the Sender:

@@ -377,11 +377,49 @@ impl Receiver<Initialized> {
         let current_state = self.clone();
         let proposal = match self.inner_process_res(body, context) {
             Ok(proposal) => proposal,
-            Err(e) =>
-                return MaybeFatalTransitionWithNoResults::fatal(
-                    SessionEvent::SessionInvalid(e.to_string(), None),
-                    e,
-                ),
+            Err(e) => match e {
+                // Implementation errors should be unreachable
+                Error::Implementation(_) => return MaybeFatalTransitionWithNoResults::transient(e),
+                Error::Protocol(ref protocol_err) => match protocol_err {
+                    ProtocolError::V2(session_error) => match session_error {
+                        SessionError(InternalSessionError::DirectoryResponse(directory_error)) =>
+                            match directory_error {
+                                DirectoryResponseError::OhttpDecapsulation(_) =>
+                                    return MaybeFatalTransitionWithNoResults::fatal(
+                                        SessionEvent::SessionInvalid(
+                                            directory_error.to_string(),
+                                            None,
+                                        ),
+                                        e,
+                                    ),
+                                DirectoryResponseError::InvalidSize(_) =>
+                                    return MaybeFatalTransitionWithNoResults::transient(e),
+                                DirectoryResponseError::UnexpectedStatusCode(status_code) =>
+                                    if status_code.is_client_error() {
+                                        return MaybeFatalTransitionWithNoResults::fatal(
+                                            SessionEvent::SessionInvalid(
+                                                directory_error.to_string(),
+                                                None,
+                                            ),
+                                            e,
+                                        );
+                                    } else {
+                                        return MaybeFatalTransitionWithNoResults::transient(e);
+                                    },
+                            },
+                        _ =>
+                            return MaybeFatalTransitionWithNoResults::fatal(
+                                SessionEvent::SessionInvalid(session_error.to_string(), None),
+                                e,
+                            ),
+                    },
+                    _ =>
+                        return MaybeFatalTransitionWithNoResults::fatal(
+                            SessionEvent::SessionInvalid(protocol_err.to_string(), None),
+                            e,
+                        ),
+                },
+            },
         };
 
         if let Some((proposal, reply_key)) = proposal {

@@ -41,7 +41,7 @@ use super::error::BuildSenderError;
 use super::*;
 use crate::error::{InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
-use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
+use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res, DirectoryResponseError};
 use crate::persist::{
     MaybeFatalTransition, MaybeSuccessTransitionWithNoResults, NextStateTransition,
 };
@@ -323,12 +323,31 @@ impl Sender<WithReplyKey> {
     ) -> MaybeFatalTransition<SessionEvent, Sender<PollingForProposal>, EncapsulationError> {
         match process_post_res(response, post_ctx.ohttp_ctx) {
             Ok(()) => {}
-            Err(e) => {
-                return MaybeFatalTransition::fatal(
-                    SessionEvent::SessionInvalid(e.to_string()),
-                    InternalEncapsulationError::DirectoryResponse(e).into(),
-                );
-            }
+            Err(e) => match e {
+                DirectoryResponseError::InvalidSize(_) => {
+                    return MaybeFatalTransition::transient(
+                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                    );
+                }
+                DirectoryResponseError::OhttpDecapsulation(_) => {
+                    return MaybeFatalTransition::fatal(
+                        SessionEvent::SessionInvalid(e.to_string()),
+                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                    );
+                }
+                DirectoryResponseError::UnexpectedStatusCode(status_code) => {
+                    if status_code.is_client_error() {
+                        return MaybeFatalTransition::fatal(
+                            SessionEvent::SessionInvalid(e.to_string()),
+                            InternalEncapsulationError::DirectoryResponse(e).into(),
+                        );
+                    } else {
+                        return MaybeFatalTransition::transient(
+                            InternalEncapsulationError::DirectoryResponse(e).into(),
+                        );
+                    }
+                }
+            },
         }
 
         let polling_for_proposal = PollingForProposal {
@@ -472,11 +491,31 @@ impl Sender<PollingForProposal> {
         let body = match process_get_res(response, ohttp_ctx) {
             Ok(Some(body)) => body,
             Ok(None) => return MaybeSuccessTransitionWithNoResults::no_results(self.clone()),
-            Err(e) =>
-                return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::SessionInvalid(e.to_string()),
-                    InternalEncapsulationError::DirectoryResponse(e).into(),
-                ),
+            Err(e) => match e {
+                DirectoryResponseError::InvalidSize(_) => {
+                    return MaybeSuccessTransitionWithNoResults::transient(
+                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                    );
+                }
+                DirectoryResponseError::OhttpDecapsulation(_) => {
+                    return MaybeSuccessTransitionWithNoResults::fatal(
+                        SessionEvent::SessionInvalid(e.to_string()),
+                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                    );
+                }
+                DirectoryResponseError::UnexpectedStatusCode(status_code) => {
+                    if status_code.is_client_error() {
+                        return MaybeSuccessTransitionWithNoResults::fatal(
+                            SessionEvent::SessionInvalid(e.to_string()),
+                            InternalEncapsulationError::DirectoryResponse(e).into(),
+                        );
+                    } else {
+                        return MaybeSuccessTransitionWithNoResults::transient(
+                            InternalEncapsulationError::DirectoryResponse(e).into(),
+                        );
+                    }
+                }
+            },
         };
         let psbt = match decrypt_message_b(
             &body,

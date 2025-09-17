@@ -433,17 +433,16 @@ impl Sender<PollingForProposal> {
         let mailbox: ShortId = hash.into();
         let url = self
             .endpoint()
-            .clone()
             .join(&mailbox.to_string())
             .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
         let body = encrypt_message_a(
             Vec::new(),
-            &HpkeKeyPair::from_secret_key(&self.reply_key).public_key().clone(),
-            &self.pj_param.receiver_pubkey().clone(),
+            HpkeKeyPair::from_secret_key(&self.reply_key).public_key(),
+            self.pj_param.receiver_pubkey(),
         )
         .map_err(InternalCreateRequestError::Hpke)?;
-        let ohttp_keys = self.pj_param.ohttp_keys().clone();
-        let (body, ohttp_ctx) = ohttp_encapsulate(&ohttp_keys, "GET", url.as_str(), Some(&body))
+        let ohttp_keys = self.pj_param.ohttp_keys();
+        let (body, ohttp_ctx) = ohttp_encapsulate(ohttp_keys, "GET", url.as_str(), Some(&body))
             .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
 
         let url = ohttp_relay.into_url().map_err(InternalCreateRequestError::Url)?;

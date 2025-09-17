@@ -13,7 +13,7 @@ const OHTTP_REQ_HEADER_BYTES: usize = 7;
 pub const PADDED_BHTTP_REQ_BYTES: usize =
     ENCAPSULATED_MESSAGE_BYTES - (N_ENC + N_T + OHTTP_REQ_HEADER_BYTES);
 
-pub fn ohttp_encapsulate(
+pub(crate) fn ohttp_encapsulate(
     ohttp_keys: &ohttp::KeyConfig,
     method: &str,
     target_resource: &str,
@@ -89,7 +89,7 @@ impl error::Error for DirectoryResponseError {
     }
 }
 
-pub fn process_get_res(
+pub(crate) fn process_get_res(
     res: &[u8],
     ohttp_context: ohttp::ClientResponse,
 ) -> Result<Option<Vec<u8>>, DirectoryResponseError> {
@@ -101,7 +101,7 @@ pub fn process_get_res(
     }
 }
 
-pub fn process_post_res(
+pub(crate) fn process_post_res(
     res: &[u8],
     ohttp_context: ohttp::ClientResponse,
 ) -> Result<(), DirectoryResponseError> {
@@ -125,7 +125,7 @@ fn process_ohttp_res(
 }
 
 /// decapsulate ohttp, bhttp response and return http response body and status code
-pub fn ohttp_decapsulate(
+pub(crate) fn ohttp_decapsulate(
     res_ctx: ohttp::ClientResponse,
     ohttp_body: &[u8; ENCAPSULATED_MESSAGE_BYTES],
 ) -> Result<http::Response<Vec<u8>>, OhttpEncapsulationError> {

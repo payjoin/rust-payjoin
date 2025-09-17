@@ -71,7 +71,6 @@ impl StatusText for ReceiveSession {
             | ReceiveSession::ProvisionalProposal(_) => "Processing original proposal",
             ReceiveSession::PayjoinProposal(_) => "Payjoin proposal sent",
             ReceiveSession::HasReplyableError(_) => "Session failure",
-            ReceiveSession::TerminalFailure => "Session failure",
         }
     }
 }
@@ -524,8 +523,6 @@ impl App {
                     self.send_payjoin_proposal(proposal, persister).await,
                 ReceiveSession::HasReplyableError(error) =>
                     self.handle_error(error, persister).await,
-                ReceiveSession::TerminalFailure =>
-                    return Err(anyhow!("Terminal receiver session")),
             }
         };
         res

@@ -6,7 +6,7 @@ use super::{ReceiveSession, SessionContext};
 use crate::error::{InternalReplayError, ReplayError};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
-use crate::receive::v2::{extract_err_req, SessionError};
+use crate::receive::v2::{extract_err_req, HasError, Receiver, SessionError};
 use crate::receive::{common, JsonReply, OriginalPayload, PsbtContext};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
@@ -51,7 +51,7 @@ where
         // FIXME: Expiry is not replyable and SessionError doesn't implement Into<JsonReply>
         // but we need to store a JsonReply here for now.
         let json_reply = JsonReply::new(crate::error_codes::ErrorCode::Unavailable, "expired");
-        let event = SessionEvent::TerminalFailure(json_reply);
+        let event = SessionEvent::TerminalFailure(json_reply.clone());
         persister
             .save_event(event.clone().into())
             .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
@@ -62,7 +62,13 @@ where
         session_events.push(event);
         let history = SessionHistory::new(session_events);
 
-        return Ok((ReceiveSession::TerminalFailure, history));
+        return Ok((
+            ReceiveSession::HasError(Receiver {
+                state: HasError { error: json_reply },
+                session_context: ctx,
+            }),
+            history,
+        ));
     }
 
     Ok((receiver, history))
@@ -353,7 +359,12 @@ mod tests {
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
-            expected_receiver_state: ReceiveSession::TerminalFailure,
+            expected_receiver_state: ReceiveSession::HasError(Receiver {
+                state: HasError {
+                    error: JsonReply::new(crate::error_codes::ErrorCode::Unavailable, "expired"),
+                },
+                session_context,
+            }),
         };
         // TODO: should check for the expired error message off the session history
         run_session_history_test(test)

@@ -47,7 +47,7 @@ impl error::Error for Error {
     }
 }
 
-/// The protocolerror type for the payjoin receiver, representing failures in
+/// The protocol error type for the payjoin receiver, representing failures in
 /// the internal protocol operation.
 ///
 /// The error handling is designed to:

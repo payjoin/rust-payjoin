@@ -23,15 +23,15 @@ macro_rules! impl_save_for_transition {
             ) -> Result<$next_state, SenderPersistedError> {
                 let adapter = CallbackPersisterAdapter::new(persister);
                 let mut inner = self.0.write().map_err(|_| {
-                    SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                        "Lock poisoned".to_string(),
-                    )))
+                    SenderPersistedError::from(ImplementationError::new(
+                        ForeignError::InternalError("Lock poisoned".to_string()),
+                    ))
                 })?;
 
                 let value = inner.take().ok_or_else(|| {
-                    SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                        "Already saved or moved".to_string(),
-                    )))
+                    SenderPersistedError::from(ImplementationError::new(
+                        ForeignError::InternalError("Already saved or moved".to_string()),
+                    ))
                 })?;
 
                 let res = value.save(&adapter).map_err(SenderPersistedError::from)?;
@@ -292,13 +292,13 @@ impl WithReplyKeyTransition {
     ) -> Result<PollingForProposal, SenderPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner = self.0.write().map_err(|_| {
-            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
+            SenderPersistedError::from(ImplementationError::new(ForeignError::InternalError(
                 "Lock poisoned".to_string(),
             )))
         })?;
 
         let value = inner.take().ok_or_else(|| {
-            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
+            SenderPersistedError::from(ImplementationError::new(ForeignError::InternalError(
                 "Already saved or moved".to_string(),
             )))
         })?;

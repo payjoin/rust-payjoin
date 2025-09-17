@@ -282,7 +282,7 @@ mod integration {
                 // test session with expiry in the past
                 let mut expired_receiver =
                     ReceiverBuilder::new(address, services.directory_url().as_str(), ohttp_keys)?
-                        .with_expiry(Duration::from_secs(0))
+                        .with_expiration(Duration::from_secs(0))
                         .build()
                         .save(&recv_noop_persister)?;
                 match expired_receiver.create_poll_request(services.ohttp_relay_url().as_str()) {

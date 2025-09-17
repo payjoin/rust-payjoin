@@ -468,7 +468,7 @@ mod tests {
         set_exp(&mut url, &exp_time);
         assert_eq!(url.fragment(), Some("EX1C4UC6ES"));
 
-        assert_eq!(exp(&url).expect("Expiry has been set but is missing on get"), exp_time);
+        assert_eq!(exp(&url).expect("Expiration has been set but is missing on get"), exp_time);
     }
 
     #[test]

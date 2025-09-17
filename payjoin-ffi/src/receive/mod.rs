@@ -266,8 +266,8 @@ impl ReceiverBuilder {
         Self(self.0.clone().with_amount(Amount::from_sat(amount_sats)))
     }
 
-    pub fn with_expiry(&self, expiry: u64) -> Self {
-        Self(self.0.clone().with_expiry(Duration::from_secs(expiry)))
+    pub fn with_expiration(&self, expiration: u64) -> Self {
+        Self(self.0.clone().with_expiration(Duration::from_secs(expiration)))
     }
 
     /// Set the maximum effective fee rate the receiver is willing to pay for their own input/output contributions

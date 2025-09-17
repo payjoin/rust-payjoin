@@ -15,7 +15,7 @@ pub(crate) enum InternalCreateRequestError {
     Url(crate::into_url::Error),
     Hpke(crate::hpke::HpkeError),
     OhttpEncapsulation(crate::ohttp::OhttpEncapsulationError),
-    Expired(std::time::SystemTime),
+    Expiration(std::time::SystemTime),
 }
 
 impl fmt::Display for CreateRequestError {
@@ -26,7 +26,7 @@ impl fmt::Display for CreateRequestError {
             Url(e) => write!(f, "cannot parse url: {e:#?}"),
             Hpke(e) => write!(f, "v2 error: {e}"),
             OhttpEncapsulation(e) => write!(f, "v2 error: {e}"),
-            Expired(expiry) => write!(f, "session expired at {expiry:?}"),
+            Expiration(expiration) => write!(f, "session expired at {expiration:?}"),
         }
     }
 }
@@ -39,7 +39,7 @@ impl std::error::Error for CreateRequestError {
             Url(error) => Some(error),
             Hpke(error) => Some(error),
             OhttpEncapsulation(error) => Some(error),
-            Expired(_) => None,
+            Expiration(_) => None,
         }
     }
 }

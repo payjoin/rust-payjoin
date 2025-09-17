@@ -255,7 +255,7 @@ impl AppTrait for App {
         println!("Receive session established");
         let pj_uri = session.pj_uri();
         println!("Request Payjoin by sharing this Payjoin Uri:");
-        println!("{}", pj_uri);
+        println!("{pj_uri}");
 
         self.process_receiver_session(ReceiveSession::Initialized(session.clone()), &persister)
             .await?;
@@ -384,10 +384,10 @@ impl AppTrait for App {
 
         // Print receiver and sender rows separately
         for row in send_rows {
-            println!("{}", row);
+            println!("{row}");
         }
         for row in recv_rows {
-            println!("{}", row);
+            println!("{row}");
         }
 
         Ok(())

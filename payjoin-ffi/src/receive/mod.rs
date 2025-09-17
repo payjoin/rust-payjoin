@@ -930,7 +930,7 @@ impl ProvisionalProposal {
             self.0.clone().finalize_proposal(|pre_processed| {
                 let psbt = process_psbt
                     .callback(pre_processed.to_string())
-                    .map_err(|e| ImplementationError::new(e))?;
+                    .map_err(ImplementationError::new)?;
                 Ok(Psbt::from_str(&psbt).map_err(ImplementationError::new)?)
             }),
         ))))

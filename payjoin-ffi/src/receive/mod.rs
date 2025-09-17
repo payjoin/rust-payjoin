@@ -79,7 +79,6 @@ pub enum ReceiveSession {
     ProvisionalProposal { inner: Arc<ProvisionalProposal> },
     PayjoinProposal { inner: Arc<PayjoinProposal> },
     HasReplyableError { inner: Arc<HasReplyableError> },
-    TerminalFailure,
 }
 
 impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
@@ -108,7 +107,6 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
                 Self::PayjoinProposal { inner: Arc::new(inner.into()) },
             ReceiveSession::HasReplyableError(inner) =>
                 Self::HasReplyableError { inner: Arc::new(inner.into()) },
-            ReceiveSession::TerminalFailure => Self::TerminalFailure,
         }
     }
 }

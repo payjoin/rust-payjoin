@@ -122,7 +122,7 @@ fn short_id_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 }
 
 /// Represents the various states of a Payjoin receiver session during the protocol flow.
-/// Each variant parameterizes a `Receiver` with a specific state type, and [`ReceiveSession::TerminalFailure`] which indicates the session has ended or is invalid.
+/// Each variant parameterizes a `Receiver` with a specific state type.
 ///
 /// This provides type erasure for the receive session state, allowing for the session to be replayed
 /// and the state to be updated with the next event over a uniform interface.
@@ -139,7 +139,6 @@ pub enum ReceiveSession {
     ProvisionalProposal(Receiver<ProvisionalProposal>),
     PayjoinProposal(Receiver<PayjoinProposal>),
     HasReplyableError(Receiver<HasReplyableError>),
-    TerminalFailure,
 }
 
 impl ReceiveSession {
@@ -204,8 +203,6 @@ impl ReceiveSession {
                         ReceiveSession::ProvisionalProposal(r) => r.session_context,
                         ReceiveSession::PayjoinProposal(r) => r.session_context,
                         ReceiveSession::HasReplyableError(r) => r.session_context,
-                        ReceiveSession::TerminalFailure =>
-                            return Ok(ReceiveSession::TerminalFailure),
                     },
                 })),
 

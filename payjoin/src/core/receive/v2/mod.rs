@@ -51,6 +51,7 @@ use crate::persist::{
     MaybeFatalTransition, MaybeFatalTransitionWithNoResults, MaybeSuccessTransition,
     MaybeTransientTransition, NextStateTransition,
 };
+use crate::receive::v2::session::SessionOutcome;
 use crate::receive::{parse_payload, InputPair, OriginalPayload, PsbtContext};
 use crate::time::Time;
 use crate::uri::ShortId;
@@ -186,7 +187,7 @@ impl ReceiveSession {
 
             (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiveSession::TerminalFailure),
 
-            (current_state, SessionEvent::Closed) => Ok(current_state),
+            (current_state, SessionEvent::Closed(_)) => Ok(current_state),
 
             (current_state, event) => Err(InternalReplayError::InvalidEvent(
                 Box::new(event),
@@ -1053,7 +1054,8 @@ impl Receiver<PayjoinProposal> {
         match process_post_res(res, ohttp_context)
             .map_err(|e| InternalSessionError::DirectoryResponse(e).into())
         {
-            Ok(_) => MaybeSuccessTransition::success(SessionEvent::Closed, ()),
+            Ok(_) =>
+                MaybeSuccessTransition::success(SessionEvent::Closed(SessionOutcome::Success), ()),
             Err(e) => MaybeSuccessTransition::transient(e),
         }
     }

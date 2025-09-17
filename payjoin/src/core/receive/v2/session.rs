@@ -172,9 +172,9 @@ impl SessionHistory {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 /// Represents a piece of information that the receiver has obtained from the session
 /// Each event can be used to transition the receiver state machine to a new state
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SessionEvent {
     Created(SessionContext),
     UncheckedOriginalPayload {
@@ -194,7 +194,20 @@ pub enum SessionEvent {
     /// Reason being in some cases we still want to preserve the error b/c we can action on it. For now this is a terminal state and there is nothing to replay and is saved to be displayed.
     /// b/c its a terminal state and there is nothing to replay. So serialization will be lossy and that is fine.
     SessionInvalid(String, Option<JsonReply>),
-    Closed,
+    Closed(SessionOutcome),
+}
+
+/// Represents all possible outcomes for a closed Payjoin session
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SessionOutcome {
+    /// Payjoin completed successfully
+    /// TODO: this should include the sender's witnesses once tx monitoring is implemented
+    /// (this will ensure the payjoin txid can be computed)
+    Success,
+    /// Payjoin failed to complete due to a counterparty deviation from the protocol
+    Failure,
+    /// Payjoin was cancelled by the user
+    Cancel,
 }
 
 #[cfg(test)]

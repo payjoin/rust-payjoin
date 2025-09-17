@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use payjoin::into_url::IntoUrlSealed;
+
 use crate::uri::Url;
 
 ///Represents data that needs to be transmitted to the receiver.
@@ -25,7 +27,7 @@ pub struct Request {
 impl From<payjoin::Request> for Request {
     fn from(value: payjoin::Request) -> Self {
         Self {
-            url: Arc::new(value.url.into()),
+            url: Arc::new(Url(value.url.as_str().into_url().expect("Could not parse Url"))),
             content_type: value.content_type.to_string(),
             body: value.body,
         }

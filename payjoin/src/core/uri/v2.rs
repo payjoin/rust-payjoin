@@ -6,14 +6,14 @@ use std::str::FromStr;
 use bitcoin::bech32::Hrp;
 use bitcoin::consensus::encode::Decodable;
 use bitcoin::consensus::Encodable;
-use url::Url;
 
 use crate::hpke::HpkePublicKey;
+use crate::into_url::{self, Url};
 use crate::ohttp::OhttpKeys;
 use crate::uri::ShortId;
 
 /// Retrieve the receiver's public key from the URL fragment
-fn receiver_pubkey(url: &Url) -> Result<HpkePublicKey, ParseReceiverPubkeyParamError> {
+fn receiver_pubkey(url: &url::Url) -> Result<HpkePublicKey, ParseReceiverPubkeyParamError> {
     let value = get_param(url, "RK1")
         .map_err(ParseReceiverPubkeyParamError::InvalidFragment)?
         .ok_or(ParseReceiverPubkeyParamError::MissingPubkey)?;
@@ -31,7 +31,7 @@ fn receiver_pubkey(url: &Url) -> Result<HpkePublicKey, ParseReceiverPubkeyParamE
 }
 
 /// Set the receiver's public key in the URL fragment
-fn set_receiver_pubkey(url: &mut Url, pubkey: &HpkePublicKey) {
+fn set_receiver_pubkey(url: &mut url::Url, pubkey: &HpkePublicKey) {
     let rk_hrp: Hrp = Hrp::parse("RK").expect("parsing a valid HRP constant should never fail");
     set_param(
         url,
@@ -41,7 +41,7 @@ fn set_receiver_pubkey(url: &mut Url, pubkey: &HpkePublicKey) {
 }
 
 /// Retrieve the ohttp parameter from the URL fragment
-fn ohttp(url: &Url) -> Result<OhttpKeys, ParseOhttpKeysParamError> {
+fn ohttp(url: &url::Url) -> Result<OhttpKeys, ParseOhttpKeysParamError> {
     let value = get_param(url, "OH1")
         .map_err(ParseOhttpKeysParamError::InvalidFragment)?
         .ok_or(ParseOhttpKeysParamError::MissingOhttpKeys)?;
@@ -58,10 +58,10 @@ fn ohttp(url: &Url) -> Result<OhttpKeys, ParseOhttpKeysParamError> {
 }
 
 /// Set the ohttp parameter in the URL fragment
-fn set_ohttp(url: &mut Url, ohttp: &OhttpKeys) { set_param(url, &ohttp.to_string()) }
+fn set_ohttp(url: &mut url::Url, ohttp: &OhttpKeys) { set_param(url, &ohttp.to_string()) }
 
 /// Retrieve the exp parameter from the URL fragment
-fn exp(url: &Url) -> Result<std::time::SystemTime, ParseExpParamError> {
+fn exp(url: &url::Url) -> Result<std::time::SystemTime, ParseExpParamError> {
     let value = get_param(url, "EX1")
         .map_err(ParseExpParamError::InvalidFragment)?
         .ok_or(ParseExpParamError::MissingExp)?;
@@ -80,7 +80,7 @@ fn exp(url: &Url) -> Result<std::time::SystemTime, ParseExpParamError> {
 }
 
 /// Set the exp parameter in the URL fragment
-fn set_exp(url: &mut Url, exp: &std::time::SystemTime) {
+fn set_exp(url: &mut url::Url, exp: &std::time::SystemTime) {
     let t = match exp.duration_since(std::time::UNIX_EPOCH) {
         Ok(duration) => duration.as_secs().try_into().unwrap(), // TODO Result type instead of Option & unwrap
         Err(_) => 0u32,
@@ -99,7 +99,7 @@ fn set_exp(url: &mut Url, exp: &std::time::SystemTime) {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct PjParam {
-    directory: Url,
+    directory: url::Url,
     id: ShortId,
     expiration: std::time::SystemTime,
     ohttp_keys: OhttpKeys,
@@ -108,7 +108,7 @@ pub struct PjParam {
 
 impl PjParam {
     pub(crate) fn new(
-        directory: Url,
+        directory: url::Url,
         id: ShortId,
         expiration: std::time::SystemTime,
         ohttp_keys: OhttpKeys,
@@ -117,7 +117,7 @@ impl PjParam {
         Self { directory, id, expiration, ohttp_keys, receiver_pubkey }
     }
 
-    pub(super) fn parse(url: Url) -> Result<Self, PjParseError> {
+    pub(super) fn parse(url: url::Url) -> Result<Self, PjParseError> {
         let path_segments: Vec<&str> = url.path_segments().map(|c| c.collect()).unwrap_or_default();
         let id = if path_segments.len() == 1 {
             ShortId::from_str(path_segments[0]).map_err(|_| PjParseError::NotV2)?
@@ -156,7 +156,7 @@ impl PjParam {
         set_receiver_pubkey(&mut endpoint, &self.receiver_pubkey);
         set_ohttp(&mut endpoint, &self.ohttp_keys);
         set_exp(&mut endpoint, &self.expiration);
-        endpoint
+        into_url::Url(endpoint)
     }
 }
 
@@ -214,7 +214,7 @@ fn check_fragment_delimiter(fragment: &str) -> Result<char, ParseFragmentError> 
     }
 }
 
-fn get_param<'a>(url: &'a Url, prefix: &str) -> Result<Option<&'a str>, ParseFragmentError> {
+fn get_param<'a>(url: &'a url::Url, prefix: &str) -> Result<Option<&'a str>, ParseFragmentError> {
     if let Some(fragment) = url.fragment() {
         let delim = check_fragment_delimiter(fragment)?;
 
@@ -236,7 +236,7 @@ fn get_param<'a>(url: &'a Url, prefix: &str) -> Result<Option<&'a str>, ParseFra
 /// whether a parameter with the same bech32 HRP is already present.
 ///
 /// Parameters are sorted lexicographically by prefix.
-fn set_param(url: &mut Url, new_param: &str) {
+fn set_param(url: &mut url::Url, new_param: &str) {
     let fragment = url.fragment().unwrap_or("");
     let delim = check_fragment_delimiter(fragment)
         .expect("set_param must be called on a URL with a valid fragment");
@@ -431,7 +431,7 @@ mod tests {
         ));
 
         let invalid_ohttp_url =
-            Url::parse("https://example.com?pj=https://test-payjoin-url#OH1invalid_bech_32")
+            url::Url::parse("https://example.com?pj=https://test-payjoin-url#OH1invalid_bech_32")
                 .unwrap();
         assert!(matches!(
             ohttp(&invalid_ohttp_url),
@@ -439,7 +439,7 @@ mod tests {
         ));
 
         let too_long_ohttp_url =
-            Url::parse("https://example.com?pj=https://test-payjoin-url#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQCC")
+            url::Url::parse("https://example.com?pj=https://test-payjoin-url#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQCC")
                 .unwrap();
         assert!(matches!(
             ohttp(&too_long_ohttp_url),
@@ -449,7 +449,7 @@ mod tests {
         ));
 
         let too_short_ohttp_url =
-            Url::parse("https://example.com?pj=https://test-payjoin-url#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQ")
+            url::Url::parse("https://example.com?pj=https://test-payjoin-url#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQ")
                 .unwrap();
         assert!(matches!(
             ohttp(&too_short_ohttp_url),
@@ -477,7 +477,7 @@ mod tests {
         assert!(matches!(exp(&missing_exp_url), Err(ParseExpParamError::MissingExp)));
 
         let invalid_fragment_exp_url =
-            Url::parse("http://example.com?pj=https://test-payjoin-url#EX1invalid_bech_32")
+            url::Url::parse("http://example.com?pj=https://test-payjoin-url#EX1invalid_bech_32")
                 .unwrap();
         assert!(matches!(
             exp(&invalid_fragment_exp_url),
@@ -485,18 +485,19 @@ mod tests {
         ));
 
         let invalid_bech32_exp_url =
-            Url::parse("http://example.com?pj=https://test-payjoin-url#EX1INVALIDBECH32").unwrap();
+            url::Url::parse("http://example.com?pj=https://test-payjoin-url#EX1INVALIDBECH32")
+                .unwrap();
         assert!(matches!(exp(&invalid_bech32_exp_url), Err(ParseExpParamError::InvalidFormat)));
 
         // Since the HRP is everything to the left of the right-most separator, the invalid url in
         // this test would have it's HRP being parsed as EX101 instead of the expected EX1
         let invalid_hrp_exp_url =
-            Url::parse("http://example.com?pj=https://test-payjoin-url#EX1010").unwrap();
+            url::Url::parse("http://example.com?pj=https://test-payjoin-url#EX1010").unwrap();
         assert!(matches!(exp(&invalid_hrp_exp_url), Err(ParseExpParamError::InvalidFormat)));
 
         // Not enough data to decode into a u32
         let invalid_timestamp_exp_url =
-            Url::parse("http://example.com?pj=https://test-payjoin-url#EX10").unwrap();
+            url::Url::parse("http://example.com?pj=https://test-payjoin-url#EX10").unwrap();
         assert!(matches!(exp(&invalid_timestamp_exp_url), Err(ParseExpParamError::InvalidExp(_))));
     }
 
@@ -509,7 +510,7 @@ mod tests {
         ));
 
         let invalid_fragment_receiver_pubkey_url =
-            Url::parse("http://example.com?pj=https://test-payjoin-url#RK1invalid_bech_32")
+            url::Url::parse("http://example.com?pj=https://test-payjoin-url#RK1invalid_bech_32")
                 .unwrap();
         assert!(matches!(
             receiver_pubkey(&invalid_fragment_receiver_pubkey_url),
@@ -517,7 +518,8 @@ mod tests {
         ));
 
         let invalid_bech32_receiver_pubkey_url =
-            Url::parse("http://example.com?pj=https://test-payjoin-url#RK1INVALIDBECH32").unwrap();
+            url::Url::parse("http://example.com?pj=https://test-payjoin-url#RK1INVALIDBECH32")
+                .unwrap();
         assert!(matches!(
             receiver_pubkey(&invalid_bech32_receiver_pubkey_url),
             Err(ParseReceiverPubkeyParamError::InvalidFormat)
@@ -526,7 +528,7 @@ mod tests {
         // Since the HRP is everything to the left of the right-most separator, the invalid url in
         // this test would have it's HRP being parsed as RK101 instead of the expected RK1
         let invalid_hrp_receiver_pubkey_url =
-            Url::parse("http://example.com?pj=https://test-payjoin-url#RK101").unwrap();
+            url::Url::parse("http://example.com?pj=https://test-payjoin-url#RK101").unwrap();
         assert!(matches!(
             receiver_pubkey(&invalid_hrp_receiver_pubkey_url),
             Err(ParseReceiverPubkeyParamError::InvalidFormat)
@@ -534,7 +536,7 @@ mod tests {
 
         // Not enough data to decode into a u32
         let invalid_receiver_pubkey_url =
-            Url::parse("http://example.com?pj=https://test-payjoin-url#RK10").unwrap();
+            url::Url::parse("http://example.com?pj=https://test-payjoin-url#RK10").unwrap();
         assert!(matches!(
             receiver_pubkey(&invalid_receiver_pubkey_url),
             Err(ParseReceiverPubkeyParamError::InvalidPubkey(_))
@@ -547,7 +549,7 @@ mod tests {
                    &pjos=0&pj=HTTPS://EXAMPLE.COM/\
                    %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
         let pjuri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
-        assert!(ohttp(&pjuri.extras.endpoint()).is_ok());
+        assert!(ohttp(&pjuri.extras.endpoint().0).is_ok());
         assert_eq!(format!("{pjuri}"), uri);
 
         let reordered = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
@@ -556,7 +558,7 @@ mod tests {
                    &pjos=0";
         let pjuri =
             Uri::try_from(reordered).unwrap().assume_checked().check_pj_supported().unwrap();
-        assert!(ohttp(&pjuri.extras.endpoint()).is_ok());
+        assert!(ohttp(&pjuri.extras.endpoint().0).is_ok());
         assert_eq!(format!("{pjuri}"), uri);
     }
 
@@ -601,7 +603,7 @@ mod tests {
         let url = "HTTPS://EXAMPLE.COM/TXJCGKTKXLUUZ\
                    #EX1C4UC6ES+OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC+RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV";
 
-        let mut endpoint = Url::parse(url).unwrap();
+        let mut endpoint = url::Url::parse(url).unwrap();
         assert!(ohttp(&endpoint).is_ok());
         assert!(exp(&endpoint).is_ok());
 
@@ -624,7 +626,7 @@ mod tests {
     fn test_fragment_lexicographical_order() {
         let url_with_fragment = "HTTPS://EXAMPLE.COM/TXJCGKTKXLUUZ\
                    #OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-EX1C4UC6ES";
-        let mut endpoint = Url::parse(url_with_fragment).unwrap();
+        let mut endpoint = url::Url::parse(url_with_fragment).unwrap();
         assert!(ohttp(&endpoint).is_ok());
         assert!(exp(&endpoint).is_ok());
 
@@ -666,27 +668,27 @@ mod tests {
     #[test]
     fn test_fragment_parameter_validation() {
         // Missing RK1 parameter only
-        let url_missing_rk1 = Url::parse("https://example.com/TXJCGKTKXLUUZ#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-EX1C4UC6ES").unwrap();
+        let url_missing_rk1 = url::Url::parse("https://example.com/TXJCGKTKXLUUZ#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-EX1C4UC6ES").unwrap();
         assert!(matches!(PjParam::parse(url_missing_rk1), Err(PjParseError::NotV2)));
 
         // Missing OH1 parameter only
-        let url_missing_oh1 = Url::parse("https://example.com/TXJCGKTKXLUUZ#RK1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-EX1C4UC6ES").unwrap();
+        let url_missing_oh1 = url::Url::parse("https://example.com/TXJCGKTKXLUUZ#RK1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-EX1C4UC6ES").unwrap();
         assert!(matches!(PjParam::parse(url_missing_oh1), Err(PjParseError::NotV2)));
 
         // Missing EX1 parameter only
-        let url_missing_ex1 = Url::parse("https://example.com/TXJCGKTKXLUUZ#RK1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC").unwrap();
+        let url_missing_ex1 = url::Url::parse("https://example.com/TXJCGKTKXLUUZ#RK1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC").unwrap();
         assert!(matches!(PjParam::parse(url_missing_ex1), Err(PjParseError::NotV2)));
 
         // Missing multiple parameters (only EX1 present) - tests first part of OR condition
-        let url_only_ex1 = Url::parse("https://example.com/TXJCGKTKXLUUZ#EX1C4UC6ES").unwrap();
+        let url_only_ex1 = url::Url::parse("https://example.com/TXJCGKTKXLUUZ#EX1C4UC6ES").unwrap();
         assert!(matches!(PjParam::parse(url_only_ex1), Err(PjParseError::NotV2)));
 
         // Missing multiple parameters (only OH1 present) - tests middle part of OR condition
-        let url_only_oh1 = Url::parse("https://example.com/TXJCGKTKXLUUZ#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC").unwrap();
+        let url_only_oh1 = url::Url::parse("https://example.com/TXJCGKTKXLUUZ#OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC").unwrap();
         assert!(matches!(PjParam::parse(url_only_oh1), Err(PjParseError::NotV2)));
 
         // Missing multiple parameters (only RK1 present) - tests last part of OR condition
-        let url_only_rk1 = Url::parse("https://example.com/TXJCGKTKXLUUZ#RK1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC").unwrap();
+        let url_only_rk1 = url::Url::parse("https://example.com/TXJCGKTKXLUUZ#RK1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC").unwrap();
         assert!(matches!(PjParam::parse(url_only_rk1), Err(PjParseError::NotV2)));
     }
 }

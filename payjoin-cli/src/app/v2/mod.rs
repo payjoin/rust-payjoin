@@ -420,7 +420,7 @@ impl App {
         persister: &SenderPersister,
     ) -> Result<()> {
         let (req, ctx) = sender.create_v2_post_request(
-            self.unwrap_relay_or_else_fetch(Some(sender.endpoint().clone())).await?.as_str(),
+            self.unwrap_relay_or_else_fetch(Some(sender.endpoint().into())).await?.as_str(),
         )?;
         let response = self.post_request(req).await?;
         println!("Posted original proposal...");
@@ -437,7 +437,7 @@ impl App {
         // Long poll until we get a response
         loop {
             let (req, ctx) = session.create_poll_request(
-                self.unwrap_relay_or_else_fetch(Some(session.endpoint().clone())).await?.as_str(),
+                self.unwrap_relay_or_else_fetch(Some(session.endpoint().into())).await?.as_str(),
             )?;
             let response = self.post_request(req).await?;
             let res = session.process_response(&response.bytes().await?, ctx).save(persister);
@@ -467,7 +467,7 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<Receiver<UncheckedOriginalPayload>> {
         let ohttp_relay = self
-            .unwrap_relay_or_else_fetch(Some(session.pj_uri().extras.endpoint().clone()))
+            .unwrap_relay_or_else_fetch(Some(session.pj_uri().extras.endpoint().into()))
             .await?;
 
         let mut session = session;
@@ -528,7 +528,7 @@ impl App {
             Ok(_) => Ok(()),
             Err(e) => {
                 let (_, session_history) = replay_receiver_event_log(persister)?;
-                let pj_uri = session_history.pj_uri().extras.endpoint().clone();
+                let pj_uri = session_history.pj_uri().extras.endpoint().into();
                 let ohttp_relay = self.unwrap_relay_or_else_fetch(Some(pj_uri)).await?;
                 self.handle_recoverable_error(&ohttp_relay, &session_history).await?;
 
@@ -684,10 +684,7 @@ impl App {
         Ok(())
     }
 
-    async fn unwrap_relay_or_else_fetch(
-        &self,
-        directory: Option<payjoin::Url>,
-    ) -> Result<payjoin::Url> {
+    async fn unwrap_relay_or_else_fetch(&self, directory: Option<url::Url>) -> Result<url::Url> {
         let selected_relay =
             self.relay_manager.lock().expect("Lock should not be poisoned").get_selected_relay();
         let ohttp_relay = match selected_relay {
@@ -703,7 +700,7 @@ impl App {
     /// Handle request error by sending an error response over the directory
     async fn handle_recoverable_error(
         &self,
-        ohttp_relay: &payjoin::Url,
+        ohttp_relay: &url::Url,
         session_history: &SessionHistory,
     ) -> Result<()> {
         let e = match session_history.terminal_error() {

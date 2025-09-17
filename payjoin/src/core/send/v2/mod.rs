@@ -35,12 +35,12 @@ use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
 use serde::{Deserialize, Serialize};
 pub use session::{replay_event_log, SessionEvent, SessionHistory};
-use url::Url;
 
 use super::error::BuildSenderError;
 use super::*;
 use crate::error::{InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
+use crate::into_url::Url;
 use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
 use crate::persist::{
     MaybeFatalTransition, MaybeSuccessTransitionWithNoResults, NextStateTransition,
@@ -285,7 +285,7 @@ impl Sender<WithReplyKey> {
             self.psbt_ctx.fee_contribution,
             self.psbt_ctx.min_fee_rate,
         )?;
-        let base_url = self.pj_param.endpoint().clone();
+        let base_url = self.pj_param.endpoint().0.clone();
         let mut ohttp_keys = self.pj_param.ohttp_keys().clone();
         let (request, ohttp_ctx) = extract_request(
             ohttp_relay,
@@ -357,11 +357,11 @@ pub(crate) fn extract_request(
     ohttp_relay: impl IntoUrl,
     reply_key: HpkeSecretKey,
     body: Vec<u8>,
-    url: Url,
+    url: url::Url,
     receiver_pubkey: HpkePublicKey,
     ohttp_keys: &mut OhttpKeys,
 ) -> Result<(Request, ClientResponse), CreateRequestError> {
-    let ohttp_relay = ohttp_relay.into_url()?;
+    let ohttp_relay = ohttp_relay.into_url()?.0;
     let body = encrypt_message_a(
         body,
         &HpkeKeyPair::from_secret_key(&reply_key).public_key().clone(),
@@ -387,7 +387,7 @@ pub(crate) fn serialize_v2_body(
     min_fee_rate: FeeRate,
 ) -> Result<Vec<u8>, CreateRequestError> {
     // Grug say localhost base be discarded anyway. no big brain needed.
-    let base_url = Url::parse("http://localhost").expect("invalid URL");
+    let base_url = url::Url::parse("http://localhost").expect("invalid URL");
 
     let placeholder_url =
         serialize_url(base_url, output_substitution, fee_contribution, min_fee_rate, Version::Two);
@@ -433,6 +433,7 @@ impl Sender<PollingForProposal> {
         let mailbox: ShortId = hash.into();
         let url = self
             .endpoint()
+            .0
             .clone()
             .join(&mailbox.to_string())
             .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
@@ -447,7 +448,7 @@ impl Sender<PollingForProposal> {
             ohttp_encapsulate(&mut ohttp_keys, "GET", url.as_str(), Some(&body))
                 .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
 
-        let url = ohttp_relay.into_url().map_err(InternalCreateRequestError::Url)?;
+        let url = ohttp_relay.into_url().map_err(InternalCreateRequestError::Url)?.0;
         Ok((Request::new_v2(&url, &body), ohttp_ctx))
     }
 
@@ -537,7 +538,7 @@ mod test {
     fn create_sender_context(
         expiration: SystemTime,
     ) -> Result<super::Sender<super::WithReplyKey>, BoxError> {
-        let endpoint = Url::parse("http://localhost:1234")?;
+        let endpoint = url::Url::parse("http://localhost:1234")?;
         let pj_param = crate::uri::v2::PjParam::new(
             endpoint,
             crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id"),
@@ -584,7 +585,7 @@ mod test {
         assert!(!request.body.is_empty(), "Request body should not be empty");
         assert_eq!(
             request.url.to_string(),
-            format!("{}{}", EXAMPLE_URL.clone(), sender.pj_param.endpoint().join("/")?)
+            format!("{}{}", EXAMPLE_URL.clone(), sender.pj_param.endpoint().0.join("/")?)
         );
         assert_eq!(context.psbt_ctx.original_psbt, sender.psbt_ctx.original_psbt);
         Ok(())

@@ -1,17 +1,16 @@
 //! Payjoin v1 URI functionality
 
-use url::Url;
-
 use super::PjParseError;
+use crate::into_url::{self, Url};
 use crate::uri::error::InternalPjParseError;
 
 /// Payjoin v1 parameter containing the endpoint URL
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PjParam(Url);
+pub struct PjParam(url::Url);
 
 impl PjParam {
     /// Parse a new v1 PjParam from a URL
-    pub(super) fn parse(url: Url) -> Result<Self, PjParseError> {
+    pub(super) fn parse(url: url::Url) -> Result<Self, PjParseError> {
         if url.scheme() == "https"
             || url.scheme() == "http" && url.domain().unwrap_or_default().ends_with(".onion")
         {
@@ -22,7 +21,7 @@ impl PjParam {
     }
 
     /// Get the endpoint URL
-    pub(crate) fn endpoint(&self) -> Url { self.0.clone() }
+    pub(crate) fn endpoint(&self) -> Url { into_url::Url(self.0.clone()) }
 }
 
 impl std::fmt::Display for PjParam {

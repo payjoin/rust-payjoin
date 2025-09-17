@@ -13,7 +13,6 @@ impl<Event, SuccessValue, CurrentState, Err>
         MaybeSuccessTransitionWithNoResults(Err(Rejection::fatal(event, error)))
     }
 
-    #[allow(dead_code)]
     #[inline]
     pub(crate) fn transient(error: Err) -> Self {
         MaybeSuccessTransitionWithNoResults(Err(Rejection::transient(error)))

@@ -64,6 +64,11 @@ impl<Event, NextState, CurrentState, Err>
     }
 
     #[inline]
+    pub(crate) fn transient(error: Err) -> Self {
+        MaybeFatalTransitionWithNoResults(Err(Rejection::transient(error)))
+    }
+
+    #[inline]
     pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         MaybeFatalTransitionWithNoResults(Ok(AcceptOptionalTransition::Success(AcceptNextState(
             event, next_state,

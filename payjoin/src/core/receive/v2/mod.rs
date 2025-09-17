@@ -257,7 +257,7 @@ fn extract_err_req(
     }
     let mailbox = mailbox_endpoint(&session_context.directory, &session_context.reply_mailbox_id());
     let (body, ohttp_ctx) = ohttp_encapsulate(
-        &mut session_context.ohttp_keys.0.clone(),
+        &session_context.ohttp_keys.0,
         "POST",
         mailbox.as_str(),
         Some(err.to_json().to_string().as_bytes()),
@@ -339,7 +339,7 @@ pub struct Initialized {}
 impl Receiver<Initialized> {
     /// construct an OHTTP Encapsulated HTTP GET request for the Original PSBT
     pub fn create_poll_request(
-        &mut self,
+        &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), Error> {
         if SystemTime::now() > self.session_context.expiration {
@@ -413,7 +413,7 @@ impl Receiver<Initialized> {
     }
 
     fn fallback_req_body(
-        &mut self,
+        &self,
     ) -> Result<
         ([u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES], ohttp::ClientResponse),
         OhttpEncapsulationError,
@@ -422,12 +422,7 @@ impl Receiver<Initialized> {
             &self.session_context.directory,
             &self.session_context.proposal_mailbox_id(),
         );
-        ohttp_encapsulate(
-            &mut self.session_context.ohttp_keys,
-            "GET",
-            fallback_target.as_str(),
-            None,
-        )
+        ohttp_encapsulate(&self.session_context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
 
     fn extract_proposal_from_v1(self, response: &str) -> Result<OriginalPayload, ProtocolError> {
@@ -990,7 +985,7 @@ impl Receiver<PayjoinProposal> {
 
     /// Construct an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
     pub fn create_post_request(
-        &mut self,
+        &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), Error> {
         let target_resource: Url;
@@ -1014,7 +1009,7 @@ impl Receiver<PayjoinProposal> {
         }
         tracing::debug!("Payjoin PSBT target: {}", target_resource.as_str());
         let (body, ctx) = ohttp_encapsulate(
-            &mut self.session_context.ohttp_keys,
+            &self.session_context.ohttp_keys,
             method,
             target_resource.as_str(),
             Some(&body),

@@ -385,7 +385,6 @@ impl Initialized {
         ohttp_relay: String,
     ) -> Result<RequestResponse, ReceiverError> {
         self.0
-            .clone()
             .create_poll_request(ohttp_relay)
             .map(|(req, ctx)| RequestResponse {
                 request: req.into(),

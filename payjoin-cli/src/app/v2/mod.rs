@@ -668,7 +668,7 @@ impl App {
 
     async fn send_payjoin_proposal(
         &self,
-        mut proposal: Receiver<PayjoinProposal>,
+        proposal: Receiver<PayjoinProposal>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let (req, ohttp_ctx) = proposal

@@ -60,7 +60,7 @@ mod session;
 
 const SUPPORTED_VERSIONS: &[Version] = &[Version::One, Version::Two];
 
-static TWENTY_FOUR_HOURS_DEFAULT_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
+static TWENTY_FOUR_HOURS_DEFAULT_EXPIRATION: Duration = Duration::from_secs(60 * 60 * 24);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionContext {
@@ -69,7 +69,7 @@ pub struct SessionContext {
     directory: url::Url,
     mailbox: Option<url::Url>,
     ohttp_keys: OhttpKeys,
-    expiry: SystemTime,
+    expiration: SystemTime,
     amount: Option<Amount>,
     receiver_key: HpkeKeyPair,
     reply_key: Option<HpkePublicKey>,
@@ -252,8 +252,8 @@ fn extract_err_req(
     ohttp_relay: impl IntoUrl,
     session_context: &SessionContext,
 ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
-    if SystemTime::now() > session_context.expiry {
-        return Err(InternalSessionError::Expired(session_context.expiry).into());
+    if SystemTime::now() > session_context.expiration {
+        return Err(InternalSessionError::Expired(session_context.expiration).into());
     }
     let mailbox = mailbox_endpoint(&session_context.directory, &session_context.reply_mailbox_id());
     let (body, ohttp_ctx) = ohttp_encapsulate(
@@ -299,7 +299,7 @@ impl ReceiverBuilder {
             directory,
             ohttp_keys,
             receiver_key: HpkeKeyPair::gen_keypair(),
-            expiry: SystemTime::now() + TWENTY_FOUR_HOURS_DEFAULT_EXPIRY,
+            expiration: SystemTime::now() + TWENTY_FOUR_HOURS_DEFAULT_EXPIRATION,
             amount: None,
             mailbox: None,
             reply_key: None,
@@ -308,8 +308,8 @@ impl ReceiverBuilder {
         Ok(Self(session_context))
     }
 
-    pub fn with_expiry(self, expiry: Duration) -> Self {
-        Self(SessionContext { expiry: SystemTime::now() + expiry, ..self.0 })
+    pub fn with_expiration(self, expiration: Duration) -> Self {
+        Self(SessionContext { expiration: SystemTime::now() + expiration, ..self.0 })
     }
 
     pub fn with_amount(self, amount: Amount) -> Self {
@@ -342,8 +342,8 @@ impl Receiver<Initialized> {
         &mut self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), Error> {
-        if SystemTime::now() > self.session_context.expiry {
-            return Err(InternalSessionError::Expired(self.session_context.expiry).into());
+        if SystemTime::now() > self.session_context.expiration {
+            return Err(InternalSessionError::Expired(self.session_context.expiration).into());
         }
         let (body, ohttp_ctx) =
             self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulation)?;
@@ -1066,7 +1066,7 @@ pub(crate) fn pj_uri<'a>(
     let pj_param = crate::uri::PjParam::V2(crate::uri::v2::PjParam::new(
         session_context.directory.clone(),
         session_context.proposal_mailbox_id(),
-        session_context.expiry,
+        session_context.expiration,
         session_context.ohttp_keys.clone(),
         session_context.receiver_key.public_key().clone(),
     ));
@@ -1104,7 +1104,7 @@ pub mod test {
         ohttp_keys: OhttpKeys(
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
         ),
-        expiry: SystemTime::now() + Duration::from_secs(60),
+        expiration: SystemTime::now() + Duration::from_secs(60),
         receiver_key: HpkeKeyPair::gen_keypair(),
         reply_key: None,
         amount: None,
@@ -1327,7 +1327,7 @@ pub mod test {
     fn test_extract_err_req_expiry() -> Result<(), BoxError> {
         let now = SystemTime::now();
         let noop_persister = NoopSessionPersister::default();
-        let context = SessionContext { expiry: now, ..SHARED_CONTEXT.clone() };
+        let context = SessionContext { expiration: now, ..SHARED_CONTEXT.clone() };
         let receiver = Receiver {
             state: UncheckedOriginalPayload {
                 original: crate::receive::tests::original_from_test_vector(),
@@ -1346,9 +1346,9 @@ pub mod test {
         let res = error.api_error().expect("check_broadcast error should propagate to api error");
         let actual_json = JsonReply::from(&res);
 
-        let expiry = extract_err_req(&actual_json, EXAMPLE_URL.as_str(), &context);
+        let expiration = extract_err_req(&actual_json, EXAMPLE_URL.as_str(), &context);
 
-        match expiry {
+        match expiration {
             Err(error) => assert_eq!(
                 error.to_string(),
                 SessionError::from(InternalSessionError::Expired(now)).to_string()
@@ -1359,7 +1359,7 @@ pub mod test {
     }
 
     #[test]
-    fn default_expiry() {
+    fn default_expiration() {
         let now = SystemTime::now();
         let noop_persister = NoopSessionPersister::default();
 
@@ -1372,11 +1372,15 @@ pub mod test {
         .build()
         .save(&noop_persister)
         .expect("Noop persister shouldn't fail");
-        let session_expiry = session.session_context.expiry.duration_since(now).unwrap().as_secs();
-        let default_expiry = Duration::from_secs(86400);
-        if let Some(expected_expiry) = now.checked_add(default_expiry) {
-            assert_eq!(TWENTY_FOUR_HOURS_DEFAULT_EXPIRY, default_expiry);
-            assert_eq!(session_expiry, expected_expiry.duration_since(now).unwrap().as_secs());
+        let session_expiration =
+            session.session_context.expiration.duration_since(now).unwrap().as_secs();
+        let default_expiration = Duration::from_secs(86400);
+        if let Some(expected_expiration) = now.checked_add(default_expiration) {
+            assert_eq!(TWENTY_FOUR_HOURS_DEFAULT_EXPIRATION, default_expiration);
+            assert_eq!(
+                session_expiration,
+                expected_expiration.duration_since(now).unwrap().as_secs()
+            );
         }
     }
 
@@ -1411,9 +1415,9 @@ pub mod test {
     }
 
     #[test]
-    fn build_receiver_with_non_default_expiry() {
+    fn build_receiver_with_non_default_expiration() {
         let now = SystemTime::now();
-        let expiry = Duration::from_secs(60);
+        let expiration = Duration::from_secs(60);
         let noop_persister = NoopSessionPersister::default();
         let receiver = ReceiverBuilder::new(
             SHARED_CONTEXT.address.clone(),
@@ -1421,13 +1425,13 @@ pub mod test {
             SHARED_CONTEXT.ohttp_keys.clone(),
         )
         .expect("constructor on test vector should not fail")
-        .with_expiry(expiry)
+        .with_expiration(expiration)
         .build()
         .save(&noop_persister)
         .expect("Noop persister shouldn't fail");
         assert_eq!(
-            receiver.session_context.expiry.duration_since(now).unwrap().as_secs(),
-            expiry.as_secs()
+            receiver.session_context.expiration.duration_since(now).unwrap().as_secs(),
+            expiration.as_secs()
         );
     }
 

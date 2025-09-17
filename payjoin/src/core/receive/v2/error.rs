@@ -51,7 +51,7 @@ impl fmt::Display for SessionError {
 
         match &self.0 {
             ParseUrl(e) => write!(f, "URL parsing failed: {e}"),
-            Expired(expiry) => write!(f, "Session expired at {expiry:?}"),
+            Expired(expiration) => write!(f, "Session expired at {expiration:?}"),
             OhttpEncapsulation(e) => write!(f, "OHTTP Encapsulation Error: {e}"),
             Hpke(e) => write!(f, "Hpke decryption failed: {e}"),
             DirectoryResponse(e) => write!(f, "Directory response error: {e}"),

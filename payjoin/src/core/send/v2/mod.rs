@@ -274,7 +274,7 @@ impl Sender<WithReplyKey> {
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, V2PostContext), CreateRequestError> {
         if std::time::SystemTime::now() > self.pj_param.expiration() {
-            return Err(InternalCreateRequestError::Expired(self.pj_param.expiration()).into());
+            return Err(InternalCreateRequestError::Expiration(self.pj_param.expiration()).into());
         }
 
         let mut sanitized_psbt = self.psbt_ctx.original_psbt.clone();
@@ -596,7 +596,7 @@ mod test {
         let sender = create_sender_context(SystemTime::now() - Duration::from_secs(60))?;
         let ohttp_relay = EXAMPLE_URL.as_str();
         let result = sender.create_v2_post_request(ohttp_relay);
-        assert!(result.is_err(), "Extract v2 expected expiry error, but it succeeded");
+        assert!(result.is_err(), "Extract v2 expected expiration error, but it succeeded");
 
         match result {
             Ok(_) => panic!("Expected error, got success"),

@@ -45,9 +45,9 @@ where
 
     let history = SessionHistory::new(session_events.clone());
     let ctx = history.session_context();
-    if SystemTime::now() > ctx.expiry {
+    if SystemTime::now() > ctx.expiration {
         // Session has expired: close the session and persist a fatal error
-        let err = SessionError(InternalSessionError::Expired(ctx.expiry));
+        let err = SessionError(InternalSessionError::Expired(ctx.expiration));
         persister
             .save_event(SessionEvent::SessionInvalid(err.to_string(), None).into())
             .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn test_replaying_session_creation_with_expired_session() -> Result<(), BoxError> {
         let session_context = SessionContext {
-            expiry: SystemTime::now() - Duration::from_secs(1),
+            expiration: SystemTime::now() - Duration::from_secs(1),
             ..SHARED_CONTEXT.clone()
         };
         let test = SessionHistoryTest {

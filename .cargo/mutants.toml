@@ -24,16 +24,6 @@ exclude_re = [
     # payjoin/src/core/send/mod.rs
     "replace < with <= in PsbtContextBuilder::build_recommended", # clamping the fee contribution when the fee equals to the recommended fee does not do anything
 
-    # Async SystemTime comparison
-    # checking if the system time is equal to the expiry is difficult to reasonably test
-    # payjoin/src/core/receive/v2/session.rs and payjoin/src/core/send/v2/session.rs
-    "replace > with >= in replay_event_log",
-    # payjoin/src/core/receive/v2/mod.rs
-    "replace > with >= in Receiver<Initialized>::create_poll_request",
-    "replace > with >= in extract_err_req",
-    # payjoin/src/core/send/v2/mod.rs
-    "replace > with >= in Sender<WithReplyKey>::create_v2_post_request",
-
     # TODO exclusions
     # payjoin/src/core/receive/v1/mod.rs
     "replace > with >= in WantsInputs::avoid_uih", # This mutation I am unsure about whether or not it is a trivial mutant and have not decided on how the best way to approach testing it is

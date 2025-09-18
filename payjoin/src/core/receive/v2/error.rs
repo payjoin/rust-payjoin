@@ -5,6 +5,7 @@ use crate::hpke::HpkeError;
 use crate::ohttp::{DirectoryResponseError, OhttpEncapsulationError};
 use crate::receive::error::Error;
 use crate::receive::ProtocolError;
+use crate::time::Time;
 
 /// Error that may occur during a v2 session typestate change
 ///
@@ -26,7 +27,7 @@ pub(crate) enum InternalSessionError {
     /// Url parsing failed
     ParseUrl(crate::into_url::Error),
     /// The session has expired
-    Expired(std::time::SystemTime),
+    Expired(Time),
     /// OHTTP Encapsulation failed
     OhttpEncapsulation(OhttpEncapsulationError),
     /// Hybrid Public Key Encryption failed

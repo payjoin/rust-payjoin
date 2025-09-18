@@ -4,12 +4,11 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use bitcoin::bech32::Hrp;
-use bitcoin::consensus::encode::Decodable;
-use bitcoin::consensus::Encodable;
 use url::Url;
 
 use crate::hpke::HpkePublicKey;
 use crate::ohttp::OhttpKeys;
+use crate::time::{ParseTimeError, Time};
 use crate::uri::ShortId;
 
 /// Retrieve the receiver's public key from the URL fragment
@@ -60,8 +59,8 @@ fn ohttp(url: &Url) -> Result<OhttpKeys, ParseOhttpKeysParamError> {
 /// Set the ohttp parameter in the URL fragment
 fn set_ohttp(url: &mut Url, ohttp: &OhttpKeys) { set_param(url, &ohttp.to_string()) }
 
-/// Retrieve the exp parameter from the URL fragment
-fn exp(url: &Url) -> Result<std::time::SystemTime, ParseExpParamError> {
+/// Retrieve the EX parameter from the URL fragment
+fn expiration(url: &Url) -> Result<Time, ParseExpParamError> {
     let value = get_param(url, "EX1")
         .map_err(ParseExpParamError::InvalidFragment)?
         .ok_or(ParseExpParamError::MissingExp)?;
@@ -74,24 +73,14 @@ fn exp(url: &Url) -> Result<std::time::SystemTime, ParseExpParamError> {
         return Err(ParseExpParamError::InvalidFormat);
     }
 
-    u32::consensus_decode(&mut &bytes[..])
-        .map(|timestamp| std::time::UNIX_EPOCH + std::time::Duration::from_secs(timestamp as u64))
-        .map_err(ParseExpParamError::InvalidExp)
+    Time::from_bytes(&bytes).map_err(ParseExpParamError::InvalidExp)
 }
 
-/// Set the exp parameter in the URL fragment
-fn set_exp(url: &mut Url, exp: &std::time::SystemTime) {
-    let t = match exp.duration_since(std::time::UNIX_EPOCH) {
-        Ok(duration) => duration.as_secs().try_into().unwrap(), // TODO Result type instead of Option & unwrap
-        Err(_) => 0u32,
-    };
-
-    let mut buf = [0u8; 4];
-    t.consensus_encode(&mut &mut buf[..]).unwrap(); // TODO no unwrap
-
+/// Set the EX parameter in the URL fragment
+fn set_expiration(url: &mut Url, exp: &Time) {
     let ex_hrp: Hrp = Hrp::parse("EX").expect("parsing a valid HRP constant should never fail");
 
-    let exp_str = crate::bech32::nochecksum::encode(ex_hrp, &buf)
+    let exp_str = crate::bech32::nochecksum::encode(ex_hrp, &exp.to_bytes())
         .expect("encoding u32 timestamp should never fail");
 
     set_param(url, &exp_str)
@@ -101,7 +90,7 @@ fn set_exp(url: &mut Url, exp: &std::time::SystemTime) {
 pub struct PjParam {
     directory: Url,
     id: ShortId,
-    expiration: std::time::SystemTime,
+    expiration: Time,
     ohttp_keys: OhttpKeys,
     receiver_pubkey: HpkePublicKey,
 }
@@ -110,7 +99,7 @@ impl PjParam {
     pub(crate) fn new(
         directory: Url,
         id: ShortId,
-        expiration: std::time::SystemTime,
+        expiration: Time,
         ohttp_keys: OhttpKeys,
         receiver_pubkey: HpkePublicKey,
     ) -> Self {
@@ -137,7 +126,7 @@ impl PjParam {
 
         let rk = receiver_pubkey(&url).map_err(PjParseError::InvalidReceiverPubkey)?;
         let oh = ohttp(&url).map_err(PjParseError::InvalidOhttpKeys)?;
-        let ex = exp(&url).map_err(PjParseError::InvalidExp)?;
+        let ex = expiration(&url).map_err(PjParseError::InvalidExp)?;
 
         Ok(Self::new(url, id, ex, oh, rk))
     }
@@ -149,13 +138,13 @@ impl PjParam {
 
     pub(crate) fn ohttp_keys(&self) -> &OhttpKeys { &self.ohttp_keys }
 
-    pub(crate) fn expiration(&self) -> std::time::SystemTime { self.expiration }
+    pub(crate) fn expiration(&self) -> Time { self.expiration }
 
     pub(crate) fn endpoint(&self) -> Url {
         let mut endpoint = self.directory.clone().join(&self.id.to_string()).unwrap();
         set_receiver_pubkey(&mut endpoint, &self.receiver_pubkey);
         set_ohttp(&mut endpoint, &self.ohttp_keys);
-        set_exp(&mut endpoint, &self.expiration);
+        set_expiration(&mut endpoint, &self.expiration);
         endpoint
     }
 }
@@ -335,7 +324,7 @@ impl std::error::Error for ParseOhttpKeysParamError {
 pub(super) enum ParseExpParamError {
     MissingExp,
     InvalidFormat,
-    InvalidExp(bitcoin::consensus::encode::Error),
+    InvalidExp(ParseTimeError),
     InvalidFragment(ParseFragmentError),
 }
 
@@ -463,41 +452,53 @@ mod tests {
     fn test_exp_get_set() {
         let mut url = EXAMPLE_URL.clone();
 
-        let exp_time =
-            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1720547781);
-        set_exp(&mut url, &exp_time);
+        let exp_time = Time::try_from(
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1720547781),
+        )
+        .expect("invalid timestamp");
+
+        set_expiration(&mut url, &exp_time);
         assert_eq!(url.fragment(), Some("EX1C4UC6ES"));
 
-        assert_eq!(exp(&url).expect("Expiration has been set but is missing on get"), exp_time);
+        assert_eq!(
+            expiration(&url).expect("Expiration has been set but is missing on get"),
+            exp_time
+        );
     }
 
     #[test]
     fn test_errors_when_parsing_exp() {
         let missing_exp_url = EXAMPLE_URL.clone();
-        assert!(matches!(exp(&missing_exp_url), Err(ParseExpParamError::MissingExp)));
+        assert!(matches!(expiration(&missing_exp_url), Err(ParseExpParamError::MissingExp)));
 
         let invalid_fragment_exp_url =
             Url::parse("http://example.com?pj=https://test-payjoin-url#EX1invalid_bech_32")
                 .unwrap();
         assert!(matches!(
-            exp(&invalid_fragment_exp_url),
+            expiration(&invalid_fragment_exp_url),
             Err(ParseExpParamError::InvalidFragment(_))
         ));
 
         let invalid_bech32_exp_url =
             Url::parse("http://example.com?pj=https://test-payjoin-url#EX1INVALIDBECH32").unwrap();
-        assert!(matches!(exp(&invalid_bech32_exp_url), Err(ParseExpParamError::InvalidFormat)));
+        assert!(matches!(
+            expiration(&invalid_bech32_exp_url),
+            Err(ParseExpParamError::InvalidFormat)
+        ));
 
         // Since the HRP is everything to the left of the right-most separator, the invalid url in
         // this test would have it's HRP being parsed as EX101 instead of the expected EX1
         let invalid_hrp_exp_url =
             Url::parse("http://example.com?pj=https://test-payjoin-url#EX1010").unwrap();
-        assert!(matches!(exp(&invalid_hrp_exp_url), Err(ParseExpParamError::InvalidFormat)));
+        assert!(matches!(expiration(&invalid_hrp_exp_url), Err(ParseExpParamError::InvalidFormat)));
 
         // Not enough data to decode into a u32
         let invalid_timestamp_exp_url =
             Url::parse("http://example.com?pj=https://test-payjoin-url#EX10").unwrap();
-        assert!(matches!(exp(&invalid_timestamp_exp_url), Err(ParseExpParamError::InvalidExp(_))));
+        assert!(matches!(
+            expiration(&invalid_timestamp_exp_url),
+            Err(ParseExpParamError::InvalidExp(_))
+        ));
     }
 
     #[test]
@@ -603,7 +604,7 @@ mod tests {
 
         let mut endpoint = Url::parse(url).unwrap();
         assert!(ohttp(&endpoint).is_ok());
-        assert!(exp(&endpoint).is_ok());
+        assert!(expiration(&endpoint).is_ok());
 
         // Before setting the delimiter should be preserved
         assert_eq!(
@@ -611,9 +612,9 @@ mod tests {
             Some("EX1C4UC6ES+OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC+RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV")
         );
 
-        let exp = exp(&endpoint).unwrap();
+        let exp = expiration(&endpoint).unwrap();
         // Upon setting any value, the delimiter should be normalized to `-`
-        set_exp(&mut endpoint, &exp);
+        set_expiration(&mut endpoint, &exp);
         assert_eq!(
             endpoint.fragment(),
             Some("EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV")
@@ -626,14 +627,14 @@ mod tests {
                    #OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-EX1C4UC6ES";
         let mut endpoint = Url::parse(url_with_fragment).unwrap();
         assert!(ohttp(&endpoint).is_ok());
-        assert!(exp(&endpoint).is_ok());
+        assert!(expiration(&endpoint).is_ok());
 
         assert_eq!(
             endpoint.fragment(),
             Some("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-EX1C4UC6ES")
         );
         assert!(ohttp(&endpoint).is_ok());
-        assert!(exp(&endpoint).is_ok());
+        assert!(expiration(&endpoint).is_ok());
 
         assert_eq!(
             endpoint.fragment(),
@@ -641,8 +642,8 @@ mod tests {
         );
 
         // Upon setting any value, the order should be normalized to lexicographical
-        let exp = exp(&endpoint).unwrap();
-        set_exp(&mut endpoint, &exp);
+        let exp = expiration(&endpoint).unwrap();
+        set_expiration(&mut endpoint, &exp);
         assert_eq!(
             endpoint.fragment(),
             Some("EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")

@@ -279,7 +279,7 @@ mod integration {
                 // **********************
                 // Inside the Receiver:
                 let address = receiver.new_address()?;
-                // test session with expiry in the past
+                // test session with expiration in the past
                 let expired_receiver =
                     ReceiverBuilder::new(address, services.directory_url().as_str(), ohttp_keys)?
                         .with_expiration(Duration::from_secs(0))
@@ -463,7 +463,7 @@ mod integration {
                 // Inside the Receiver:
                 let address = receiver.new_address()?;
 
-                // test session with expiry in the future
+                // test session with expiration in the future
                 let session =
                     ReceiverBuilder::new(address, services.directory_url().as_str(), ohttp_keys)?
                         .build()

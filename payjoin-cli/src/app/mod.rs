@@ -55,15 +55,19 @@ pub trait App: Send + Sync {
     }
 }
 
-#[cfg(feature = "_manual-tls")]
-fn http_agent(config: &Config) -> Result<reqwest::Client> {
-    Ok(http_agent_builder(config.root_certificate.as_ref())?.build()?)
+fn http_agent(_config: &Config) -> Result<reqwest::Client> {
+    #[cfg(all(not(feature = "pki-https"), feature = "_manual-tls"))]
+    {
+        Ok(http_agent_builder(_config.root_certificate.as_ref())?.build()?)
+    }
+
+    #[cfg(feature = "pki-https")]
+    {
+        Ok(reqwest::Client::new())
+    }
 }
 
-#[cfg(not(feature = "_manual-tls"))]
-fn http_agent(_config: &Config) -> Result<reqwest::Client> { Ok(reqwest::Client::new()) }
-
-#[cfg(feature = "_manual-tls")]
+#[cfg(all(not(feature = "pki-https"), feature = "_manual-tls"))]
 fn http_agent_builder(
     root_cert_path: Option<&std::path::PathBuf>,
 ) -> Result<reqwest::ClientBuilder> {

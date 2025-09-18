@@ -78,7 +78,7 @@ async fn fetch_ohttp_keys(
             .set_selected_relay(selected_relay.clone());
 
         let ohttp_keys = {
-            #[cfg(feature = "_manual-tls")]
+            #[cfg(all(not(feature = "pki-https"), feature = "_manual-tls"))]
             {
                 if let Some(cert_path) = config.root_certificate.as_ref() {
                     let cert_der = std::fs::read(cert_path)?;
@@ -96,7 +96,7 @@ async fn fetch_ohttp_keys(
                     .await
                 }
             }
-            #[cfg(not(feature = "_manual-tls"))]
+            #[cfg(feature = "pki-https")]
             payjoin::io::fetch_ohttp_keys(selected_relay.as_str(), payjoin_directory.as_str()).await
         };
 

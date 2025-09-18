@@ -58,9 +58,10 @@ pub struct Config {
     pub bitcoind: BitcoindConfig,
     #[serde(skip)]
     pub version: Option<VersionConfig>,
-    #[cfg(feature = "_manual-tls")]
+    #[cfg(all(not(feature = "pki-https"), feature = "_manual-tls"))]
     pub root_certificate: Option<PathBuf>,
-    #[cfg(feature = "_manual-tls")]
+    #[cfg(all(not(feature = "pki-https"), feature = "_manual-tls"))]
+    #[allow(dead_code)]
     pub certificate_key: Option<PathBuf>,
 }
 
@@ -145,9 +146,9 @@ impl Config {
             max_fee_rate: built_config.get("max_fee_rate").ok(),
             bitcoind: built_config.get("bitcoind")?,
             version: None,
-            #[cfg(feature = "_manual-tls")]
+            #[cfg(all(not(feature = "pki-https"), feature = "_manual-tls"))]
             root_certificate: built_config.get("root_certificate").ok(),
-            #[cfg(feature = "_manual-tls")]
+            #[cfg(all(not(feature = "pki-https"), feature = "_manual-tls"))]
             certificate_key: built_config.get("certificate_key").ok(),
         };
 
@@ -289,7 +290,7 @@ fn add_v2_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
 
 /// Handles configuration overrides based on CLI subcommands
 fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
-    #[cfg(feature = "_manual-tls")]
+    #[cfg(all(not(feature = "pki-https"), feature = "_manual-tls"))]
     let config = {
         config
             .set_override_option(

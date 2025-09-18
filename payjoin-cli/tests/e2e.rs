@@ -1,4 +1,4 @@
-#[cfg(feature = "_manual-tls")]
+#[cfg(all(not(feature = "pki-https"), feature = "_manual-tls"))]
 mod e2e {
     use std::process::{ExitStatus, Stdio};
 
@@ -64,7 +64,7 @@ mod e2e {
         res
     }
 
-    #[cfg(feature = "v1")]
+    #[cfg(all(feature = "v1", feature = "_manual-tls"))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn send_receive_payjoin_v1() -> Result<(), BoxError> {
         use payjoin_test_utils::local_cert_key;
@@ -196,7 +196,7 @@ mod e2e {
         Ok(())
     }
 
-    #[cfg(feature = "v2")]
+    #[cfg(all(feature = "v2", feature = "_manual-tls"))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn send_receive_payjoin_v2() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use payjoin_test_utils::{init_tracing, TestServices};

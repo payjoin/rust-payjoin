@@ -23,7 +23,9 @@ use tokio::sync::watch;
 use super::config::Config;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
-use crate::app::{handle_interrupt, http_agent};
+use crate::app::handle_interrupt;
+#[cfg(any(feature = "_manual-tls", feature = "pki-https"))]
+use crate::app::http_agent;
 use crate::db::Database;
 
 struct Headers<'a>(&'a hyper::HeaderMap);
@@ -156,14 +158,14 @@ impl App {
 
         let app = self.clone();
 
-        #[cfg(feature = "_manual-tls")]
+        #[cfg(all(not(feature = "pki-https"), feature = "_manual-tls"))]
         let tls_acceptor = self.init_tls_acceptor()?;
         while let Ok((stream, _)) = listener.accept().await {
             let app = app.clone();
-            #[cfg(feature = "_manual-tls")]
+            #[cfg(all(not(feature = "pki-https"), feature = "_manual-tls"))]
             let tls_acceptor = tls_acceptor.clone();
             tokio::spawn(async move {
-                #[cfg(feature = "_manual-tls")]
+                #[cfg(all(not(feature = "pki-https"), feature = "_manual-tls"))]
                 let stream = match tls_acceptor.accept(stream).await {
                     Ok(tls_stream) => tls_stream,
                     Err(e) => {
@@ -183,7 +185,7 @@ impl App {
         Ok(())
     }
 
-    #[cfg(feature = "_manual-tls")]
+    #[cfg(all(not(feature = "pki-https"), feature = "_manual-tls"))]
     fn init_tls_acceptor(&self) -> Result<tokio_rustls::TlsAcceptor> {
         use std::sync::Arc;
 

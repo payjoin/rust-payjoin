@@ -19,8 +19,9 @@ path = "src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-default = ["v2"]
+default = ["v2", "_manual-tls"]
 native-certs = ["reqwest/rustls-tls-native-roots"]
+pki-https = []
 _manual-tls = ["rcgen", "reqwest/rustls-tls", "hyper-rustls", "payjoin/_manual-tls", "tokio-rustls"]
 v1 = ["payjoin/v1","hyper", "hyper-util", "http-body-util"]
 v2 = ["payjoin/v2", "payjoin/io"]

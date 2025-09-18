@@ -170,6 +170,32 @@ impl SessionHistory {
 
         initial_session_context
     }
+
+    // Helper method to query the current status of the session.
+    #[allow(dead_code)]
+    fn status(&self) -> SessionStatus {
+        if self.session_context().expiration.elapsed() {
+            return SessionStatus::Expired;
+        }
+        match self.events.last() {
+            Some(SessionEvent::Closed(outcome)) => match outcome {
+                SessionOutcome::Success => SessionStatus::Completed,
+                SessionOutcome::Failure | SessionOutcome::UserAbort => SessionStatus::Failed,
+            },
+            _ => SessionStatus::Active,
+        }
+    }
+}
+
+// Represents the status of a session that can be inferred from the information in the session
+// event log.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionStatus {
+    Active,
+    Expired,
+    Failed,
+    Completed,
 }
 
 /// Represents a piece of information that the receiver has obtained from the session
@@ -302,6 +328,7 @@ mod tests {
     struct SessionHistoryExpectedOutcome {
         psbt_with_fee_contributions: Option<bitcoin::Psbt>,
         fallback_tx: Option<bitcoin::Transaction>,
+        expected_status: SessionStatus,
     }
 
     struct SessionHistoryTest {
@@ -323,6 +350,7 @@ mod tests {
             test.expected_session_history.psbt_with_fee_contributions
         );
         assert_eq!(session_history.fallback_tx(), test.expected_session_history.fallback_tx);
+        assert_eq!(session_history.status(), test.expected_session_history.expected_status);
         Ok(())
     }
 
@@ -334,6 +362,7 @@ mod tests {
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
+                expected_status: SessionStatus::Active,
             },
             expected_receiver_state: ReceiveSession::Initialized(Receiver {
                 state: Initialized {},
@@ -354,6 +383,7 @@ mod tests {
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
+                expected_status: SessionStatus::Expired,
             },
             expected_receiver_state: ReceiveSession::TerminalFailure,
         };
@@ -378,6 +408,7 @@ mod tests {
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
+                expected_status: SessionStatus::Active,
             },
             expected_receiver_state: ReceiveSession::UncheckedOriginalPayload(Receiver {
                 state: UncheckedOriginalPayload { original },
@@ -404,6 +435,7 @@ mod tests {
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
+                expected_status: SessionStatus::Active,
             },
             expected_receiver_state: ReceiveSession::UncheckedOriginalPayload(Receiver {
                 state: UncheckedOriginalPayload { original },
@@ -438,6 +470,7 @@ mod tests {
             expected_session_history: SessionHistoryExpectedOutcome {
                 psbt_with_fee_contributions: None,
                 fallback_tx: Some(expected_fallback),
+                expected_status: SessionStatus::Active,
             },
             expected_receiver_state: ReceiveSession::MaybeInputsOwned(Receiver {
                 state: MaybeInputsOwned { original },
@@ -507,6 +540,7 @@ mod tests {
                     provisional_proposal.state.psbt_context.payjoin_psbt.clone(),
                 ),
                 fallback_tx: Some(expected_fallback),
+                expected_status: SessionStatus::Active,
             },
             expected_receiver_state: ReceiveSession::ProvisionalProposal(Receiver {
                 state: ProvisionalProposal {
@@ -576,6 +610,7 @@ mod tests {
             provisional_proposal.state.psbt_context.clone(),
         ));
         events.push(SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()));
+        events.push(SessionEvent::Closed(SessionOutcome::Success));
 
         let test = SessionHistoryTest {
             events,
@@ -584,6 +619,7 @@ mod tests {
                     provisional_proposal.state.psbt_context.payjoin_psbt.clone(),
                 ),
                 fallback_tx: Some(expected_fallback),
+                expected_status: SessionStatus::Completed,
             },
             expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {
                 state: PayjoinProposal { psbt: payjoin_proposal.psbt().clone() },

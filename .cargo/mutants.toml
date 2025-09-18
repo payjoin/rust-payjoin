@@ -23,6 +23,8 @@ exclude_re = [
     "replace > with >= in PsbtContext::check_fees",
     # payjoin/src/core/send/mod.rs
     "replace < with <= in PsbtContextBuilder::build_recommended", # clamping the fee contribution when the fee equals to the recommended fee does not do anything
+    # payjoin/src/core/receive/v2/mod.rs	 
+    "payjoin/src/core/receive/v2.mod.*replace \\* with [+/]$", # This targets mutations on the static TWENTY_FOUR_HOURS_DEFAULT_EXPIRATION that is not particularly useful to test for
 
     # TODO exclusions
     # payjoin/src/core/receive/v1/mod.rs

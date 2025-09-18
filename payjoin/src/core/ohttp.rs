@@ -60,6 +60,18 @@ pub enum DirectoryResponseError {
     UnexpectedStatusCode(http::StatusCode),
 }
 
+impl DirectoryResponseError {
+    pub(crate) fn is_fatal(&self) -> bool {
+        use DirectoryResponseError::*;
+
+        match self {
+            OhttpDecapsulation(_) => true,
+            InvalidSize(_) => false,
+            UnexpectedStatusCode(status_code) => status_code.is_client_error(),
+        }
+    }
+}
+
 impl fmt::Display for DirectoryResponseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use DirectoryResponseError::*;

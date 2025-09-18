@@ -44,8 +44,7 @@ use super::{
 use crate::error::{InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{
-    ohttp_encapsulate, process_get_res, process_post_res, DirectoryResponseError,
-    OhttpEncapsulationError, OhttpKeys,
+    ohttp_encapsulate, process_get_res, process_post_res, OhttpEncapsulationError, OhttpKeys,
 };
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
@@ -383,29 +382,13 @@ impl Receiver<Initialized> {
                 Error::Protocol(ref protocol_err) => match protocol_err {
                     ProtocolError::V2(session_error) => match session_error {
                         SessionError(InternalSessionError::DirectoryResponse(directory_error)) =>
-                            match directory_error {
-                                DirectoryResponseError::OhttpDecapsulation(_) =>
-                                    return MaybeFatalTransitionWithNoResults::fatal(
-                                        SessionEvent::SessionInvalid(
-                                            directory_error.to_string(),
-                                            None,
-                                        ),
-                                        e,
-                                    ),
-                                DirectoryResponseError::InvalidSize(_) =>
-                                    return MaybeFatalTransitionWithNoResults::transient(e),
-                                DirectoryResponseError::UnexpectedStatusCode(status_code) =>
-                                    if status_code.is_client_error() {
-                                        return MaybeFatalTransitionWithNoResults::fatal(
-                                            SessionEvent::SessionInvalid(
-                                                directory_error.to_string(),
-                                                None,
-                                            ),
-                                            e,
-                                        );
-                                    } else {
-                                        return MaybeFatalTransitionWithNoResults::transient(e);
-                                    },
+                            if directory_error.is_fatal() {
+                                return MaybeFatalTransitionWithNoResults::fatal(
+                                    SessionEvent::SessionInvalid(session_error.to_string(), None),
+                                    e,
+                                );
+                            } else {
+                                return MaybeFatalTransitionWithNoResults::transient(e);
                             },
                         _ =>
                             return MaybeFatalTransitionWithNoResults::fatal(
@@ -1094,26 +1077,17 @@ impl Receiver<PayjoinProposal> {
         match process_post_res(res, ohttp_context) {
             Ok(_) =>
                 MaybeSuccessTransition::success(SessionEvent::Closed(SessionOutcome::Success), ()),
-            Err(e) => match e {
-                DirectoryResponseError::OhttpDecapsulation(_) => MaybeSuccessTransition::fatal(
-                    SessionEvent::SessionInvalid(e.to_string(), None),
-                    InternalSessionError::DirectoryResponse(e).into(),
-                ),
-                DirectoryResponseError::InvalidSize(_) => MaybeSuccessTransition::transient(
-                    InternalSessionError::DirectoryResponse(e).into(),
-                ),
-                DirectoryResponseError::UnexpectedStatusCode(status_code) =>
-                    if status_code.is_client_error() {
-                        MaybeSuccessTransition::fatal(
-                            SessionEvent::SessionInvalid(e.to_string(), None),
-                            InternalSessionError::DirectoryResponse(e).into(),
-                        )
-                    } else {
-                        MaybeSuccessTransition::transient(
-                            InternalSessionError::DirectoryResponse(e).into(),
-                        )
-                    },
-            },
+            Err(e) =>
+                if e.is_fatal() {
+                    MaybeSuccessTransition::fatal(
+                        SessionEvent::SessionInvalid(e.to_string(), None),
+                        InternalSessionError::DirectoryResponse(e).into(),
+                    )
+                } else {
+                    MaybeSuccessTransition::transient(
+                        InternalSessionError::DirectoryResponse(e).into(),
+                    )
+                },
         }
     }
 }

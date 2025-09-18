@@ -4,7 +4,7 @@ use super::{ReceiveSession, SessionContext};
 use crate::error::{InternalReplayError, ReplayError};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
-use crate::receive::v2::{extract_err_req, InternalSessionError, SessionError};
+use crate::receive::v2::{extract_err_req, HasError, Receiver, SessionError};
 use crate::receive::{common, JsonReply, OriginalPayload, PsbtContext};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
@@ -45,18 +45,28 @@ where
     let ctx = history.session_context();
     if ctx.expiration.elapsed() {
         // Session has expired: close the session and persist a fatal error
-        let err = SessionError(InternalSessionError::Expired(ctx.expiration));
+        // let err = SessionError(InternalSessionError::Expired(ctx.expiration));
+        // FIXME: Expiry is not replyable and SessionError doesn't implement Into<JsonReply>
+        // but we need to store a JsonReply here for now.
+        let json_reply = JsonReply::new(crate::error_codes::ErrorCode::Unavailable, "expired");
+        let event = SessionEvent::TerminalFailure(json_reply.clone());
         persister
-            .save_event(SessionEvent::SessionInvalid(err.to_string(), None).into())
+            .save_event(event.clone().into())
             .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
         persister
             .close()
             .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
 
-        session_events.push(SessionEvent::SessionInvalid(err.to_string(), None));
+        session_events.push(event);
         let history = SessionHistory::new(session_events);
 
-        return Ok((ReceiveSession::TerminalFailure, history));
+        return Ok((
+            ReceiveSession::HasError(Receiver {
+                state: HasError { error: json_reply },
+                session_context: ctx,
+            }),
+            history,
+        ));
     }
 
     Ok((receiver, history))
@@ -117,9 +127,9 @@ impl SessionHistory {
     }
 
     /// Terminal error from the session if present
-    pub fn terminal_error(&self) -> Option<(String, Option<JsonReply>)> {
+    pub fn terminal_error(&self) -> Option<JsonReply> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::SessionInvalid(err_str, reply) => Some((err_str.clone(), reply.clone())),
+            SessionEvent::TerminalFailure(reply) => Some(reply.clone()),
             _ => None,
         })
     }
@@ -140,7 +150,7 @@ impl SessionHistory {
 
         let session_context = self.session_context();
         let json_reply = match self.terminal_error() {
-            Some((_, Some(json_reply))) => json_reply,
+            Some(json_reply) => json_reply,
             _ => return Ok(None),
         };
         let (req, ctx) = extract_err_req(&json_reply, ohttp_relay, &session_context)?;
@@ -172,15 +182,12 @@ impl SessionHistory {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 /// Represents a piece of information that the receiver has obtained from the session
 /// Each event can be used to transition the receiver state machine to a new state
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SessionEvent {
     Created(SessionContext),
-    UncheckedOriginalPayload {
-        original: OriginalPayload,
-        reply_key: Option<crate::HpkePublicKey>,
-    },
+    UncheckedOriginalPayload { original: OriginalPayload, reply_key: Option<crate::HpkePublicKey> },
     MaybeInputsOwned(),
     MaybeInputsSeen(),
     OutputsUnknown(),
@@ -189,11 +196,19 @@ pub enum SessionEvent {
     WantsFeeRange(common::WantsFeeRange),
     ProvisionalProposal(PsbtContext),
     PayjoinProposal(bitcoin::Psbt),
-    /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
-    /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
-    /// Reason being in some cases we still want to preserve the error b/c we can action on it. For now this is a terminal state and there is nothing to replay and is saved to be displayed.
-    /// b/c its a terminal state and there is nothing to replay. So serialization will be lossy and that is fine.
-    SessionInvalid(String, Option<JsonReply>),
+    TerminalFailure(JsonReply),
+    Closed(SessionOutcome),
+}
+
+/// Represents all possible outcomes for a closed Payjoin session
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SessionOutcome {
+    /// Payjoin completed successfully
+    Success,
+    /// Payjoin failed to complete
+    Failure,
+    /// Payjoin was aborted by the caller with the provided reason
+    Abort(String),
 }
 
 #[cfg(test)]
@@ -208,9 +223,10 @@ mod tests {
     use crate::receive::tests::original_from_test_vector;
     use crate::receive::v2::test::{mock_err, SHARED_CONTEXT};
     use crate::receive::v2::{
-        Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal, Receiver,
+        HasError, Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal, Receiver,
         UncheckedOriginalPayload,
     };
+    use crate::receive::{InternalPayloadError, PayloadError};
 
     fn unchecked_receiver_from_test_vector() -> Receiver<UncheckedOriginalPayload> {
         Receiver {
@@ -275,6 +291,7 @@ mod tests {
             SessionEvent::WantsFeeRange(wants_fee_range.state.inner.clone()),
             SessionEvent::ProvisionalProposal(provisional_proposal.state.psbt_context.clone()),
             SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()),
+            SessionEvent::TerminalFailure(mock_err()),
         ];
 
         for event in test_cases {
@@ -341,7 +358,12 @@ mod tests {
                 psbt_with_fee_contributions: None,
                 fallback_tx: None,
             },
-            expected_receiver_state: ReceiveSession::TerminalFailure,
+            expected_receiver_state: ReceiveSession::HasError(Receiver {
+                state: HasError {
+                    error: JsonReply::new(crate::error_codes::ErrorCode::Unavailable, "expired"),
+                },
+                session_context,
+            }),
         };
         // TODO: should check for the expired error message off the session history
         run_session_history_test(test)
@@ -580,6 +602,79 @@ mod tests {
     }
 
     #[test]
+    fn test_session_fatal_error() -> Result<(), BoxError> {
+        let persister = NoopSessionPersister::<SessionEvent>::default();
+        let session_context = SHARED_CONTEXT.clone();
+        let mut events = vec![];
+
+        let original = original_from_test_vector();
+        // Original PSBT is not broadcastable
+        let _unbroadcastable = unchecked_receiver_from_test_vector()
+            .check_broadcast_suitability(None, |_| Ok(false))
+            .save(&persister)
+            .expect_err("Unbroadcastable should error");
+        // NOTE: it would be good to assert against the internal error type but InternalPersistedError is private
+        let expected_error = PayloadError(InternalPayloadError::OriginalPsbtNotBroadcastable);
+        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
+
+        events.push(SessionEvent::Created(session_context.clone()));
+        events.push(SessionEvent::UncheckedOriginalPayload {
+            original: original.clone(),
+            reply_key: reply_key.clone(),
+        });
+        events.push(SessionEvent::TerminalFailure((&expected_error).into()));
+
+        let test = SessionHistoryTest {
+            events,
+            expected_session_history: SessionHistoryExpectedOutcome {
+                psbt_with_fee_contributions: None,
+                fallback_tx: None,
+            },
+            expected_receiver_state: ReceiveSession::HasError(Receiver {
+                state: HasError { error: (&expected_error).into() },
+                session_context: SessionContext { reply_key, ..session_context },
+            }),
+        };
+        run_session_history_test(test)
+    }
+
+    #[test]
+    fn test_session_transient_error() -> Result<(), BoxError> {
+        let persister = NoopSessionPersister::<SessionEvent>::default();
+        let session_context = SHARED_CONTEXT.clone();
+        let mut events = vec![];
+
+        let original = original_from_test_vector();
+        // Mock some implementation error
+        let _maybe_broadcastable = unchecked_receiver_from_test_vector()
+            .check_broadcast_suitability(None, |_| Err("mock error".into()))
+            .save(&persister)
+            .expect_err("Mock error should error");
+        // NOTE: it would be good to assert against the internal error type but InternalPersistedError is private
+
+        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
+
+        events.push(SessionEvent::Created(session_context.clone()));
+        events.push(SessionEvent::UncheckedOriginalPayload {
+            original: original.clone(),
+            reply_key: reply_key.clone(),
+        });
+
+        let test = SessionHistoryTest {
+            events,
+            expected_session_history: SessionHistoryExpectedOutcome {
+                psbt_with_fee_contributions: None,
+                fallback_tx: None,
+            },
+            expected_receiver_state: ReceiveSession::UncheckedOriginalPayload(Receiver {
+                state: UncheckedOriginalPayload { original },
+                session_context: SessionContext { reply_key, ..session_context },
+            }),
+        };
+        run_session_history_test(test)
+    }
+
+    #[test]
     fn test_session_history_uri() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
         let events = vec![SessionEvent::Created(session_context.clone())];
@@ -604,7 +699,7 @@ mod tests {
         let session_history = SessionHistory {
             events: vec![
                 SessionEvent::MaybeInputsOwned(),
-                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 
@@ -615,7 +710,7 @@ mod tests {
             events: vec![
                 SessionEvent::Created(SHARED_CONTEXT.clone()),
                 SessionEvent::MaybeInputsOwned(),
-                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 
@@ -637,7 +732,7 @@ mod tests {
                     original: proposal.clone(),
                     reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
                 },
-                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 
@@ -651,7 +746,7 @@ mod tests {
                     original: proposal.clone(),
                     reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
                 },
-                SessionEvent::SessionInvalid(mock_err.0, Some(mock_err.1)),
+                SessionEvent::TerminalFailure(mock_err.clone()),
             ],
         };
 

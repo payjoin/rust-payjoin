@@ -3,10 +3,9 @@ use std::str::FromStr;
 use anyhow::Result;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
-use axum::http::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post, put};
+use axum::routing::{get, post, };
 use axum::Router;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tower::ServiceBuilder;
@@ -68,6 +67,11 @@ impl AppState {
 
     pub fn main_router(self) -> Router {
         Router::new()
+            .route("/ohttp/.well-known/ohttp-gateway", post(handle_ohttp_gateway))
+            .route("/ohttp/.well-known/ohttp-gateway", get(handle_ohttp_gateway_get))
+            .route("/", post(handle_ohttp_gateway))
+            .route("/ohttp-keys", get(get_ohttp_keys))
+            .route("/{id}", get(post_fallback_v1))
             .route("/health", get(health_check))
             .route("/", get(handle_directory_home_path))
             .layer(ServiceBuilder::new().layer(CorsLayer::permissive()))
@@ -78,6 +82,65 @@ impl AppState {
         let router = self.main_router();
         axum::serve(listener, router).await?;
         Ok(())
+    }
+}
+
+async fn handle_ohttp_gateway(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<Response, HandlerError> {
+    let (bhttp_req, res_ctx) = state.ohttp.decapsulate(&body).map_err(|e| HandlerError::OhttpKeyRejection(e.into()))?;
+
+    let mut cursor = std::io::Cursor::new(bhttp_req);
+    let req = bhttp::Message::read_bhttp(&mut cursor).map_err(|e| HandlerError::BadRequest(e.into()))?;
+
+    let uri = Uri::builder().scheme(req.control().scheme().unwrap_or_default())
+                       .authority(req.control().authority().unwrap_or_default())
+                       .path_and_query(req.control().path().unwrap_or_default())
+                       .build()
+                       .map_err(|e| HandlerError::BadRequest(e.into()))?;
+
+    let body_content = req.content().to_vec();
+    let req_method  = std::str::from_utf8(req.control().method().unwrap_or_default())?;
+
+    let response = handle_v2_request(&state, &uri, req_method, Bytes::from(body_content)).await?;
+
+    let mut bhttp_res = bhttp::Message::response(bhttp::StatusCode::try_from(response.status().as_u16()).map_err(|e| HandlerError::InternalServerError(e.into()))?);
+
+    for (name,value ) in response.headers().iter() {
+        bhttp_res.put_header(name.as_str(), value.to_str().unwrap_or_default());
+    }
+
+    let (_,body) = response.into_parts();
+    let body_bytes =axum::body::to_bytes(body, usize::MAX).await.map_err(|e| HandlerError::InternalServerError(e.into()))?;
+
+    bhttp_res.write_content(&body_bytes);
+    let mut  bhttp_bytes =Vec::new();
+    bhttp_res.write_bhttp(bhttp::Mode::KnownLength,&mut bhttp_bytes).map_err(|e| HandlerError::InternalServerError(e.into()))?;
+
+    bhttp_bytes.resize(BHTTP_REQ_BYTES, 0);
+    let ohttp_res  = res_ctx.encapsulate(&bhttp_bytes).map_err(|e| HandlerError::InternalServerError(e.into()))?;
+    assert!(ohttp_res.len() == ENCAPSULATED_MESSAGE_BYTES,"Unexpect OHTTP response size");
+    Ok((StatusCode::OK,ohttp_res).into_response())
+
+    
+}
+
+async fn handle_v2_request(
+    state: &AppState,
+    uri: &Uri,
+    method: &str,
+    body: Bytes,
+) -> Result<Response, HandlerError> {
+    let path = uri.path();
+    let path_segments = path.split('/').collect::<Vec<&str>>();
+    debug!("path_segments: {:?}", path_segments);
+
+    match (method, path_segments.as_slice()) {
+        ("POST", &["", id]) => post_mailbox(state, id, body).await,
+        ("GET", &["", id]) => get_mailbox(state, id).await,
+        ("PUT", &["", id]) => put_payjoin_v1(state, id, body).await,
+        _ => Ok(StatusCode::NOT_FOUND.into_response()),
     }
 }
 
@@ -334,6 +397,11 @@ impl From<ShortIdError> for HandlerError {
         HandlerError::BadRequest(anyhow::anyhow!("mailbox ID must be 13 bech32 characters"))
     }
 }
+impl From<std::str::Utf8Error> for HandlerError {
+    fn from(e: std::str::Utf8Error) -> Self {
+        HandlerError::BadRequest(anyhow::anyhow!("Invalid UTF-8 in request method: {}", e))
+    }
+}
 
 pub async fn serve_metrics_tcp(
     service: AppState,
@@ -344,3 +412,6 @@ pub async fn serve_metrics_tcp(
     axum::serve(listener, router).await?;
     Ok(())
 }
+
+
+

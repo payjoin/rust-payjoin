@@ -46,7 +46,6 @@ pub fn init_tracing() {
 
 pub struct TestServices {
     cert: Certificate,
-    /// redis is an implicit dependency of the directory service
     directory: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
     ohttp_relay: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
     http_agent: Arc<Client>,

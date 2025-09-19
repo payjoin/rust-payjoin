@@ -28,7 +28,6 @@ hyper-rustls = { version = "0.27.7", default-features=false, features = ["webpki
 hyper-util = { version = "0.1.16", features = ["tokio"] }
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0"}
 payjoin = { version = "0.24.0", features = ["directory"], default-features = false }
-redis = { version = "0.32.5", features = ["aio", "tokio-comp"] }
 tokio = { version = "1.47.1", features = ["full"] }
 tokio-rustls = { version = "0.26.2", features = ["ring"], default-features = false, optional = true }
 tracing = "0.1.41"
@@ -37,6 +36,7 @@ prometheus = "0.13.4"
 clap = { version = "4.5.45", features = ["derive", "env"] }
 config = "0.15.14"
 serde = { version = "1.0.219", features = ["derive"] }
+rand = "0.8"
 
 [dev-dependencies]
 tempfile = "3.20.0"

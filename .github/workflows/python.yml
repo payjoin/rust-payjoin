@@ -39,16 +39,17 @@ jobs:
         run: bash ./scripts/generate_bindings.sh
 
       - name: "Build wheel"
-        run: python -m build --wheel
+        run: uv build
 
       - name: "Install wheel"
-        run: pip install ./dist/*.whl
+        run: uv pip install ./dist/*.whl
 
       - name: "Run tests"
         # Skip integration test on macOS due to Docker issues
         run: |
+          set -e
           if [[ "${{ matrix.os }}" = "macos-latest" ]]; then
-            python -m unittest test/test_payjoin_unit_test.py -v
+            uv run python -m unittest test/test_payjoin_unit_test.py -v
           else
-            python -m unittest -v
+            uv run python -m unittest -v
           fi

@@ -1,5 +1,6 @@
 use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::Result;
 use http_body_util::combinators::BoxBody;
@@ -12,7 +13,8 @@ use hyper_util::rt::TokioIo;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tracing::{debug, error, trace, warn};
 
-pub use crate::db::DbPool;
+pub use crate::db::files::Db as FilesDb;
+use crate::db::Db;
 pub mod key_config;
 pub use crate::key_config::*;
 use crate::metrics::Metrics;
@@ -27,7 +29,7 @@ const V1_REJECT_RES_JSON: &str =
     r#"{{"errorCode": "original-psbt-rejected ", "message": "Body is not a string"}}"#;
 const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message": "V2 receiver offline. V1 sends require synchronous communications."}}"#;
 
-mod db;
+pub(crate) mod db;
 
 pub mod cli;
 pub mod config;
@@ -54,30 +56,27 @@ fn init_tls_acceptor(cert_key: (Vec<u8>, Vec<u8>)) -> Result<tokio_rustls::TlsAc
 }
 
 #[derive(Clone)]
-pub struct Service {
-    pool: DbPool,
+pub struct Service<D: Db> {
+    db: D,
     ohttp: ohttp::Server,
     metrics: Metrics,
 }
 
-impl hyper::service::Service<Request<Incoming>> for Service {
+impl<D: Db> hyper::service::Service<Request<Incoming>> for Service<D> {
     type Response = Response<BoxBody<Bytes, hyper::Error>>;
     type Error = anyhow::Error;
     type Future =
         Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
-        let pool = self.pool.clone();
-        let ohttp = self.ohttp.clone();
-        let metrics = self.metrics.clone();
-        let this = Service::new(pool, ohttp, metrics);
+        let this = self.clone();
         Box::pin(async move { this.serve_request(req).await })
     }
 }
 
-impl Service {
-    pub fn new(pool: DbPool, ohttp: ohttp::Server, metrics: Metrics) -> Self {
-        Self { pool, ohttp, metrics }
+impl<D: Db> Service<D> {
+    pub fn new(db: D, ohttp: ohttp::Server, metrics: Metrics) -> Self {
+        Self { db, ohttp, metrics }
     }
 
     #[cfg(feature = "_manual-tls")]
@@ -252,7 +251,7 @@ impl Service {
             return Err(HandlerError::PayloadTooLarge);
         }
 
-        match self.pool.push_default(&id, req.into()).await {
+        match self.db.post_v2_payload(&id, req.into()).await {
             Ok(_) => Ok(none_response),
             Err(e) => Err(HandlerError::InternalServerError(e.into())),
         }
@@ -265,7 +264,7 @@ impl Service {
         trace!("get_mailbox");
         let id = ShortId::from_str(id)?;
         let timeout_response = Response::builder().status(StatusCode::ACCEPTED).body(empty())?;
-        handle_peek(self.pool.peek_default(&id).await, timeout_response)
+        handle_peek(self.db.wait_for_v2_payload(&id).await, timeout_response)
     }
     async fn put_payjoin_v1(
         &self,
@@ -285,7 +284,7 @@ impl Service {
             return Err(HandlerError::PayloadTooLarge);
         }
 
-        match self.pool.push_v1(&id, req.into()).await {
+        match self.db.post_v1_response(&id, req.into()).await {
             Ok(_) => Ok(ok_response),
             Err(e) => Err(HandlerError::BadRequest(e.into())),
         }
@@ -316,11 +315,10 @@ impl Service {
 
         let v2_compat_body = format!("{body_str}\n{query}");
         let id = ShortId::from_str(id)?;
-        self.pool
-            .push_default(&id, v2_compat_body.into())
-            .await
-            .map_err(|e| HandlerError::BadRequest(e.into()))?;
-        handle_peek(self.pool.peek_v1(&id).await, none_response)
+        handle_peek(
+            self.db.post_v1_request_and_wait_for_response(&id, v2_compat_body.into()).await,
+            none_response,
+        )
     }
 
     async fn handle_ohttp_gateway_get(
@@ -378,20 +376,45 @@ impl Service {
             }
         }
     }
+
+    pub async fn serve_metrics_tcp(
+        &self,
+        listener: tokio::net::TcpListener,
+    ) -> Result<(), BoxError> {
+        while let Ok((stream, _)) = listener.accept().await {
+            let io = TokioIo::new(stream);
+            let service = self.clone();
+            tokio::spawn(async move {
+                if let Err(err) =
+                    http1::Builder::new().serve_connection(io, service).with_upgrades().await
+                {
+                    error!("Error serving connection: {:?}", err);
+                }
+            });
+        }
+
+        Ok(())
+    }
 }
 
-fn handle_peek(
-    result: db::Result<Vec<u8>>,
+fn handle_peek<Error: db::SendableError>(
+    result: Result<Arc<Vec<u8>>, db::Error<Error>>,
     timeout_response: Response<BoxBody<Bytes, hyper::Error>>,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
     match result {
-        Ok(buffered_req) => Ok(Response::new(full(buffered_req))),
+        Ok(payload) => Ok(Response::new(full((*payload).clone()))), // TODO Bytes instead of Arc<Vec<u8>>
         Err(e) => match e {
-            db::Error::Redis(re) => {
-                error!("Redis error: {}", re);
+            db::Error::Operational(err) => {
+                error!("Storage error: {err}");
                 Err(HandlerError::InternalServerError(anyhow::Error::msg("Internal server error")))
             }
             db::Error::Timeout(_) => Ok(timeout_response),
+            db::Error::OverCapacity => Err(HandlerError::ServiceUnavailable(anyhow::Error::msg(
+                "mailbox storage at capacity",
+            ))),
+            db::Error::V1SenderUnavailable => Err(HandlerError::SenderGone(anyhow::Error::msg(
+                "Sender is unavailable try a new request",
+            ))),
         },
     }
 }
@@ -465,6 +488,8 @@ async fn handle_directory_home_path() -> Result<Response<BoxBody<Bytes, hyper::E
 enum HandlerError {
     PayloadTooLarge,
     InternalServerError(anyhow::Error),
+    ServiceUnavailable(anyhow::Error),
+    SenderGone(anyhow::Error),
     OhttpKeyRejection(anyhow::Error),
     BadRequest(anyhow::Error),
 }
@@ -477,6 +502,14 @@ impl HandlerError {
             HandlerError::InternalServerError(e) => {
                 error!("Internal server error: {}", e);
                 *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR
+            }
+            HandlerError::ServiceUnavailable(e) => {
+                error!("Service temporarily unavailable: {}", e);
+                *res.status_mut() = StatusCode::SERVICE_UNAVAILABLE
+            }
+            HandlerError::SenderGone(e) => {
+                error!("Sender gone: {}", e);
+                *res.status_mut() = StatusCode::GONE
             }
             HandlerError::OhttpKeyRejection(e) => {
                 const OHTTP_KEY_REJECTION_RES_JSON: &str = r#"{"type":"https://iana.org/assignments/http-problem-types#ohttp-key", "title": "key identifier unknown"}"#;
@@ -519,23 +552,4 @@ fn empty() -> BoxBody<Bytes, hyper::Error> {
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into()).map_err(|never| match never {}).boxed()
-}
-
-pub async fn serve_metrics_tcp(
-    service: Service,
-    listener: tokio::net::TcpListener,
-) -> Result<(), BoxError> {
-    while let Ok((stream, _)) = listener.accept().await {
-        let io = TokioIo::new(stream);
-        let service = service.clone();
-        tokio::spawn(async move {
-            if let Err(err) =
-                http1::Builder::new().serve_connection(io, service).with_upgrades().await
-            {
-                error!("Error serving connection: {:?}", err);
-            }
-        });
-    }
-
-    Ok(())
 }

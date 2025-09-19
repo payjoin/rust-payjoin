@@ -132,6 +132,8 @@ Congratulations! You've completed a version 2 payjoin, which can be used for che
 
 Config options can be passed from the command line, or manually edited in a `config.toml` file within the directory you run `payjoin-cli` from.
 
+You can persist command-line flags into a configuration file. If a config file exists in the current working directory it will be used; otherwise, one in the default directory is used. This behavior is enabled via the `--set-config` flag.
+
 See the
 [example.config.toml](https://github.com/payjoin/rust-payjoin/blob/fde867b93ede767c9a50913432a73782a94ef40b/payjoin-cli/example.config.toml)
 for inspiration.

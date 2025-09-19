@@ -848,12 +848,22 @@ impl Receiver<WantsInputs> {
     pub fn commit_inputs(self) -> NextStateTransition<SessionEvent, Receiver<WantsFeeRange>> {
         let inner = self.state.inner.clone().commit_inputs();
         NextStateTransition::success(
-            SessionEvent::WantsFeeRange(inner.clone()),
+            SessionEvent::WantsFeeRange(inner.receiver_inputs.clone()),
             Receiver { state: WantsFeeRange { inner }, session_context: self.session_context },
         )
     }
 
-    pub(crate) fn apply_wants_fee_range(self, inner: common::WantsFeeRange) -> ReceiveSession {
+    pub(crate) fn apply_wants_fee_range(
+        self,
+        contributed_inputs: Vec<InputPair>,
+    ) -> ReceiveSession {
+        let inner = common::WantsFeeRange {
+            original_psbt: self.state.inner.original_psbt.clone(),
+            payjoin_psbt: self.state.inner.payjoin_psbt.clone(),
+            params: self.state.inner.params.clone(),
+            change_vout: self.state.inner.change_vout,
+            receiver_inputs: contributed_inputs,
+        };
         let new_state =
             Receiver { state: WantsFeeRange { inner }, session_context: self.session_context };
         ReceiveSession::WantsFeeRange(new_state)

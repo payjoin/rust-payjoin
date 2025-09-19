@@ -5,7 +5,7 @@ use crate::error::{InternalReplayError, ReplayError};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
 use crate::receive::v2::{extract_err_req, InternalSessionError, SessionError};
-use crate::receive::{common, JsonReply, OriginalPayload, PsbtContext};
+use crate::receive::{common, InputPair, JsonReply, OriginalPayload, PsbtContext};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
 /// Replay a receiver event log to get the receiver in its current state [ReceiveSession]
@@ -186,7 +186,7 @@ pub enum SessionEvent {
     OutputsUnknown(),
     WantsOutputs(common::WantsOutputs),
     WantsInputs(common::WantsInputs),
-    WantsFeeRange(common::WantsFeeRange),
+    WantsFeeRange(Vec<InputPair>),
     ProvisionalProposal(PsbtContext),
     PayjoinProposal(bitcoin::Psbt),
     /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
@@ -272,7 +272,7 @@ mod tests {
             SessionEvent::OutputsUnknown(),
             SessionEvent::WantsOutputs(wants_outputs.state.inner.clone()),
             SessionEvent::WantsInputs(wants_inputs.state.inner.clone()),
-            SessionEvent::WantsFeeRange(wants_fee_range.state.inner.clone()),
+            SessionEvent::WantsFeeRange(wants_fee_range.state.inner.receiver_inputs.clone()),
             SessionEvent::ProvisionalProposal(provisional_proposal.state.psbt_context.clone()),
             SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()),
         ];
@@ -481,7 +481,8 @@ mod tests {
         events.push(SessionEvent::OutputsUnknown());
         events.push(SessionEvent::WantsOutputs(wants_outputs.state.inner.clone()));
         events.push(SessionEvent::WantsInputs(wants_inputs.state.inner.clone()));
-        events.push(SessionEvent::WantsFeeRange(wants_fee_range.state.inner.clone()));
+        events
+            .push(SessionEvent::WantsFeeRange(wants_fee_range.state.inner.receiver_inputs.clone()));
         events.push(SessionEvent::ProvisionalProposal(
             provisional_proposal.state.psbt_context.clone(),
         ));
@@ -557,7 +558,8 @@ mod tests {
         events.push(SessionEvent::OutputsUnknown());
         events.push(SessionEvent::WantsOutputs(wants_outputs.state.inner.clone()));
         events.push(SessionEvent::WantsInputs(wants_inputs.state.inner.clone()));
-        events.push(SessionEvent::WantsFeeRange(wants_fee_range.state.inner.clone()));
+        events
+            .push(SessionEvent::WantsFeeRange(wants_fee_range.state.inner.receiver_inputs.clone()));
         events.push(SessionEvent::ProvisionalProposal(
             provisional_proposal.state.psbt_context.clone(),
         ));

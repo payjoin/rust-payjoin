@@ -713,7 +713,7 @@ impl App {
         let (err_req, err_ctx) = session_history
             .extract_err_req(ohttp_relay.as_str())?
             .expect("If JsonReply is Some, then err_req and err_ctx should be Some");
-        let to_return = anyhow!("Replied with error: {}", e.to_json().to_string());
+        let to_return = anyhow!("Replied with error: {}", e.to_json());
 
         let err_response = match self.post_request(err_req).await {
             Ok(response) => response,

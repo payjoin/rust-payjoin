@@ -7,6 +7,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
+use axum_server::tls_rustls::RustlsConfig;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
@@ -35,24 +36,6 @@ pub mod metrics;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-#[cfg(feature = "_manual-tls")]
-fn init_tls_acceptor(cert_key: (Vec<u8>, Vec<u8>)) -> Result<tokio_rustls::TlsAcceptor> {
-    use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
-    use tokio_rustls::rustls::ServerConfig;
-    use tokio_rustls::TlsAcceptor;
-    let (cert, key) = cert_key;
-    let cert = CertificateDer::from(cert);
-    let key =
-        PrivateKeyDer::try_from(key).map_err(|e| anyhow::anyhow!("Could not parse key: {}", e))?;
-
-    let mut server_config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(vec![cert], key)
-        .map_err(|e| anyhow::anyhow!("TLS error: {}", e))?;
-    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
-    Ok(TlsAcceptor::from(std::sync::Arc::new(server_config)))
-}
-
 #[derive(Clone)]
 pub struct AppState {
     pool: DbPool,
@@ -67,11 +50,11 @@ impl AppState {
 
     pub fn main_router(self) -> Router {
         Router::new()
-            .route("/ohttp/.well-known/ohttp-gateway", post(handle_ohttp_gateway))
-            .route("/ohttp/.well-known/ohttp-gateway", get(handle_ohttp_gateway_get))
+            .route("/.well-known/ohttp-gateway", post(handle_ohttp_gateway))
+            .route("/.well-known/ohttp-gateway", get(handle_ohttp_gateway_get))
             .route("/", post(handle_ohttp_gateway))
             .route("/ohttp-keys", get(get_ohttp_keys))
-            .route("/{id}", get(post_fallback_v1))
+            .route("/{id}", post(post_fallback_v1))
             .route("/health", get(health_check))
             .route("/", get(handle_directory_home_path))
             .layer(ServiceBuilder::new().layer(CorsLayer::permissive()))
@@ -83,8 +66,24 @@ impl AppState {
         axum::serve(listener, router).await?;
         Ok(())
     }
-}
 
+    #[cfg(feature = "_manual-tls")]
+    pub async fn serve_tls(
+        self,
+        listener: tokio::net::TcpListener,
+        cert_key: (Vec<u8>, Vec<u8>),
+    ) -> Result<(), BoxError> {
+        let (cert, key) = cert_key;
+        let config = RustlsConfig::from_der(vec![cert], key).await?;
+
+        let router = self.main_router();
+        axum_server::from_tcp_rustls(listener.into_std()?, config)
+            .serve(router.into_make_service())
+            .await?;
+
+        Ok(())
+    }
+}
 async fn handle_ohttp_gateway(
     State(state): State<AppState>,
     body: Bytes,
@@ -132,7 +131,7 @@ async fn handle_ohttp_gateway(
     let ohttp_res = res_ctx
         .encapsulate(&bhttp_bytes)
         .map_err(|e| HandlerError::InternalServerError(e.into()))?;
-    assert!(ohttp_res.len() == ENCAPSULATED_MESSAGE_BYTES, "Unexpect OHTTP response size");
+    assert!(ohttp_res.len() == ENCAPSULATED_MESSAGE_BYTES, "Unexpected OHTTP response size");
     Ok((StatusCode::OK, ohttp_res).into_response())
 }
 
@@ -367,6 +366,8 @@ async fn handle_directory_home_path() -> Response {
 enum HandlerError {
     PayloadTooLarge,
     InternalServerError(anyhow::Error),
+    //ServiceUnavailable(anyhow::Error),
+    // SenderGone(anyhow::Error),
     OhttpKeyRejection(anyhow::Error),
     BadRequest(anyhow::Error),
 }
@@ -379,7 +380,16 @@ impl IntoResponse for HandlerError {
                 error!("Internal server error: {}", e);
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
-
+            /* *
+            HandlerError::ServiceUnavailable(e) => {
+                error!("Service unavailable: {}", e);
+                StatusCode::SERVICE_UNAVAILABLE.into_response()
+            }
+            HandlerError::SenderGone(e) => {
+                warn!("Sender gone: {}", e);
+                StatusCode::GONE.into_response()
+            }
+            */
             HandlerError::OhttpKeyRejection(e) => {
                 const OHTTP_KEY_REJECTION_RES_JSON: &str = r#"{"type":"https://iana.org/assignments/http-problem-types#ohttp-key", "title": "key identifier unknown"}"#;
                 warn!("Bad request: Key configuration rejected: {}", e);

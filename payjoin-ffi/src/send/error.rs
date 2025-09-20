@@ -117,13 +117,14 @@ impl From<ImplementationError> for SenderPersistedError {
 impl<S> From<payjoin::persist::PersistedError<send::v2::EncapsulationError, S>>
     for SenderPersistedError
 where
-    S: std::error::Error,
+    S: std::error::Error + Send + Sync + 'static,
 {
     fn from(err: payjoin::persist::PersistedError<send::v2::EncapsulationError, S>) -> Self {
-        if let Some(storage_err) = err.storage_error_ref() {
-            return SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                storage_err.to_string(),
-            )));
+        if err.storage_error_ref().is_some() {
+            if let Some(storage_err) = err.storage_error() {
+                return SenderPersistedError::from(ImplementationError::new(storage_err));
+            }
+            return SenderPersistedError::Unexpected;
         }
         if let Some(api_err) = err.api_error() {
             return SenderPersistedError::EncapsulationError(Arc::new(api_err.into()));
@@ -134,13 +135,14 @@ where
 
 impl<S> From<payjoin::persist::PersistedError<send::ResponseError, S>> for SenderPersistedError
 where
-    S: std::error::Error,
+    S: std::error::Error + Send + Sync + 'static,
 {
     fn from(err: payjoin::persist::PersistedError<send::ResponseError, S>) -> Self {
-        if let Some(storage_err) = err.storage_error_ref() {
-            return SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                storage_err.to_string(),
-            )));
+        if err.storage_error_ref().is_some() {
+            if let Some(storage_err) = err.storage_error() {
+                return SenderPersistedError::from(ImplementationError::new(storage_err));
+            }
+            return SenderPersistedError::Unexpected;
         }
         if let Some(api_err) = err.api_error() {
             return SenderPersistedError::ResponseError(api_err.into());
@@ -151,13 +153,14 @@ where
 
 impl<S> From<payjoin::persist::PersistedError<send::BuildSenderError, S>> for SenderPersistedError
 where
-    S: std::error::Error,
+    S: std::error::Error + Send + Sync + 'static,
 {
     fn from(err: payjoin::persist::PersistedError<send::BuildSenderError, S>) -> Self {
-        if let Some(storage_err) = err.storage_error_ref() {
-            return SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                storage_err.to_string(),
-            )));
+        if err.storage_error_ref().is_some() {
+            if let Some(storage_err) = err.storage_error() {
+                return SenderPersistedError::from(ImplementationError::new(storage_err));
+            }
+            return SenderPersistedError::Unexpected;
         }
         if let Some(api_err) = err.api_error() {
             return SenderPersistedError::BuildSenderError(Arc::new(api_err.into()));

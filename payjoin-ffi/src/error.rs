@@ -13,13 +13,6 @@ impl ImplementationError {
     }
 }
 
-impl From<String> for ImplementationError {
-    fn from(value: String) -> Self {
-        let error = Box::<dyn error::Error + Send + Sync>::from(value);
-        Self(payjoin::ImplementationError::from(error))
-    }
-}
-
 impl From<ImplementationError> for payjoin::ImplementationError {
     fn from(value: ImplementationError) -> Self { value.0 }
 }

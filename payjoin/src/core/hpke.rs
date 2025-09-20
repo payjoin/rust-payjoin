@@ -10,14 +10,18 @@ use hpke::kdf::HkdfSha256;
 use hpke::kem::SecpK256HkdfSha256;
 use hpke::rand_core::OsRng;
 use hpke::{Deserializable, OpModeR, OpModeS, Serializable};
+
 use serde::{Deserialize, Serialize};
+
+// Poly1305 tag size is 16 bytes. This is a standard constant across all poly1305 implementations.
+// The bitcoin-hpke crate doesn't re-export this constant, so we define it here.
+pub const POLY1305_TAG_SIZE: usize = 16;
 
 pub const PADDED_MESSAGE_BYTES: usize = 7168;
 pub const PADDED_PLAINTEXT_A_LENGTH: usize =
     PADDED_MESSAGE_BYTES - (ELLSWIFT_ENCODING_SIZE + PUBLIC_KEY_SIZE + POLY1305_TAG_SIZE);
 pub const PADDED_PLAINTEXT_B_LENGTH: usize =
     PADDED_MESSAGE_BYTES - (ELLSWIFT_ENCODING_SIZE + POLY1305_TAG_SIZE);
-pub const POLY1305_TAG_SIZE: usize = 16; // FIXME there is a U16 defined for poly1305, should bitcoin hpke re-export it?
 pub const INFO_A: &[u8; 8] = b"PjV2MsgA";
 pub const INFO_B: &[u8; 8] = b"PjV2MsgB";
 
@@ -289,7 +293,9 @@ impl From<secp256k1::Error> for HpkeError {
             // As of writing, this is the only relevant variant that could arise here.
             // This may need to be updated if relevant variants are added to secp256k1
             secp256k1::Error::InvalidPublicKey => Self::InvalidPublicKey,
-            _ => panic!("Unsupported variant of secp256k1::Error"),
+            // Map any unexpected variants to InvalidPublicKey to avoid panicking
+            // This ensures the application remains stable even if secp256k1 adds new error types
+            _ => Self::InvalidPublicKey,
         }
     }
 }
@@ -490,6 +496,19 @@ mod test {
                 max: PADDED_PLAINTEXT_B_LENGTH
             })
         );
+    }
+
+    #[test]
+    fn test_secp256k1_error_conversion() {
+        // Test that secp256k1::Error::InvalidPublicKey converts to HpkeError::InvalidPublicKey
+        let secp_error = secp256k1::Error::InvalidPublicKey;
+        let hpke_error: HpkeError = secp_error.into();
+        assert_eq!(hpke_error, HpkeError::InvalidPublicKey);
+        
+        // Test that any other secp256k1 error also converts to InvalidPublicKey (not panic)
+        // This ensures our fix prevents panics when secp256k1 adds new error variants
+        // Note: We can't easily test other variants without breaking changes to secp256k1,
+        // but the match statement ensures they map to InvalidPublicKey instead of panicking
     }
 
     /// Test that the encrypted payloads are uniform.

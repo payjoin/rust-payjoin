@@ -44,7 +44,8 @@ use super::{
 use crate::error::{InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{
-    ohttp_encapsulate, process_get_res, process_post_res, OhttpEncapsulationError, OhttpKeys,
+    ohttp_encapsulate, process_get_res, process_post_res, DirectoryResponseError,
+    OhttpEncapsulationError, OhttpKeys,
 };
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
@@ -372,11 +373,30 @@ impl Receiver<Initialized> {
         let current_state = self.clone();
         let proposal = match self.inner_process_res(body, context) {
             Ok(proposal) => proposal,
-            Err(e) =>
-                return MaybeFatalTransitionWithNoResults::fatal(
-                    SessionEvent::SessionInvalid(e.to_string(), None),
-                    e,
-                ),
+            Err(e) => match e {
+                // Implementation errors should be unreachable
+                Error::Implementation(_) => return MaybeFatalTransitionWithNoResults::transient(e),
+                Error::Protocol(ref protocol_err) => match protocol_err {
+                    ProtocolError::V2(session_error) => match session_error {
+                        SessionError(InternalSessionError::DirectoryResponse(directory_error)) =>
+                            match map_directory_response_to_event(directory_error) {
+                                Some(event) =>
+                                    return MaybeFatalTransitionWithNoResults::fatal(event, e),
+                                None => return MaybeFatalTransitionWithNoResults::transient(e),
+                            },
+                        _ =>
+                            return MaybeFatalTransitionWithNoResults::fatal(
+                                SessionEvent::SessionInvalid(session_error.to_string(), None),
+                                e,
+                            ),
+                    },
+                    _ =>
+                        return MaybeFatalTransitionWithNoResults::fatal(
+                            SessionEvent::SessionInvalid(protocol_err.to_string(), None),
+                            e,
+                        ),
+                },
+            },
         };
 
         if let Some((proposal, reply_key)) = proposal {
@@ -1046,13 +1066,30 @@ impl Receiver<PayjoinProposal> {
         self,
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
-    ) -> MaybeSuccessTransition<(), Error> {
-        match process_post_res(res, ohttp_context)
-            .map_err(|e| InternalSessionError::DirectoryResponse(e).into())
-        {
+    ) -> MaybeSuccessTransition<(), SessionEvent, Error> {
+        match process_post_res(res, ohttp_context) {
             Ok(_) => MaybeSuccessTransition::success(()),
-            Err(e) => MaybeSuccessTransition::transient(e),
+            Err(e) => match map_directory_response_to_event(&e) {
+                Some(event) => MaybeSuccessTransition::fatal(
+                    event,
+                    InternalSessionError::DirectoryResponse(e).into(),
+                ),
+                None => MaybeSuccessTransition::transient(
+                    InternalSessionError::DirectoryResponse(e).into(),
+                ),
+            },
         }
+    }
+}
+
+fn map_directory_response_to_event(error: &DirectoryResponseError) -> Option<SessionEvent> {
+    let error_msg = error.to_string();
+    match error {
+        DirectoryResponseError::OhttpDecapsulation(_) =>
+            Some(SessionEvent::SessionInvalid(error_msg, None)),
+        DirectoryResponseError::InvalidSize(_) => None,
+        DirectoryResponseError::UnexpectedStatusCode(status_code) =>
+            status_code.is_client_error().then_some(SessionEvent::SessionInvalid(error_msg, None)),
     }
 }
 
@@ -1454,5 +1491,39 @@ pub mod test {
             .unchecked_from_payload(&payload)
             .expect("unchecked_from_payload should parse valid v1 PSBT payload");
         assert_eq!(proposal.params.output_substitution, OutputSubstitution::Disabled);
+    }
+
+    #[test]
+    fn test_map_directory_response_to_event() {
+        let error = DirectoryResponseError::OhttpDecapsulation(OhttpEncapsulationError::Ohttp(
+            ohttp::Error::Internal,
+        ));
+        let event = map_directory_response_to_event(&error);
+        assert_eq!(
+            event,
+            Some(SessionEvent::SessionInvalid(
+                "OHTTP Decapsulation Error: an internal error occurred".to_string(),
+                None
+            ))
+        );
+
+        let error = DirectoryResponseError::InvalidSize(100);
+        let event = map_directory_response_to_event(&error);
+        assert_eq!(event, None);
+
+        let error =
+            DirectoryResponseError::UnexpectedStatusCode(http::StatusCode::INTERNAL_SERVER_ERROR);
+        let event = map_directory_response_to_event(&error);
+        assert_eq!(event, None);
+
+        let error = DirectoryResponseError::UnexpectedStatusCode(http::StatusCode::BAD_REQUEST);
+        let event = map_directory_response_to_event(&error);
+        assert_eq!(
+            event,
+            Some(SessionEvent::SessionInvalid(
+                "Unexpected status code: 400 Bad Request".to_string(),
+                None
+            ))
+        );
     }
 }

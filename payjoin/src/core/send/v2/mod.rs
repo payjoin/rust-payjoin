@@ -41,7 +41,7 @@ use super::error::BuildSenderError;
 use super::*;
 use crate::error::{InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
-use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
+use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res, DirectoryResponseError};
 use crate::persist::{
     MaybeFatalTransition, MaybeSuccessTransitionWithNoResults, NextStateTransition,
 };
@@ -323,12 +323,17 @@ impl Sender<WithReplyKey> {
     ) -> MaybeFatalTransition<SessionEvent, Sender<PollingForProposal>, EncapsulationError> {
         match process_post_res(response, post_ctx.ohttp_ctx) {
             Ok(()) => {}
-            Err(e) => {
-                return MaybeFatalTransition::fatal(
-                    SessionEvent::SessionInvalid(e.to_string()),
-                    InternalEncapsulationError::DirectoryResponse(e).into(),
-                );
-            }
+            Err(e) => match map_directory_response_to_event(&e) {
+                Some(event) =>
+                    return MaybeFatalTransition::fatal(
+                        event,
+                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                    ),
+                None =>
+                    return MaybeFatalTransition::transient(
+                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                    ),
+            },
         }
 
         let polling_for_proposal = PollingForProposal {
@@ -472,11 +477,17 @@ impl Sender<PollingForProposal> {
         let body = match process_get_res(response, ohttp_ctx) {
             Ok(Some(body)) => body,
             Ok(None) => return MaybeSuccessTransitionWithNoResults::no_results(self.clone()),
-            Err(e) =>
-                return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::SessionInvalid(e.to_string()),
-                    InternalEncapsulationError::DirectoryResponse(e).into(),
-                ),
+            Err(e) => match map_directory_response_to_event(&e) {
+                Some(event) =>
+                    return MaybeSuccessTransitionWithNoResults::fatal(
+                        event,
+                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                    ),
+                None =>
+                    return MaybeSuccessTransitionWithNoResults::transient(
+                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                    ),
+            },
         };
         let psbt = match decrypt_message_b(
             &body,
@@ -514,6 +525,17 @@ impl Sender<PollingForProposal> {
     }
 
     pub fn endpoint(&self) -> Url { self.pj_param.endpoint() }
+}
+
+fn map_directory_response_to_event(error: &DirectoryResponseError) -> Option<SessionEvent> {
+    let error_msg = error.to_string();
+    match error {
+        DirectoryResponseError::OhttpDecapsulation(_) =>
+            Some(SessionEvent::SessionInvalid(error_msg)),
+        DirectoryResponseError::InvalidSize(_) => None,
+        DirectoryResponseError::UnexpectedStatusCode(status_code) =>
+            status_code.is_client_error().then_some(SessionEvent::SessionInvalid(error_msg)),
+    }
 }
 
 #[cfg(test)]
@@ -661,5 +683,37 @@ mod test {
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
         assert_eq!(req_ctx.state.psbt_ctx.output_substitution, OutputSubstitution::Disabled);
+    }
+
+    #[test]
+    fn test_map_directory_response_to_event() {
+        let error = DirectoryResponseError::OhttpDecapsulation(
+            crate::ohttp::OhttpEncapsulationError::Ohttp(ohttp::Error::Internal),
+        );
+        let event = map_directory_response_to_event(&error);
+        assert_eq!(
+            event,
+            Some(SessionEvent::SessionInvalid(
+                "OHTTP Decapsulation Error: an internal error occurred".to_string(),
+            ))
+        );
+
+        let error = DirectoryResponseError::InvalidSize(100);
+        let event = map_directory_response_to_event(&error);
+        assert_eq!(event, None);
+
+        let error =
+            DirectoryResponseError::UnexpectedStatusCode(http::StatusCode::INTERNAL_SERVER_ERROR);
+        let event = map_directory_response_to_event(&error);
+        assert_eq!(event, None);
+
+        let error = DirectoryResponseError::UnexpectedStatusCode(http::StatusCode::BAD_REQUEST);
+        let event = map_directory_response_to_event(&error);
+        assert_eq!(
+            event,
+            Some(SessionEvent::SessionInvalid(
+                "Unexpected status code: 400 Bad Request".to_string(),
+            ))
+        );
     }
 }

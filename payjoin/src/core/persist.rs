@@ -13,7 +13,6 @@ impl<Event, SuccessValue, CurrentState, Err>
         MaybeSuccessTransitionWithNoResults(Err(Rejection::fatal(event, error)))
     }
 
-    #[allow(dead_code)]
     #[inline]
     pub(crate) fn transient(error: Err) -> Self {
         MaybeSuccessTransitionWithNoResults(Err(Rejection::transient(error)))
@@ -62,6 +61,11 @@ impl<Event, NextState, CurrentState, Err>
     #[inline]
     pub(crate) fn no_results(current_state: CurrentState) -> Self {
         MaybeFatalTransitionWithNoResults(Ok(AcceptOptionalTransition::NoResults(current_state)))
+    }
+
+    #[inline]
+    pub(crate) fn transient(error: Err) -> Self {
+        MaybeFatalTransitionWithNoResults(Err(Rejection::transient(error)))
     }
 
     #[inline]
@@ -151,11 +155,11 @@ impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err> {
 /// A transition that can result in the completion of a state machine or a transient error
 /// If success there are no events to save or a next state.
 /// Fatal errors cannot occur in this transition.
-pub struct MaybeSuccessTransition<SuccessValue, Err>(
-    Result<AcceptCompleted<SuccessValue>, RejectTransient<Err>>,
+pub struct MaybeSuccessTransition<SuccessValue, Event, Err>(
+    Result<AcceptCompleted<SuccessValue>, Rejection<Event, Err>>,
 );
 
-impl<SuccessValue, Err> MaybeSuccessTransition<SuccessValue, Err>
+impl<SuccessValue, Event, Err> MaybeSuccessTransition<SuccessValue, Event, Err>
 where
     Err: std::error::Error,
 {
@@ -166,7 +170,12 @@ where
 
     #[inline]
     pub(crate) fn transient(error: Err) -> Self {
-        MaybeSuccessTransition(Err(RejectTransient(error)))
+        MaybeSuccessTransition(Err(Rejection::transient(error)))
+    }
+
+    #[inline]
+    pub(crate) fn fatal(event: Event, error: Err) -> Self {
+        MaybeSuccessTransition(Err(Rejection::fatal(event, error)))
     }
 
     pub fn save<P>(
@@ -174,7 +183,7 @@ where
         persister: &P,
     ) -> Result<SuccessValue, PersistedError<Err, P::InternalStorageError>>
     where
-        P: SessionPersister,
+        P: SessionPersister<SessionEvent = Event>,
     {
         persister.save_maybe_success_transition(self)
     }
@@ -369,7 +378,7 @@ trait InternalSessionPersister: SessionPersister {
     /// Save a transition that can be a state transition or a transient error
     fn save_maybe_success_transition<SuccessValue, Err>(
         &self,
-        state_transition: MaybeSuccessTransition<SuccessValue, Err>,
+        state_transition: MaybeSuccessTransition<SuccessValue, Self::SessionEvent, Err>,
     ) -> Result<SuccessValue, PersistedError<Err, Self::InternalStorageError>>
     where
         Err: std::error::Error,
@@ -379,7 +388,10 @@ trait InternalSessionPersister: SessionPersister {
                 self.close().map_err(InternalPersistedError::Storage)?;
                 Ok(success_value)
             }
-            Err(RejectTransient(err)) => Err(InternalPersistedError::Transient(err).into()),
+            Err(Rejection::Transient(RejectTransient(err))) =>
+                Err(InternalPersistedError::Transient(err).into()),
+            Err(Rejection::Fatal(RejectFatal(event, err))) =>
+                Err(self.handle_fatal_reject(RejectFatal(event, err)).into()),
         }
     }
 
@@ -797,6 +809,22 @@ mod tests {
                 },
                 test: Box::new(move |persister| {
                     MaybeSuccessTransition::transient(InMemoryTestError {}).save(persister)
+                }),
+            },
+            // Fatal error
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![InMemoryTestEvent("error event".to_string())],
+                    is_closed: true,
+                    error: Some(InternalPersistedError::Fatal(InMemoryTestError {}).into()),
+                    success: None,
+                },
+                test: Box::new(move |persister| {
+                    MaybeSuccessTransition::fatal(
+                        InMemoryTestEvent("error event".to_string()),
+                        InMemoryTestError {},
+                    )
+                    .save(persister)
                 }),
             },
         ];

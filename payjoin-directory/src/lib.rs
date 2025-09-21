@@ -1,16 +1,17 @@
-use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::Result;
-use http_body_util::combinators::BoxBody;
-use http_body_util::{BodyExt, Empty, Full};
-use hyper::body::{Body, Bytes, Incoming};
-use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
-use hyper::server::conn::http1;
-use hyper::{Method, Request, Response, StatusCode, Uri};
-use hyper_util::rt::TokioIo;
+use axum::body::Bytes;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::Router;
+use axum_server::tls_rustls::RustlsConfig;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
+use tower::ServiceBuilder;
+use tower_http::cors::CorsLayer;
 use tracing::{debug, error, trace, warn};
 
 pub use crate::db::files::Db as FilesDb;
@@ -36,399 +37,264 @@ pub mod config;
 pub mod metrics;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
-
-#[cfg(feature = "_manual-tls")]
-fn init_tls_acceptor(cert_key: (Vec<u8>, Vec<u8>)) -> Result<tokio_rustls::TlsAcceptor> {
-    use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
-    use tokio_rustls::rustls::ServerConfig;
-    use tokio_rustls::TlsAcceptor;
-    let (cert, key) = cert_key;
-    let cert = CertificateDer::from(cert);
-    let key =
-        PrivateKeyDer::try_from(key).map_err(|e| anyhow::anyhow!("Could not parse key: {}", e))?;
-
-    let mut server_config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(vec![cert], key)
-        .map_err(|e| anyhow::anyhow!("TLS error: {}", e))?;
-    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
-    Ok(TlsAcceptor::from(std::sync::Arc::new(server_config)))
-}
-
 #[derive(Clone)]
-pub struct Service<D: Db> {
+pub struct AppState<D: Db> {
     db: D,
     ohttp: ohttp::Server,
     metrics: Metrics,
 }
 
-impl<D: Db> hyper::service::Service<Request<Incoming>> for Service<D> {
-    type Response = Response<BoxBody<Bytes, hyper::Error>>;
-    type Error = anyhow::Error;
-    type Future =
-        Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn call(&self, req: Request<Incoming>) -> Self::Future {
-        let this = self.clone();
-        Box::pin(async move { this.serve_request(req).await })
-    }
-}
-
-impl<D: Db> Service<D> {
+impl<D: Db> AppState<D> {
     pub fn new(db: D, ohttp: ohttp::Server, metrics: Metrics) -> Self {
         Self { db, ohttp, metrics }
+    }
+
+    pub fn main_router(self) -> Router {
+        Router::new()
+            .route("/.well-known/ohttp-gateway", post(handle_ohttp_gateway))
+            .route("/.well-known/ohttp-gateway", get(handle_ohttp_gateway_get))
+            .route("/", post(handle_ohttp_gateway))
+            .route("/ohttp-keys", get(get_ohttp_keys))
+            .route("/{id}", post(post_fallback_v1))
+            .route("/health", get(health_check))
+            .route("/", get(handle_directory_home_path))
+            .layer(ServiceBuilder::new().layer(CorsLayer::permissive()))
+            .with_state(self)
+    }
+
+    pub async fn serve_tcp(self, listener: tokio::net::TcpListener) -> Result<(), BoxError> {
+        let router = self.main_router();
+        axum::serve(listener, router).await?;
+        Ok(())
     }
 
     #[cfg(feature = "_manual-tls")]
     pub async fn serve_tls(
         self,
         listener: tokio::net::TcpListener,
-        tls_config: (Vec<u8>, Vec<u8>),
+        cert_key: (Vec<u8>, Vec<u8>),
     ) -> Result<(), BoxError> {
-        let tls_acceptor = init_tls_acceptor(tls_config)?;
-        // Spawn the connection handling loop in a separate task
+        let (cert, key) = cert_key;
+        let config = RustlsConfig::from_der(vec![cert], key).await?;
 
-        while let Ok((stream, _)) = listener.accept().await {
-            let tls_acceptor = tls_acceptor.clone();
-            let service = self.clone();
-            tokio::spawn(async move {
-                service.metrics.record_connection();
-                let tls_stream = match tls_acceptor.accept(stream).await {
-                    Ok(tls_stream) => tls_stream,
-                    Err(e) => {
-                        error!("TLS accept error: {}", e);
-                        return;
-                    }
-                };
-                if let Err(err) = http1::Builder::new()
-                    .serve_connection(TokioIo::new(tls_stream), service)
-                    .with_upgrades()
-                    .await
-                {
-                    error!("Error serving connection: {:?}", err);
-                }
-            });
-        }
-        Ok(())
-    }
-
-    pub async fn serve_tcp(self, listener: tokio::net::TcpListener) -> Result<(), BoxError> {
-        while let Ok((stream, _)) = listener.accept().await {
-            let io = TokioIo::new(stream);
-            let service = self.clone();
-            tokio::spawn(async move {
-                service.metrics.record_connection();
-                if let Err(err) =
-                    http1::Builder::new().serve_connection(io, service).with_upgrades().await
-                {
-                    error!("Error serving connection: {:?}", err);
-                }
-            });
-        }
-
-        Ok(())
-    }
-
-    async fn serve_request(
-        &self,
-        req: Request<Incoming>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
-        let path = req.uri().path().to_string();
-        let query = req.uri().query().unwrap_or_default().to_string();
-        let (parts, body) = req.into_parts();
-
-        let path_segments: Vec<&str> = path.split('/').collect();
-        debug!("Service::serve_request: {:?}", &path_segments);
-        let mut response = match (parts.method, path_segments.as_slice()) {
-            (Method::POST, ["", ".well-known", "ohttp-gateway"]) =>
-                self.handle_ohttp_gateway(body).await,
-            (Method::GET, ["", ".well-known", "ohttp-gateway"]) =>
-                self.handle_ohttp_gateway_get(&query).await,
-            (Method::POST, ["", ""]) => self.handle_ohttp_gateway(body).await,
-            (Method::GET, ["", "ohttp-keys"]) => self.get_ohttp_keys().await,
-            (Method::POST, ["", id]) => self.post_fallback_v1(id, query, body).await,
-            (Method::GET, ["", "health"]) => health_check().await,
-            (Method::GET, ["", ""]) => handle_directory_home_path().await,
-            (Method::GET, ["", "metrics"]) => Ok(self.handle_metrics().await),
-            _ => Ok(not_found()),
-        }
-        .unwrap_or_else(|e| e.to_response());
-
-        // Allow CORS for third-party access
-        response.headers_mut().insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
-
-        Ok(response)
-    }
-
-    async fn handle_ohttp_gateway(
-        &self,
-        body: Incoming,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-        // decapsulate
-        let ohttp_body =
-            body.collect().await.map_err(|e| HandlerError::BadRequest(e.into()))?.to_bytes();
-        let (bhttp_req, res_ctx) = self
-            .ohttp
-            .decapsulate(&ohttp_body)
-            .map_err(|e| HandlerError::OhttpKeyRejection(e.into()))?;
-        let mut cursor = std::io::Cursor::new(bhttp_req);
-        let req = bhttp::Message::read_bhttp(&mut cursor)
-            .map_err(|e| HandlerError::BadRequest(e.into()))?;
-        let uri = Uri::builder()
-            .scheme(req.control().scheme().unwrap_or_default())
-            .authority(req.control().authority().unwrap_or_default())
-            .path_and_query(req.control().path().unwrap_or_default())
-            .build()?;
-        let body = req.content().to_vec();
-        let mut http_req =
-            Request::builder().uri(uri).method(req.control().method().unwrap_or_default());
-        for header in req.header().fields() {
-            http_req = http_req.header(header.name(), header.value())
-        }
-        let request = http_req.body(full(body))?;
-
-        let response = self.handle_v2(request).await?;
-
-        let (parts, body) = response.into_parts();
-        let mut bhttp_res = bhttp::Message::response(
-            bhttp::StatusCode::try_from(parts.status.as_u16())
-                .map_err(|e| HandlerError::InternalServerError(e.into()))?,
-        );
-        for (name, value) in parts.headers.iter() {
-            bhttp_res.put_header(name.as_str(), value.to_str().unwrap_or_default());
-        }
-        let full_body = body
-            .collect()
-            .await
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?
-            .to_bytes();
-        bhttp_res.write_content(&full_body);
-        let mut bhttp_bytes = Vec::new();
-        bhttp_res
-            .write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_bytes)
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?;
-        bhttp_bytes.resize(BHTTP_REQ_BYTES, 0);
-        let ohttp_res = res_ctx
-            .encapsulate(&bhttp_bytes)
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?;
-        assert!(ohttp_res.len() == ENCAPSULATED_MESSAGE_BYTES, "Unexpected OHTTP response size");
-        Ok(Response::new(full(ohttp_res)))
-    }
-
-    async fn handle_v2(
-        &self,
-        req: Request<BoxBody<Bytes, hyper::Error>>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-        let path = req.uri().path().to_string();
-        let (parts, body) = req.into_parts();
-
-        let path_segments: Vec<&str> = path.split('/').collect();
-        debug!("handle_v2: {:?}", &path_segments);
-        match (parts.method, path_segments.as_slice()) {
-            (Method::POST, &["", id]) => self.post_mailbox(id, body).await,
-            (Method::GET, &["", id]) => self.get_mailbox(id).await,
-            (Method::PUT, &["", id]) => self.put_payjoin_v1(id, body).await,
-            _ => Ok(not_found()),
-        }
-    }
-
-    async fn post_mailbox(
-        &self,
-        id: &str,
-        body: BoxBody<Bytes, hyper::Error>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-        let none_response = Response::builder().status(StatusCode::OK).body(empty())?;
-        trace!("post_mailbox");
-
-        let id = ShortId::from_str(id)?;
-
-        let req = body
-            .collect()
-            .await
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?
-            .to_bytes();
-        if req.len() > V1_MAX_BUFFER_SIZE {
-            return Err(HandlerError::PayloadTooLarge);
-        }
-
-        match self.db.post_v2_payload(&id, req.into()).await {
-            Ok(_) => Ok(none_response),
-            Err(e) => Err(HandlerError::InternalServerError(e.into())),
-        }
-    }
-
-    async fn get_mailbox(
-        &self,
-        id: &str,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-        trace!("get_mailbox");
-        let id = ShortId::from_str(id)?;
-        let timeout_response = Response::builder().status(StatusCode::ACCEPTED).body(empty())?;
-        handle_peek(self.db.wait_for_v2_payload(&id).await, timeout_response)
-    }
-    async fn put_payjoin_v1(
-        &self,
-        id: &str,
-        body: BoxBody<Bytes, hyper::Error>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-        trace!("Put_payjoin_v1");
-        let ok_response = Response::builder().status(StatusCode::OK).body(empty())?;
-
-        let id = ShortId::from_str(id)?;
-        let req = body
-            .collect()
-            .await
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?
-            .to_bytes();
-        if req.len() > V1_MAX_BUFFER_SIZE {
-            return Err(HandlerError::PayloadTooLarge);
-        }
-
-        match self.db.post_v1_response(&id, req.into()).await {
-            Ok(_) => Ok(ok_response),
-            Err(e) => Err(HandlerError::BadRequest(e.into())),
-        }
-    }
-
-    async fn post_fallback_v1(
-        &self,
-        id: &str,
-        query: String,
-        body: impl Body,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-        trace!("Post fallback v1");
-        let none_response = Response::builder()
-            .status(StatusCode::SERVICE_UNAVAILABLE)
-            .body(full(V1_UNAVAILABLE_RES_JSON))?;
-        let bad_request_body_res =
-            Response::builder().status(StatusCode::BAD_REQUEST).body(full(V1_REJECT_RES_JSON))?;
-
-        let body_bytes = match body.collect().await {
-            Ok(bytes) => bytes.to_bytes(),
-            Err(_) => return Ok(bad_request_body_res),
-        };
-
-        let body_str = match String::from_utf8(body_bytes.to_vec()) {
-            Ok(body_str) => body_str,
-            Err(_) => return Ok(bad_request_body_res),
-        };
-
-        let v2_compat_body = format!("{body_str}\n{query}");
-        let id = ShortId::from_str(id)?;
-        handle_peek(
-            self.db.post_v1_request_and_wait_for_response(&id, v2_compat_body.into()).await,
-            none_response,
-        )
-    }
-
-    async fn handle_ohttp_gateway_get(
-        &self,
-        query: &str,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-        match query {
-            "allowed_purposes" => Ok(self.get_ohttp_allowed_purposes().await),
-            _ => self.get_ohttp_keys().await,
-        }
-    }
-
-    async fn get_ohttp_keys(&self) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-        let ohttp_keys = self
-            .ohttp
-            .config()
-            .encode()
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?;
-        let mut res = Response::new(full(ohttp_keys));
-        res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/ohttp-keys"));
-        Ok(res)
-    }
-
-    async fn get_ohttp_allowed_purposes(&self) -> Response<BoxBody<Bytes, hyper::Error>> {
-        // Encode the magic string in the same format as a TLS ALPN protocol list (a
-        // U16BE length encoded list of U8 length encoded strings).
-        //
-        // The string is just "BIP77" followed by a UUID, that signals to relays
-        // that this OHTTP gateway will accept any requests associated with this
-        // purpose.
-        let mut res = Response::new(full(Bytes::from_static(
-            b"\x00\x01\x2aBIP77 454403bb-9f7b-4385-b31f-acd2dae20b7e",
-        )));
-
-        res.headers_mut()
-            .insert(CONTENT_TYPE, HeaderValue::from_static("application/x-ohttp-allowed-purposes"));
-
-        res
-    }
-    async fn handle_metrics(&self) -> Response<BoxBody<Bytes, hyper::Error>> {
-        match self.metrics.generate_metrics() {
-            Ok(metrics_data) => {
-                let mut response = Response::new(full(metrics_data));
-                response.headers_mut().insert(
-                    CONTENT_TYPE,
-                    HeaderValue::from_static("text/plain; version=0.0.4; charset=utf-8"),
-                );
-                response
-            }
-            Err(e) => {
-                error!("failed to generate metrics: {}", e);
-                let mut response = Response::new(full("Error generating metrics"));
-                *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-                response
-            }
-        }
-    }
-
-    pub async fn serve_metrics_tcp(
-        &self,
-        listener: tokio::net::TcpListener,
-    ) -> Result<(), BoxError> {
-        while let Ok((stream, _)) = listener.accept().await {
-            let io = TokioIo::new(stream);
-            let service = self.clone();
-            tokio::spawn(async move {
-                if let Err(err) =
-                    http1::Builder::new().serve_connection(io, service).with_upgrades().await
-                {
-                    error!("Error serving connection: {:?}", err);
-                }
-            });
-        }
+        let router = self.main_router();
+        axum_server::from_tcp_rustls(listener.into_std()?, config)
+            .serve(router.into_make_service())
+            .await?;
 
         Ok(())
     }
 }
+async fn handle_ohttp_gateway<D: Db>(
+    State(state): State<AppState<D>>,
+    body: Bytes,
+) -> Result<Response, HandlerError> {
+    let (bhttp_req, res_ctx) =
+        state.ohttp.decapsulate(&body).map_err(|e| HandlerError::OhttpKeyRejection(e.into()))?;
 
-fn handle_peek<Error: db::SendableError>(
-    result: Result<Arc<Vec<u8>>, db::Error<Error>>,
-    timeout_response: Response<BoxBody<Bytes, hyper::Error>>,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-    match result {
-        Ok(payload) => Ok(Response::new(full((*payload).clone()))), // TODO Bytes instead of Arc<Vec<u8>>
-        Err(e) => match e {
-            db::Error::Operational(err) => {
-                error!("Storage error: {err}");
-                Err(HandlerError::InternalServerError(anyhow::Error::msg("Internal server error")))
-            }
-            db::Error::Timeout(_) => Ok(timeout_response),
-            db::Error::OverCapacity => Err(HandlerError::ServiceUnavailable(anyhow::Error::msg(
-                "mailbox storage at capacity",
-            ))),
-            db::Error::V1SenderUnavailable => Err(HandlerError::SenderGone(anyhow::Error::msg(
-                "Sender is unavailable try a new request",
-            ))),
-        },
+    let mut cursor = std::io::Cursor::new(bhttp_req);
+    let req =
+        bhttp::Message::read_bhttp(&mut cursor).map_err(|e| HandlerError::BadRequest(e.into()))?;
+
+    let uri = Uri::builder()
+        .scheme(req.control().scheme().unwrap_or_default())
+        .authority(req.control().authority().unwrap_or_default())
+        .path_and_query(req.control().path().unwrap_or_default())
+        .build()
+        .map_err(|e| HandlerError::BadRequest(e.into()))?;
+
+    let body_content = req.content().to_vec();
+    let req_method = std::str::from_utf8(req.control().method().unwrap_or_default())?;
+
+    let response = handle_v2_request(&state, &uri, req_method, Bytes::from(body_content)).await?;
+
+    let mut bhttp_res = bhttp::Message::response(
+        bhttp::StatusCode::try_from(response.status().as_u16())
+            .map_err(|e| HandlerError::InternalServerError(e.into()))?,
+    );
+
+    for (name, value) in response.headers().iter() {
+        bhttp_res.put_header(name.as_str(), value.to_str().unwrap_or_default());
+    }
+
+    let (_, body) = response.into_parts();
+    let body_bytes = axum::body::to_bytes(body, usize::MAX)
+        .await
+        .map_err(|e| HandlerError::InternalServerError(e.into()))?;
+
+    bhttp_res.write_content(&body_bytes);
+    let mut bhttp_bytes = Vec::new();
+    bhttp_res
+        .write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_bytes)
+        .map_err(|e| HandlerError::InternalServerError(e.into()))?;
+
+    bhttp_bytes.resize(BHTTP_REQ_BYTES, 0);
+    let ohttp_res = res_ctx
+        .encapsulate(&bhttp_bytes)
+        .map_err(|e| HandlerError::InternalServerError(e.into()))?;
+    assert!(ohttp_res.len() == ENCAPSULATED_MESSAGE_BYTES, "Unexpected OHTTP response size");
+    Ok((StatusCode::OK, ohttp_res).into_response())
+}
+
+async fn handle_v2_request<D: Db>(
+    state: &AppState<D>,
+    uri: &Uri,
+    method: &str,
+    body: Bytes,
+) -> Result<Response, HandlerError> {
+    let path = uri.path();
+    let path_segments = path.split('/').collect::<Vec<&str>>();
+    debug!("path_segments: {:?}", path_segments);
+
+    match (method, path_segments.as_slice()) {
+        ("POST", &["", id]) => post_mailbox(state, id, body).await,
+        ("GET", &["", id]) => get_mailbox(state, id).await,
+        ("PUT", &["", id]) => put_payjoin_v1(state, id, body).await,
+        _ => Ok(StatusCode::NOT_FOUND.into_response()),
     }
 }
 
-async fn health_check() -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-    Ok(Response::new(empty()))
+async fn get_mailbox<D: Db>(
+    state: &AppState<D>,
+    mailbox_id: &str,
+) -> Result<Response, HandlerError> {
+    trace!("get_mailbox");
+    let mailbox_id = ShortId::from_str(mailbox_id)?;
+
+    handle_peek(
+        state.db.wait_for_v2_payload(&mailbox_id).await,
+        StatusCode::ACCEPTED.into_response(),
+    )
 }
 
-async fn handle_directory_home_path() -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError>
-{
-    let mut res = Response::new(empty());
-    *res.status_mut() = StatusCode::OK;
-    res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/html"));
+async fn post_mailbox<D: Db>(
+    state: &AppState<D>,
+    mailbox_id: &str,
+    body: Bytes,
+) -> Result<Response, HandlerError> {
+    let none_response = StatusCode::OK.into_response();
+    trace!("post_mailbox");
 
+    let mailbox_id = ShortId::from_str(mailbox_id)?;
+
+    if body.len() > V1_MAX_BUFFER_SIZE {
+        return Err(HandlerError::PayloadTooLarge);
+    }
+
+    match state.db.post_v2_payload(&mailbox_id, body.to_vec()).await {
+        Ok(_) => Ok(none_response),
+        Err(e) => Err(HandlerError::InternalServerError(e.into())),
+    }
+}
+
+async fn put_payjoin_v1<D: Db>(
+    state: &AppState<D>,
+    mailbox_id: &str,
+    body: Bytes,
+) -> Result<Response, HandlerError> {
+    trace!("put_payjoin_v1");
+    let none_response = StatusCode::OK.into_response();
+
+    let mailbox_id = ShortId::from_str(mailbox_id)?;
+
+    if body.len() > V1_MAX_BUFFER_SIZE {
+        return Err(HandlerError::PayloadTooLarge);
+    }
+
+    match state.db.post_v1_response(&mailbox_id, body.to_vec()).await {
+        Ok(_) => Ok(none_response),
+        Err(e) => Err(HandlerError::InternalServerError(e.into())),
+    }
+}
+
+async fn post_fallback_v1<D: Db>(
+    State(state): State<AppState<D>>,
+    Path(mailbox_id): Path<String>,
+    uri: Uri,
+    body: Bytes,
+) -> Result<Response, HandlerError> {
+    trace!("post_fallback_v1");
+
+    let none_response = (StatusCode::SERVICE_UNAVAILABLE, V1_UNAVAILABLE_RES_JSON);
+    let bad_request_body_res = (StatusCode::BAD_REQUEST, V1_REJECT_RES_JSON);
+
+    let body_str = match String::from_utf8(body.to_vec()) {
+        Ok(body_str) => body_str,
+        Err(_) => return Ok(bad_request_body_res.into_response()),
+    };
+
+    let query = uri.query().unwrap_or_default();
+
+    let v2_compact_body = format!("{body_str}\n{query}");
+    let id = ShortId::from_str(&mailbox_id)?;
+
+    handle_peek(
+        state
+            .db
+            .post_v1_request_and_wait_for_response(&id, v2_compact_body.clone().into_bytes())
+            .await,
+        none_response.into_response(),
+    )
+}
+async fn get_ohttp_keys<D: Db>(State(state): State<AppState<D>>) -> Result<Response, HandlerError> {
+    get_ohttp_keys_func(&state).await
+}
+
+// Since only routers can inject state , only handlers that are called by the router can access the state
+// This is both called  by router and in another handler . So we need to pass the state as a parameter to the handler
+async fn get_ohttp_keys_func<D: Db>(state: &AppState<D>) -> Result<Response, HandlerError> {
+    let ohttp_keys =
+        state.ohttp.config().encode().map_err(|e| HandlerError::InternalServerError(e.into()))?;
+
+    let mut headers = HeaderMap::new();
+    headers.insert("content-type", HeaderValue::from_static("application/ohttp-keys"));
+    Ok((StatusCode::OK, headers, ohttp_keys).into_response())
+}
+
+async fn get_ohttp_allowed_purposes() -> Response {
+    // Encode the magic string in the same format as a TLS ALPN protocol list (a
+    // U16BE length encoded list of U8 length encoded strings).
+    //
+    // The string is just "BIP77" followed by a UUID, that signals to relays
+    // that this OHTTP gateway will accept any requests associated with this
+    // purpose.
+    let body = Bytes::from_static(b"\x00\x01\x2aBIP77 454403bb-9f7b-4385-b31f-acd2dae20b7e");
+    let mut headers = HeaderMap::new();
+    headers
+        .insert("content-type", HeaderValue::from_static("application/x-ohttp-allowed-purposes"));
+    (StatusCode::OK, headers, body).into_response()
+}
+
+async fn handle_ohttp_gateway_get<D: Db>(
+    State(state): State<AppState<D>>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, HandlerError> {
+    match params.get("allowed_purposes") {
+        Some(_) => Ok(get_ohttp_allowed_purposes().await),
+        None => get_ohttp_keys_func(&state).await,
+    }
+}
+
+async fn handle_metrics<D: Db>(State(state): State<AppState<D>>) -> Response {
+    match state.metrics.generate_metrics() {
+        Ok(metrics_data) => {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "content-type",
+                HeaderValue::from_static("text/plain; version=0.0.4; charset=utf-8"),
+            );
+            (StatusCode::OK, headers, metrics_data).into_response()
+        }
+        Err(e) => {
+            error!("failed to generate metrics: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Error generating metrics").into_response()
+        }
+    }
+}
+
+async fn health_check() -> Response { StatusCode::OK.into_response() }
+
+async fn handle_directory_home_path() -> Response {
     let html = r#"
 <!DOCTYPE html>
 <html lang="en">
@@ -480,8 +346,9 @@ async fn handle_directory_home_path() -> Result<Response<BoxBody<Bytes, hyper::E
 </html>
 "#;
 
-    *res.body_mut() = full(html);
-    Ok(res)
+    let mut headers = HeaderMap::new();
+    headers.insert("content-type", HeaderValue::from_static("text/html"));
+    (StatusCode::OK, headers, html).into_response()
 }
 
 #[derive(Debug)]
@@ -494,44 +361,44 @@ enum HandlerError {
     BadRequest(anyhow::Error),
 }
 
-impl HandlerError {
-    fn to_response(&self) -> Response<BoxBody<Bytes, hyper::Error>> {
-        let mut res = Response::new(empty());
+impl IntoResponse for HandlerError {
+    fn into_response(self) -> Response {
         match self {
-            HandlerError::PayloadTooLarge => *res.status_mut() = StatusCode::PAYLOAD_TOO_LARGE,
+            HandlerError::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE.into_response(),
             HandlerError::InternalServerError(e) => {
                 error!("Internal server error: {}", e);
-                *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
+
             HandlerError::ServiceUnavailable(e) => {
-                error!("Service temporarily unavailable: {}", e);
-                *res.status_mut() = StatusCode::SERVICE_UNAVAILABLE
+                error!("Service unavailable: {}", e);
+                StatusCode::SERVICE_UNAVAILABLE.into_response()
             }
             HandlerError::SenderGone(e) => {
-                error!("Sender gone: {}", e);
-                *res.status_mut() = StatusCode::GONE
+                warn!("Sender gone: {}", e);
+                StatusCode::GONE.into_response()
             }
+
             HandlerError::OhttpKeyRejection(e) => {
                 const OHTTP_KEY_REJECTION_RES_JSON: &str = r#"{"type":"https://iana.org/assignments/http-problem-types#ohttp-key", "title": "key identifier unknown"}"#;
-
                 warn!("Bad request: Key configuration rejected: {}", e);
-                *res.status_mut() = StatusCode::BAD_REQUEST;
-                res.headers_mut()
-                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                *res.body_mut() = full(OHTTP_KEY_REJECTION_RES_JSON);
+
+                let mut headers = HeaderMap::new();
+                headers
+                    .insert("content-type", HeaderValue::from_static("application/problem+json"));
+                (StatusCode::BAD_REQUEST, headers, OHTTP_KEY_REJECTION_RES_JSON).into_response()
             }
+
             HandlerError::BadRequest(e) => {
                 warn!("Bad request: {}", e);
-                *res.status_mut() = StatusCode::BAD_REQUEST
+                StatusCode::BAD_REQUEST.into_response()
             }
-        };
-
-        res
+        }
     }
 }
 
-impl From<hyper::http::Error> for HandlerError {
-    fn from(e: hyper::http::Error) -> Self { HandlerError::InternalServerError(e.into()) }
+impl From<axum::http::Error> for HandlerError {
+    fn from(e: axum::http::Error) -> Self { HandlerError::InternalServerError(e.into()) }
 }
 
 impl From<ShortIdError> for HandlerError {
@@ -539,17 +406,43 @@ impl From<ShortIdError> for HandlerError {
         HandlerError::BadRequest(anyhow::anyhow!("mailbox ID must be 13 bech32 characters"))
     }
 }
-
-fn not_found() -> Response<BoxBody<Bytes, hyper::Error>> {
-    let mut res = Response::default();
-    *res.status_mut() = StatusCode::NOT_FOUND;
-    res
+impl From<std::str::Utf8Error> for HandlerError {
+    fn from(e: std::str::Utf8Error) -> Self {
+        HandlerError::BadRequest(anyhow::anyhow!("Invalid UTF-8 in request method: {}", e))
+    }
 }
 
-fn empty() -> BoxBody<Bytes, hyper::Error> {
-    Empty::<Bytes>::new().map_err(|never| match never {}).boxed()
+pub async fn serve_metrics_tcp<D: Db>(
+    service: AppState<D>,
+    listener: tokio::net::TcpListener,
+) -> Result<(), BoxError> {
+    let router = Router::new().route("/metrics", get(handle_metrics)).with_state(service);
+
+    axum::serve(listener, router).await?;
+    Ok(())
 }
 
-fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
-    Full::new(chunk.into()).map_err(|never| match never {}).boxed()
+fn handle_peek<Error: db::SendableError>(
+    result: Result<Arc<Vec<u8>>, db::Error<Error>>,
+    timeout_response: Response,
+) -> Result<Response, HandlerError> {
+    match result {
+        Ok(payload) => {
+            let bytes = Bytes::from((*payload).clone());
+            Ok((StatusCode::OK, bytes).into_response())
+        }
+        Err(e) => match e {
+            db::Error::Operational(err) => {
+                error!("Storage error: {err}");
+                Err(HandlerError::InternalServerError(anyhow::Error::msg("Internal server error")))
+            }
+            db::Error::Timeout(_) => Ok(timeout_response),
+            db::Error::OverCapacity => Err(HandlerError::ServiceUnavailable(anyhow::Error::msg(
+                "mailbox storage at capacity",
+            ))),
+            db::Error::V1SenderUnavailable => Err(HandlerError::SenderGone(anyhow::Error::msg(
+                "Sender is unavailable try a new request",
+            ))),
+        },
+    }
 }

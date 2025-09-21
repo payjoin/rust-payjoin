@@ -30,7 +30,7 @@ async fn main() -> Result<(), BoxError> {
         .await
         .expect("Failed to initialize persistent storage");
 
-    let service = Service::new(db, ohttp.into(), metrics);
+    let service = AppState::new(db, ohttp.into(), metrics);
 
     let listener = TcpListener::bind(config.listen_addr).await?;
     service.serve_tcp(listener).await

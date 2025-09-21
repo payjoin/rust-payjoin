@@ -131,7 +131,7 @@ pub async fn init_directory(
     let tempdir = tempdir()?;
     let db = payjoin_directory::FilesDb::init(timeout, tempdir.path().to_path_buf()).await?;
 
-    let service = payjoin_directory::Service::new(db, ohttp_server.into(), metrics);
+    let service = payjoin_directory::AppState::new(db, ohttp_server.into(), metrics);
 
     let listener = bind_free_port().await?;
     let port = listener.local_addr()?.port();

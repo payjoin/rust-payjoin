@@ -42,6 +42,7 @@ mod test {
         );
 
         // TODO assert uppercase
+        assert!(encoded.chars().all(|c| c.is_ascii_uppercase() || c == '1'));
 
         // should not error
         let corrupted = encoded + "QQPP";

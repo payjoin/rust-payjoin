@@ -184,7 +184,7 @@ pub enum SessionEvent {
     MaybeInputsOwned(),
     MaybeInputsSeen(),
     OutputsUnknown(),
-    WantsOutputs(common::WantsOutputs),
+    WantsOutputs(Vec<usize>),
     WantsInputs(common::WantsInputs),
     WantsFeeRange(Vec<InputPair>),
     ProvisionalProposal(PsbtContext),
@@ -270,7 +270,7 @@ mod tests {
             SessionEvent::MaybeInputsOwned(),
             SessionEvent::MaybeInputsSeen(),
             SessionEvent::OutputsUnknown(),
-            SessionEvent::WantsOutputs(wants_outputs.state.inner.clone()),
+            SessionEvent::WantsOutputs(wants_outputs.state.inner.owned_vouts.clone()),
             SessionEvent::WantsInputs(wants_inputs.state.inner.clone()),
             SessionEvent::WantsFeeRange(wants_fee_range.state.inner.receiver_inputs.clone()),
             SessionEvent::ProvisionalProposal(provisional_proposal.state.psbt_context.clone()),
@@ -479,7 +479,7 @@ mod tests {
         events.push(SessionEvent::MaybeInputsOwned());
         events.push(SessionEvent::MaybeInputsSeen());
         events.push(SessionEvent::OutputsUnknown());
-        events.push(SessionEvent::WantsOutputs(wants_outputs.state.inner.clone()));
+        events.push(SessionEvent::WantsOutputs(wants_outputs.state.inner.owned_vouts.clone()));
         events.push(SessionEvent::WantsInputs(wants_inputs.state.inner.clone()));
         events
             .push(SessionEvent::WantsFeeRange(wants_fee_range.state.inner.receiver_inputs.clone()));
@@ -556,7 +556,7 @@ mod tests {
         events.push(SessionEvent::MaybeInputsOwned());
         events.push(SessionEvent::MaybeInputsSeen());
         events.push(SessionEvent::OutputsUnknown());
-        events.push(SessionEvent::WantsOutputs(wants_outputs.state.inner.clone()));
+        events.push(SessionEvent::WantsOutputs(wants_outputs.state.inner.owned_vouts.clone()));
         events.push(SessionEvent::WantsInputs(wants_inputs.state.inner.clone()));
         events
             .push(SessionEvent::WantsFeeRange(wants_fee_range.state.inner.receiver_inputs.clone()));

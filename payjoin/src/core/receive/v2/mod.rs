@@ -728,14 +728,15 @@ impl Receiver<OutputsUnknown> {
                 }
             },
         };
-        let inner = common::WantsOutputs::new(self.state.original, owned_vouts);
+        let inner = common::WantsOutputs::new(self.state.original, owned_vouts.clone());
         MaybeFatalTransition::success(
-            SessionEvent::WantsOutputs(inner.clone()),
+            SessionEvent::WantsOutputs(owned_vouts),
             Receiver { state: WantsOutputs { inner }, session_context: self.session_context },
         )
     }
 
-    pub(crate) fn apply_wants_outputs(self, inner: common::WantsOutputs) -> ReceiveSession {
+    pub(crate) fn apply_wants_outputs(self, owned_vouts: Vec<usize>) -> ReceiveSession {
+        let inner = common::WantsOutputs::new(self.state.original, owned_vouts);
         let new_state =
             Receiver { state: WantsOutputs { inner }, session_context: self.session_context };
         ReceiveSession::WantsOutputs(new_state)

@@ -34,7 +34,7 @@ pub struct WantsOutputs {
     payjoin_psbt: Psbt,
     params: Params,
     change_vout: usize,
-    owned_vouts: Vec<usize>,
+    pub(crate) owned_vouts: Vec<usize>,
 }
 
 impl WantsOutputs {

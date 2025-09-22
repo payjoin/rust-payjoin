@@ -316,7 +316,7 @@ pub struct InitializedTransition(
                     payjoin::receive::v2::SessionEvent,
                     payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedOriginalPayload>,
                     payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>,
-                    payjoin::receive::Error,
+                    payjoin::receive::ProtocolError,
                 >,
             >,
         >,

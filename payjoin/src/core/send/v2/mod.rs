@@ -323,12 +323,17 @@ impl Sender<WithReplyKey> {
     ) -> MaybeFatalTransition<SessionEvent, Sender<PollingForProposal>, EncapsulationError> {
         match process_post_res(response, post_ctx.ohttp_ctx) {
             Ok(()) => {}
-            Err(e) => {
-                return MaybeFatalTransition::fatal(
-                    SessionEvent::SessionInvalid(e.to_string()),
-                    InternalEncapsulationError::DirectoryResponse(e).into(),
-                );
-            }
+            Err(e) =>
+                if e.is_fatal() {
+                    return MaybeFatalTransition::fatal(
+                        SessionEvent::SessionInvalid(e.to_string()),
+                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                    );
+                } else {
+                    return MaybeFatalTransition::transient(
+                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                    );
+                },
         }
 
         let polling_for_proposal = PollingForProposal {
@@ -473,10 +478,16 @@ impl Sender<PollingForProposal> {
             Ok(Some(body)) => body,
             Ok(None) => return MaybeSuccessTransitionWithNoResults::no_results(self.clone()),
             Err(e) =>
-                return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::SessionInvalid(e.to_string()),
-                    InternalEncapsulationError::DirectoryResponse(e).into(),
-                ),
+                if e.is_fatal() {
+                    return MaybeSuccessTransitionWithNoResults::fatal(
+                        SessionEvent::SessionInvalid(e.to_string()),
+                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                    );
+                } else {
+                    return MaybeSuccessTransitionWithNoResults::transient(
+                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                    );
+                },
         };
         let psbt = match decrypt_message_b(
             &body,

@@ -371,16 +371,35 @@ impl Receiver<Initialized> {
         SessionEvent,
         Receiver<UncheckedOriginalPayload>,
         Receiver<Initialized>,
-        Error,
+        ProtocolError,
     > {
         let current_state = self.clone();
         let proposal = match self.inner_process_res(body, context) {
             Ok(proposal) => proposal,
-            Err(e) =>
-                return MaybeFatalTransitionWithNoResults::fatal(
-                    SessionEvent::SessionInvalid(e.to_string(), None),
-                    e,
-                ),
+            Err(e) => match e {
+                // Implementation errors should be unreachable
+                ProtocolError::V2(ref session_error) => match session_error {
+                    SessionError(InternalSessionError::DirectoryResponse(directory_error)) =>
+                        if directory_error.is_fatal() {
+                            return MaybeFatalTransitionWithNoResults::fatal(
+                                SessionEvent::SessionInvalid(e.to_string(), None),
+                                e,
+                            );
+                        } else {
+                            return MaybeFatalTransitionWithNoResults::transient(e);
+                        },
+                    _ =>
+                        return MaybeFatalTransitionWithNoResults::fatal(
+                            SessionEvent::SessionInvalid(session_error.to_string(), None),
+                            e,
+                        ),
+                },
+                _ =>
+                    return MaybeFatalTransitionWithNoResults::fatal(
+                        SessionEvent::SessionInvalid(e.to_string(), None),
+                        e,
+                    ),
+            },
         };
 
         if let Some((proposal, reply_key)) = proposal {
@@ -403,9 +422,9 @@ impl Receiver<Initialized> {
         self,
         body: &[u8],
         context: ohttp::ClientResponse,
-    ) -> Result<Option<(OriginalPayload, Option<HpkePublicKey>)>, Error> {
+    ) -> Result<Option<(OriginalPayload, Option<HpkePublicKey>)>, ProtocolError> {
         let body = match process_get_res(body, context)
-            .map_err(InternalSessionError::DirectoryResponse)?
+            .map_err(|e| ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()))?
         {
             Some(body) => body,
             None => return Ok(None),
@@ -442,12 +461,13 @@ impl Receiver<Initialized> {
     fn extract_proposal_from_v2(
         self,
         response: Vec<u8>,
-    ) -> Result<(OriginalPayload, HpkePublicKey), Error> {
+    ) -> Result<(OriginalPayload, HpkePublicKey), ProtocolError> {
         let (payload_bytes, reply_key) =
-            decrypt_message_a(&response, self.session_context.receiver_key.secret_key().clone())?;
+            decrypt_message_a(&response, self.session_context.receiver_key.secret_key().clone())
+                .map_err(|e| ProtocolError::V2(InternalSessionError::Hpke(e).into()))?;
         let payload = std::str::from_utf8(&payload_bytes)
             .map_err(|e| ProtocolError::OriginalPayload(InternalPayloadError::Utf8(e).into()))?;
-        self.unchecked_from_payload(payload).map_err(Error::Protocol).map(|p| (p, reply_key))
+        self.unchecked_from_payload(payload).map(|p| (p, reply_key))
     }
 
     fn unchecked_from_payload(self, payload: &str) -> Result<OriginalPayload, ProtocolError> {
@@ -1052,12 +1072,20 @@ impl Receiver<PayjoinProposal> {
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
     ) -> MaybeSuccessTransition<SessionEvent, (), Error> {
-        match process_post_res(res, ohttp_context)
-            .map_err(|e| InternalSessionError::DirectoryResponse(e).into())
-        {
+        match process_post_res(res, ohttp_context) {
             Ok(_) =>
                 MaybeSuccessTransition::success(SessionEvent::Closed(SessionOutcome::Success), ()),
-            Err(e) => MaybeSuccessTransition::transient(e),
+            Err(e) =>
+                if e.is_fatal() {
+                    MaybeSuccessTransition::fatal(
+                        SessionEvent::SessionInvalid(e.to_string(), None),
+                        InternalSessionError::DirectoryResponse(e).into(),
+                    )
+                } else {
+                    MaybeSuccessTransition::transient(
+                        InternalSessionError::DirectoryResponse(e).into(),
+                    )
+                },
         }
     }
 }

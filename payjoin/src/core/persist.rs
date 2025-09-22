@@ -13,7 +13,6 @@ impl<Event, SuccessValue, CurrentState, Err>
         MaybeSuccessTransitionWithNoResults(Err(Rejection::fatal(event, error)))
     }
 
-    #[allow(dead_code)]
     #[inline]
     pub(crate) fn transient(error: Err) -> Self {
         MaybeSuccessTransitionWithNoResults(Err(Rejection::transient(error)))
@@ -62,6 +61,11 @@ impl<Event, NextState, CurrentState, Err>
     #[inline]
     pub(crate) fn no_results(current_state: CurrentState) -> Self {
         MaybeFatalTransitionWithNoResults(Ok(AcceptOptionalTransition::NoResults(current_state)))
+    }
+
+    #[inline]
+    pub(crate) fn transient(error: Err) -> Self {
+        MaybeFatalTransitionWithNoResults(Err(Rejection::transient(error)))
     }
 
     #[inline]
@@ -151,7 +155,7 @@ impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err> {
 /// A transition that can result in the completion of a state machine or a transient error
 /// Fatal errors cannot occur in this transition.
 pub struct MaybeSuccessTransition<Event, SuccessValue, Err>(
-    Result<AcceptNextState<Event, SuccessValue>, RejectTransient<Err>>,
+    Result<AcceptNextState<Event, SuccessValue>, Rejection<Event, Err>>,
 );
 
 impl<Event, SuccessValue, Err> MaybeSuccessTransition<Event, SuccessValue, Err>
@@ -165,7 +169,12 @@ where
 
     #[inline]
     pub(crate) fn transient(error: Err) -> Self {
-        MaybeSuccessTransition(Err(RejectTransient(error)))
+        MaybeSuccessTransition(Err(Rejection::transient(error)))
+    }
+
+    #[inline]
+    pub(crate) fn fatal(event: Event, error: Err) -> Self {
+        MaybeSuccessTransition(Err(Rejection::fatal(event, error)))
     }
 
     pub fn save<P>(
@@ -377,7 +386,10 @@ trait InternalSessionPersister: SessionPersister {
                 self.close().map_err(InternalPersistedError::Storage)?;
                 Ok(success_value)
             }
-            Err(RejectTransient(err)) => Err(InternalPersistedError::Transient(err).into()),
+            Err(Rejection::Transient(RejectTransient(err))) =>
+                Err(InternalPersistedError::Transient(err).into()),
+            Err(Rejection::Fatal(RejectFatal(event, err))) =>
+                Err(self.handle_fatal_reject(RejectFatal(event, err)).into()),
         }
     }
 
@@ -796,6 +808,22 @@ mod tests {
                 },
                 test: Box::new(move |persister| {
                     MaybeSuccessTransition::transient(InMemoryTestError {}).save(persister)
+                }),
+            },
+            // Fatal error
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![InMemoryTestEvent("error event".to_string())],
+                    is_closed: true,
+                    error: Some(InternalPersistedError::Fatal(InMemoryTestError {}).into()),
+                    success: None,
+                },
+                test: Box::new(move |persister| {
+                    MaybeSuccessTransition::fatal(
+                        InMemoryTestEvent("error event".to_string()),
+                        InMemoryTestError {},
+                    )
+                    .save(persister)
                 }),
             },
         ];

@@ -29,17 +29,9 @@ macro_rules! impl_save_for_transition {
                 persister: Arc<dyn JsonReceiverSessionPersister>,
             ) -> Result<$next_state, ReceiverPersistedError> {
                 let adapter = CallbackPersisterAdapter::new(persister);
-                let mut inner = self.0.write().map_err(|_| {
-                    ImplementationError::new(ForeignError::InternalError(
-                        "Lock poisoned".to_string(),
-                    ))
-                })?;
+                let mut inner = self.0.write().expect("Lock should not be poisoned");
 
-                let value = inner.take().ok_or_else(|| {
-                    ImplementationError::new(ForeignError::InternalError(
-                        "Already saved or moved".to_string(),
-                    ))
-                })?;
+                let value = inner.take().expect("Already saved or moved");
 
                 let res = value
                     .save(&adapter)
@@ -221,12 +213,9 @@ impl InitialReceiveTransition {
         persister: Arc<dyn JsonReceiverSessionPersister>,
     ) -> Result<Initialized, ForeignError> {
         let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner =
-            self.0.write().map_err(|_| ForeignError::InternalError("Lock poisoned".to_string()))?;
+        let mut inner = self.0.write().expect("Lock should not be poisoned");
 
-        let value = inner
-            .take()
-            .ok_or_else(|| ForeignError::InternalError("Already saved or moved".to_string()))?;
+        let value = inner.take().expect("Already saved or moved");
 
         let res = value.save(&adapter)?;
         Ok(res.into())
@@ -331,15 +320,9 @@ impl InitializedTransition {
         persister: Arc<dyn JsonReceiverSessionPersister>,
     ) -> Result<InitializedTransitionOutcome, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner = self.0.write().map_err(|_| {
-            ImplementationError::new(ForeignError::InternalError("Lock poisoned".to_string()))
-        })?;
+        let mut inner = self.0.write().expect("Lock should not be poisoned");
 
-        let value = inner.take().ok_or_else(|| {
-            ImplementationError::new(ForeignError::InternalError(
-                "Already saved or moved".to_string(),
-            ))
-        })?;
+        let value = inner.take().expect("Already saved or moved");
 
         let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
         Ok(res.into())
@@ -968,15 +951,9 @@ impl PayjoinProposalTransition {
         persister: Arc<dyn JsonReceiverSessionPersister>,
     ) -> Result<(), ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner = self.0.write().map_err(|_| {
-            ImplementationError::new(ForeignError::InternalError("Lock poisoned".to_string()))
-        })?;
+        let mut inner = self.0.write().expect("Lock should not be poisoned");
 
-        let value = inner.take().ok_or_else(|| {
-            ImplementationError::new(ForeignError::InternalError(
-                "Already saved or moved".to_string(),
-            ))
-        })?;
+        let value = inner.take().expect("Already saved or moved");
 
         value.save(&adapter).map_err(ReceiverPersistedError::from)?;
         Ok(())

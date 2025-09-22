@@ -935,15 +935,7 @@ impl Receiver<WantsFeeRange> {
         {
             Ok(inner) => inner,
             Err(e) => {
-                // FIXME: follow up by returning a terminal error rather than replyable error
-                let payload_error = super::PayloadError::from(e);
-                return MaybeFatalTransition::fatal(
-                    SessionEvent::SessionInvalid(
-                        payload_error.to_string(),
-                        Some(JsonReply::from(&payload_error)),
-                    ),
-                    ProtocolError::OriginalPayload(payload_error),
-                );
+                return MaybeFatalTransition::transient(ProtocolError::OriginalPayload(e.into()));
             }
         };
         MaybeFatalTransition::success(

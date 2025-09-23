@@ -40,24 +40,12 @@ where
     let history = SessionHistory::new(session_events.clone());
     let pj_param = history.pj_param();
     if pj_param.expiration().elapsed() {
-        // Session has expired: close the session and persist a fatal error
-        let session_event = SessionEvent::SessionInvalid("Session expired".to_string());
-        persister
-            .save_event(session_event.clone().into())
-            .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
-        persister
-            .close()
-            .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
-
-        session_events.push(session_event);
-        let history = SessionHistory::new(session_events);
-
-        return Ok((SendSession::TerminalFailure, history));
+        return Err(InternalReplayError::Expired(pj_param.expiration()).into());
     }
     Ok((sender, history))
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SessionHistory {
     events: Vec<SessionEvent>,
 }
@@ -225,12 +213,13 @@ mod tests {
         .unwrap();
         let reply_key = HpkeKeyPair::gen_keypair();
         let endpoint = sender.endpoint().clone();
-        let fallback_tx = sender.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
         let id = crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id");
+        let expiration =
+            (std::time::SystemTime::now() - std::time::Duration::from_secs(1)).try_into().unwrap();
         let pj_param = crate::uri::v2::PjParam::new(
             endpoint,
             id,
-            (std::time::SystemTime::now() - std::time::Duration::from_secs(1)).try_into().unwrap(),
+            expiration,
             crate::OhttpKeys(
                 ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
             ),
@@ -241,13 +230,15 @@ mod tests {
             psbt_ctx: sender.psbt_ctx.clone(),
             reply_key: reply_key.0,
         };
-        let test = SessionHistoryTest {
-            events: vec![SessionEvent::CreatedReplyKey(with_reply_key)],
-            expected_session_history: SessionHistoryExpectedOutcome { fallback_tx, pj_param },
-            expected_sender_state: SendSession::TerminalFailure,
-            expected_error: Some("Session expired".to_string()),
-        };
-        run_session_history_test(test);
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        persister
+            .save_event(SessionEvent::CreatedReplyKey(with_reply_key))
+            .expect("save_event should succeed");
+
+        let err = replay_event_log(&persister).expect_err("session should be expired");
+        let expected_err: ReplayError<SendSession, SessionEvent> =
+            InternalReplayError::Expired(expiration).into();
+        assert_eq!(err.to_string(), expected_err.to_string());
     }
 
     #[test]

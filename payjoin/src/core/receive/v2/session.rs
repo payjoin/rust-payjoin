@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::{ReceiveSession, SessionContext};
 use crate::error::{InternalReplayError, ReplayError};
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::SessionPersister;
+use crate::persist::{SessionEventTrait, SessionPersister};
 use crate::receive::v2::{extract_err_req, SessionError};
 use crate::receive::{common, InputPair, JsonReply, OriginalPayload, PsbtContext};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
@@ -214,6 +214,12 @@ pub enum SessionOutcome {
     Failure,
     /// Payjoin was cancelled by the user
     Cancel,
+}
+
+impl crate::persist::sealed::Sealed for SessionEvent {}
+
+impl SessionEventTrait for SessionEvent {
+    fn is_closed_event(&self) -> bool { matches!(self, SessionEvent::Closed(_)) }
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@ use super::{ReceiveSession, SessionContext};
 use crate::error::{InternalReplayError, ReplayError};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
-use crate::receive::v2::{extract_err_req, InternalSessionError, SessionError};
+use crate::receive::v2::{extract_err_req, SessionError};
 use crate::receive::{common, InputPair, JsonReply, OriginalPayload, PsbtContext};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
@@ -44,19 +44,7 @@ where
     let history = SessionHistory::new(session_events.clone());
     let ctx = history.session_context();
     if ctx.expiration.elapsed() {
-        // Session has expired: close the session and persist a fatal error
-        let err = SessionError(InternalSessionError::Expired(ctx.expiration));
-        persister
-            .save_event(SessionEvent::SessionInvalid(err.to_string(), None).into())
-            .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
-        persister
-            .close()
-            .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
-
-        session_events.push(SessionEvent::SessionInvalid(err.to_string(), None));
-        let history = SessionHistory::new(session_events);
-
-        return Ok((ReceiveSession::TerminalFailure, history));
+        return Err(InternalReplayError::Expired(ctx.expiration).into());
     }
 
     Ok((receiver, history))
@@ -64,7 +52,7 @@ where
 
 /// A collection of events that have occurred during a receiver's session.
 /// It is obtained by calling [replay_event_log].
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SessionHistory {
     events: Vec<SessionEvent>,
 }
@@ -372,21 +360,16 @@ mod tests {
 
     #[test]
     fn test_replaying_session_creation_with_expired_session() -> Result<(), BoxError> {
-        let session_context = SessionContext {
-            expiration: (SystemTime::now() - Duration::from_secs(1)).try_into().unwrap(),
-            ..SHARED_CONTEXT.clone()
-        };
-        let test = SessionHistoryTest {
-            events: vec![SessionEvent::Created(session_context.clone())],
-            expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: None,
-                fallback_tx: None,
-                expected_status: SessionStatus::Expired,
-            },
-            expected_receiver_state: ReceiveSession::TerminalFailure,
-        };
-        // TODO: should check for the expired error message off the session history
-        run_session_history_test(test)
+        let expiration = (SystemTime::now() - Duration::from_secs(1)).try_into().unwrap();
+        let session_context = SessionContext { expiration, ..SHARED_CONTEXT.clone() };
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        persister.save_event(SessionEvent::Created(session_context))?;
+
+        let err = replay_event_log(&persister).expect_err("session should be expired");
+        let expected_err: ReplayError<ReceiveSession, SessionEvent> =
+            InternalReplayError::Expired(expiration).into();
+        assert_eq!(err.to_string(), expected_err.to_string());
+        Ok(())
     }
 
     #[test]

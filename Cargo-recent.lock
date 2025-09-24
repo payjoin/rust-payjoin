@@ -3843,7 +3843,7 @@ dependencies = [
 [[package]]
 name = "uniffi-dart"
 version = "0.1.0"
-source = "git+https://github.com/Uniffi-Dart/uniffi-dart.git?rev=b6186bc#b6186bc5358bb706c7dd70482650de068751a24d"
+source = "git+https://github.com/Uniffi-Dart/uniffi-dart.git?rev=04f0007#04f00070418dc9c0a116386d2ca01d617a7079e4"
 dependencies = [
  "anyhow",
  "camino",
@@ -3914,7 +3914,7 @@ dependencies = [
 [[package]]
 name = "uniffi_dart_macro"
 version = "0.1.0"
-source = "git+https://github.com/Uniffi-Dart/uniffi-dart.git?rev=b6186bc#b6186bc5358bb706c7dd70482650de068751a24d"
+source = "git+https://github.com/Uniffi-Dart/uniffi-dart.git?rev=04f0007#04f00070418dc9c0a116386d2ca01d617a7079e4"
 dependencies = [
  "futures",
  "proc-macro2",

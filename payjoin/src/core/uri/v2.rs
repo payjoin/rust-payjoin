@@ -398,7 +398,7 @@ mod tests {
 
     #[test]
     fn test_ohttp_get_set() {
-        let mut url = EXAMPLE_URL.clone();
+        let mut url = Url::from_str(EXAMPLE_URL).expect("Could not parse Url");
 
         let serialized = "OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
         let ohttp_keys = OhttpKeys::from_str(serialized).unwrap();
@@ -413,7 +413,7 @@ mod tests {
 
     #[test]
     fn test_errors_when_parsing_ohttp() {
-        let missing_ohttp_url = EXAMPLE_URL.clone();
+        let missing_ohttp_url = Url::from_str(EXAMPLE_URL).expect("Could not parse Url");
         assert!(matches!(
             ohttp(&missing_ohttp_url),
             Err(ParseOhttpKeysParamError::MissingOhttpKeys)
@@ -450,7 +450,7 @@ mod tests {
 
     #[test]
     fn test_exp_get_set() {
-        let mut url = EXAMPLE_URL.clone();
+        let mut url = Url::parse(EXAMPLE_URL).expect("Could not parse Url");
 
         let exp_time = Time::try_from(
             std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1720547781),
@@ -468,7 +468,7 @@ mod tests {
 
     #[test]
     fn test_errors_when_parsing_exp() {
-        let missing_exp_url = EXAMPLE_URL.clone();
+        let missing_exp_url = Url::from_str(EXAMPLE_URL).expect("Could not parse Url");
         assert!(matches!(expiration(&missing_exp_url), Err(ParseExpParamError::MissingExp)));
 
         let invalid_fragment_exp_url =
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn test_errors_when_parsing_receiver_pubkey() {
-        let missing_receiver_pubkey_url = EXAMPLE_URL.clone();
+        let missing_receiver_pubkey_url = Url::from_str(EXAMPLE_URL).expect("Could not parse Url");
         assert!(matches!(
             receiver_pubkey(&missing_receiver_pubkey_url),
             Err(ParseReceiverPubkeyParamError::MissingPubkey)

@@ -1138,7 +1138,7 @@ pub mod test {
         address: Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
             .expect("valid address")
             .assume_checked(),
-        directory: EXAMPLE_URL.clone(),
+        directory: Url::from_str(EXAMPLE_URL).expect("Could not parse Url"),
         ohttp_keys: OhttpKeys(
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
         ),
@@ -1349,15 +1349,11 @@ pub mod test {
 
         assert_eq!(mock_err.1.to_json(), expected_json);
 
-        let (_req, _ctx) =
-            extract_err_req(&mock_err.1, EXAMPLE_URL.as_str(), &receiver.session_context)?;
+        let (_req, _ctx) = extract_err_req(&mock_err.1, EXAMPLE_URL, &receiver.session_context)?;
 
         let internal_error: Error = InternalPayloadError::MissingPayment.into();
-        let (_req, _ctx) = extract_err_req(
-            &(&internal_error).into(),
-            EXAMPLE_URL.as_str(),
-            &receiver.session_context,
-        )?;
+        let (_req, _ctx) =
+            extract_err_req(&(&internal_error).into(), EXAMPLE_URL, &receiver.session_context)?;
         Ok(())
     }
 
@@ -1384,7 +1380,7 @@ pub mod test {
         let res = error.api_error().expect("check_broadcast error should propagate to api error");
         let actual_json = JsonReply::from(&res);
 
-        let expiration = extract_err_req(&actual_json, EXAMPLE_URL.as_str(), &context);
+        let expiration = extract_err_req(&actual_json, EXAMPLE_URL, &context);
 
         match expiration {
             Err(error) => assert_eq!(
@@ -1466,7 +1462,7 @@ pub mod test {
     fn test_v2_pj_uri() {
         let uri =
             Receiver { state: Initialized {}, session_context: SHARED_CONTEXT.clone() }.pj_uri();
-        assert_ne!(uri.extras.pj_param.endpoint(), EXAMPLE_URL.clone());
+        assert_ne!(uri.extras.pj_param.endpoint().as_str(), EXAMPLE_URL);
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
     }
 

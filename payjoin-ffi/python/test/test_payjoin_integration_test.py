@@ -55,7 +55,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         cls.receiver = cls.env.get_receiver()
         cls.sender = cls.env.get_sender()
 
-    async def process_receiver_proposal(self, receiver: ReceiveSession, recv_persister: InMemoryReceiverSessionEventLog, ohttp_relay: Url) -> Optional[ReceiveSession]:
+    async def process_receiver_proposal(self, receiver: ReceiveSession, recv_persister: InMemoryReceiverSessionEventLog, ohttp_relay: str) -> Optional[ReceiveSession]:
         if receiver.is_INITIALIZED():
             res = await self.retrieve_receiver_proposal(receiver.inner, recv_persister, ohttp_relay)
             if res is None:
@@ -83,13 +83,13 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
 
         raise Exception(f"Unknown receiver state: {receiver}")
 
-    def create_receiver_context(self, receiver_address: bitcoinffi.Address, directory: Url, ohttp_keys: OhttpKeys, recv_persister: InMemoryReceiverSessionEventLog) -> Initialized:
-        receiver = ReceiverBuilder(address=receiver_address, directory=directory.as_string(), ohttp_keys=ohttp_keys).build().save(recv_persister)
+    def create_receiver_context(self, receiver_address: bitcoinffi.Address, directory: str, ohttp_keys: OhttpKeys, recv_persister: InMemoryReceiverSessionEventLog) -> Initialized:
+        receiver = ReceiverBuilder(address=receiver_address, directory=directory, ohttp_keys=ohttp_keys).build().save(recv_persister)
         return receiver
 
-    async def retrieve_receiver_proposal(self, receiver: Initialized, recv_persister: InMemoryReceiverSessionEventLog, ohttp_relay: Url):
+    async def retrieve_receiver_proposal(self, receiver: Initialized, recv_persister: InMemoryReceiverSessionEventLog, ohttp_relay: str):
         agent = httpx.AsyncClient()
-        request: RequestResponse = receiver.create_poll_request(ohttp_relay.as_string())
+        request: RequestResponse = receiver.create_poll_request(ohttp_relay)
         response = await agent.post(
             url=request.request.url.as_string(),
             headers={"Content-Type": request.request.content_type},
@@ -158,7 +158,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             pj_uri = session.pj_uri()
             psbt = build_sweep_psbt(self.sender, pj_uri)
             req_ctx: WithReplyKey = SenderBuilder(psbt, pj_uri).build_recommended(1000).save(sender_persister)
-            request: RequestV2PostContext = req_ctx.create_v2_post_request(ohttp_relay.as_string())
+            request: RequestV2PostContext = req_ctx.create_v2_post_request(ohttp_relay)
             response = await agent.post(
                 url=request.request.url.as_string(),
                 headers={"Content-Type": request.request.content_type},
@@ -176,7 +176,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(payjoin_proposal.is_PAYJOIN_PROPOSAL(), True)
 
             payjoin_proposal = payjoin_proposal.inner
-            request: RequestResponse = payjoin_proposal.create_post_request(ohttp_relay.as_string())
+            request: RequestResponse = payjoin_proposal.create_post_request(ohttp_relay)
             response = await agent.post(
                 url=request.request.url.as_string(),
                 headers={"Content-Type": request.request.content_type},
@@ -188,7 +188,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             # Inside the Sender:
             # Sender checks, signs, finalizes, extracts, and broadcasts
             # Replay post fallback to get the response
-            request: RequestOhttpContext = send_ctx.create_poll_request(ohttp_relay.as_string())
+            request: RequestOhttpContext = send_ctx.create_poll_request(ohttp_relay)
             response = await agent.post(
                 url=request.request.url.as_string(),
                 headers={"Content-Type": request.request.content_type},

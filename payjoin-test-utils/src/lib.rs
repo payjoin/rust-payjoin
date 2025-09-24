@@ -22,7 +22,6 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
-use url::Url;
 
 pub type BoxError = Box<dyn std::error::Error + 'static>;
 pub type BoxSendSyncError = Box<dyn std::error::Error + Send + Sync>;
@@ -79,21 +78,16 @@ impl TestServices {
 
     pub fn cert(&self) -> Vec<u8> { self.cert.der().to_vec() }
 
-    pub fn directory_url(&self) -> Url {
-        Url::parse(&format!("https://localhost:{}", self.directory.0)).expect("invalid URL")
-    }
+    pub fn directory_url(&self) -> String { format!("https://localhost:{}", self.directory.0) }
 
     pub fn take_directory_handle(&mut self) -> JoinHandle<Result<(), BoxSendSyncError>> {
         self.directory.1.take().expect("directory handle not found")
     }
 
-    pub fn ohttp_relay_url(&self) -> Url {
-        Url::parse(&format!("http://localhost:{}", self.ohttp_relay.0)).expect("invalid URL")
-    }
+    pub fn ohttp_relay_url(&self) -> String { format!("http://localhost:{}", self.ohttp_relay.0) }
 
-    pub fn ohttp_gateway_url(&self) -> Url {
-        let url = self.directory_url();
-        url.join("/.well-known/ohttp-gateway").expect("invalid URL")
+    pub fn ohttp_gateway_url(&self) -> String {
+        format!("{}/.well-known/ohttp-gateway", self.directory_url())
     }
 
     pub fn take_ohttp_relay_handle(&mut self) -> JoinHandle<Result<(), BoxSendSyncError>> {
@@ -103,8 +97,8 @@ impl TestServices {
     pub fn http_agent(&self) -> Arc<Client> { self.http_agent.clone() }
 
     pub async fn wait_for_services_ready(&self) -> Result<(), &'static str> {
-        wait_for_service_ready(self.ohttp_relay_url(), self.http_agent()).await?;
-        wait_for_service_ready(self.directory_url(), self.http_agent()).await?;
+        wait_for_service_ready(&self.ohttp_relay_url(), self.http_agent()).await?;
+        wait_for_service_ready(&self.directory_url(), self.http_agent()).await?;
         Ok(())
     }
 
@@ -236,15 +230,15 @@ const TESTS_TIMEOUT: Duration = Duration::from_secs(20);
 const WAIT_SERVICE_INTERVAL: Duration = Duration::from_secs(3);
 
 pub async fn wait_for_service_ready(
-    service_url: Url,
+    service_url: &str,
     agent: Arc<Client>,
 ) -> Result<(), &'static str> {
-    let health_url = service_url.join("/health").map_err(|_| "Invalid URL")?;
+    let health_url = format!("{}/health", service_url.trim_end_matches("/"));
     let start = std::time::Instant::now();
 
     while start.elapsed() < TESTS_TIMEOUT {
         let request_result =
-            agent.get(health_url.as_str()).send().await.map_err(|_| "Bad request")?;
+            agent.get(health_url.clone()).send().await.map_err(|_| "Bad request")?;
         match request_result.status() {
             StatusCode::OK => return Ok(()),
             StatusCode::NOT_FOUND => return Err("Endpoint not found"),
@@ -255,8 +249,7 @@ pub async fn wait_for_service_ready(
     Err("Timeout waiting for service to be ready")
 }
 
-pub static EXAMPLE_URL: Lazy<Url> =
-    Lazy::new(|| Url::parse("https://example.com").expect("invalid URL"));
+pub static EXAMPLE_URL: &str = "https://example.com";
 
 pub const KEY_ID: KeyId = 1;
 pub const KEM: Kem = Kem::K256Sha256;

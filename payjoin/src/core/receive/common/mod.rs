@@ -34,7 +34,7 @@ pub struct WantsOutputs {
     payjoin_psbt: Psbt,
     params: Params,
     change_vout: usize,
-    pub(crate) owned_vouts: Vec<usize>,
+    pub(super) owned_vouts: Vec<usize>,
 }
 
 impl WantsOutputs {
@@ -42,7 +42,7 @@ impl WantsOutputs {
     /// owned outputs.
     ///
     /// The first output in the `owned_vouts` list is used as the `change_vout`.
-    pub(crate) fn new(original: OriginalPayload, owned_vouts: Vec<usize>) -> Self {
+    pub(super) fn new(original: OriginalPayload, owned_vouts: Vec<usize>) -> Self {
         Self {
             original_psbt: original.psbt.clone(),
             payjoin_psbt: original.psbt,
@@ -188,11 +188,11 @@ fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [
 /// Call [`Self::commit_inputs`] to proceed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsInputs {
-    pub(crate) original_psbt: Psbt,
-    pub(crate) payjoin_psbt: Psbt,
-    pub(crate) params: Params,
-    pub(crate) change_vout: usize,
-    pub(crate) receiver_inputs: Vec<InputPair>,
+    pub(super) original_psbt: Psbt,
+    pub(super) payjoin_psbt: Psbt,
+    pub(super) params: Params,
+    pub(super) change_vout: usize,
+    pub(super) receiver_inputs: Vec<InputPair>,
 }
 
 impl WantsInputs {
@@ -223,7 +223,7 @@ impl WantsInputs {
     /// value increased by the amount of the candidate input.
     ///
     /// Errors if the transaction does not have exactly 2 outputs.
-    pub(crate) fn avoid_uih(
+    pub(super) fn avoid_uih(
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<InputPair, SelectionError> {
@@ -359,11 +359,11 @@ impl WantsInputs {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsFeeRange {
-    pub(crate) original_psbt: Psbt,
-    pub(crate) payjoin_psbt: Psbt,
-    pub(crate) params: Params,
-    pub(crate) change_vout: usize,
-    pub(crate) receiver_inputs: Vec<InputPair>,
+    pub(super) original_psbt: Psbt,
+    pub(super) payjoin_psbt: Psbt,
+    pub(super) params: Params,
+    pub(super) change_vout: usize,
+    pub(super) receiver_inputs: Vec<InputPair>,
 }
 
 impl WantsFeeRange {

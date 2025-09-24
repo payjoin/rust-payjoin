@@ -1,11 +1,15 @@
+use std::sync::Arc;
+
+use crate::uri::Url;
+
 ///Represents data that needs to be transmitted to the receiver.
 ///You need to send this request over HTTP(S) to the receiver.
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct Request {
     /// URL to send the request to.
     ///
-    /// This is a URL string - you will need to parse it before you can pass it to `reqwest` or a similar library.
-    pub url: String,
+    /// This is a payjoin URL wrapper - you will need to get the full url out before you can pass it to `reqwest` or a similar library.
+    pub url: Arc<Url>,
 
     /// The `Content-Type` header to use for the request.
     ///
@@ -20,6 +24,10 @@ pub struct Request {
 
 impl From<payjoin::Request> for Request {
     fn from(value: payjoin::Request) -> Self {
-        Self { url: value.url, content_type: value.content_type.to_string(), body: value.body }
+        Self {
+            url: Arc::new(value.url.into()),
+            content_type: value.content_type.to_string(),
+            body: value.body,
+        }
     }
 }

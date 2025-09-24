@@ -177,7 +177,7 @@ impl Sender {
         clear_unneeded_fields(&mut sanitized_psbt);
         let body = sanitized_psbt.to_string().as_bytes().to_vec();
         (
-            Request::new_v1(url.as_str(), &body),
+            Request::new_v1(&Url(url), &body),
             V1Context {
                 psbt_context: PsbtContext {
                     original_psbt: self.psbt_ctx.original_psbt.clone(),

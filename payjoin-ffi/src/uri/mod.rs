@@ -73,3 +73,29 @@ impl PjUri {
 
     pub fn as_string(&self) -> String { self.0.clone().to_string() }
 }
+
+impl From<payjoin::Url> for Url {
+    fn from(value: payjoin::Url) -> Self { Self(value) }
+}
+
+impl From<Url> for payjoin::Url {
+    fn from(value: Url) -> Self { value.0 }
+}
+
+#[derive(Clone, Debug, uniffi::Object)]
+pub struct Url(payjoin::Url);
+
+#[uniffi::export]
+impl Url {
+    #[uniffi::constructor]
+    pub fn parse(input: String) -> Result<Url, UrlParseError> {
+        payjoin::Url::try_from(input).map(Self).map_err(Into::into)
+    }
+    pub fn query(&self) -> Option<String> {
+        url::Url::parse(self.0.as_str())
+            .expect("could not parse Url")
+            .query()
+            .map(|x| x.to_string())
+    }
+    pub fn as_string(&self) -> String { self.0.to_string() }
+}

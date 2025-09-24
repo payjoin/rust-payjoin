@@ -1,3 +1,5 @@
+use crate::Url;
+
 #[cfg(feature = "v1")]
 const V1_REQ_CONTENT_TYPE: &str = "text/plain";
 
@@ -11,8 +13,8 @@ const V2_REQ_CONTENT_TYPE: &str = "message/ohttp-req";
 pub struct Request {
     /// URL to send the request to.
     ///
-    /// This is a URL string - you will need to parse it before you can pass it to `reqwest` or a similar library.
-    pub url: String,
+    /// This is a payjoin URL wrapper - you will need to get the full url out before you can pass it to `reqwest` or a similar library.
+    pub url: Url,
 
     /// The `Content-Type` header to use for the request.
     ///
@@ -28,16 +30,16 @@ pub struct Request {
 impl Request {
     /// Construct a new v1 request.
     #[cfg(feature = "v1")]
-    pub(crate) fn new_v1(url: &str, body: &[u8]) -> Self {
-        Self { url: url.to_string(), content_type: V1_REQ_CONTENT_TYPE, body: body.to_vec() }
+    pub(crate) fn new_v1(url: &Url, body: &[u8]) -> Self {
+        Self { url: url.clone(), content_type: V1_REQ_CONTENT_TYPE, body: body.to_vec() }
     }
 
     /// Construct a new v2 request.
     #[cfg(feature = "v2")]
     pub(crate) fn new_v2(
-        url: &str,
+        url: &Url,
         body: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES],
     ) -> Self {
-        Self { url: url.to_string(), content_type: V2_REQ_CONTENT_TYPE, body: body.to_vec() }
+        Self { url: url.clone(), content_type: V2_REQ_CONTENT_TYPE, body: body.to_vec() }
     }
 }

@@ -54,7 +54,7 @@ use crate::receive::v2::session::SessionOutcome;
 use crate::receive::{parse_payload, InputPair, OriginalPayload, PsbtContext};
 use crate::time::Time;
 use crate::uri::ShortId;
-use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
+use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Url, Version};
 
 mod error;
 mod session;
@@ -268,7 +268,7 @@ fn extract_err_req(
         Some(err.to_json().to_string().as_bytes()),
     )
     .map_err(InternalSessionError::OhttpEncapsulation)?;
-    let req = Request::new_v2(session_context.full_relay_url(ohttp_relay)?.as_str(), &body);
+    let req = Request::new_v2(&Url(session_context.full_relay_url(ohttp_relay)?), &body);
     Ok((req, ohttp_ctx))
 }
 
@@ -357,8 +357,7 @@ impl Receiver<Initialized> {
         }
         let (body, ohttp_ctx) =
             self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulation)?;
-        let req =
-            Request::new_v2(self.session_context.full_relay_url(ohttp_relay)?.as_str(), &body);
+        let req = Request::new_v2(&Url(self.session_context.full_relay_url(ohttp_relay)?), &body);
         Ok((req, ohttp_ctx))
     }
 
@@ -1057,8 +1056,7 @@ impl Receiver<PayjoinProposal> {
             Some(&body),
         )?;
 
-        let req =
-            Request::new_v2(self.session_context.full_relay_url(ohttp_relay)?.as_str(), &body);
+        let req = Request::new_v2(&Url(self.session_context.full_relay_url(ohttp_relay)?), &body);
         Ok((req, ctx))
     }
 

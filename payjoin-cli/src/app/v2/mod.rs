@@ -168,7 +168,7 @@ impl AppTrait for App {
                 let body = String::from_utf8(req.body.clone()).unwrap();
                 println!("Sending fallback request to {}", &req.url);
                 let response = http
-                    .post(req.url)
+                    .post(req.url.as_str())
                     .header("Content-Type", req.content_type)
                     .body(body.clone())
                     .send()
@@ -734,7 +734,7 @@ impl App {
 
     async fn post_request(&self, req: payjoin::Request) -> Result<reqwest::Response> {
         let http = http_agent(&self.config)?;
-        http.post(req.url)
+        http.post(req.url.as_str())
             .header("Content-Type", req.content_type)
             .body(req.body)
             .send()

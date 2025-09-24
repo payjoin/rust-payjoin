@@ -72,7 +72,7 @@ impl AppTrait for App {
         let body = String::from_utf8(req.body.clone()).unwrap();
         println!("Sending fallback request to {}", &req.url);
         let response = http
-            .post(req.url)
+            .post(req.url.as_str())
             .header("Content-Type", req.content_type)
             .body(body.clone())
             .send()

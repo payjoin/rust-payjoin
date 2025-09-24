@@ -247,7 +247,7 @@ mod integration {
                 let (req, _ctx) =
                     bad_initializer.create_poll_request(services.ohttp_relay_url().as_str())?;
                 agent
-                    .post(req.url)
+                    .post(req.url.as_str())
                     .header("Content-Type", req.content_type)
                     .body(req.body)
                     .send()
@@ -342,7 +342,7 @@ mod integration {
                 let (req, ctx) =
                     session.create_poll_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
-                    .post(req.url)
+                    .post(req.url.as_str())
                     .header("Content-Type", req.content_type)
                     .body(req.body)
                     .send()
@@ -373,8 +373,12 @@ mod integration {
                     .save(&sender_persister)?;
                 let (Request { url, body, content_type, .. }, _send_ctx) =
                     req_ctx.create_v2_post_request(services.ohttp_relay_url().as_str())?;
-                let response =
-                    agent.post(url).header("Content-Type", content_type).body(body).send().await?;
+                let response = agent
+                    .post(url.as_str())
+                    .header("Content-Type", content_type)
+                    .body(body)
+                    .send()
+                    .await?;
                 tracing::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success(), "error response: {}", response.status());
                 // POST Original PSBT
@@ -386,7 +390,7 @@ mod integration {
                 let (req, ctx) =
                     session.create_poll_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
-                    .post(req.url)
+                    .post(req.url.as_str())
                     .header("Content-Type", req.content_type)
                     .body(req.body)
                     .send()
@@ -424,7 +428,7 @@ mod integration {
                     .extract_err_req(services.ohttp_relay_url().as_str())?
                     .expect("error request should exist");
                 let err_response = agent
-                    .post(err_req.url)
+                    .post(err_req.url.as_str())
                     .header("Content-Type", err_req.content_type)
                     .body(err_req.body)
                     .send()
@@ -473,7 +477,7 @@ mod integration {
                 let (req, ctx) =
                     session.create_poll_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
-                    .post(req.url)
+                    .post(req.url.as_str())
                     .header("Content-Type", req.content_type)
                     .body(req.body)
                     .send()
@@ -504,8 +508,12 @@ mod integration {
                     .save(&send_persister)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
                     req_ctx.create_v2_post_request(services.ohttp_relay_url().as_str())?;
-                let response =
-                    agent.post(url).header("Content-Type", content_type).body(body).send().await?;
+                let response = agent
+                    .post(url.as_str())
+                    .header("Content-Type", content_type)
+                    .body(body)
+                    .send()
+                    .await?;
                 tracing::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success(), "error response: {}", response.status());
                 let send_ctx = req_ctx
@@ -520,7 +528,7 @@ mod integration {
                 let (req, ctx) =
                     session.create_poll_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
-                    .post(req.url)
+                    .post(req.url.as_str())
                     .header("Content-Type", req.content_type)
                     .body(req.body)
                     .send()
@@ -538,7 +546,7 @@ mod integration {
                 let (req, ctx) =
                     payjoin_proposal.create_post_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
-                    .post(req.url)
+                    .post(req.url.as_str())
                     .header("Content-Type", req.content_type)
                     .body(req.body)
                     .send()
@@ -553,8 +561,12 @@ mod integration {
                 // Replay post fallback to get the response
                 let (Request { url, body, content_type, .. }, ohttp_ctx) =
                     send_ctx.create_poll_request(services.ohttp_relay_url().as_str())?;
-                let response =
-                    agent.post(url).header("Content-Type", content_type).body(body).send().await?;
+                let response = agent
+                    .post(url.as_str())
+                    .header("Content-Type", content_type)
+                    .body(body)
+                    .send()
+                    .await?;
                 tracing::info!("Response: {:#?}", &response);
                 let response = send_ctx
                     .process_response(&response.bytes().await?, ohttp_ctx)
@@ -703,7 +715,7 @@ mod integration {
                     req_ctx.create_v1_post_request();
                 tracing::info!("send fallback v1 to offline receiver fail");
                 let res = agent
-                    .post(url.clone())
+                    .post(url.as_str())
                     .header("Content-Type", content_type)
                     .body(body.clone())
                     .send()
@@ -721,7 +733,7 @@ mod integration {
                     let proposal = loop {
                         let (req, ctx) = session.create_poll_request(&ohttp_relay)?;
                         let response = agent_clone
-                            .post(req.url)
+                            .post(req.url.as_str())
                             .header("Content-Type", req.content_type)
                             .body(req.body)
                             .send()
@@ -753,7 +765,7 @@ mod integration {
                     // this response would be returned as http response to the sender
                     let (req, ctx) = payjoin_proposal.create_post_request(ohttp_relay)?;
                     let response = agent_clone
-                        .post(req.url)
+                        .post(req.url.as_str())
                         .header("Content-Type", req.content_type)
                         .body(req.body)
                         .send()
@@ -768,8 +780,12 @@ mod integration {
                 // **********************
                 // send fallback v1 to online receiver
                 tracing::info!("send fallback v1 to online receiver should succeed");
-                let response =
-                    agent.post(url).header("Content-Type", content_type).body(body).send().await?;
+                let response = agent
+                    .post(url.as_str())
+                    .header("Content-Type", content_type)
+                    .body(body)
+                    .send()
+                    .await?;
                 tracing::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success(), "error response: {}", response.status());
 
@@ -1169,7 +1185,7 @@ mod integration {
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
         let proposal = payjoin::receive::v1::UncheckedOriginalPayload::from_request(
             req.body.as_slice(),
-            url::Url::parse(&req.url)?.query().unwrap_or(""),
+            url::Url::parse(req.url.as_str())?.query().unwrap_or(""),
             headers,
         )?;
         let proposal =

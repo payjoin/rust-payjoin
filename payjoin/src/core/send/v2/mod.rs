@@ -381,7 +381,7 @@ pub(crate) fn extract_request(
     let full_ohttp_relay = ohttp_relay
         .join(&format!("/{directory_base}"))
         .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
-    let request = Request::new_v2(full_ohttp_relay.as_str(), &body);
+    let request = Request::new_v2(&Url(full_ohttp_relay), &body);
     Ok((request, ohttp_ctx))
 }
 
@@ -453,7 +453,7 @@ impl Sender<PollingForProposal> {
             .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
 
         let url = ohttp_relay.into_url().map_err(InternalCreateRequestError::Url)?.0;
-        Ok((Request::new_v2(url.as_str(), &body), ohttp_ctx))
+        Ok((Request::new_v2(&Url(url), &body), ohttp_ctx))
     }
 
     /// Processes the response for the final GET message from the sender client

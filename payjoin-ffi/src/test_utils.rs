@@ -13,6 +13,8 @@ use serde_json::Value;
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
 
+use crate::Url;
+
 lazy_static! {
     static ref RUNTIME: Arc<std::sync::Mutex<Runtime>> =
         Arc::new(std::sync::Mutex::new(Runtime::new().expect("Failed to create Tokio runtime")));
@@ -126,9 +128,13 @@ impl TestServices {
         runtime.block_on(async { self.0.lock().await.cert() })
     }
 
-    pub fn directory_url(&self) -> String {
+    pub fn directory_url(&self) -> Url {
         let runtime = RUNTIME.lock().expect("Lock should not be poisoned");
-        runtime.block_on(async { self.0.lock().await.directory_url().to_string() })
+        runtime.block_on(async {
+            payjoin::Url::try_from(self.0.lock().await.directory_url().to_string())
+                .expect("Could not parse Url")
+                .into()
+        })
     }
 
     pub fn take_directory_handle(&self) -> JoinHandle {
@@ -137,14 +143,22 @@ impl TestServices {
             .block_on(async { JoinHandle(Arc::new(self.0.lock().await.take_directory_handle())) })
     }
 
-    pub fn ohttp_relay_url(&self) -> String {
+    pub fn ohttp_relay_url(&self) -> Url {
         let runtime = RUNTIME.lock().expect("Lock should not be poisoned");
-        runtime.block_on(async { self.0.lock().await.ohttp_relay_url().to_string() })
+        runtime.block_on(async {
+            payjoin::Url::try_from(self.0.lock().await.ohttp_relay_url().to_string())
+                .expect("Could not parse Url")
+                .into()
+        })
     }
 
-    pub fn ohttp_gateway_url(&self) -> String {
+    pub fn ohttp_gateway_url(&self) -> Url {
         let runtime = RUNTIME.lock().expect("Lock should not be poisoned");
-        runtime.block_on(async { self.0.lock().await.ohttp_gateway_url().to_string() })
+        runtime.block_on(async {
+            payjoin::Url::try_from(self.0.lock().await.ohttp_gateway_url().to_string())
+                .expect("Could not parse Url")
+                .into()
+        })
     }
 
     pub fn take_ohttp_relay_handle(&self) -> JoinHandle {

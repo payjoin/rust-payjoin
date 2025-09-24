@@ -198,8 +198,8 @@ mod integration {
         use http::StatusCode;
         use payjoin::persist::{NoopSessionPersister, OptionalTransitionOutcome};
         use payjoin::receive::v2::{
-            replay_event_log as replay_receiver_event_log, PayjoinProposal, Receiver,
-            ReceiverBuilder, UncheckedOriginalPayload,
+            replay_event_log as replay_receiver_event_log, PayjoinProposal, ReceiveSession,
+            Receiver, ReceiverBuilder, SessionStatus, UncheckedOriginalPayload,
         };
         use payjoin::send::v2::SenderBuilder;
         use payjoin::send::ResponseError;
@@ -318,12 +318,12 @@ mod integration {
             let result = tokio::select!(
             err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
             err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
-            res = process_err_res(&services) => res
+            res = do_err_test(&services) => res
             );
 
             assert!(result.is_ok(), "v2 send receive failed: {:#?}", result.unwrap_err());
 
-            async fn process_err_res(services: &TestServices) -> Result<(), BoxError> {
+            async fn do_err_test(services: &TestServices) -> Result<(), BoxError> {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
                 let agent = services.http_agent();
                 services.wait_for_services_ready().await?;
@@ -425,10 +425,14 @@ mod integration {
                     "Protocol error: The receiver rejected the original PSBT."
                 );
 
-                let (_, session_history) = replay_receiver_event_log(&persister)?;
-                let (err_req, err_ctx) = session_history
-                    .extract_err_req(services.ohttp_relay_url().as_str())?
-                    .expect("error request should exist");
+                let (session, session_history) = replay_receiver_event_log(&persister)?;
+                assert_eq!(session_history.status(), SessionStatus::Active);
+                let has_error = match session {
+                    ReceiveSession::HasReplyableError(r) => r,
+                    _ => panic!("Expected HasError"),
+                };
+                let (err_req, err_ctx) =
+                    has_error.create_error_request(services.ohttp_relay_url().as_str())?;
                 let err_response = agent
                     .post(err_req.url)
                     .header("Content-Type", err_req.content_type)
@@ -437,8 +441,15 @@ mod integration {
                     .await?;
 
                 let err_bytes = err_response.bytes().await?;
-                // Ensure that the error was handled properly
-                assert!(payjoin::receive::v2::process_err_res(&err_bytes, err_ctx).is_ok());
+                has_error.process_error_response(&err_bytes, err_ctx).save(&persister)?;
+
+                // Ensure the session is closed properly
+                let (_, session_history) = replay_receiver_event_log(&persister)?;
+                assert_eq!(session_history.status(), SessionStatus::Failed);
+                assert_eq!(
+                    session_history.terminal_error().expect("should have error"),
+                    (&server_error).into()
+                );
 
                 // Check that we can read the error response as a sender
                 let (req, ctx) =

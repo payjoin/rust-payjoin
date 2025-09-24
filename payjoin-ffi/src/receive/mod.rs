@@ -154,22 +154,6 @@ impl SessionHistory {
     pub fn fallback_tx(&self) -> Option<Arc<crate::Transaction>> {
         self.0.fallback_tx().map(|tx| Arc::new(tx.into()))
     }
-
-    /// Construct the error request to be posted on the directory if an error occurred.
-    /// To process the response, use [process_err_res]
-    pub fn extract_err_req(
-        &self,
-        ohttp_relay: String,
-    ) -> Result<Option<RequestResponse>, SessionError> {
-        match self.0.extract_err_req(ohttp_relay) {
-            Ok(Some((request, ctx))) => Ok(Some(RequestResponse {
-                request: request.into(),
-                client_response: Arc::new(ctx.into()),
-            })),
-            Ok(None) => Ok(None),
-            Err(e) => Err(SessionError::from(e)),
-        }
-    }
 }
 
 #[derive(uniffi::Object)]
@@ -470,12 +454,6 @@ impl UncheckedOriginalPayload {
     }
 }
 
-/// Process an OHTTP Encapsulated HTTP POST Error response
-/// to ensure it has been posted properly
-#[uniffi::export]
-pub fn process_err_res(body: &[u8], context: &ClientResponse) -> Result<(), SessionError> {
-    payjoin::receive::v2::process_err_res(body, context.into()).map_err(Into::into)
-}
 #[derive(Clone, uniffi::Object)]
 pub struct MaybeInputsOwned(payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsOwned>);
 

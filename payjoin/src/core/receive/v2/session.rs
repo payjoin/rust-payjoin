@@ -4,9 +4,8 @@ use super::{ReceiveSession, SessionContext};
 use crate::error::{InternalReplayError, ReplayError};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
-use crate::receive::v2::{extract_err_req, SessionError};
 use crate::receive::{InputPair, JsonReply, OriginalPayload, PsbtContext};
-use crate::{ImplementationError, IntoUrl, PjUri, Request};
+use crate::{ImplementationError, PjUri};
 
 /// Replay a receiver event log to get the receiver in its current state [ReceiveSession]
 /// and a session history [SessionHistory]
@@ -102,35 +101,6 @@ impl SessionHistory {
             SessionEvent::GotReplyableError(reply) => Some(reply.clone()),
             _ => None,
         })
-    }
-
-    /// Construct the error request to be posted on the directory if an error occurred.
-    /// To process the response, use [crate::receive::v2::process_err_res]
-    pub fn extract_err_req(
-        &self,
-        ohttp_relay: impl IntoUrl,
-    ) -> Result<Option<(Request, ohttp::ClientResponse)>, SessionError> {
-        // FIXME ideally this should be more like a method of
-        // Receiver<UncheckedOriginalPayload> and subsequent states instead of the
-        // history as a whole since it doesn't make sense to call it before,
-        // reaching that state.
-        if !self.received_sender_proposal() {
-            return Ok(None);
-        }
-
-        let session_context = self.session_context();
-        let json_reply = match self.terminal_error() {
-            Some(json_reply) => json_reply,
-            _ => return Ok(None),
-        };
-        let (req, ctx) = extract_err_req(&json_reply, ohttp_relay, &session_context)?;
-        Ok(Some((req, ctx)))
-    }
-
-    fn received_sender_proposal(&self) -> bool {
-        self.events
-            .iter()
-            .any(|event| matches!(event, SessionEvent::RetrievedOriginalPayload { .. }))
     }
 
     fn session_context(&self) -> SessionContext {
@@ -675,80 +645,6 @@ mod tests {
 
         assert_ne!(uri.extras.pj_param.endpoint().as_str(), EXAMPLE_URL);
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_skipped_session_extract_err_request() -> Result<(), BoxError> {
-        let ohttp_relay = EXAMPLE_URL;
-        let mock_err = mock_err();
-
-        let session_history =
-            SessionHistory { events: vec![SessionEvent::CheckedBroadcastSuitability()] };
-        let err_req = session_history.extract_err_req(ohttp_relay)?;
-        assert!(err_req.is_none());
-
-        let session_history = SessionHistory {
-            events: vec![
-                SessionEvent::CheckedBroadcastSuitability(),
-                SessionEvent::GotReplyableError(mock_err.clone()),
-            ],
-        };
-
-        let err_req = session_history.extract_err_req(ohttp_relay)?;
-        assert!(err_req.is_none());
-
-        let session_history = SessionHistory {
-            events: vec![
-                SessionEvent::Created(SHARED_CONTEXT.clone()),
-                SessionEvent::CheckedBroadcastSuitability(),
-                SessionEvent::GotReplyableError(mock_err.clone()),
-            ],
-        };
-
-        let err_req = session_history.extract_err_req(ohttp_relay)?;
-        assert!(err_req.is_none());
-        Ok(())
-    }
-
-    #[test]
-    fn test_session_extract_err_req_reply_key() -> Result<(), BoxError> {
-        let proposal = original_from_test_vector();
-        let ohttp_relay = EXAMPLE_URL;
-        let mock_err = mock_err();
-
-        let session_history_one = SessionHistory {
-            events: vec![
-                SessionEvent::Created(SHARED_CONTEXT.clone()),
-                SessionEvent::RetrievedOriginalPayload {
-                    original: proposal.clone(),
-                    reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
-                },
-                SessionEvent::GotReplyableError(mock_err.clone()),
-            ],
-        };
-
-        let err_req_one = session_history_one.extract_err_req(ohttp_relay)?;
-        assert!(err_req_one.is_some());
-
-        let session_history_two = SessionHistory {
-            events: vec![
-                SessionEvent::Created(SHARED_CONTEXT.clone()),
-                SessionEvent::RetrievedOriginalPayload {
-                    original: proposal.clone(),
-                    reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
-                },
-                SessionEvent::GotReplyableError(mock_err.clone()),
-            ],
-        };
-
-        let err_req_two = session_history_two.extract_err_req(ohttp_relay)?;
-        assert!(err_req_two.is_some());
-        assert_ne!(
-            session_history_one.session_context().reply_key,
-            session_history_two.session_context().reply_key
-        );
 
         Ok(())
     }

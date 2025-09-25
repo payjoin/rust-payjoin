@@ -202,6 +202,7 @@ mod integration {
             ReceiverBuilder, UncheckedOriginalPayload,
         };
         use payjoin::send::v2::SenderBuilder;
+        use payjoin::send::ResponseError;
         use payjoin::{OhttpKeys, PjUri, UriExt};
         use payjoin_test_utils::{BoxSendSyncError, InMemoryTestPersister, TestServices};
         use reqwest::{Client, Response};
@@ -371,12 +372,16 @@ mod integration {
                 let req_ctx = SenderBuilder::new(psbt, pj_uri)
                     .build_recommended(FeeRate::BROADCAST_MIN)?
                     .save(&sender_persister)?;
-                let (Request { url, body, content_type, .. }, _send_ctx) =
+                let (Request { url, body, content_type, .. }, send_ctx) =
                     req_ctx.create_v2_post_request(services.ohttp_relay_url().as_str())?;
                 let response =
                     agent.post(url).header("Content-Type", content_type).body(body).send().await?;
                 tracing::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success(), "error response: {}", response.status());
+                let req_ctx = req_ctx
+                    .process_response(&response.bytes().await?, send_ctx)
+                    .save(&sender_persister)?;
+
                 // POST Original PSBT
 
                 // **********************
@@ -401,14 +406,15 @@ mod integration {
                     panic!("proposal should exist");
                 };
 
+                // Progress past the first typestate so we can send a encrypted error response
+                // TODO: when the reply key is being persisted as its own session event we can fail at the
+                // unchecked original typestate
+                let proposal = proposal.assume_interactive_receiver().save(&persister)?;
+
                 // Generate replyable error
-                let check_broadcast_suitability = || {
-                    proposal
-                        .clone()
-                        .check_broadcast_suitability(None, |_| Ok(false))
-                        .save(&persister)
-                };
-                let server_error = check_broadcast_suitability()
+                let check_inputs_not_owned =
+                    || proposal.clone().check_inputs_not_owned(&mut |_| Ok(true)).save(&persister);
+                let server_error = check_inputs_not_owned()
                     .expect_err("should fail")
                     .api_error()
                     .expect("expected api error");
@@ -416,7 +422,7 @@ mod integration {
                 // Issue: https://github.com/payjoin/rust-payjoin/issues/645
                 assert_eq!(
                     server_error.to_string(),
-                    "Protocol error: Can't broadcast. PSBT rejected by mempool."
+                    "Protocol error: The receiver rejected the original PSBT."
                 );
 
                 let (_, session_history) = replay_receiver_event_log(&persister)?;
@@ -433,6 +439,32 @@ mod integration {
                 let err_bytes = err_response.bytes().await?;
                 // Ensure that the error was handled properly
                 assert!(payjoin::receive::v2::process_err_res(&err_bytes, err_ctx).is_ok());
+
+                // Check that we can read the error response as a sender
+                let (req, ctx) =
+                    req_ctx.create_poll_request(services.ohttp_relay_url().as_str())?;
+                let response = agent
+                    .post(req.url)
+                    .header("Content-Type", req.content_type)
+                    .body(req.body)
+                    .send()
+                    .await?;
+                assert!(response.status().is_success(), "error response: {}", response.status());
+                let reply_error = req_ctx
+                    .process_response(&response.bytes().await?, ctx)
+                    .save(&sender_persister)
+                    .expect_err("Should be a fatal error");
+
+                let api_error = reply_error.api_error().expect("expecting error from API");
+                match api_error {
+                    ResponseError::WellKnown(well_known_error) => {
+                        assert_eq!(
+                            well_known_error.to_string(),
+                            "The receiver rejected the original PSBT."
+                        );
+                    }
+                    _ => panic!("Expected Unrecognized error, got {:?}", api_error),
+                }
 
                 Ok(())
             }

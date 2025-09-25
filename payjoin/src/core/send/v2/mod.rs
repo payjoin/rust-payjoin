@@ -425,6 +425,14 @@ pub struct PollingForProposal {
     pub(crate) reply_key: HpkeSecretKey,
 }
 
+impl ResponseError {
+    fn from_slice(bytes: &[u8]) -> Result<Self, serde_json::Error> {
+        let trimmed_bytes = bytes.split(|&byte| byte == 0).next().unwrap_or(bytes);
+        let value: serde_json::Value = serde_json::from_slice(trimmed_bytes)?;
+        Ok(ResponseError::from_json(value))
+    }
+}
+
 impl Sender<PollingForProposal> {
     /// Construct an OHTTP Encapsulated HTTP GET request for the Proposal PSBT
     pub fn create_poll_request(
@@ -489,19 +497,28 @@ impl Sender<PollingForProposal> {
                     );
                 },
         };
-        let psbt = match decrypt_message_b(
+
+        let body = match decrypt_message_b(
             &body,
             self.pj_param.receiver_pubkey().clone(),
             self.reply_key.clone(),
         ) {
-            Ok(psbt) => psbt,
+            Ok(body) => body,
             Err(e) =>
                 return MaybeSuccessTransitionWithNoResults::fatal(
                     SessionEvent::SessionInvalid(e.to_string()),
                     InternalEncapsulationError::Hpke(e).into(),
                 ),
         };
-        let proposal = match Psbt::deserialize(&psbt) {
+
+        if let Ok(resp_err) = ResponseError::from_slice(&body) {
+            return MaybeSuccessTransitionWithNoResults::fatal(
+                SessionEvent::SessionInvalid(resp_err.to_string()),
+                resp_err,
+            );
+        }
+
+        let proposal = match Psbt::deserialize(&body) {
             Ok(proposal) => proposal,
             Err(e) =>
                 return MaybeSuccessTransitionWithNoResults::fatal(

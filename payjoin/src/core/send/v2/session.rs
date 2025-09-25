@@ -1,6 +1,6 @@
 use super::WithReplyKey;
 use crate::error::{InternalReplayError, ReplayError};
-use crate::persist::SessionPersister;
+use crate::persist::{SessionEventTrait, SessionPersister};
 use crate::send::v2::{PollingForProposal, SendSession};
 use crate::uri::v2::PjParam;
 use crate::ImplementationError;
@@ -96,6 +96,16 @@ pub enum SessionEvent {
     ProposalReceived(bitcoin::Psbt),
     /// Invalid session
     SessionInvalid(String),
+}
+
+impl crate::persist::sealed::Sealed for SessionEvent {}
+
+impl SessionEventTrait for SessionEvent {
+    fn is_closed_event(&self) -> bool {
+        // Sender doesn't have a Closed variant yet, so always return true for now.
+        // This maintains current behavior where all fatal events close the session.
+        true
+    }
 }
 
 #[cfg(test)]

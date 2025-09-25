@@ -3,10 +3,9 @@ use serde::{Deserialize, Serialize};
 use super::{ReceiveSession, SessionContext};
 use crate::error::{InternalReplayError, ReplayError};
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::SessionPersister;
-use crate::receive::v2::{extract_err_req, SessionError};
+use crate::persist::{SessionEventTrait, SessionPersister};
 use crate::receive::{common, InputPair, JsonReply, OriginalPayload, PsbtContext};
-use crate::{ImplementationError, IntoUrl, PjUri, Request};
+use crate::{ImplementationError, PjUri};
 
 /// Replay a receiver event log to get the receiver in its current state [ReceiveSession]
 /// and a session history [SessionHistory]
@@ -105,40 +104,12 @@ impl SessionHistory {
     }
 
     /// Terminal error from the session if present
-    pub fn terminal_error(&self) -> Option<(String, Option<JsonReply>)> {
+    /// TODO: This should replay the event log and return the actual error, not a JSON reply
+    pub fn terminal_error(&self) -> Option<JsonReply> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::SessionInvalid(err_str, reply) => Some((err_str.clone(), reply.clone())),
+            SessionEvent::HasReplyableError(reply) => Some(reply.clone()),
             _ => None,
         })
-    }
-
-    /// Construct the error request to be posted on the directory if an error occurred.
-    /// To process the response, use [crate::receive::v2::process_err_res]
-    pub fn extract_err_req(
-        &self,
-        ohttp_relay: impl IntoUrl,
-    ) -> Result<Option<(Request, ohttp::ClientResponse)>, SessionError> {
-        // FIXME ideally this should be more like a method of
-        // Receiver<UncheckedOriginalPayload> and subsequent states instead of the
-        // history as a whole since it doesn't make sense to call it before,
-        // reaching that state.
-        if !self.received_sender_proposal() {
-            return Ok(None);
-        }
-
-        let session_context = self.session_context();
-        let json_reply = match self.terminal_error() {
-            Some((_, Some(json_reply))) => json_reply,
-            _ => return Ok(None),
-        };
-        let (req, ctx) = extract_err_req(&json_reply, ohttp_relay, &session_context)?;
-        Ok(Some((req, ctx)))
-    }
-
-    fn received_sender_proposal(&self) -> bool {
-        self.events
-            .iter()
-            .any(|event| matches!(event, SessionEvent::UncheckedOriginalPayload { .. }))
     }
 
     fn session_context(&self) -> SessionContext {
@@ -189,10 +160,7 @@ pub enum SessionStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SessionEvent {
     Created(SessionContext),
-    UncheckedOriginalPayload {
-        original: OriginalPayload,
-        reply_key: Option<crate::HpkePublicKey>,
-    },
+    UncheckedOriginalPayload { original: OriginalPayload, reply_key: Option<crate::HpkePublicKey> },
     MaybeInputsOwned(),
     MaybeInputsSeen(),
     OutputsUnknown(),
@@ -201,11 +169,7 @@ pub enum SessionEvent {
     WantsFeeRange(Vec<InputPair>),
     ProvisionalProposal(PsbtContext),
     PayjoinProposal(bitcoin::Psbt),
-    /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
-    /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
-    /// Reason being in some cases we still want to preserve the error b/c we can action on it. For now this is a terminal state and there is nothing to replay and is saved to be displayed.
-    /// b/c its a terminal state and there is nothing to replay. So serialization will be lossy and that is fine.
-    SessionInvalid(String, Option<JsonReply>),
+    HasReplyableError(JsonReply),
     Closed(SessionOutcome),
 }
 
@@ -222,6 +186,12 @@ pub enum SessionOutcome {
     Cancel,
 }
 
+impl crate::persist::sealed::Sealed for SessionEvent {}
+
+impl SessionEventTrait for SessionEvent {
+    fn is_closed_event(&self) -> bool { matches!(self, SessionEvent::Closed(_)) }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, SystemTime};
@@ -234,9 +204,10 @@ mod tests {
     use crate::receive::tests::original_from_test_vector;
     use crate::receive::v2::test::{mock_err, SHARED_CONTEXT};
     use crate::receive::v2::{
-        Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal, Receiver,
-        UncheckedOriginalPayload,
+        HasReplyableError, Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal,
+        Receiver, UncheckedOriginalPayload,
     };
+    use crate::receive::{InternalPayloadError, PayloadError};
 
     fn unchecked_receiver_from_test_vector() -> Receiver<UncheckedOriginalPayload> {
         Receiver {
@@ -301,6 +272,7 @@ mod tests {
             SessionEvent::WantsFeeRange(wants_fee_range.state.inner.receiver_inputs.clone()),
             SessionEvent::ProvisionalProposal(provisional_proposal.state.psbt_context.clone()),
             SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()),
+            SessionEvent::HasReplyableError(mock_err()),
         ];
 
         for event in test_cases {
@@ -613,6 +585,82 @@ mod tests {
     }
 
     #[test]
+    fn test_session_fatal_error() -> Result<(), BoxError> {
+        let persister = NoopSessionPersister::<SessionEvent>::default();
+        let session_context = SHARED_CONTEXT.clone();
+        let mut events = vec![];
+
+        let original = original_from_test_vector();
+        // Original PSBT is not broadcastable
+        let _unbroadcastable = unchecked_receiver_from_test_vector()
+            .check_broadcast_suitability(None, |_| Ok(false))
+            .save(&persister)
+            .expect_err("Unbroadcastable should error");
+        // NOTE: it would be good to assert against the internal error type but InternalPersistedError is private
+        let expected_error = PayloadError(InternalPayloadError::OriginalPsbtNotBroadcastable);
+        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
+
+        events.push(SessionEvent::Created(session_context.clone()));
+        events.push(SessionEvent::UncheckedOriginalPayload {
+            original: original.clone(),
+            reply_key: reply_key.clone(),
+        });
+        events.push(SessionEvent::HasReplyableError((&expected_error).into()));
+        events.push(SessionEvent::Closed(SessionOutcome::Failure));
+
+        let test = SessionHistoryTest {
+            events,
+            expected_session_history: SessionHistoryExpectedOutcome {
+                psbt_with_fee_contributions: None,
+                fallback_tx: None,
+                expected_status: SessionStatus::Failed,
+            },
+            expected_receiver_state: ReceiveSession::HasReplyableError(Receiver {
+                state: HasReplyableError { error_reply: (&expected_error).into() },
+                session_context: SessionContext { reply_key, ..session_context },
+            }),
+        };
+        run_session_history_test(test)
+    }
+
+    #[test]
+    fn test_session_transient_error() -> Result<(), BoxError> {
+        let persister = NoopSessionPersister::<SessionEvent>::default();
+        let session_context = SHARED_CONTEXT.clone();
+        let mut events = vec![];
+
+        let original = original_from_test_vector();
+        // Mock some implementation error
+        let _maybe_broadcastable = unchecked_receiver_from_test_vector()
+            .check_broadcast_suitability(None, |_| Err("mock error".into()))
+            .save(&persister)
+            .expect_err("Mock error should error");
+        // NOTE: it would be good to assert against the internal error type but InternalPersistedError is private
+
+        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
+
+        events.push(SessionEvent::Created(session_context.clone()));
+        events.push(SessionEvent::UncheckedOriginalPayload {
+            original: original.clone(),
+            reply_key: reply_key.clone(),
+        });
+
+        let test = SessionHistoryTest {
+            events,
+            expected_session_history: SessionHistoryExpectedOutcome {
+                psbt_with_fee_contributions: None,
+                fallback_tx: None,
+                expected_status: SessionStatus::Active,
+            },
+            expected_receiver_state: ReceiveSession::UncheckedOriginalPayload(Receiver {
+                state: UncheckedOriginalPayload { original },
+                session_context: SessionContext { reply_key, ..session_context },
+            }),
+        };
+        run_session_history_test(test)
+    }
+
+    #[test]
     fn test_session_history_uri() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
         let events = vec![SessionEvent::Created(session_context.clone())];
@@ -621,79 +669,6 @@ mod tests {
 
         assert_ne!(uri.extras.pj_param.endpoint(), EXAMPLE_URL.clone());
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_skipped_session_extract_err_request() -> Result<(), BoxError> {
-        let ohttp_relay = EXAMPLE_URL.as_str();
-        let mock_err = mock_err();
-
-        let session_history = SessionHistory { events: vec![SessionEvent::MaybeInputsOwned()] };
-        let err_req = session_history.extract_err_req(ohttp_relay)?;
-        assert!(err_req.is_none());
-
-        let session_history = SessionHistory {
-            events: vec![
-                SessionEvent::MaybeInputsOwned(),
-                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
-            ],
-        };
-
-        let err_req = session_history.extract_err_req(ohttp_relay)?;
-        assert!(err_req.is_none());
-
-        let session_history = SessionHistory {
-            events: vec![
-                SessionEvent::Created(SHARED_CONTEXT.clone()),
-                SessionEvent::MaybeInputsOwned(),
-                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
-            ],
-        };
-
-        let err_req = session_history.extract_err_req(ohttp_relay)?;
-        assert!(err_req.is_none());
-        Ok(())
-    }
-
-    #[test]
-    fn test_session_extract_err_req_reply_key() -> Result<(), BoxError> {
-        let proposal = original_from_test_vector();
-        let ohttp_relay = EXAMPLE_URL.as_str();
-        let mock_err = mock_err();
-
-        let session_history_one = SessionHistory {
-            events: vec![
-                SessionEvent::Created(SHARED_CONTEXT.clone()),
-                SessionEvent::UncheckedOriginalPayload {
-                    original: proposal.clone(),
-                    reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
-                },
-                SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
-            ],
-        };
-
-        let err_req_one = session_history_one.extract_err_req(ohttp_relay)?;
-        assert!(err_req_one.is_some());
-
-        let session_history_two = SessionHistory {
-            events: vec![
-                SessionEvent::Created(SHARED_CONTEXT.clone()),
-                SessionEvent::UncheckedOriginalPayload {
-                    original: proposal.clone(),
-                    reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
-                },
-                SessionEvent::SessionInvalid(mock_err.0, Some(mock_err.1)),
-            ],
-        };
-
-        let err_req_two = session_history_two.extract_err_req(ohttp_relay)?;
-        assert!(err_req_two.is_some());
-        assert_ne!(
-            session_history_one.session_context().reply_key,
-            session_history_two.session_context().reply_key
-        );
 
         Ok(())
     }

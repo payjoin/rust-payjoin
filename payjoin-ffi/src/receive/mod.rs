@@ -85,7 +85,7 @@ pub enum ReceiveSession {
     WantsFeeRange { inner: Arc<WantsFeeRange> },
     ProvisionalProposal { inner: Arc<ProvisionalProposal> },
     PayjoinProposal { inner: Arc<PayjoinProposal> },
-    TerminalFailure,
+    HasReplyableError { inner: Arc<HasReplyableError> },
 }
 
 impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
@@ -112,7 +112,8 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
                 Self::ProvisionalProposal { inner: Arc::new(inner.into()) },
             ReceiveSession::PayjoinProposal(inner) =>
                 Self::PayjoinProposal { inner: Arc::new(inner.into()) },
-            ReceiveSession::TerminalFailure => Self::TerminalFailure,
+            ReceiveSession::HasReplyableError(inner) =>
+                Self::HasReplyableError { inner: Arc::new(inner.into()) },
         }
     }
 }
@@ -146,19 +147,6 @@ impl From<payjoin::receive::v2::SessionHistory> for SessionHistory {
     fn from(value: payjoin::receive::v2::SessionHistory) -> Self { Self(value) }
 }
 
-#[derive(uniffi::Object)]
-pub struct TerminalErr {
-    error: String,
-    reply: Option<JsonReply>,
-}
-
-#[uniffi::export]
-impl TerminalErr {
-    pub fn error(&self) -> String { self.error.clone() }
-
-    pub fn reply(&self) -> Option<Arc<JsonReply>> { self.reply.clone().map(Arc::new) }
-}
-
 #[uniffi::export]
 impl SessionHistory {
     /// Receiver session Payjoin URI
@@ -170,31 +158,13 @@ impl SessionHistory {
     }
 
     /// Terminal error from the session if present
-    pub fn terminal_error(&self) -> Option<Arc<TerminalErr>> {
-        self.0.terminal_error().map(|(error, reply)| {
-            Arc::new(TerminalErr { error, reply: reply.map(|reply| reply.into()) })
-        })
+    pub fn terminal_error(&self) -> Option<Arc<JsonReply>> {
+        self.0.terminal_error().map(|reply| Arc::new(reply.into()))
     }
 
     /// Fallback transaction from the session if present
     pub fn fallback_tx(&self) -> Option<Arc<crate::Transaction>> {
         self.0.fallback_tx().map(|tx| Arc::new(tx.into()))
-    }
-
-    /// Construct the error request to be posted on the directory if an error occurred.
-    /// To process the response, use [process_err_res]
-    pub fn extract_err_req(
-        &self,
-        ohttp_relay: String,
-    ) -> Result<Option<RequestResponse>, SessionError> {
-        match self.0.extract_err_req(ohttp_relay) {
-            Ok(Some((request, ctx))) => Ok(Some(RequestResponse {
-                request: request.into(),
-                client_response: Arc::new(ctx.into()),
-            })),
-            Ok(None) => Ok(None),
-            Err(e) => Err(SessionError::from(e)),
-        }
     }
 }
 
@@ -502,12 +472,6 @@ impl UncheckedOriginalPayload {
     }
 }
 
-/// Process an OHTTP Encapsulated HTTP POST Error response
-/// to ensure it has been posted properly
-#[uniffi::export]
-pub fn process_err_res(body: &[u8], context: &ClientResponse) -> Result<(), SessionError> {
-    payjoin::receive::v2::process_err_res(body, context.into()).map_err(Into::into)
-}
 #[derive(Clone, uniffi::Object)]
 pub struct MaybeInputsOwned(payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsOwned>);
 
@@ -961,7 +925,7 @@ pub struct PayjoinProposalTransition(
                 payjoin::persist::MaybeSuccessTransition<
                     payjoin::receive::v2::SessionEvent,
                     (),
-                    payjoin::receive::Error,
+                    payjoin::receive::ProtocolError,
                 >,
             >,
         >,
@@ -1032,6 +996,83 @@ impl PayjoinProposal {
     ) -> PayjoinProposalTransition {
         PayjoinProposalTransition(Arc::new(RwLock::new(Some(
             self.0.clone().process_response(body, ohttp_context.into()),
+        ))))
+    }
+}
+
+#[derive(Clone, uniffi::Object)]
+pub struct HasReplyableError(
+    pub payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError>,
+);
+
+impl From<HasReplyableError>
+    for payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError>
+{
+    fn from(value: HasReplyableError) -> Self { value.0 }
+}
+
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError>>
+    for HasReplyableError
+{
+    fn from(
+        value: payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError>,
+    ) -> Self {
+        Self(value)
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct HasReplyableErrorTransition(
+    Arc<
+        RwLock<
+            Option<
+                payjoin::persist::MaybeSuccessTransition<
+                    payjoin::receive::v2::SessionEvent,
+                    (),
+                    payjoin::receive::Error,
+                >,
+            >,
+        >,
+    >,
+);
+
+#[uniffi::export]
+impl HasReplyableErrorTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<(), ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let mut inner =
+            self.0.write().map_err(|_| ImplementationError::from("Lock poisoned".to_string()))?;
+
+        let value = inner
+            .take()
+            .ok_or_else(|| ImplementationError::from("Already saved or moved".to_string()))?;
+
+        value.save(&adapter).map_err(ReceiverPersistedError::from)?;
+        Ok(())
+    }
+}
+
+#[uniffi::export]
+impl HasReplyableError {
+    pub fn create_error_request(
+        &self,
+        ohttp_relay: String,
+    ) -> Result<RequestResponse, SessionError> {
+        self.0.clone().create_error_request(ohttp_relay).map_err(Into::into).map(|(req, ctx)| {
+            RequestResponse { request: req.into(), client_response: Arc::new(ctx.into()) }
+        })
+    }
+
+    pub fn process_error_response(
+        &self,
+        body: &[u8],
+        ohttp_context: &ClientResponse,
+    ) -> PayjoinProposalTransition {
+        PayjoinProposalTransition(Arc::new(RwLock::new(Some(
+            self.0.clone().process_error_response(body, ohttp_context.into()),
         ))))
     }
 }

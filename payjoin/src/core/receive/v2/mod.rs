@@ -815,12 +815,21 @@ impl Receiver<WantsOutputs> {
     pub fn commit_outputs(self) -> NextStateTransition<SessionEvent, Receiver<WantsInputs>> {
         let inner = self.state.inner.clone().commit_outputs();
         NextStateTransition::success(
-            SessionEvent::WantsInputs(inner.clone()),
+            SessionEvent::WantsInputs(self.state.inner.payjoin_psbt.unsigned_tx.output),
             Receiver { state: WantsInputs { inner }, session_context: self.session_context },
         )
     }
 
-    pub(crate) fn apply_wants_inputs(self, inner: common::WantsInputs) -> ReceiveSession {
+    pub(crate) fn apply_wants_inputs(self, outputs: Vec<TxOut>) -> ReceiveSession {
+        let mut payjoin_proposal = self.inner.payjoin_psbt.clone();
+        let outputs_len = outputs.len();
+        // Add the outputs that may have been replaced
+        payjoin_proposal.unsigned_tx.output = outputs;
+        payjoin_proposal.outputs = vec![Default::default(); outputs_len];
+
+        let mut inner = self.state.inner.commit_outputs();
+        inner.payjoin_psbt = payjoin_proposal;
+
         let new_state =
             Receiver { state: WantsInputs { inner }, session_context: self.session_context };
         ReceiveSession::WantsInputs(new_state)

@@ -5,7 +5,7 @@ use crate::error::{InternalReplayError, ReplayError};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
 use crate::receive::v2::{extract_err_req, SessionError};
-use crate::receive::{common, InputPair, JsonReply, OriginalPayload, PsbtContext};
+use crate::receive::{InputPair, JsonReply, OriginalPayload, PsbtContext};
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
 /// Replay a receiver event log to get the receiver in its current state [ReceiveSession]
@@ -197,7 +197,7 @@ pub enum SessionEvent {
     MaybeInputsSeen(),
     OutputsUnknown(),
     WantsOutputs(Vec<usize>),
-    WantsInputs(common::WantsInputs),
+    WantsInputs(Vec<bitcoin::TxOut>),
     WantsFeeRange(Vec<InputPair>),
     ProvisionalProposal(PsbtContext),
     PayjoinProposal(bitcoin::Psbt),
@@ -297,7 +297,7 @@ mod tests {
             SessionEvent::MaybeInputsSeen(),
             SessionEvent::OutputsUnknown(),
             SessionEvent::WantsOutputs(wants_outputs.state.inner.owned_vouts.clone()),
-            SessionEvent::WantsInputs(wants_inputs.state.inner.clone()),
+            SessionEvent::WantsInputs(wants_outputs.state.inner.payjoin_psbt.unsigned_tx.output),
             SessionEvent::WantsFeeRange(wants_fee_range.state.inner.receiver_inputs.clone()),
             SessionEvent::ProvisionalProposal(provisional_proposal.state.psbt_context.clone()),
             SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()),
@@ -508,7 +508,9 @@ mod tests {
         events.push(SessionEvent::MaybeInputsSeen());
         events.push(SessionEvent::OutputsUnknown());
         events.push(SessionEvent::WantsOutputs(wants_outputs.state.inner.owned_vouts.clone()));
-        events.push(SessionEvent::WantsInputs(wants_inputs.state.inner.clone()));
+        events.push(SessionEvent::WantsInputs(
+            wants_outputs.state.inner.payjoin_psbt.unsigned_tx.output,
+        ));
         events
             .push(SessionEvent::WantsFeeRange(wants_fee_range.state.inner.receiver_inputs.clone()));
         events.push(SessionEvent::ProvisionalProposal(
@@ -586,7 +588,9 @@ mod tests {
         events.push(SessionEvent::MaybeInputsSeen());
         events.push(SessionEvent::OutputsUnknown());
         events.push(SessionEvent::WantsOutputs(wants_outputs.state.inner.owned_vouts.clone()));
-        events.push(SessionEvent::WantsInputs(wants_inputs.state.inner.clone()));
+        events.push(SessionEvent::WantsInputs(
+            wants_outputs.state.inner.payjoin_psbt.unsigned_tx.output,
+        ));
         events
             .push(SessionEvent::WantsFeeRange(wants_fee_range.state.inner.receiver_inputs.clone()));
         events.push(SessionEvent::ProvisionalProposal(

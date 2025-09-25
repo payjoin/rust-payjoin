@@ -69,7 +69,6 @@ pub struct SessionContext {
     #[serde(deserialize_with = "deserialize_address_assume_checked")]
     address: Address,
     directory: url::Url,
-    mailbox: Option<url::Url>,
     ohttp_keys: OhttpKeys,
     expiration: Time,
     amount: Option<Amount>,
@@ -307,7 +306,6 @@ impl ReceiverBuilder {
             expiration: Time::from_now(TWENTY_FOUR_HOURS_DEFAULT_EXPIRATION)
                 .expect("Default expiration time should be representable as u32 unix time"),
             amount: None,
-            mailbox: None,
             reply_key: None,
             max_fee_rate: FeeRate::BROADCAST_MIN,
         };
@@ -324,10 +322,6 @@ impl ReceiverBuilder {
 
     pub fn with_amount(self, amount: Amount) -> Self {
         Self(SessionContext { amount: Some(amount), ..self.0 })
-    }
-
-    pub fn with_mailbox(self, mailbox: impl IntoUrl) -> Result<Self, IntoUrlError> {
-        Ok(Self(SessionContext { mailbox: Some(mailbox.into_url()?), ..self.0 }))
     }
 
     /// Set the maximum effective fee rate the receiver is willing to pay for their own input/output contributions
@@ -1145,7 +1139,6 @@ pub mod test {
             .expect("valid address")
             .assume_checked(),
         directory: EXAMPLE_URL.clone(),
-        mailbox: None,
         ohttp_keys: OhttpKeys(
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
         ),

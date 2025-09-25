@@ -162,16 +162,19 @@ impl<Event, SuccessValue, Err> MaybeSuccessTransition<Event, SuccessValue, Err>
 where
     Err: std::error::Error,
 {
+    #[cfg(test)]
     #[inline]
     pub(crate) fn success(event: Event, success_value: SuccessValue) -> Self {
         MaybeSuccessTransition(Ok(AcceptNextState(event, success_value)))
     }
 
+    #[cfg(test)]
     #[inline]
     pub(crate) fn transient(error: Err) -> Self {
         MaybeSuccessTransition(Err(Rejection::transient(error)))
     }
 
+    #[cfg(test)]
     #[inline]
     pub(crate) fn fatal(event: Event, error: Err) -> Self {
         MaybeSuccessTransition(Err(Rejection::fatal(event, error)))
@@ -202,6 +205,53 @@ impl<Event, NextState> NextStateTransition<Event, NextState> {
         P: SessionPersister<SessionEvent = Event>,
     {
         persister.save_progression_transition(self)
+    }
+}
+
+pub enum MaybeFatalOrSuccessTransition<Event, SuccessValue, CurrentState, Err> {
+    Success(Vec<Event>, SuccessValue),
+    NoResults(CurrentState),
+    Transient(RejectTransient<Err>),
+    Fatal(RejectFatal<Event, Err>),
+}
+
+impl<Event, SuccessValue, CurrentState, Err>
+    MaybeFatalOrSuccessTransition<Event, SuccessValue, CurrentState, Err>
+where
+    Err: std::error::Error,
+{
+    #[inline]
+    pub(crate) fn success(events: Vec<Event>, success_value: SuccessValue) -> Self {
+        MaybeFatalOrSuccessTransition::Success(events, success_value)
+    }
+
+    #[inline]
+    pub(crate) fn fatal(event: Event, error: Err) -> Self {
+        MaybeFatalOrSuccessTransition::Fatal(RejectFatal(event, error))
+    }
+
+    #[inline]
+    pub(crate) fn transient(error: Err) -> Self {
+        MaybeFatalOrSuccessTransition::Transient(RejectTransient(error))
+    }
+
+    #[inline]
+    pub(crate) fn no_results(current_state: CurrentState) -> Self {
+        MaybeFatalOrSuccessTransition::NoResults(current_state)
+    }
+
+    pub fn save<P>(
+        self,
+        persister: &P,
+    ) -> Result<
+        OptionalTransitionOutcome<SuccessValue, CurrentState>,
+        PersistedError<Err, P::InternalStorageError>,
+    >
+    where
+        P: SessionPersister<SessionEvent = Event>,
+        Err: std::error::Error,
+    {
+        persister.save_maybe_fatal_or_success_transition(self)
     }
 }
 
@@ -362,6 +412,39 @@ pub trait SessionPersister {
 /// Internal logic for processing specific state transitions. Each method is strongly typed to the state transition type.
 /// Methods are not meant to be called directly, but are invoked through a state transition object's `save` method.
 trait InternalSessionPersister: SessionPersister {
+    fn save_maybe_fatal_or_success_transition<SuccessValue, CurrentState, Err>(
+        &self,
+        state_transition: MaybeFatalOrSuccessTransition<
+            Self::SessionEvent,
+            SuccessValue,
+            CurrentState,
+            Err,
+        >,
+    ) -> Result<
+        OptionalTransitionOutcome<SuccessValue, CurrentState>,
+        PersistedError<Err, Self::InternalStorageError>,
+    >
+    where
+        Err: std::error::Error,
+    {
+        match state_transition {
+            MaybeFatalOrSuccessTransition::Success(events, success_value) => {
+                // Success value here would be the something to save
+                for event in events {
+                    self.save_event(event).map_err(InternalPersistedError::Storage)?;
+                }
+                self.close().map_err(InternalPersistedError::Storage)?;
+                Ok(OptionalTransitionOutcome::Progress(success_value))
+            }
+            MaybeFatalOrSuccessTransition::NoResults(current_state) =>
+                Ok(OptionalTransitionOutcome::Stasis(current_state)),
+            MaybeFatalOrSuccessTransition::Fatal(RejectFatal(event, error)) =>
+                Err(self.handle_fatal_reject(RejectFatal(event, error)).into()),
+            MaybeFatalOrSuccessTransition::Transient(RejectTransient(err)) =>
+                Err(InternalPersistedError::Transient(err).into()),
+        }
+    }
+
     /// Save state transition where state transition does not return an error
     /// Only returns an error if the storage fails
     fn save_progression_transition<NextState>(
@@ -1020,6 +1103,80 @@ mod tests {
                         InMemoryTestError {},
                     )
                     .save(persister)
+                }),
+            },
+        ];
+
+        for test in test_cases {
+            let persister = InMemoryTestPersister::default();
+            do_test(&persister, &test);
+        }
+    }
+
+    #[test]
+    fn test_maybe_fatal_or_success_transition() {
+        let event1 = InMemoryTestEvent("foo 1".to_string());
+        let event2 = InMemoryTestEvent("foo 2".to_string());
+        let error_event = InMemoryTestEvent("error event".to_string());
+        let success_value = "Success value".to_string();
+        let current_state = "Current state".to_string();
+        let test_cases: Vec<
+            TestCase<
+                OptionalTransitionOutcome<InMemoryTestState, InMemoryTestState>,
+                PersistedError<InMemoryTestError, std::convert::Infallible>,
+            >,
+        > = vec![
+            // Success
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![event1.clone(), event2.clone()],
+                    is_closed: true,
+                    error: None,
+                    success: Some(OptionalTransitionOutcome::Progress(success_value.clone())),
+                },
+                test: Box::new(move |persister| {
+                    MaybeFatalOrSuccessTransition::Success(
+                        vec![event1.clone(), event2.clone()],
+                        success_value.clone(),
+                    )
+                    .save(persister)
+                }),
+            },
+            // No results
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![],
+                    is_closed: false,
+                    error: None,
+                    success: Some(OptionalTransitionOutcome::Stasis(current_state.clone())),
+                },
+                test: Box::new(move |persister| {
+                    MaybeFatalOrSuccessTransition::NoResults(current_state.clone()).save(persister)
+                }),
+            },
+            // Fatal error
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![error_event.clone()],
+                    is_closed: true,
+                    error: Some(InternalPersistedError::Fatal(InMemoryTestError {}).into()),
+                    success: None,
+                },
+                test: Box::new(move |persister| {
+                    MaybeFatalOrSuccessTransition::fatal(error_event.clone(), InMemoryTestError {})
+                        .save(persister)
+                }),
+            },
+            // Transient error
+            TestCase {
+                expected_result: ExpectedResult {
+                    events: vec![],
+                    is_closed: false,
+                    error: Some(InternalPersistedError::Transient(InMemoryTestError {}).into()),
+                    success: None,
+                },
+                test: Box::new(move |persister| {
+                    MaybeFatalOrSuccessTransition::transient(InMemoryTestError {}).save(persister)
                 }),
             },
         ];

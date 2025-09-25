@@ -319,6 +319,34 @@ mod e2e {
                 .expect("Failed to execute payjoin-cli");
             check_payjoin_sent(cli_send_resumer).await?;
 
+            // Need to mine a block
+            let funding_address = bitcoind
+                .client
+                .get_new_address(None, None)?
+                .address()
+                .expect("address should be valid")
+                .assume_checked();
+            bitcoind.client.generate_to_address(1, &funding_address)?;
+
+            // Resume the receiver to ensure we monitor for the payjoin proposal
+            let cli_receive_resumer = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&receiver_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&receiver_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relay)
+                .arg("resume")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli");
+
+            check_resume_completed(cli_receive_resumer).await?;
             // Check that neither the sender or the receiver have sessions to resume
             let cli_receive_resumer = Command::new(payjoin_cli)
                 .arg("--root-certificate")
@@ -417,6 +445,22 @@ mod e2e {
             Ok(())
         }
 
+        async fn check_resume_completed(mut cli_resumer: Child) -> Result<()> {
+            let mut stdout =
+                cli_resumer.stdout.take().expect("Failed to take stdout of child process");
+            let timeout = tokio::time::Duration::from_secs(10);
+            let res = tokio::time::timeout(
+                timeout,
+                wait_for_stdout_match(&mut stdout, |line| {
+                    line.contains("All resumed sessions completed.")
+                }),
+            )
+            .await?;
+
+            terminate(cli_resumer).await.expect("Failed to kill payjoin-cli");
+            assert!(res.is_some(), "Expected all resumed sessions completed");
+            Ok(())
+        }
         Ok(())
     }
 

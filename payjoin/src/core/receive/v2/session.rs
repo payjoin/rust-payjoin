@@ -168,6 +168,7 @@ impl SessionHistory {
             Some(SessionEvent::Closed(outcome)) => match outcome {
                 SessionOutcome::Success => SessionStatus::Completed,
                 SessionOutcome::Failure | SessionOutcome::Cancel => SessionStatus::Failed,
+                SessionOutcome::FallbackBroadcasted => SessionStatus::FallbackBroadcasted,
             },
             _ => SessionStatus::Active,
         }
@@ -182,6 +183,7 @@ pub enum SessionStatus {
     Expired,
     Failed,
     Completed,
+    FallbackBroadcasted,
 }
 
 /// Represents a piece of information that the receiver has obtained from the session
@@ -201,6 +203,9 @@ pub enum SessionEvent {
     WantsFeeRange(Vec<InputPair>),
     ProvisionalProposal(PsbtContext),
     PayjoinProposal(bitcoin::Psbt),
+    PayjoinPosted(),
+    // TODO: do we save the entire tx or just the witness/sigscript of the sender inputs
+    PayjoinTransactionDetected(Vec<(bitcoin::ScriptBuf, bitcoin::Witness)>),
     /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
     /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
     /// Reason being in some cases we still want to preserve the error b/c we can action on it. For now this is a terminal state and there is nothing to replay and is saved to be displayed.
@@ -220,6 +225,8 @@ pub enum SessionOutcome {
     Failure,
     /// Payjoin was cancelled by the user
     Cancel,
+    /// Fallback transaction was broadcasted
+    FallbackBroadcasted,
 }
 
 #[cfg(test)]
@@ -609,7 +616,9 @@ mod tests {
                 expected_status: SessionStatus::Completed,
             },
             expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {
-                state: PayjoinProposal { psbt: payjoin_proposal.psbt().clone() },
+                state: PayjoinProposal {
+                    psbt_context: payjoin_proposal.state.psbt_context.clone(),
+                },
                 session_context: SessionContext { reply_key, ..session_context },
             }),
         };
@@ -698,6 +707,20 @@ mod tests {
             session_history_one.session_context().reply_key,
             session_history_two.session_context().reply_key
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_session_history_fallback_broadcasted() -> Result<(), BoxError> {
+        let session_context = SHARED_CONTEXT.clone();
+        let events = vec![
+            SessionEvent::Created(session_context.clone()),
+            SessionEvent::Closed(SessionOutcome::FallbackBroadcasted),
+        ];
+        let status = SessionHistory { events }.status();
+
+        assert_eq!(status, SessionStatus::FallbackBroadcasted);
 
         Ok(())
     }

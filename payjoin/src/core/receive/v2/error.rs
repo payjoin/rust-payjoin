@@ -34,6 +34,8 @@ pub(crate) enum InternalSessionError {
     Hpke(HpkeError),
     /// The directory returned a bad response
     DirectoryResponse(DirectoryResponseError),
+    /// Fallback outpoints were spent in either the fallback or a different transaction entirely
+    FallbackOutpointsSpent(Vec<bitcoin::OutPoint>),
 }
 
 impl From<OhttpEncapsulationError> for Error {
@@ -56,6 +58,8 @@ impl fmt::Display for SessionError {
             OhttpEncapsulation(e) => write!(f, "OHTTP Encapsulation Error: {e}"),
             Hpke(e) => write!(f, "Hpke decryption failed: {e}"),
             DirectoryResponse(e) => write!(f, "Directory response error: {e}"),
+            FallbackOutpointsSpent(outpoints) =>
+                write!(f, "Fallback outpoints {outpoints:?} were spent"),
         }
     }
 }
@@ -70,6 +74,7 @@ impl error::Error for SessionError {
             OhttpEncapsulation(e) => Some(e),
             Hpke(e) => Some(e),
             DirectoryResponse(e) => Some(e),
+            FallbackOutpointsSpent(_) => None,
         }
     }
 }

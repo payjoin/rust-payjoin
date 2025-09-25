@@ -8,18 +8,14 @@ echo "Running on $OS"
 # Install Rust targets if on macOS
 if [[ "$OS" == "Darwin" ]]; then
     LIBNAME=libpayjoin_ffi.dylib
-    python3 --version
-    pip install -r requirements.txt -r requirements-dev.txt
 elif [[ "$OS" == "Linux" ]]; then
     LIBNAME=libpayjoin_ffi.so
-    PYBIN=$(dirname $(which python))
-    PYBIN="$PYBIN" 
-    ${PYBIN}/python --version
-    ${PYBIN}/pip install -r requirements.txt -r requirements-dev.txt
 else
     echo "Unsupported os: $OS"
     exit 1
 fi
+
+uv run python --version
 
 cd ../
 # This is a test script the actual release should not include the test utils feature

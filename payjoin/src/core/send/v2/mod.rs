@@ -592,13 +592,13 @@ mod test {
         let expiration =
             Time::from_now(Duration::from_secs(60)).expect("expiration should be valid");
         let sender = create_sender_context(expiration)?;
-        let ohttp_relay = EXAMPLE_URL.as_str();
+        let ohttp_relay = EXAMPLE_URL;
         let result = sender.create_v2_post_request(ohttp_relay);
         let (request, context) = result.expect("Result should be ok");
         assert!(!request.body.is_empty(), "Request body should not be empty");
         assert_eq!(
             request.url.to_string(),
-            format!("{}{}", EXAMPLE_URL.clone(), sender.pj_param.endpoint().join("/")?)
+            format!("{}/{}", EXAMPLE_URL, sender.pj_param.endpoint().join("/")?)
         );
         assert_eq!(context.psbt_ctx.original_psbt, sender.psbt_ctx.original_psbt);
         Ok(())
@@ -611,7 +611,7 @@ mod test {
             .expect("time in the past should be representable");
 
         let sender = create_sender_context(expiration)?;
-        let ohttp_relay = EXAMPLE_URL.as_str();
+        let ohttp_relay = EXAMPLE_URL;
         let result = sender.create_v2_post_request(ohttp_relay);
         assert!(result.is_err(), "Extract v2 expected expiration error, but it succeeded");
 
@@ -627,7 +627,7 @@ mod test {
         let address = Address::from_str("2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7")
             .expect("valid address")
             .assume_checked();
-        let directory = EXAMPLE_URL.as_str();
+        let directory = EXAMPLE_URL;
         let ohttp_keys = OhttpKeys(
             ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
         );

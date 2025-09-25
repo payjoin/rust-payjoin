@@ -623,7 +623,7 @@ mod tests {
 
         let uri = SessionHistory { events }.pj_uri();
 
-        assert_ne!(uri.extras.pj_param.endpoint(), EXAMPLE_URL.clone());
+        assert_ne!(uri.extras.pj_param.endpoint().as_str(), EXAMPLE_URL);
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
 
         Ok(())
@@ -631,7 +631,7 @@ mod tests {
 
     #[test]
     fn test_skipped_session_extract_err_request() -> Result<(), BoxError> {
-        let ohttp_relay = EXAMPLE_URL.as_str();
+        let ohttp_relay = EXAMPLE_URL;
         let mock_err = mock_err();
 
         let session_history = SessionHistory { events: vec![SessionEvent::MaybeInputsOwned()] };
@@ -664,7 +664,7 @@ mod tests {
     #[test]
     fn test_session_extract_err_req_reply_key() -> Result<(), BoxError> {
         let proposal = original_from_test_vector();
-        let ohttp_relay = EXAMPLE_URL.as_str();
+        let ohttp_relay = EXAMPLE_URL;
         let mock_err = mock_err();
 
         let session_history_one = SessionHistory {

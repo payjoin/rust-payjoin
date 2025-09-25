@@ -350,7 +350,7 @@ mod test {
         map.insert(unknown_key, value);
         psbt_ctx.original_psbt.unknown = map;
 
-        let sender = Sender { endpoint: EXAMPLE_URL.clone(), psbt_ctx };
+        let sender = Sender { endpoint: Url::from_str(EXAMPLE_URL)?, psbt_ctx };
 
         let body = sender.create_v1_post_request().0.body;
         let res_str = std::str::from_utf8(&body)?;

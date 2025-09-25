@@ -244,9 +244,9 @@ Future<payjoin.PayjoinProposalReceiveSession> process_unchecked_proposal(
 Future<payjoin.ReceiveSession?> retrieve_receiver_proposal(
     payjoin.Initialized receiver,
     InMemoryReceiverPersister recv_persister,
-    payjoin.Url ohttp_relay) async {
+    String ohttp_relay) async {
   var agent = http.Client();
-  var request = receiver.createPollRequest(ohttp_relay.asString());
+  var request = receiver.createPollRequest(ohttp_relay);
   var response = await agent.post(Uri.parse(request.request.url.asString()),
       headers: {"Content-Type": request.request.contentType},
       body: request.request.body);
@@ -268,7 +268,7 @@ Future<payjoin.ReceiveSession?> retrieve_receiver_proposal(
 Future<payjoin.ReceiveSession?> process_receiver_proposal(
     payjoin.ReceiveSession receiver,
     InMemoryReceiverPersister recv_persister,
-    payjoin.Url ohttp_relay) async {
+    String ohttp_relay) async {
   if (receiver is payjoin.InitializedReceiveSession) {
     var res = await retrieve_receiver_proposal(
         receiver.inner, recv_persister, ohttp_relay);
@@ -319,7 +319,7 @@ void main() {
       var services = payjoin.TestServices.initialize();
 
       services.waitForServicesReady();
-      var directory = services.directoryUrl().asString();
+      var directory = services.directoryUrl();
       var ohttp_keys = services.fetchOhttpKeys();
       var ohttp_relay = services.ohttpRelayUrl();
       var agent = http.Client();
@@ -345,7 +345,7 @@ void main() {
           .buildRecommended(1000)
           .save(sender_persister);
       payjoin.RequestV2PostContext request =
-          req_ctx.createV2PostRequest(ohttp_relay.asString());
+          req_ctx.createV2PostRequest(ohttp_relay);
       var response = await agent.post(Uri.parse(request.request.url.asString()),
           headers: {"Content-Type": request.request.contentType},
           body: request.request.body);
@@ -369,7 +369,7 @@ void main() {
       payjoin.PayjoinProposal proposal =
           (payjoin_proposal as payjoin.PayjoinProposalReceiveSession).inner;
       payjoin.RequestResponse request_response =
-          proposal.createPostRequest(ohttp_relay.asString());
+          proposal.createPostRequest(ohttp_relay);
       var fallback_response = await agent.post(
           Uri.parse(request_response.request.url.asString()),
           headers: {"Content-Type": request_response.request.contentType},
@@ -382,7 +382,7 @@ void main() {
       // Sender checks, isngs, finalizes, extracts, and broadcasts
       // Replay post fallback to get the response
       payjoin.RequestOhttpContext ohttp_context_request =
-          send_ctx.createPollRequest(ohttp_relay.asString());
+          send_ctx.createPollRequest(ohttp_relay);
       var final_response = await agent.post(
           Uri.parse(ohttp_context_request.request.url.asString()),
           headers: {"Content-Type": ohttp_context_request.request.contentType},

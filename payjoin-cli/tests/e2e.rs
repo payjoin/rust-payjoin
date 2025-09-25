@@ -234,8 +234,8 @@ mod e2e {
 
             let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
 
-            let directory = &services.directory_url().to_string();
-            let ohttp_relay = &services.ohttp_relay_url().to_string();
+            let directory = &services.directory_url();
+            let ohttp_relay = &services.ohttp_relay_url();
 
             let cli_receive_initiator = Command::new(payjoin_cli)
                 .arg("--root-certificate")
@@ -527,7 +527,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&sender_db_path)
                 .arg("--ohttp-relays")
-                .arg(services.ohttp_relay_url().to_string())
+                .arg(services.ohttp_relay_url())
                 .arg("send")
                 .arg(&bip21)
                 .arg("--fee-rate")

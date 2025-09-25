@@ -28,6 +28,8 @@
 //! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
 //! but request reuse makes correlation trivial for the relay.
 
+use std::str::FromStr;
+
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::Address;
 pub use error::{CreateRequestError, EncapsulationError};
@@ -40,6 +42,7 @@ use url::Url;
 use super::error::BuildSenderError;
 use super::*;
 use crate::error::{InternalReplayError, ReplayError};
+use crate::error_codes::ErrorCode;
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
 use crate::persist::{
@@ -425,6 +428,22 @@ pub struct PollingForProposal {
     pub(crate) reply_key: HpkeSecretKey,
 }
 
+impl ResponseError {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, serde_json::Error> {
+        let value: serde_json::Value = serde_json::from_slice(bytes)?;
+        Ok(ResponseError::from_json(value))
+    }
+
+    fn status(&self) -> ErrorCode {
+        match self {
+            ResponseError::WellKnown(well_known_error) => well_known_error.code,
+            ResponseError::Validation(_) => ErrorCode::Unavailable,
+            ResponseError::Unrecognized { error_code, .. } =>
+                ErrorCode::from_str(error_code).unwrap_or(ErrorCode::Unavailable),
+        }
+    }
+}
+
 impl Sender<PollingForProposal> {
     /// Construct an OHTTP Encapsulated HTTP GET request for the Proposal PSBT
     pub fn create_poll_request(
@@ -489,6 +508,22 @@ impl Sender<PollingForProposal> {
                     );
                 },
         };
+
+        match ResponseError::from_bytes(&body) {
+            Ok(resp_err) => {
+                let error_message = resp_err.to_string();
+                return MaybeSuccessTransitionWithNoResults::fatal(
+                    SessionEvent::SessionInvalid(error_message.clone()),
+                    ResponseError::Unrecognized {
+                        error_code: resp_err.status().to_string(),
+                        message: error_message,
+                    },
+                );
+            }
+            Err(_) => {
+                // Nothing to do, lets try to parse the PSBT
+            }
+        }
         let psbt = match decrypt_message_b(
             &body,
             self.pj_param.receiver_pubkey().clone(),

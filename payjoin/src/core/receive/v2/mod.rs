@@ -260,13 +260,23 @@ fn extract_err_req(
         return Err(InternalSessionError::Expired(session_context.expiration).into());
     }
     let mailbox = mailbox_endpoint(&session_context.directory, &session_context.reply_mailbox_id());
-    let (body, ohttp_ctx) = ohttp_encapsulate(
-        &session_context.ohttp_keys.0,
-        "POST",
-        mailbox.as_str(),
-        Some(err.to_json().to_string().as_bytes()),
-    )
-    .map_err(InternalSessionError::OhttpEncapsulation)?;
+    let body = {
+        if let Some(reply_key) = &session_context.reply_key {
+            encrypt_message_b(
+                err.to_json().to_string().as_bytes().to_vec(),
+                &session_context.receiver_key,
+                reply_key,
+            )
+            .map_err(InternalSessionError::Hpke)?
+        } else {
+            // Post a generic unavailable error message in the case where we don't have a reply key
+            let err = JsonReply::new(crate::error_codes::ErrorCode::Unavailable, "Receiver error");
+            err.to_json().to_string().as_bytes().to_vec()
+        }
+    };
+    let (body, ohttp_ctx) =
+        ohttp_encapsulate(&session_context.ohttp_keys.0, "POST", mailbox.as_str(), Some(&body))
+            .map_err(InternalSessionError::OhttpEncapsulation)?;
     let req = Request::new_v2(&session_context.full_relay_url(ohttp_relay)?, &body);
     Ok((req, ohttp_ctx))
 }

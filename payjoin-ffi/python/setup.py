@@ -16,9 +16,12 @@ as the core implementation of BIP77, sourced from the [Payjoin Dev Kit](https://
 ## Install the package
 ```shell
 pip install payjoin
+
+# Or, if using uv
+uv add payjoin
 ```
 
-## Usage 
+## Usage
 ```python
 import payjoin as payjoin
 """

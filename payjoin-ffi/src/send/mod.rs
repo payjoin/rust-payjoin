@@ -22,17 +22,9 @@ macro_rules! impl_save_for_transition {
                 persister: Arc<dyn JsonSenderSessionPersister>,
             ) -> Result<$next_state, SenderPersistedError> {
                 let adapter = CallbackPersisterAdapter::new(persister);
-                let mut inner = self.0.write().map_err(|_| {
-                    SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                        "Lock poisoned".to_string(),
-                    )))
-                })?;
+                let mut inner = self.0.write().expect("Lock should not be poisoned");
 
-                let value = inner.take().ok_or_else(|| {
-                    SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                        "Already saved or moved".to_string(),
-                    )))
-                })?;
+                let value = inner.take().expect("Already saved or moved");
 
                 let res = value.save(&adapter).map_err(SenderPersistedError::from)?;
                 Ok(res.into())
@@ -149,12 +141,9 @@ impl InitialSendTransition {
         persister: Arc<dyn JsonSenderSessionPersister>,
     ) -> Result<WithReplyKey, ForeignError> {
         let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner =
-            self.0.write().map_err(|_| ForeignError::InternalError("Lock poisoned".to_string()))?;
+        let mut inner = self.0.write().expect("Lock should not be poisoned");
 
-        let value = inner
-            .take()
-            .ok_or_else(|| ForeignError::InternalError("Already saved or moved".to_string()))?;
+        let value = inner.take().expect("Already saved or moved");
 
         let res = value.save(&adapter).map_err(|e| ForeignError::InternalError(e.to_string()))?;
         Ok(res.into())
@@ -291,17 +280,9 @@ impl WithReplyKeyTransition {
         persister: Arc<dyn JsonSenderSessionPersister>,
     ) -> Result<PollingForProposal, SenderPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
-        let mut inner = self.0.write().map_err(|_| {
-            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                "Lock poisoned".to_string(),
-            )))
-        })?;
+        let mut inner = self.0.write().expect("Lock should not be poisoned");
 
-        let value = inner.take().ok_or_else(|| {
-            SenderPersistedError::Storage(Arc::new(ImplementationError::from(
-                "Already saved or moved".to_string(),
-            )))
-        })?;
+        let value = inner.take().expect("Already saved or moved");
 
         let res = value.save(&adapter).map_err(SenderPersistedError::from)?;
         Ok(res.into())

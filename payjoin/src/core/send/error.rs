@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 
 use bitcoin::locktime::absolute::LockTime;
 use bitcoin::transaction::Version;
@@ -92,7 +93,6 @@ pub struct ValidationError(InternalValidationError);
 
 #[derive(Debug)]
 pub(crate) enum InternalValidationError {
-    #[cfg(feature = "v1")]
     Parse,
     #[cfg(feature = "v1")]
     ContentTooLarge,
@@ -118,7 +118,6 @@ impl fmt::Display for ValidationError {
         use InternalValidationError::*;
 
         match &self.0 {
-            #[cfg(feature = "v1")]
             Parse => write!(f, "couldn't decode as PSBT or JSON",),
             #[cfg(feature = "v1")]
             ContentTooLarge => {
@@ -137,7 +136,6 @@ impl std::error::Error for ValidationError {
         use InternalValidationError::*;
 
         match &self.0 {
-            #[cfg(feature = "v1")]
             Parse => None,
             #[cfg(feature = "v1")]
             ContentTooLarge => None,
@@ -330,6 +328,36 @@ impl fmt::Debug for ResponseError {
     }
 }
 
+impl ResponseError {
+    pub(crate) fn from_json(json: serde_json::Value) -> Self {
+        let message = json
+            .as_object()
+            .and_then(|v| v.get("message"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        let error_code = json.as_object().and_then(|v| v.get("errorCode")).and_then(|v| v.as_str());
+
+        match error_code {
+            Some(code) => match ErrorCode::from_str(code) {
+                Ok(ErrorCode::VersionUnsupported) => {
+                    let supported = json
+                        .as_object()
+                        .and_then(|v| v.get("supported"))
+                        .and_then(|v| v.as_array())
+                        .map(|array| array.iter().filter_map(|v| v.as_u64()).collect::<Vec<u64>>())
+                        .unwrap_or_default();
+                    WellKnownError::version_unsupported(message, supported).into()
+                }
+                Ok(code) => WellKnownError::new(code, message).into(),
+                Err(_) => Self::Unrecognized { error_code: code.to_string(), message },
+            },
+            None => InternalValidationError::Parse.into(),
+        }
+    }
+}
+
 /// A well-known error that can be safely displayed to end users.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WellKnownError {
@@ -354,6 +382,22 @@ impl core::fmt::Display for WellKnownError {
             }
             ErrorCode::OriginalPsbtRejected => write!(f, "The receiver rejected the original PSBT."),
         }
+    }
+}
+
+impl From<WellKnownError> for ResponseError {
+    fn from(value: WellKnownError) -> Self { Self::WellKnown(value) }
+}
+
+impl WellKnownError {
+    /// Create a new well-known error with the given code and message.
+    pub(crate) fn new(code: ErrorCode, message: String) -> Self {
+        Self { code, message, supported_versions: None }
+    }
+
+    /// Create a version unsupported error with the given message and supported versions.
+    pub(crate) fn version_unsupported(message: String, supported: Vec<u64>) -> Self {
+        Self { code: ErrorCode::VersionUnsupported, message, supported_versions: Some(supported) }
     }
 }
 

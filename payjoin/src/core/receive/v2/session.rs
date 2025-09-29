@@ -77,7 +77,7 @@ impl SessionHistory {
 
     fn get_unchecked_proposal(&self) -> Option<OriginalPayload> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::UncheckedOriginalPayload { original, .. } => Some(original.clone()),
+            SessionEvent::RetrievedOriginalPayload { original, .. } => Some(original.clone()),
             _ => None,
         })
     }
@@ -85,7 +85,7 @@ impl SessionHistory {
     /// Fallback transaction from the session if present
     pub fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::MaybeInputsOwned() => Some(
+            SessionEvent::CheckedBroadcastSuitability() => Some(
                 self.get_unchecked_proposal()
                     .expect("Should exist if this event is present")
                     .psbt
@@ -98,8 +98,7 @@ impl SessionHistory {
     /// Psbt with fee contributions applied
     pub fn psbt_ready_for_signing(&self) -> Option<bitcoin::Psbt> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::ProvisionalProposal(psbt_context) =>
-                Some(psbt_context.payjoin_psbt.clone()),
+            SessionEvent::AppliedFeeRange(psbt_context) => Some(psbt_context.payjoin_psbt.clone()),
             _ => None,
         })
     }
@@ -138,7 +137,7 @@ impl SessionHistory {
     fn received_sender_proposal(&self) -> bool {
         self.events
             .iter()
-            .any(|event| matches!(event, SessionEvent::UncheckedOriginalPayload { .. }))
+            .any(|event| matches!(event, SessionEvent::RetrievedOriginalPayload { .. }))
     }
 
     fn session_context(&self) -> SessionContext {
@@ -152,7 +151,7 @@ impl SessionHistory {
             .expect("Session event log must contain at least one event with session_context");
 
         initial_session_context.reply_key = self.events.iter().find_map(|event| match event {
-            SessionEvent::UncheckedOriginalPayload { reply_key, .. } => reply_key.clone(),
+            SessionEvent::RetrievedOriginalPayload { reply_key, .. } => reply_key.clone(),
             _ => None,
         });
 
@@ -189,18 +188,18 @@ pub enum SessionStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SessionEvent {
     Created(SessionContext),
-    UncheckedOriginalPayload {
+    RetrievedOriginalPayload {
         original: OriginalPayload,
         reply_key: Option<crate::HpkePublicKey>,
     },
-    MaybeInputsOwned(),
-    MaybeInputsSeen(),
-    OutputsUnknown(),
-    WantsOutputs(Vec<usize>),
-    WantsInputs(Vec<bitcoin::TxOut>),
-    WantsFeeRange(Vec<InputPair>),
-    ProvisionalProposal(PsbtContext),
-    PayjoinProposal(bitcoin::Psbt),
+    CheckedBroadcastSuitability(),
+    CheckedInputsNotOwned(),
+    CheckedNoInputsSeenBefore(),
+    IdentifiedReceiverOutputs(Vec<usize>),
+    CommittedOutputs(Vec<bitcoin::TxOut>),
+    CommittedInputs(Vec<InputPair>),
+    AppliedFeeRange(PsbtContext),
+    FinalizedProposal(bitcoin::Psbt),
     /// Session is invalid. This is a irrecoverable error. Fallback tx should be broadcasted.
     /// TODO this should be any error type that is impl std::error and works well with serde, or as a fallback can be formatted as a string
     /// Reason being in some cases we still want to preserve the error b/c we can action on it. For now this is a terminal state and there is nothing to replay and is saved to be displayed.
@@ -288,19 +287,21 @@ mod tests {
 
         let test_cases = vec![
             SessionEvent::Created(SHARED_CONTEXT.clone()),
-            SessionEvent::UncheckedOriginalPayload { original: original.clone(), reply_key: None },
-            SessionEvent::UncheckedOriginalPayload {
+            SessionEvent::RetrievedOriginalPayload { original: original.clone(), reply_key: None },
+            SessionEvent::RetrievedOriginalPayload {
                 original,
                 reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
             },
-            SessionEvent::MaybeInputsOwned(),
-            SessionEvent::MaybeInputsSeen(),
-            SessionEvent::OutputsUnknown(),
-            SessionEvent::WantsOutputs(wants_outputs.state.inner.owned_vouts.clone()),
-            SessionEvent::WantsInputs(wants_outputs.state.inner.payjoin_psbt.unsigned_tx.output),
-            SessionEvent::WantsFeeRange(wants_fee_range.state.inner.receiver_inputs.clone()),
-            SessionEvent::ProvisionalProposal(provisional_proposal.state.psbt_context.clone()),
-            SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()),
+            SessionEvent::CheckedBroadcastSuitability(),
+            SessionEvent::CheckedInputsNotOwned(),
+            SessionEvent::CheckedNoInputsSeenBefore(),
+            SessionEvent::IdentifiedReceiverOutputs(wants_outputs.state.inner.owned_vouts.clone()),
+            SessionEvent::CommittedOutputs(
+                wants_outputs.state.inner.payjoin_psbt.unsigned_tx.output,
+            ),
+            SessionEvent::CommittedInputs(wants_fee_range.state.inner.receiver_inputs.clone()),
+            SessionEvent::AppliedFeeRange(provisional_proposal.state.psbt_context.clone()),
+            SessionEvent::FinalizedProposal(payjoin_proposal.psbt().clone()),
         ];
 
         for event in test_cases {
@@ -381,7 +382,7 @@ mod tests {
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
-                SessionEvent::UncheckedOriginalPayload {
+                SessionEvent::RetrievedOriginalPayload {
                     original: original.clone(),
                     reply_key: reply_key.clone(),
                 },
@@ -408,7 +409,7 @@ mod tests {
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
-                SessionEvent::UncheckedOriginalPayload {
+                SessionEvent::RetrievedOriginalPayload {
                     original: original.clone(),
                     reply_key: reply_key.clone(),
                 },
@@ -440,11 +441,11 @@ mod tests {
         let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedOriginalPayload {
+        events.push(SessionEvent::RetrievedOriginalPayload {
             original: original.clone(),
             reply_key: reply_key.clone(),
         });
-        events.push(SessionEvent::MaybeInputsOwned());
+        events.push(SessionEvent::CheckedBroadcastSuitability());
 
         let test = SessionHistoryTest {
             events,
@@ -500,22 +501,23 @@ mod tests {
         let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedOriginalPayload {
+        events.push(SessionEvent::RetrievedOriginalPayload {
             original: original.clone(),
             reply_key: reply_key.clone(),
         });
-        events.push(SessionEvent::MaybeInputsOwned());
-        events.push(SessionEvent::MaybeInputsSeen());
-        events.push(SessionEvent::OutputsUnknown());
-        events.push(SessionEvent::WantsOutputs(wants_outputs.state.inner.owned_vouts.clone()));
-        events.push(SessionEvent::WantsInputs(
+        events.push(SessionEvent::CheckedBroadcastSuitability());
+        events.push(SessionEvent::CheckedInputsNotOwned());
+        events.push(SessionEvent::CheckedNoInputsSeenBefore());
+        events.push(SessionEvent::IdentifiedReceiverOutputs(
+            wants_outputs.state.inner.owned_vouts.clone(),
+        ));
+        events.push(SessionEvent::CommittedOutputs(
             wants_outputs.state.inner.payjoin_psbt.unsigned_tx.output,
         ));
-        events
-            .push(SessionEvent::WantsFeeRange(wants_fee_range.state.inner.receiver_inputs.clone()));
-        events.push(SessionEvent::ProvisionalProposal(
-            provisional_proposal.state.psbt_context.clone(),
+        events.push(SessionEvent::CommittedInputs(
+            wants_fee_range.state.inner.receiver_inputs.clone(),
         ));
+        events.push(SessionEvent::AppliedFeeRange(provisional_proposal.state.psbt_context.clone()));
 
         let test = SessionHistoryTest {
             events,
@@ -580,23 +582,24 @@ mod tests {
         let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::UncheckedOriginalPayload {
+        events.push(SessionEvent::RetrievedOriginalPayload {
             original: original.clone(),
             reply_key: reply_key.clone(),
         });
-        events.push(SessionEvent::MaybeInputsOwned());
-        events.push(SessionEvent::MaybeInputsSeen());
-        events.push(SessionEvent::OutputsUnknown());
-        events.push(SessionEvent::WantsOutputs(wants_outputs.state.inner.owned_vouts.clone()));
-        events.push(SessionEvent::WantsInputs(
+        events.push(SessionEvent::CheckedBroadcastSuitability());
+        events.push(SessionEvent::CheckedInputsNotOwned());
+        events.push(SessionEvent::CheckedNoInputsSeenBefore());
+        events.push(SessionEvent::IdentifiedReceiverOutputs(
+            wants_outputs.state.inner.owned_vouts.clone(),
+        ));
+        events.push(SessionEvent::CommittedOutputs(
             wants_outputs.state.inner.payjoin_psbt.unsigned_tx.output,
         ));
-        events
-            .push(SessionEvent::WantsFeeRange(wants_fee_range.state.inner.receiver_inputs.clone()));
-        events.push(SessionEvent::ProvisionalProposal(
-            provisional_proposal.state.psbt_context.clone(),
+        events.push(SessionEvent::CommittedInputs(
+            wants_fee_range.state.inner.receiver_inputs.clone(),
         ));
-        events.push(SessionEvent::PayjoinProposal(payjoin_proposal.psbt().clone()));
+        events.push(SessionEvent::AppliedFeeRange(provisional_proposal.state.psbt_context.clone()));
+        events.push(SessionEvent::FinalizedProposal(payjoin_proposal.psbt().clone()));
         events.push(SessionEvent::Closed(SessionOutcome::Success));
 
         let test = SessionHistoryTest {
@@ -634,13 +637,14 @@ mod tests {
         let ohttp_relay = EXAMPLE_URL;
         let mock_err = mock_err();
 
-        let session_history = SessionHistory { events: vec![SessionEvent::MaybeInputsOwned()] };
+        let session_history =
+            SessionHistory { events: vec![SessionEvent::CheckedBroadcastSuitability()] };
         let err_req = session_history.extract_err_req(ohttp_relay)?;
         assert!(err_req.is_none());
 
         let session_history = SessionHistory {
             events: vec![
-                SessionEvent::MaybeInputsOwned(),
+                SessionEvent::CheckedBroadcastSuitability(),
                 SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
             ],
         };
@@ -651,7 +655,7 @@ mod tests {
         let session_history = SessionHistory {
             events: vec![
                 SessionEvent::Created(SHARED_CONTEXT.clone()),
-                SessionEvent::MaybeInputsOwned(),
+                SessionEvent::CheckedBroadcastSuitability(),
                 SessionEvent::SessionInvalid(mock_err.0.clone(), Some(mock_err.1.clone())),
             ],
         };
@@ -670,7 +674,7 @@ mod tests {
         let session_history_one = SessionHistory {
             events: vec![
                 SessionEvent::Created(SHARED_CONTEXT.clone()),
-                SessionEvent::UncheckedOriginalPayload {
+                SessionEvent::RetrievedOriginalPayload {
                     original: proposal.clone(),
                     reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
                 },
@@ -684,7 +688,7 @@ mod tests {
         let session_history_two = SessionHistory {
             events: vec![
                 SessionEvent::Created(SHARED_CONTEXT.clone()),
-                SessionEvent::UncheckedOriginalPayload {
+                SessionEvent::RetrievedOriginalPayload {
                     original: proposal.clone(),
                     reply_key: Some(crate::HpkeKeyPair::gen_keypair().1),
                 },

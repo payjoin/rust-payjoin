@@ -153,36 +153,40 @@ impl ReceiveSession {
         match (self, event) {
             (
                 ReceiveSession::Initialized(state),
-                SessionEvent::UncheckedOriginalPayload { original: proposal, reply_key },
-            ) => Ok(state.apply_unchecked_from_payload(proposal, reply_key)),
-
-            (ReceiveSession::UncheckedOriginalPayload(state), SessionEvent::MaybeInputsOwned()) =>
-                Ok(state.apply_maybe_inputs_owned()),
-
-            (ReceiveSession::MaybeInputsOwned(state), SessionEvent::MaybeInputsSeen()) =>
-                Ok(state.apply_maybe_inputs_seen()),
-
-            (ReceiveSession::MaybeInputsSeen(state), SessionEvent::OutputsUnknown()) =>
-                Ok(state.apply_outputs_unknown()),
-
-            (ReceiveSession::OutputsUnknown(state), SessionEvent::WantsOutputs(wants_outputs)) =>
-                Ok(state.apply_wants_outputs(wants_outputs)),
-
-            (ReceiveSession::WantsOutputs(state), SessionEvent::WantsInputs(wants_inputs)) =>
-                Ok(state.apply_wants_inputs(wants_inputs)),
-
-            (ReceiveSession::WantsInputs(state), SessionEvent::WantsFeeRange(wants_fee_range)) =>
-                Ok(state.apply_wants_fee_range(wants_fee_range)),
+                SessionEvent::RetrievedOriginalPayload { original: proposal, reply_key },
+            ) => Ok(state.apply_retrieved_original_payload(proposal, reply_key)),
 
             (
-                ReceiveSession::WantsFeeRange(state),
-                SessionEvent::ProvisionalProposal(psbt_context),
-            ) => Ok(state.apply_provisional_proposal(psbt_context)),
+                ReceiveSession::UncheckedOriginalPayload(state),
+                SessionEvent::CheckedBroadcastSuitability(),
+            ) => Ok(state.apply_checked_broadcast_suitability()),
+
+            (ReceiveSession::MaybeInputsOwned(state), SessionEvent::CheckedInputsNotOwned()) =>
+                Ok(state.apply_checked_inputs_not_owned()),
+
+            (ReceiveSession::MaybeInputsSeen(state), SessionEvent::CheckedNoInputsSeenBefore()) =>
+                Ok(state.apply_checked_no_inputs_seen_before()),
+
+            (
+                ReceiveSession::OutputsUnknown(state),
+                SessionEvent::IdentifiedReceiverOutputs(wants_outputs),
+            ) => Ok(state.apply_identified_receiver_outputs(wants_outputs)),
+
+            (ReceiveSession::WantsOutputs(state), SessionEvent::CommittedOutputs(wants_inputs)) =>
+                Ok(state.apply_committed_outputs(wants_inputs)),
+
+            (
+                ReceiveSession::WantsInputs(state),
+                SessionEvent::CommittedInputs(wants_fee_range),
+            ) => Ok(state.apply_committed_inputs(wants_fee_range)),
+
+            (ReceiveSession::WantsFeeRange(state), SessionEvent::AppliedFeeRange(psbt_context)) =>
+                Ok(state.apply_applied_fee_range(psbt_context)),
 
             (
                 ReceiveSession::ProvisionalProposal(state),
-                SessionEvent::PayjoinProposal(payjoin_proposal),
-            ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
+                SessionEvent::FinalizedProposal(payjoin_proposal),
+            ) => Ok(state.apply_finalized_proposal(payjoin_proposal)),
 
             (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiveSession::TerminalFailure),
 
@@ -398,7 +402,7 @@ impl Receiver<Initialized> {
 
         if let Some((proposal, reply_key)) = proposal {
             MaybeFatalTransitionWithNoResults::success(
-                SessionEvent::UncheckedOriginalPayload {
+                SessionEvent::RetrievedOriginalPayload {
                     original: proposal.clone(),
                     reply_key: reply_key.clone(),
                 },
@@ -492,7 +496,7 @@ impl Receiver<Initialized> {
         pj_uri(&self.session_context, OutputSubstitution::Disabled)
     }
 
-    pub(crate) fn apply_unchecked_from_payload(
+    pub(crate) fn apply_retrieved_original_payload(
         self,
         event: OriginalPayload,
         reply_key: Option<HpkePublicKey>,
@@ -552,7 +556,7 @@ impl Receiver<UncheckedOriginalPayload> {
     ) -> MaybeFatalTransition<SessionEvent, Receiver<MaybeInputsOwned>, Error> {
         match self.state.original.check_broadcast_suitability(min_fee_rate, can_broadcast) {
             Ok(()) => MaybeFatalTransition::success(
-                SessionEvent::MaybeInputsOwned(),
+                SessionEvent::CheckedBroadcastSuitability(),
                 Receiver {
                     state: MaybeInputsOwned { original: self.original.clone() },
                     session_context: self.session_context,
@@ -575,7 +579,7 @@ impl Receiver<UncheckedOriginalPayload> {
         self,
     ) -> NextStateTransition<SessionEvent, Receiver<MaybeInputsOwned>> {
         NextStateTransition::success(
-            SessionEvent::MaybeInputsOwned(),
+            SessionEvent::CheckedBroadcastSuitability(),
             Receiver {
                 state: MaybeInputsOwned { original: self.original.clone() },
                 session_context: self.session_context,
@@ -583,7 +587,7 @@ impl Receiver<UncheckedOriginalPayload> {
         )
     }
 
-    pub(crate) fn apply_maybe_inputs_owned(self) -> ReceiveSession {
+    pub(crate) fn apply_checked_broadcast_suitability(self) -> ReceiveSession {
         let new_state = Receiver {
             state: MaybeInputsOwned { original: self.original.clone() },
             session_context: self.session_context,
@@ -636,7 +640,7 @@ impl Receiver<MaybeInputsOwned> {
             },
         };
         MaybeFatalTransition::success(
-            SessionEvent::MaybeInputsSeen(),
+            SessionEvent::CheckedInputsNotOwned(),
             Receiver {
                 state: MaybeInputsSeen { original: self.original.clone() },
                 session_context: self.session_context,
@@ -644,7 +648,7 @@ impl Receiver<MaybeInputsOwned> {
         )
     }
 
-    pub(crate) fn apply_maybe_inputs_seen(self) -> ReceiveSession {
+    pub(crate) fn apply_checked_inputs_not_owned(self) -> ReceiveSession {
         let new_state = Receiver {
             state: MaybeInputsSeen { original: self.original.clone() },
             session_context: self.session_context,
@@ -689,7 +693,7 @@ impl Receiver<MaybeInputsSeen> {
             },
         };
         MaybeFatalTransition::success(
-            SessionEvent::OutputsUnknown(),
+            SessionEvent::CheckedNoInputsSeenBefore(),
             Receiver {
                 state: OutputsUnknown { original: self.original.clone() },
                 session_context: self.session_context,
@@ -697,7 +701,7 @@ impl Receiver<MaybeInputsSeen> {
         )
     }
 
-    pub(crate) fn apply_outputs_unknown(self) -> ReceiveSession {
+    pub(crate) fn apply_checked_no_inputs_seen_before(self) -> ReceiveSession {
         let new_state = Receiver {
             state: OutputsUnknown { original: self.original.clone() },
             session_context: self.session_context,
@@ -748,12 +752,15 @@ impl Receiver<OutputsUnknown> {
         };
         let inner = common::WantsOutputs::new(self.state.original, owned_vouts.clone());
         MaybeFatalTransition::success(
-            SessionEvent::WantsOutputs(owned_vouts),
+            SessionEvent::IdentifiedReceiverOutputs(owned_vouts),
             Receiver { state: WantsOutputs { inner }, session_context: self.session_context },
         )
     }
 
-    pub(crate) fn apply_wants_outputs(self, owned_vouts: Vec<usize>) -> ReceiveSession {
+    pub(crate) fn apply_identified_receiver_outputs(
+        self,
+        owned_vouts: Vec<usize>,
+    ) -> ReceiveSession {
         let inner = common::WantsOutputs::new(self.state.original, owned_vouts);
         let new_state =
             Receiver { state: WantsOutputs { inner }, session_context: self.session_context };
@@ -815,12 +822,12 @@ impl Receiver<WantsOutputs> {
     pub fn commit_outputs(self) -> NextStateTransition<SessionEvent, Receiver<WantsInputs>> {
         let inner = self.state.inner.clone().commit_outputs();
         NextStateTransition::success(
-            SessionEvent::WantsInputs(self.state.inner.payjoin_psbt.unsigned_tx.output),
+            SessionEvent::CommittedOutputs(self.state.inner.payjoin_psbt.unsigned_tx.output),
             Receiver { state: WantsInputs { inner }, session_context: self.session_context },
         )
     }
 
-    pub(crate) fn apply_wants_inputs(self, outputs: Vec<TxOut>) -> ReceiveSession {
+    pub(crate) fn apply_committed_outputs(self, outputs: Vec<TxOut>) -> ReceiveSession {
         let mut payjoin_proposal = self.inner.payjoin_psbt.clone();
         let outputs_len = outputs.len();
         // Add the outputs that may have been replaced
@@ -876,12 +883,12 @@ impl Receiver<WantsInputs> {
     pub fn commit_inputs(self) -> NextStateTransition<SessionEvent, Receiver<WantsFeeRange>> {
         let inner = self.state.inner.clone().commit_inputs();
         NextStateTransition::success(
-            SessionEvent::WantsFeeRange(inner.receiver_inputs.clone()),
+            SessionEvent::CommittedInputs(inner.receiver_inputs.clone()),
             Receiver { state: WantsFeeRange { inner }, session_context: self.session_context },
         )
     }
 
-    pub(crate) fn apply_wants_fee_range(
+    pub(crate) fn apply_committed_inputs(
         self,
         contributed_inputs: Vec<InputPair>,
     ) -> ReceiveSession {
@@ -942,7 +949,7 @@ impl Receiver<WantsFeeRange> {
             }
         };
         MaybeFatalTransition::success(
-            SessionEvent::ProvisionalProposal(psbt_context.clone()),
+            SessionEvent::AppliedFeeRange(psbt_context.clone()),
             Receiver {
                 state: ProvisionalProposal { psbt_context },
                 session_context: self.session_context,
@@ -950,7 +957,7 @@ impl Receiver<WantsFeeRange> {
         )
     }
 
-    pub(crate) fn apply_provisional_proposal(self, psbt_context: PsbtContext) -> ReceiveSession {
+    pub(crate) fn apply_applied_fee_range(self, psbt_context: PsbtContext) -> ReceiveSession {
         let new_state = Receiver {
             state: ProvisionalProposal { psbt_context },
             session_context: self.session_context,
@@ -989,12 +996,12 @@ impl Receiver<ProvisionalProposal> {
         };
         let payjoin_proposal = PayjoinProposal { psbt: inner.clone() };
         MaybeTransientTransition::success(
-            SessionEvent::PayjoinProposal(inner),
+            SessionEvent::FinalizedProposal(inner),
             Receiver { state: payjoin_proposal, session_context: self.session_context },
         )
     }
 
-    pub(crate) fn apply_payjoin_proposal(self, psbt: Psbt) -> ReceiveSession {
+    pub(crate) fn apply_finalized_proposal(self, psbt: Psbt) -> ReceiveSession {
         let new_state =
             Receiver { state: PayjoinProposal { psbt }, session_context: self.session_context };
         ReceiveSession::PayjoinProposal(new_state)

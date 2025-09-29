@@ -301,8 +301,10 @@ impl WithReplyKey {
         ohttp_relay: String,
     ) -> Result<RequestV2PostContext, CreateRequestError> {
         match self.0.create_v2_post_request(ohttp_relay) {
-            Ok((req, ctx)) =>
-                Ok(RequestV2PostContext { request: req.into(), context: Arc::new(ctx.into()) }),
+            Ok((req, ctx)) => Ok(RequestV2PostContext {
+                request: Arc::new(req.into()),
+                context: Arc::new(ctx.into()),
+            }),
             Err(e) => Err(e.into()),
         }
     }
@@ -325,13 +327,13 @@ impl WithReplyKey {
 
 #[derive(uniffi::Record)]
 pub struct RequestV2PostContext {
-    pub request: Request,
+    pub request: Arc<Request>,
     pub context: Arc<V2PostContext>,
 }
 
 #[derive(uniffi::Record)]
 pub struct RequestV1Context {
-    pub request: Request,
+    pub request: Arc<Request>,
     pub context: Arc<V1Context>,
 }
 
@@ -366,7 +368,7 @@ impl From<payjoin::send::v2::V2PostContext> for V2PostContext {
 
 #[derive(uniffi::Record)]
 pub struct RequestOhttpContext {
-    pub request: crate::Request,
+    pub request: Arc<Request>,
     pub ohttp_ctx: Arc<crate::ClientResponse>,
 }
 
@@ -436,7 +438,7 @@ impl PollingForProposal {
         self.0
             .create_poll_request(ohttp_relay)
             .map(|(req, ctx)| RequestOhttpContext {
-                request: req.into(),
+                request: Arc::new(req.into()),
                 ohttp_ctx: Arc::new(ctx.into()),
             })
             .map_err(|e| e.into())

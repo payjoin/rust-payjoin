@@ -13,17 +13,17 @@ pub struct Request {
     /// URL to send the request to.
     ///
     /// This is full URL with scheme etc - you can pass it right to `reqwest` or a similar library.
-    pub url: Url,
+    url: Url,
 
     /// The `Content-Type` header to use for the request.
     ///
     /// `text/plain` for v1 requests and `message/ohttp-req` for v2 requests.
-    pub content_type: &'static str,
+    content_type: &'static str,
 
     /// Bytes to be sent to the receiver.
     ///
     /// This is properly encoded PSBT payload either in base64 in v1 or an OHTTP encapsulated payload in v2.
-    pub body: Vec<u8>,
+    body: Vec<u8>,
 }
 
 impl Request {
@@ -41,4 +41,10 @@ impl Request {
     ) -> Self {
         Self { url: url.clone(), content_type: V2_REQ_CONTENT_TYPE, body: body.to_vec() }
     }
+
+    pub fn url(&self) -> &str { self.url.as_str() }
+
+    pub fn content_type(&self) -> &str { self.content_type }
+
+    pub fn body(&self) -> &[u8] { self.body.as_slice() }
 }

@@ -165,11 +165,11 @@ impl AppTrait for App {
                 .with_context(|| "Failed to build payjoin request")?
                 .create_v1_post_request();
                 let http = http_agent(&self.config)?;
-                let body = String::from_utf8(req.body.clone()).unwrap();
-                println!("Sending fallback request to {}", &req.url);
+                let body = String::from_utf8(req.body().to_vec()).unwrap();
+                println!("Sending fallback request to {}", &req.url());
                 let response = http
-                    .post(req.url)
-                    .header("Content-Type", req.content_type)
+                    .post(req.url())
+                    .header("Content-Type", req.content_type())
                     .body(body.clone())
                     .send()
                     .await
@@ -734,9 +734,9 @@ impl App {
 
     async fn post_request(&self, req: payjoin::Request) -> Result<reqwest::Response> {
         let http = http_agent(&self.config)?;
-        http.post(req.url)
-            .header("Content-Type", req.content_type)
-            .body(req.body)
+        http.post(req.url())
+            .header("Content-Type", req.content_type())
+            .body(req.body().to_vec())
             .send()
             .await
             .map_err(map_reqwest_err)

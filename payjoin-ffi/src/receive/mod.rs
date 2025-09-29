@@ -182,7 +182,7 @@ impl SessionHistory {
     ) -> Result<Option<RequestResponse>, SessionError> {
         match self.0.extract_err_req(ohttp_relay) {
             Ok(Some((request, ctx))) => Ok(Some(RequestResponse {
-                request: request.into(),
+                request: Arc::new(request.into()),
                 client_response: Arc::new(ctx.into()),
             })),
             Ok(None) => Ok(None),
@@ -360,7 +360,7 @@ impl
 
 #[derive(uniffi::Record)]
 pub struct RequestResponse {
-    pub request: Request,
+    pub request: Arc<Request>,
     pub client_response: Arc<ClientResponse>,
 }
 
@@ -374,7 +374,7 @@ impl Initialized {
         self.0
             .create_poll_request(ohttp_relay)
             .map(|(req, ctx)| RequestResponse {
-                request: req.into(),
+                request: Arc::new(req.into()),
                 client_response: Arc::new(ctx.into()),
             })
             .map_err(Into::into)
@@ -998,7 +998,7 @@ impl PayjoinProposal {
         ohttp_relay: String,
     ) -> Result<RequestResponse, ReceiverError> {
         self.0.clone().create_post_request(ohttp_relay).map_err(Into::into).map(|(req, ctx)| {
-            RequestResponse { request: req.into(), client_response: Arc::new(ctx.into()) }
+            RequestResponse { request: Arc::new(req.into()), client_response: Arc::new(ctx.into()) }
         })
     }
 

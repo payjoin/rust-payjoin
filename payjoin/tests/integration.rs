@@ -119,7 +119,7 @@ mod integration {
             let (req, ctx) = SenderBuilder::new(psbt, uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .create_v1_post_request();
-            let headers = HeaderMock::new(&req.body, req.content_type);
+            let headers = HeaderMock::new(req.body(), req.content_type());
 
             // **********************
             // Inside the Receiver:
@@ -178,7 +178,7 @@ mod integration {
             let (req, _ctx) = SenderBuilder::new(psbt, uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .create_v1_post_request();
-            let headers = HeaderMock::new(&req.body, req.content_type);
+            let headers = HeaderMock::new(req.body(), req.content_type());
 
             // **********************
             // Inside the Receiver:
@@ -247,9 +247,9 @@ mod integration {
                 let (req, _ctx) =
                     bad_initializer.create_poll_request(services.ohttp_relay_url().as_str())?;
                 agent
-                    .post(req.url)
-                    .header("Content-Type", req.content_type)
-                    .body(req.body)
+                    .post(req.url())
+                    .header("Content-Type", req.content_type())
+                    .body(req.body().to_vec())
                     .send()
                     .await
                     .map_err(|e| e.into())
@@ -342,9 +342,9 @@ mod integration {
                 let (req, ctx) =
                     session.create_poll_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
-                    .post(req.url)
-                    .header("Content-Type", req.content_type)
-                    .body(req.body)
+                    .post(req.url())
+                    .header("Content-Type", req.content_type())
+                    .body(req.body().to_vec())
                     .send()
                     .await?;
                 assert!(response.status().is_success(), "error response: {}", response.status());
@@ -371,10 +371,14 @@ mod integration {
                 let req_ctx = SenderBuilder::new(psbt, pj_uri)
                     .build_recommended(FeeRate::BROADCAST_MIN)?
                     .save(&sender_persister)?;
-                let (Request { url, body, content_type, .. }, _send_ctx) =
+                let (req, _send_ctx) =
                     req_ctx.create_v2_post_request(services.ohttp_relay_url().as_str())?;
-                let response =
-                    agent.post(url).header("Content-Type", content_type).body(body).send().await?;
+                let response = agent
+                    .post(req.url())
+                    .header("Content-Type", req.content_type())
+                    .body(req.body().to_vec())
+                    .send()
+                    .await?;
                 tracing::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success(), "error response: {}", response.status());
                 // POST Original PSBT
@@ -386,9 +390,9 @@ mod integration {
                 let (req, ctx) =
                     session.create_poll_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
-                    .post(req.url)
-                    .header("Content-Type", req.content_type)
-                    .body(req.body)
+                    .post(req.url())
+                    .header("Content-Type", req.content_type())
+                    .body(req.body().to_vec())
                     .send()
                     .await?;
                 // POST payjoin
@@ -424,9 +428,9 @@ mod integration {
                     .extract_err_req(services.ohttp_relay_url().as_str())?
                     .expect("error request should exist");
                 let err_response = agent
-                    .post(err_req.url)
-                    .header("Content-Type", err_req.content_type)
-                    .body(err_req.body)
+                    .post(err_req.url())
+                    .header("Content-Type", err_req.content_type())
+                    .body(err_req.body().to_vec())
                     .send()
                     .await?;
 
@@ -473,9 +477,9 @@ mod integration {
                 let (req, ctx) =
                     session.create_poll_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
-                    .post(req.url)
-                    .header("Content-Type", req.content_type)
-                    .body(req.body)
+                    .post(req.url())
+                    .header("Content-Type", req.content_type())
+                    .body(req.body().to_vec())
                     .send()
                     .await?;
                 assert!(response.status().is_success(), "error response: {}", response.status());
@@ -502,10 +506,14 @@ mod integration {
                 let req_ctx = SenderBuilder::new(psbt, pj_uri)
                     .build_recommended(FeeRate::BROADCAST_MIN)?
                     .save(&send_persister)?;
-                let (Request { url, body, content_type, .. }, send_ctx) =
+                let (req, send_ctx) =
                     req_ctx.create_v2_post_request(services.ohttp_relay_url().as_str())?;
-                let response =
-                    agent.post(url).header("Content-Type", content_type).body(body).send().await?;
+                let response = agent
+                    .post(req.url())
+                    .header("Content-Type", req.content_type())
+                    .body(req.body().to_vec())
+                    .send()
+                    .await?;
                 tracing::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success(), "error response: {}", response.status());
                 let send_ctx = req_ctx
@@ -520,9 +528,9 @@ mod integration {
                 let (req, ctx) =
                     session.create_poll_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
-                    .post(req.url)
-                    .header("Content-Type", req.content_type)
-                    .body(req.body)
+                    .post(req.url())
+                    .header("Content-Type", req.content_type())
+                    .body(req.body().to_vec())
                     .send()
                     .await?;
                 // POST payjoin
@@ -538,9 +546,9 @@ mod integration {
                 let (req, ctx) =
                     payjoin_proposal.create_post_request(services.ohttp_relay_url().as_str())?;
                 let response = agent
-                    .post(req.url)
-                    .header("Content-Type", req.content_type)
-                    .body(req.body)
+                    .post(req.url())
+                    .header("Content-Type", req.content_type())
+                    .body(req.body().to_vec())
                     .send()
                     .await?;
                 payjoin_proposal
@@ -551,10 +559,14 @@ mod integration {
                 // Inside the Sender:
                 // Sender checks, signs, finalizes, constructs, and broadcasts
                 // Replay post fallback to get the response
-                let (Request { url, body, content_type, .. }, ohttp_ctx) =
+                let (req, ohttp_ctx) =
                     send_ctx.create_poll_request(services.ohttp_relay_url().as_str())?;
-                let response =
-                    agent.post(url).header("Content-Type", content_type).body(body).send().await?;
+                let response = agent
+                    .post(req.url())
+                    .header("Content-Type", req.content_type())
+                    .body(req.body().to_vec())
+                    .send()
+                    .await?;
                 tracing::info!("Response: {:#?}", &response);
                 let response = send_ctx
                     .process_response(&response.bytes().await?, ohttp_ctx)
@@ -621,7 +633,7 @@ mod integration {
             let req_ctx = payjoin::send::v1::SenderBuilder::new(psbt, pj_uri)
                 .build_recommended(FeeRate::BROADCAST_MIN)?;
             let (req, ctx) = req_ctx.create_v1_post_request();
-            let headers = HeaderMock::new(&req.body, req.content_type);
+            let headers = HeaderMock::new(req.body(), req.content_type());
 
             // **********************
             // Inside the Receiver:
@@ -699,13 +711,12 @@ mod integration {
                         FeeRate::ZERO,
                         false,
                     )?;
-                let (Request { url, body, content_type, .. }, send_ctx) =
-                    req_ctx.create_v1_post_request();
+                let (req, send_ctx) = req_ctx.create_v1_post_request();
                 tracing::info!("send fallback v1 to offline receiver fail");
                 let res = agent
-                    .post(url.clone())
-                    .header("Content-Type", content_type)
-                    .body(body.clone())
+                    .post(req.url())
+                    .header("Content-Type", req.content_type())
+                    .body(req.body().to_vec())
                     .send()
                     .await;
                 assert!(res?.status() == StatusCode::SERVICE_UNAVAILABLE);
@@ -721,9 +732,9 @@ mod integration {
                     let proposal = loop {
                         let (req, ctx) = session.create_poll_request(&ohttp_relay)?;
                         let response = agent_clone
-                            .post(req.url)
-                            .header("Content-Type", req.content_type)
-                            .body(req.body)
+                            .post(req.url())
+                            .header("Content-Type", req.content_type())
+                            .body(req.body().to_vec())
                             .send()
                             .await?;
 
@@ -753,9 +764,9 @@ mod integration {
                     // this response would be returned as http response to the sender
                     let (req, ctx) = payjoin_proposal.create_post_request(ohttp_relay)?;
                     let response = agent_clone
-                        .post(req.url)
-                        .header("Content-Type", req.content_type)
-                        .body(req.body)
+                        .post(req.url())
+                        .header("Content-Type", req.content_type())
+                        .body(req.body().to_vec())
                         .send()
                         .await?;
                     payjoin_proposal
@@ -768,8 +779,12 @@ mod integration {
                 // **********************
                 // send fallback v1 to online receiver
                 tracing::info!("send fallback v1 to online receiver should succeed");
-                let response =
-                    agent.post(url).header("Content-Type", content_type).body(body).send().await?;
+                let response = agent
+                    .post(req.url())
+                    .header("Content-Type", req.content_type())
+                    .body(req.body().to_vec())
+                    .send()
+                    .await?;
                 tracing::info!("Response: {:#?}", &response);
                 assert!(response.status().is_success(), "error response: {}", response.status());
 
@@ -984,7 +999,7 @@ mod integration {
             let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)
                 .build_with_additional_fee(max_additional_fee, None, FeeRate::ZERO, false)?
                 .create_v1_post_request();
-            let headers = HeaderMock::new(&req.body, req.content_type);
+            let headers = HeaderMock::new(req.body(), req.content_type());
 
             // **********************
             // Inside the Receiver:
@@ -1063,7 +1078,7 @@ mod integration {
             let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)
                 .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
                 .create_v1_post_request();
-            let headers = HeaderMock::new(&req.body, req.content_type);
+            let headers = HeaderMock::new(req.body(), req.content_type());
 
             // **********************
             // Inside the Receiver:
@@ -1168,8 +1183,8 @@ mod integration {
     ) -> Result<String, BoxError> {
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
         let proposal = payjoin::receive::v1::UncheckedOriginalPayload::from_request(
-            req.body.as_slice(),
-            req.url.query().unwrap_or(""),
+            req.body(),
+            url::Url::from_str(req.url()).expect("Could not parse url").query().unwrap_or(""),
             headers,
         )?;
         let proposal =

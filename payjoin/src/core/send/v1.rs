@@ -352,7 +352,7 @@ mod test {
 
         let sender = Sender { endpoint: Url::from_str(EXAMPLE_URL)?, psbt_ctx };
 
-        let body = sender.create_v1_post_request().0.body;
+        let body = sender.create_v1_post_request().0.body().to_vec();
         let res_str = std::str::from_utf8(&body)?;
         let proposal = Psbt::from_str(res_str)?;
         assert!(proposal.inputs[0].tap_internal_key.is_none());

@@ -595,9 +595,9 @@ mod test {
         let ohttp_relay = EXAMPLE_URL;
         let result = sender.create_v2_post_request(ohttp_relay);
         let (request, context) = result.expect("Result should be ok");
-        assert!(!request.body.is_empty(), "Request body should not be empty");
+        assert!(!request.body().is_empty(), "Request body should not be empty");
         assert_eq!(
-            request.url.to_string(),
+            request.url(),
             format!("{}/{}", EXAMPLE_URL, sender.pj_param.endpoint().join("/")?)
         );
         assert_eq!(context.psbt_ctx.original_psbt, sender.psbt_ctx.original_psbt);

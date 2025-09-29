@@ -1169,7 +1169,7 @@ mod integration {
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
         let proposal = payjoin::receive::v1::UncheckedOriginalPayload::from_request(
             req.body.as_slice(),
-            req.url.query().unwrap_or(""),
+            url::Url::from_str(&req.url).expect("Could not parse url").query().unwrap_or(""),
             headers,
         )?;
         let proposal =

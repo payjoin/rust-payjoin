@@ -247,7 +247,7 @@ Future<payjoin.ReceiveSession?> retrieve_receiver_proposal(
     String ohttp_relay) async {
   var agent = http.Client();
   var request = receiver.createPollRequest(ohttp_relay);
-  var response = await agent.post(Uri.parse(request.request.url.asString()),
+  var response = await agent.post(Uri.parse(request.request.url),
       headers: {"Content-Type": request.request.contentType},
       body: request.request.body);
   var res = receiver
@@ -258,8 +258,7 @@ Future<payjoin.ReceiveSession?> retrieve_receiver_proposal(
     return null;
   } else if (res is payjoin.ProgressInitializedTransitionOutcome) {
     var proposal = res.inner;
-    return await process_unchecked_proposal(
-        proposal, recv_persister);
+    return await process_unchecked_proposal(proposal, recv_persister);
   }
 
   throw Exception("Unknown initialized transition outcome: $res");
@@ -346,7 +345,7 @@ void main() {
           .save(sender_persister);
       payjoin.RequestV2PostContext request =
           req_ctx.createV2PostRequest(ohttp_relay);
-      var response = await agent.post(Uri.parse(request.request.url.asString()),
+      var response = await agent.post(Uri.parse(request.request.url),
           headers: {"Content-Type": request.request.contentType},
           body: request.request.body);
       payjoin.PollingForProposal send_ctx = req_ctx
@@ -371,7 +370,7 @@ void main() {
       payjoin.RequestResponse request_response =
           proposal.createPostRequest(ohttp_relay);
       var fallback_response = await agent.post(
-          Uri.parse(request_response.request.url.asString()),
+          Uri.parse(request_response.request.url),
           headers: {"Content-Type": request_response.request.contentType},
           body: request_response.request.body);
       proposal.processResponse(
@@ -384,7 +383,7 @@ void main() {
       payjoin.RequestOhttpContext ohttp_context_request =
           send_ctx.createPollRequest(ohttp_relay);
       var final_response = await agent.post(
-          Uri.parse(ohttp_context_request.request.url.asString()),
+          Uri.parse(ohttp_context_request.request.url),
           headers: {"Content-Type": ohttp_context_request.request.contentType},
           body: ohttp_context_request.request.body);
       var checked_payjoin_proposal_psbt = send_ctx
@@ -392,9 +391,9 @@ void main() {
               final_response.bodyBytes, ohttp_context_request.ohttpCtx)
           .save(sender_persister);
       expect(checked_payjoin_proposal_psbt, isNotNull);
-      var checked_payjoin_proposal_psbt_inner =
-          (checked_payjoin_proposal_psbt as payjoin.ProgressPollingForProposalTransitionOutcome)
-              .inner;
+      var checked_payjoin_proposal_psbt_inner = (checked_payjoin_proposal_psbt
+              as payjoin.ProgressPollingForProposalTransitionOutcome)
+          .inner;
       var payjoin_psbt = jsonDecode(sender.call("walletprocesspsbt",
           [checked_payjoin_proposal_psbt_inner.serializeBase64()]))["psbt"];
       var final_psbt = jsonDecode(sender

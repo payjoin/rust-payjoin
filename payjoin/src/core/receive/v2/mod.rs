@@ -1001,6 +1001,13 @@ impl Receiver<ProvisionalProposal> {
         )
     }
 
+    /// The Payjoin proposal PSBT that the receiver needs to sign
+    ///
+    /// In some applications the entity that progresses the typestate
+    /// is different from the entity that has access to the private keys,
+    /// so the PSBT to sign must be accessible to such implementers.
+    pub fn psbt_to_sign(&self) -> Psbt { self.state.psbt_context.payjoin_psbt.clone() }
+
     pub(crate) fn apply_finalized_proposal(self, psbt: Psbt) -> ReceiveSession {
         let new_state =
             Receiver { state: PayjoinProposal { psbt }, session_context: self.session_context };
@@ -1131,8 +1138,8 @@ pub mod test {
     use bitcoin::FeeRate;
     use once_cell::sync::Lazy;
     use payjoin_test_utils::{
-        BoxError, EXAMPLE_URL, KEM, KEY_ID, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT, QUERY_PARAMS,
-        SYMMETRIC,
+        BoxError, EXAMPLE_URL, KEM, KEY_ID, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT,
+        PARSED_PAYJOIN_PROPOSAL, QUERY_PARAMS, SYMMETRIC,
     };
 
     use super::*;
@@ -1485,5 +1492,19 @@ pub mod test {
             .unchecked_from_payload(&payload)
             .expect("unchecked_from_payload should parse valid v1 PSBT payload");
         assert_eq!(proposal.params.output_substitution, OutputSubstitution::Disabled);
+    }
+
+    #[test]
+    fn test_getting_psbt_to_sign() {
+        let provisional_proposal = ProvisionalProposal {
+            psbt_context: PsbtContext {
+                payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
+                original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+            },
+        };
+        let receiver =
+            Receiver { state: provisional_proposal, session_context: SHARED_CONTEXT.clone() };
+        let psbt = receiver.psbt_to_sign();
+        assert_eq!(psbt, PARSED_PAYJOIN_PROPOSAL.clone());
     }
 }

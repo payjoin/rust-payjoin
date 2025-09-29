@@ -95,14 +95,6 @@ impl SessionHistory {
         })
     }
 
-    /// Psbt with fee contributions applied
-    pub fn psbt_ready_for_signing(&self) -> Option<bitcoin::Psbt> {
-        self.events.iter().find_map(|event| match event {
-            SessionEvent::AppliedFeeRange(psbt_context) => Some(psbt_context.payjoin_psbt.clone()),
-            _ => None,
-        })
-    }
-
     /// Terminal error from the session if present
     pub fn terminal_error(&self) -> Option<(String, Option<JsonReply>)> {
         self.events.iter().find_map(|event| match event {
@@ -313,7 +305,6 @@ mod tests {
     }
 
     struct SessionHistoryExpectedOutcome {
-        psbt_with_fee_contributions: Option<bitcoin::Psbt>,
         fallback_tx: Option<bitcoin::Transaction>,
         expected_status: SessionStatus,
     }
@@ -332,10 +323,6 @@ mod tests {
 
         let (receiver, session_history) = replay_event_log(&persister)?;
         assert_eq!(receiver, test.expected_receiver_state);
-        assert_eq!(
-            session_history.psbt_ready_for_signing(),
-            test.expected_session_history.psbt_with_fee_contributions
-        );
         assert_eq!(session_history.fallback_tx(), test.expected_session_history.fallback_tx);
         assert_eq!(session_history.status(), test.expected_session_history.expected_status);
         Ok(())
@@ -347,7 +334,6 @@ mod tests {
         let test = SessionHistoryTest {
             events: vec![SessionEvent::Created(session_context.clone())],
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: None,
                 fallback_tx: None,
                 expected_status: SessionStatus::Active,
             },
@@ -388,7 +374,6 @@ mod tests {
                 },
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: None,
                 fallback_tx: None,
                 expected_status: SessionStatus::Active,
             },
@@ -415,7 +400,6 @@ mod tests {
                 },
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: None,
                 fallback_tx: None,
                 expected_status: SessionStatus::Active,
             },
@@ -450,7 +434,6 @@ mod tests {
         let test = SessionHistoryTest {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: None,
                 fallback_tx: Some(expected_fallback),
                 expected_status: SessionStatus::Active,
             },
@@ -522,9 +505,6 @@ mod tests {
         let test = SessionHistoryTest {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: Some(
-                    provisional_proposal.state.psbt_context.payjoin_psbt.clone(),
-                ),
                 fallback_tx: Some(expected_fallback),
                 expected_status: SessionStatus::Active,
             },
@@ -605,9 +585,6 @@ mod tests {
         let test = SessionHistoryTest {
             events,
             expected_session_history: SessionHistoryExpectedOutcome {
-                psbt_with_fee_contributions: Some(
-                    provisional_proposal.state.psbt_context.payjoin_psbt.clone(),
-                ),
                 fallback_tx: Some(expected_fallback),
                 expected_status: SessionStatus::Completed,
             },

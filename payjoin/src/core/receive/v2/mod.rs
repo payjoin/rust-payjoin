@@ -154,39 +154,39 @@ impl ReceiveSession {
             (
                 ReceiveSession::Initialized(state),
                 SessionEvent::RetrievedOriginalPayload { original: proposal, reply_key },
-            ) => Ok(state.apply_unchecked_from_payload(proposal, reply_key)),
+            ) => Ok(state.apply_retrieved_original_payload(proposal, reply_key)),
 
             (
                 ReceiveSession::UncheckedOriginalPayload(state),
                 SessionEvent::CheckedBroadcastSuitability(),
-            ) => Ok(state.apply_maybe_inputs_owned()),
+            ) => Ok(state.apply_checked_broadcast_suitability()),
 
             (ReceiveSession::MaybeInputsOwned(state), SessionEvent::CheckedInputsNotOwned()) =>
-                Ok(state.apply_maybe_inputs_seen()),
+                Ok(state.apply_checked_inputs_not_owned()),
 
             (ReceiveSession::MaybeInputsSeen(state), SessionEvent::CheckedNoInputsSeenBefore()) =>
-                Ok(state.apply_outputs_unknown()),
+                Ok(state.apply_checked_no_inputs_seen_before()),
 
             (
                 ReceiveSession::OutputsUnknown(state),
                 SessionEvent::IdentifiedReceiverOutputs(wants_outputs),
-            ) => Ok(state.apply_wants_outputs(wants_outputs)),
+            ) => Ok(state.apply_identified_receiver_outputs(wants_outputs)),
 
             (ReceiveSession::WantsOutputs(state), SessionEvent::CommittedOutputs(wants_inputs)) =>
-                Ok(state.apply_wants_inputs(wants_inputs)),
+                Ok(state.apply_committed_outputs(wants_inputs)),
 
             (
                 ReceiveSession::WantsInputs(state),
                 SessionEvent::CommittedInputs(wants_fee_range),
-            ) => Ok(state.apply_wants_fee_range(wants_fee_range)),
+            ) => Ok(state.apply_committed_inputs(wants_fee_range)),
 
             (ReceiveSession::WantsFeeRange(state), SessionEvent::AppliedFeeRange(psbt_context)) =>
-                Ok(state.apply_provisional_proposal(psbt_context)),
+                Ok(state.apply_applied_fee_range(psbt_context)),
 
             (
                 ReceiveSession::ProvisionalProposal(state),
                 SessionEvent::FinalizedProposal(payjoin_proposal),
-            ) => Ok(state.apply_payjoin_proposal(payjoin_proposal)),
+            ) => Ok(state.apply_finalized_proposal(payjoin_proposal)),
 
             (_, SessionEvent::SessionInvalid(_, _)) => Ok(ReceiveSession::TerminalFailure),
 
@@ -496,7 +496,7 @@ impl Receiver<Initialized> {
         pj_uri(&self.session_context, OutputSubstitution::Disabled)
     }
 
-    pub(crate) fn apply_unchecked_from_payload(
+    pub(crate) fn apply_retrieved_original_payload(
         self,
         event: OriginalPayload,
         reply_key: Option<HpkePublicKey>,
@@ -587,7 +587,7 @@ impl Receiver<UncheckedOriginalPayload> {
         )
     }
 
-    pub(crate) fn apply_maybe_inputs_owned(self) -> ReceiveSession {
+    pub(crate) fn apply_checked_broadcast_suitability(self) -> ReceiveSession {
         let new_state = Receiver {
             state: MaybeInputsOwned { original: self.original.clone() },
             session_context: self.session_context,
@@ -648,7 +648,7 @@ impl Receiver<MaybeInputsOwned> {
         )
     }
 
-    pub(crate) fn apply_maybe_inputs_seen(self) -> ReceiveSession {
+    pub(crate) fn apply_checked_inputs_not_owned(self) -> ReceiveSession {
         let new_state = Receiver {
             state: MaybeInputsSeen { original: self.original.clone() },
             session_context: self.session_context,
@@ -701,7 +701,7 @@ impl Receiver<MaybeInputsSeen> {
         )
     }
 
-    pub(crate) fn apply_outputs_unknown(self) -> ReceiveSession {
+    pub(crate) fn apply_checked_no_inputs_seen_before(self) -> ReceiveSession {
         let new_state = Receiver {
             state: OutputsUnknown { original: self.original.clone() },
             session_context: self.session_context,
@@ -757,7 +757,10 @@ impl Receiver<OutputsUnknown> {
         )
     }
 
-    pub(crate) fn apply_wants_outputs(self, owned_vouts: Vec<usize>) -> ReceiveSession {
+    pub(crate) fn apply_identified_receiver_outputs(
+        self,
+        owned_vouts: Vec<usize>,
+    ) -> ReceiveSession {
         let inner = common::WantsOutputs::new(self.state.original, owned_vouts);
         let new_state =
             Receiver { state: WantsOutputs { inner }, session_context: self.session_context };
@@ -824,7 +827,7 @@ impl Receiver<WantsOutputs> {
         )
     }
 
-    pub(crate) fn apply_wants_inputs(self, outputs: Vec<TxOut>) -> ReceiveSession {
+    pub(crate) fn apply_committed_outputs(self, outputs: Vec<TxOut>) -> ReceiveSession {
         let mut payjoin_proposal = self.inner.payjoin_psbt.clone();
         let outputs_len = outputs.len();
         // Add the outputs that may have been replaced
@@ -885,7 +888,7 @@ impl Receiver<WantsInputs> {
         )
     }
 
-    pub(crate) fn apply_wants_fee_range(
+    pub(crate) fn apply_committed_inputs(
         self,
         contributed_inputs: Vec<InputPair>,
     ) -> ReceiveSession {
@@ -962,7 +965,7 @@ impl Receiver<WantsFeeRange> {
         )
     }
 
-    pub(crate) fn apply_provisional_proposal(self, psbt_context: PsbtContext) -> ReceiveSession {
+    pub(crate) fn apply_applied_fee_range(self, psbt_context: PsbtContext) -> ReceiveSession {
         let new_state = Receiver {
             state: ProvisionalProposal { psbt_context },
             session_context: self.session_context,
@@ -1006,7 +1009,7 @@ impl Receiver<ProvisionalProposal> {
         )
     }
 
-    pub(crate) fn apply_payjoin_proposal(self, psbt: Psbt) -> ReceiveSession {
+    pub(crate) fn apply_finalized_proposal(self, psbt: Psbt) -> ReceiveSession {
         let new_state =
             Receiver { state: PayjoinProposal { psbt }, session_context: self.session_context };
         ReceiveSession::PayjoinProposal(new_state)

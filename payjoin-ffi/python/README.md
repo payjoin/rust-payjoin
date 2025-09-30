@@ -8,46 +8,51 @@ Grab the latest release with a simple:
 
 ```shell
 pip install payjoin
+
+# Or, for uv:
+uv add payjoin
 ```
 
 ## Running Tests
 
 Follow these steps to clone the repository and run the tests.
 
-
 ```shell
-git clone https://github.com/payjoin/rust-payjoin.git
-cd rust-payjoin/payjoin-ffi/python
+# Ensure you have uv installed:
+# https://docs.astral.sh/uv/getting-started/installation/
 
-# Setup a python virtual environment
-python -m venv venv
-source venv/bin/activate
+# Setup virtual environment/install all packages (including developer packages)
+uv sync --all-extras
 
-PYBIN="./venv/bin/" bash ./scripts/generate_bindings.sh
+bash ./scripts/generate_bindings.sh
 
 # Build the wheel
-python -m build --wheel
+uv build --wheel
 
-# Force reinstall payjoin
-pip install ./dist/payjoin-<version>.whl --force-reinstall
+# Force reinstall payjoin with <version>
+uv pip install ./dist/payjoin-*.whl --force-reinstall
 
 # Run all tests
-python -m unittest --verbose
+uv run python -m unittest --verbose
 ```
-
-Note that you'll need Docker to run the integration tests. If you get a "Failed to start container" error, ensure the Docker engine is running on your machine.
-You can [filter which tests](https://docs.python.org/3/library/unittest.html#command-line-interface) to run by passing a file or test name as argument.
 
 ## Building the Package
 
 ```shell
-# Setup a python virtual environment
-python -m venv venv
-source venv/bin/activate
+# Setup virtual environment/install packages for release
+uv sync --all-extras
 
-PYBIN="./venv/bin/" bash ./scripts/generate_bindings.sh
+bash ./scripts/generate_bindings.sh
 
 # Build the wheel
-python -m build --wheel
+uv build --wheel
 
+# Force reinstall payjoin with <version>
+uv pip install ./dist/payjoin-*.whl --force-reinstall
+
+# Example:
+# uv pip install ./dist/payjoin-0.24.0-cp313-cp313-linux_x86_64.whl
+
+# Run all tests
+uv run python -m unittest --verbose
 ```

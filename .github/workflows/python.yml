@@ -27,22 +27,26 @@ jobs:
       - name: "Install Rust 1.85.0"
         uses: dtolnay/rust-toolchain@1.85.0
 
-      - name: "Install Python"
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.12
-
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
+
+      - name: Install a specific version of uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.2"
+          enable-cache: true
+
+      - name: "uv sync"
+        run: uv sync --all-extras
 
       - name: "Generate payjoin-ffi.py and binaries"
         run: bash ./scripts/generate_bindings.sh
 
       - name: "Build wheel"
-        run: python -m build --wheel
+        run: uv build --wheel
 
       - name: "Install wheel"
-        run: pip install ./dist/*.whl
+        run: uv run pip install ./dist/*.whl
 
       - name: "Run tests"
-        run: python -m unittest -v
+        run: uv run python -m unittest --verbose

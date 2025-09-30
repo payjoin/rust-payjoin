@@ -8,7 +8,7 @@ __pycache__/
 *.swp
 *.whl
 build/
-venv
+.venv
 
 # Auto-generated shared libraries
 *.dylib

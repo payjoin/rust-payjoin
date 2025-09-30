@@ -91,7 +91,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         agent = httpx.AsyncClient()
         request: RequestResponse = receiver.create_poll_request(ohttp_relay)
         response = await agent.post(
-            url=request.request.url.as_string(),
+            url=request.request.url,
             headers={"Content-Type": request.request.content_type},
             content=request.request.body
         )
@@ -160,7 +160,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             req_ctx: WithReplyKey = SenderBuilder(psbt, pj_uri).build_recommended(1000).save(sender_persister)
             request: RequestV2PostContext = req_ctx.create_v2_post_request(ohttp_relay)
             response = await agent.post(
-                url=request.request.url.as_string(),
+                url=request.request.url,
                 headers={"Content-Type": request.request.content_type},
                 content=request.request.body
             )
@@ -178,7 +178,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             payjoin_proposal = payjoin_proposal.inner
             request: RequestResponse = payjoin_proposal.create_post_request(ohttp_relay)
             response = await agent.post(
-                url=request.request.url.as_string(),
+                url=request.request.url,
                 headers={"Content-Type": request.request.content_type},
                 content=request.request.body
             )
@@ -190,7 +190,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             # Replay post fallback to get the response
             request: RequestOhttpContext = send_ctx.create_poll_request(ohttp_relay)
             response = await agent.post(
-                url=request.request.url.as_string(),
+                url=request.request.url,
                 headers={"Content-Type": request.request.content_type},
                 content=request.request.body
             )

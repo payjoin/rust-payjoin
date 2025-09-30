@@ -302,6 +302,13 @@ impl ProvisionalProposal {
             .map_err(|e| Error::Implementation(ImplementationError::new(e)))?;
         Ok(PayjoinProposal { payjoin_psbt: finalized_psbt })
     }
+
+    /// The Payjoin proposal PSBT that the receiver needs to sign
+    ///
+    /// In some applications the entity that progresses the typestate
+    /// is different from the entity that has access to the private keys,
+    /// so the PSBT to sign must be accessible to such implementers.
+    pub fn psbt_to_sign(&self) -> Psbt { self.psbt_context.payjoin_psbt.clone() }
 }
 
 /// A finalized Payjoin proposal, complete with fees and receiver signatures, that the sender
@@ -327,7 +334,9 @@ mod tests {
 
     use bitcoin::absolute::{LockTime, Time};
     use bitcoin::{Address, Amount, Network, Transaction};
-    use payjoin_test_utils::{ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT, QUERY_PARAMS};
+    use payjoin_test_utils::{
+        ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL, QUERY_PARAMS,
+    };
 
     use super::*;
     use crate::Version;
@@ -533,5 +542,17 @@ mod tests {
                 other_psbt.unsigned_tx.compute_txid()
             )
         );
+    }
+
+    #[test]
+    fn test_getting_psbt_to_sign() {
+        let provisional_proposal = ProvisionalProposal {
+            psbt_context: PsbtContext {
+                payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
+                original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+            },
+        };
+        let psbt = provisional_proposal.psbt_to_sign();
+        assert_eq!(psbt, PARSED_PAYJOIN_PROPOSAL.clone());
     }
 }

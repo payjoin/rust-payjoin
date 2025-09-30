@@ -91,13 +91,6 @@ impl SessionHistory {
             _ => SessionStatus::Active,
         }
     }
-
-    pub fn terminal_error(&self) -> Option<String> {
-        self.events.iter().find_map(|event| match event {
-            SessionEvent::Closed(SessionOutcome::Failure) => None,
-            _ => None,
-        })
-    }
 }
 
 /// Represents the status of a session that can be inferred from the information in the session
@@ -215,13 +208,36 @@ mod tests {
             persister.save_event(event).expect("In memory persister shouldn't fail");
         }
 
-        let (sender, session_history) =
-            replay_event_log(&persister).expect("In memory persister shouldn't fail");
-        assert_eq!(sender, test.expected_sender_state);
-        assert_eq!(session_history.fallback_tx(), test.expected_session_history.fallback_tx);
-        assert_eq!(*session_history.pj_param(), test.expected_session_history.pj_param);
-        assert_eq!(session_history.status(), test.expected_session_history.expected_status);
-        assert_eq!(session_history.terminal_error(), test.expected_error);
+        let session_result = replay_event_log(&persister);
+
+        match session_result {
+            Ok((sender_state, session_history)) => {
+                assert!(test.expected_error.is_none(), "Expected an error but got Ok");
+                assert_eq!(sender_state, test.expected_sender_state);
+                assert_eq!(
+                    session_history.fallback_tx(),
+                    test.expected_session_history.fallback_tx
+                );
+                assert_eq!(session_history.pj_param(), &test.expected_session_history.pj_param);
+                assert_eq!(SessionStatus::Active, test.expected_session_history.expected_status);
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if let Some(expected) = &test.expected_error {
+                    assert!(
+                        err_str.contains(expected),
+                        "Expected error containing '{expected}', got '{err_str}'"
+                    );
+                } else {
+                    panic!("Unexpected error: {err_str}");
+                }
+                assert_eq!(
+                    SendSession::Closed(SessionOutcome::Failure),
+                    test.expected_sender_state
+                );
+                assert_eq!(test.expected_session_history.expected_status, SessionStatus::Failed);
+            }
+        };
     }
 
     #[test]
@@ -240,6 +256,8 @@ mod tests {
         .unwrap();
         let reply_key = HpkeKeyPair::gen_keypair();
         let endpoint = sender.endpoint().clone();
+        let fallback_tx = sender.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
+
         let id = crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id");
         let expiration =
             (std::time::SystemTime::now() - std::time::Duration::from_secs(1)).try_into().unwrap();
@@ -257,15 +275,17 @@ mod tests {
             psbt_ctx: sender.psbt_ctx.clone(),
             reply_key: reply_key.0,
         };
-        let persister = InMemoryTestPersister::<SessionEvent>::default();
-        persister
-            .save_event(SessionEvent::Created(Box::new(with_reply_key)))
-            .expect("save_event should succeed");
-
-        let err = replay_event_log(&persister).expect_err("session should be expired");
-        let expected_err: ReplayError<SendSession, SessionEvent> =
-            InternalReplayError::Expired(expiration).into();
-        assert_eq!(err.to_string(), expected_err.to_string());
+        let test = SessionHistoryTest {
+            events: vec![SessionEvent::Created(Box::new(with_reply_key))],
+            expected_session_history: SessionHistoryExpectedOutcome {
+                fallback_tx,
+                pj_param,
+                expected_status: SessionStatus::Failed,
+            },
+            expected_sender_state: SendSession::Closed(SessionOutcome::Failure),
+            expected_error: Some("Session expired at".to_string()),
+        };
+        run_session_history_test(test);
     }
 
     #[test]

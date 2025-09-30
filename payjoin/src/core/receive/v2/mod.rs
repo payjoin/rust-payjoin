@@ -1183,6 +1183,39 @@ impl Receiver<HasReplyableError> {
     }
 }
 
+/// Generic methods available for all receiver states
+impl<State> Receiver<State>
+where
+    State: sealed::State,
+{
+    /// Explicitly close the session with `SessionOutcome::Failure`.
+    ///
+    /// This method allows implementations to terminate the payjoin session when
+    /// they encounter errors that cannot be resolved, such as insufficient
+    /// funds or a double-spend detection.
+    pub fn fail<P>(self, persister: &P) -> Result<(), P::InternalStorageError>
+    where
+        P: crate::persist::SessionPersister<SessionEvent = SessionEvent>,
+    {
+        persister.save_event(SessionEvent::Closed(SessionOutcome::Failure))?;
+        persister.close()?;
+        Ok(())
+    }
+
+    /// Explicitly close the session with `SessionOutcome::Cancel`.
+    ///
+    /// This method allows implementations to terminate the payjoin session when
+    /// the user decides to cancel the operation interactively.
+    pub fn cancel<P>(self, persister: &P) -> Result<(), P::InternalStorageError>
+    where
+        P: crate::persist::SessionPersister<SessionEvent = SessionEvent>,
+    {
+        persister.save_event(SessionEvent::Closed(SessionOutcome::Cancel))?;
+        persister.close()?;
+        Ok(())
+    }
+}
+
 /// Derive a mailbox endpoint on a directory given a [`ShortId`].
 /// It consists of a directory URL and the session ShortID in the path.
 fn mailbox_endpoint(directory: &Url, id: &ShortId) -> Url {

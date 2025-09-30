@@ -42,6 +42,37 @@ macro_rules! impl_save_for_transition {
     };
 }
 
+macro_rules! impl_generic_methods_for_receiver {
+    ($ty:ident) => {
+        #[uniffi::export]
+        impl $ty {
+            /// Explicitly fail the session due to an unrecoverable error.
+            ///
+            /// This method allows implementations to terminate the payjoin session
+            /// when they encounter errors that cannot be resolved.
+            pub fn fail(
+                &self,
+                persister: Arc<dyn JsonReceiverSessionPersister>,
+            ) -> Result<(), ImplementationError> {
+                let adapter = CallbackPersisterAdapter::new(persister);
+                self.0.clone().fail(&adapter).map_err(ImplementationError::new)
+            }
+
+            /// Explicitly cancel the session.
+            ///
+            /// This method allows implementations to terminate the payjoin session
+            /// when the user decides to cancel the operation.
+            pub fn cancel(
+                &self,
+                persister: Arc<dyn JsonReceiverSessionPersister>,
+            ) -> Result<(), ImplementationError> {
+                let adapter = CallbackPersisterAdapter::new(persister);
+                self.0.clone().cancel(&adapter).map_err(ImplementationError::new)
+            }
+        }
+    };
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Object)]
 pub struct ReceiverSessionEvent(payjoin::receive::v2::SessionEvent);
 
@@ -362,6 +393,8 @@ impl Initialized {
     }
 }
 
+impl_generic_methods_for_receiver!(Initialized);
+
 #[derive(Clone, uniffi::Object)]
 pub struct UncheckedOriginalPayload(
     payjoin::receive::v2::Receiver<payjoin::receive::v2::UncheckedOriginalPayload>,
@@ -455,6 +488,8 @@ impl UncheckedOriginalPayload {
     }
 }
 
+impl_generic_methods_for_receiver!(UncheckedOriginalPayload);
+
 #[derive(Clone, uniffi::Object)]
 pub struct MaybeInputsOwned(payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsOwned>);
 
@@ -510,6 +545,8 @@ impl MaybeInputsOwned {
     }
 }
 
+impl_generic_methods_for_receiver!(MaybeInputsOwned);
+
 #[derive(Clone, uniffi::Object)]
 pub struct MaybeInputsSeen(payjoin::receive::v2::Receiver<payjoin::receive::v2::MaybeInputsSeen>);
 
@@ -561,6 +598,8 @@ impl MaybeInputsSeen {
     }
 }
 
+impl_generic_methods_for_receiver!(MaybeInputsSeen);
+
 /// The receiver has not yet identified which outputs belong to the receiver.
 ///
 /// Only accept PSBTs that send us money.
@@ -609,6 +648,8 @@ impl OutputsUnknown {
         ))))
     }
 }
+
+impl_generic_methods_for_receiver!(OutputsUnknown);
 
 #[derive(uniffi::Object)]
 pub struct WantsOutputs(payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsOutputs>);
@@ -669,6 +710,8 @@ impl WantsOutputs {
         WantsOutputsTransition(Arc::new(RwLock::new(Some(self.0.clone().commit_outputs()))))
     }
 }
+
+impl_generic_methods_for_receiver!(WantsOutputs);
 
 #[derive(uniffi::Object)]
 pub struct WantsInputs(payjoin::receive::v2::Receiver<payjoin::receive::v2::WantsInputs>);
@@ -738,6 +781,8 @@ impl WantsInputs {
         WantsInputsTransition(Arc::new(RwLock::new(Some(self.0.clone().commit_inputs()))))
     }
 }
+
+impl_generic_methods_for_receiver!(WantsInputs);
 
 #[derive(Debug, Clone, uniffi::Object)]
 pub struct InputPair(payjoin::receive::InputPair);
@@ -827,6 +872,8 @@ impl WantsFeeRange {
     }
 }
 
+impl_generic_methods_for_receiver!(WantsFeeRange);
+
 #[derive(uniffi::Object)]
 pub struct ProvisionalProposal(
     pub payjoin::receive::v2::Receiver<payjoin::receive::v2::ProvisionalProposal>,
@@ -883,6 +930,8 @@ impl ProvisionalProposal {
 
     pub fn psbt_to_sign(&self) -> bitcoin_ffi::Psbt { self.0.clone().psbt_to_sign().into() }
 }
+
+impl_generic_methods_for_receiver!(ProvisionalProposal);
 
 #[derive(Clone, uniffi::Object)]
 pub struct PayjoinProposal(
@@ -983,6 +1032,8 @@ impl PayjoinProposal {
     }
 }
 
+impl_generic_methods_for_receiver!(PayjoinProposal);
+
 #[derive(Clone, uniffi::Object)]
 pub struct HasReplyableError(
     pub payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError>,
@@ -1056,6 +1107,8 @@ impl HasReplyableError {
         ))))
     }
 }
+
+impl_generic_methods_for_receiver!(HasReplyableError);
 
 /// Session persister that should save and load events as JSON strings.
 #[uniffi::export(with_foreign)]

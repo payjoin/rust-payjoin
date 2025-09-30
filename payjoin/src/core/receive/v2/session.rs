@@ -648,4 +648,54 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_session_fail() -> Result<(), BoxError> {
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        let session_context = SHARED_CONTEXT.clone();
+
+        let receiver = Receiver { state: Initialized {}, session_context: session_context.clone() };
+        receiver.fail(&persister)?;
+
+        let test = SessionHistoryTest {
+            events: vec![
+                SessionEvent::Created(session_context.clone()),
+                SessionEvent::Closed(SessionOutcome::Failure),
+            ],
+            expected_session_history: SessionHistoryExpectedOutcome {
+                fallback_tx: None,
+                expected_status: SessionStatus::Failed,
+            },
+            expected_receiver_state: ReceiveSession::Initialized(Receiver {
+                state: Initialized {},
+                session_context,
+            }),
+        };
+        run_session_history_test(test)
+    }
+
+    #[test]
+    fn test_session_cancel() -> Result<(), BoxError> {
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        let session_context = SHARED_CONTEXT.clone();
+
+        let receiver = Receiver { state: Initialized {}, session_context: session_context.clone() };
+        receiver.cancel(&persister)?;
+
+        let test = SessionHistoryTest {
+            events: vec![
+                SessionEvent::Created(session_context.clone()),
+                SessionEvent::Closed(SessionOutcome::Cancel),
+            ],
+            expected_session_history: SessionHistoryExpectedOutcome {
+                fallback_tx: None,
+                expected_status: SessionStatus::Failed,
+            },
+            expected_receiver_state: ReceiveSession::Initialized(Receiver {
+                state: Initialized {},
+                session_context,
+            }),
+        };
+        run_session_history_test(test)
+    }
 }

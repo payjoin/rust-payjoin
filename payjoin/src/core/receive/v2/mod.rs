@@ -536,7 +536,12 @@ impl Receiver<UncheckedOriginalPayload> {
         self,
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
-    ) -> MaybeFatalTransition<SessionEvent, Receiver<MaybeInputsOwned>, Error> {
+    ) -> MaybeFatalTransition<
+        SessionEvent,
+        Receiver<MaybeInputsOwned>,
+        Error,
+        Receiver<HasReplyableError>,
+    > {
         match self.state.original.check_broadcast_suitability(min_fee_rate, can_broadcast) {
             Ok(()) => MaybeFatalTransition::success(
                 SessionEvent::CheckedBroadcastSuitability(),
@@ -547,7 +552,14 @@ impl Receiver<UncheckedOriginalPayload> {
             ),
             Err(Error::Implementation(e)) =>
                 MaybeFatalTransition::transient(Error::Implementation(e)),
-            Err(e) => MaybeFatalTransition::fatal(SessionEvent::GotReplyableError((&e).into()), e),
+            Err(e) => MaybeFatalTransition::replyable_error(
+                SessionEvent::GotReplyableError((&e).into()),
+                Receiver {
+                    state: HasReplyableError { error_reply: (&e).into() },
+                    session_context: self.session_context,
+                },
+                e,
+            ),
         }
     }
 
@@ -604,7 +616,12 @@ impl Receiver<MaybeInputsOwned> {
     pub fn check_inputs_not_owned(
         self,
         is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
-    ) -> MaybeFatalTransition<SessionEvent, Receiver<MaybeInputsSeen>, Error> {
+    ) -> MaybeFatalTransition<
+        SessionEvent,
+        Receiver<MaybeInputsSeen>,
+        Error,
+        Receiver<HasReplyableError>,
+    > {
         match self.state.original.check_inputs_not_owned(is_owned) {
             Ok(inner) => inner,
             Err(e) => match e {
@@ -612,8 +629,12 @@ impl Receiver<MaybeInputsOwned> {
                     return MaybeFatalTransition::transient(e);
                 }
                 _ => {
-                    return MaybeFatalTransition::fatal(
+                    return MaybeFatalTransition::replyable_error(
                         SessionEvent::GotReplyableError((&e).into()),
+                        Receiver {
+                            state: HasReplyableError { error_reply: (&e).into() },
+                            session_context: self.session_context,
+                        },
                         e,
                     );
                 }
@@ -657,7 +678,12 @@ impl Receiver<MaybeInputsSeen> {
     pub fn check_no_inputs_seen_before(
         self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
-    ) -> MaybeFatalTransition<SessionEvent, Receiver<OutputsUnknown>, Error> {
+    ) -> MaybeFatalTransition<
+        SessionEvent,
+        Receiver<OutputsUnknown>,
+        Error,
+        Receiver<HasReplyableError>,
+    > {
         match self.state.original.check_no_inputs_seen_before(is_known) {
             Ok(inner) => inner,
             Err(e) => match e {
@@ -665,8 +691,12 @@ impl Receiver<MaybeInputsSeen> {
                     return MaybeFatalTransition::transient(e);
                 }
                 _ => {
-                    return MaybeFatalTransition::fatal(
+                    return MaybeFatalTransition::replyable_error(
                         SessionEvent::GotReplyableError((&e).into()),
+                        Receiver {
+                            state: HasReplyableError { error_reply: (&e).into() },
+                            session_context: self.session_context,
+                        },
                         e,
                     );
                 }
@@ -715,7 +745,12 @@ impl Receiver<OutputsUnknown> {
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
-    ) -> MaybeFatalTransition<SessionEvent, Receiver<WantsOutputs>, Error> {
+    ) -> MaybeFatalTransition<
+        SessionEvent,
+        Receiver<WantsOutputs>,
+        Error,
+        Receiver<HasReplyableError>,
+    > {
         let owned_vouts = match self.state.original.identify_receiver_outputs(is_receiver_output) {
             Ok(inner) => inner,
             Err(e) => match e {
@@ -723,8 +758,12 @@ impl Receiver<OutputsUnknown> {
                     return MaybeFatalTransition::transient(e);
                 }
                 _ => {
-                    return MaybeFatalTransition::fatal(
+                    return MaybeFatalTransition::replyable_error(
                         SessionEvent::GotReplyableError((&e).into()),
+                        Receiver {
+                            state: HasReplyableError { error_reply: (&e).into() },
+                            session_context: self.session_context,
+                        },
                         e,
                     );
                 }
@@ -1189,7 +1228,7 @@ pub mod test {
 
     use super::*;
     use crate::output_substitution::OutputSubstitution;
-    use crate::persist::{NoopSessionPersister, RejectFatal, RejectTransient, Rejection};
+    use crate::persist::{NoopSessionPersister, RejectTransient, Rejection};
     use crate::receive::optional_parameters::Params;
     use crate::receive::v2;
     use crate::ImplementationError;
@@ -1302,36 +1341,18 @@ pub mod test {
 
     #[test]
     fn test_unchecked_proposal_fatal_error() -> Result<(), BoxError> {
+        let persister = NoopSessionPersister::default();
         let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
         let receiver =
             v2::Receiver { state: unchecked_proposal, session_context: SHARED_CONTEXT.clone() };
 
-        let receive_session = ReceiveSession::UncheckedOriginalPayload(receiver.clone());
-        let unchecked_proposal =
-            receiver.check_broadcast_suitability(Some(FeeRate::MIN), |_| Ok(false));
-
-        let event = match &unchecked_proposal {
-            MaybeFatalTransition(Err(Rejection::Fatal(RejectFatal(
-                event,
-                Error::Protocol(error),
-            )))) => {
-                assert_eq!(
-                    error.to_string(),
-                    InternalPayloadError::OriginalPsbtNotBroadcastable.to_string()
-                );
-                event.clone()
-            }
-            _ => panic!("Expected fatal error"),
-        };
-
-        let has_error = match receive_session.process_event(event) {
-            Ok(ReceiveSession::HasReplyableError(r)) => r,
-            _ => panic!("Expected HasError"),
-        };
+        let unchecked_proposal_err = receiver
+            .check_broadcast_suitability(Some(FeeRate::MIN), |_| Ok(false))
+            .save(&persister)
+            .expect_err("should have replyable error");
+        let has_error = unchecked_proposal_err.error_state().expect("should have state");
 
         let _err_req = has_error.create_error_request(EXAMPLE_URL)?;
-        // TODO: assert process_error_response terminally closes session
-
         Ok(())
     }
 

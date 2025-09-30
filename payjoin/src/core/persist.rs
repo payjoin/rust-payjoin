@@ -91,11 +91,14 @@ impl<Event, NextState, CurrentState, Err>
 }
 
 /// A transition that can be either fatal, transient, or a state transition.
-pub struct MaybeFatalTransition<Event, NextState, Err>(
-    pub(crate) Result<AcceptNextState<Event, NextState>, Rejection<Event, Err>>,
+pub struct MaybeFatalTransition<Event, NextState, Err, ErrorState = ()>(
+    pub(crate) Result<AcceptNextState<Event, NextState>, Rejection<Event, Err, ErrorState>>,
 );
 
-impl<Event, NextState, Err> MaybeFatalTransition<Event, NextState, Err> {
+impl<Event, NextState, Err, ErrorState> MaybeFatalTransition<Event, NextState, Err, ErrorState>
+where
+    ErrorState: fmt::Debug,
+{
     #[inline]
     pub(crate) fn fatal(event: Event, error: Err) -> Self {
         MaybeFatalTransition(Err(Rejection::fatal(event, error)))
@@ -111,10 +114,15 @@ impl<Event, NextState, Err> MaybeFatalTransition<Event, NextState, Err> {
         MaybeFatalTransition(Ok(AcceptNextState(event, next_state)))
     }
 
+    #[inline]
+    pub(crate) fn replyable_error(event: Event, error_state: ErrorState, error: Err) -> Self {
+        MaybeFatalTransition(Err(Rejection::replyable_error(event, error_state, error)))
+    }
+
     pub fn save<P>(
         self,
         persister: &P,
-    ) -> Result<NextState, PersistedError<Err, P::InternalStorageError>>
+    ) -> Result<NextState, PersistedError<Err, P::InternalStorageError, ErrorState>>
     where
         P: SessionPersister<SessionEvent = Event>,
         Err: std::error::Error,
@@ -217,16 +225,21 @@ pub enum AcceptOptionalTransition<Event, NextState, CurrentState> {
 }
 
 /// Wrapper representing a fatal or transient rejection of a state transition.
-pub enum Rejection<Event, Err> {
+pub enum Rejection<Event, Err, ErrorState = ()> {
     Fatal(RejectFatal<Event, Err>),
     Transient(RejectTransient<Err>),
+    ReplyableError(RejectReplyableError<Event, ErrorState, Err>),
 }
 
-impl<Event, Err> Rejection<Event, Err> {
+impl<Event, Err, ErrorState> Rejection<Event, Err, ErrorState> {
     #[inline]
     pub fn fatal(event: Event, error: Err) -> Self { Rejection::Fatal(RejectFatal(event, error)) }
     #[inline]
     pub fn transient(error: Err) -> Self { Rejection::Transient(RejectTransient(error)) }
+    #[inline]
+    pub fn replyable_error(event: Event, error_state: ErrorState, error: Err) -> Self {
+        Rejection::ReplyableError(RejectReplyableError(event, error_state, error))
+    }
 }
 
 /// Represents a fatal rejection of a state transition.
@@ -235,6 +248,13 @@ pub struct RejectFatal<Event, Err>(pub(crate) Event, pub(crate) Err);
 /// Represents a transient rejection of a state transition.
 /// When this error occurs, the session should resume from its current state.
 pub struct RejectTransient<Err>(pub(crate) Err);
+/// Represents a replyable error that transitions to an error state but keeps the session open.
+/// When this error occurs, the session transitions to the ErrorState.
+pub struct RejectReplyableError<Event, ErrorState, Err>(
+    pub(crate) Event,
+    pub(crate) ErrorState,
+    pub(crate) Err,
+);
 /// Represents a bad initial inputs to the state machine.
 /// When this error occurs, the session cannot be created.
 /// The wrapper contains the error and should be returned to the caller.
@@ -248,15 +268,18 @@ impl<Err: std::error::Error> fmt::Display for RejectTransient<Err> {
 }
 
 /// Error type that represents all possible errors that can be returned when processing a state transition
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PersistedError<ApiError: std::error::Error, StorageError: std::error::Error>(
-    InternalPersistedError<ApiError, StorageError>,
-);
+#[derive(Debug)]
+pub struct PersistedError<
+    ApiError: std::error::Error,
+    StorageError: std::error::Error,
+    ErrorState: fmt::Debug = (),
+>(InternalPersistedError<ApiError, StorageError, ErrorState>);
 
-impl<ApiErr, StorageErr> PersistedError<ApiErr, StorageErr>
+impl<ApiErr, StorageErr, ErrorState> PersistedError<ApiErr, StorageErr, ErrorState>
 where
     StorageErr: std::error::Error,
     ApiErr: std::error::Error,
+    ErrorState: fmt::Debug,
 {
     #[allow(dead_code)]
     pub fn storage_error(self) -> Option<StorageErr> {
@@ -268,7 +291,9 @@ where
 
     pub fn api_error(self) -> Option<ApiErr> {
         match self.0 {
-            InternalPersistedError::Fatal(e) | InternalPersistedError::Transient(e) => Some(e),
+            InternalPersistedError::Fatal(e)
+            | InternalPersistedError::Transient(e)
+            | InternalPersistedError::FatalWithState(e, _) => Some(e),
             _ => None,
         }
     }
@@ -282,46 +307,61 @@ where
 
     pub fn api_error_ref(&self) -> Option<&ApiErr> {
         match &self.0 {
-            InternalPersistedError::Fatal(e) | InternalPersistedError::Transient(e) => Some(e),
+            InternalPersistedError::Fatal(e)
+            | InternalPersistedError::Transient(e)
+            | InternalPersistedError::FatalWithState(e, _) => Some(e),
+            _ => None,
+        }
+    }
+
+    pub fn error_state(self) -> Option<ErrorState> {
+        match self.0 {
+            InternalPersistedError::FatalWithState(_, state) => Some(state),
             _ => None,
         }
     }
 }
 
-impl<ApiError: std::error::Error, StorageError: std::error::Error>
-    From<InternalPersistedError<ApiError, StorageError>>
-    for PersistedError<ApiError, StorageError>
+impl<ApiError: std::error::Error, StorageError: std::error::Error, ErrorState: fmt::Debug>
+    From<InternalPersistedError<ApiError, StorageError, ErrorState>>
+    for PersistedError<ApiError, StorageError, ErrorState>
 {
-    fn from(value: InternalPersistedError<ApiError, StorageError>) -> Self { PersistedError(value) }
+    fn from(value: InternalPersistedError<ApiError, StorageError, ErrorState>) -> Self {
+        PersistedError(value)
+    }
 }
 
-impl<ApiError: std::error::Error, StorageError: std::error::Error> std::error::Error
-    for PersistedError<ApiError, StorageError>
+impl<ApiError: std::error::Error, StorageError: std::error::Error, ErrorState: fmt::Debug>
+    std::error::Error for PersistedError<ApiError, StorageError, ErrorState>
 {
 }
 
-impl<ApiError: std::error::Error, StorageError: std::error::Error> fmt::Display
-    for PersistedError<ApiError, StorageError>
+impl<ApiError: std::error::Error, StorageError: std::error::Error, ErrorState: fmt::Debug>
+    fmt::Display for PersistedError<ApiError, StorageError, ErrorState>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.0 {
             InternalPersistedError::Transient(err) => write!(f, "Transient error: {err}"),
-            InternalPersistedError::Fatal(err) => write!(f, "Fatal error: {err}"),
+            InternalPersistedError::Fatal(err) | InternalPersistedError::FatalWithState(err, _) =>
+                write!(f, "Fatal error: {err}"),
             InternalPersistedError::Storage(err) => write!(f, "Storage error: {err}"),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum InternalPersistedError<InternalApiError, StorageErr>
+#[derive(Debug)]
+pub(crate) enum InternalPersistedError<InternalApiError, StorageErr, ErrorState = ()>
 where
     InternalApiError: std::error::Error,
     StorageErr: std::error::Error,
+    ErrorState: fmt::Debug,
 {
     /// Error indicating that the session should be retried from the same state
     Transient(InternalApiError),
     /// Error indicating that the session is terminally closed
     Fatal(InternalApiError),
+    /// Fatal error that results in a state transition to ErrorState
+    FatalWithState(InternalApiError, ErrorState),
     /// Error indicating that application failed to save the session event. This should be treated as a transient error
     /// but is represented as a separate error because this error is propagated from the application's storage layer
     Storage(StorageErr),
@@ -390,6 +430,8 @@ trait InternalSessionPersister: SessionPersister {
                 Err(InternalPersistedError::Transient(err).into()),
             Err(Rejection::Fatal(RejectFatal(event, err))) =>
                 Err(self.handle_fatal_reject(RejectFatal(event, err)).into()),
+            Err(Rejection::ReplyableError(reject_replyable_error)) =>
+                Err(self.handle_replyable_error_reject(reject_replyable_error).into()),
         }
     }
 
@@ -425,6 +467,8 @@ trait InternalSessionPersister: SessionPersister {
                 Err(self.handle_fatal_reject(reject_fatal).into()),
             Err(Rejection::Transient(RejectTransient(err))) =>
                 Err(InternalPersistedError::Transient(err).into()),
+            Err(Rejection::ReplyableError(reject_replyable_error)) =>
+                Err(self.handle_replyable_error_reject(reject_replyable_error).into()),
         }
     }
     /// Save a transition that can result in:
@@ -458,6 +502,8 @@ trait InternalSessionPersister: SessionPersister {
                 Err(self.handle_fatal_reject(reject_fatal).into()),
             Err(Rejection::Transient(RejectTransient(err))) =>
                 Err(InternalPersistedError::Transient(err).into()),
+            Err(Rejection::ReplyableError(reject_replyable_error)) =>
+                Err(self.handle_replyable_error_reject(reject_replyable_error).into()),
         }
     }
 
@@ -479,12 +525,13 @@ trait InternalSessionPersister: SessionPersister {
     }
 
     /// Save a transition that can be a fatal error, transient error or a state transition
-    fn save_maybe_fatal_error_transition<NextState, Err>(
+    fn save_maybe_fatal_error_transition<NextState, Err, ErrorState>(
         &self,
-        state_transition: MaybeFatalTransition<Self::SessionEvent, NextState, Err>,
-    ) -> Result<NextState, PersistedError<Err, Self::InternalStorageError>>
+        state_transition: MaybeFatalTransition<Self::SessionEvent, NextState, Err, ErrorState>,
+    ) -> Result<NextState, PersistedError<Err, Self::InternalStorageError, ErrorState>>
     where
         Err: std::error::Error,
+        ErrorState: fmt::Debug,
     {
         match state_transition.0 {
             Ok(AcceptNextState(event, next_state)) => {
@@ -499,17 +546,20 @@ trait InternalSessionPersister: SessionPersister {
                         // No event to store for transient errors
                         Err(InternalPersistedError::Transient(err).into())
                     }
+                    Rejection::ReplyableError(reject_replyable_error) =>
+                        Err(self.handle_replyable_error_reject(reject_replyable_error).into()),
                 }
             }
         }
     }
 
-    fn handle_fatal_reject<Err>(
+    fn handle_fatal_reject<Err, ErrorState>(
         &self,
         reject_fatal: RejectFatal<Self::SessionEvent, Err>,
-    ) -> InternalPersistedError<Err, Self::InternalStorageError>
+    ) -> InternalPersistedError<Err, Self::InternalStorageError, ErrorState>
     where
         Err: std::error::Error,
+        ErrorState: fmt::Debug,
     {
         let RejectFatal(event, error) = reject_fatal;
         if let Err(e) = self.save_event(event) {
@@ -521,6 +571,22 @@ trait InternalSessionPersister: SessionPersister {
         }
 
         InternalPersistedError::Fatal(error)
+    }
+
+    fn handle_replyable_error_reject<Err, ErrorState>(
+        &self,
+        reject_replyable_error: RejectReplyableError<Self::SessionEvent, ErrorState, Err>,
+    ) -> InternalPersistedError<Err, Self::InternalStorageError, ErrorState>
+    where
+        Err: std::error::Error,
+        ErrorState: fmt::Debug,
+    {
+        let RejectReplyableError(event, error_state, error) = reject_replyable_error;
+        if let Err(e) = self.save_event(event) {
+            return InternalPersistedError::Storage(e);
+        }
+        // For replyable errors, don't close the session - keep it open for error response
+        InternalPersistedError::FatalWithState(error, error_state)
     }
 }
 

@@ -171,7 +171,7 @@ impl SenderBuilder {
     ) -> NextStateTransition<SessionEvent, Sender<WithReplyKey>> {
         let with_reply_key = WithReplyKey::new(pj_param, psbt_ctx);
         NextStateTransition::success(
-            SessionEvent::CreatedReplyKey(Box::new(with_reply_key.clone())),
+            SessionEvent::Created(Box::new(with_reply_key.clone())),
             Sender { state: with_reply_key },
         )
     }
@@ -225,7 +225,7 @@ impl SendSession {
         event: SessionEvent,
     ) -> Result<SendSession, ReplayError<Self, SessionEvent>> {
         match (self, event) {
-            (SendSession::WithReplyKey(state), SessionEvent::PollingForProposal()) =>
+            (SendSession::WithReplyKey(state), SessionEvent::PostedOriginalPsbt()) =>
                 Ok(state.apply_polling_for_proposal()),
             (
                 SendSession::PollingForProposal(_state),
@@ -342,7 +342,7 @@ impl Sender<WithReplyKey> {
             reply_key: post_ctx.reply_key,
         };
         MaybeFatalTransition::success(
-            SessionEvent::PollingForProposal(),
+            SessionEvent::PostedOriginalPsbt(),
             Sender { state: polling_for_proposal },
         )
     }

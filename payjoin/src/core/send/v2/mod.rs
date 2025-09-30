@@ -45,6 +45,7 @@ use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
 use crate::persist::{
     MaybeFatalTransition, MaybeSuccessTransitionWithNoResults, NextStateTransition,
 };
+use crate::send::v2::session::SessionOutcome;
 use crate::uri::v2::PjParam;
 use crate::uri::ShortId;
 use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
@@ -227,9 +228,12 @@ impl SendSession {
         match (self, event) {
             (SendSession::WithReplyKey(state), SessionEvent::PollingForProposal()) =>
                 Ok(state.apply_polling_for_proposal()),
-            (SendSession::PollingForProposal(_state), SessionEvent::ProposalReceived(proposal)) =>
-                Ok(SendSession::ProposalReceived(proposal)),
-            (_, SessionEvent::SessionInvalid(_)) => Ok(SendSession::TerminalFailure),
+            (
+                SendSession::PollingForProposal(_state),
+                SessionEvent::ReceivedProposalPsbt(proposal),
+            ) => Ok(SendSession::ProposalReceived(proposal)),
+            (_, SessionEvent::Closed(SessionOutcome::Failure)) => Ok(SendSession::TerminalFailure),
+            (current_state, SessionEvent::Closed(_)) => Ok(current_state),
             (current_state, event) => Err(InternalReplayError::InvalidEvent(
                 Box::new(event),
                 Some(Box::new(current_state)),
@@ -324,7 +328,7 @@ impl Sender<WithReplyKey> {
             Err(e) =>
                 if e.is_fatal() {
                     return MaybeFatalTransition::fatal(
-                        SessionEvent::SessionInvalid(e.to_string()),
+                        SessionEvent::Closed(SessionOutcome::Failure),
                         InternalEncapsulationError::DirectoryResponse(e).into(),
                     );
                 } else {
@@ -489,7 +493,7 @@ impl Sender<PollingForProposal> {
             Err(e) =>
                 if e.is_fatal() {
                     return MaybeSuccessTransitionWithNoResults::fatal(
-                        SessionEvent::SessionInvalid(e.to_string()),
+                        SessionEvent::Closed(SessionOutcome::Failure),
                         InternalEncapsulationError::DirectoryResponse(e).into(),
                     );
                 } else {
@@ -507,14 +511,14 @@ impl Sender<PollingForProposal> {
             Ok(body) => body,
             Err(e) =>
                 return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::SessionInvalid(e.to_string()),
+                    SessionEvent::Closed(SessionOutcome::Failure),
                     InternalEncapsulationError::Hpke(e).into(),
                 ),
         };
 
         if let Ok(resp_err) = ResponseError::from_slice(&body) {
             return MaybeSuccessTransitionWithNoResults::fatal(
-                SessionEvent::SessionInvalid(resp_err.to_string()),
+                SessionEvent::Closed(SessionOutcome::Failure),
                 resp_err,
             );
         }
@@ -523,7 +527,7 @@ impl Sender<PollingForProposal> {
             Ok(proposal) => proposal,
             Err(e) =>
                 return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::SessionInvalid(e.to_string()),
+                    SessionEvent::Closed(SessionOutcome::Failure),
                     InternalProposalError::Psbt(e).into(),
                 ),
         };
@@ -531,14 +535,14 @@ impl Sender<PollingForProposal> {
             Ok(processed_proposal) => processed_proposal,
             Err(e) =>
                 return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::SessionInvalid(e.to_string()),
+                    SessionEvent::Closed(SessionOutcome::Failure),
                     e.into(),
                 ),
         };
 
         MaybeSuccessTransitionWithNoResults::success(
             processed_proposal.clone(),
-            SessionEvent::ProposalReceived(processed_proposal),
+            SessionEvent::ReceivedProposalPsbt(processed_proposal),
         )
     }
 

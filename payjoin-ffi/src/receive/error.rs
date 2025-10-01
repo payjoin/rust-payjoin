@@ -64,15 +64,21 @@ macro_rules! impl_persisted_error_from {
             S: std::error::Error + Send + Sync + 'static,
         {
             fn from(err: payjoin::persist::PersistedError<$api_error_ty, S>) -> Self {
-                if err.storage_error_ref().is_some() {
-                    if let Some(storage_err) = err.storage_error() {
+                let mut err = Some(err);
+
+                if err.as_ref().and_then(|e| e.storage_error_ref()).is_some() {
+                    if let Some(storage_err) = err.take().and_then(|e| e.storage_error()) {
                         return ReceiverPersistedError::from(ImplementationError::new(storage_err));
                     }
                     return ReceiverPersistedError::Receiver(ReceiverError::Unexpected);
                 }
+
+                let err = err.expect("PersistedError consumed before extracting API error");
+
                 if let Some(api_err) = err.api_error() {
                     return ReceiverPersistedError::Receiver($receiver_arm(api_err));
                 }
+
                 ReceiverPersistedError::Receiver(ReceiverError::Unexpected)
             }
         }

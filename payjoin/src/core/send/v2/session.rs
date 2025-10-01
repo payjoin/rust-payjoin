@@ -78,12 +78,36 @@ impl SessionHistory {
             .expect("Session event log must contain at least one event with pj_param")
     }
 
+    pub fn status(&self) -> SessionStatus {
+        if self.pj_param().expiration().elapsed() {
+            return SessionStatus::Expired;
+        }
+
+        match self.events.last() {
+            Some(SessionEvent::Closed(outcome)) => match outcome {
+                SessionOutcome::Success => SessionStatus::Completed,
+                SessionOutcome::Failure | SessionOutcome::Cancel => SessionStatus::Failed,
+            },
+            _ => SessionStatus::Active,
+        }
+    }
+
     pub fn terminal_error(&self) -> Option<String> {
         self.events.iter().find_map(|event| match event {
-            SessionEvent::SessionInvalid(error) => Some(error.clone()),
+            SessionEvent::Closed(SessionOutcome::Failure) => None,
             _ => None,
         })
     }
+}
+
+/// Represents the status of a session that can be inferred from the information in the session
+/// event log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionStatus {
+    Expired,
+    Active,
+    Failed,
+    Completed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -93,9 +117,20 @@ pub enum SessionEvent {
     /// Sender POST'd the original PSBT, and waiting to receive a Proposal PSBT using GET context
     PollingForProposal(),
     /// Sender received a Proposal PSBT
-    ProposalReceived(bitcoin::Psbt),
-    /// Invalid session
-    SessionInvalid(String),
+    ReceivedProposalPsbt(bitcoin::Psbt),
+    /// Closed successful or failed session
+    Closed(SessionOutcome),
+}
+
+/// Represents all possible outcomes for a closed Payjoin session
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum SessionOutcome {
+    /// Successful payjoin
+    Success,
+    /// Payjoin failed to complete due to a counterparty deviation from the protocol
+    Failure,
+    /// Payjoin was cancelled by the user
+    Cancel,
 }
 
 #[cfg(test)]
@@ -147,8 +182,10 @@ mod tests {
         let test_cases = vec![
             SessionEvent::CreatedReplyKey(Box::new(sender_with_reply_key.clone())),
             SessionEvent::PollingForProposal(),
-            SessionEvent::ProposalReceived(PARSED_ORIGINAL_PSBT.clone()),
-            SessionEvent::SessionInvalid("error message".to_string()),
+            SessionEvent::ReceivedProposalPsbt(PARSED_ORIGINAL_PSBT.clone()),
+            SessionEvent::Closed(SessionOutcome::Success),
+            SessionEvent::Closed(SessionOutcome::Failure),
+            SessionEvent::Closed(SessionOutcome::Cancel),
         ];
 
         for event in test_cases {
@@ -162,6 +199,7 @@ mod tests {
     struct SessionHistoryExpectedOutcome {
         fallback_tx: bitcoin::Transaction,
         pj_param: PjParam,
+        expected_status: SessionStatus,
     }
 
     struct SessionHistoryTest {
@@ -182,6 +220,7 @@ mod tests {
         assert_eq!(sender, test.expected_sender_state);
         assert_eq!(session_history.fallback_tx(), test.expected_session_history.fallback_tx);
         assert_eq!(*session_history.pj_param(), test.expected_session_history.pj_param);
+        assert_eq!(session_history.status(), test.expected_session_history.expected_status);
         assert_eq!(session_history.terminal_error(), test.expected_error);
     }
 
@@ -266,10 +305,58 @@ mod tests {
         let sender = Sender { state: with_reply_key.clone() };
         let test = SessionHistoryTest {
             events: vec![SessionEvent::CreatedReplyKey(Box::new(with_reply_key))],
-            expected_session_history: SessionHistoryExpectedOutcome { fallback_tx, pj_param },
+            expected_session_history: SessionHistoryExpectedOutcome {
+                fallback_tx,
+                pj_param,
+                expected_status: SessionStatus::Active,
+            },
             expected_sender_state: SendSession::WithReplyKey(sender),
             expected_error: None,
         };
         run_session_history_test(test);
+    }
+
+    #[test]
+    fn status_is_completed_for_closed_success() {
+        let psbt = PARSED_ORIGINAL_PSBT.clone();
+        let sender = SenderBuilder::new(
+            psbt.clone(),
+            Uri::try_from(PJ_URI)
+                .expect("Valid uri")
+                .assume_checked()
+                .check_pj_supported()
+                .expect("Payjoin to be supported"),
+        )
+        .build_recommended(FeeRate::BROADCAST_MIN)
+        .unwrap();
+
+        let reply_key = HpkeKeyPair::gen_keypair();
+        let endpoint = sender.endpoint().clone();
+        let id = crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id");
+        let expiration =
+            Time::from_now(std::time::Duration::from_secs(60)).expect("Valid expiration");
+        let pj_param = crate::uri::v2::PjParam::new(
+            endpoint,
+            id,
+            expiration,
+            crate::OhttpKeys(
+                ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
+            ),
+            HpkeKeyPair::gen_keypair().1,
+        );
+
+        let with_reply_key = WithReplyKey {
+            pj_param: pj_param.clone(),
+            psbt_ctx: sender.psbt_ctx.clone(),
+            reply_key: reply_key.0,
+        };
+
+        let events = vec![
+            SessionEvent::CreatedReplyKey(Box::new(with_reply_key)),
+            SessionEvent::Closed(SessionOutcome::Success),
+        ];
+
+        let session = SessionHistory { events };
+        assert_eq!(session.status(), SessionStatus::Completed);
     }
 }

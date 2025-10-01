@@ -4,6 +4,7 @@ use payjoin::receive;
 
 use crate::error::ImplementationError;
 use crate::uri::error::IntoUrlError;
+use crate::SessionHistory;
 
 /// The top-level error type for the payjoin receiver
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -155,5 +156,17 @@ pub struct PsbtInputError(#[from] receive::PsbtInputError);
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
 pub struct ReceiverReplayError(
-    #[from] payjoin::error::ReplayError<receive::v2::ReceiveSession, receive::v2::SessionEvent>,
+    #[from]
+    payjoin::error::ReplayError<
+        receive::v2::ReceiveSession,
+        receive::v2::SessionEvent,
+        receive::v2::SessionHistory,
+    >,
 );
+
+#[uniffi::export]
+impl ReceiverReplayError {
+    pub fn session_history(&self) -> Option<Arc<SessionHistory>> {
+        self.0.session_history().map(|h| Arc::new(h.clone().into()))
+    }
+}

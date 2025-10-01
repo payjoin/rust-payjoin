@@ -149,7 +149,7 @@ impl ReceiveSession {
     fn process_event(
         self,
         event: SessionEvent,
-    ) -> Result<ReceiveSession, ReplayError<Self, SessionEvent>> {
+    ) -> Result<ReceiveSession, ReplayError<Self, SessionEvent, SessionHistory>> {
         match (self, event) {
             (
                 ReceiveSession::Initialized(state),
@@ -205,9 +205,9 @@ impl ReceiveSession {
                         ReceiveSession::HasReplyableError(r) => r.session_context,
                     },
                 })),
-
+            (_, SessionEvent::Closed(SessionOutcome::Failure)) =>
+                Err(InternalReplayError::ProtocolError().into()),
             (current_state, SessionEvent::Closed(_)) => Ok(current_state),
-
             (current_state, event) => Err(InternalReplayError::InvalidEvent(
                 Box::new(event),
                 Some(Box::new(current_state)),

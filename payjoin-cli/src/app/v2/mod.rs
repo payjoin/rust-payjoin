@@ -52,7 +52,6 @@ impl StatusText for SendSession {
             SendSession::WithReplyKey(_) | SendSession::PollingForProposal(_) =>
                 "Waiting for proposal",
             SendSession::ProposalReceived(_) => "Proposal received",
-            SendSession::TerminalFailure => "Session failure",
         }
     }
 }
@@ -411,7 +410,6 @@ impl App {
                 self.process_pj_response(proposal)?;
                 return Ok(());
             }
-            _ => return Err(anyhow!("Unexpected sender state")),
         }
         Ok(())
     }

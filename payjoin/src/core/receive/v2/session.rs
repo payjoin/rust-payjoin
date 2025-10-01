@@ -11,7 +11,10 @@ use crate::{ImplementationError, PjUri};
 /// and a session history [SessionHistory]
 pub fn replay_event_log<P>(
     persister: &P,
-) -> Result<(ReceiveSession, SessionHistory), ReplayError<ReceiveSession, SessionEvent>>
+) -> Result<
+    (ReceiveSession, SessionHistory),
+    ReplayError<ReceiveSession, SessionEvent, SessionHistory>,
+>
 where
     P: SessionPersister,
     P::SessionEvent: Into<SessionEvent> + Clone,
@@ -27,23 +30,31 @@ where
         SessionEvent::Created(context) => ReceiveSession::new(context),
         _ => return Err(InternalReplayError::InvalidEvent(Box::new(first_event), None).into()),
     };
-    for event in logs {
-        session_events.push(event.clone().into());
-        receiver = receiver.process_event(event.into()).map_err(|e| {
-            if let Err(storage_err) = persister.close() {
-                return InternalReplayError::PersistenceFailure(ImplementationError::new(
-                    storage_err,
-                ))
-                .into();
+
+    for log in logs {
+        let session_event = log.into();
+        session_events.push(session_event.clone());
+        match receiver.clone().process_event(session_event) {
+            Ok(next_receiver) => receiver = next_receiver,
+            Err(e) => {
+                persister.close().map_err(|e| {
+                    InternalReplayError::PersistenceFailure(ImplementationError::new(e))
+                })?;
+                if let InternalReplayError::ProtocolError() = e.0 {
+                    return Err(InternalReplayError::TerminalFailure(SessionHistory::new(
+                        session_events,
+                    ))
+                    .into());
+                }
+                break;
             }
-            e
-        })?;
+        }
     }
 
     let history = SessionHistory::new(session_events.clone());
     let ctx = history.session_context();
     if ctx.expiration.elapsed() {
-        return Err(InternalReplayError::Expired(ctx.expiration).into());
+        return Err(InternalReplayError::Expired(ctx.expiration, history.clone()).into());
     }
 
     Ok((receiver, history))
@@ -189,8 +200,8 @@ mod tests {
     use crate::receive::tests::original_from_test_vector;
     use crate::receive::v2::test::{mock_err, SHARED_CONTEXT};
     use crate::receive::v2::{
-        HasReplyableError, Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal,
-        Receiver, UncheckedOriginalPayload,
+        Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal, Receiver,
+        UncheckedOriginalPayload,
     };
     use crate::receive::{InternalPayloadError, PayloadError};
 
@@ -319,8 +330,9 @@ mod tests {
         persister.save_event(SessionEvent::Created(session_context))?;
 
         let err = replay_event_log(&persister).expect_err("session should be expired");
-        let expected_err: ReplayError<ReceiveSession, SessionEvent> =
-            InternalReplayError::Expired(expiration).into();
+        let events = persister.inner.read().expect("should be poisoned").events.clone();
+        let expected_err: ReplayError<ReceiveSession, SessionEvent, SessionHistory> =
+            InternalReplayError::Expired(expiration, SessionHistory::new(events.to_vec())).into();
         assert_eq!(err.to_string(), expected_err.to_string());
         Ok(())
     }
@@ -564,40 +576,37 @@ mod tests {
 
     #[test]
     fn test_session_fatal_error() -> Result<(), BoxError> {
-        let persister = NoopSessionPersister::<SessionEvent>::default();
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
         let session_context = SHARED_CONTEXT.clone();
-        let mut events = vec![];
 
         let original = original_from_test_vector();
         // Original PSBT is not broadcastable
-        let _unbroadcastable = unchecked_receiver_from_test_vector()
-            .check_broadcast_suitability(None, |_| Ok(false))
-            .save(&persister)
-            .expect_err("Unbroadcastable should error");
-        // NOTE: it would be good to assert against the internal error type but InternalPersistedError is private
         let expected_error = PayloadError(InternalPayloadError::OriginalPsbtNotBroadcastable);
         let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
-        events.push(SessionEvent::Created(session_context.clone()));
-        events.push(SessionEvent::RetrievedOriginalPayload {
-            original: original.clone(),
-            reply_key: reply_key.clone(),
-        });
-        events.push(SessionEvent::GotReplyableError((&expected_error).into()));
-        events.push(SessionEvent::Closed(SessionOutcome::Failure));
+        persister
+            .save_event(SessionEvent::Created(session_context.clone()))
+            .expect("In memory persister should not fail");
+        persister
+            .save_event(SessionEvent::RetrievedOriginalPayload {
+                original: original.clone(),
+                reply_key: reply_key.clone(),
+            })
+            .expect("In memory persister should not fail");
+        persister
+            .save_event(SessionEvent::GotReplyableError((&expected_error).into()))
+            .expect("In memory persister should not fail");
+        persister
+            .save_event(SessionEvent::Closed(SessionOutcome::Failure))
+            .expect("In memory persister should not fail");
+        // Closed session should receive a replay error
+        let events = persister.inner.read().expect("should be poisoned").events.clone();
+        let err = replay_event_log(&persister).expect_err("session should be expired");
+        let expected_err: ReplayError<ReceiveSession, SessionEvent, SessionHistory> =
+            InternalReplayError::TerminalFailure(SessionHistory::new(events.to_vec())).into();
+        assert_eq!(err.to_string(), expected_err.to_string());
 
-        let test = SessionHistoryTest {
-            events,
-            expected_session_history: SessionHistoryExpectedOutcome {
-                fallback_tx: None,
-                expected_status: SessionStatus::Failed,
-            },
-            expected_receiver_state: ReceiveSession::HasReplyableError(Receiver {
-                state: HasReplyableError { error_reply: (&expected_error).into() },
-                session_context: SessionContext { reply_key, ..session_context },
-            }),
-        };
-        run_session_history_test(test)
+        Ok(())
     }
 
     #[test]

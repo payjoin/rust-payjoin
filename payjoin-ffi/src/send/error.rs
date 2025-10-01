@@ -4,6 +4,7 @@ use payjoin::bitcoin::psbt::PsbtParseError;
 use payjoin::send;
 
 use crate::error::ImplementationError;
+use crate::SenderSessionHistory;
 
 /// Error building a Sender from a SenderBuilder.
 ///
@@ -86,8 +87,20 @@ pub struct WellKnownError(#[from] send::WellKnownError);
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
 pub struct SenderReplayError(
-    #[from] payjoin::error::ReplayError<send::v2::SendSession, send::v2::SessionEvent>,
+    #[from]
+    payjoin::error::ReplayError<
+        send::v2::SendSession,
+        send::v2::SessionEvent,
+        send::v2::SessionHistory,
+    >,
 );
+
+#[uniffi::export]
+impl SenderReplayError {
+    pub fn session_history(&self) -> Option<Arc<SenderSessionHistory>> {
+        self.0.session_history().map(|h| Arc::new(h.clone().into()))
+    }
+}
 
 /// Error that may occur during state machine transitions
 #[derive(Debug, thiserror::Error, uniffi::Error)]

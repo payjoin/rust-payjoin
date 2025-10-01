@@ -62,7 +62,6 @@ pub enum SendSession {
     WithReplyKey { inner: Arc<WithReplyKey> },
     PollingForProposal { inner: Arc<PollingForProposal> },
     ProposalReceived { inner: Arc<Psbt> },
-    TerminalFailure,
 }
 
 impl From<payjoin::send::v2::SendSession> for SendSession {
@@ -75,7 +74,6 @@ impl From<payjoin::send::v2::SendSession> for SendSession {
                 Self::PollingForProposal { inner: Arc::new(inner.into()) },
             SendSession::ProposalReceived(inner) =>
                 Self::ProposalReceived { inner: Arc::new(inner.into()) },
-            SendSession::TerminalFailure => Self::TerminalFailure,
         }
     }
 }

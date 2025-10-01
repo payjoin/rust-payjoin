@@ -215,7 +215,6 @@ pub enum SendSession {
     WithReplyKey(Sender<WithReplyKey>),
     PollingForProposal(Sender<PollingForProposal>),
     ProposalReceived(Psbt),
-    TerminalFailure,
 }
 
 impl SendSession {
@@ -224,7 +223,7 @@ impl SendSession {
     fn process_event(
         self,
         event: SessionEvent,
-    ) -> Result<SendSession, ReplayError<Self, SessionEvent>> {
+    ) -> Result<SendSession, ReplayError<Self, SessionEvent, SessionHistory>> {
         match (self, event) {
             (SendSession::WithReplyKey(state), SessionEvent::PollingForProposal()) =>
                 Ok(state.apply_polling_for_proposal()),
@@ -232,7 +231,8 @@ impl SendSession {
                 SendSession::PollingForProposal(_state),
                 SessionEvent::ReceivedProposalPsbt(proposal),
             ) => Ok(SendSession::ProposalReceived(proposal)),
-            (_, SessionEvent::Closed(SessionOutcome::Failure)) => Ok(SendSession::TerminalFailure),
+            (_, SessionEvent::Closed(SessionOutcome::Failure)) =>
+                Err(InternalReplayError::ProtocolError().into()),
             (current_state, SessionEvent::Closed(_)) => Ok(current_state),
             (current_state, event) => Err(InternalReplayError::InvalidEvent(
                 Box::new(event),

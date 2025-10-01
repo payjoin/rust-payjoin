@@ -7,7 +7,7 @@ use crate::ImplementationError;
 
 pub fn replay_event_log<P>(
     persister: &P,
-) -> Result<(SendSession, SessionHistory), ReplayError<SendSession, SessionEvent>>
+) -> Result<(SendSession, SessionHistory), ReplayError<SendSession, SessionEvent, SessionHistory>>
 where
     P: SessionPersister + Clone,
     P::SessionEvent: Into<SessionEvent> + Clone,
@@ -28,10 +28,16 @@ where
         session_events.push(session_event.clone());
         match sender.clone().process_event(session_event) {
             Ok(next_sender) => sender = next_sender,
-            Err(_e) => {
+            Err(e) => {
                 persister.close().map_err(|e| {
                     InternalReplayError::PersistenceFailure(ImplementationError::new(e))
                 })?;
+                if let InternalReplayError::ProtocolError() = e.0 {
+                    return Err(InternalReplayError::TerminalFailure(SessionHistory::new(
+                        session_events,
+                    ))
+                    .into());
+                }
                 break;
             }
         }
@@ -40,7 +46,7 @@ where
     let history = SessionHistory::new(session_events.clone());
     let pj_param = history.pj_param();
     if pj_param.expiration().elapsed() {
-        return Err(InternalReplayError::Expired(pj_param.expiration()).into());
+        return Err(InternalReplayError::Expired(pj_param.expiration(), history.clone()).into());
     }
     Ok((sender, history))
 }
@@ -263,8 +269,9 @@ mod tests {
             .expect("save_event should succeed");
 
         let err = replay_event_log(&persister).expect_err("session should be expired");
-        let expected_err: ReplayError<SendSession, SessionEvent> =
-            InternalReplayError::Expired(expiration).into();
+        let events = persister.inner.read().expect("should be poisoned").events.clone();
+        let expected_err: ReplayError<SendSession, SessionEvent, SessionHistory> =
+            InternalReplayError::Expired(expiration, SessionHistory::new(events.to_vec())).into();
         assert_eq!(err.to_string(), expected_err.to_string());
     }
 

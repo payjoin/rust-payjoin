@@ -444,12 +444,18 @@ mod integration {
                 has_error.process_error_response(&err_bytes, err_ctx).save(&persister)?;
 
                 // Ensure the session is closed properly
-                let (_, session_history) = replay_receiver_event_log(&persister)?;
-                assert_eq!(session_history.status(), SessionStatus::Failed);
-                assert_eq!(
-                    session_history.terminal_error().expect("should have error"),
-                    (&server_error).into()
-                );
+                let res = replay_receiver_event_log(&persister)
+                    .expect_err("Terminal failure should error during replay");
+                match res.session_history() {
+                    Some(session_history) => {
+                        assert_eq!(session_history.status(), SessionStatus::Failed);
+                        assert_eq!(
+                            session_history.terminal_error().expect("should have error"),
+                            (&server_error).into()
+                        );
+                    }
+                    _ => panic!("Expected session history but found none"),
+                }
 
                 // Check that we can read the error response as a sender
                 let (req, ctx) =

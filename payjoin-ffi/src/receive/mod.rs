@@ -1012,7 +1012,7 @@ pub struct HasReplyableErrorTransition(
                 payjoin::persist::MaybeSuccessTransition<
                     payjoin::receive::v2::SessionEvent,
                     (),
-                    payjoin::receive::Error,
+                    payjoin::receive::ProtocolError,
                 >,
             >,
         >,
@@ -1050,8 +1050,8 @@ impl HasReplyableError {
         &self,
         body: &[u8],
         ohttp_context: &ClientResponse,
-    ) -> PayjoinProposalTransition {
-        PayjoinProposalTransition(Arc::new(RwLock::new(Some(
+    ) -> HasReplyableErrorTransition {
+        HasReplyableErrorTransition(Arc::new(RwLock::new(Some(
             self.0.clone().process_error_response(body, ohttp_context.into()),
         ))))
     }

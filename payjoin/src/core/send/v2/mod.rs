@@ -171,7 +171,7 @@ impl SenderBuilder {
     ) -> NextStateTransition<SessionEvent, Sender<WithReplyKey>> {
         let with_reply_key = WithReplyKey::new(pj_param, psbt_ctx);
         NextStateTransition::success(
-            SessionEvent::CreatedReplyKey(with_reply_key.clone()),
+            SessionEvent::CreatedReplyKey(Box::new(with_reply_key.clone())),
             Sender { state: with_reply_key },
         )
     }
@@ -225,10 +225,8 @@ impl SendSession {
         event: SessionEvent,
     ) -> Result<SendSession, ReplayError<Self, SessionEvent>> {
         match (self, event) {
-            (
-                SendSession::WithReplyKey(state),
-                SessionEvent::PollingForProposal(polling_for_proposal),
-            ) => Ok(state.apply_polling_for_proposal(polling_for_proposal)),
+            (SendSession::WithReplyKey(state), SessionEvent::PollingForProposal()) =>
+                Ok(state.apply_polling_for_proposal()),
             (SendSession::PollingForProposal(_state), SessionEvent::ProposalReceived(proposal)) =>
                 Ok(SendSession::ProposalReceived(proposal)),
             (_, SessionEvent::SessionInvalid(_)) => Ok(SendSession::TerminalFailure),
@@ -342,7 +340,7 @@ impl Sender<WithReplyKey> {
             reply_key: post_ctx.reply_key,
         };
         MaybeFatalTransition::success(
-            SessionEvent::PollingForProposal(polling_for_proposal.clone()),
+            SessionEvent::PollingForProposal(),
             Sender { state: polling_for_proposal },
         )
     }
@@ -350,11 +348,14 @@ impl Sender<WithReplyKey> {
     /// The endpoint in the Payjoin URI
     pub fn endpoint(&self) -> Url { self.pj_param.endpoint().clone() }
 
-    pub(crate) fn apply_polling_for_proposal(
-        self,
-        polling_for_proposal: PollingForProposal,
-    ) -> SendSession {
-        SendSession::PollingForProposal(Sender { state: polling_for_proposal })
+    pub(crate) fn apply_polling_for_proposal(self) -> SendSession {
+        SendSession::PollingForProposal(Sender {
+            state: PollingForProposal {
+                pj_param: self.state.pj_param,
+                psbt_ctx: self.state.psbt_ctx,
+                reply_key: self.state.reply_key,
+            },
+        })
     }
 }
 

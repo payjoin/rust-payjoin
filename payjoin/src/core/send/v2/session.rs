@@ -78,12 +78,36 @@ impl SessionHistory {
             .expect("Session event log must contain at least one event with pj_param")
     }
 
+    pub fn status(&self) -> SessionStatus {
+        if self.pj_param().expiration().elapsed() {
+            return SessionStatus::Expired;
+        }
+
+        match self.events.last() {
+            Some(SessionEvent::Closed(outcome)) => match outcome {
+                SessionOutcome::Success => SessionStatus::Completed,
+                SessionOutcome::Failure | SessionOutcome::Cancel => SessionStatus::Failed,
+            },
+            _ => SessionStatus::Active,
+        }
+    }
+
     pub fn terminal_error(&self) -> Option<String> {
         self.events.iter().find_map(|event| match event {
             SessionEvent::Closed(SessionOutcome::Failure) => None,
             _ => None,
         })
     }
+}
+
+/// Represents the status of a session that can be inferred from the information in the session
+/// event log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionStatus {
+    Expired,
+    Active,
+    Failed,
+    Completed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -175,6 +199,7 @@ mod tests {
     struct SessionHistoryExpectedOutcome {
         fallback_tx: bitcoin::Transaction,
         pj_param: PjParam,
+        expected_status: SessionStatus,
     }
 
     struct SessionHistoryTest {
@@ -195,6 +220,7 @@ mod tests {
         assert_eq!(sender, test.expected_sender_state);
         assert_eq!(session_history.fallback_tx(), test.expected_session_history.fallback_tx);
         assert_eq!(*session_history.pj_param(), test.expected_session_history.pj_param);
+        assert_eq!(session_history.status(), test.expected_session_history.expected_status);
         assert_eq!(session_history.terminal_error(), test.expected_error);
     }
 
@@ -279,7 +305,11 @@ mod tests {
         let sender = Sender { state: with_reply_key.clone() };
         let test = SessionHistoryTest {
             events: vec![SessionEvent::CreatedReplyKey(Box::new(with_reply_key))],
-            expected_session_history: SessionHistoryExpectedOutcome { fallback_tx, pj_param },
+            expected_session_history: SessionHistoryExpectedOutcome {
+                fallback_tx,
+                pj_param,
+                expected_status: SessionStatus::Active,
+            },
             expected_sender_state: SendSession::WithReplyKey(sender),
             expected_error: None,
         };

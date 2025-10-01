@@ -187,7 +187,8 @@ impl InitialSendTransition {
 
         let value = inner.take().expect("Already saved or moved");
 
-        let res = value.save(&adapter).map_err(|e| ForeignError::InternalError(e.to_string()))?;
+        let res =
+            value.save(&adapter).map_err(|e| ForeignError::from(ImplementationError::new(e)))?;
         Ok(res.into())
     }
 }
@@ -509,7 +510,7 @@ impl payjoin::persist::SessionPersister for CallbackPersisterAdapter {
     fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
         let event: SenderSessionEvent = event.into();
         self.callback_persister
-            .save(event.to_json().map_err(|e| ForeignError::InternalError(e.to_string()))?)
+            .save(event.to_json().map_err(|e| ForeignError::from(ImplementationError::new(e)))?)
     }
 
     fn load(
@@ -521,7 +522,7 @@ impl payjoin::persist::SessionPersister for CallbackPersisterAdapter {
                 .into_iter()
                 .map(|event| {
                     SenderSessionEvent::from_json(event)
-                        .map_err(|e| ForeignError::InternalError(e.to_string()))
+                        .map_err(|e| ForeignError::from(ImplementationError::new(e)))
                         .map(|e| e.into())
                 })
                 .collect::<Result<Vec<_>, _>>()

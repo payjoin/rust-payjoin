@@ -1,4 +1,5 @@
 use std::error;
+use std::sync::Arc;
 
 /// Error arising due to the specific receiver implementation
 ///
@@ -21,14 +22,18 @@ impl From<ImplementationError> for payjoin::ImplementationError {
 #[error("Error de/serializing JSON object: {0}")]
 pub struct SerdeJsonError(#[from] serde_json::Error);
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq, uniffi::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum ForeignError {
-    #[error("Internal error: {0}")]
-    InternalError(String),
+    #[error(transparent)]
+    Implementation(Arc<ImplementationError>),
+}
+
+impl From<ImplementationError> for ForeignError {
+    fn from(value: ImplementationError) -> Self { Self::Implementation(Arc::new(value)) }
 }
 
 impl From<uniffi::UnexpectedUniFFICallbackError> for ForeignError {
-    fn from(_: uniffi::UnexpectedUniFFICallbackError) -> Self {
-        Self::InternalError("Unexpected Uniffi callback error".to_string())
+    fn from(err: uniffi::UnexpectedUniFFICallbackError) -> Self {
+        ForeignError::from(ImplementationError::new(err))
     }
 }

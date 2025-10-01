@@ -1183,7 +1183,7 @@ impl payjoin::persist::SessionPersister for CallbackPersisterAdapter {
     fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
         let uni_event: ReceiverSessionEvent = event.into();
         self.callback_persister
-            .save(uni_event.to_json().map_err(|e| ForeignError::InternalError(e.to_string()))?)
+            .save(uni_event.to_json().map_err(|e| ForeignError::from(ImplementationError::new(e)))?)
     }
 
     fn load(
@@ -1195,7 +1195,7 @@ impl payjoin::persist::SessionPersister for CallbackPersisterAdapter {
                 .into_iter()
                 .map(|event| {
                     ReceiverSessionEvent::from_json(event)
-                        .map_err(|e| ForeignError::InternalError(e.to_string()))
+                        .map_err(|e| ForeignError::from(ImplementationError::new(e)))
                         .map(|e| e.into())
                 })
                 .collect::<Result<Vec<_>, _>>()

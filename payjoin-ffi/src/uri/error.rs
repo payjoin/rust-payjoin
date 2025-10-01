@@ -1,19 +1,27 @@
-#[derive(Debug, thiserror::Error, uniffi::Object)]
-#[error(transparent)]
-pub struct PjParseError(#[from] payjoin::PjParseError);
-
-impl PjParseError {
-    pub fn message(&self) -> String { self.0.to_string() }
+#[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
+#[error("Error parsing the payjoin URI: {msg}")]
+pub struct PjParseError {
+    msg: String,
 }
 
-#[derive(Debug, thiserror::Error, uniffi::Object)]
-#[error(transparent)]
-pub struct PjNotSupported(
-    #[from] Box<payjoin::Uri<'static, payjoin::bitcoin::address::NetworkChecked>>,
-);
+impl PjParseError {
+    pub fn message(&self) -> &str { &self.msg }
+
+    pub(crate) fn from_err(err: impl std::fmt::Display) -> Self { Self { msg: err.to_string() } }
+}
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
+#[error("URI doesn't support payjoin: {msg}")]
+pub struct PjNotSupported {
+    msg: String,
+}
 
 impl PjNotSupported {
-    pub fn uri(&self) -> String { self.0.to_string() }
+    pub fn uri(&self) -> &str { &self.msg }
+
+    pub(crate) fn from_display(uri: impl std::fmt::Display) -> Self {
+        Self { msg: uri.to_string() }
+    }
 }
 
 #[derive(Debug, thiserror::Error, uniffi::Object)]

@@ -20,7 +20,9 @@ impl From<payjoin::Uri<'static, NetworkChecked>> for Uri {
 impl Uri {
     #[uniffi::constructor]
     pub fn parse(uri: String) -> Result<Self, PjParseError> {
-        payjoin::Uri::from_str(uri.as_str()).map(|e| e.assume_checked().into()).map_err(Into::into)
+        payjoin::Uri::from_str(uri.as_str())
+            .map(|e| e.assume_checked().into())
+            .map_err(PjParseError::from_err)
     }
     pub fn address(&self) -> String { self.clone().0.address.to_string() }
     /// Gets the amount in satoshis.
@@ -37,7 +39,7 @@ impl Uri {
             .clone()
             .check_pj_supported()
             .map(|uri| Arc::new(uri.into()))
-            .map_err(|uri| PjNotSupported(uri.into()))
+            .map_err(PjNotSupported::from_display)
     }
     pub fn as_string(&self) -> String { self.0.clone().to_string() }
 }

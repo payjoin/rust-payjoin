@@ -1,21 +1,19 @@
-#[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
-#[error("Error parsing the payjoin URI: {msg}")]
-pub struct PjParseError {
-    msg: String,
+#[derive(Debug, thiserror::Error, uniffi::Object)]
+#[error(transparent)]
+pub struct PjParseError(#[from] payjoin::PjParseError);
+
+impl PjParseError {
+    pub fn message(&self) -> String { self.0.to_string() }
 }
 
-impl From<String> for PjParseError {
-    fn from(msg: String) -> Self { PjParseError { msg } }
-}
+#[derive(Debug, thiserror::Error, uniffi::Object)]
+#[error(transparent)]
+pub struct PjNotSupported(
+    #[from] Box<payjoin::Uri<'static, payjoin::bitcoin::address::NetworkChecked>>,
+);
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
-#[error("URI doesn't support payjoin: {msg}")]
-pub struct PjNotSupported {
-    msg: String,
-}
-
-impl From<String> for PjNotSupported {
-    fn from(msg: String) -> Self { PjNotSupported { msg } }
+impl PjNotSupported {
+    pub fn uri(&self) -> String { self.0.to_string() }
 }
 
 #[derive(Debug, thiserror::Error, uniffi::Object)]

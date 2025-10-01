@@ -1,16 +1,12 @@
 pub use error::OhttpError;
 
 pub mod error {
-    #[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
-    #[error("OHTTP error: {message}")]
-    pub struct OhttpError {
-        message: String,
-    }
-    impl From<ohttp::Error> for OhttpError {
-        fn from(value: ohttp::Error) -> Self { OhttpError { message: format!("{value:?}") } }
-    }
-    impl From<String> for OhttpError {
-        fn from(value: String) -> Self { OhttpError { message: value } }
+    #[derive(Debug, thiserror::Error, uniffi::Object)]
+    #[error(transparent)]
+    pub struct OhttpError(#[from] ohttp::Error);
+
+    impl OhttpError {
+        pub fn message(&self) -> String { self.0.to_string() }
     }
 }
 

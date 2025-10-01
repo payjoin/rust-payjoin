@@ -1,7 +1,7 @@
 use super::WithReplyKey;
 use crate::error::{InternalReplayError, ReplayError};
 use crate::persist::SessionPersister;
-use crate::send::v2::{PollingForProposal, SendSession};
+use crate::send::v2::SendSession;
 use crate::uri::v2::PjParam;
 use crate::ImplementationError;
 
@@ -19,7 +19,7 @@ where
     let first_event = logs.next().ok_or(InternalReplayError::NoEvents)?.into();
     let mut session_events = vec![first_event.clone()];
     let mut sender = match first_event {
-        SessionEvent::CreatedReplyKey(reply_key) => SendSession::new(reply_key),
+        SessionEvent::CreatedReplyKey(reply_key) => SendSession::new(*reply_key),
         _ => return Err(InternalReplayError::InvalidEvent(Box::new(first_event), None).into()),
     };
 
@@ -89,9 +89,9 @@ impl SessionHistory {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SessionEvent {
     /// Sender was created with a HPKE key pair
-    CreatedReplyKey(WithReplyKey),
+    CreatedReplyKey(Box<WithReplyKey>),
     /// Sender POST'd the original PSBT, and waiting to receive a Proposal PSBT using GET context
-    PollingForProposal(PollingForProposal),
+    PollingForProposal(),
     /// Sender received a Proposal PSBT
     ProposalReceived(bitcoin::Psbt),
     /// Invalid session
@@ -144,21 +144,9 @@ mod tests {
             reply_key: keypair.0.clone(),
         };
 
-        let polling_for_proposal = PollingForProposal {
-            pj_param: pj_param.clone(),
-            psbt_ctx: PsbtContext {
-                original_psbt: PARSED_ORIGINAL_PSBT.clone(),
-                output_substitution: OutputSubstitution::Enabled,
-                fee_contribution: None,
-                min_fee_rate: FeeRate::ZERO,
-                payee: ScriptBuf::from(vec![0x00]),
-            },
-            reply_key: keypair.0.clone(),
-        };
-
         let test_cases = vec![
-            SessionEvent::CreatedReplyKey(sender_with_reply_key.clone()),
-            SessionEvent::PollingForProposal(polling_for_proposal.clone()),
+            SessionEvent::CreatedReplyKey(Box::new(sender_with_reply_key.clone())),
+            SessionEvent::PollingForProposal(),
             SessionEvent::ProposalReceived(PARSED_ORIGINAL_PSBT.clone()),
             SessionEvent::SessionInvalid("error message".to_string()),
         ];
@@ -232,7 +220,7 @@ mod tests {
         };
         let persister = InMemoryTestPersister::<SessionEvent>::default();
         persister
-            .save_event(SessionEvent::CreatedReplyKey(with_reply_key))
+            .save_event(SessionEvent::CreatedReplyKey(Box::new(with_reply_key)))
             .expect("save_event should succeed");
 
         let err = replay_event_log(&persister).expect_err("session should be expired");
@@ -277,7 +265,7 @@ mod tests {
         };
         let sender = Sender { state: with_reply_key.clone() };
         let test = SessionHistoryTest {
-            events: vec![SessionEvent::CreatedReplyKey(with_reply_key)],
+            events: vec![SessionEvent::CreatedReplyKey(Box::new(with_reply_key))],
             expected_session_history: SessionHistoryExpectedOutcome { fallback_tx, pj_param },
             expected_sender_state: SendSession::WithReplyKey(sender),
             expected_error: None,

@@ -29,7 +29,6 @@ use error::BuildSenderError;
 use url::Url;
 
 use super::*;
-use crate::error_codes::ErrorCode;
 pub use crate::output_substitution::OutputSubstitution;
 use crate::uri::v1::PjParam;
 use crate::{PjUri, Request, MAX_CONTENT_LENGTH};
@@ -221,34 +220,6 @@ impl V1Context {
 }
 
 impl ResponseError {
-    pub(crate) fn from_json(json: serde_json::Value) -> Self {
-        let message = json
-            .as_object()
-            .and_then(|v| v.get("message"))
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-
-        let error_code = json.as_object().and_then(|v| v.get("errorCode")).and_then(|v| v.as_str());
-
-        match error_code {
-            Some(code) => match ErrorCode::from_str(code) {
-                Ok(ErrorCode::VersionUnsupported) => {
-                    let supported = json
-                        .as_object()
-                        .and_then(|v| v.get("supported"))
-                        .and_then(|v| v.as_array())
-                        .map(|array| array.iter().filter_map(|v| v.as_u64()).collect::<Vec<u64>>())
-                        .unwrap_or_default();
-                    WellKnownError::version_unsupported(message, supported).into()
-                }
-                Ok(code) => WellKnownError::new(code, message).into(),
-                Err(_) => Self::Unrecognized { error_code: code.to_string(), message },
-            },
-            None => InternalValidationError::Parse.into(),
-        }
-    }
-
     /// Parse a response from the receiver.
     ///
     /// response must be valid JSON string.
@@ -258,22 +229,6 @@ impl ResponseError {
             Err(_) => InternalValidationError::Parse.into(),
         }
     }
-}
-
-impl WellKnownError {
-    /// Create a new well-known error with the given code and message.
-    pub(crate) fn new(code: ErrorCode, message: String) -> Self {
-        Self { code, message, supported_versions: None }
-    }
-
-    /// Create a version unsupported error with the given message and supported versions.
-    pub(crate) fn version_unsupported(message: String, supported: Vec<u64>) -> Self {
-        Self { code: ErrorCode::VersionUnsupported, message, supported_versions: Some(supported) }
-    }
-}
-
-impl From<WellKnownError> for ResponseError {
-    fn from(value: WellKnownError) -> Self { Self::WellKnown(value) }
 }
 
 #[cfg(test)]

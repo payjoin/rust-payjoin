@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{ReceiveSession, SessionContext};
-use crate::error::{InternalReplayError, ReplayError};
+use crate::error::{InternalProcessEventError, InternalReplayError, ReplayError};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
 use crate::receive::{InputPair, JsonReply, OriginalPayload, PsbtContext};
@@ -40,13 +40,17 @@ where
                 persister.close().map_err(|e| {
                     InternalReplayError::PersistenceFailure(ImplementationError::new(e))
                 })?;
-                if let InternalReplayError::ProtocolError() = e.0 {
-                    return Err(InternalReplayError::TerminalFailure(SessionHistory::new(
-                        session_events,
-                    ))
-                    .into());
+                match e {
+                    InternalProcessEventError::ProtocolError() => {
+                        return Err(InternalReplayError::TerminalFailure(SessionHistory::new(
+                            session_events,
+                        ))
+                        .into());
+                    }
+                    InternalProcessEventError::InvalidEvent(event, session) => {
+                        return Err(InternalReplayError::InvalidEvent(event, session).into());
+                    }
                 }
-                break;
             }
         }
     }

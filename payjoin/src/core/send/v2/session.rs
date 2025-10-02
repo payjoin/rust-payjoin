@@ -1,5 +1,5 @@
 use super::WithReplyKey;
-use crate::error::{InternalReplayError, ReplayError};
+use crate::error::{InternalProcessEventError, InternalReplayError, ReplayError};
 use crate::persist::SessionPersister;
 use crate::send::v2::SendSession;
 use crate::uri::v2::PjParam;
@@ -32,13 +32,17 @@ where
                 persister.close().map_err(|e| {
                     InternalReplayError::PersistenceFailure(ImplementationError::new(e))
                 })?;
-                if let InternalReplayError::ProtocolError() = e.0 {
-                    return Err(InternalReplayError::TerminalFailure(SessionHistory::new(
-                        session_events,
-                    ))
-                    .into());
+                match e {
+                    InternalProcessEventError::ProtocolError() => {
+                        return Err(InternalReplayError::TerminalFailure(SessionHistory::new(
+                            session_events,
+                        ))
+                        .into());
+                    }
+                    InternalProcessEventError::InvalidEvent(event, session) => {
+                        return Err(InternalReplayError::InvalidEvent(event, session).into());
+                    }
                 }
-                break;
             }
         }
     }

@@ -41,7 +41,7 @@ use super::error::{Error, InputContributionError};
 use super::{
     common, InternalPayloadError, JsonReply, OutputSubstitutionError, ProtocolError, SelectionError,
 };
-use crate::error::{InternalReplayError, ReplayError};
+use crate::error::InternalProcessEventError;
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{
     ohttp_encapsulate, process_get_res, process_post_res, OhttpEncapsulationError, OhttpKeys,
@@ -149,7 +149,7 @@ impl ReceiveSession {
     fn process_event(
         self,
         event: SessionEvent,
-    ) -> Result<ReceiveSession, ReplayError<Self, SessionEvent, SessionHistory>> {
+    ) -> Result<ReceiveSession, InternalProcessEventError<Self, SessionEvent>> {
         match (self, event) {
             (
                 ReceiveSession::Initialized(state),
@@ -206,13 +206,12 @@ impl ReceiveSession {
                     },
                 })),
             (_, SessionEvent::Closed(SessionOutcome::Failure)) =>
-                Err(InternalReplayError::ProtocolError().into()),
+                Err(InternalProcessEventError::ProtocolError()),
             (current_state, SessionEvent::Closed(_)) => Ok(current_state),
-            (current_state, event) => Err(InternalReplayError::InvalidEvent(
+            (current_state, event) => Err(InternalProcessEventError::InvalidEvent(
                 Box::new(event),
                 Some(Box::new(current_state)),
-            )
-            .into()),
+            )),
         }
     }
 }

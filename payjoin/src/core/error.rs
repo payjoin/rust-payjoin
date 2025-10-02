@@ -68,7 +68,6 @@ impl<SessionState: Debug, SessionEvent: Debug, SessionHistory: Debug> std::fmt::
             },
             Expired(time, _) => write!(f, "Session expired at {time:?}"),
             PersistenceFailure(e) => write!(f, "Persistence failure: {e}"),
-            ProtocolError() => write!(f, "Protocol error"),
             TerminalFailure(_) => write!(f, "Terminal failure"),
         }
     }
@@ -100,9 +99,12 @@ pub(crate) enum InternalReplayError<SessionState, SessionEvent, SessionHistory> 
     Expired(crate::time::Time, SessionHistory),
     /// Application storage error
     PersistenceFailure(ImplementationError),
-    /// Protocol error
-    // TODO: should this include a deserialize / string representation of the error?
-    ProtocolError(),
     /// Terminal failure with session history
     TerminalFailure(SessionHistory),
+}
+
+#[cfg(feature = "v2")]
+pub(crate) enum InternalProcessEventError<SessionState, SessionEvent> {
+    InvalidEvent(Box<SessionEvent>, Option<Box<SessionState>>),
+    ProtocolError(),
 }

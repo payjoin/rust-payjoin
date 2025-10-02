@@ -134,6 +134,47 @@ impl BitcoindWallet {
         }
     }
 
+    #[cfg(feature = "v2")]
+    pub fn is_outpoint_spent(&self, outpoint: &OutPoint) -> Result<bool> {
+        let _ = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                // Note: explicitly ignore txouts in the mempool. Those should be considered spent for our purposes
+                .block_on(async {
+                    match self.rpc.get_tx_out(&outpoint.txid, outpoint.vout, false).await {
+                        Ok(_) => Ok(true),
+                        Err(e) =>
+                            if e.is_missing_or_invalid_input() {
+                                Ok(false)
+                            } else {
+                                Err(e)
+                            },
+                    }
+                })
+        })?;
+        Ok(true)
+    }
+
+    #[cfg(feature = "v2")]
+    pub fn get_raw_transaction(
+        &self,
+        txid: &Txid,
+    ) -> Result<Option<payjoin::bitcoin::Transaction>> {
+        let raw_tx = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                match self.rpc.get_transaction(txid).await {
+                    Ok(tx) => Ok(Some(tx.hex)),
+                    Err(e) =>
+                        if e.is_tx_not_found() {
+                            Ok(None)
+                        } else {
+                            Err(e)
+                        },
+                }
+            })
+        })?;
+        Ok(raw_tx)
+    }
+
     /// Get a new address from the wallet
     pub fn get_new_address(&self) -> Result<Address> {
         let addr = tokio::task::block_in_place(|| {

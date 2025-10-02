@@ -128,8 +128,9 @@ impl SessionHistory {
         }
         match self.events.last() {
             Some(SessionEvent::Closed(outcome)) => match outcome {
-                SessionOutcome::Success => SessionStatus::Completed,
+                SessionOutcome::Success(_) => SessionStatus::Completed,
                 SessionOutcome::Failure | SessionOutcome::Cancel => SessionStatus::Failed,
+                SessionOutcome::FallbackBroadcasted => SessionStatus::FallbackBroadcasted,
             },
             _ => SessionStatus::Active,
         }
@@ -144,6 +145,7 @@ pub enum SessionStatus {
     Expired,
     Failed,
     Completed,
+    FallbackBroadcasted,
 }
 
 /// Represents a piece of information that the receiver has obtained from the session
@@ -161,6 +163,7 @@ pub enum SessionEvent {
     AppliedFeeRange(PsbtContext),
     FinalizedProposal(bitcoin::Psbt),
     GotReplyableError(JsonReply),
+    PostedPayjoinProposal(),
     Closed(SessionOutcome),
 }
 
@@ -168,13 +171,13 @@ pub enum SessionEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SessionOutcome {
     /// Payjoin completed successfully
-    /// TODO: this should include the sender's witnesses once tx monitoring is implemented
-    /// (this will ensure the payjoin txid can be computed)
-    Success,
+    Success(Vec<(bitcoin::ScriptBuf, bitcoin::Witness)>),
     /// Payjoin failed to complete due to a counterparty deviation from the protocol
     Failure,
     /// Payjoin was cancelled by the user
     Cancel,
+    /// Fallback transaction was broadcasted
+    FallbackBroadcasted,
 }
 
 #[cfg(test)]
@@ -546,7 +549,7 @@ mod tests {
         ));
         events.push(SessionEvent::AppliedFeeRange(provisional_proposal.state.psbt_context.clone()));
         events.push(SessionEvent::FinalizedProposal(payjoin_proposal.psbt().clone()));
-        events.push(SessionEvent::Closed(SessionOutcome::Success));
+        events.push(SessionEvent::Closed(SessionOutcome::Success(vec![])));
 
         let test = SessionHistoryTest {
             events,
@@ -555,7 +558,9 @@ mod tests {
                 expected_status: SessionStatus::Completed,
             },
             expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {
-                state: PayjoinProposal { psbt: payjoin_proposal.psbt().clone() },
+                state: PayjoinProposal {
+                    psbt_context: payjoin_proposal.state.psbt_context.clone(),
+                },
                 session_context: SessionContext { reply_key, ..session_context },
             }),
         };
@@ -645,6 +650,20 @@ mod tests {
 
         assert_ne!(uri.extras.pj_param.endpoint().as_str(), EXAMPLE_URL);
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_session_history_fallback_broadcasted() -> Result<(), BoxError> {
+        let session_context = SHARED_CONTEXT.clone();
+        let events = vec![
+            SessionEvent::Created(session_context.clone()),
+            SessionEvent::Closed(SessionOutcome::FallbackBroadcasted),
+        ];
+        let status = SessionHistory { events }.status();
+
+        assert_eq!(status, SessionStatus::FallbackBroadcasted);
 
         Ok(())
     }

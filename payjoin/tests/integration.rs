@@ -586,7 +586,7 @@ mod integration {
                     .body(req.body)
                     .send()
                     .await?;
-                payjoin_proposal
+                let monitoring_payment = payjoin_proposal
                     .process_response(&response.bytes().await?, ctx)
                     .save(&recv_persister)?;
 
@@ -631,6 +631,21 @@ mod integration {
                 assert_eq!(
                     sender.get_balances()?.into_model()?.mine.untrusted_pending,
                     Amount::from_btc(0.0)?
+                );
+
+                // monitor the payment on the receiver side
+                monitoring_payment.check_payment(
+                    |txid| {
+                        let tx = receiver
+                            .get_raw_transaction(txid)
+                            .expect("transaction should exist")
+                            .transaction()
+                            .expect("transaction should be decodable");
+                        Ok(Some(tx))
+                    },
+                    |_| {
+                        panic!("We should never check outpoints since the payjoin tx has been broadcasted")
+                    },
                 );
                 Ok(())
             }

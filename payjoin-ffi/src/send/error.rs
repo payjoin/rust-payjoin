@@ -104,14 +104,14 @@ pub enum SenderPersistedError {
     BuildSenderError(Arc<BuildSenderError>),
     /// Storage error that could occur at application storage layer
     #[error(transparent)]
-    Storage(Arc<ImplementationError>),
+    Storage(ImplementationError),
     /// Unexpected error
     #[error("An unexpected error occurred")]
     Unexpected,
 }
 
 impl From<ImplementationError> for SenderPersistedError {
-    fn from(value: ImplementationError) -> Self { SenderPersistedError::Storage(Arc::new(value)) }
+    fn from(value: ImplementationError) -> Self { SenderPersistedError::Storage(value) }
 }
 
 impl<S> From<payjoin::persist::PersistedError<send::v2::EncapsulationError, S>>

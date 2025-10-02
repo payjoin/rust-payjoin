@@ -4,7 +4,6 @@ use std::sync::{Arc, RwLock};
 use bitcoin_ffi::Psbt;
 pub use error::{BuildSenderError, CreateRequestError, EncapsulationError, ResponseError};
 
-use crate::error::ForeignError;
 pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::ClientResponse;
 use crate::request::Request;
@@ -181,14 +180,13 @@ impl InitialSendTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonSenderSessionPersister>,
-    ) -> Result<WithReplyKey, ForeignError> {
+    ) -> Result<WithReplyKey, ImplementationError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner = self.0.write().expect("Lock should not be poisoned");
 
         let value = inner.take().expect("Already saved or moved");
 
-        let res =
-            value.save(&adapter).map_err(|e| ForeignError::from(ImplementationError::new(e)))?;
+        let res = value.save(&adapter).map_err(ImplementationError::new)?;
         Ok(res.into())
     }
 }
@@ -485,9 +483,9 @@ impl PollingForProposal {
 /// Session persister that should save and load events as JSON strings.
 #[uniffi::export(with_foreign)]
 pub trait JsonSenderSessionPersister: Send + Sync {
-    fn save(&self, event: String) -> Result<(), ForeignError>;
-    fn load(&self) -> Result<Vec<String>, ForeignError>;
-    fn close(&self) -> Result<(), ForeignError>;
+    fn save(&self, event: String) -> Result<(), ImplementationError>;
+    fn load(&self) -> Result<Vec<String>, ImplementationError>;
+    fn close(&self) -> Result<(), ImplementationError>;
 }
 
 // The adapter to use the save and load callbacks
@@ -505,12 +503,11 @@ impl CallbackPersisterAdapter {
 // Implement the Persister trait for the adapter
 impl payjoin::persist::SessionPersister for CallbackPersisterAdapter {
     type SessionEvent = payjoin::send::v2::SessionEvent;
-    type InternalStorageError = ForeignError;
+    type InternalStorageError = ImplementationError;
 
     fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
         let event: SenderSessionEvent = event.into();
-        self.callback_persister
-            .save(event.to_json().map_err(|e| ForeignError::from(ImplementationError::new(e)))?)
+        self.callback_persister.save(event.to_json().map_err(ImplementationError::new)?)
     }
 
     fn load(
@@ -522,7 +519,7 @@ impl payjoin::persist::SessionPersister for CallbackPersisterAdapter {
                 .into_iter()
                 .map(|event| {
                     SenderSessionEvent::from_json(event)
-                        .map_err(|e| ForeignError::from(ImplementationError::new(e)))
+                        .map_err(ImplementationError::new)
                         .map(|e| e.into())
                 })
                 .collect::<Result<Vec<_>, _>>()

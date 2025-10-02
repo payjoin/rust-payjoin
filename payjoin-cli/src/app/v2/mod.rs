@@ -8,12 +8,13 @@ use payjoin::persist::OptionalTransitionOutcome;
 use payjoin::receive::v2::{
     replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
     MaybeInputsOwned, MaybeInputsSeen, Monitor, OutputsUnknown, PayjoinProposal,
-    ProvisionalProposal, ReceiveSession, Receiver, ReceiverBuilder, UncheckedOriginalPayload,
-    WantsFeeRange, WantsInputs, WantsOutputs,
+    ProvisionalProposal, ReceiveSession, Receiver, ReceiverBuilder,
+    SessionOutcome as ReceiverSessionOutcome, UncheckedOriginalPayload, WantsFeeRange, WantsInputs,
+    WantsOutputs,
 };
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, PollingForProposal, SendSession, Sender,
-    SenderBuilder, WithReplyKey,
+    SenderBuilder, SessionOutcome as SenderSessionOutcome, WithReplyKey,
 };
 use payjoin::{ImplementationError, PjParam, Uri};
 use tokio::sync::watch;
@@ -52,7 +53,11 @@ impl StatusText for SendSession {
             SendSession::WithReplyKey(_) | SendSession::PollingForProposal(_) =>
                 "Waiting for proposal",
             SendSession::ProposalReceived(_) => "Proposal received",
-            SendSession::TerminalFailure => "Session failure",
+            SendSession::Closed(session_outcome) => match session_outcome {
+                SenderSessionOutcome::Failure => "Session failure",
+                SenderSessionOutcome::Success => "Session success",
+                SenderSessionOutcome::Cancel => "Session cancelled",
+            },
         }
     }
 }
@@ -70,8 +75,15 @@ impl StatusText for ReceiveSession {
             | ReceiveSession::WantsFeeRange(_)
             | ReceiveSession::ProvisionalProposal(_) => "Processing original proposal",
             ReceiveSession::PayjoinProposal(_) => "Payjoin proposal sent",
-            ReceiveSession::HasReplyableError(_) => "Session failure",
+            ReceiveSession::HasReplyableError(_) =>
+                "Session failure, waiting to post error response",
             ReceiveSession::Monitor(_) => "Monitoring payjoin proposal",
+            ReceiveSession::Closed(session_outcome) => match session_outcome {
+                ReceiverSessionOutcome::Failure => "Session failure",
+                ReceiverSessionOutcome::Success(_) => "Session success",
+                ReceiverSessionOutcome::Cancel => "Session cancelled",
+                ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
+            },
         }
     }
 }
@@ -526,6 +538,7 @@ impl App {
                     self.handle_error(error, persister).await,
                 ReceiveSession::Monitor(proposal) =>
                     self.monitor_payjoin_proposal(proposal, persister).await,
+                ReceiveSession::Closed(_) => return Err(anyhow!("Session closed")),
             }
         };
         res

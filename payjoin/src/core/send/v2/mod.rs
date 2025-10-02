@@ -34,7 +34,7 @@ pub use error::{CreateRequestError, EncapsulationError};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
 use serde::{Deserialize, Serialize};
-pub use session::{replay_event_log, SessionEvent, SessionHistory};
+pub use session::{replay_event_log, SessionEvent, SessionHistory, SessionOutcome};
 use url::Url;
 
 use super::error::BuildSenderError;
@@ -45,7 +45,6 @@ use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
 use crate::persist::{
     MaybeFatalTransition, MaybeSuccessTransitionWithNoResults, NextStateTransition,
 };
-use crate::send::v2::session::SessionOutcome;
 use crate::uri::v2::PjParam;
 use crate::uri::ShortId;
 use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
@@ -215,7 +214,7 @@ pub enum SendSession {
     WithReplyKey(Sender<WithReplyKey>),
     PollingForProposal(Sender<PollingForProposal>),
     ProposalReceived(Psbt),
-    TerminalFailure,
+    Closed(SessionOutcome),
 }
 
 impl SendSession {
@@ -232,8 +231,7 @@ impl SendSession {
                 SendSession::PollingForProposal(_state),
                 SessionEvent::ReceivedProposalPsbt(proposal),
             ) => Ok(SendSession::ProposalReceived(proposal)),
-            (_, SessionEvent::Closed(SessionOutcome::Failure)) => Ok(SendSession::TerminalFailure),
-            (current_state, SessionEvent::Closed(_)) => Ok(current_state),
+            (_, SessionEvent::Closed(session_outcome)) => Ok(SendSession::Closed(session_outcome)),
             (current_state, event) => Err(InternalReplayError::InvalidEvent(
                 Box::new(event),
                 Some(Box::new(current_state)),

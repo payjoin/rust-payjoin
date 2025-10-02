@@ -34,7 +34,7 @@ pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
-pub use session::{replay_event_log, SessionEvent, SessionHistory, SessionStatus};
+pub use session::{replay_event_log, SessionEvent, SessionHistory, SessionOutcome, SessionStatus};
 use url::Url;
 
 use super::error::{Error, InputContributionError};
@@ -51,7 +51,6 @@ use crate::persist::{
     MaybeFatalOrSuccessTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
     MaybeSuccessTransition, MaybeTransientTransition, NextStateTransition,
 };
-use crate::receive::v2::session::SessionOutcome;
 use crate::receive::{parse_payload, InputPair, OriginalPayload, PsbtContext};
 use crate::time::Time;
 use crate::uri::ShortId;
@@ -140,6 +139,7 @@ pub enum ReceiveSession {
     PayjoinProposal(Receiver<PayjoinProposal>),
     HasReplyableError(Receiver<HasReplyableError>),
     Monitor(Receiver<Monitor>),
+    Closed(SessionOutcome),
 }
 
 impl ReceiveSession {
@@ -192,6 +192,9 @@ impl ReceiveSession {
             (ReceiveSession::PayjoinProposal(state), SessionEvent::PostedPayjoinProposal()) =>
                 Ok(state.apply_payjoin_posted()),
 
+            (_, SessionEvent::Closed(session_outcome)) =>
+                Ok(ReceiveSession::Closed(session_outcome)),
+
             (session, SessionEvent::GotReplyableError(error)) =>
                 Ok(ReceiveSession::HasReplyableError(Receiver {
                     state: HasReplyableError { error_reply: error.clone() },
@@ -208,10 +211,10 @@ impl ReceiveSession {
                         ReceiveSession::PayjoinProposal(r) => r.session_context,
                         ReceiveSession::HasReplyableError(r) => r.session_context,
                         ReceiveSession::Monitor(r) => r.session_context,
+                        ReceiveSession::Closed(session_outcome) =>
+                            return Ok(ReceiveSession::Closed(session_outcome)),
                     },
                 })),
-
-            (current_state, SessionEvent::Closed(_)) => Ok(current_state),
 
             (current_state, event) => Err(InternalReplayError::InvalidEvent(
                 Box::new(event),

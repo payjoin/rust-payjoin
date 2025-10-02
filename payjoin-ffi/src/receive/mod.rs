@@ -67,6 +67,19 @@ impl ReceiverSessionEvent {
     }
 }
 
+#[derive(Clone, uniffi::Object)]
+pub struct ReceiverSessionOutcome {
+    inner: payjoin::receive::v2::SessionOutcome,
+}
+
+impl From<payjoin::receive::v2::SessionOutcome> for ReceiverSessionOutcome {
+    fn from(value: payjoin::receive::v2::SessionOutcome) -> Self { Self { inner: value } }
+}
+
+impl From<ReceiverSessionOutcome> for payjoin::receive::v2::SessionOutcome {
+    fn from(value: ReceiverSessionOutcome) -> Self { value.inner }
+}
+
 #[derive(Clone, uniffi::Enum)]
 pub enum ReceiveSession {
     Initialized { inner: Arc<Initialized> },
@@ -81,6 +94,7 @@ pub enum ReceiveSession {
     PayjoinProposal { inner: Arc<PayjoinProposal> },
     HasReplyableError { inner: Arc<HasReplyableError> },
     Monitor { inner: Arc<Monitor> },
+    Closed { inner: Arc<ReceiverSessionOutcome> },
 }
 
 impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
@@ -110,6 +124,8 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
             ReceiveSession::HasReplyableError(inner) =>
                 Self::HasReplyableError { inner: Arc::new(inner.into()) },
             ReceiveSession::Monitor(inner) => Self::Monitor { inner: Arc::new(inner.into()) },
+            ReceiveSession::Closed(session_outcome) =>
+                Self::Closed { inner: Arc::new(session_outcome.into()) },
         }
     }
 }

@@ -57,12 +57,25 @@ impl SenderSessionEvent {
     }
 }
 
+#[derive(Clone, uniffi::Object)]
+pub struct SenderSessionOutcome {
+    inner: payjoin::send::v2::SessionOutcome,
+}
+
+impl From<payjoin::send::v2::SessionOutcome> for SenderSessionOutcome {
+    fn from(value: payjoin::send::v2::SessionOutcome) -> Self { Self { inner: value } }
+}
+
+impl From<SenderSessionOutcome> for payjoin::send::v2::SessionOutcome {
+    fn from(value: SenderSessionOutcome) -> Self { value.inner }
+}
+
 #[derive(Clone, uniffi::Enum)]
 pub enum SendSession {
     WithReplyKey { inner: Arc<WithReplyKey> },
     PollingForProposal { inner: Arc<PollingForProposal> },
     ProposalReceived { inner: Arc<Psbt> },
-    TerminalFailure,
+    Closed { inner: Arc<SenderSessionOutcome> },
 }
 
 impl From<payjoin::send::v2::SendSession> for SendSession {
@@ -75,7 +88,8 @@ impl From<payjoin::send::v2::SendSession> for SendSession {
                 Self::PollingForProposal { inner: Arc::new(inner.into()) },
             SendSession::ProposalReceived(inner) =>
                 Self::ProposalReceived { inner: Arc::new(inner.into()) },
-            SendSession::TerminalFailure => Self::TerminalFailure,
+            SendSession::Closed(session_outcome) =>
+                Self::Closed { inner: Arc::new(session_outcome.into()) },
         }
     }
 }

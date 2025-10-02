@@ -4,10 +4,6 @@ pub mod error {
     #[derive(Debug, thiserror::Error, uniffi::Object)]
     #[error(transparent)]
     pub struct OhttpError(#[from] ohttp::Error);
-
-    impl OhttpError {
-        pub fn message(&self) -> String { self.0.to_string() }
-    }
 }
 
 impl From<payjoin::OhttpKeys> for OhttpKeys {

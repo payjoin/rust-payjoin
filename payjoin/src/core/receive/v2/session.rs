@@ -192,8 +192,7 @@ mod tests {
     use crate::receive::tests::original_from_test_vector;
     use crate::receive::v2::test::{mock_err, SHARED_CONTEXT};
     use crate::receive::v2::{
-        HasReplyableError, Initialized, MaybeInputsOwned, PayjoinProposal, ProvisionalProposal,
-        Receiver, UncheckedOriginalPayload,
+        Initialized, MaybeInputsOwned, ProvisionalProposal, Receiver, UncheckedOriginalPayload,
     };
     use crate::receive::{InternalPayloadError, PayloadError};
 
@@ -557,12 +556,7 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
                 expected_status: SessionStatus::Completed,
             },
-            expected_receiver_state: ReceiveSession::PayjoinProposal(Receiver {
-                state: PayjoinProposal {
-                    psbt_context: payjoin_proposal.state.psbt_context.clone(),
-                },
-                session_context: SessionContext { reply_key, ..session_context },
-            }),
+            expected_receiver_state: ReceiveSession::Closed(SessionOutcome::Success(vec![])),
         };
         run_session_history_test(test)
     }
@@ -597,10 +591,7 @@ mod tests {
                 fallback_tx: None,
                 expected_status: SessionStatus::Failed,
             },
-            expected_receiver_state: ReceiveSession::HasReplyableError(Receiver {
-                state: HasReplyableError { error_reply: (&expected_error).into() },
-                session_context: SessionContext { reply_key, ..session_context },
-            }),
+            expected_receiver_state: ReceiveSession::Closed(SessionOutcome::Failure),
         };
         run_session_history_test(test)
     }

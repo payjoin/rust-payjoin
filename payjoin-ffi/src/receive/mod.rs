@@ -46,32 +46,61 @@ macro_rules! impl_generic_methods_for_receiver {
     ($ty:ident) => {
         #[uniffi::export]
         impl $ty {
-            /// Explicitly fail the session due to an unrecoverable error.
+            /// Explicitly fail the session.
             ///
-            /// This method allows implementations to terminate the payjoin session
-            /// when they encounter errors that cannot be resolved.
-            pub fn fail(
-                &self,
-                persister: Arc<dyn JsonReceiverSessionPersister>,
-            ) -> Result<(), ImplementationError> {
-                let adapter = CallbackPersisterAdapter::new(persister);
-                self.0.clone().fail(&adapter).map_err(ImplementationError::new)
+            /// This method allows implementations to terminate the payjoin session when
+            /// they encounter errors that cannot be resolved, such as insufficient
+            /// funds or a double-spend detection.
+            pub fn fail(&self) -> FailTransition {
+                FailTransition(Arc::new(RwLock::new(Some(self.0.clone().fail()))))
             }
 
             /// Explicitly cancel the session.
             ///
-            /// This method allows implementations to terminate the payjoin session
-            /// when the user decides to cancel the operation.
-            pub fn cancel(
-                &self,
-                persister: Arc<dyn JsonReceiverSessionPersister>,
-            ) -> Result<(), ImplementationError> {
-                let adapter = CallbackPersisterAdapter::new(persister);
-                self.0.clone().cancel(&adapter).map_err(ImplementationError::new)
+            /// This method allows implementations to terminate the payjoin session when
+            /// the user decides to cancel the operation interactively.
+            pub fn cancel(&self) -> CancelTransition {
+                CancelTransition(Arc::new(RwLock::new(Some(self.0.clone().cancel()))))
             }
         }
     };
 }
+
+/// Transition wrapper for `fail()` method
+#[derive(uniffi::Object)]
+#[allow(clippy::type_complexity)]
+pub struct FailTransition(
+    Arc<
+        RwLock<
+            Option<
+                NextStateTransition<
+                    payjoin::receive::v2::SessionEvent,
+                    payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError>,
+                >,
+            >,
+        >,
+    >,
+);
+
+impl_save_for_transition!(FailTransition, HasReplyableError);
+
+/// Transition wrapper for `cancel()` method
+#[derive(uniffi::Object)]
+#[allow(clippy::type_complexity)]
+pub struct CancelTransition(
+    Arc<
+        RwLock<
+            Option<
+                NextStateTransition<
+                    payjoin::receive::v2::SessionEvent,
+                    payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError>,
+                >,
+            >,
+        >,
+    >,
+);
+
+impl_save_for_transition!(CancelTransition, HasReplyableError);
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Object)]
 pub struct ReceiverSessionEvent(payjoin::receive::v2::SessionEvent);

@@ -593,7 +593,10 @@ mod tests {
                 expected_status: SessionStatus::Failed,
             },
             expected_receiver_state: ReceiveSession::HasReplyableError(Receiver {
-                state: HasReplyableError { error_reply: (&expected_error).into() },
+                state: HasReplyableError {
+                    error_reply: (&expected_error).into(),
+                    outcome: SessionOutcome::Failure,
+                },
                 session_context: SessionContext { reply_key, ..session_context },
             }),
         };
@@ -655,19 +658,24 @@ mod tests {
         let session_context = SHARED_CONTEXT.clone();
 
         let receiver = Receiver { state: Initialized {}, session_context: session_context.clone() };
-        receiver.fail(&persister)?;
+        let has_error = receiver.fail().save(&persister)?;
+        let expected_err =
+            JsonReply::new(crate::error_codes::ErrorCode::Unavailable, "Receiver error");
 
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
-                SessionEvent::Closed(SessionOutcome::Failure),
+                SessionEvent::GotReplyableError(expected_err.clone()),
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 fallback_tx: None,
-                expected_status: SessionStatus::Failed,
+                expected_status: SessionStatus::Active,
             },
-            expected_receiver_state: ReceiveSession::Initialized(Receiver {
-                state: Initialized {},
+            expected_receiver_state: ReceiveSession::HasReplyableError(Receiver {
+                state: HasReplyableError {
+                    error_reply: expected_err,
+                    outcome: SessionOutcome::Failure,
+                },
                 session_context,
             }),
         };
@@ -680,19 +688,24 @@ mod tests {
         let session_context = SHARED_CONTEXT.clone();
 
         let receiver = Receiver { state: Initialized {}, session_context: session_context.clone() };
-        receiver.cancel(&persister)?;
+        let has_error = receiver.cancel().save(&persister)?;
+        let expected_err =
+            JsonReply::new(crate::error_codes::ErrorCode::Unavailable, "Receiver error");
 
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
-                SessionEvent::Closed(SessionOutcome::Cancel),
+                SessionEvent::GotReplyableError(expected_err.clone()),
             ],
             expected_session_history: SessionHistoryExpectedOutcome {
                 fallback_tx: None,
-                expected_status: SessionStatus::Failed,
+                expected_status: SessionStatus::Active,
             },
-            expected_receiver_state: ReceiveSession::Initialized(Receiver {
-                state: Initialized {},
+            expected_receiver_state: ReceiveSession::HasReplyableError(Receiver {
+                state: HasReplyableError {
+                    error_reply: expected_err,
+                    outcome: SessionOutcome::Cancel,
+                },
                 session_context,
             }),
         };

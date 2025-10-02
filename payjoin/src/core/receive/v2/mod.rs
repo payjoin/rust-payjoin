@@ -190,7 +190,10 @@ impl ReceiveSession {
 
             (session, SessionEvent::GotReplyableError(error)) =>
                 Ok(ReceiveSession::HasReplyableError(Receiver {
-                    state: HasReplyableError { error_reply: error.clone() },
+                    state: HasReplyableError {
+                        error_reply: error.clone(),
+                        outcome: SessionOutcome::Failure,
+                    },
                     session_context: match session {
                         ReceiveSession::Initialized(r) => r.session_context,
                         ReceiveSession::UncheckedOriginalPayload(r) => r.session_context,
@@ -555,7 +558,10 @@ impl Receiver<UncheckedOriginalPayload> {
             Err(e) => MaybeFatalTransition::replyable_error(
                 SessionEvent::GotReplyableError((&e).into()),
                 Receiver {
-                    state: HasReplyableError { error_reply: (&e).into() },
+                    state: HasReplyableError {
+                        error_reply: (&e).into(),
+                        outcome: SessionOutcome::Failure,
+                    },
                     session_context: self.session_context,
                 },
                 e,
@@ -632,7 +638,10 @@ impl Receiver<MaybeInputsOwned> {
                     return MaybeFatalTransition::replyable_error(
                         SessionEvent::GotReplyableError((&e).into()),
                         Receiver {
-                            state: HasReplyableError { error_reply: (&e).into() },
+                            state: HasReplyableError {
+                                error_reply: (&e).into(),
+                                outcome: SessionOutcome::Failure,
+                            },
                             session_context: self.session_context,
                         },
                         e,
@@ -694,7 +703,10 @@ impl Receiver<MaybeInputsSeen> {
                     return MaybeFatalTransition::replyable_error(
                         SessionEvent::GotReplyableError((&e).into()),
                         Receiver {
-                            state: HasReplyableError { error_reply: (&e).into() },
+                            state: HasReplyableError {
+                                error_reply: (&e).into(),
+                                outcome: SessionOutcome::Failure,
+                            },
                             session_context: self.session_context,
                         },
                         e,
@@ -761,7 +773,10 @@ impl Receiver<OutputsUnknown> {
                     return MaybeFatalTransition::replyable_error(
                         SessionEvent::GotReplyableError((&e).into()),
                         Receiver {
-                            state: HasReplyableError { error_reply: (&e).into() },
+                            state: HasReplyableError {
+                                error_reply: (&e).into(),
+                                outcome: SessionOutcome::Failure,
+                            },
                             session_context: self.session_context,
                         },
                         e,
@@ -1121,6 +1136,7 @@ impl Receiver<PayjoinProposal> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct HasReplyableError {
     error_reply: JsonReply,
+    outcome: SessionOutcome,
 }
 
 impl Receiver<HasReplyableError> {
@@ -1167,11 +1183,11 @@ impl Receiver<HasReplyableError> {
     ) -> MaybeSuccessTransition<SessionEvent, (), ProtocolError> {
         match process_post_res(res, ohttp_context) {
             Ok(_) =>
-                MaybeSuccessTransition::success(SessionEvent::Closed(SessionOutcome::Failure), ()),
+                MaybeSuccessTransition::success(SessionEvent::Closed(self.outcome.clone()), ()),
             Err(e) =>
                 if e.is_fatal() {
                     MaybeSuccessTransition::fatal(
-                        SessionEvent::Closed(SessionOutcome::Failure),
+                        SessionEvent::Closed(self.outcome.clone()),
                         ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()),
                     )
                 } else {
@@ -1188,31 +1204,35 @@ impl<State> Receiver<State>
 where
     State: sealed::State,
 {
-    /// Explicitly close the session with `SessionOutcome::Failure`.
+    /// Explicitly fail the session.
     ///
     /// This method allows implementations to terminate the payjoin session when
     /// they encounter errors that cannot be resolved, such as insufficient
     /// funds or a double-spend detection.
-    pub fn fail<P>(self, persister: &P) -> Result<(), P::InternalStorageError>
-    where
-        P: crate::persist::SessionPersister<SessionEvent = SessionEvent>,
-    {
-        persister.save_event(SessionEvent::Closed(SessionOutcome::Failure))?;
-        persister.close()?;
-        Ok(())
+    pub fn fail(self) -> NextStateTransition<SessionEvent, Receiver<HasReplyableError>> {
+        let err = JsonReply::new(crate::error_codes::ErrorCode::Unavailable, "Receiver error");
+        NextStateTransition::success(
+            SessionEvent::GotReplyableError(err.clone()),
+            Receiver {
+                state: HasReplyableError { error_reply: err, outcome: SessionOutcome::Failure },
+                session_context: self.session_context,
+            },
+        )
     }
 
-    /// Explicitly close the session with `SessionOutcome::Cancel`.
+    /// Explicitly cancel the session.
     ///
     /// This method allows implementations to terminate the payjoin session when
     /// the user decides to cancel the operation interactively.
-    pub fn cancel<P>(self, persister: &P) -> Result<(), P::InternalStorageError>
-    where
-        P: crate::persist::SessionPersister<SessionEvent = SessionEvent>,
-    {
-        persister.save_event(SessionEvent::Closed(SessionOutcome::Cancel))?;
-        persister.close()?;
-        Ok(())
+    pub fn cancel(self) -> NextStateTransition<SessionEvent, Receiver<HasReplyableError>> {
+        let err = JsonReply::new(crate::error_codes::ErrorCode::Unavailable, "Receiver error");
+        NextStateTransition::success(
+            SessionEvent::GotReplyableError(err.clone()),
+            Receiver {
+                state: HasReplyableError { error_reply: err, outcome: SessionOutcome::Cancel },
+                session_context: self.session_context,
+            },
+        )
     }
 }
 
@@ -1494,7 +1514,10 @@ pub mod test {
         assert_eq!(mock_err.to_json(), expected_json);
 
         let receiver = Receiver {
-            state: HasReplyableError { error_reply: mock_err.clone() },
+            state: HasReplyableError {
+                error_reply: mock_err.clone(),
+                outcome: SessionOutcome::Failure,
+            },
             session_context: SHARED_CONTEXT.clone(),
         };
 
@@ -1508,7 +1531,7 @@ pub mod test {
         let now = crate::time::Time::now();
         let context = SessionContext { expiration: now, ..SHARED_CONTEXT.clone() };
         let receiver = Receiver {
-            state: HasReplyableError { error_reply: mock_err() },
+            state: HasReplyableError { error_reply: mock_err(), outcome: SessionOutcome::Failure },
             session_context: context.clone(),
         };
 

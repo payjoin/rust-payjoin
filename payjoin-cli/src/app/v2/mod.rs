@@ -316,7 +316,7 @@ impl AppTrait for App {
         print_header();
         let mut send_rows = vec![];
         let mut recv_rows = vec![];
-        self.db.get_send_session_ids()?.into_iter().try_for_each(|session_id| {
+        self.db.get_send_session_ids()?.into_iter().for_each(|session_id| {
             let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
             if let Ok((sender_state, _)) = replay_sender_event_log(&persister) {
                 let row = SessionHistoryRow {
@@ -328,10 +328,9 @@ impl AppTrait for App {
                 };
                 send_rows.push(row);
             }
-            Ok::<_, anyhow::Error>(())
-        })?;
+        });
 
-        self.db.get_recv_session_ids()?.into_iter().try_for_each(|session_id| {
+        self.db.get_recv_session_ids()?.into_iter().for_each(|session_id| {
             let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
             if let Ok((receiver_state, _)) = replay_receiver_event_log(&persister) {
                 let row = SessionHistoryRow {
@@ -343,10 +342,9 @@ impl AppTrait for App {
                 };
                 recv_rows.push(row);
             }
-            Ok::<_, anyhow::Error>(())
-        })?;
+        });
 
-        self.db.get_inactive_send_session_ids()?.into_iter().try_for_each(
+        self.db.get_inactive_send_session_ids()?.into_iter().for_each(
             |(session_id, completed_at)| {
                 let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
                 if let Ok((sender_state, session_history)) = replay_sender_event_log(&persister) {
@@ -359,11 +357,10 @@ impl AppTrait for App {
                     };
                     send_rows.push(row);
                 }
-                Ok::<_, anyhow::Error>(())
             },
-        )?;
+        );
 
-        self.db.get_inactive_recv_session_ids()?.into_iter().try_for_each(
+        self.db.get_inactive_recv_session_ids()?.into_iter().for_each(
             |(session_id, completed_at)| {
                 let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
                 if let Ok((receiver_state, session_history)) = replay_receiver_event_log(&persister)
@@ -379,9 +376,8 @@ impl AppTrait for App {
                     };
                     recv_rows.push(row);
                 }
-                Ok::<_, anyhow::Error>(())
             },
-        )?;
+        );
 
         // Print receiver and sender rows separately
         for row in send_rows {

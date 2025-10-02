@@ -5,8 +5,6 @@ pub struct PjParseError {
 }
 
 impl PjParseError {
-    pub fn message(&self) -> &str { &self.msg }
-
     pub(crate) fn from_err(err: impl std::fmt::Display) -> Self { Self { msg: err.to_string() } }
 }
 
@@ -17,8 +15,6 @@ pub struct PjNotSupported {
 }
 
 impl PjNotSupported {
-    pub fn uri(&self) -> &str { &self.msg }
-
     pub(crate) fn from_display(uri: impl std::fmt::Display) -> Self {
         Self { msg: uri.to_string() }
     }

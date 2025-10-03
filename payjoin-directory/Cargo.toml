@@ -27,7 +27,7 @@ hyper = { version = "1.6.0", features = ["http1", "server"] }
 hyper-rustls = { version = "0.27.7", default-features=false, features = ["webpki-roots", "http1", "ring"], optional=true }
 hyper-util = { version = "0.1.16", features = ["tokio"] }
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0"}
-payjoin = { version = "0.24.0", features = ["directory"], default-features = false }
+payjoin = { version = "1.0.0-rc.0", features = ["directory"], default-features = false }
 tokio = { version = "1.47.1", features = ["full"] }
 tokio-rustls = { version = "0.26.2", features = ["ring"], default-features = false, optional = true }
 tracing = "0.1.41"

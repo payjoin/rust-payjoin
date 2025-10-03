@@ -1,5 +1,4 @@
-pub use std::time::Duration;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bitcoin::absolute::Time as BitcoinTime;
 use bitcoin::consensus::encode::{Decodable, Error as EncodeError};

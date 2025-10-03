@@ -58,16 +58,14 @@ impl SenderSessionEvent {
 }
 
 #[derive(Clone, uniffi::Object)]
-pub struct SenderSessionOutcome {
-    inner: payjoin::send::v2::SessionOutcome,
-}
+pub struct SenderSessionOutcome(payjoin::send::v2::SessionOutcome);
 
 impl From<payjoin::send::v2::SessionOutcome> for SenderSessionOutcome {
-    fn from(value: payjoin::send::v2::SessionOutcome) -> Self { Self { inner: value } }
+    fn from(value: payjoin::send::v2::SessionOutcome) -> Self { Self(value) }
 }
 
 impl From<SenderSessionOutcome> for payjoin::send::v2::SessionOutcome {
-    fn from(value: SenderSessionOutcome) -> Self { value.inner }
+    fn from(value: SenderSessionOutcome) -> Self { value.0 }
 }
 
 #[derive(Clone, uniffi::Enum)]
@@ -116,6 +114,32 @@ pub fn replay_sender_event_log(
     Ok(SenderReplayResult { state: state.into(), session_history: session_history.into() })
 }
 
+/// Represents the status of a session that can be inferred from the information in the session
+/// event log.
+#[derive(uniffi::Object)]
+pub struct SenderSessionStatus {
+    inner: payjoin::send::v2::SessionStatus,
+}
+
+impl From<payjoin::send::v2::SessionStatus> for SenderSessionStatus {
+    fn from(value: payjoin::send::v2::SessionStatus) -> Self { Self { inner: value } }
+}
+
+impl From<SenderSessionStatus> for payjoin::send::v2::SessionStatus {
+    fn from(value: SenderSessionStatus) -> Self { value.inner }
+}
+
+#[derive(uniffi::Object)]
+pub struct PjParam(payjoin::uri::v2::PjParam);
+
+impl From<payjoin::uri::v2::PjParam> for PjParam {
+    fn from(value: payjoin::uri::v2::PjParam) -> Self { Self(value) }
+}
+
+impl From<PjParam> for payjoin::uri::v2::PjParam {
+    fn from(value: PjParam) -> Self { value.0 }
+}
+
 #[derive(uniffi::Object, Clone)]
 pub struct SenderSessionHistory(pub payjoin::send::v2::SessionHistory);
 
@@ -131,6 +155,10 @@ impl From<SenderSessionHistory> for payjoin::send::v2::SessionHistory {
 impl SenderSessionHistory {
     /// Fallback transaction from the session if present
     pub fn fallback_tx(&self) -> Arc<crate::Transaction> { Arc::new(self.0.fallback_tx().into()) }
+
+    pub fn pj_param(&self) -> Arc<PjParam> { Arc::new(self.0.pj_param().to_owned().into()) }
+
+    pub fn status(&self) -> SenderSessionStatus { self.0.status().into() }
 }
 
 #[derive(uniffi::Object)]

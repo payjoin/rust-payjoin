@@ -378,7 +378,7 @@ impl Receiver<Initialized> {
                 ))) =>
                     if directory_error.is_fatal() {
                         return MaybeFatalTransitionWithNoResults::fatal(
-                            SessionEvent::Closed(SessionOutcome::Failure),
+                            SessionEvent::Closed(SessionOutcome::Failure(e.to_string())),
                             e,
                         );
                     } else {
@@ -386,7 +386,7 @@ impl Receiver<Initialized> {
                     },
                 _ =>
                     return MaybeFatalTransitionWithNoResults::fatal(
-                        SessionEvent::Closed(SessionOutcome::Failure),
+                        SessionEvent::Closed(SessionOutcome::Failure(e.to_string())),
                         e,
                     ),
             },
@@ -1128,7 +1128,7 @@ impl Receiver<PayjoinProposal> {
             Err(e) =>
                 if e.is_fatal() {
                     MaybeFatalTransition::fatal(
-                        SessionEvent::Closed(SessionOutcome::Failure),
+                        SessionEvent::Closed(SessionOutcome::Failure(e.to_string())),
                         ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()),
                     )
                 } else {
@@ -1195,12 +1195,16 @@ impl Receiver<HasReplyableError> {
         ohttp_context: ohttp::ClientResponse,
     ) -> MaybeSuccessTransition<SessionEvent, (), ProtocolError> {
         match process_post_res(res, ohttp_context) {
-            Ok(_) =>
-                MaybeSuccessTransition::success(SessionEvent::Closed(SessionOutcome::Failure), ()),
+            Ok(_) => MaybeSuccessTransition::success(
+                SessionEvent::Closed(SessionOutcome::Failure(
+                    self.error_reply.message().to_string(),
+                )),
+                (),
+            ),
             Err(e) =>
                 if e.is_fatal() {
                     MaybeSuccessTransition::fatal(
-                        SessionEvent::Closed(SessionOutcome::Failure),
+                        SessionEvent::Closed(SessionOutcome::Failure(e.to_string())),
                         ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()),
                     )
                 } else {
@@ -1287,7 +1291,7 @@ impl Receiver<Monitor> {
         } else if outpoints_spend > 0 {
             // Some outpoints were spent but not in the payjoin proposal. This is a double spend.
             return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
-                SessionOutcome::Failure,
+                SessionOutcome::Failure("Double spend detected".to_string()),
             ));
         }
 
@@ -1488,7 +1492,9 @@ pub mod test {
         assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 1);
         assert_eq!(
             persister.inner.read().expect("Shouldn't be poisoned").events.last(),
-            Some(&SessionEvent::Closed(SessionOutcome::Failure))
+            Some(&SessionEvent::Closed(SessionOutcome::Failure(
+                "Double spend detected".to_string(),
+            )))
         );
 
         // assert_eq!(

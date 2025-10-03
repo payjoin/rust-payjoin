@@ -119,6 +119,8 @@ impl JsonReply {
         }
         .as_u16()
     }
+
+    pub fn message(&self) -> &str { &self.message }
 }
 
 impl From<&ProtocolError> for JsonReply {

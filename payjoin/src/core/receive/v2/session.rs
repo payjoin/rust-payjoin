@@ -120,7 +120,7 @@ impl SessionHistory {
         match self.events.last() {
             Some(SessionEvent::Closed(outcome)) => match outcome {
                 SessionOutcome::Success(_) => SessionStatus::Completed,
-                SessionOutcome::Failure | SessionOutcome::Cancel => SessionStatus::Failed,
+                SessionOutcome::Failure(_) | SessionOutcome::Cancel => SessionStatus::Failed,
                 SessionOutcome::FallbackBroadcasted => SessionStatus::FallbackBroadcasted,
             },
             _ => SessionStatus::Active,
@@ -164,7 +164,7 @@ pub enum SessionOutcome {
     /// Payjoin completed successfully
     Success(Vec<(bitcoin::ScriptBuf, bitcoin::Witness)>),
     /// Payjoin failed to complete due to a counterparty deviation from the protocol
-    Failure,
+    Failure(String),
     /// Payjoin was cancelled by the user
     Cancel,
     /// Fallback transaction was broadcasted
@@ -574,7 +574,7 @@ mod tests {
             reply_key: reply_key.clone(),
         });
         events.push(SessionEvent::GotReplyableError((&expected_error).into()));
-        events.push(SessionEvent::Closed(SessionOutcome::Failure));
+        events.push(SessionEvent::Closed(SessionOutcome::Failure("Foobar".to_string())));
 
         let test = SessionHistoryTest {
             events,
@@ -582,7 +582,9 @@ mod tests {
                 fallback_tx: None,
                 expected_status: SessionStatus::Failed,
             },
-            expected_receiver_state: ReceiveSession::Closed(SessionOutcome::Failure),
+            expected_receiver_state: ReceiveSession::Closed(SessionOutcome::Failure(
+                "Foobar".to_string(),
+            )),
         };
         run_session_history_test(test)
     }

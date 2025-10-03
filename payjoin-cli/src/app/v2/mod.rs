@@ -79,7 +79,10 @@ impl StatusText for ReceiveSession {
                 "Session failure, waiting to post error response",
             ReceiveSession::Monitor(_) => "Monitoring payjoin proposal",
             ReceiveSession::Closed(session_outcome) => match session_outcome {
-                ReceiverSessionOutcome::Failure => "Session failure",
+                ReceiverSessionOutcome::Failure(e) => {
+                    let error_message = format!("Session failure: {}", e);
+                    Box::leak(error_message.into_boxed_str())
+                }
                 ReceiverSessionOutcome::Success(_) => "Session success",
                 ReceiverSessionOutcome::Cancel => "Session cancelled",
                 ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
@@ -373,7 +376,9 @@ impl AppTrait for App {
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Receiver,
-                        status: ReceiveSession::Closed(ReceiverSessionOutcome::Failure),
+                        status: ReceiveSession::Closed(ReceiverSessionOutcome::Failure(
+                            e.to_string(),
+                        )),
                         completed_at: None,
                         error_message: Some(e.to_string()),
                     };
@@ -428,7 +433,9 @@ impl AppTrait for App {
                         let row = SessionHistoryRow {
                             session_id,
                             role: Role::Receiver,
-                            status: ReceiveSession::Closed(ReceiverSessionOutcome::Failure),
+                            status: ReceiveSession::Closed(ReceiverSessionOutcome::Failure(
+                                e.to_string(),
+                            )),
                             completed_at: Some(completed_at),
                             error_message: Some(e.to_string()),
                         };

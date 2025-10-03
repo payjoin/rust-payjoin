@@ -1,5 +1,66 @@
 # Payjoin Changelog
 
+## 1.0.0-rc.0
+
+Introduce monitoring typestates, replyable error handling, and other updates for more robust session lifecycle management.
+
+Selected Improvements:
+
+### Updates to Typestates and Session Event Log Replay
+
+- Receiver Monitor Typestate (#1061)
+- Sender closed variant (#1129)
+- Rename sender session events (#1125, #1116)
+- Remove `PollingForProposal` from session event (#1128)
+- Return closed session state during replays (#1136)
+- Introduce `SessionEvent::Closed` (#1078)
+- Name multi-field SessionEvent variants (#1051)
+- Enforce `handle_fatal_reject` type safety (#1058)
+- Remove uninitialized session state (#1014)
+- Enforce that `SessionHistory` is created internally (#1062)
+- Reduce visibility of common recv abstractions (#1109)
+- Abstract V2 Sender over SenderContext and remove public Url (#1141)
+
+### Improve Error Handling
+
+- Handle fatal errors in receiver state machine (#1060)
+- Update sender `process_res` to parse and process error response (#1114)
+- HPKE encrypt error response (#1115)
+- Use `HasReplyableErrorTransition` in reply error typestate (#1130)
+- Use reply key for replyable errors to v2 senders (#981)
+- Improve `receive` error hierarchy (#1031)
+- Separate session replay & protocol operation (#1036)
+
+### API and Dependency Refinements
+
+- Depend on `url/serde` with no default features (#1126)
+- Use String type instead of Url on Request Struct (#1122)
+- Remove the url crate dep from payjoin-test-utils (#1111)
+- Remove use of payjoin::Url and url::Url in public methods (#1057)
+- Make `payjoin::uri` module public (#1048)
+- Replace `psbt_with_fee_contributions` with pub fn (#1120)
+- Refactor sender to validate PjParam by version (#901)
+- Replace bitcoind with corepc_node (#1041)
+- Bump MSRV to 1.85.0 (#957)
+- Upgrade testcontainers (#970)
+
+### Build, CI, and Workflow Enhancements
+
+- Run all tests in macOS CI (#1094)
+- Use tracing crate instead of log (#1020)
+- Add Pull Request Review Template (#967)
+- Add bug issue templates (#758, #784)
+- Add Feature Request, Good First Issue, and General Issue Templates (#891)
+- Enforce new AI Disclosure in PR Checklist (#1012)
+
+### Miscellaneous Cleanups
+
+- Remove redundant fields from `WantsInputs`, `WantsOutputs`, and `WantsFeeRange` events (#1106, #1102, #1092)
+- Remove mailbox from receiver session context (#1112)
+- Remove extraneous clones and redundant Vec clones in HPKE encrypt functions (#1089, #982, #845)
+- Use `expiration` instead of `expiry` (#1087)
+- Clarify request construction methods for sender and receiver (#814)
+
 ## 0.24.0
 
 Introduce the Session Event Log for Session Replay

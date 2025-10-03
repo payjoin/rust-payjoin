@@ -16,7 +16,7 @@ log = "0.4.27"
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }
 ohttp-relay = { version = "0.0.11", features = ["_test-util"] }
 once_cell = "1.21.3"
-payjoin = { version = "0.24.0", features = ["io", "_manual-tls", "_test-utils"] }
+payjoin = { version = "1.0.0-rc.0", features = ["io", "_manual-tls", "_test-utils"] }
 payjoin-directory = { version = "0.0.3", features = ["_manual-tls"] }
 rcgen = "0.14.3"
 rustls = { version = "0.23.31", default-features=false, features = ["ring"] }

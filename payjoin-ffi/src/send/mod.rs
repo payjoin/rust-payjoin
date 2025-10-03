@@ -129,6 +129,17 @@ impl From<SenderSessionStatus> for payjoin::send::v2::SessionStatus {
     fn from(value: SenderSessionStatus) -> Self { value.inner }
 }
 
+#[derive(uniffi::Object)]
+pub struct PjParam(payjoin::uri::v2::PjParam);
+
+impl From<payjoin::uri::v2::PjParam> for PjParam {
+    fn from(value: payjoin::uri::v2::PjParam) -> Self { Self(value) }
+}
+
+impl From<PjParam> for payjoin::uri::v2::PjParam {
+    fn from(value: PjParam) -> Self { value.0 }
+}
+
 #[derive(uniffi::Object, Clone)]
 pub struct SenderSessionHistory(pub payjoin::send::v2::SessionHistory);
 
@@ -144,6 +155,8 @@ impl From<SenderSessionHistory> for payjoin::send::v2::SessionHistory {
 impl SenderSessionHistory {
     /// Fallback transaction from the session if present
     pub fn fallback_tx(&self) -> Arc<crate::Transaction> { Arc::new(self.0.fallback_tx().into()) }
+
+    pub fn pj_param(&self) -> Arc<PjParam> { Arc::new(self.0.pj_param().to_owned().into()) }
 
     pub fn status(&self) -> SenderSessionStatus { self.0.status().into() }
 }

@@ -1,7 +1,6 @@
-use super::{Sender, WithReplyKey};
 use crate::error::{InternalReplayError, ReplayError};
 use crate::persist::SessionPersister;
-use crate::send::v2::SendSession;
+use crate::send::v2::{SendSession, SessionContext};
 use crate::uri::v2::PjParam;
 use crate::ImplementationError;
 
@@ -19,7 +18,7 @@ where
     let first_event = logs.next().ok_or(InternalReplayError::NoEvents)?.into();
     let mut session_events = vec![first_event.clone()];
     let mut sender = match first_event {
-        SessionEvent::Created(sender) => SendSession::new(*sender),
+        SessionEvent::Created(session_context) => SendSession::new(*session_context),
         _ => return Err(InternalReplayError::InvalidEvent(Box::new(first_event), None).into()),
     };
 
@@ -61,8 +60,9 @@ impl SessionHistory {
         self.events
             .iter()
             .find_map(|event| match event {
-                SessionEvent::Created(sender) =>
-                    Some(sender.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate()),
+                SessionEvent::Created(session_context) => Some(
+                    session_context.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate(),
+                ),
                 _ => None,
             })
             .expect("Session event log must contain at least one event with fallback_tx")
@@ -72,7 +72,7 @@ impl SessionHistory {
         self.events
             .iter()
             .find_map(|event| match event {
-                SessionEvent::Created(sender) => Some(&sender.pj_param),
+                SessionEvent::Created(session_context) => Some(&session_context.pj_param),
                 _ => None,
             })
             .expect("Session event log must contain at least one event with pj_param")
@@ -106,7 +106,7 @@ pub enum SessionStatus {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SessionEvent {
     /// Sender was created with session data
-    Created(Box<Sender<WithReplyKey>>),
+    Created(Box<SessionContext>),
     /// Sender POSTed the Original PSBT and is waiting to receive a Proposal PSBT
     PostedOriginalPsbt(),
     /// Sender received a Proposal PSBT
@@ -136,7 +136,7 @@ mod tests {
     use crate::output_substitution::OutputSubstitution;
     use crate::persist::test_utils::InMemoryTestPersister;
     use crate::persist::NoopSessionPersister;
-    use crate::send::v2::{Sender, SenderBuilder};
+    use crate::send::v2::{Sender, SenderBuilder, SessionContext, WithReplyKey};
     use crate::send::PsbtContext;
     use crate::time::Time;
     use crate::{HpkeKeyPair, Uri, UriExt};
@@ -162,19 +162,21 @@ mod tests {
         );
         let sender_with_reply_key = Sender {
             state: WithReplyKey,
-            pj_param: pj_param.clone(),
-            psbt_ctx: PsbtContext {
-                original_psbt: PARSED_ORIGINAL_PSBT.clone(),
-                output_substitution: OutputSubstitution::Enabled,
-                fee_contribution: None,
-                min_fee_rate: FeeRate::ZERO,
-                payee: ScriptBuf::from(vec![0x00]),
+            session_context: SessionContext {
+                pj_param: pj_param.clone(),
+                psbt_ctx: PsbtContext {
+                    original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+                    output_substitution: OutputSubstitution::Enabled,
+                    fee_contribution: None,
+                    min_fee_rate: FeeRate::ZERO,
+                    payee: ScriptBuf::from(vec![0x00]),
+                },
+                reply_key: keypair.0.clone(),
             },
-            reply_key: keypair.0.clone(),
         };
 
         let test_cases = vec![
-            SessionEvent::Created(Box::new(sender_with_reply_key.clone())),
+            SessionEvent::Created(Box::new(sender_with_reply_key.session_context.clone())),
             SessionEvent::PostedOriginalPsbt(),
             SessionEvent::ReceivedProposalPsbt(PARSED_ORIGINAL_PSBT.clone()),
             SessionEvent::Closed(SessionOutcome::Success),
@@ -257,10 +259,15 @@ mod tests {
         .save(&NoopSessionPersister::default())
         .unwrap();
         let test = SessionHistoryTest {
-            events: vec![SessionEvent::Created(Box::new(sender.clone()))],
+            events: vec![SessionEvent::Created(Box::new(sender.session_context.clone()))],
             expected_session_history: SessionHistoryExpectedOutcome {
-                fallback_tx: sender.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate(),
-                pj_param: sender.pj_param.clone(),
+                fallback_tx: sender
+                    .session_context
+                    .psbt_ctx
+                    .original_psbt
+                    .clone()
+                    .extract_tx_unchecked_fee_rate(),
+                pj_param: sender.session_context.pj_param.clone(),
                 expected_status: SessionStatus::Expired,
             },
             expected_sender_state: SendSession::Closed(SessionOutcome::Failure),
@@ -284,12 +291,18 @@ mod tests {
         .unwrap()
         .save(&NoopSessionPersister::default())
         .unwrap();
-        sender.pj_param.expiration = Time::from_now(std::time::Duration::from_secs(60)).unwrap();
+        sender.session_context.pj_param.expiration =
+            Time::from_now(std::time::Duration::from_secs(60)).unwrap();
         let test = SessionHistoryTest {
-            events: vec![SessionEvent::Created(Box::new(sender.clone()))],
+            events: vec![SessionEvent::Created(Box::new(sender.session_context.clone()))],
             expected_session_history: SessionHistoryExpectedOutcome {
-                fallback_tx: sender.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate(),
-                pj_param: sender.pj_param.clone(),
+                fallback_tx: sender
+                    .session_context
+                    .psbt_ctx
+                    .original_psbt
+                    .clone()
+                    .extract_tx_unchecked_fee_rate(),
+                pj_param: sender.session_context.pj_param.clone(),
                 expected_status: SessionStatus::Active,
             },
             expected_sender_state: SendSession::WithReplyKey(sender),
@@ -331,13 +344,15 @@ mod tests {
 
         let with_reply_key = Sender {
             state: WithReplyKey,
-            pj_param: pj_param.clone(),
-            psbt_ctx: sender.psbt_ctx.clone(),
-            reply_key: reply_key.0,
+            session_context: SessionContext {
+                pj_param: pj_param.clone(),
+                psbt_ctx: sender.session_context.psbt_ctx.clone(),
+                reply_key: reply_key.0,
+            },
         };
 
         let events = vec![
-            SessionEvent::Created(Box::new(with_reply_key)),
+            SessionEvent::Created(Box::new(with_reply_key.session_context.clone())),
             SessionEvent::Closed(SessionOutcome::Success),
         ];
 

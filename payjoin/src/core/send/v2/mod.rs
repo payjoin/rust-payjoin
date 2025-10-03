@@ -170,7 +170,10 @@ impl SenderBuilder {
         psbt_ctx: PsbtContext,
     ) -> NextStateTransition<SessionEvent, Sender<WithReplyKey>> {
         let sender = Sender::new(pj_param, psbt_ctx);
-        NextStateTransition::success(SessionEvent::Created(Box::new(sender.clone())), sender)
+        NextStateTransition::success(
+            SessionEvent::Created(Box::new(sender.session_context.clone())),
+            sender,
+        )
     }
 }
 
@@ -190,6 +193,11 @@ pub trait State: sealed::State {}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sender<State> {
     pub(crate) state: State,
+    pub(crate) session_context: SessionContext,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionContext {
     /// The endpoint in the Payjoin URI
     pub(crate) pj_param: PjParam,
     /// The Original PSBT context
@@ -210,7 +218,7 @@ impl<State> core::ops::DerefMut for Sender<State> {
 
 impl<State> Sender<State> {
     /// The endpoint in the Payjoin URI
-    pub fn endpoint(&self) -> String { self.pj_param.endpoint().to_string() }
+    pub fn endpoint(&self) -> String { self.session_context.pj_param.endpoint().to_string() }
 }
 
 /// Represents the various states of a Payjoin send session during the protocol flow.
@@ -226,7 +234,9 @@ pub enum SendSession {
 }
 
 impl SendSession {
-    fn new(sender: Sender<WithReplyKey>) -> Self { SendSession::WithReplyKey(sender) }
+    fn new(session_context: SessionContext) -> Self {
+        SendSession::WithReplyKey(Sender { state: WithReplyKey, session_context })
+    }
 
     fn process_event(
         self,
@@ -256,7 +266,14 @@ pub struct WithReplyKey;
 
 impl Sender<WithReplyKey> {
     fn new(pj_param: PjParam, psbt_ctx: PsbtContext) -> Self {
-        Sender { state: WithReplyKey, pj_param, psbt_ctx, reply_key: HpkeKeyPair::gen_keypair().0 }
+        Sender {
+            state: WithReplyKey,
+            session_context: SessionContext {
+                pj_param,
+                psbt_ctx,
+                reply_key: HpkeKeyPair::gen_keypair().0,
+            },
+        }
     }
 
     /// Construct serialized Request and Context from a Payjoin Proposal.
@@ -272,37 +289,32 @@ impl Sender<WithReplyKey> {
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, V2PostContext), CreateRequestError> {
-        if self.pj_param.expiration().elapsed() {
-            return Err(InternalCreateRequestError::Expired(self.pj_param.expiration()).into());
+        if self.session_context.pj_param.expiration().elapsed() {
+            return Err(InternalCreateRequestError::Expired(
+                self.session_context.pj_param.expiration(),
+            )
+            .into());
         }
 
-        let mut sanitized_psbt = self.psbt_ctx.original_psbt.clone();
+        let mut sanitized_psbt = self.session_context.psbt_ctx.original_psbt.clone();
         clear_unneeded_fields(&mut sanitized_psbt);
         let body = serialize_v2_body(
             &sanitized_psbt,
-            self.psbt_ctx.output_substitution,
-            self.psbt_ctx.fee_contribution,
-            self.psbt_ctx.min_fee_rate,
+            self.session_context.psbt_ctx.output_substitution,
+            self.session_context.psbt_ctx.fee_contribution,
+            self.session_context.psbt_ctx.min_fee_rate,
         )?;
-        let base_url = self.pj_param.endpoint().clone();
-        let ohttp_keys = self.pj_param.ohttp_keys();
+        let base_url = self.session_context.pj_param.endpoint().clone();
+        let ohttp_keys = self.session_context.pj_param.ohttp_keys();
         let (request, ohttp_ctx) = extract_request(
             ohttp_relay,
-            self.reply_key.clone(),
+            self.session_context.reply_key.clone(),
             body,
             base_url,
-            self.pj_param.receiver_pubkey().clone(),
+            self.session_context.pj_param.receiver_pubkey().clone(),
             ohttp_keys,
         )?;
-        Ok((
-            request,
-            V2PostContext {
-                pj_param: self.pj_param.clone(),
-                psbt_ctx: self.psbt_ctx.clone(),
-                reply_key: self.reply_key.clone(),
-                ohttp_ctx,
-            },
-        ))
+        Ok((request, V2PostContext { ohttp_ctx }))
     }
 
     /// Processes the response for the initial POST message from the sender
@@ -335,21 +347,14 @@ impl Sender<WithReplyKey> {
                 },
         }
 
-        let sender = Sender {
-            state: PollingForProposal,
-            pj_param: post_ctx.pj_param,
-            psbt_ctx: post_ctx.psbt_ctx,
-            reply_key: post_ctx.reply_key,
-        };
+        let sender = Sender { state: PollingForProposal, session_context: self.session_context };
         MaybeFatalTransition::success(SessionEvent::PostedOriginalPsbt(), sender)
     }
 
     pub(crate) fn apply_polling_for_proposal(self) -> SendSession {
         SendSession::PollingForProposal(Sender {
             state: PollingForProposal,
-            pj_param: self.pj_param,
-            psbt_ctx: self.psbt_ctx,
-            reply_key: self.reply_key,
+            session_context: self.session_context,
         })
     }
 }
@@ -397,15 +402,10 @@ pub(crate) fn serialize_v2_body(
     Ok(format!("{base64}\n{query_params}").into_bytes())
 }
 
-/// Data required to validate the POST response.
+/// Wrapper for ohttp context
 ///
 /// This type is used to process a BIP77 POST response.
-/// Call [`Sender<V2PostContext>::process_response`] on it to continue the BIP77 flow.
 pub struct V2PostContext {
-    /// The endpoint in the Payjoin URI
-    pub(crate) pj_param: PjParam,
-    pub(crate) psbt_ctx: PsbtContext,
-    pub(crate) reply_key: HpkeSecretKey,
     pub(crate) ohttp_ctx: ohttp::ClientResponse,
 }
 
@@ -432,20 +432,22 @@ impl Sender<PollingForProposal> {
     ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
         // TODO unify with receiver's fn short_id_from_pubkey
         let hash = sha256::Hash::hash(
-            &HpkeKeyPair::from_secret_key(&self.reply_key).public_key().to_compressed_bytes(),
+            &HpkeKeyPair::from_secret_key(&self.session_context.reply_key)
+                .public_key()
+                .to_compressed_bytes(),
         );
         let mailbox: ShortId = hash.into();
-        let url = Url::parse(self.pj_param.endpoint().as_str())
+        let url = Url::parse(self.session_context.pj_param.endpoint().as_str())
             .expect("Could not parse url")
             .join(&mailbox.to_string())
             .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
         let body = encrypt_message_a(
             Vec::new(),
-            HpkeKeyPair::from_secret_key(&self.reply_key).public_key(),
-            self.pj_param.receiver_pubkey(),
+            HpkeKeyPair::from_secret_key(&self.session_context.reply_key).public_key(),
+            self.session_context.pj_param.receiver_pubkey(),
         )
         .map_err(InternalCreateRequestError::Hpke)?;
-        let ohttp_keys = self.pj_param.ohttp_keys();
+        let ohttp_keys = self.session_context.pj_param.ohttp_keys();
         let (body, ohttp_ctx) = ohttp_encapsulate(ohttp_keys, "GET", url.as_str(), Some(&body))
             .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
 
@@ -491,8 +493,8 @@ impl Sender<PollingForProposal> {
 
         let body = match decrypt_message_b(
             &body,
-            self.pj_param.receiver_pubkey().clone(),
-            self.reply_key.clone(),
+            self.session_context.pj_param.receiver_pubkey().clone(),
+            self.session_context.reply_key.clone(),
         ) {
             Ok(body) => body,
             Err(e) =>
@@ -517,14 +519,15 @@ impl Sender<PollingForProposal> {
                     InternalProposalError::Psbt(e).into(),
                 ),
         };
-        let processed_proposal = match self.psbt_ctx.clone().process_proposal(proposal) {
-            Ok(processed_proposal) => processed_proposal,
-            Err(e) =>
-                return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::Closed(SessionOutcome::Failure),
-                    e.into(),
-                ),
-        };
+        let processed_proposal =
+            match self.session_context.psbt_ctx.clone().process_proposal(proposal) {
+                Ok(processed_proposal) => processed_proposal,
+                Err(e) =>
+                    return MaybeSuccessTransitionWithNoResults::fatal(
+                        SessionEvent::Closed(SessionOutcome::Failure),
+                        e.into(),
+                    ),
+            };
 
         MaybeSuccessTransitionWithNoResults::success(
             processed_proposal.clone(),
@@ -565,15 +568,17 @@ mod test {
         );
         Ok(super::Sender {
             state: super::WithReplyKey,
-            pj_param,
-            psbt_ctx: PsbtContext {
-                original_psbt: PARSED_ORIGINAL_PSBT.clone(),
-                output_substitution: OutputSubstitution::Enabled,
-                fee_contribution: None,
-                min_fee_rate: FeeRate::ZERO,
-                payee: ScriptBuf::from(vec![0x00]),
+            session_context: SessionContext {
+                pj_param,
+                psbt_ctx: PsbtContext {
+                    original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+                    output_substitution: OutputSubstitution::Enabled,
+                    fee_contribution: None,
+                    min_fee_rate: FeeRate::ZERO,
+                    payee: ScriptBuf::from(vec![0x00]),
+                },
+                reply_key: HpkeKeyPair::gen_keypair().0,
             },
-            reply_key: HpkeKeyPair::gen_keypair().0,
         })
     }
 
@@ -583,10 +588,10 @@ mod test {
             Time::from_now(Duration::from_secs(60)).expect("expiration should be valid");
         let sender = create_sender_context(expiration)?;
         let body = serialize_v2_body(
-            &sender.psbt_ctx.original_psbt,
-            sender.psbt_ctx.output_substitution,
-            sender.psbt_ctx.fee_contribution,
-            sender.psbt_ctx.min_fee_rate,
+            &sender.session_context.psbt_ctx.original_psbt,
+            sender.session_context.psbt_ctx.output_substitution,
+            sender.session_context.psbt_ctx.fee_contribution,
+            sender.session_context.psbt_ctx.min_fee_rate,
         );
         assert_eq!(body.as_ref().unwrap(), &<Vec<u8> as FromHex>::from_hex(SERIALIZED_BODY_V2)?,);
         Ok(())
@@ -599,13 +604,12 @@ mod test {
         let sender = create_sender_context(expiration)?;
         let ohttp_relay = EXAMPLE_URL;
         let result = sender.create_v2_post_request(ohttp_relay);
-        let (request, context) = result.expect("Result should be ok");
+        let (request, _) = result.expect("Result should be ok");
         assert!(!request.body.is_empty(), "Request body should not be empty");
         assert_eq!(
             request.url.to_string(),
-            format!("{}/{}", EXAMPLE_URL, sender.pj_param.endpoint().join("/")?)
+            format!("{}/{}", EXAMPLE_URL, sender.session_context.pj_param.endpoint().join("/")?)
         );
-        assert_eq!(context.psbt_ctx.original_psbt, sender.psbt_ctx.original_psbt);
         Ok(())
     }
 
@@ -649,26 +653,38 @@ mod test {
             .expect("sender should succeed");
         // v2 senders may always override the receiver's `pjos` parameter to enable output
         // substitution
-        assert_eq!(req_ctx.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
-        assert_eq!(&req_ctx.psbt_ctx.payee, &address.script_pubkey());
-        let fee_contribution =
-            req_ctx.psbt_ctx.fee_contribution.expect("sender should contribute fees");
+        assert_eq!(
+            req_ctx.session_context.psbt_ctx.output_substitution,
+            OutputSubstitution::Enabled
+        );
+        assert_eq!(&req_ctx.session_context.psbt_ctx.payee, &address.script_pubkey());
+        let fee_contribution = req_ctx
+            .session_context
+            .psbt_ctx
+            .fee_contribution
+            .expect("sender should contribute fees");
         assert_eq!(fee_contribution.max_amount, Amount::from_sat(91));
         assert_eq!(fee_contribution.vout, 0);
-        assert_eq!(req_ctx.psbt_ctx.min_fee_rate, FeeRate::from_sat_per_kwu(250));
+        assert_eq!(req_ctx.session_context.psbt_ctx.min_fee_rate, FeeRate::from_sat_per_kwu(250));
         // ensure that the other builder methods also enable output substitution
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_non_incentivizing(FeeRate::BROADCAST_MIN)
             .expect("build on test vector should succeed")
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
-        assert_eq!(req_ctx.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
+        assert_eq!(
+            req_ctx.session_context.psbt_ctx.output_substitution,
+            OutputSubstitution::Enabled
+        );
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_with_additional_fee(Amount::ZERO, Some(0), FeeRate::BROADCAST_MIN, false)
             .expect("build on test vector should succeed")
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
-        assert_eq!(req_ctx.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
+        assert_eq!(
+            req_ctx.session_context.psbt_ctx.output_substitution,
+            OutputSubstitution::Enabled
+        );
         // ensure that a v2 sender may still disable output substitution if they prefer.
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
             .always_disable_output_substitution()
@@ -676,6 +692,9 @@ mod test {
             .expect("build on test vector should succeed")
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
-        assert_eq!(req_ctx.psbt_ctx.output_substitution, OutputSubstitution::Disabled);
+        assert_eq!(
+            req_ctx.session_context.psbt_ctx.output_substitution,
+            OutputSubstitution::Disabled
+        );
     }
 }

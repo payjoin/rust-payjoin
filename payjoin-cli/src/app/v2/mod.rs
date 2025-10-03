@@ -332,44 +332,80 @@ impl AppTrait for App {
         let mut recv_rows = vec![];
         self.db.get_send_session_ids()?.into_iter().for_each(|session_id| {
             let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
-            if let Ok((sender_state, _)) = replay_sender_event_log(&persister) {
-                let row = SessionHistoryRow {
-                    session_id,
-                    role: Role::Sender,
-                    status: sender_state,
-                    completed_at: None,
-                    error_message: None,
-                };
-                send_rows.push(row);
+            match replay_sender_event_log(&persister) {
+                Ok((sender_state, _)) => {
+                    let row = SessionHistoryRow {
+                        session_id,
+                        role: Role::Sender,
+                        status: sender_state.clone(),
+                        completed_at: None,
+                        error_message: None,
+                    };
+                    send_rows.push(row);
+                }
+                Err(e) => {
+                    let row = SessionHistoryRow {
+                        session_id,
+                        role: Role::Sender,
+                        status: SendSession::Closed(SenderSessionOutcome::Failure),
+                        completed_at: None,
+                        error_message: Some(e.to_string()),
+                    };
+                    send_rows.push(row);
+                }
             }
         });
 
         self.db.get_recv_session_ids()?.into_iter().for_each(|session_id| {
             let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
-            if let Ok((receiver_state, _)) = replay_receiver_event_log(&persister) {
-                let row = SessionHistoryRow {
-                    session_id,
-                    role: Role::Receiver,
-                    status: receiver_state,
-                    completed_at: None,
-                    error_message: None,
-                };
-                recv_rows.push(row);
+            match replay_receiver_event_log(&persister) {
+                Ok((receiver_state, _)) => {
+                    let row = SessionHistoryRow {
+                        session_id,
+                        role: Role::Receiver,
+                        status: receiver_state.clone(),
+                        completed_at: None,
+                        error_message: None,
+                    };
+                    recv_rows.push(row);
+                }
+                Err(e) => {
+                    let row = SessionHistoryRow {
+                        session_id,
+                        role: Role::Receiver,
+                        status: ReceiveSession::Closed(ReceiverSessionOutcome::Failure),
+                        completed_at: None,
+                        error_message: Some(e.to_string()),
+                    };
+                    recv_rows.push(row);
+                }
             }
         });
 
         self.db.get_inactive_send_session_ids()?.into_iter().for_each(
             |(session_id, completed_at)| {
                 let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
-                if let Ok((sender_state, session_history)) = replay_sender_event_log(&persister) {
-                    let row = SessionHistoryRow {
-                        session_id,
-                        role: Role::Sender,
-                        status: sender_state,
-                        completed_at: Some(completed_at),
-                        error_message: session_history.terminal_error(),
-                    };
-                    send_rows.push(row);
+                match replay_sender_event_log(&persister) {
+                    Ok((sender_state, _)) => {
+                        let row = SessionHistoryRow {
+                            session_id,
+                            role: Role::Sender,
+                            status: sender_state.clone(),
+                            completed_at: Some(completed_at),
+                            error_message: None,
+                        };
+                        send_rows.push(row);
+                    }
+                    Err(e) => {
+                        let row = SessionHistoryRow {
+                            session_id,
+                            role: Role::Sender,
+                            status: SendSession::Closed(SenderSessionOutcome::Failure),
+                            completed_at: Some(completed_at),
+                            error_message: Some(e.to_string()),
+                        };
+                        send_rows.push(row);
+                    }
                 }
             },
         );
@@ -377,18 +413,27 @@ impl AppTrait for App {
         self.db.get_inactive_recv_session_ids()?.into_iter().for_each(
             |(session_id, completed_at)| {
                 let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
-                if let Ok((receiver_state, session_history)) = replay_receiver_event_log(&persister)
-                {
-                    let row = SessionHistoryRow {
-                        session_id,
-                        role: Role::Receiver,
-                        status: receiver_state,
-                        completed_at: Some(completed_at),
-                        error_message: session_history
-                            .terminal_error()
-                            .map(|e| e.to_json().to_string()),
-                    };
-                    recv_rows.push(row);
+                match replay_receiver_event_log(&persister) {
+                    Ok((receiver_state, _)) => {
+                        let row = SessionHistoryRow {
+                            session_id,
+                            role: Role::Receiver,
+                            status: receiver_state.clone(),
+                            completed_at: Some(completed_at),
+                            error_message: None,
+                        };
+                        recv_rows.push(row);
+                    }
+                    Err(e) => {
+                        let row = SessionHistoryRow {
+                            session_id,
+                            role: Role::Receiver,
+                            status: ReceiveSession::Closed(ReceiverSessionOutcome::Failure),
+                            completed_at: Some(completed_at),
+                            error_message: Some(e.to_string()),
+                        };
+                        recv_rows.push(row);
+                    }
                 }
             },
         );

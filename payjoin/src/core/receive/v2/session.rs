@@ -94,15 +94,6 @@ impl SessionHistory {
         })
     }
 
-    /// Terminal error from the session if present
-    /// TODO: This should replay the event log and return the actual error, not a JSON reply
-    pub fn terminal_error(&self) -> Option<JsonReply> {
-        self.events.iter().find_map(|event| match event {
-            SessionEvent::GotReplyableError(reply) => Some(reply.clone()),
-            _ => None,
-        })
-    }
-
     fn session_context(&self) -> SessionContext {
         let mut initial_session_context = self
             .events

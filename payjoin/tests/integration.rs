@@ -446,10 +446,6 @@ mod integration {
                 // Ensure the session is closed properly
                 let (_, session_history) = replay_receiver_event_log(&persister)?;
                 assert_eq!(session_history.status(), SessionStatus::Failed);
-                assert_eq!(
-                    session_history.terminal_error().expect("should have error"),
-                    (&server_error).into()
-                );
 
                 // Check that we can read the error response as a sender
                 let (req, ctx) =

@@ -164,11 +164,6 @@ impl SessionHistory {
     /// Receiver session Payjoin URI
     pub fn pj_uri(&self) -> Arc<crate::PjUri> { Arc::new(self.0.pj_uri().into()) }
 
-    /// Terminal error from the session if present
-    pub fn terminal_error(&self) -> Option<Arc<JsonReply>> {
-        self.0.terminal_error().map(|reply| Arc::new(reply.into()))
-    }
-
     /// Fallback transaction from the session if present
     pub fn fallback_tx(&self) -> Option<Arc<crate::Transaction>> {
         self.0.fallback_tx().map(|tx| Arc::new(tx.into()))

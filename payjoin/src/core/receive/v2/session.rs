@@ -112,7 +112,7 @@ impl SessionHistory {
         initial_session_context
     }
 
-    // Helper method to query the current status of the session.
+    /// Helper method to query the current status of the session.
     pub fn status(&self) -> SessionStatus {
         if self.session_context().expiration.elapsed() {
             return SessionStatus::Expired;

@@ -133,14 +133,14 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
 #[derive(uniffi::Object)]
 pub struct ReplayResult {
     state: ReceiveSession,
-    session_history: SessionHistory,
+    session_history: ReceiverSessionHistory,
 }
 
 #[uniffi::export]
 impl ReplayResult {
     pub fn state(&self) -> ReceiveSession { self.state.clone() }
 
-    pub fn session_history(&self) -> SessionHistory { self.session_history.clone() }
+    pub fn session_history(&self) -> ReceiverSessionHistory { self.session_history.clone() }
 }
 
 #[uniffi::export]
@@ -153,14 +153,14 @@ pub fn replay_receiver_event_log(
 }
 
 #[derive(Clone, uniffi::Object)]
-pub struct SessionHistory(pub payjoin::receive::v2::SessionHistory);
+pub struct ReceiverSessionHistory(pub payjoin::receive::v2::SessionHistory);
 
-impl From<payjoin::receive::v2::SessionHistory> for SessionHistory {
+impl From<payjoin::receive::v2::SessionHistory> for ReceiverSessionHistory {
     fn from(value: payjoin::receive::v2::SessionHistory) -> Self { Self(value) }
 }
 
 #[uniffi::export]
-impl SessionHistory {
+impl ReceiverSessionHistory {
     /// Receiver session Payjoin URI
     pub fn pj_uri(&self) -> Arc<crate::PjUri> { Arc::new(self.0.pj_uri().into()) }
 

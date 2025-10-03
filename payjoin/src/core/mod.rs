@@ -20,7 +20,6 @@ pub use into_url::{Error as IntoUrlError, IntoUrl};
 pub mod time;
 pub mod uri;
 pub use uri::{PjParam, PjParseError, PjUri, Uri, UriExt};
-pub use url::{ParseError, Url};
 pub(crate) mod error_codes;
 
 pub(crate) mod output_substitution;

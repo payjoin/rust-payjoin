@@ -169,11 +169,8 @@ impl SenderBuilder {
         pj_param: PjParam,
         psbt_ctx: PsbtContext,
     ) -> NextStateTransition<SessionEvent, Sender<WithReplyKey>> {
-        let with_reply_key = WithReplyKey::new(pj_param, psbt_ctx);
-        NextStateTransition::success(
-            SessionEvent::Created(Box::new(with_reply_key.clone())),
-            Sender { state: with_reply_key },
-        )
+        let sender = Sender::new(pj_param, psbt_ctx);
+        NextStateTransition::success(SessionEvent::Created(Box::new(sender.clone())), sender)
     }
 }
 
@@ -193,6 +190,12 @@ pub trait State: sealed::State {}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sender<State> {
     pub(crate) state: State,
+    /// The endpoint in the Payjoin URI
+    pub(crate) pj_param: PjParam,
+    /// The Original PSBT context
+    pub(crate) psbt_ctx: PsbtContext,
+    /// The secret key to decrypt the receiver's reply.
+    pub(crate) reply_key: HpkeSecretKey,
 }
 
 impl<State> core::ops::Deref for Sender<State> {
@@ -203,6 +206,11 @@ impl<State> core::ops::Deref for Sender<State> {
 
 impl<State> core::ops::DerefMut for Sender<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
+}
+
+impl<State> Sender<State> {
+    /// The endpoint in the Payjoin URI
+    pub fn endpoint(&self) -> String { self.pj_param.endpoint().to_string() }
 }
 
 /// Represents the various states of a Payjoin send session during the protocol flow.
@@ -218,7 +226,7 @@ pub enum SendSession {
 }
 
 impl SendSession {
-    fn new(context: WithReplyKey) -> Self { SendSession::WithReplyKey(Sender { state: context }) }
+    fn new(sender: Sender<WithReplyKey>) -> Self { SendSession::WithReplyKey(sender) }
 
     fn process_event(
         self,
@@ -244,22 +252,13 @@ impl SendSession {
 /// A payjoin V2 sender, allowing the construction of a payjoin V2 request
 /// and the resulting [`V2PostContext`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WithReplyKey {
-    /// The endpoint in the Payjoin URI
-    pub(crate) pj_param: PjParam,
-    /// The Original PSBT context
-    pub(crate) psbt_ctx: PsbtContext,
-    /// The secret key to decrypt the receiver's reply.
-    pub(crate) reply_key: HpkeSecretKey,
-}
-
-impl WithReplyKey {
-    fn new(pj_param: PjParam, psbt_ctx: PsbtContext) -> Self {
-        Self { pj_param, psbt_ctx, reply_key: HpkeKeyPair::gen_keypair().0 }
-    }
-}
+pub struct WithReplyKey;
 
 impl Sender<WithReplyKey> {
+    fn new(pj_param: PjParam, psbt_ctx: PsbtContext) -> Self {
+        Sender { state: WithReplyKey, pj_param, psbt_ctx, reply_key: HpkeKeyPair::gen_keypair().0 }
+    }
+
     /// Construct serialized Request and Context from a Payjoin Proposal.
     ///
     /// Important: This request must not be retried or reused on failure.
@@ -336,27 +335,21 @@ impl Sender<WithReplyKey> {
                 },
         }
 
-        let polling_for_proposal = PollingForProposal {
+        let sender = Sender {
+            state: PollingForProposal,
             pj_param: post_ctx.pj_param,
             psbt_ctx: post_ctx.psbt_ctx,
             reply_key: post_ctx.reply_key,
         };
-        MaybeFatalTransition::success(
-            SessionEvent::PostedOriginalPsbt(),
-            Sender { state: polling_for_proposal },
-        )
+        MaybeFatalTransition::success(SessionEvent::PostedOriginalPsbt(), sender)
     }
-
-    /// The endpoint in the Payjoin URI
-    pub fn endpoint(&self) -> String { self.pj_param.endpoint().to_string() }
 
     pub(crate) fn apply_polling_for_proposal(self) -> SendSession {
         SendSession::PollingForProposal(Sender {
-            state: PollingForProposal {
-                pj_param: self.state.pj_param,
-                psbt_ctx: self.state.psbt_ctx,
-                reply_key: self.state.reply_key,
-            },
+            state: PollingForProposal,
+            pj_param: self.pj_param,
+            psbt_ctx: self.psbt_ctx,
+            reply_key: self.reply_key,
         })
     }
 }
@@ -421,12 +414,7 @@ pub struct V2PostContext {
 /// This type is used to make a BIP77 GET request and process the response.
 /// Call [`Sender<PollingForProposal>::process_response`] on it to continue the BIP77 flow.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PollingForProposal {
-    /// The endpoint in the Payjoin URI
-    pub(crate) pj_param: PjParam,
-    pub(crate) psbt_ctx: PsbtContext,
-    pub(crate) reply_key: HpkeSecretKey,
-}
+pub struct PollingForProposal;
 
 impl ResponseError {
     fn from_slice(bytes: &[u8]) -> Result<Self, serde_json::Error> {
@@ -447,7 +435,7 @@ impl Sender<PollingForProposal> {
             &HpkeKeyPair::from_secret_key(&self.reply_key).public_key().to_compressed_bytes(),
         );
         let mailbox: ShortId = hash.into();
-        let url = Url::parse(&self.endpoint())
+        let url = Url::parse(self.pj_param.endpoint().as_str())
             .expect("Could not parse url")
             .join(&mailbox.to_string())
             .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
@@ -543,8 +531,6 @@ impl Sender<PollingForProposal> {
             SessionEvent::ReceivedProposalPsbt(processed_proposal),
         )
     }
-
-    pub fn endpoint(&self) -> String { self.pj_param.endpoint().to_string() }
 }
 
 #[cfg(test)]
@@ -578,17 +564,16 @@ mod test {
             HpkeKeyPair::gen_keypair().1,
         );
         Ok(super::Sender {
-            state: super::WithReplyKey {
-                pj_param,
-                psbt_ctx: PsbtContext {
-                    original_psbt: PARSED_ORIGINAL_PSBT.clone(),
-                    output_substitution: OutputSubstitution::Enabled,
-                    fee_contribution: None,
-                    min_fee_rate: FeeRate::ZERO,
-                    payee: ScriptBuf::from(vec![0x00]),
-                },
-                reply_key: HpkeKeyPair::gen_keypair().0,
+            state: super::WithReplyKey,
+            pj_param,
+            psbt_ctx: PsbtContext {
+                original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+                output_substitution: OutputSubstitution::Enabled,
+                fee_contribution: None,
+                min_fee_rate: FeeRate::ZERO,
+                payee: ScriptBuf::from(vec![0x00]),
             },
+            reply_key: HpkeKeyPair::gen_keypair().0,
         })
     }
 
@@ -664,26 +649,26 @@ mod test {
             .expect("sender should succeed");
         // v2 senders may always override the receiver's `pjos` parameter to enable output
         // substitution
-        assert_eq!(req_ctx.state.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
-        assert_eq!(&req_ctx.state.psbt_ctx.payee, &address.script_pubkey());
+        assert_eq!(req_ctx.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
+        assert_eq!(&req_ctx.psbt_ctx.payee, &address.script_pubkey());
         let fee_contribution =
-            req_ctx.state.psbt_ctx.fee_contribution.expect("sender should contribute fees");
+            req_ctx.psbt_ctx.fee_contribution.expect("sender should contribute fees");
         assert_eq!(fee_contribution.max_amount, Amount::from_sat(91));
         assert_eq!(fee_contribution.vout, 0);
-        assert_eq!(req_ctx.state.psbt_ctx.min_fee_rate, FeeRate::from_sat_per_kwu(250));
+        assert_eq!(req_ctx.psbt_ctx.min_fee_rate, FeeRate::from_sat_per_kwu(250));
         // ensure that the other builder methods also enable output substitution
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_non_incentivizing(FeeRate::BROADCAST_MIN)
             .expect("build on test vector should succeed")
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
-        assert_eq!(req_ctx.state.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
+        assert_eq!(req_ctx.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_with_additional_fee(Amount::ZERO, Some(0), FeeRate::BROADCAST_MIN, false)
             .expect("build on test vector should succeed")
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
-        assert_eq!(req_ctx.state.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
+        assert_eq!(req_ctx.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
         // ensure that a v2 sender may still disable output substitution if they prefer.
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
             .always_disable_output_substitution()
@@ -691,6 +676,6 @@ mod test {
             .expect("build on test vector should succeed")
             .save(&NoopSessionPersister::default())
             .expect("sender should succeed");
-        assert_eq!(req_ctx.state.psbt_ctx.output_substitution, OutputSubstitution::Disabled);
+        assert_eq!(req_ctx.psbt_ctx.output_substitution, OutputSubstitution::Disabled);
     }
 }

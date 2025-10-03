@@ -90,7 +90,7 @@ fn set_expiration(url: &mut Url, exp: &Time) {
 pub struct PjParam {
     directory: Url,
     id: ShortId,
-    expiration: Time,
+    pub(crate) expiration: Time,
     ohttp_keys: OhttpKeys,
     receiver_pubkey: HpkePublicKey,
 }

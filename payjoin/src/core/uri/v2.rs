@@ -90,7 +90,7 @@ fn set_expiration(url: &mut Url, exp: &Time) {
 pub struct PjParam {
     directory: Url,
     id: ShortId,
-    expiration: Time,
+    pub(crate) expiration: Time,
     ohttp_keys: OhttpKeys,
     receiver_pubkey: HpkePublicKey,
 }
@@ -548,7 +548,7 @@ mod tests {
                    &pjos=0&pj=HTTPS://EXAMPLE.COM/\
                    %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
         let pjuri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
-        assert!(ohttp(&pjuri.extras.endpoint()).is_ok());
+        assert!(ohttp(&Url::parse(&pjuri.extras.endpoint()).expect("Could not parse url")).is_ok());
         assert_eq!(format!("{pjuri}"), uri);
 
         let reordered = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
@@ -557,7 +557,7 @@ mod tests {
                    &pjos=0";
         let pjuri =
             Uri::try_from(reordered).unwrap().assume_checked().check_pj_supported().unwrap();
-        assert!(ohttp(&pjuri.extras.endpoint()).is_ok());
+        assert!(ohttp(&Url::parse(&pjuri.extras.endpoint()).expect("Could not parse url")).is_ok());
         assert_eq!(format!("{pjuri}"), uri);
     }
 

@@ -4,7 +4,6 @@ use std::borrow::Cow;
 
 use bitcoin::address::NetworkChecked;
 pub use error::PjParseError;
-use url::Url;
 
 #[cfg(feature = "v2")]
 pub(crate) use crate::directory::ShortId;
@@ -48,7 +47,9 @@ impl PjParam {
         compile_error!("Either v1 or v2 feature must be enabled");
     }
 
-    pub fn endpoint(&self) -> Url {
+    pub fn endpoint(&self) -> String { self.endpoint_url().to_string() }
+
+    pub(crate) fn endpoint_url(&self) -> url::Url {
         match self {
             #[cfg(feature = "v1")]
             PjParam::V1(url) => url.endpoint(),
@@ -62,7 +63,7 @@ impl std::fmt::Display for PjParam {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // normalizing to uppercase enables QR alphanumeric mode encoding
         // unfortunately Url normalizes these to be lowercase
-        let endpoint = self.endpoint();
+        let endpoint = &self.endpoint_url();
         let scheme = endpoint.scheme();
         let host = endpoint.host_str().expect("host must be set");
         let endpoint_str = self
@@ -101,7 +102,7 @@ pub struct PayjoinExtras {
 
 impl PayjoinExtras {
     pub fn pj_param(&self) -> &PjParam { &self.pj_param }
-    pub fn endpoint(&self) -> Url { self.pj_param.endpoint() }
+    pub fn endpoint(&self) -> String { self.pj_param.endpoint() }
     pub fn output_substitution(&self) -> OutputSubstitution { self.output_substitution }
 }
 

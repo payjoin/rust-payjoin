@@ -1,7 +1,6 @@
-use super::WithReplyKey;
 use crate::error::{InternalReplayError, ReplayError};
 use crate::persist::SessionPersister;
-use crate::send::v2::SendSession;
+use crate::send::v2::{SendSession, SessionContext};
 use crate::uri::v2::PjParam;
 use crate::ImplementationError;
 
@@ -19,7 +18,7 @@ where
     let first_event = logs.next().ok_or(InternalReplayError::NoEvents)?.into();
     let mut session_events = vec![first_event.clone()];
     let mut sender = match first_event {
-        SessionEvent::Created(reply_key) => SendSession::new(*reply_key),
+        SessionEvent::Created(session_context) => SendSession::new(*session_context),
         _ => return Err(InternalReplayError::InvalidEvent(Box::new(first_event), None).into()),
     };
 
@@ -61,8 +60,9 @@ impl SessionHistory {
         self.events
             .iter()
             .find_map(|event| match event {
-                SessionEvent::Created(proposal) =>
-                    Some(proposal.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate()),
+                SessionEvent::Created(session_context) => Some(
+                    session_context.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate(),
+                ),
                 _ => None,
             })
             .expect("Session event log must contain at least one event with fallback_tx")
@@ -72,7 +72,7 @@ impl SessionHistory {
         self.events
             .iter()
             .find_map(|event| match event {
-                SessionEvent::Created(proposal) => Some(&proposal.pj_param),
+                SessionEvent::Created(session_context) => Some(&session_context.pj_param),
                 _ => None,
             })
             .expect("Session event log must contain at least one event with pj_param")
@@ -105,8 +105,8 @@ pub enum SessionStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SessionEvent {
-    /// Sender was created with a HPKE key pair
-    Created(Box<WithReplyKey>),
+    /// Sender was created with session data
+    Created(Box<SessionContext>),
     /// Sender POSTed the Original PSBT and is waiting to receive a Proposal PSBT
     PostedOriginalPsbt(),
     /// Sender received a Proposal PSBT
@@ -130,19 +130,19 @@ pub enum SessionOutcome {
 mod tests {
     use bitcoin::{FeeRate, ScriptBuf};
     use payjoin_test_utils::{KEM, KEY_ID, PARSED_ORIGINAL_PSBT, SYMMETRIC};
+    use url::Url;
 
     use super::*;
     use crate::output_substitution::OutputSubstitution;
     use crate::persist::test_utils::InMemoryTestPersister;
-    #[cfg(feature = "v1")]
-    use crate::send::v1::SenderBuilder;
-    use crate::send::v2::Sender;
+    use crate::persist::NoopSessionPersister;
+    use crate::send::v2::{Sender, SenderBuilder, SessionContext, WithReplyKey};
     use crate::send::PsbtContext;
     use crate::time::Time;
     use crate::{HpkeKeyPair, Uri, UriExt};
 
-    const PJ_URI: &str =
-        "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/";
+    /// Expired V2 Payjoin URI without Amount inspired by BIP 77 test vector
+    const PJ_URI: &str = "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?pjos=0&pj=HTTPS://PAYJO.IN/TXJCGKTKXLUUZ%23EX1WKV8CEC-OH1QYPM59NK2LXXS4890SUAXXYT25Z2VAPHP0X7YEYCJXGWAG6UG9ZU6NQ-RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV";
 
     #[test]
     fn test_sender_session_event_serialization_roundtrip() {
@@ -160,20 +160,23 @@ mod tests {
             ),
             HpkeKeyPair::gen_keypair().1,
         );
-        let sender_with_reply_key = WithReplyKey {
-            pj_param: pj_param.clone(),
-            psbt_ctx: PsbtContext {
-                original_psbt: PARSED_ORIGINAL_PSBT.clone(),
-                output_substitution: OutputSubstitution::Enabled,
-                fee_contribution: None,
-                min_fee_rate: FeeRate::ZERO,
-                payee: ScriptBuf::from(vec![0x00]),
+        let sender_with_reply_key = Sender {
+            state: WithReplyKey,
+            session_context: SessionContext {
+                pj_param: pj_param.clone(),
+                psbt_ctx: PsbtContext {
+                    original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+                    output_substitution: OutputSubstitution::Enabled,
+                    fee_contribution: None,
+                    min_fee_rate: FeeRate::ZERO,
+                    payee: ScriptBuf::from(vec![0x00]),
+                },
+                reply_key: keypair.0.clone(),
             },
-            reply_key: keypair.0.clone(),
         };
 
         let test_cases = vec![
-            SessionEvent::Created(Box::new(sender_with_reply_key.clone())),
+            SessionEvent::Created(Box::new(sender_with_reply_key.session_context.clone())),
             SessionEvent::PostedOriginalPsbt(),
             SessionEvent::ReceivedProposalPsbt(PARSED_ORIGINAL_PSBT.clone()),
             SessionEvent::Closed(SessionOutcome::Success),
@@ -235,14 +238,13 @@ mod tests {
                     SendSession::Closed(SessionOutcome::Failure),
                     test.expected_sender_state
                 );
-                assert_eq!(test.expected_session_history.expected_status, SessionStatus::Failed);
+                assert_eq!(test.expected_session_history.expected_status, SessionStatus::Expired);
             }
         };
     }
 
     #[test]
     fn test_sender_session_history_with_expired_session() {
-        // TODO(armins): how can we reduce the boilerplate for these tests?
         let psbt = PARSED_ORIGINAL_PSBT.clone();
         let sender = SenderBuilder::new(
             psbt.clone(),
@@ -253,34 +255,20 @@ mod tests {
                 .expect("Payjoin to be supported"),
         )
         .build_recommended(FeeRate::BROADCAST_MIN)
+        .unwrap()
+        .save(&NoopSessionPersister::default())
         .unwrap();
-        let reply_key = HpkeKeyPair::gen_keypair();
-        let endpoint = sender.endpoint().clone();
-        let fallback_tx = sender.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
-
-        let id = crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id");
-        let expiration =
-            (std::time::SystemTime::now() - std::time::Duration::from_secs(1)).try_into().unwrap();
-        let pj_param = crate::uri::v2::PjParam::new(
-            endpoint,
-            id,
-            expiration,
-            crate::OhttpKeys(
-                ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
-            ),
-            reply_key.1,
-        );
-        let with_reply_key = WithReplyKey {
-            pj_param: pj_param.clone(),
-            psbt_ctx: sender.psbt_ctx.clone(),
-            reply_key: reply_key.0,
-        };
         let test = SessionHistoryTest {
-            events: vec![SessionEvent::Created(Box::new(with_reply_key))],
+            events: vec![SessionEvent::Created(Box::new(sender.session_context.clone()))],
             expected_session_history: SessionHistoryExpectedOutcome {
-                fallback_tx,
-                pj_param,
-                expected_status: SessionStatus::Failed,
+                fallback_tx: sender
+                    .session_context
+                    .psbt_ctx
+                    .original_psbt
+                    .clone()
+                    .extract_tx_unchecked_fee_rate(),
+                pj_param: sender.session_context.pj_param.clone(),
+                expected_status: SessionStatus::Expired,
             },
             expected_sender_state: SendSession::Closed(SessionOutcome::Failure),
             expected_error: Some("Session expired at".to_string()),
@@ -289,10 +277,9 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "v1")]
     fn test_sender_session_history_with_reply_key_event() {
         let psbt = PARSED_ORIGINAL_PSBT.clone();
-        let sender = SenderBuilder::new(
+        let mut sender = SenderBuilder::new(
             psbt.clone(),
             Uri::try_from(PJ_URI)
                 .expect("Valid uri")
@@ -301,33 +288,21 @@ mod tests {
                 .expect("Payjoin to be supported"),
         )
         .build_recommended(FeeRate::BROADCAST_MIN)
+        .unwrap()
+        .save(&NoopSessionPersister::default())
         .unwrap();
-        let reply_key = HpkeKeyPair::gen_keypair();
-        let endpoint = sender.endpoint().clone();
-        let fallback_tx = sender.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
-        let id = crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id");
-        let expiration =
-            Time::from_now(std::time::Duration::from_secs(60)).expect("Valid expiration");
-        let pj_param = crate::uri::v2::PjParam::new(
-            endpoint,
-            id,
-            expiration,
-            crate::OhttpKeys(
-                ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
-            ),
-            HpkeKeyPair::gen_keypair().1,
-        );
-        let with_reply_key = WithReplyKey {
-            pj_param: pj_param.clone(),
-            psbt_ctx: sender.psbt_ctx.clone(),
-            reply_key: reply_key.0,
-        };
-        let sender = Sender { state: with_reply_key.clone() };
+        sender.session_context.pj_param.expiration =
+            Time::from_now(std::time::Duration::from_secs(60)).unwrap();
         let test = SessionHistoryTest {
-            events: vec![SessionEvent::Created(Box::new(with_reply_key))],
+            events: vec![SessionEvent::Created(Box::new(sender.session_context.clone()))],
             expected_session_history: SessionHistoryExpectedOutcome {
-                fallback_tx,
-                pj_param,
+                fallback_tx: sender
+                    .session_context
+                    .psbt_ctx
+                    .original_psbt
+                    .clone()
+                    .extract_tx_unchecked_fee_rate(),
+                pj_param: sender.session_context.pj_param.clone(),
                 expected_status: SessionStatus::Active,
             },
             expected_sender_state: SendSession::WithReplyKey(sender),
@@ -348,10 +323,12 @@ mod tests {
                 .expect("Payjoin to be supported"),
         )
         .build_recommended(FeeRate::BROADCAST_MIN)
+        .unwrap()
+        .save(&NoopSessionPersister::default())
         .unwrap();
 
         let reply_key = HpkeKeyPair::gen_keypair();
-        let endpoint = sender.endpoint().clone();
+        let endpoint = Url::parse(&sender.endpoint()).expect("Could not parse url");
         let id = crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id");
         let expiration =
             Time::from_now(std::time::Duration::from_secs(60)).expect("Valid expiration");
@@ -365,14 +342,17 @@ mod tests {
             HpkeKeyPair::gen_keypair().1,
         );
 
-        let with_reply_key = WithReplyKey {
-            pj_param: pj_param.clone(),
-            psbt_ctx: sender.psbt_ctx.clone(),
-            reply_key: reply_key.0,
+        let with_reply_key = Sender {
+            state: WithReplyKey,
+            session_context: SessionContext {
+                pj_param: pj_param.clone(),
+                psbt_ctx: sender.session_context.psbt_ctx.clone(),
+                reply_key: reply_key.0,
+            },
         };
 
         let events = vec![
-            SessionEvent::Created(Box::new(with_reply_key)),
+            SessionEvent::Created(Box::new(with_reply_key.session_context.clone())),
             SessionEvent::Closed(SessionOutcome::Success),
         ];
 

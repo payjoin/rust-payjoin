@@ -343,13 +343,13 @@ void main() {
       payjoin.WithReplyKey req_ctx = payjoin.SenderBuilder(psbt, pj_uri)
           .buildRecommended(1000)
           .save(sender_persister);
-      payjoin.RequestV2PostContext request =
+      payjoin.RequestOhttpContext request =
           req_ctx.createV2PostRequest(ohttp_relay);
       var response = await agent.post(Uri.parse(request.request.url),
           headers: {"Content-Type": request.request.contentType},
           body: request.request.body);
       payjoin.PollingForProposal send_ctx = req_ctx
-          .processResponse(response.bodyBytes, request.context)
+          .processResponse(response.bodyBytes, request.ohttpCtx)
           .save(sender_persister);
       // POST Original PSBT
 

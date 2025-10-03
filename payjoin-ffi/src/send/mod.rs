@@ -341,10 +341,10 @@ impl WithReplyKey {
     pub fn create_v2_post_request(
         &self,
         ohttp_relay: String,
-    ) -> Result<RequestV2PostContext, CreateRequestError> {
+    ) -> Result<RequestOhttpContext, CreateRequestError> {
         match self.0.create_v2_post_request(ohttp_relay) {
             Ok((req, ctx)) =>
-                Ok(RequestV2PostContext { request: req.into(), context: Arc::new(ctx.into()) }),
+                Ok(RequestOhttpContext { request: req.into(), ohttp_ctx: Arc::new(ctx.into()) }),
             Err(e) => Err(e.into()),
         }
     }
@@ -355,20 +355,12 @@ impl WithReplyKey {
     pub fn process_response(
         &self,
         response: &[u8],
-        post_ctx: Arc<V2PostContext>,
+        post_ctx: &ClientResponse,
     ) -> WithReplyKeyTransition {
-        let mut guard = post_ctx.0.write().expect("Lock should not be poisoned");
-        let post_ctx = guard.take().expect("Value should not be taken");
         WithReplyKeyTransition(Arc::new(RwLock::new(Some(
-            self.clone().0.process_response(response, post_ctx),
+            self.0.clone().process_response(response, post_ctx.into()),
         ))))
     }
-}
-
-#[derive(uniffi::Record)]
-pub struct RequestV2PostContext {
-    pub request: Request,
-    pub context: Arc<V2PostContext>,
 }
 
 #[derive(uniffi::Record)]
@@ -394,15 +386,6 @@ impl V1Context {
             .process_response(response)
             .map(|e| e.to_string())
             .map_err(Into::into)
-    }
-}
-
-#[derive(uniffi::Object)]
-pub struct V2PostContext(Arc<RwLock<Option<payjoin::send::v2::V2PostContext>>>);
-
-impl From<payjoin::send::v2::V2PostContext> for V2PostContext {
-    fn from(value: payjoin::send::v2::V2PostContext) -> Self {
-        Self(Arc::new(RwLock::new(Some(value))))
     }
 }
 

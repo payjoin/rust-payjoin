@@ -158,13 +158,13 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             pj_uri = session.pj_uri()
             psbt = build_sweep_psbt(self.sender, pj_uri)
             req_ctx: WithReplyKey = SenderBuilder(psbt, pj_uri).build_recommended(1000).save(sender_persister)
-            request: RequestV2PostContext = req_ctx.create_v2_post_request(ohttp_relay)
+            request: RequestOhttpContext = req_ctx.create_v2_post_request(ohttp_relay)
             response = await agent.post(
                 url=request.request.url,
                 headers={"Content-Type": request.request.content_type},
                 content=request.request.body
             )
-            send_ctx: PollingForProposal = req_ctx.process_response(response.content, request.context).save(sender_persister)
+            send_ctx: PollingForProposal = req_ctx.process_response(response.content, request.ohttp_ctx).save(sender_persister)
             # POST Original PSBT
 
             # **********************

@@ -2291,6 +2291,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rustls",
+ "toml 0.5.11",
  "tracing",
  "tracing-subscriber",
  "url",

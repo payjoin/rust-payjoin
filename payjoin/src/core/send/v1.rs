@@ -26,7 +26,6 @@ use std::str::FromStr;
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, Amount, FeeRate};
 use error::BuildSenderError;
-use url::Url;
 
 use super::*;
 pub use crate::output_substitution::OutputSubstitution;
@@ -48,7 +47,7 @@ impl SenderBuilder {
     /// to create a [`Sender`]
     pub fn new(psbt: Psbt, uri: PjUri) -> Self {
         Self {
-            endpoint: uri.extras.pj_param.endpoint().clone(),
+            endpoint: uri.extras.pj_param.endpoint_url(),
             // Adopt the output substitution preference from the URI
             output_substitution: uri.extras.output_substitution,
             psbt_ctx_builder: PsbtContextBuilder::new(
@@ -70,7 +69,7 @@ impl SenderBuilder {
         amount: Option<Amount>,
     ) -> Self {
         Self {
-            endpoint: pj_param.endpoint().clone(),
+            endpoint: pj_param.endpoint(),
             // Default to enabled output substitution for v1 when not specified via URI
             output_substitution: OutputSubstitution::Enabled,
             psbt_ctx_builder: PsbtContextBuilder::new(psbt, address.script_pubkey(), amount),
@@ -190,7 +189,7 @@ impl Sender {
     }
 
     /// The endpoint in the Payjoin URI
-    pub fn endpoint(&self) -> &Url { &self.endpoint }
+    pub fn endpoint(&self) -> String { self.endpoint.to_string() }
 }
 
 /// Data required to validate the response.
@@ -306,6 +305,7 @@ mod test {
         psbt_ctx.original_psbt.unknown = map;
 
         let sender = Sender { endpoint: Url::from_str(EXAMPLE_URL)?, psbt_ctx };
+        assert_eq!(Url::parse(&sender.endpoint()), Url::parse(EXAMPLE_URL));
 
         let body = sender.create_v1_post_request().0.body;
         let res_str = std::str::from_utf8(&body)?;

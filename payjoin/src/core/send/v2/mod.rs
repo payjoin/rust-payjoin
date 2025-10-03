@@ -348,7 +348,7 @@ impl Sender<WithReplyKey> {
     }
 
     /// The endpoint in the Payjoin URI
-    pub fn endpoint(&self) -> Url { self.pj_param.endpoint().clone() }
+    pub fn endpoint(&self) -> String { self.pj_param.endpoint().to_string() }
 
     pub(crate) fn apply_polling_for_proposal(self) -> SendSession {
         SendSession::PollingForProposal(Sender {
@@ -447,8 +447,8 @@ impl Sender<PollingForProposal> {
             &HpkeKeyPair::from_secret_key(&self.reply_key).public_key().to_compressed_bytes(),
         );
         let mailbox: ShortId = hash.into();
-        let url = self
-            .endpoint()
+        let url = Url::parse(&self.endpoint())
+            .expect("Could not parse url")
             .join(&mailbox.to_string())
             .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
         let body = encrypt_message_a(
@@ -544,7 +544,7 @@ impl Sender<PollingForProposal> {
         )
     }
 
-    pub fn endpoint(&self) -> Url { self.pj_param.endpoint() }
+    pub fn endpoint(&self) -> String { self.pj_param.endpoint().to_string() }
 }
 
 #[cfg(test)]

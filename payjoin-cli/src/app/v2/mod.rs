@@ -476,7 +476,7 @@ impl App {
         persister: &SenderPersister,
     ) -> Result<()> {
         let (req, ctx) = sender.create_v2_post_request(
-            self.unwrap_relay_or_else_fetch(Some(sender.endpoint().clone())).await?.as_str(),
+            self.unwrap_relay_or_else_fetch(Some(&sender.endpoint())).await?.as_str(),
         )?;
         let response = self.post_request(req).await?;
         println!("Posted original proposal...");
@@ -493,7 +493,7 @@ impl App {
         // Long poll until we get a response
         loop {
             let (req, ctx) = session.create_poll_request(
-                self.unwrap_relay_or_else_fetch(Some(session.endpoint().clone())).await?.as_str(),
+                self.unwrap_relay_or_else_fetch(Some(&session.endpoint())).await?.as_str(),
             )?;
             let response = self.post_request(req).await?;
             let res = session.process_response(&response.bytes().await?, ctx).save(persister);
@@ -522,9 +522,8 @@ impl App {
         session: Receiver<Initialized>,
         persister: &ReceiverPersister,
     ) -> Result<Receiver<UncheckedOriginalPayload>> {
-        let ohttp_relay = self
-            .unwrap_relay_or_else_fetch(Some(session.pj_uri().extras.endpoint().clone()))
-            .await?;
+        let ohttp_relay =
+            self.unwrap_relay_or_else_fetch(Some(&session.pj_uri().extras.endpoint())).await?;
 
         let mut session = session;
         loop {
@@ -720,7 +719,7 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let (req, ohttp_ctx) = proposal
-            .create_post_request(self.unwrap_relay_or_else_fetch(None).await?.as_str())
+            .create_post_request(self.unwrap_relay_or_else_fetch(None::<&str>).await?.as_str())
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         let res = self.post_request(req).await?;
         let payjoin_psbt = proposal.psbt().clone();
@@ -758,8 +757,9 @@ impl App {
 
     async fn unwrap_relay_or_else_fetch(
         &self,
-        directory: Option<payjoin::Url>,
-    ) -> Result<payjoin::Url> {
+        directory: Option<impl payjoin::IntoUrl>,
+    ) -> Result<url::Url> {
+        let directory = directory.map(|url| url.into_url()).transpose()?;
         let selected_relay =
             self.relay_manager.lock().expect("Lock should not be poisoned").get_selected_relay();
         let ohttp_relay = match selected_relay {
@@ -778,8 +778,8 @@ impl App {
         session: Receiver<HasReplyableError>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        let (err_req, err_ctx) =
-            session.create_error_request(self.unwrap_relay_or_else_fetch(None).await?.as_str())?;
+        let (err_req, err_ctx) = session
+            .create_error_request(self.unwrap_relay_or_else_fetch(None::<&str>).await?.as_str())?;
 
         let err_response = match self.post_request(err_req).await {
             Ok(response) => response,

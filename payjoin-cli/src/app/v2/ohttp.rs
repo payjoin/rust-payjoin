@@ -29,7 +29,7 @@ pub(crate) struct ValidatedOhttpKeys {
 
 pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
     config: &Config,
-    directory: Option<payjoin::Url>,
+    directory: Option<url::Url>,
     relay_manager: Arc<Mutex<RelayManager>>,
 ) -> Result<ValidatedOhttpKeys> {
     if let Some(ohttp_keys) = config.v2()?.ohttp_keys.clone() {
@@ -48,7 +48,7 @@ pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
 
 async fn fetch_ohttp_keys(
     config: &Config,
-    directory: Option<payjoin::Url>,
+    directory: Option<url::Url>,
     relay_manager: Arc<Mutex<RelayManager>>,
 ) -> Result<ValidatedOhttpKeys> {
     use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;

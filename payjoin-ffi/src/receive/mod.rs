@@ -152,6 +152,19 @@ pub fn replay_receiver_event_log(
     Ok(ReplayResult { state: state.into(), session_history: session_history.into() })
 }
 
+/// Represents the status of a session that can be inferred from the information in the session
+/// event log.
+#[derive(uniffi::Object)]
+pub struct ReceiverSessionStatus(payjoin::receive::v2::SessionStatus);
+
+impl From<payjoin::receive::v2::SessionStatus> for ReceiverSessionStatus {
+    fn from(value: payjoin::receive::v2::SessionStatus) -> Self { Self(value) }
+}
+
+impl From<ReceiverSessionStatus> for payjoin::receive::v2::SessionStatus {
+    fn from(value: ReceiverSessionStatus) -> Self { value.0 }
+}
+
 #[derive(Clone, uniffi::Object)]
 pub struct ReceiverSessionHistory(pub payjoin::receive::v2::SessionHistory);
 
@@ -168,6 +181,9 @@ impl ReceiverSessionHistory {
     pub fn fallback_tx(&self) -> Option<Arc<crate::Transaction>> {
         self.0.fallback_tx().map(|tx| Arc::new(tx.into()))
     }
+
+    /// Helper method to query the current status of the session.
+    pub fn status(&self) -> ReceiverSessionStatus { self.0.status().into() }
 }
 
 #[derive(uniffi::Object)]

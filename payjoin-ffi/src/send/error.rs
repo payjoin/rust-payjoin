@@ -104,14 +104,14 @@ pub enum SenderPersistedError {
     BuildSenderError(Arc<BuildSenderError>),
     /// Storage error that could occur at application storage layer
     #[error(transparent)]
-    Storage(Arc<ImplementationError>),
+    Storage(ImplementationError),
     /// Unexpected error
     #[error("An unexpected error occurred")]
     Unexpected,
 }
 
 impl From<ImplementationError> for SenderPersistedError {
-    fn from(value: ImplementationError) -> Self { SenderPersistedError::Storage(Arc::new(value)) }
+    fn from(value: ImplementationError) -> Self { SenderPersistedError::Storage(value) }
 }
 
 impl<S> From<payjoin::persist::PersistedError<send::v2::EncapsulationError, S>>
@@ -120,12 +120,17 @@ where
     S: std::error::Error + Send + Sync + 'static,
 {
     fn from(err: payjoin::persist::PersistedError<send::v2::EncapsulationError, S>) -> Self {
-        if err.storage_error_ref().is_some() {
-            if let Some(storage_err) = err.storage_error() {
+        let mut err = Some(err);
+
+        if err.as_ref().and_then(|e| e.storage_error_ref()).is_some() {
+            if let Some(storage_err) = err.take().and_then(|e| e.storage_error()) {
                 return SenderPersistedError::from(ImplementationError::new(storage_err));
             }
             return SenderPersistedError::Unexpected;
         }
+
+        let err = err.expect("PersistedError consumed before extracting API error");
+
         if let Some(api_err) = err.api_error() {
             return SenderPersistedError::EncapsulationError(Arc::new(api_err.into()));
         }
@@ -138,12 +143,17 @@ where
     S: std::error::Error + Send + Sync + 'static,
 {
     fn from(err: payjoin::persist::PersistedError<send::ResponseError, S>) -> Self {
-        if err.storage_error_ref().is_some() {
-            if let Some(storage_err) = err.storage_error() {
+        let mut err = Some(err);
+
+        if err.as_ref().and_then(|e| e.storage_error_ref()).is_some() {
+            if let Some(storage_err) = err.take().and_then(|e| e.storage_error()) {
                 return SenderPersistedError::from(ImplementationError::new(storage_err));
             }
             return SenderPersistedError::Unexpected;
         }
+
+        let err = err.expect("PersistedError consumed before extracting API error");
+
         if let Some(api_err) = err.api_error() {
             return SenderPersistedError::ResponseError(api_err.into());
         }
@@ -156,12 +166,17 @@ where
     S: std::error::Error + Send + Sync + 'static,
 {
     fn from(err: payjoin::persist::PersistedError<send::BuildSenderError, S>) -> Self {
-        if err.storage_error_ref().is_some() {
-            if let Some(storage_err) = err.storage_error() {
+        let mut err = Some(err);
+
+        if err.as_ref().and_then(|e| e.storage_error_ref()).is_some() {
+            if let Some(storage_err) = err.take().and_then(|e| e.storage_error()) {
                 return SenderPersistedError::from(ImplementationError::new(storage_err));
             }
             return SenderPersistedError::Unexpected;
         }
+
+        let err = err.expect("PersistedError consumed before extracting API error");
+
         if let Some(api_err) = err.api_error() {
             return SenderPersistedError::BuildSenderError(Arc::new(api_err.into()));
         }

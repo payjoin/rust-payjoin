@@ -12,7 +12,6 @@ use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::{MaybeFatalTransition, NextStateTransition};
 
 use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
-use crate::error::ForeignError;
 pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::OhttpKeys;
 use crate::receive::error::{ReceiverPersistedError, ReceiverReplayError};
@@ -206,7 +205,7 @@ impl InitialReceiveTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<Initialized, ForeignError> {
+    ) -> Result<Initialized, ImplementationError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner = self.0.write().expect("Lock should not be poisoned");
 
@@ -451,7 +450,7 @@ impl_save_for_transition!(AssumeInteractiveTransition, MaybeInputsOwned);
 
 #[uniffi::export(with_foreign)]
 pub trait CanBroadcast: Send + Sync {
-    fn callback(&self, tx: Vec<u8>) -> Result<bool, ForeignError>;
+    fn callback(&self, tx: Vec<u8>) -> Result<bool, ImplementationError>;
 }
 
 #[uniffi::export]
@@ -517,7 +516,7 @@ impl_save_for_transition!(MaybeInputsOwnedTransition, MaybeInputsSeen);
 
 #[uniffi::export(with_foreign)]
 pub trait IsScriptOwned: Send + Sync {
-    fn callback(&self, script: Vec<u8>) -> Result<bool, ForeignError>;
+    fn callback(&self, script: Vec<u8>) -> Result<bool, ImplementationError>;
 }
 
 #[uniffi::export]
@@ -572,7 +571,7 @@ impl_save_for_transition!(MaybeInputsSeenTransition, OutputsUnknown);
 
 #[uniffi::export(with_foreign)]
 pub trait IsOutputKnown: Send + Sync {
-    fn callback(&self, outpoint: OutPoint) -> Result<bool, ForeignError>;
+    fn callback(&self, outpoint: OutPoint) -> Result<bool, ImplementationError>;
 }
 
 #[uniffi::export]
@@ -892,7 +891,7 @@ impl_save_for_transition!(ProvisionalProposalTransition, PayjoinProposal);
 
 #[uniffi::export(with_foreign)]
 pub trait ProcessPsbt: Send + Sync {
-    fn callback(&self, psbt: String) -> Result<String, ForeignError>;
+    fn callback(&self, psbt: String) -> Result<String, ImplementationError>;
 }
 
 #[uniffi::export]
@@ -1078,12 +1077,12 @@ impl HasReplyableError {
 pub trait TransactionExists: Send + Sync {
     // TODO: Is there an ffi exported txid type that we can use here?
     // TODO: Is there a ffi type for the serialized tx?
-    fn callback(&self, txid: String) -> Result<Option<Vec<u8>>, ForeignError>;
+    fn callback(&self, txid: String) -> Result<Option<Vec<u8>>, ImplementationError>;
 }
 
 #[uniffi::export(with_foreign)]
 pub trait OutpointSpent: Send + Sync {
-    fn callback(&self, outpoint: OutPoint) -> Result<bool, ForeignError>;
+    fn callback(&self, outpoint: OutPoint) -> Result<bool, ImplementationError>;
 }
 
 #[allow(clippy::type_complexity)]
@@ -1129,9 +1128,9 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>> for Mon
 
 fn try_deserialize_tx(
     buf: Vec<u8>,
-) -> Result<payjoin::bitcoin::transaction::Transaction, ForeignError> {
+) -> Result<payjoin::bitcoin::transaction::Transaction, ImplementationError> {
     payjoin::bitcoin::transaction::Transaction::consensus_decode(&mut buf.as_slice())
-        .map_err(|e| ForeignError::InternalError(e.to_string()))
+        .map_err(ImplementationError::new)
 }
 
 #[uniffi::export]
@@ -1146,13 +1145,9 @@ impl Monitor {
                 transaction_exists
                     .callback(txid.to_string())
                     .and_then(|buf| buf.map(try_deserialize_tx).transpose())
-                    .map_err(|e| ImplementationError::new(e).into())
+                    .map_err(Into::into)
             },
-            |outpoint| {
-                outpoint_spent
-                    .callback(outpoint.into())
-                    .map_err(|e| ImplementationError::new(e).into())
-            },
+            |outpoint| outpoint_spent.callback(outpoint.into()).map_err(Into::into),
         )))))
     }
 }
@@ -1160,9 +1155,9 @@ impl Monitor {
 /// Session persister that should save and load events as JSON strings.
 #[uniffi::export(with_foreign)]
 pub trait JsonReceiverSessionPersister: Send + Sync {
-    fn save(&self, event: String) -> Result<(), ForeignError>;
-    fn load(&self) -> Result<Vec<String>, ForeignError>;
-    fn close(&self) -> Result<(), ForeignError>;
+    fn save(&self, event: String) -> Result<(), ImplementationError>;
+    fn load(&self) -> Result<Vec<String>, ImplementationError>;
+    fn close(&self) -> Result<(), ImplementationError>;
 }
 
 /// Adapter for the [JsonReceiverSessionPersister] trait to use the save and load callbacks.
@@ -1178,12 +1173,11 @@ impl CallbackPersisterAdapter {
 
 impl payjoin::persist::SessionPersister for CallbackPersisterAdapter {
     type SessionEvent = payjoin::receive::v2::SessionEvent;
-    type InternalStorageError = ForeignError;
+    type InternalStorageError = ImplementationError;
 
     fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
         let uni_event: ReceiverSessionEvent = event.into();
-        self.callback_persister
-            .save(uni_event.to_json().map_err(|e| ForeignError::InternalError(e.to_string()))?)
+        self.callback_persister.save(uni_event.to_json().map_err(ImplementationError::new)?)
     }
 
     fn load(
@@ -1195,7 +1189,7 @@ impl payjoin::persist::SessionPersister for CallbackPersisterAdapter {
                 .into_iter()
                 .map(|event| {
                     ReceiverSessionEvent::from_json(event)
-                        .map_err(|e| ForeignError::InternalError(e.to_string()))
+                        .map_err(ImplementationError::new)
                         .map(|e| e.into())
                 })
                 .collect::<Result<Vec<_>, _>>()

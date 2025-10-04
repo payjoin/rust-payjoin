@@ -4,8 +4,8 @@ pub struct PjParseError {
     msg: String,
 }
 
-impl From<String> for PjParseError {
-    fn from(msg: String) -> Self { PjParseError { msg } }
+impl PjParseError {
+    pub(crate) fn from_err(err: impl std::fmt::Display) -> Self { Self { msg: err.to_string() } }
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
@@ -14,8 +14,10 @@ pub struct PjNotSupported {
     msg: String,
 }
 
-impl From<String> for PjNotSupported {
-    fn from(msg: String) -> Self { PjNotSupported { msg } }
+impl PjNotSupported {
+    pub(crate) fn from_display(uri: impl std::fmt::Display) -> Self {
+        Self { msg: uri.to_string() }
+    }
 }
 
 #[derive(Debug, thiserror::Error, uniffi::Object)]

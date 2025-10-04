@@ -16,7 +16,7 @@ pub enum ReceiverError {
     ///
     /// e.g. database errors, network failures, wallet errors
     #[error("Implementation error: {0}")]
-    Implementation(Arc<ImplementationError>),
+    Implementation(ImplementationError),
     /// Error that may occur when converting a some type to a URL
     #[error("IntoUrl error: {0}")]
     IntoUrl(Arc<IntoUrlError>),
@@ -31,8 +31,7 @@ impl From<receive::Error> for ReceiverError {
 
         match value {
             receive::Error::Protocol(e) => Protocol(Arc::new(ProtocolError(e))),
-            receive::Error::Implementation(e) =>
-                Implementation(Arc::new(ImplementationError::from(e))),
+            receive::Error::Implementation(e) => Implementation(ImplementationError::from(e)),
             _ => Unexpected,
         }
     }
@@ -47,11 +46,11 @@ pub enum ReceiverPersistedError {
     Receiver(ReceiverError),
     /// Storage error that could occur at application storage layer
     #[error(transparent)]
-    Storage(Arc<ImplementationError>),
+    Storage(ImplementationError),
 }
 
 impl From<ImplementationError> for ReceiverPersistedError {
-    fn from(value: ImplementationError) -> Self { ReceiverPersistedError::Storage(Arc::new(value)) }
+    fn from(value: ImplementationError) -> Self { ReceiverPersistedError::Storage(value) }
 }
 
 macro_rules! impl_persisted_error_from {
@@ -64,15 +63,21 @@ macro_rules! impl_persisted_error_from {
             S: std::error::Error + Send + Sync + 'static,
         {
             fn from(err: payjoin::persist::PersistedError<$api_error_ty, S>) -> Self {
-                if err.storage_error_ref().is_some() {
-                    if let Some(storage_err) = err.storage_error() {
+                let mut err = Some(err);
+
+                if err.as_ref().and_then(|e| e.storage_error_ref()).is_some() {
+                    if let Some(storage_err) = err.take().and_then(|e| e.storage_error()) {
                         return ReceiverPersistedError::from(ImplementationError::new(storage_err));
                     }
                     return ReceiverPersistedError::Receiver(ReceiverError::Unexpected);
                 }
+
+                let err = err.expect("PersistedError consumed before extracting API error");
+
                 if let Some(api_err) = err.api_error() {
                     return ReceiverPersistedError::Receiver($receiver_arm(api_err));
                 }
+
                 ReceiverPersistedError::Receiver(ReceiverError::Unexpected)
             }
         }

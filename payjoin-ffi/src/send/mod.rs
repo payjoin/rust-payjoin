@@ -68,6 +68,28 @@ impl From<SenderSessionOutcome> for payjoin::send::v2::SessionOutcome {
     fn from(value: SenderSessionOutcome) -> Self { value.0 }
 }
 
+#[uniffi::export]
+impl SenderSessionOutcome {
+    pub fn is_success(&self) -> bool {
+        matches!(self.0, payjoin::send::v2::SessionOutcome::Success(_))
+    }
+
+    pub fn success_psbt_base64(&self) -> Option<String> {
+        match &self.0 {
+            payjoin::send::v2::SessionOutcome::Success(psbt) => Some(psbt.to_string()),
+            _ => None,
+        }
+    }
+
+    pub fn is_failure(&self) -> bool {
+        matches!(self.0, payjoin::send::v2::SessionOutcome::Failure)
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self.0, payjoin::send::v2::SessionOutcome::Cancel)
+    }
+}
+
 #[derive(Clone, uniffi::Enum)]
 pub enum SendSession {
     WithReplyKey { inner: Arc<WithReplyKey> },

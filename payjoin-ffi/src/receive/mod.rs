@@ -3,8 +3,9 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 pub use error::{
-    InputContributionError, JsonReply, OutputSubstitutionError, ProtocolError, PsbtInputError,
-    ReceiverError, SelectionError, SessionError,
+    AddressParseError, InputContributionError, InputPairError, JsonReply, OutputSubstitutionError,
+    ProtocolError, PsbtInputError, ReceiverBuilderError, ReceiverError, SelectionError,
+    SessionError,
 };
 use payjoin::bitcoin::consensus::Decodable;
 use payjoin::bitcoin::psbt::Psbt;
@@ -15,7 +16,7 @@ use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 use crate::error::ForeignError;
 pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::OhttpKeys;
-use crate::receive::error::{ReceiverPersistedError, ReceiverReplayError};
+use crate::receive::error::{InputPairError, ReceiverPersistedError, ReceiverReplayError};
 use crate::uri::error::{FeeRateError, IntoUrlError};
 use crate::{ClientResponse, OutputSubstitution, Request};
 
@@ -219,6 +220,110 @@ impl InitialReceiveTransition {
 
 #[derive(Clone, Debug, uniffi::Object)]
 pub struct ReceiverBuilder(payjoin::receive::v2::ReceiverBuilder);
+
+/// Primitive representation of a transaction output for the FFI boundary.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct PlainTxOut {
+    /// Amount in satoshis.
+    pub value_sat: u64,
+    /// Raw scriptPubKey bytes.
+    pub script_pubkey: Vec<u8>,
+}
+
+impl From<PlainTxOut> for payjoin::bitcoin::TxOut {
+    fn from(value: PlainTxOut) -> Self {
+        payjoin::bitcoin::TxOut {
+            value: Amount::from_sat(value.value_sat),
+            script_pubkey: payjoin::bitcoin::ScriptBuf::from_bytes(value.script_pubkey),
+        }
+    }
+}
+
+impl From<payjoin::bitcoin::TxOut> for PlainTxOut {
+    fn from(value: payjoin::bitcoin::TxOut) -> Self {
+        PlainTxOut {
+            value_sat: value.value.to_sat(),
+            script_pubkey: value.script_pubkey.into_bytes(),
+        }
+    }
+}
+
+/// Primitive representation of a transaction input for the FFI boundary.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct PlainTxIn {
+    pub previous_output: PlainOutPoint,
+    pub script_sig: Vec<u8>,
+    pub sequence: u32,
+    pub witness: Vec<Vec<u8>>,
+}
+
+impl PlainTxIn {
+    fn into_core(self) -> Result<payjoin::bitcoin::TxIn, InputPairError> {
+        let previous_output = self.previous_output.into_core()?;
+        Ok(payjoin::bitcoin::TxIn {
+            previous_output,
+            script_sig: payjoin::bitcoin::ScriptBuf::from_bytes(self.script_sig),
+            sequence: payjoin::bitcoin::Sequence(self.sequence),
+            witness: self.witness.into(),
+        })
+    }
+}
+
+/// Primitive representation of an outpoint for the FFI boundary.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct PlainOutPoint {
+    /// Hex-encoded txid (big-endian).
+    pub txid: String,
+    /// Output index.
+    pub vout: u32,
+}
+
+impl From<payjoin::bitcoin::OutPoint> for PlainOutPoint {
+    fn from(value: payjoin::bitcoin::OutPoint) -> Self {
+        PlainOutPoint { txid: value.txid.to_string(), vout: value.vout }
+    }
+}
+
+impl PlainOutPoint {
+    fn into_core(self) -> Result<payjoin::bitcoin::OutPoint, InputPairError> {
+        let txid = payjoin::bitcoin::Txid::from_str(&self.txid)
+            .map_err(|_| InputPairError::invalid_outpoint(self.txid, self.vout))?;
+        Ok(payjoin::bitcoin::OutPoint { txid, vout: self.vout })
+    }
+}
+
+/// Primitive representation of a PSBT input for the FFI boundary.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct PlainPsbtInput {
+    pub witness_utxo: Option<PlainTxOut>,
+    pub redeem_script: Option<Vec<u8>>,
+    pub witness_script: Option<Vec<u8>>,
+}
+
+impl PlainPsbtInput {
+    fn into_core(self) -> payjoin::bitcoin::psbt::Input {
+        payjoin::bitcoin::psbt::Input {
+            witness_utxo: self.witness_utxo.map(Into::into),
+            redeem_script: self.redeem_script.map(payjoin::bitcoin::ScriptBuf::from_bytes),
+            witness_script: self.witness_script.map(payjoin::bitcoin::ScriptBuf::from_bytes),
+            ..Default::default()
+        }
+    }
+}
+
+/// Primitive representation of a weight measurement.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct PlainWeight {
+    pub weight_units: u64,
+}
+
+impl From<PlainWeight> for payjoin::bitcoin::Weight {
+    fn from(value: PlainWeight) -> Self { payjoin::bitcoin::Weight::from_wu(value.weight_units) }
+}
+
+impl From<payjoin::bitcoin::Weight> for PlainWeight {
+    fn from(value: payjoin::bitcoin::Weight) -> Self { PlainWeight { weight_units: value.to_wu() } }
+}
 
 #[uniffi::export]
 impl ReceiverBuilder {

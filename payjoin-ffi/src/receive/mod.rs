@@ -1077,12 +1077,12 @@ impl HasReplyableError {
 pub trait TransactionExists: Send + Sync {
     // TODO: Is there an ffi exported txid type that we can use here?
     // TODO: Is there a ffi type for the serialized tx?
-    fn callback(&self, txid: String) -> Result<Option<Vec<u8>>, ForeignError>;
+    fn callback(&self, txid: String) -> Result<Option<Vec<u8>>, ImplementationError>;
 }
 
 #[uniffi::export(with_foreign)]
 pub trait OutpointSpent: Send + Sync {
-    fn callback(&self, outpoint: OutPoint) -> Result<bool, ForeignError>;
+    fn callback(&self, outpoint: OutPoint) -> Result<bool, ImplementationError>;
 }
 
 #[allow(clippy::type_complexity)]
@@ -1128,9 +1128,9 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>> for Mon
 
 fn try_deserialize_tx(
     buf: Vec<u8>,
-) -> Result<payjoin::bitcoin::transaction::Transaction, ForeignError> {
+) -> Result<payjoin::bitcoin::transaction::Transaction, ImplementationError> {
     payjoin::bitcoin::transaction::Transaction::consensus_decode(&mut buf.as_slice())
-        .map_err(|e| ForeignError::InternalError(e.to_string()))
+        .map_err(ImplementationError::new)
 }
 
 #[uniffi::export]
@@ -1145,13 +1145,9 @@ impl Monitor {
                 transaction_exists
                     .callback(txid.to_string())
                     .and_then(|buf| buf.map(try_deserialize_tx).transpose())
-                    .map_err(|e| ImplementationError::new(e).into())
+                    .map_err(Into::into)
             },
-            |outpoint| {
-                outpoint_spent
-                    .callback(outpoint.into())
-                    .map_err(|e| ImplementationError::new(e).into())
-            },
+            |outpoint| outpoint_spent.callback(outpoint.into()).map_err(Into::into),
         )))))
     }
 }

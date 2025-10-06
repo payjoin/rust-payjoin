@@ -276,7 +276,7 @@ mod tests {
 
     fn run_session_history_test(test: SessionHistoryTest) -> Result<(), BoxError> {
         let persister = InMemoryTestPersister::<SessionEvent>::default();
-        for event in test.events {
+        for event in test.events.clone() {
             persister.save_event(event)?;
         }
 
@@ -284,6 +284,13 @@ mod tests {
         assert_eq!(receiver, test.expected_receiver_state);
         assert_eq!(session_history.fallback_tx(), test.expected_session_history.fallback_tx);
         assert_eq!(session_history.status(), test.expected_session_history.expected_status);
+        let expected_reply_key = test.events.iter().find_map(|event| match event {
+            SessionEvent::RetrievedOriginalPayload { reply_key, .. } => reply_key.clone(),
+            _ => None,
+        });
+
+        assert_eq!(session_history.session_context().reply_key, expected_reply_key);
+
         Ok(())
     }
 

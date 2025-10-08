@@ -3,6 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::Result;
+use futures::StreamExt;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::body::{Body, Bytes, Incoming};
@@ -11,6 +12,11 @@ use hyper::server::conn::http1;
 use hyper::{Method, Request, Response, StatusCode, Uri};
 use hyper_util::rt::TokioIo;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
+use tokio::net::TcpListener;
+#[cfg(feature = "acme")]
+use tokio_rustls_acme::AcmeConfig;
+use tokio_stream::wrappers::TcpListenerStream;
+use tokio_stream::Stream;
 use tracing::{debug, error, trace, warn};
 
 pub use crate::db::files::Db as FilesDb;
@@ -82,7 +88,7 @@ impl<D: Db> Service<D> {
     #[cfg(feature = "_manual-tls")]
     pub async fn serve_tls(
         self,
-        listener: tokio::net::TcpListener,
+        listener: TcpListener,
         tls_config: (Vec<u8>, Vec<u8>),
     ) -> Result<(), BoxError> {
         let tls_acceptor = init_tls_acceptor(tls_config)?;
@@ -112,21 +118,52 @@ impl<D: Db> Service<D> {
         Ok(())
     }
 
-    pub async fn serve_tcp(self, listener: tokio::net::TcpListener) -> Result<(), BoxError> {
-        while let Ok((stream, _)) = listener.accept().await {
-            let io = TokioIo::new(stream);
-            let service = self.clone();
-            tokio::spawn(async move {
-                service.metrics.record_connection();
-                if let Err(err) =
-                    http1::Builder::new().serve_connection(io, service).with_upgrades().await
-                {
-                    error!("Error serving connection: {:?}", err);
-                }
-            });
-        }
+    #[cfg(feature = "acme")]
+    pub async fn serve_acme<EC, EA>(self, listener: TcpListener, acme_config: AcmeConfig<EC, EA>)
+    where
+        EC: 'static + std::fmt::Debug,
+        EA: 'static + std::fmt::Debug,
+    {
+        let tcp_incoming = TcpListenerStream::new(listener);
 
-        Ok(())
+        let tls_incoming = acme_config.incoming(tcp_incoming, Vec::new());
+
+        self.serve_connections(tls_incoming).await;
+    }
+
+    pub async fn serve_tcp(self, listener: TcpListener) {
+        let tcp_incoming = TcpListenerStream::new(listener);
+        self.serve_connections(tcp_incoming).await;
+    }
+
+    async fn serve_connections<S, I>(self, mut incoming_connections: S)
+    where
+        S: Stream<Item = tokio::io::Result<I>> + Unpin,
+        I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
+    {
+        while let Some(conn) = incoming_connections.next().await {
+            match conn {
+                Ok(stream) => {
+                    let service = self.clone();
+                    tokio::spawn(async move { service.serve_connection(stream).await });
+                }
+                Err(err) => {
+                    error!("Accept error: {err}")
+                }
+            }
+        }
+    }
+
+    // TODO https://docs.rs/tower/0.4.13/tower/make/trait.MakeService.html
+    async fn serve_connection<I>(&self, stream: I)
+    where
+        I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
+    {
+        if let Err(err) =
+            http1::Builder::new().serve_connection(TokioIo::new(stream), self).with_upgrades().await
+        {
+            error!("Error serving connection: {:?}", err);
+        }
     }
 
     async fn serve_request(

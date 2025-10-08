@@ -12,8 +12,8 @@ use crate::cli::Cli;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub listen_addr: String,         // TODO tokio_listener::ListenerAddressLFlag
-    pub metrics_listen_addr: String, // TODO tokio_listener::ListenerAddressLFlag
+    pub listen_addr: String, // TODO tokio_listener::ListenerAddressLFlag
+    pub metrics_listen_addr: Option<String>, // TODO tokio_listener::ListenerAddressLFlag
     pub timeout: Duration,
     pub storage_dir: PathBuf,
     pub ohttp_keys: PathBuf, // TODO OhttpConfig struct with rotation params, etc
@@ -31,7 +31,7 @@ impl Config {
 
         Ok(Config {
             listen_addr: built_config.get("listen_addr")?,
-            metrics_listen_addr: built_config.get("metrics_listen_addr")?,
+            metrics_listen_addr: built_config.get("metrics_listen_addr").ok(),
             timeout: Duration::from_secs(built_config.get("timeout")?),
             storage_dir: built_config.get("storage_dir")?,
             ohttp_keys: built_config.get("ohttp_keys")?,
@@ -41,12 +41,22 @@ impl Config {
 
 fn add_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
     config
-        .set_override_option("listen_addr", Some(format!("[::]:{}", cli.port)))?
+        .set_default("listen_addr", "[::]:8080")?
+        .set_override_option("listen_addr", cli.port.map(|port| format!("[::]:{}", port)))?
+        .set_default("metrics_listen_addr", Option::<String>::None)?
         .set_override_option(
             "metrics_listen_addr",
-            Some(format!("localhost:{}", cli.metrics_port)),
+            cli.metrics_port.map(|port| format!("localhost:{}", port)),
         )?
-        .set_override_option("timeout", Some(cli.timeout))?
-        .set_override_option("ohttp_keys", Some(cli.ohttp_keys.to_string_lossy().into_owned()))?
-        .set_override_option("storage_dir", Some(cli.storage_dir.to_string_lossy().into_owned()))
+        .set_default("timeout", Some(30))?
+        .set_override_option("timeout", cli.timeout)?
+        .set_default("ohttp_keys", "ohttp_keys")?
+        .set_override_option(
+            "ohttp_keys",
+            cli.ohttp_keys.clone().map(|s| s.to_string_lossy().into_owned()),
+        )?
+        .set_override_option(
+            "storage_dir",
+            cli.storage_dir.clone().map(|s| s.to_string_lossy().into_owned()),
+        )
 }

@@ -39,11 +39,12 @@ use url::Url;
 
 use super::error::BuildSenderError;
 use super::*;
-use crate::error::{InternalReplayError, ReplayError};
+use crate::error::{ImplementationError, InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
 use crate::persist::{
-    MaybeFatalTransition, MaybeSuccessTransitionWithNoResults, NextStateTransition,
+    MaybeFatalOrSuccessTransition, MaybeFatalTransition, MaybeSuccessTransitionWithNoResults,
+    NextStateTransition,
 };
 use crate::uri::v2::PjParam;
 use crate::uri::ShortId;
@@ -255,6 +256,26 @@ impl SendSession {
                 Some(Box::new(current_state)),
             )
             .into()),
+        }
+    }
+
+    /// Process the received PSBT and return a transition that automatically saves Closed events
+    pub fn process_proposal(
+        self,
+        process_psbt: impl FnOnce(Psbt) -> Result<(), ImplementationError>,
+    ) -> MaybeFatalOrSuccessTransition<SessionEvent, Self, ImplementationError> {
+        match self {
+            SendSession::ProposalReceived(psbt) => match process_psbt(psbt) {
+                Ok(()) => MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+                    SessionOutcome::Success,
+                )),
+                Err(_e) => MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+                    SessionOutcome::Failure,
+                )),
+            },
+            _ => MaybeFatalOrSuccessTransition::transient(ImplementationError::from(
+                "Invalid state for processing proposal",
+            )),
         }
     }
 }
@@ -539,6 +560,7 @@ mod test {
     use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, PARSED_ORIGINAL_PSBT, SYMMETRIC};
 
     use super::*;
+    use crate::persist::test_utils::InMemoryTestPersister;
     use crate::persist::NoopSessionPersister;
     use crate::receive::v2::ReceiverBuilder;
     use crate::time::Time;
@@ -689,5 +711,64 @@ mod test {
             req_ctx.session_context.psbt_ctx.output_substitution,
             OutputSubstitution::Disabled
         );
+    }
+
+    #[test]
+    fn test_process_proposal_success() -> Result<(), BoxError> {
+        let psbt = PARSED_ORIGINAL_PSBT.clone();
+        let session = SendSession::ProposalReceived(psbt.clone());
+        let persister = InMemoryTestPersister::default();
+
+        let transition = session.process_proposal(|p| {
+            assert_eq!(p, psbt);
+            Ok(())
+        });
+
+        let result = transition.save(&persister);
+        assert!(result.is_ok());
+        assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
+        assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 1);
+
+        let events = &persister.inner.read().expect("Shouldn't be poisoned").events;
+        assert!(matches!(events.last(), Some(SessionEvent::Closed(SessionOutcome::Success))));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_process_proposal_failure() -> Result<(), BoxError> {
+        let psbt = PARSED_ORIGINAL_PSBT.clone();
+        let session = SendSession::ProposalReceived(psbt.clone());
+        let persister = InMemoryTestPersister::default();
+
+        let transition =
+            session.process_proposal(|_p| Err(ImplementationError::from("Test error")));
+
+        let result = transition.save(&persister);
+        assert!(result.is_ok());
+        assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
+        assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 1);
+
+        let events = &persister.inner.read().expect("Shouldn't be poisoned").events;
+        assert!(matches!(events.last(), Some(SessionEvent::Closed(SessionOutcome::Failure))));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_process_proposal_invalid_state() -> Result<(), BoxError> {
+        let session = SendSession::WithReplyKey(create_sender_context(
+            Time::from_now(Duration::from_secs(60)).expect("expiration should be valid"),
+        )?);
+        let persister = InMemoryTestPersister::default();
+
+        let transition = session.process_proposal(|_p| Ok(()));
+
+        let result = transition.save(&persister);
+        assert!(result.is_err());
+        assert!(!persister.inner.read().expect("Shouldn't be poisoned").is_closed);
+        assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 0);
+
+        Ok(())
     }
 }

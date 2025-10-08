@@ -462,8 +462,28 @@ impl App {
             SendSession::PollingForProposal(context) =>
                 self.get_proposed_payjoin_psbt(context, persister).await?,
             SendSession::ProposalReceived(proposal) => {
-                self.process_pj_response(proposal)?;
-                return Ok(());
+                let proposal_session = SendSession::ProposalReceived(proposal);
+                let transition = proposal_session.process_proposal(|psbt| {
+                    match self.process_pj_response(psbt) {
+                        Ok(_) => Ok(()),
+                        Err(e) => {
+                            tracing::debug!("PSBT processing error: {:?}", e);
+                            Err(ImplementationError::from("Payjoin processing failed"))
+                        }
+                    }
+                });
+
+                match transition.save(persister) {
+                    Ok(OptionalTransitionOutcome::Progress(_)) => {
+                        return Ok(());
+                    }
+                    Ok(OptionalTransitionOutcome::Stasis(_)) => {
+                        return Err(anyhow!("Unexpected state after processing proposal"));
+                    }
+                    Err(e) => {
+                        return Err(anyhow!("Failed to save session transition: {}", e));
+                    }
+                }
             }
             _ => return Err(anyhow!("Unexpected sender state")),
         }
@@ -500,8 +520,28 @@ impl App {
             match res {
                 Ok(OptionalTransitionOutcome::Progress(psbt)) => {
                     println!("Proposal received. Processing...");
-                    self.process_pj_response(psbt)?;
-                    return Ok(());
+                    let proposal_session = SendSession::ProposalReceived(psbt);
+                    let transition = proposal_session.process_proposal(|psbt| {
+                        match self.process_pj_response(psbt) {
+                            Ok(_) => Ok(()),
+                            Err(e) => {
+                                tracing::debug!("PSBT processing error: {:?}", e);
+                                Err(ImplementationError::from("Payjoin processing failed"))
+                            }
+                        }
+                    });
+
+                    match transition.save(persister) {
+                        Ok(OptionalTransitionOutcome::Progress(_)) => {
+                            return Ok(());
+                        }
+                        Ok(OptionalTransitionOutcome::Stasis(_)) => {
+                            return Err(anyhow!("Unexpected state after processing proposal"));
+                        }
+                        Err(e) => {
+                            return Err(anyhow!("Failed to save session transition: {}", e));
+                        }
+                    }
                 }
                 Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
                     println!("No response yet.");

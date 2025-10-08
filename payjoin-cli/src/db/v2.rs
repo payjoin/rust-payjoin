@@ -90,9 +90,19 @@ impl SessionPersister for SenderPersister {
     fn close(&self) -> std::result::Result<(), Self::InternalStorageError> {
         let conn = self.db.get_connection()?;
 
+        let completed_event_id: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM send_session_events 
+             WHERE session_id = ?1 AND event_data LIKE '%\"Closed\"%' 
+             ORDER BY created_at DESC LIMIT 1",
+                params![*self.session_id],
+                |row| row.get(0),
+            )
+            .ok();
+
         conn.execute(
-            "UPDATE send_sessions SET completed_at = ?1 WHERE session_id = ?2",
-            params![now(), *self.session_id],
+            "UPDATE send_sessions SET completed_at = ?1, completed_event_id = ?2 WHERE session_id = ?3",
+            params![now(), completed_event_id, *self.session_id],
         )?;
 
         Ok(())
@@ -171,9 +181,19 @@ impl SessionPersister for ReceiverPersister {
     fn close(&self) -> std::result::Result<(), Self::InternalStorageError> {
         let conn = self.db.get_connection()?;
 
+        let completed_event_id: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM receive_session_events 
+             WHERE session_id = ?1 AND event_data LIKE '%\"Closed\"%' 
+             ORDER BY created_at DESC LIMIT 1",
+                params![*self.session_id],
+                |row| row.get(0),
+            )
+            .ok();
+
         conn.execute(
-            "UPDATE receive_sessions SET completed_at = ?1 WHERE session_id = ?2",
-            params![now(), *self.session_id],
+            "UPDATE receive_sessions SET completed_at = ?1, completed_event_id = ?2 WHERE session_id = ?3",
+            params![now(), completed_event_id, *self.session_id],
         )?;
 
         Ok(())

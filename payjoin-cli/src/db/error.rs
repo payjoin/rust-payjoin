@@ -14,6 +14,10 @@ pub(crate) enum Error {
     Serialize(serde_json::Error),
     #[cfg(feature = "v2")]
     Deserialize(serde_json::Error),
+    #[cfg(feature = "v2")]
+    MissingCompletedEventId {
+        session_id: i64,
+    },
 }
 
 impl fmt::Display for Error {
@@ -25,6 +29,10 @@ impl fmt::Display for Error {
             Error::Serialize(e) => write!(f, "Serialization failed: {e}"),
             #[cfg(feature = "v2")]
             Error::Deserialize(e) => write!(f, "Deserialization failed: {e}"),
+            #[cfg(feature = "v2")]
+            Error::MissingCompletedEventId { session_id } => {
+                write!(f, "completed_event_id for Session {} is none", session_id)
+            }
         }
     }
 }
@@ -38,6 +46,8 @@ impl std::error::Error for Error {
             Error::Serialize(e) => Some(e),
             #[cfg(feature = "v2")]
             Error::Deserialize(e) => Some(e),
+            #[cfg(feature = "v2")]
+            Error::MissingCompletedEventId { .. } => None,
         }
     }
 }

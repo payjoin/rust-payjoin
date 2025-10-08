@@ -976,8 +976,9 @@ dependencies = [
 
 [[package]]
 name = "corepc-client"
-version = "0.8.0"
-source = "git+https://github.com/rust-bitcoin/corepc.git?rev=0e3f028#0e3f028803dee946490e00783404d4d6397ce698"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7755b8b9219b23d166a5897b5e2d8266cbdd0de5861d351b96f6db26bcf415f3"
 dependencies = [
  "bitcoin 0.32.7",
  "corepc-types",
@@ -989,8 +990,9 @@ dependencies = [
 
 [[package]]
 name = "corepc-node"
-version = "0.8.0"
-source = "git+https://github.com/rust-bitcoin/corepc.git?rev=0e3f028#0e3f028803dee946490e00783404d4d6397ce698"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69bd382fc775f760a8b55d658527621b890eaa3d8e8bc9779864659b172e81c6"
 dependencies = [
  "anyhow",
  "bitcoin_hashes 0.14.0",
@@ -1007,8 +1009,9 @@ dependencies = [
 
 [[package]]
 name = "corepc-types"
-version = "0.8.0"
-source = "git+https://github.com/rust-bitcoin/corepc.git?rev=0e3f028#0e3f028803dee946490e00783404d4d6397ce698"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e94b68cfbafce3a4f7a0d0f3553dedcf83586f71ddf16d737694915c28823b5"
 dependencies = [
  "bitcoin 0.32.7",
  "serde",

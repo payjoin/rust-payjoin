@@ -12,8 +12,8 @@ use crate::cli::Cli;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub listen_addr: String,         // TODO tokio_listener::ListenerAddressLFlag
-    pub metrics_listen_addr: String, // TODO tokio_listener::ListenerAddressLFlag
+    pub listen_addr: String, // TODO tokio_listener::ListenerAddressLFlag
+    pub metrics_listen_addr: Option<String>, // TODO tokio_listener::ListenerAddressLFlag
     pub timeout: Duration,
     pub storage_dir: PathBuf,
     pub ohttp_keys: PathBuf, // TODO OhttpConfig struct with rotation params, etc
@@ -31,7 +31,7 @@ impl Config {
 
         Ok(Config {
             listen_addr: built_config.get("listen_addr")?,
-            metrics_listen_addr: built_config.get("metrics_listen_addr")?,
+            metrics_listen_addr: built_config.get("metrics_listen_addr").ok(),
             timeout: Duration::from_secs(built_config.get("timeout")?),
             storage_dir: built_config.get("storage_dir")?,
             ohttp_keys: built_config.get("ohttp_keys")?,
@@ -44,7 +44,7 @@ fn add_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
         .set_override_option("listen_addr", Some(format!("[::]:{}", cli.port)))?
         .set_override_option(
             "metrics_listen_addr",
-            Some(format!("localhost:{}", cli.metrics_port)),
+            cli.metrics_port.map(|port| format!("localhost:{}", port)),
         )?
         .set_override_option("timeout", Some(cli.timeout))?
         .set_override_option("ohttp_keys", Some(cli.ohttp_keys.to_string_lossy().into_owned()))?

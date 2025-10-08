@@ -68,7 +68,7 @@ impl SessionPersister for SenderPersister {
     {
         let conn = self.db.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT event_data FROM send_session_events WHERE session_id = ?1 ORDER BY created_at ASC",
+            "SELECT event_data FROM send_session_events WHERE session_id = ?1 ORDER BY id ASC",
         )?;
 
         let event_rows = stmt.query_map(params![*self.session_id], |row| {
@@ -90,9 +90,24 @@ impl SessionPersister for SenderPersister {
     fn close(&self) -> std::result::Result<(), Self::InternalStorageError> {
         let conn = self.db.get_connection()?;
 
+        let completed_event_id: i64 = match conn.query_row(
+            "SELECT id FROM send_session_events 
+             WHERE session_id = ?1 
+             AND json_extract(event_data, '$.Closed') IS NOT NULL
+             ORDER BY id DESC 
+             LIMIT 1",
+            params![*self.session_id],
+            |row| row.get(0),
+        ) {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) =>
+                return Err(Error::MissingCompletedEventId { session_id: *self.session_id }),
+            Err(e) => return Err(Error::Rusqlite(e)),
+        };
+
         conn.execute(
-            "UPDATE send_sessions SET completed_at = ?1 WHERE session_id = ?2",
-            params![now(), *self.session_id],
+            "UPDATE send_sessions SET completed_event_id = ?1 WHERE session_id = ?2",
+            params![completed_event_id, *self.session_id],
         )?;
 
         Ok(())
@@ -149,7 +164,7 @@ impl SessionPersister for ReceiverPersister {
     > {
         let conn = self.db.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT event_data FROM receive_session_events WHERE session_id = ?1 ORDER BY created_at ASC",
+            "SELECT event_data FROM receive_session_events WHERE session_id = ?1 ORDER BY id ASC",
         )?;
 
         let event_rows = stmt.query_map(params![*self.session_id], |row| {
@@ -171,9 +186,24 @@ impl SessionPersister for ReceiverPersister {
     fn close(&self) -> std::result::Result<(), Self::InternalStorageError> {
         let conn = self.db.get_connection()?;
 
+        let completed_event_id: i64 = match conn.query_row(
+            "SELECT id FROM receive_session_events 
+             WHERE session_id = ?1 
+             AND json_extract(event_data, '$.Closed') IS NOT NULL
+             ORDER BY id DESC 
+             LIMIT 1",
+            params![*self.session_id],
+            |row| row.get(0),
+        ) {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) =>
+                return Err(Error::MissingCompletedEventId { session_id: *self.session_id }),
+            Err(e) => return Err(Error::Rusqlite(e)),
+        };
+
         conn.execute(
-            "UPDATE receive_sessions SET completed_at = ?1 WHERE session_id = ?2",
-            params![now(), *self.session_id],
+            "UPDATE receive_sessions SET completed_event_id = ?1 WHERE session_id = ?2",
+            params![completed_event_id, *self.session_id],
         )?;
 
         Ok(())
@@ -183,8 +213,8 @@ impl SessionPersister for ReceiverPersister {
 impl Database {
     pub(crate) fn get_recv_session_ids(&self) -> Result<Vec<SessionId>> {
         let conn = self.get_connection()?;
-        let mut stmt =
-            conn.prepare("SELECT session_id FROM receive_sessions WHERE completed_at IS NULL")?;
+        let mut stmt = conn
+            .prepare("SELECT session_id FROM receive_sessions WHERE completed_event_id IS NULL")?;
 
         let session_rows = stmt.query_map([], |row| {
             let session_id: i64 = row.get(0)?;
@@ -203,7 +233,7 @@ impl Database {
     pub(crate) fn get_send_session_ids(&self) -> Result<Vec<SessionId>> {
         let conn = self.get_connection()?;
         let mut stmt =
-            conn.prepare("SELECT session_id FROM send_sessions WHERE completed_at IS NULL")?;
+            conn.prepare("SELECT session_id FROM send_sessions WHERE completed_event_id IS NULL")?;
 
         let session_rows = stmt.query_map([], |row| {
             let session_id: i64 = row.get(0)?;
@@ -233,7 +263,10 @@ impl Database {
     pub(crate) fn get_inactive_send_session_ids(&self) -> Result<Vec<(SessionId, u64)>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT session_id, completed_at FROM send_sessions WHERE completed_at IS NOT NULL",
+            "SELECT s.session_id, e.created_at 
+             FROM send_sessions s 
+             JOIN send_session_events e ON s.completed_event_id = e.id 
+             WHERE s.completed_event_id IS NOT NULL",
         )?;
         let session_rows = stmt.query_map([], |row| {
             let session_id: i64 = row.get(0)?;
@@ -252,7 +285,10 @@ impl Database {
     pub(crate) fn get_inactive_recv_session_ids(&self) -> Result<Vec<(SessionId, u64)>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT session_id, completed_at FROM receive_sessions WHERE completed_at IS NOT NULL",
+            "SELECT r.session_id, e.created_at 
+             FROM receive_sessions r 
+             JOIN receive_session_events e ON r.completed_event_id = e.id 
+             WHERE r.completed_event_id IS NOT NULL",
         )?;
         let session_rows = stmt.query_map([], |row| {
             let session_id: i64 = row.get(0)?;

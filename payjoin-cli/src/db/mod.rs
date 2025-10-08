@@ -38,7 +38,8 @@ impl Database {
             "CREATE TABLE IF NOT EXISTS send_sessions (
                 session_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 receiver_pubkey BLOB NOT NULL,
-                completed_at INTEGER
+                completed_event_id INTEGER,
+                FOREIGN KEY(completed_event_id) REFERENCES send_session_events(id)
             )",
             [],
         )?;
@@ -46,7 +47,8 @@ impl Database {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS receive_sessions (
                 session_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                completed_at INTEGER
+                completed_event_id INTEGER,
+                FOREIGN KEY(completed_event_id) REFERENCES receive_session_events(id)
             )",
             [],
         )?;

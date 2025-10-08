@@ -10,7 +10,7 @@ license = "MIT"
 
 [dependencies]
 bitcoin = { version = "0.32.7", features = ["base64"] }
-corepc-node = { git = "https://github.com/rust-bitcoin/corepc.git", rev = "0e3f028", features = ["download", "29_0"] }
+corepc-node = { version = "0.10.0", features = ["download", "29_0"] }
 http = "1.3.1"
 log = "0.4.27"
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }

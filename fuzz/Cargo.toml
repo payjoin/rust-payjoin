@@ -21,7 +21,15 @@ ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }
 url = { version = "2.5.4", default-features=false, features = ["serde"] }
 
 [[bin]]
-name = "uri_deserialize_pjuri"
-path = "fuzz_targets/uri/deserialize_pjuri.rs"
+name = "pjuri_roundtrip"
+path = "fuzz_targets/uri/pjuri_roundtrip.rs"
 test = false
 doc = false
+bench = false
+
+[[bin]]
+name = "psbt_roundtrip"
+path = "fuzz_targets/psbt/psbt_roundtrip.rs"
+test = false
+doc = false
+bench = false

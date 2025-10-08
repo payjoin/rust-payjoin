@@ -32,6 +32,9 @@ async fn main() -> Result<(), BoxError> {
 
     let service = Service::new(db, ohttp.into(), metrics);
 
+    let metrics_listener = TcpListener::bind(config.metrics_listen_addr).await?;
+    service.serve_metrics_tcp(metrics_listener).await?;
+
     let listener = TcpListener::bind(config.listen_addr).await?;
     service.serve_tcp(listener).await
 }

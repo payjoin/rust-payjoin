@@ -738,21 +738,49 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         // On a session resumption, the receiver will resume again in this state.
-        let _ = proposal
-            .check_payment(
-                |txid| {
-                    self.wallet()
-                        .get_raw_transaction(&txid)
-                        .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-                },
-                |outpoint| {
-                    self.wallet()
-                        .is_outpoint_spent(&outpoint)
-                        .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-                },
-            )
-            .save(persister)?;
-        Ok(())
+        let poll_interval = tokio::time::Duration::from_millis(200);
+        let timeout_duration = tokio::time::Duration::from_secs(5);
+        let start = tokio::time::Instant::now();
+
+        loop {
+            // Check if we've exceeded the wait time
+            // since the payment will eventually come through, wondering if i should just remove this check
+            if start.elapsed() >= timeout_duration {
+                return Err(anyhow!(
+                    "Timeout waiting for payment confirmation after {:?}",
+                    timeout_duration
+                ));
+            }
+
+            let result = proposal
+                .check_payment(
+                    |txid| {
+                        self.wallet()
+                            .get_raw_transaction(&txid)
+                            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+                    },
+                    |outpoint| {
+                        self.wallet()
+                            .is_outpoint_spent(&outpoint)
+                            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+                    },
+                )
+                .save(persister);
+
+            match result {
+                Ok(_) => {
+                    println!("Payment confirmed!");
+                    return Ok(());
+                }
+                Err(e) => {
+                    // Log the error but keep polling
+                    tracing::debug!("Payment check failed (will retry): {:?}", e);
+
+                    tokio::time::sleep(poll_interval).await;
+                    continue;
+                }
+            }
+        }
     }
 
     async fn unwrap_relay_or_else_fetch(

@@ -27,15 +27,70 @@ pub(crate) struct SenderPersister {
 }
 
 impl SenderPersister {
-    pub fn new(db: Arc<Database>, receiver_pubkey: HpkePublicKey) -> crate::db::Result<Self> {
+    pub fn new(
+        db: Arc<Database>,
+        receiver_pubkey: HpkePublicKey,
+        original_uri: &str,
+        bitcoin_address: &str,
+    ) -> crate::db::Result<Self> {
         let conn = db.get_connection()?;
 
-        // Create a new session in send_sessions and get its ID
-        let session_id: i64 = conn.query_row(
-            "INSERT INTO send_sessions (session_id, receiver_pubkey) VALUES (NULL, ?1) RETURNING session_id",
-            params![receiver_pubkey.to_compressed_bytes()],
-            |row| row.get(0),
-        )?;
+        // Perform duplicate checks only if the new columns exist
+        // If they don't exist yet, we'll skip the enhanced safety checks
+
+        // Try to check for duplicates with new columns, but handle gracefully if columns don't exist
+        let has_new_columns =
+            conn.prepare("SELECT original_uri, bitcoin_address FROM send_sessions LIMIT 1").is_ok();
+
+        if has_new_columns {
+            // Check for same URI with different receiver key (modified URI being retried)
+            let modified_uri: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM send_sessions WHERE original_uri = ?1 AND receiver_pubkey != ?2 AND completed_at IS NULL)",
+                params![original_uri, receiver_pubkey.to_compressed_bytes()],
+                |row| row.get(0),
+            ).unwrap_or(false);
+            if modified_uri {
+                return Err(crate::db::error::Error::DuplicateUri(original_uri.to_string()));
+            }
+
+            // Check for same receiver key with different URI (receiver key reuse)
+            let reused_rk: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM send_sessions WHERE receiver_pubkey = ?1 AND original_uri != ?2 AND completed_at IS NULL)",
+                params![receiver_pubkey.to_compressed_bytes(), original_uri],
+                |row| row.get(0),
+            ).unwrap_or(false);
+            if reused_rk {
+                return Err(crate::db::error::Error::DuplicateReceiverKey);
+            }
+
+            // Check for same bitcoin address with different receiver key (privacy issue)
+            let addr_reuse: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM send_sessions WHERE bitcoin_address = ?1 AND receiver_pubkey != ?2 AND completed_at IS NULL)",
+                params![bitcoin_address, receiver_pubkey.to_compressed_bytes()],
+                |row| row.get(0),
+            ).unwrap_or(false);
+            if addr_reuse {
+                return Err(crate::db::error::Error::DuplicateBitcoinAddress(
+                    bitcoin_address.to_string(),
+                ));
+            }
+        }
+
+        // Create a new session - use new or old schema depending on what's available
+        let session_id: i64 = if has_new_columns {
+            conn.execute(
+                "INSERT INTO send_sessions (receiver_pubkey, original_uri, bitcoin_address) VALUES (?1, ?2, ?3)",
+                params![receiver_pubkey.to_compressed_bytes(), original_uri, bitcoin_address],
+            )?;
+            conn.last_insert_rowid()
+        } else {
+            // Fallback to original schema if new columns don't exist
+            conn.execute(
+                "INSERT INTO send_sessions (receiver_pubkey) VALUES (?1)",
+                params![receiver_pubkey.to_compressed_bytes()],
+            )?;
+            conn.last_insert_rowid()
+        };
 
         Ok(Self { db, session_id: SessionId(session_id) })
     }
@@ -110,11 +165,8 @@ impl ReceiverPersister {
         let conn = db.get_connection()?;
 
         // Create a new session in receive_sessions and get its ID
-        let session_id: i64 = conn.query_row(
-            "INSERT INTO receive_sessions (session_id) VALUES (NULL) RETURNING session_id",
-            [],
-            |row| row.get(0),
-        )?;
+        conn.execute("INSERT INTO receive_sessions DEFAULT VALUES", [])?;
+        let session_id: i64 = conn.last_insert_rowid();
 
         Ok(Self { db, session_id: SessionId(session_id) })
     }

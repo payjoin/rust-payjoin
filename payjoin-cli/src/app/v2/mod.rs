@@ -225,10 +225,18 @@ impl AppTrait for App {
                     });
 
                 let (sender_state, persister) = match sender_state {
-                    Some((sender_state, persister)) => (sender_state, persister),
+                    Some((sender_state, persister)) => {
+                        // Resuming existing session - no duplicate checks needed
+                        (sender_state, persister)
+                    }
                     None => {
-                        let persister =
-                            SenderPersister::new(self.db.clone(), receiver_pubkey.clone())?;
+                        // Creating new session - perform duplicate checks
+                        let persister = SenderPersister::new(
+                            self.db.clone(),
+                            receiver_pubkey.clone(),
+                            bip21,
+                            &address.to_string(),
+                        )?;
                         let psbt = self.create_original_psbt(&address, amount, fee_rate)?;
                         let sender =
                             SenderBuilder::from_parts(psbt, pj_param, &address, Some(amount))

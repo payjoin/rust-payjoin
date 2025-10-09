@@ -34,6 +34,10 @@ impl Database {
         // Enable foreign keys
         conn.execute("PRAGMA foreign_keys = ON", [])?;
 
+        // Set locking mode to EXCLUSIVE for concurrent safety
+        conn.execute("PRAGMA locking_mode = EXCLUSIVE", [])?;
+
+        // Create send_sessions table with original schema first
         conn.execute(
             "CREATE TABLE IF NOT EXISTS send_sessions (
                 session_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,6 +46,12 @@ impl Database {
             )",
             [],
         )?;
+
+        // Add new columns if they don't exist (for migration)
+        let _ =
+            conn.execute("ALTER TABLE send_sessions ADD COLUMN original_uri TEXT DEFAULT ''", []);
+        let _ = conn
+            .execute("ALTER TABLE send_sessions ADD COLUMN bitcoin_address TEXT DEFAULT ''", []);
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS receive_sessions (

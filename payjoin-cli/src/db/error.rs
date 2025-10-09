@@ -14,6 +14,12 @@ pub(crate) enum Error {
     Serialize(serde_json::Error),
     #[cfg(feature = "v2")]
     Deserialize(serde_json::Error),
+    #[cfg(feature = "v2")]
+    DuplicateUri(String),
+    #[cfg(feature = "v2")]
+    DuplicateReceiverKey,
+    #[cfg(feature = "v2")]
+    DuplicateBitcoinAddress(String),
 }
 
 impl fmt::Display for Error {
@@ -25,6 +31,12 @@ impl fmt::Display for Error {
             Error::Serialize(e) => write!(f, "Serialization failed: {e}"),
             #[cfg(feature = "v2")]
             Error::Deserialize(e) => write!(f, "Deserialization failed: {e}"),
+            #[cfg(feature = "v2")]
+            Error::DuplicateUri(uri) => write!(f, "A session for URI '{}' has already been started. Use the 'resume' command to continue existing sessions.", uri),
+            #[cfg(feature = "v2")]
+            Error::DuplicateReceiverKey => write!(f, "A session with the same receiver key is already active. This indicates the URI may have been modified or the receiver is misbehaving."),
+            #[cfg(feature = "v2")]
+            Error::DuplicateBitcoinAddress(address) => write!(f, "A session sending to bitcoin address '{}' is already active. This is problematic for privacy, especially if both transactions are broadcast.", address),
         }
     }
 }
@@ -38,6 +50,10 @@ impl std::error::Error for Error {
             Error::Serialize(e) => Some(e),
             #[cfg(feature = "v2")]
             Error::Deserialize(e) => Some(e),
+            #[cfg(feature = "v2")]
+            Error::DuplicateUri(_)
+            | Error::DuplicateReceiverKey
+            | Error::DuplicateBitcoinAddress(_) => None,
         }
     }
 }

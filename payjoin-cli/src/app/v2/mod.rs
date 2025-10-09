@@ -738,21 +738,54 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         // On a session resumption, the receiver will resume again in this state.
-        let _ = proposal
-            .check_payment(
-                |txid| {
-                    self.wallet()
-                        .get_raw_transaction(&txid)
-                        .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-                },
-                |outpoint| {
-                    self.wallet()
-                        .is_outpoint_spent(&outpoint)
-                        .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-                },
-            )
-            .save(persister)?;
-        Ok(())
+        let poll_interval = tokio::time::Duration::from_millis(200);
+        let timeout_duration = tokio::time::Duration::from_secs(5);
+
+        let mut interval = tokio::time::interval(poll_interval);
+        interval.tick().await;
+
+        tracing::debug!("Polling for payment confirmation");
+
+        let result = tokio::time::timeout(timeout_duration, async {
+            loop {
+                interval.tick().await;
+                let check_result = proposal
+                    .check_payment(
+                        |txid| {
+                            self.wallet()
+                                .get_raw_transaction(&txid)
+                                .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+                        },
+                        |outpoint| {
+                            self.wallet()
+                                .is_outpoint_spent(&outpoint)
+                                .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+                        },
+                    )
+                    .save(persister);
+
+                match check_result {
+                    Ok(_) => {
+                        println!("Payjoin transaction detected in the mempool!");
+                        return Ok(());
+                    }
+                    Err(_) => {
+                        // keep polling
+
+                        continue;
+                    }
+                }
+            }
+        })
+        .await;
+
+        match result {
+            Ok(ok) => ok,
+            Err(_) => Err(anyhow!(
+                "Timeout waiting for payment confirmation after {:?}",
+                timeout_duration
+            )),
+        }
     }
 
     async fn unwrap_relay_or_else_fetch(

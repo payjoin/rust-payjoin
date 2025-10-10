@@ -17,5 +17,3 @@ bash ./scripts/generate_<platform>.sh
 # Run all tests
 dart test
 ```
-
-Note that you'll need Docker to run the integration tests. If you get a "Failed to start container" error, ensure the Docker engine is running on your machine.

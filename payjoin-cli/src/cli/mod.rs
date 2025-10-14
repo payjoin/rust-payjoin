@@ -76,6 +76,10 @@ pub struct Cli {
     #[arg(long = "pj-directory", help = "The directory to store payjoin requests", value_parser = value_parser!(Url))]
     pub pj_directory: Option<Url>,
 
+    #[cfg(feature = "v2")]
+    #[arg(long = "set-config", help = "Save current configuration parameters to config.toml", value_parser = value_parser!(bool))]
+    pub set_config: bool,
+
     #[cfg(feature = "_manual-tls")]
     #[arg(long = "root-certificate", help = "Specify a TLS certificate to be added as a root", value_parser = value_parser!(PathBuf))]
     pub root_certificate: Option<PathBuf>,

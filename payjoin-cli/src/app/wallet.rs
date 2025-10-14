@@ -194,6 +194,12 @@ impl BitcoindWallet {
         Ok(unspent.into_iter().map(input_pair_from_corepc).collect())
     }
 
+    /// Check if wallet has any spendable UTXOs
+    pub fn has_spendable_utxos(&self) -> Result<bool> {
+        let unspent = self.list_unspent()?;
+        Ok(!unspent.is_empty())
+    }
+
     /// Get the network this wallet is operating on
     pub fn network(&self) -> Result<Network> {
         tokio::task::block_in_place(|| {

@@ -760,25 +760,26 @@ impl Receiver<OutputsUnknown> {
         Error,
         Receiver<HasReplyableError>,
     > {
-        let owned_vouts = match self.state.original.identify_receiver_outputs(is_receiver_output) {
-            Ok(inner) => inner,
-            Err(e) => match e {
-                Error::Implementation(_) => {
-                    return MaybeFatalTransition::transient(e);
-                }
-                _ => {
-                    return MaybeFatalTransition::replyable_error(
-                        SessionEvent::GotReplyableError((&e).into()),
-                        Receiver {
-                            state: HasReplyableError { error_reply: (&e).into() },
-                            session_context: self.session_context,
-                        },
-                        e,
-                    );
-                }
-            },
-        };
-        let inner = common::WantsOutputs::new(self.state.original, owned_vouts.clone());
+        let (owned_vouts, original_payload) =
+            match self.state.original.identify_receiver_outputs(is_receiver_output) {
+                Ok((owned_vouts, original_payload)) => (owned_vouts, original_payload),
+                Err(e) => match e {
+                    Error::Implementation(_) => {
+                        return MaybeFatalTransition::transient(e);
+                    }
+                    _ => {
+                        return MaybeFatalTransition::replyable_error(
+                            SessionEvent::GotReplyableError((&e).into()),
+                            Receiver {
+                                state: HasReplyableError { error_reply: (&e).into() },
+                                session_context: self.session_context,
+                            },
+                            e,
+                        );
+                    }
+                },
+            };
+        let inner = common::WantsOutputs::new(original_payload, owned_vouts.clone());
         MaybeFatalTransition::success(
             SessionEvent::IdentifiedReceiverOutputs(owned_vouts),
             Receiver { state: WantsOutputs { inner }, session_context: self.session_context },

@@ -425,7 +425,7 @@ impl OriginalPayload {
     pub fn identify_receiver_outputs(
         &self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<Vec<usize>, Error> {
+    ) -> Result<(Vec<usize>, Self), Error> {
         let owned_vouts: Vec<usize> = self
             .psbt
             .unsigned_tx
@@ -452,8 +452,9 @@ impl OriginalPayload {
                 params.additional_fee_contribution = None;
             }
         }
+        let original_payload = Self { psbt: self.psbt.clone(), params };
 
-        Ok(owned_vouts)
+        Ok((owned_vouts, original_payload))
     }
 }
 

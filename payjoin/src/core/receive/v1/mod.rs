@@ -208,11 +208,12 @@ impl OutputsUnknown {
         self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<WantsOutputs, Error> {
-        let owned_vouts = self.original.identify_receiver_outputs(is_receiver_output)?;
+        let (owned_vouts, original_payload) =
+            self.original.identify_receiver_outputs(is_receiver_output)?;
         // In case of there being multiple outputs paying to the receiver, we select the first one
         // as the `change_vout`, which we will default to when making single output changes in
         // future mutating typestates.
-        Ok(WantsOutputs::new(self.original, owned_vouts))
+        Ok(WantsOutputs::new(original_payload, owned_vouts))
     }
 }
 

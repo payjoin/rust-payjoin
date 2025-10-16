@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::persist::{OptionalTransitionOutcome, SessionPersister};
+use payjoin::persist::{OptionalTransitionOutcome, PersistedError, SessionPersister};
 use payjoin::receive::v2::{
     replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
     MaybeInputsOwned, MaybeInputsSeen, Monitor, OutputsUnknown, PayjoinProposal,
@@ -13,8 +13,8 @@ use payjoin::receive::v2::{
     WantsOutputs,
 };
 use payjoin::send::v2::{
-    replay_event_log as replay_sender_event_log, PollingForProposal, SendSession, Sender,
-    SenderBuilder, SessionOutcome as SenderSessionOutcome, WithReplyKey,
+    replay_event_log as replay_sender_event_log, EncapsulationError, PollingForProposal,
+    SendSession, Sender, SenderBuilder, SessionOutcome as SenderSessionOutcome, WithReplyKey,
 };
 use payjoin::{ImplementationError, PjParam, Uri};
 use tokio::sync::watch;
@@ -25,7 +25,7 @@ use super::App as AppTrait;
 use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, RelayManager};
 use crate::app::{handle_interrupt, http_agent};
 use crate::db::v2::{ReceiverPersister, SenderPersister, SessionId};
-use crate::db::Database;
+use crate::db::{error as db_error, Database};
 
 mod ohttp;
 
@@ -196,18 +196,28 @@ impl AppTrait for App {
                     "Sent fallback transaction hex: {:#}",
                     payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
                 );
-                let psbt = ctx.process_response(&response.bytes().await?).map_err(|e| {
-                    tracing::debug!("Error processing response: {e:?}");
-                    anyhow!("Failed to process response {e}")
-                })?;
+                // Try to process the payjoin response
+                match ctx.process_response(&response.bytes().await?) {
+                    Ok(psbt) => {
+                        println!("Payjoin proposal received, processing...");
+                        self.process_pj_response(psbt)?;
+                        Ok(())
+                    }
+                    Err(e) => {
+                        tracing::debug!("Error processing response: {e:?}");
+                        println!("Payjoin failed: {e}. Broadcasting fallback transaction.");
 
-                self.process_pj_response(psbt)?;
-                Ok(())
+                        // Broadcast the fallback transaction
+                        let txid = self.wallet().broadcast_tx(&fallback_tx)?;
+                        println!("Fallback transaction broadcasted. TXID: {txid}");
+                        Ok(())
+                    }
+                }
             }
             PjParam::V2(pj_param) => {
                 let receiver_pubkey = pj_param.receiver_pubkey();
-                let sender_state =
-                    self.db.get_send_session_ids()?.into_iter().find_map(|session_id| {
+                let (sender_state, persister, fallback_tx) =
+                    match self.db.get_send_session_ids()?.into_iter().find_map(|session_id| {
                         let session_receiver_pubkey = self
                             .db
                             .get_send_session_receiver_pk(&session_id)
@@ -215,33 +225,38 @@ impl AppTrait for App {
                         if session_receiver_pubkey == *receiver_pubkey {
                             let sender_persister =
                                 SenderPersister::from_id(self.db.clone(), session_id);
-                            let (send_session, _) = replay_sender_event_log(&sender_persister)
-                                .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))
-                                .ok()?;
+                            let (send_session, history) =
+                                replay_sender_event_log(&sender_persister)
+                                    .map_err(|e| {
+                                        anyhow!("Failed to replay sender event log: {:?}", e)
+                                    })
+                                    .ok()?;
 
-                            Some((send_session, sender_persister))
+                            Some((send_session, sender_persister, history.fallback_tx()))
                         } else {
                             None
                         }
-                    });
+                    }) {
+                        Some((sender_state, persister, fallback_tx)) =>
+                            (sender_state, persister, fallback_tx),
+                        None => {
+                            let persister =
+                                SenderPersister::new(self.db.clone(), receiver_pubkey.clone())?;
+                            let psbt = self.create_original_psbt(&address, amount, fee_rate)?;
+                            let fallback_tx = psbt.clone().extract_tx().map_err(|e| {
+                                anyhow!("Failed to extract fallback transaction: {}", e)
+                            })?;
+                            let sender =
+                                SenderBuilder::from_parts(psbt, pj_param, &address, Some(amount))
+                                    .build_recommended(fee_rate)?
+                                    .save(&persister)?;
 
-                let (sender_state, persister) = match sender_state {
-                    Some((sender_state, persister)) => (sender_state, persister),
-                    None => {
-                        let persister =
-                            SenderPersister::new(self.db.clone(), receiver_pubkey.clone())?;
-                        let psbt = self.create_original_psbt(&address, amount, fee_rate)?;
-                        let sender =
-                            SenderBuilder::from_parts(psbt, pj_param, &address, Some(amount))
-                                .build_recommended(fee_rate)?
-                                .save(&persister)?;
-
-                        (SendSession::WithReplyKey(sender), persister)
-                    }
-                };
+                            (SendSession::WithReplyKey(sender), persister, fallback_tx)
+                        }
+                    };
                 let mut interrupt = self.interrupt.clone();
                 tokio::select! {
-                    _ = self.process_sender_session(sender_state, &persister) => return Ok(()),
+                    _ = self.process_sender_session(sender_state, &persister, &fallback_tx) => return Ok(()),
                     _ = interrupt.changed() => {
                         println!("Interrupted. Call `send` with the same arguments to resume this session or `resume` to resume all sessions.");
                         return Err(anyhow!("Interrupted"))
@@ -309,10 +324,13 @@ impl AppTrait for App {
         for session_id in send_session_ids {
             let sender_persiter = SenderPersister::from_id(self.db.clone(), session_id.clone());
             match replay_sender_event_log(&sender_persiter) {
-                Ok((sender_state, _)) => {
+                Ok((sender_state, history)) => {
+                    let fallback_tx = history.fallback_tx();
                     let self_clone = self.clone();
                     tasks.push(tokio::spawn(async move {
-                        self_clone.process_sender_session(sender_state, &sender_persiter).await
+                        self_clone
+                            .process_sender_session(sender_state, &sender_persiter, &fallback_tx)
+                            .await
                     }));
                 }
                 Err(e) => {
@@ -479,12 +497,57 @@ impl App {
         &self,
         session: SendSession,
         persister: &SenderPersister,
+        fallback_tx: &payjoin::bitcoin::Transaction,
     ) -> Result<()> {
         match session {
-            SendSession::WithReplyKey(context) =>
-                self.post_original_proposal(context, persister).await?,
-            SendSession::PollingForProposal(context) =>
-                self.get_proposed_payjoin_psbt(context, persister).await?,
+            SendSession::WithReplyKey(context) => {
+                let response = self.post_original_proposal(context, persister).await;
+                match response {
+                    Ok(_) => {
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        if let Some(persisted_error) = e.downcast_ref::<PersistedError<
+                            EncapsulationError,
+                            db_error::Error,
+                            (),
+                        >>() {
+                            if let Some(api_error) = persisted_error.api_error_ref() {
+                                println!("Error posting original proposal: {api_error}");
+                                let txid = self.wallet().broadcast_tx(fallback_tx)?;
+                                println!("Fallback transaction broadcasted. TXID: {txid}");
+                                return Err(anyhow!(
+                                    "Fallback transaction broadcasted due to: {api_error}"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            SendSession::PollingForProposal(context) => {
+                let response = self.get_proposed_payjoin_psbt(context, persister).await;
+                match response {
+                    Ok(_) => {
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        if let Some(persisted_error) = e.downcast_ref::<PersistedError<
+                            EncapsulationError,
+                            db_error::Error,
+                            (),
+                        >>() {
+                            if let Some(api_error) = persisted_error.api_error_ref() {
+                                println!("Error getting proposed payjoin psbt: {api_error}");
+                                let txid = self.wallet().broadcast_tx(fallback_tx)?;
+                                println!("Fallback transaction broadcasted. TXID: {txid}");
+                                return Err(anyhow!(
+                                    "Error getting proposed payjoin psbt: {api_error}"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
             SendSession::Closed(SenderSessionOutcome::Success(proposal)) => {
                 self.process_pj_response(proposal)?;
                 return Ok(());

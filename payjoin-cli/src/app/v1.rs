@@ -86,13 +86,22 @@ impl AppTrait for App {
             "Sent fallback transaction hex: {:#}",
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
         );
-        let psbt = ctx.process_response(&response.bytes().await?).map_err(|e| {
-            tracing::debug!("Error processing response: {e:?}");
-            anyhow!("Failed to process response {e}")
-        })?;
+        // Try to process the payjoin response
+        match ctx.process_response(&response.bytes().await?) {
+            Ok(psbt) => {
+                self.process_pj_response(psbt)?;
+                Ok(())
+            }
+            Err(e) => {
+                tracing::debug!("Error processing response: {e:?}");
+                println!("Payjoin failed: {e}. Broadcasting fallback transaction.");
 
-        self.process_pj_response(psbt)?;
-        Ok(())
+                // Broadcast the fallback transaction
+                let txid = self.wallet().broadcast_tx(&fallback_tx)?;
+                println!("Fallback transaction broadcasted. TXID: {txid}");
+                Ok(())
+            }
+        }
     }
 
     #[allow(clippy::incompatible_msrv)]

@@ -206,6 +206,24 @@ pub struct SessionContext {
     pub(crate) reply_key: HpkeSecretKey,
 }
 
+impl SessionContext {
+    fn full_relay_url(&self, ohttp_relay: impl IntoUrl) -> Result<Url, InternalCreateRequestError> {
+        let relay_base = ohttp_relay.into_url().map_err(InternalCreateRequestError::Url)?;
+
+        // Only reveal scheme and authority to the relay
+        let directory_base = self
+            .pj_param
+            .endpoint()
+            .join("/")
+            .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
+
+        // Append that information as a path to the relay URL
+        relay_base
+            .join(&format!("/{directory_base}"))
+            .map_err(|e| InternalCreateRequestError::Url(e.into()))
+    }
+}
+
 impl<State> core::ops::Deref for Sender<State> {
     type Target = State;
 
@@ -444,8 +462,7 @@ impl Sender<PollingForProposal> {
         let (body, ohttp_ctx) = ohttp_encapsulate(ohttp_keys, "GET", url.as_str(), Some(&body))
             .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
 
-        let url = ohttp_relay.into_url().map_err(InternalCreateRequestError::Url)?;
-        Ok((Request::new_v2(&url, &body), ohttp_ctx))
+        Ok((Request::new_v2(&self.session_context.full_relay_url(ohttp_relay)?, &body), ohttp_ctx))
     }
 
     /// Processes the response for the final GET message from the sender client

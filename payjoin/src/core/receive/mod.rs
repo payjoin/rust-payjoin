@@ -423,9 +423,9 @@ impl OriginalPayload {
     }
 
     pub fn identify_receiver_outputs(
-        &self,
+        self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<Vec<usize>, Error> {
+    ) -> Result<common::WantsOutputs, Error> {
         let owned_vouts: Vec<usize> = self
             .psbt
             .unsigned_tx
@@ -448,12 +448,13 @@ impl OriginalPayload {
         if let Some((_, additional_fee_output_index)) = params.additional_fee_contribution {
             // If the additional fee output index specified by the sender is pointing to a receiver output,
             // the receiver should ignore the parameter.
+            // https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#optional-parameters
             if owned_vouts.contains(&additional_fee_output_index) {
                 params.additional_fee_contribution = None;
             }
         }
-
-        Ok(owned_vouts)
+        let original_payload = OriginalPayload { params, ..self.clone() };
+        Ok(common::WantsOutputs::new(original_payload, owned_vouts))
     }
 }
 
@@ -765,5 +766,40 @@ pub(crate) mod tests {
             InputPair::new_p2tr(p2sh_txout, outpoint, Some(sequence)).err().unwrap(),
             PsbtInputError::from(InvalidScriptPubKey(AddressType::P2tr))
         )
+    }
+
+    #[test]
+    fn test_identify_receiver_outputs() {
+        let original = original_from_test_vector();
+
+        // Simple check that it correctly identifies the owned vouts and leaves params unchanged
+        let wants_outputs = original
+            .clone()
+            .identify_receiver_outputs(&mut |script| {
+                Ok(script == &PARSED_ORIGINAL_PSBT.unsigned_tx.output[1].script_pubkey)
+            })
+            .expect("receiver outputs should be identified");
+        assert_eq!(wants_outputs.owned_vouts, vec![1]);
+        assert_eq!(wants_outputs.params, original.params);
+
+        // No outputs belong to the receiver, it should error
+        let wants_outputs = original
+            .clone()
+            .identify_receiver_outputs(&mut |_| Ok(false))
+            .expect_err("should error");
+        assert_eq!(wants_outputs.to_string(), "Protocol error: Missing payment.");
+
+        // Fee contribution output belongs to the receiver, it should correctly identify owned
+        // vouts and ignore the additional fee contribution param
+        let params = Params {
+            additional_fee_contribution: Some((Amount::from_sat(182), 1)),
+            ..original.params
+        };
+        let original = OriginalPayload { params, ..original };
+        let wants_outputs = original
+            .identify_receiver_outputs(&mut |_| Ok(true))
+            .expect("receiver outputs should be identified");
+        assert_eq!(wants_outputs.owned_vouts, vec![0, 1]);
+        assert_eq!(wants_outputs.params.additional_fee_contribution, None);
     }
 }

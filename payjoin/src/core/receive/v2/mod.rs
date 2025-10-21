@@ -760,7 +760,7 @@ impl Receiver<OutputsUnknown> {
         Error,
         Receiver<HasReplyableError>,
     > {
-        let owned_vouts = match self.state.original.identify_receiver_outputs(is_receiver_output) {
+        let inner = match self.state.original.identify_receiver_outputs(is_receiver_output) {
             Ok(inner) => inner,
             Err(e) => match e {
                 Error::Implementation(_) => {
@@ -778,9 +778,8 @@ impl Receiver<OutputsUnknown> {
                 }
             },
         };
-        let inner = common::WantsOutputs::new(self.state.original, owned_vouts.clone());
         MaybeFatalTransition::success(
-            SessionEvent::IdentifiedReceiverOutputs(owned_vouts),
+            SessionEvent::IdentifiedReceiverOutputs(inner.owned_vouts.clone()),
             Receiver { state: WantsOutputs { inner }, session_context: self.session_context },
         )
     }

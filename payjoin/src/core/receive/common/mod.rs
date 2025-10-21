@@ -32,7 +32,7 @@ use crate::receive::{InternalPayloadError, OriginalPayload, PsbtContext};
 pub struct WantsOutputs {
     original_psbt: Psbt,
     pub(super) payjoin_psbt: Psbt,
-    params: Params,
+    pub(super) params: Params,
     change_vout: usize,
     pub(super) owned_vouts: Vec<usize>,
 }

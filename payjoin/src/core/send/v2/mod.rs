@@ -47,7 +47,7 @@ use crate::persist::{
 };
 use crate::uri::v2::PjParam;
 use crate::uri::ShortId;
-use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
+use crate::{HpkeKeyPair, IntoUrl, PjUri, Request};
 
 mod error;
 mod session;
@@ -206,6 +206,24 @@ pub struct SessionContext {
     pub(crate) reply_key: HpkeSecretKey,
 }
 
+impl SessionContext {
+    fn full_relay_url(&self, ohttp_relay: impl IntoUrl) -> Result<Url, InternalCreateRequestError> {
+        let relay_base = ohttp_relay.into_url().map_err(InternalCreateRequestError::Url)?;
+
+        // Only reveal scheme and authority to the relay
+        let directory_base = self
+            .pj_param
+            .endpoint()
+            .join("/")
+            .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
+
+        // Append that information as a path to the relay URL
+        relay_base
+            .join(&format!("/{directory_base}"))
+            .map_err(|e| InternalCreateRequestError::Url(e.into()))
+    }
+}
+
 impl<State> core::ops::Deref for Sender<State> {
     type Target = State;
 
@@ -304,16 +322,7 @@ impl Sender<WithReplyKey> {
             self.session_context.psbt_ctx.fee_contribution,
             self.session_context.psbt_ctx.min_fee_rate,
         )?;
-        let base_url = self.session_context.pj_param.endpoint().clone();
-        let ohttp_keys = self.session_context.pj_param.ohttp_keys();
-        let (request, ohttp_ctx) = extract_request(
-            ohttp_relay,
-            self.session_context.reply_key.clone(),
-            body,
-            base_url,
-            self.session_context.pj_param.receiver_pubkey().clone(),
-            ohttp_keys,
-        )?;
+        let (request, ohttp_ctx) = extract_request(&self.session_context, ohttp_relay, body)?;
         Ok((request, ohttp_ctx))
     }
 
@@ -360,29 +369,27 @@ impl Sender<WithReplyKey> {
 }
 
 pub(crate) fn extract_request(
+    session_context: &SessionContext,
     ohttp_relay: impl IntoUrl,
-    reply_key: HpkeSecretKey,
     body: Vec<u8>,
-    url: Url,
-    receiver_pubkey: HpkePublicKey,
-    ohttp_keys: &OhttpKeys,
 ) -> Result<(Request, ClientResponse), CreateRequestError> {
-    let ohttp_relay = ohttp_relay.into_url()?;
     let body = encrypt_message_a(
         body,
-        &HpkeKeyPair::from_secret_key(&reply_key).public_key().clone(),
-        &receiver_pubkey,
+        &HpkeKeyPair::from_secret_key(&session_context.reply_key).public_key().clone(),
+        session_context.pj_param.receiver_pubkey(),
     )
     .map_err(InternalCreateRequestError::Hpke)?;
 
-    let (body, ohttp_ctx) = ohttp_encapsulate(ohttp_keys, "POST", url.as_str(), Some(&body))
-        .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
-    tracing::debug!("ohttp_relay_url: {ohttp_relay:?}");
-    let directory_base = url.join("/").map_err(|e| InternalCreateRequestError::Url(e.into()))?;
-    let full_ohttp_relay = ohttp_relay
-        .join(&format!("/{directory_base}"))
-        .map_err(|e| InternalCreateRequestError::Url(e.into()))?;
-    let request = Request::new_v2(&full_ohttp_relay, &body);
+    let (body, ohttp_ctx) = ohttp_encapsulate(
+        session_context.pj_param.ohttp_keys(),
+        "POST",
+        session_context.pj_param.endpoint().as_str(),
+        Some(&body),
+    )
+    .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
+    let full_relay_url = session_context.full_relay_url(ohttp_relay)?;
+    tracing::debug!("ohttp_relay_url: {full_relay_url:?}");
+    let request = Request::new_v2(&full_relay_url, &body);
     Ok((request, ohttp_ctx))
 }
 
@@ -444,8 +451,7 @@ impl Sender<PollingForProposal> {
         let (body, ohttp_ctx) = ohttp_encapsulate(ohttp_keys, "GET", url.as_str(), Some(&body))
             .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
 
-        let url = ohttp_relay.into_url().map_err(InternalCreateRequestError::Url)?;
-        Ok((Request::new_v2(&url, &body), ohttp_ctx))
+        Ok((Request::new_v2(&self.session_context.full_relay_url(ohttp_relay)?, &body), ohttp_ctx))
     }
 
     /// Processes the response for the final GET message from the sender client

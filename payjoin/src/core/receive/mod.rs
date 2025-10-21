@@ -425,7 +425,7 @@ impl OriginalPayload {
     pub fn identify_receiver_outputs(
         &self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<Vec<usize>, Error> {
+    ) -> Result<common::WantsOutputs, Error> {
         let owned_vouts: Vec<usize> = self
             .psbt
             .unsigned_tx
@@ -448,12 +448,13 @@ impl OriginalPayload {
         if let Some((_, additional_fee_output_index)) = params.additional_fee_contribution {
             // If the additional fee output index specified by the sender is pointing to a receiver output,
             // the receiver should ignore the parameter.
+            // https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#optional-parameters
             if owned_vouts.contains(&additional_fee_output_index) {
                 params.additional_fee_contribution = None;
             }
         }
-
-        Ok(owned_vouts)
+        let original_payload = OriginalPayload { params, ..self.clone() };
+        Ok(common::WantsOutputs::new(original_payload, owned_vouts))
     }
 }
 

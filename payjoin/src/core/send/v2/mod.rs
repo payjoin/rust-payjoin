@@ -247,7 +247,6 @@ impl<State> Sender<State> {
 pub enum SendSession {
     WithReplyKey(Sender<WithReplyKey>),
     PollingForProposal(Sender<PollingForProposal>),
-    ProposalReceived(Psbt),
     Closed(SessionOutcome),
 }
 
@@ -265,8 +264,8 @@ impl SendSession {
                 Ok(state.apply_polling_for_proposal()),
             (
                 SendSession::PollingForProposal(_state),
-                SessionEvent::ReceivedProposalPsbt(proposal),
-            ) => Ok(SendSession::ProposalReceived(proposal)),
+                SessionEvent::Closed(SessionOutcome::Success(proposal)),
+            ) => Ok(SendSession::Closed(SessionOutcome::Success(proposal))),
             (_, SessionEvent::Closed(session_outcome)) => Ok(SendSession::Closed(session_outcome)),
             (current_state, event) => Err(InternalReplayError::InvalidEvent(
                 Box::new(event),
@@ -530,7 +529,7 @@ impl Sender<PollingForProposal> {
 
         MaybeSuccessTransitionWithNoResults::success(
             processed_proposal.clone(),
-            SessionEvent::ReceivedProposalPsbt(processed_proposal),
+            SessionEvent::Closed(SessionOutcome::Success(processed_proposal)),
         )
     }
 }

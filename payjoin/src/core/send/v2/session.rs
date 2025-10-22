@@ -85,7 +85,7 @@ impl SessionHistory {
 
         match self.events.last() {
             Some(SessionEvent::Closed(outcome)) => match outcome {
-                SessionOutcome::Success => SessionStatus::Completed,
+                SessionOutcome::Success(_) => SessionStatus::Completed,
                 SessionOutcome::Failure | SessionOutcome::Cancel => SessionStatus::Failed,
             },
             _ => SessionStatus::Active,
@@ -109,8 +109,6 @@ pub enum SessionEvent {
     Created(Box<SessionContext>),
     /// Sender POSTed the Original PSBT and is waiting to receive a Proposal PSBT
     PostedOriginalPsbt(),
-    /// Sender received a Proposal PSBT
-    ReceivedProposalPsbt(bitcoin::Psbt),
     /// Closed successful or failed session
     Closed(SessionOutcome),
 }
@@ -119,7 +117,7 @@ pub enum SessionEvent {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum SessionOutcome {
     /// Successful payjoin
-    Success,
+    Success(bitcoin::Psbt),
     /// Payjoin failed to complete due to a counterparty deviation from the protocol
     Failure,
     /// Payjoin was cancelled by the user
@@ -178,8 +176,7 @@ mod tests {
         let test_cases = vec![
             SessionEvent::Created(Box::new(sender_with_reply_key.session_context.clone())),
             SessionEvent::PostedOriginalPsbt(),
-            SessionEvent::ReceivedProposalPsbt(PARSED_ORIGINAL_PSBT.clone()),
-            SessionEvent::Closed(SessionOutcome::Success),
+            SessionEvent::Closed(SessionOutcome::Success(PARSED_ORIGINAL_PSBT.clone())),
             SessionEvent::Closed(SessionOutcome::Failure),
             SessionEvent::Closed(SessionOutcome::Cancel),
         ];
@@ -353,7 +350,7 @@ mod tests {
 
         let events = vec![
             SessionEvent::Created(Box::new(with_reply_key.session_context.clone())),
-            SessionEvent::Closed(SessionOutcome::Success),
+            SessionEvent::Closed(SessionOutcome::Success(PARSED_ORIGINAL_PSBT.clone())),
         ];
 
         let session = SessionHistory { events };

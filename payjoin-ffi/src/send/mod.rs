@@ -72,7 +72,6 @@ impl From<SenderSessionOutcome> for payjoin::send::v2::SessionOutcome {
 pub enum SendSession {
     WithReplyKey { inner: Arc<WithReplyKey> },
     PollingForProposal { inner: Arc<PollingForProposal> },
-    ProposalReceived { inner: Arc<Psbt> },
     Closed { inner: Arc<SenderSessionOutcome> },
 }
 
@@ -84,8 +83,6 @@ impl From<payjoin::send::v2::SendSession> for SendSession {
                 Self::WithReplyKey { inner: Arc::new(inner.into()) },
             SendSession::PollingForProposal(inner) =>
                 Self::PollingForProposal { inner: Arc::new(inner.into()) },
-            SendSession::ProposalReceived(inner) =>
-                Self::ProposalReceived { inner: Arc::new(inner.into()) },
             SendSession::Closed(session_outcome) =>
                 Self::Closed { inner: Arc::new(session_outcome.into()) },
         }

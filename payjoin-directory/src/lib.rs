@@ -159,6 +159,7 @@ impl<D: Db> Service<D> {
     where
         I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
     {
+        self.metrics.record_connection();
         if let Err(err) =
             http1::Builder::new().serve_connection(TokioIo::new(stream), self).with_upgrades().await
         {

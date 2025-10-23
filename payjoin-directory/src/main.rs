@@ -32,9 +32,17 @@ async fn main() -> Result<(), BoxError> {
 
     let service = Service::new(db, ohttp.into(), metrics);
 
+    // Start metrics server in the background
     if let Some(addr) = config.metrics_listen_addr {
-        let metrics_listener = TcpListener::bind(addr).await?;
-        service.serve_metrics_tcp(metrics_listener).await?;
+        let metrics_listener = TcpListener::bind(addr.clone()).await?;
+        let service_clone = service.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = service_clone.serve_metrics_tcp(metrics_listener).await {
+                eprintln!("Metrics server error: {e}");
+            }
+            println!("Metrics server started on {}", addr);
+        });
     }
 
     let listener = TcpListener::bind(config.listen_addr).await?;

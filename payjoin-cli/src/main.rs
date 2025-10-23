@@ -20,6 +20,11 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_target(true).with_level(true).with_env_filter(env_filter).init();
 
     let cli = Cli::parse();
+
+    #[cfg(feature = "v2")]
+    if cli.set_config {
+        Config::save_config(&cli)?;
+    }
     let config = Config::new(&cli)?;
 
     #[allow(clippy::if_same_then_else)]

@@ -1,0 +1,11 @@
+name : Payjoin directory health check
+on:
+  schedule:
+    - cron: "*/15 * * * *" # Every 15 minutes
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check /health endpoint
+        run: cd payjoin-directory && bash contrib/health-check.sh

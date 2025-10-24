@@ -195,13 +195,23 @@ impl AppTrait for App {
                     "Sent fallback transaction hex: {:#}",
                     payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
                 );
-                let psbt = ctx.process_response(&response.bytes().await?).map_err(|e| {
-                    tracing::debug!("Error processing response: {e:?}");
-                    anyhow!("Failed to process response {e}")
-                })?;
+                // Try to process the payjoin response
+                match ctx.process_response(&response.bytes().await?.to_vec()) {
+                    Ok(psbt) => {
+                        println!("Payjoin proposal received, processing...");
+                        self.process_pj_response(psbt)?;
+                        Ok(())
+                    }
+                    Err(e) => {
+                        tracing::debug!("Error processing response: {e:?}");
+                        println!("Payjoin failed: {}. Broadcasting fallback transaction.", e);
 
-                self.process_pj_response(psbt)?;
-                Ok(())
+                        // Broadcast the fallback transaction
+                        let txid = self.wallet().broadcast_tx(&fallback_tx)?;
+                        println!("Fallback transaction broadcasted. TXID: {}", txid);
+                        Ok(())
+                    }
+                }
             }
             PjParam::V2(pj_param) => {
                 let receiver_pubkey = pj_param.receiver_pubkey();

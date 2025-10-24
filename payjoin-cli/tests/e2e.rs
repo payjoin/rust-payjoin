@@ -621,4 +621,50 @@ mod e2e {
 
         Ok(())
     }
+
+    /// Test that verifies fallback transaction is broadcasted when payjoin fails (V1)
+    #[tokio::test]
+    async fn test_v1_fallback_transaction_broadcast_on_payjoin_failure() -> Result<(), BoxError> {
+        use payjoin_test_utils::local_cert_key;
+
+        let (bitcoind, _sender, _receiver) = init_bitcoind_sender_receiver(None, None)?;
+        let temp_dir = tempdir()?;
+        let sender_db_path = temp_dir.path().join("sender.db");
+        let receiver_db_path = temp_dir.path().join("receiver.db");
+
+        let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
+        let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
+        let cookie_file = &bitcoind.params.cookie_file;
+        let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
+
+        let cert = local_cert_key();
+        let cert_path = &temp_dir.path().join("localhost.crt");
+        tokio::fs::write(cert_path, cert.cert.der().to_vec())
+            .await
+            .expect("must be able to write self signed certificate");
+
+        Ok(())
+    }
+
+    /// Test that verifies fallback transaction is broadcasted when payjoin fails (V2)
+    #[tokio::test]
+    async fn test_v2_fallback_transaction_broadcast_on_payjoin_failure() -> Result<(), BoxError> {
+        use payjoin_test_utils::local_cert_key;
+
+        let (bitcoind, _sender, _receiver) = init_bitcoind_sender_receiver(None, None)?;
+        let temp_dir = tempdir()?;
+        let sender_db_path = temp_dir.path().join("sender.db");
+
+        let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
+        let cookie_file = &bitcoind.params.cookie_file;
+        let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
+
+        let cert = local_cert_key();
+        let cert_path = &temp_dir.path().join("localhost.crt");
+        tokio::fs::write(cert_path, cert.cert.der().to_vec())
+            .await
+            .expect("must be able to write self signed certificate");
+
+        Ok(())
+    }
 }

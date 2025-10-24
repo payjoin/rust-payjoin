@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::persist::OptionalTransitionOutcome;
+use payjoin::persist::{OptionalTransitionOutcome, SessionPersister};
 use payjoin::receive::v2::{
     replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
     MaybeInputsOwned, MaybeInputsSeen, Monitor, OutputsUnknown, PayjoinProposal,
@@ -286,26 +286,38 @@ impl AppTrait for App {
 
         let mut tasks = Vec::new();
 
+        // Process receiver sessions
         for session_id in recv_session_ids {
             let self_clone = self.clone();
-            let recv_persister = ReceiverPersister::from_id(self.db.clone(), session_id);
-            let receiver_state = replay_receiver_event_log(&recv_persister)
-                .map_err(|e| anyhow!("Failed to replay receiver event log: {:?}", e))?
-                .0;
-            tasks.push(tokio::spawn(async move {
-                self_clone.process_receiver_session(receiver_state, &recv_persister).await
-            }));
+            let recv_persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
+            match replay_receiver_event_log(&recv_persister) {
+                Ok((receiver_state, _)) => {
+                    tasks.push(tokio::spawn(async move {
+                        self_clone.process_receiver_session(receiver_state, &recv_persister).await
+                    }));
+                }
+                Err(e) => {
+                    tracing::error!("An error {:?} occurred while replaying receiver session", e);
+                    Self::close_failed_session(&recv_persister, &session_id, "receiver");
+                }
+            }
         }
 
+        // Process sender sessions
         for session_id in send_session_ids {
-            let sender_persiter = SenderPersister::from_id(self.db.clone(), session_id);
-            let sender_state = replay_sender_event_log(&sender_persiter)
-                .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))?
-                .0;
-            let self_clone = self.clone();
-            tasks.push(tokio::spawn(async move {
-                self_clone.process_sender_session(sender_state, &sender_persiter).await
-            }));
+            let sender_persiter = SenderPersister::from_id(self.db.clone(), session_id.clone());
+            match replay_sender_event_log(&sender_persiter) {
+                Ok((sender_state, _)) => {
+                    let self_clone = self.clone();
+                    tasks.push(tokio::spawn(async move {
+                        self_clone.process_sender_session(sender_state, &sender_persiter).await
+                    }));
+                }
+                Err(e) => {
+                    tracing::error!("An error {:?} occurred while replaying Sender session", e);
+                    Self::close_failed_session(&sender_persiter, &session_id, "sender");
+                }
+            }
         }
 
         let mut interrupt = self.interrupt.clone();
@@ -450,6 +462,17 @@ impl AppTrait for App {
 }
 
 impl App {
+    fn close_failed_session<P>(persister: &P, session_id: &SessionId, role: &str)
+    where
+        P: SessionPersister,
+    {
+        if let Err(close_err) = SessionPersister::close(persister) {
+            tracing::error!("Failed to close {} session {}: {:?}", role, session_id, close_err);
+        } else {
+            tracing::error!("Closed failed {} session: {}", role, session_id);
+        }
+    }
+
     async fn process_sender_session(
         &self,
         session: SendSession,

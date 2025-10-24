@@ -30,6 +30,11 @@ jobs:
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
       - name: Install a specific version of uv
         uses: astral-sh/setup-uv@v6
         with:

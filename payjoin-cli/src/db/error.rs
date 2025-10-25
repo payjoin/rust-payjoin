@@ -65,3 +65,7 @@ impl From<serde_json::Error> for Error {
 impl From<Error> for ImplementationError {
     fn from(error: Error) -> Self { ImplementationError::new(error) }
 }
+
+impl From<String> for Error {
+    fn from(msg: String) -> Self { Error::Rusqlite(rusqlite::Error::InvalidParameterName(msg)) }
+}

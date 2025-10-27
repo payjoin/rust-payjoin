@@ -52,10 +52,9 @@ impl StatusText for SendSession {
         match self {
             SendSession::WithReplyKey(_) | SendSession::PollingForProposal(_) =>
                 "Waiting for proposal",
-            SendSession::ProposalReceived(_) => "Proposal received",
             SendSession::Closed(session_outcome) => match session_outcome {
                 SenderSessionOutcome::Failure => "Session failure",
-                SenderSessionOutcome::Success => "Session success",
+                SenderSessionOutcome::Success(_) => "Session success",
                 SenderSessionOutcome::Cancel => "Session cancelled",
             },
         }
@@ -461,7 +460,7 @@ impl App {
                 self.post_original_proposal(context, persister).await?,
             SendSession::PollingForProposal(context) =>
                 self.get_proposed_payjoin_psbt(context, persister).await?,
-            SendSession::ProposalReceived(proposal) => {
+            SendSession::Closed(SenderSessionOutcome::Success(proposal)) => {
                 self.process_pj_response(proposal)?;
                 return Ok(());
             }

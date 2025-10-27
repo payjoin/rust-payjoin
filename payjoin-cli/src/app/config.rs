@@ -204,6 +204,84 @@ impl Config {
         Ok(config)
     }
 
+    #[cfg(feature = "v2")]
+    pub fn save_config(cli: &Cli) -> Result<(), anyhow::Error> {
+        let version = Self::determine_version(cli)
+            .map_err(|e| anyhow::anyhow!("Failed to determine version: {e}"))?;
+
+        if version != Version::Two {
+            return Err(anyhow::anyhow!("--set-config is only available for bip77 (v2) mode"));
+        }
+
+        if cli.ohttp_relays.is_none() || cli.pj_directory.is_none() {
+            return Err(anyhow::anyhow!(
+                "--set-config requires ALL of: \
+                 --pj-directory, --ohttp-relays"
+            ));
+        }
+
+        let cookie_provided = cli.cookie_file.is_some();
+        let rpc_provided =
+            cli.rpcuser.is_some() && cli.rpcpassword.is_some() && cli.rpchost.is_some();
+
+        // Ensure all required parameters are present
+
+        if !(cookie_provided || rpc_provided) {
+            return Err(anyhow::anyhow!(
+                "--set-config requires ALL of: \
+                 --rpcuser, --rpcpassword, --rpchost, or \
+                 --cookie-file"
+            ));
+        }
+
+        // Build the TOML map , this feels a bit hacky but it works
+        let mut toml_map = toml::map::Map::new();
+        let mut bitcoind_map = toml::map::Map::new();
+
+        bitcoind_map.insert("rpcuser".into(), toml::Value::String(cli.rpcuser.clone().unwrap()));
+        bitcoind_map
+            .insert("rpcpassword".into(), toml::Value::String(cli.rpcpassword.clone().unwrap()));
+        bitcoind_map.insert(
+            "rpchost".into(),
+            toml::Value::String(cli.rpchost.clone().unwrap().to_string()),
+        );
+        toml_map.insert("bitcoind".into(), toml::Value::Table(bitcoind_map));
+
+        let mut v2_map = toml::map::Map::new();
+        v2_map.insert(
+            "pj_directory".into(),
+            toml::Value::String(cli.pj_directory.as_ref().unwrap().to_string()),
+        );
+        let relay_list: Vec<toml::Value> = cli
+            .ohttp_relays
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|url| toml::Value::String(url.to_string()))
+            .collect();
+        v2_map.insert("ohttp_relays".into(), toml::Value::Array(relay_list));
+        toml_map.insert("v2".into(), toml::Value::Table(v2_map));
+
+        let toml_content = toml::Value::Table(toml_map);
+        let toml_str = toml::to_string_pretty(&toml_content)?;
+
+        let config_path = std::env::current_dir()?.join("config.toml");
+        let final_path = if !config_path.exists() {
+            if let Some(config_dir) = dirs::config_dir() {
+                let global_dir = config_dir.join(CONFIG_DIR);
+                std::fs::create_dir_all(&global_dir)?;
+                global_dir.join("config.toml")
+            } else {
+                config_path
+            }
+        } else {
+            config_path
+        };
+
+        std::fs::write(final_path, toml_str)?;
+        Ok(())
+    }
+
     #[cfg(feature = "v1")]
     pub fn v1(&self) -> Result<&V1Config, anyhow::Error> {
         match &self.version {

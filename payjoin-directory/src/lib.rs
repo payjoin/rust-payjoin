@@ -187,7 +187,6 @@ impl<D: Db> Service<D> {
             (Method::POST, ["", id]) => self.post_fallback_v1(id, query, body).await,
             (Method::GET, ["", "health"]) => health_check().await,
             (Method::GET, ["", ""]) => handle_directory_home_path().await,
-            (Method::GET, ["", "metrics"]) => Ok(self.handle_metrics().await),
             _ => Ok(not_found()),
         }
         .unwrap_or_else(|e| e.to_response());
@@ -423,6 +422,10 @@ impl<D: Db> Service<D> {
             let io = TokioIo::new(stream);
             let service = self.clone();
             tokio::spawn(async move {
+                let service = hyper::service::service_fn(move |req| {
+                    let this = service.clone();
+                    async move { this.serve_metrics_request(req).await }
+                });
                 if let Err(err) =
                     http1::Builder::new().serve_connection(io, service).with_upgrades().await
                 {
@@ -432,6 +435,22 @@ impl<D: Db> Service<D> {
         }
 
         Ok(())
+    }
+
+    async fn serve_metrics_request(
+        &self,
+        req: Request<Incoming>,
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, anyhow::Error> {
+        let path = req.uri().path().to_string();
+        let (parts, _body) = req.into_parts();
+
+        let path_segments: Vec<&str> = path.split('/').collect();
+        let response = match (parts.method, path_segments.as_slice()) {
+            (Method::GET, ["", ""]) => self.handle_metrics().await,
+            _ => not_found(),
+        };
+
+        Ok(response)
     }
 }
 

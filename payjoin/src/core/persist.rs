@@ -468,8 +468,8 @@ trait InternalSessionPersister: SessionPersister {
             }
             MaybeFatalOrSuccessTransition::NoResults(current_state) =>
                 Ok(OptionalTransitionOutcome::Stasis(current_state)),
-            MaybeFatalOrSuccessTransition::Fatal(RejectFatal(event, error)) =>
-                Err(self.handle_fatal_reject(RejectFatal(event, error)).into()),
+            MaybeFatalOrSuccessTransition::Fatal(reject_fatal) =>
+                Err(self.handle_fatal_reject(reject_fatal).into()),
             MaybeFatalOrSuccessTransition::Transient(RejectTransient(err)) =>
                 Err(InternalPersistedError::Transient(err).into()),
         }
@@ -501,8 +501,8 @@ trait InternalSessionPersister: SessionPersister {
             }
             Err(Rejection::Transient(RejectTransient(err))) =>
                 Err(InternalPersistedError::Transient(err).into()),
-            Err(Rejection::Fatal(RejectFatal(event, err))) =>
-                Err(self.handle_fatal_reject(RejectFatal(event, err)).into()),
+            Err(Rejection::Fatal(reject_fatal)) =>
+                Err(self.handle_fatal_reject(reject_fatal).into()),
             Err(Rejection::ReplyableError(reject_replyable_error)) =>
                 Err(self.handle_replyable_error_reject(reject_replyable_error).into()),
         }

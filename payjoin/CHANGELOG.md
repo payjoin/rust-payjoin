@@ -1,5 +1,14 @@
 # Payjoin Changelog
 
+## 1.0.0-rc.1
+
+This release candidate fixes a BIP78 spec compliance bug, and an issue with the BIP77 sender when polling an arbitrary relay via RFC9540.
+It also removes a redundant Sender SessionEvent.
+
+- Fix identify_receiver_outputs (#1168)
+- Use full_relay_url in sender GET request (#1166)
+- Remove `ReceivedProposalPsbt` infavor of session outcome (#1171)
+
 ## 1.0.0-rc.0
 
 Introduce monitoring typestates, replyable error handling, and other updates for more robust session lifecycle management.

@@ -212,7 +212,6 @@ mod e2e {
             let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
             let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
             let cookie_file = &bitcoind.params.cookie_file;
-            let pj_endpoint = "https://localhost";
             let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
 
             let cert = local_cert_key();

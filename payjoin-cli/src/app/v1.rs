@@ -70,7 +70,7 @@ impl AppTrait for App {
             .create_v1_post_request();
         let http = http_agent(&self.config)?;
         let body = String::from_utf8(req.body.clone()).unwrap();
-        
+
         let fallback_tx = Psbt::from_str(&body)
             .map_err(|e| anyhow!("Failed to load PSBT from base64: {}", e))?
             .extract_tx()?;
@@ -81,7 +81,6 @@ impl AppTrait for App {
         );
         println!("Sending fallback request to {}", &req.url);
 
-        
         let response = match http
             .post(req.url)
             .header("Content-Type", req.content_type)

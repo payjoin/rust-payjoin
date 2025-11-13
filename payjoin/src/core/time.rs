@@ -1,8 +1,13 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bitcoin::absolute::Time as BitcoinTime;
 use bitcoin::consensus::encode::{Decodable, Error as EncodeError};
 use bitcoin::consensus::Encodable;
+// web_time already does `cfg` switching, but as an additional sanity check it doesn't hurt to do
+// our own `cfg` switching when importing it in our code.
+#[cfg(target_arch = "wasm32")]
+use web_time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,

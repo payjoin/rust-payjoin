@@ -2397,6 +2397,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "web-time",
 ]
 
 [[package]]
@@ -2469,6 +2470,7 @@ dependencies = [
  "bdk",
  "bitcoin-ffi",
  "bitcoin-ohttp",
+ "getrandom 0.2.15",
  "hex",
  "lazy_static",
  "payjoin",

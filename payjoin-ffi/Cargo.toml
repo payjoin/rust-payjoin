@@ -11,6 +11,7 @@ dart = ["dep:uniffi-dart"]
 io = ["payjoin/io"]
 _test-utils = ["payjoin-test-utils", "tokio", "io"]
 _manual-tls = ["payjoin/_manual-tls"]
+wasm_js = ["getrandom/js"]
 
 [lib]
 name = "payjoin_ffi"
@@ -27,6 +28,7 @@ uniffi-dart = { git = "https://github.com/Uniffi-Dart/uniffi-dart.git", rev = "0
 [dependencies]
 base64 = "0.22.1"
 bitcoin-ffi = { git = "https://github.com/benalleng/bitcoin-ffi.git", rev = "8e3a23b" }
+getrandom = "0.2"
 hex = "0.4.3"
 lazy_static = "1.5.0"
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }

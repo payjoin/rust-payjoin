@@ -6,18 +6,19 @@ fn uniffi_bindgen() {
     let args: Vec<String> = std::env::args().collect();
     let language =
         args.iter().position(|arg| arg == "--language").and_then(|idx| args.get(idx + 1));
-    let library_path = args
-        .iter()
-        .position(|arg| arg == "--library")
-        .and_then(|idx| args.get(idx + 1))
-        .expect("specify the library path with --library");
-    let output_dir = args
-        .iter()
-        .position(|arg| arg == "--out-dir")
-        .and_then(|idx| args.get(idx + 1))
-        .expect("--out-dir is required when using --library");
     match language {
+        #[cfg(feature = "dart")]
         Some(lang) if lang == "dart" => {
+            let library_path = args
+                .iter()
+                .position(|arg| arg == "--library")
+                .and_then(|idx| args.get(idx + 1))
+                .expect("specify the library path with --library");
+            let output_dir = args
+                .iter()
+                .position(|arg| arg == "--out-dir")
+                .and_then(|idx| args.get(idx + 1))
+                .expect("--out-dir is required when using --library");
             uniffi_dart::gen::generate_dart_bindings(
                 "src/payjoin_ffi.udl".into(),
                 None,

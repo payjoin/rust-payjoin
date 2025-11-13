@@ -13,7 +13,7 @@
     "fix-imports": "node scripts/fix-imports.js",
     "build": "npm run ubrn:web && npm run compile && npm run copy-wasm && npm run fix-imports",
     "clean": "rm -rf rust_modules dist src/generated",
-    "test": "node test.js"
+    "test": "tsx --test test/unit.test.ts test/integration.test.ts"
   },
   "files": [
     "dist/**/*"

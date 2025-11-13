@@ -1,0 +1,9 @@
+# `ubrn build` generates a Rust wasm crate in rust_modules/wasm, with `wasm-bindgen` annotated functions.
+# That crate is used to generate TS bindings which call into the `wasm-bindgen` functions.
+# Because that generated crate doesn't belong to the `payjoin` workspace, we need to patch the generated Cargo.toml accordingly for local development.
+# The patch is applied via the ubrn.config.yaml `manifestPatchFile` option.
+# The paths below are relative to payjoin-ffi/javascript/rust_modules/wasm/Cargo.toml
+[patch.crates-io]
+payjoin = { path = "../../../../payjoin" }
+payjoin-directory = { path = "../../../../payjoin-directory" }
+payjoin-test-utils = { path = "../../../../payjoin-test-utils" }

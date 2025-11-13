@@ -1,0 +1,9 @@
+rust:
+  directory: ..
+  manifestPath: Cargo.toml
+
+web:
+  features: ["wasm_js"]
+  defaultFeatures: false
+  target: nodejs
+  manifestPatchFile: wasm-manifest-patch.toml

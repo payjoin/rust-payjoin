@@ -14,10 +14,11 @@ The directories below include instructions for using, building, and publishing t
 |----------|-----------------------|-------------------|------------------------------------|
 | Python   | linux, macOS          | [payjoin-ffi/python](python) | [payjoin](https://pypi.org/project/payjoin/) |
 | Dart     | linux, macOS          | [payjoin-ffi/dart](dart)     | N/A |
+| JavaScript | linux, macOS        | [payjoin-ffi/javascript](javascript)     | N/A |
 
 ## Minimum Supported Rust Version (MSRV)
 
-This library should compile with any combination of features with Rust 1.78.0.
+This library should compile with any combination of features with Rust 1.85.0.
 
 ## References
 

@@ -14,6 +14,13 @@ if [[ "$OS" == "Darwin" ]]; then
     echo "LLVM flags set: AR=$AR, CC=$CC"
 fi
 
+# Heinous hack to pin a transitive dependency to be MSRV compatible on 1.85
+cd node_modules/uniffi-bindgen-react-native
+cargo add home@=0.5.11 --package uniffi-bindgen-react-native
+cd ../..
+
+rustup target add wasm32-unknown-unknown
+
 npm run build
 
 echo "All done!"

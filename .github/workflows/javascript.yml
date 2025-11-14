@@ -1,0 +1,50 @@
+name: Build and Test JavaScript
+on:
+  pull_request:
+    paths:
+      - payjoin-ffi/**
+env:
+  # Override the value from the rust-toolchain file
+  # This is necessary because even though the correct toolchain
+  # is explicitly specified for the rust-toolchain action,
+  # rustup honors the rust-toolchain file over the default
+  RUSTUP_TOOLCHAIN: 1.85
+
+jobs:
+  build-js-and-test:
+    name: "Build and test javascript"
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: payjoin-ffi/javascript
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.85.0
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Node
+        uses: actions/setup-node@v6
+
+      - name: Install llvm
+        if: matrix.os == 'macos-latest'
+        run: brew install llvm
+
+      - name: Install wasm-bindgen
+        run: cargo install wasm-bindgen-cli
+
+      - name: "Install dependencies"
+        run: npm ci
+
+      - name: Generate bindings and binaries
+        run: bash ./scripts/generate_bindings.sh
+
+      - name: Run tests
+        run: npm test

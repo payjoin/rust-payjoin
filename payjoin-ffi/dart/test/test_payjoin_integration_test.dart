@@ -130,7 +130,7 @@ class ProcessPsbtCallback implements payjoin.ProcessPsbt {
 }
 
 payjoin.Initialized create_receiver_context(
-    bitcoin.Address address,
+    String address,
     String directory,
     payjoin.OhttpKeys ohttp_keys,
     InMemoryReceiverPersister persister) {
@@ -161,11 +161,17 @@ List<payjoin.InputPair> get_inputs(payjoin.RpcClient rpc_connection) {
   var utxos = jsonDecode(rpc_connection.call("listunspent", []));
   List<payjoin.InputPair> inputs = [];
   for (var utxo in utxos) {
-    var txin = bitcoin.TxIn(bitcoin.OutPoint(utxo["txid"], utxo["vout"]),
-        bitcoin.Script(Uint8List.fromList([])), 0, []);
-    var tx_out = bitcoin.TxOut(bitcoin.Amount.fromBtc(utxo["amount"]),
-        bitcoin.Script(Uint8List.fromList(hex.decode(utxo["scriptPubKey"]))));
-    var psbt_in = payjoin.PsbtInput(tx_out, null, null);
+    final txid = utxo["txid"] as String;
+    final vout = utxo["vout"] as int;
+    final scriptPubKey =
+        Uint8List.fromList(hex.decode(utxo["scriptPubKey"] as String));
+    final amountBtc = utxo["amount"] as num;
+    final amountSat = (amountBtc * 100000000).round();
+
+    final txin = payjoin.PlainTxIn(
+        payjoin.PlainOutPoint(txid, vout), Uint8List(0), 0, <Uint8List>[]);
+    final witnessUtxo = payjoin.PlainTxOut(amountSat, scriptPubKey);
+    final psbt_in = payjoin.PlainPsbtInput(witnessUtxo, null, null);
     inputs.add(payjoin.InputPair(txin, psbt_in, null));
   }
 
@@ -312,9 +318,8 @@ void main() {
       bitcoind = env.getBitcoind();
       receiver = env.getReceiver();
       sender = env.getSender();
-      var receiver_address = bitcoin.Address(
-          jsonDecode(receiver.call("getnewaddress", [])),
-          bitcoin.Network.regtest);
+      var receiver_address =
+          jsonDecode(receiver.call("getnewaddress", [])) as String;
       var services = payjoin.TestServices.initialize();
 
       services.waitForServicesReady();
@@ -391,11 +396,10 @@ void main() {
               final_response.bodyBytes, ohttp_context_request.ohttpCtx)
           .save(sender_persister);
       expect(checked_payjoin_proposal_psbt, isNotNull);
-      var checked_payjoin_proposal_psbt_inner = (checked_payjoin_proposal_psbt
-              as payjoin.ProgressPollingForProposalTransitionOutcome)
-          .inner;
-      var payjoin_psbt = jsonDecode(sender.call("walletprocesspsbt",
-          [checked_payjoin_proposal_psbt_inner.serializeBase64()]))["psbt"];
+      final progressOutcome = checked_payjoin_proposal_psbt
+          as payjoin.ProgressPollingForProposalTransitionOutcome;
+      var payjoin_psbt = jsonDecode(sender
+          .call("walletprocesspsbt", [progressOutcome.psbtBase64]))["psbt"];
       var final_psbt = jsonDecode(sender
           .call("finalizepsbt", [payjoin_psbt, jsonEncode(false)]))["psbt"];
       var payjoin_tx = bitcoin.Psbt.deserializeBase64(final_psbt).extractTx();
@@ -413,6 +417,6 @@ void main() {
               ["untrusted_pending"],
           100 - network_fees);
       expect(jsonDecode(sender.call("getbalance", [])), 0.0);
-    });
+    }, timeout: const Timeout(Duration(minutes: 5)));
   });
 }

@@ -1,8 +1,7 @@
 import 'dart:typed_data';
 import 'package:convert/convert.dart';
 import 'package:test/test.dart';
-import "package:payjoin/payjoin.dart" as payjoin;
-import "package:payjoin/bitcoin.dart" as bitcoin;
+import "package:payjoin_dart/payjoin_ffi.dart" as payjoin;
 
 class InMemoryReceiverPersister
     implements payjoin.JsonReceiverSessionPersister {
@@ -103,8 +102,7 @@ void main() {
   group("Test Persistence", () {
     test("Test receiver persistence", () {
       var persister = InMemoryReceiverPersister("1");
-      var address = bitcoin.Address(
-          "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4", bitcoin.Network.signet);
+      const address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
       payjoin.ReceiverBuilder(
         address,
         "https://example.com",
@@ -118,8 +116,7 @@ void main() {
 
     test("Test sender persistence", () {
       var receiver_persister = InMemoryReceiverPersister("1");
-      var address = bitcoin.Address(
-          "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK", bitcoin.Network.testnet);
+      const address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
       var receiver = payjoin.ReceiverBuilder(
         address,
         "https://example.com",

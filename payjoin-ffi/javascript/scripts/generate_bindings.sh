@@ -22,5 +22,6 @@ cd ../..
 rustup target add wasm32-unknown-unknown
 
 npm run build
+npm run build:test-utils
 
 echo "All done!"

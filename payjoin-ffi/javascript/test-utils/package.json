@@ -1,0 +1,15 @@
+{
+  "name": "payjoin-test-utils",
+  "version": "0.1.0",
+  "description": "Native Node.js bindings for payjoin test utilities",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "payjoin-test-utils-napi",
+    "triples": {}
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  }
+}

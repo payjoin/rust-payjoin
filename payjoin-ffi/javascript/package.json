@@ -12,6 +12,7 @@
     "copy-wasm": "mkdir -p dist/generated && cp -r src/generated/wasm-bindgen dist/generated/",
     "fix-imports": "node scripts/fix-imports.js",
     "build": "npm run ubrn:web && npm run compile && npm run copy-wasm && npm run fix-imports",
+    "build:test-utils": "cd test-utils && npm install && npx @napi-rs/cli build",
     "clean": "rm -rf rust_modules dist src/generated",
     "test": "tsx --test test/unit.test.ts test/integration.test.ts"
   },

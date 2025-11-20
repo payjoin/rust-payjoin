@@ -1356,7 +1356,12 @@ mod integration {
             previous_output: OutPoint { txid: utxo.txid, vout: utxo.vout },
             ..Default::default()
         };
-        InputPair::new(txin, psbtin, None).expect("Input pair should be valid")
+        let expect_weight = psbtin
+            .witness_utxo
+            .as_ref()
+            .filter(|txo| txo.script_pubkey.is_p2tr())
+            .map(|_| Weight::from_wu(P2TR_INPUT_WEIGHT));
+        InputPair::new(txin, psbtin, expect_weight).expect("Input pair should be valid")
     }
 
     struct HeaderMock(HashMap<String, String>);

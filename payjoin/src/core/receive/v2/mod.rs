@@ -1292,6 +1292,12 @@ impl Receiver<Monitor> {
 
         MaybeFatalOrSuccessTransition::no_results(self.clone())
     }
+
+    /// The Payjoin Proposal TXID.
+    pub fn txid(&self) -> Txid {
+        let psbt = &self.psbt_context.payjoin_psbt;
+        psbt.unsigned_tx.compute_txid()
+    }
 }
 
 /// Derive a mailbox endpoint on a directory given a [`ShortId`].

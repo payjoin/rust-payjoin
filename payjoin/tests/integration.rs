@@ -630,6 +630,7 @@ mod integration {
                 );
 
                 // monitor the payment on the receiver side
+                assert_eq!(monitoring_payment.txid(), payjoin_tx.compute_txid());
                 monitoring_payment.check_payment(
                     |txid| {
                         let tx = receiver

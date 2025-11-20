@@ -4,7 +4,6 @@ use std::any::{Any, TypeId};
 
 use bitcoin::Amount;
 use bitcoin_uri::Param;
-#[cfg(feature = "fuzzing")]
 use libfuzzer_sys::fuzz_target;
 use payjoin::{Uri, UriExt};
 
@@ -40,7 +39,6 @@ fn do_test(data: &[u8]) {
     }
 }
 
-#[cfg(feature = "fuzzing")]
 fuzz_target!(|data| {
     do_test(data);
 });

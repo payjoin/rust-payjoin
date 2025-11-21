@@ -1,0 +1,39 @@
+{
+  "name": "payjoin",
+  "version": "0.1.0",
+  "description": "JavaScript/WASM bindings for rust-payjoin",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "browser": "dist/index.web.js",
+  "scripts": {
+    "ubrn:web": "ubrn build web --and-generate",
+    "compile": "tsc",
+    "copy-wasm": "mkdir -p dist/generated && cp -r src/generated/wasm-bindgen dist/generated/",
+    "fix-imports": "node scripts/fix-imports.js",
+    "build": "npm run ubrn:web && npm run compile && npm run copy-wasm && npm run fix-imports",
+    "build:test-utils": "cd test-utils && npm install && npx @napi-rs/cli build",
+    "clean": "rm -rf rust_modules dist src/generated",
+    "test": "tsx --test test/unit.test.ts test/integration.test.ts"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "keywords": [
+    "payjoin",
+    "bitcoin",
+    "wasm",
+    "rust"
+  ],
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "uniffi-bindgen-react-native": "github:spacebear21/uniffi-bindgen-react-native#tsconfig-module-nodenext"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/payjoin/rust-payjoin.git",
+    "directory": "payjoin-ffi/javascript"
+  }
+}

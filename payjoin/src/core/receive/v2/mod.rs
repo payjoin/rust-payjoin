@@ -25,6 +25,7 @@
 //! but request reuse makes correlation trivial for the relay.
 
 use std::str::FromStr;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
 use bitcoin::hashes::{sha256, Hash};
@@ -36,6 +37,8 @@ use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 pub use session::{replay_event_log, SessionEvent, SessionHistory, SessionOutcome, SessionStatus};
 use url::Url;
+#[cfg(target_arch = "wasm32")]
+use web_time::Duration;
 
 use super::error::{Error, InputContributionError};
 use super::{

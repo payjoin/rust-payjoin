@@ -1,0 +1,30 @@
+[package]
+name = "payjoin-test-utils-napi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = "2.16.17"
+napi-derive = "2.16.13"
+serde_json = "1.0.142"
+tokio = { version = "1.47.1", features = ["full"] }
+
+[dependencies.payjoin-test-utils]
+path = "../../../payjoin-test-utils"
+
+[build-dependencies]
+napi-build = "=2.2.4"
+
+[patch.crates-io.payjoin]
+path = "../../../payjoin"
+
+[patch.crates-io.payjoin-directory]
+path = "../../../payjoin-directory"
+
+[patch.crates-io.payjoin-test-utils]
+path = "../../../payjoin-test-utils"
+
+[workspace]

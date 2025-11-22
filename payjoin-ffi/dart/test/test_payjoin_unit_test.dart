@@ -135,4 +135,26 @@ void main() {
           reason: "persistence should return a reply key");
     });
   });
+
+  group("Validation", () {
+    test("receiver builder rejects bad address", () {
+      expect(
+          () => payjoin.ReceiverBuilder(
+                "not-an-address",
+                "https://example.com",
+                payjoin.OhttpKeys.decode(Uint8List.fromList(hex.decode(
+                    "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"))),
+              ),
+          throwsA(isA<Exception>()));
+    });
+
+    test("input pair rejects invalid outpoint", () {
+      expect(() {
+        final txin = payjoin.PlainTxIn(
+            payjoin.PlainOutPoint("deadbeef", 0), Uint8List(0), 0, []);
+        final psbtIn = payjoin.PlainPsbtInput(null, null, null);
+        payjoin.InputPair(txin, psbtIn, null);
+      }, throwsA(isA<Exception>()));
+    });
+  });
 }

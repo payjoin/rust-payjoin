@@ -172,7 +172,9 @@ impl From<SenderSessionHistory> for payjoin::send::v2::SessionHistory {
 #[uniffi::export]
 impl SenderSessionHistory {
     /// Fallback transaction from the session if present
-    pub fn fallback_tx(&self) -> Arc<crate::Transaction> { Arc::new(self.0.fallback_tx().into()) }
+    pub fn fallback_tx(&self) -> Vec<u8> {
+        payjoin::bitcoin::consensus::encode::serialize(&self.0.fallback_tx())
+    }
 
     pub fn pj_param(&self) -> Arc<PjParam> { Arc::new(self.0.pj_param().to_owned().into()) }
 

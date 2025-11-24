@@ -178,8 +178,10 @@ impl ReceiverSessionHistory {
     pub fn pj_uri(&self) -> Arc<crate::PjUri> { Arc::new(self.0.pj_uri().into()) }
 
     /// Fallback transaction from the session if present
-    pub fn fallback_tx(&self) -> Option<Arc<crate::Transaction>> {
-        self.0.fallback_tx().map(|tx| Arc::new(tx.into()))
+    pub fn fallback_tx(&self) -> Option<Vec<u8>> {
+        self.0
+            .fallback_tx()
+            .map(|tx| payjoin::bitcoin::consensus::encode::serialize(&tx))
     }
 
     /// Helper method to query the current status of the session.

@@ -5,8 +5,7 @@ import "package:http/http.dart" as http;
 import 'package:test/test.dart';
 import "package:convert/convert.dart";
 
-import "package:payjoin/payjoin.dart" as payjoin;
-import "package:payjoin/bitcoin.dart" as bitcoin;
+import "../lib/payjoin_ffi.dart" as payjoin;
 
 late payjoin.BitcoindEnv env;
 late payjoin.BitcoindInstance bitcoind;
@@ -91,14 +90,41 @@ class IsScriptOwnedCallback implements payjoin.IsScriptOwned {
   @override
   bool callback(Uint8List script) {
     try {
-      final scriptObj = bitcoin.Script(script);
-      final address =
-          bitcoin.Address.fromScript(scriptObj, bitcoin.Network.regtest);
-      // This is a hack due to toString() not being exposed by dart FFI
-      final address_str = address.toQrUri().split(":")[1];
-      final result = connection.call("getaddressinfo", [address_str]);
-      final decoded = jsonDecode(result);
-      return decoded["ismine"] == true;
+      final scriptHex = hex.encode(script);
+      final decodedScript =
+          jsonDecode(connection.call("decodescript", [jsonEncode(scriptHex)]));
+      final candidates = <String>[];
+
+      final address = decodedScript["address"];
+      if (address is String) {
+        candidates.add(address);
+      }
+
+      final addresses = decodedScript["addresses"];
+      if (addresses is List) {
+        candidates.addAll(addresses.whereType<String>());
+      }
+
+      final segwit = decodedScript["segwit"];
+      if (segwit is Map) {
+        final segwitAddress = segwit["address"];
+        if (segwitAddress is String) {
+          candidates.add(segwitAddress);
+        }
+        final segwitAddresses = segwit["addresses"];
+        if (segwitAddresses is List) {
+          candidates.addAll(segwitAddresses.whereType<String>());
+        }
+      }
+
+      for (final addr in candidates) {
+        final info = jsonDecode(
+            connection.call("getaddressinfo", [jsonEncode(addr)]));
+        if (info["ismine"] == true) {
+          return true;
+        }
+      }
+      return false;
     } catch (e) {
       print("An error occurred: $e");
       return false;
@@ -400,22 +426,26 @@ void main() {
           as payjoin.ProgressPollingForProposalTransitionOutcome;
       var payjoin_psbt = jsonDecode(sender
           .call("walletprocesspsbt", [progressOutcome.psbtBase64]))["psbt"];
-      var final_psbt = jsonDecode(sender
-          .call("finalizepsbt", [payjoin_psbt, jsonEncode(false)]))["psbt"];
-      var payjoin_tx = bitcoin.Psbt.deserializeBase64(final_psbt).extractTx();
-      sender.call("sendrawtransaction",
-          [jsonEncode(hex.encode(payjoin_tx.serialize()))]);
+      final finalPsbtJson = jsonDecode(
+          sender.call("finalizepsbt", [payjoin_psbt, jsonEncode(false)]));
+      final finalPsbt = finalPsbtJson["psbt"] as String;
+      final extraction = jsonDecode(
+          sender.call("finalizepsbt", [payjoin_psbt, jsonEncode(true)]));
+      final finalHex = extraction["hex"] as String;
+      sender.call("sendrawtransaction", [jsonEncode(finalHex)]);
 
-      // Check resulting transaction and balances
-      var network_fees =
-          bitcoin.Psbt.deserializeBase64(final_psbt).fee().toBtc();
-      // Sender sent the entire value of their utxo to the receiver (minus fees)
-      expect(payjoin_tx.input().length, 2);
-      expect(payjoin_tx.output().length, 1);
+      final decodedPsbt =
+          jsonDecode(sender.call("decodepsbt", [jsonEncode(finalPsbt)]));
+      final networkFees = (decodedPsbt["fee"] as num).toDouble();
+
+      final decodedTx = jsonDecode(sender.call(
+          "decoderawtransaction", [jsonEncode(finalHex)]));
+      expect((decodedTx["vin"] as List).length, 2);
+      expect((decodedTx["vout"] as List).length, 1);
       expect(
           jsonDecode(receiver.call("getbalances", []))["mine"]
               ["untrusted_pending"],
-          100 - network_fees);
+          100 - networkFees);
       expect(jsonDecode(sender.call("getbalance", [])), 0.0);
     }, timeout: const Timeout(Duration(minutes: 5)));
   });

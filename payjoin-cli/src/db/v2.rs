@@ -68,7 +68,7 @@ impl SessionPersister for SenderPersister {
     {
         let conn = self.db.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT event_data FROM send_session_events WHERE session_id = ?1 ORDER BY created_at ASC",
+            "SELECT event_data FROM send_session_events WHERE session_id = ?1 ORDER BY id ASC",
         )?;
 
         let event_rows = stmt.query_map(params![*self.session_id], |row| {
@@ -149,7 +149,7 @@ impl SessionPersister for ReceiverPersister {
     > {
         let conn = self.db.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT event_data FROM receive_session_events WHERE session_id = ?1 ORDER BY created_at ASC",
+            "SELECT event_data FROM receive_session_events WHERE session_id = ?1 ORDER BY id ASC",
         )?;
 
         let event_rows = stmt.query_map(params![*self.session_id], |row| {

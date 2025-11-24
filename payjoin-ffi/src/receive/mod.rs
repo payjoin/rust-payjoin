@@ -179,9 +179,7 @@ impl ReceiverSessionHistory {
 
     /// Fallback transaction from the session if present
     pub fn fallback_tx(&self) -> Option<Vec<u8>> {
-        self.0
-            .fallback_tx()
-            .map(|tx| payjoin::bitcoin::consensus::encode::serialize(&tx))
+        self.0.fallback_tx().map(|tx| payjoin::bitcoin::consensus::encode::serialize(&tx))
     }
 
     /// Helper method to query the current status of the session.

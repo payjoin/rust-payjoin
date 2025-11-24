@@ -1,6 +1,5 @@
 import unittest
 import payjoin as payjoin
-import payjoin.bitcoin
 
 class TestURIs(unittest.TestCase):
     def test_todo_url_encoded(self):

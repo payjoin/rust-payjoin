@@ -29,32 +29,12 @@ pub struct UrlParseError(#[from] url::ParseError);
 pub struct IntoUrlError(#[from] payjoin::IntoUrlError);
 
 #[derive(Debug, thiserror::Error, uniffi::Object)]
-#[error(transparent)]
-pub struct FeeRateError(#[from] bitcoin_ffi::error::FeeRateError);
-
-#[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error("{msg}")]
-pub struct PayjoinFeeRateError {
+pub struct FeeRateError {
     msg: String,
 }
 
-impl PayjoinFeeRateError {
-    pub(crate) fn overflow(value_sat_per_vb: u64) -> Self {
-        Self {
-            msg: format!(
-                "Fee rate {value_sat_per_vb} sat/vB exceeds the supported range for this platform"
-            ),
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error, uniffi::Object)]
-#[error("{msg}")]
-pub struct PayjoinFeeRateError {
-    msg: String,
-}
-
-impl PayjoinFeeRateError {
+impl FeeRateError {
     pub(crate) fn overflow(value_sat_per_vb: u64) -> Self {
         Self {
             msg: format!(

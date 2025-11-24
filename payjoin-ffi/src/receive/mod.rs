@@ -16,7 +16,7 @@ use crate::error::ForeignError;
 pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::OhttpKeys;
 use crate::receive::error::{ReceiverPersistedError, ReceiverReplayError};
-use crate::uri::error::PayjoinFeeRateError;
+use crate::uri::error::FeeRateError;
 use crate::{ClientResponse, OutputSubstitution, Request};
 
 pub mod error;
@@ -366,9 +366,9 @@ impl ReceiverBuilder {
     pub fn with_max_fee_rate(
         &self,
         max_effective_fee_rate_sat_per_vb: u64,
-    ) -> Result<Self, PayjoinFeeRateError> {
+    ) -> Result<Self, FeeRateError> {
         let fee_rate = FeeRate::from_sat_per_vb(max_effective_fee_rate_sat_per_vb)
-            .ok_or_else(|| PayjoinFeeRateError::overflow(max_effective_fee_rate_sat_per_vb))?;
+            .ok_or_else(|| FeeRateError::overflow(max_effective_fee_rate_sat_per_vb))?;
         Ok(Self(self.0.clone().with_max_fee_rate(fee_rate)))
     }
 

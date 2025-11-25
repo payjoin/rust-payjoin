@@ -1,1 +1,1 @@
-from payjoin.payjoin_ffi import *
+from payjoin.payjoin import *

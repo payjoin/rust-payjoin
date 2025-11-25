@@ -20,7 +20,7 @@ fn uniffi_bindgen() {
                 .and_then(|idx| args.get(idx + 1))
                 .expect("--out-dir is required when using --library");
             uniffi_dart::gen::generate_dart_bindings(
-                "src/payjoin_ffi.udl".into(),
+                "src/payjoin.udl".into(),
                 None,
                 Some(output_dir.as_str().into()),
                 library_path.as_str().into(),

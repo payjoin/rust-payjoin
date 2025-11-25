@@ -1,12 +1,12 @@
 // Export the generated bindings to the app.
-export * as payjoin from "./generated/payjoin_ffi.js";
+export * as payjoin from "./generated/payjoin.js";
 export * as bitcoin from "./generated/bitcoin.js";
 
 // Now import the bindings so we can:
 // - initialize them
 // - export them as namespaced objects as the default export.
 import * as bitcoin from "./generated/bitcoin.js";
-import * as payjoin from "./generated/payjoin_ffi.js";
+import * as payjoin from "./generated/payjoin.js";
 
 let initialized = false;
 

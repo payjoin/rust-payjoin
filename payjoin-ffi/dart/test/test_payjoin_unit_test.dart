@@ -1,8 +1,8 @@
 import 'dart:typed_data';
 import 'package:convert/convert.dart';
 import 'package:test/test.dart';
-import "package:payjoin_dart/payjoin_ffi.dart" as payjoin;
-import "package:payjoin_dart/bitcoin.dart" as bitcoin;
+import "package:payjoin/payjoin.dart" as payjoin;
+import "package:payjoin/bitcoin.dart" as bitcoin;
 
 class InMemoryReceiverPersister
     implements payjoin.JsonReceiverSessionPersister {
@@ -108,7 +108,8 @@ void main() {
       payjoin.ReceiverBuilder(
         address,
         "https://example.com",
-        payjoin.OhttpKeys.decode(Uint8List.fromList(hex.decode("01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"))),
+        payjoin.OhttpKeys.decode(Uint8List.fromList(hex.decode(
+            "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"))),
       ).build().save(persister);
       final result = payjoin.replayReceiverEventLog(persister);
       expect(result, isA<payjoin.ReplayResult>(),
@@ -120,12 +121,11 @@ void main() {
       var address = bitcoin.Address(
           "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK", bitcoin.Network.testnet);
       var receiver = payjoin.ReceiverBuilder(
-              address,
-              "https://example.com",
-              payjoin.OhttpKeys.decode(Uint8List.fromList(hex.decode("01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"))),
-        )
-        .build()
-        .save(receiver_persister);
+        address,
+        "https://example.com",
+        payjoin.OhttpKeys.decode(Uint8List.fromList(hex.decode(
+            "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"))),
+      ).build().save(receiver_persister);
       var uri = receiver.pjUri();
 
       var sender_persister = InMemorySenderPersister("1");

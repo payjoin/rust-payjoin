@@ -1,6 +1,6 @@
-name: payjoin_dart
-description: Dart bindings for payjoin
-version: 0.24.0
+name: payjoin
+description: Dart bindings for payjoin (EXPERIMENTAL)
+version: 0.1.0
 
 environment:
   sdk: '^3.2.0'

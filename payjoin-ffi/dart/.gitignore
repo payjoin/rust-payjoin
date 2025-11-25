@@ -11,5 +11,5 @@ doc/api/
 *.dll
 
 # Auto-generated bindings
-lib/payjoin_ffi.dart
+lib/payjoin.dart
 lib/bitcoin.dart

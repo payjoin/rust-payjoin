@@ -8,10 +8,22 @@
 //!
 //! Only the latest BIP 77 Payjoin V2 is enabled by default. To use BIP 78 Payjoin V1, enable the `v1` feature.
 //!
+//! The library API is organized by protocol version and operation type:
+//! - Sending Payjoins: [`send::v1`] and [`send::v2`] modules
+//! - Receiving Payjoins: [`receive::v1`] and [`receive::v2`] modules
+//!
+//! For most use cases, we recommend using the v2 modules as they are backwards compatible and provide the most convenient experience for users and implementers.
+//!
 //! The library is perfectly IO-agnostic — in fact, it does no IO by default without the `io` feature.
 //!
 //! Types relevant to a Payjoin Directory as defined in BIP 77 are available in the [`directory`] module enabled by
 //!  the `directory` feature.
+//!
+//! ## Example Usage
+//!
+//! See the [payjoin-cli] for a complete example of sending and receiving payjoins using both protocol implementations.
+//!
+//! [payjoin-cli]: https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli
 //!
 //! ## Disclaimer ⚠️ WIP
 //!

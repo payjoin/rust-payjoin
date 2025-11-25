@@ -16,5 +16,5 @@ build/
 *.dll
 
 # Auto-generated bindings python file
-src/payjoin/payjoin_ffi.py
+src/payjoin/payjoin.py
 src/payjoin/bitcoin.py

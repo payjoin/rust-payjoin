@@ -1,5 +1,5 @@
 fn main() {
-    uniffi::generate_scaffolding("src/payjoin_ffi.udl").unwrap();
+    uniffi::generate_scaffolding("src/payjoin.udl").unwrap();
     #[cfg(feature = "dart")]
-    uniffi_dart::generate_scaffolding("src/payjoin_ffi.udl".into()).unwrap();
+    uniffi_dart::generate_scaffolding("src/payjoin.udl".into()).unwrap();
 }

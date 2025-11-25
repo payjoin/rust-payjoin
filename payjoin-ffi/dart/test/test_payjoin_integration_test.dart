@@ -5,7 +5,7 @@ import "package:http/http.dart" as http;
 import 'package:test/test.dart';
 import "package:convert/convert.dart";
 
-import "package:payjoin/payjoin_ffi.dart" as payjoin;
+import "package:payjoin/payjoin.dart" as payjoin;
 import "package:payjoin/bitcoin.dart" as bitcoin;
 
 late payjoin.BitcoindEnv env;

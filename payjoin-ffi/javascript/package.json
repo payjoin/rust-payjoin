@@ -29,7 +29,7 @@
     "prettier": "^3.6.2",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
-    "uniffi-bindgen-react-native": "github:spacebear21/uniffi-bindgen-react-native#tsconfig-module-nodenext"
+    "uniffi-bindgen-react-native": "github:spacebear21/uniffi-bindgen-react-native#update-uniffi-0.30-wasm"
   },
   "repository": {
     "type": "git",

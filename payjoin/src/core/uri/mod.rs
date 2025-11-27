@@ -105,8 +105,55 @@ impl PayjoinExtras {
     pub fn endpoint(&self) -> String { self.pj_param.endpoint() }
     pub fn output_substitution(&self) -> OutputSubstitution { self.output_substitution }
 }
-
+/// A Bitcoin URI with optional Payjoin support.
+///
+/// This is a type alias for `bitcoin_uri::Uri` with Payjoin-specific extras. The URI can represent
+/// either a standard Bitcoin payment request or one that supports Payjoin transactions.
+///
+/// # Examples
+///
+/// ## Parse a URI, check version, and initialize sender
+///
+/// ```rust
+/// use payjoin::{Uri, UriExt};
+/// use bitcoin::{psbt::Psbt, FeeRate};
+/// use std::str::FromStr;
+///
+/// let Example_uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01&pj=https://example.com/pj";
+/// let pj_uri = Uri::try_from(Example_uri)
+///     .expect("parse BIP21")
+///     .assume_checked()
+///     .check_pj_supported()
+///     .expect("URI supports Payjoin");
+///
+/// // Build a PSBT (placeholder — build this from your wallet)
+/// let psbt = Psbt::from_str("cHNidP8BAH0CAAAA...").expect("valid PSBT");
+///
+/// // Branch by Payjoin version and initialize the appropriate sender
+/// match pj_uri.extras.pj_param() {
+///     #[cfg(feature = "v1")]
+///     payjoin::PjParam::V1(pj_param) => {
+///         let _sender = payjoin::send::v1::SenderBuilder::from_parts(
+///             psbt, pj_param, &pj_uri.address, pj_uri.amount
+///         )
+///         .build_recommended(FeeRate::BROADCAST_MIN)
+///         .expect("build v1 sender");
+///     }
+///     payjoin::PjParam::V2(_) => {
+///         let _sender = payjoin::send::v2::SenderBuilder::new(psbt, pj_uri)
+///             .build_recommended(FeeRate::BROADCAST_MIN)
+///             .expect("build v2 sender");
+///     }
+/// }
 pub type Uri<'a, NetworkValidation> = bitcoin_uri::Uri<'a, NetworkValidation, MaybePayjoinExtras>;
+
+/// A Bitcoin URI that is guaranteed to support Payjoin.
+///
+/// This is a type alias for `bitcoin_uri::Uri` with validated Payjoin support. Unlike [`Uri`],
+/// this type guarantees that the URI contains valid Payjoin parameters and can be used for
+/// Payjoin operations.
+/// See [`Uri`] for a complete example that parses a Bip21 Uri, checks the Payjoin version,
+/// and initializes the appropriate sender (V1 or V2).
 pub type PjUri<'a> = bitcoin_uri::Uri<'a, NetworkChecked, PayjoinExtras>;
 
 mod sealed {

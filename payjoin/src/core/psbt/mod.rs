@@ -227,7 +227,19 @@ impl InternalInputPair<'_> {
                         .ok_or(InputWeightError::NotSupported)?;
                     Ok(iwp)
                 },
-            P2tr => Ok(InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH),
+            P2tr => {
+                let witness = if !self.txin.witness.is_empty() {
+                    Some(&self.txin.witness)
+                } else {
+                    self.psbtin.final_script_witness.as_ref().filter(|w| !w.is_empty())
+                }
+                .ok_or(InputWeightError::NotSupported)?;
+
+                Ok(InputWeightPrediction::new(
+                    0,
+                    witness.iter().map(|el| el.len()).collect::<Vec<_>>(),
+                ))
+            }
             _ => Err(AddressTypeError::UnknownAddressType.into()),
         }?;
 

@@ -1,12 +1,10 @@
 use std::io;
 use std::sync::Arc;
 
-use bitcoin_ffi::Psbt;
 use lazy_static::lazy_static;
 use payjoin_test_utils::corepc_node::AddressType;
 use payjoin_test_utils::{
-    corepc_node, EXAMPLE_URL, INVALID_PSBT, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT,
-    PARSED_PAYJOIN_PROPOSAL, PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO, PAYJOIN_PROPOSAL,
+    corepc_node, EXAMPLE_URL, INVALID_PSBT, ORIGINAL_PSBT, PAYJOIN_PROPOSAL,
     PAYJOIN_PROPOSAL_WITH_SENDER_INFO, QUERY_PARAMS, RECEIVER_INPUT_CONTRIBUTION,
 };
 use serde_json::Value;
@@ -210,14 +208,3 @@ pub fn payjoin_proposal_with_sender_info() -> String {
 
 #[uniffi::export]
 pub fn receiver_input_contribution() -> String { RECEIVER_INPUT_CONTRIBUTION.to_string() }
-
-#[uniffi::export]
-pub fn parsed_original_psbt() -> Psbt { PARSED_ORIGINAL_PSBT.clone().into() }
-
-#[uniffi::export]
-pub fn parsed_payjoin_proposal() -> Psbt { PARSED_PAYJOIN_PROPOSAL.clone().into() }
-
-#[uniffi::export]
-pub fn parsed_payjoin_proposal_with_sender_info() -> Psbt {
-    PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO.clone().into()
-}

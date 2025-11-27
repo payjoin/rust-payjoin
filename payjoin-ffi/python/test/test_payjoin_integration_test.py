@@ -5,7 +5,6 @@ import json
 
 from payjoin import *
 from typing import Optional
-import payjoin.bitcoin as bitcoinffi
 
 # The below sys path setting is required to use the 'payjoin' module in the 'src' directory
 # This script is in the 'tests' directory and the 'payjoin' module is in the 'src' directory
@@ -83,7 +82,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
 
         raise Exception(f"Unknown receiver state: {receiver}")
 
-    def create_receiver_context(self, receiver_address: bitcoinffi.Address, directory: str, ohttp_keys: OhttpKeys, recv_persister: InMemoryReceiverSessionEventLog) -> Initialized:
+    def create_receiver_context(self, receiver_address: str, directory: str, ohttp_keys: OhttpKeys, recv_persister: InMemoryReceiverSessionEventLog) -> Initialized:
         receiver = ReceiverBuilder(address=receiver_address, directory=directory, ohttp_keys=ohttp_keys).build().save(recv_persister)
         return receiver
 
@@ -134,7 +133,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
 
     async def test_integration_v2_to_v2(self):
         try:
-            receiver_address = bitcoinffi.Address(json.loads(self.receiver.call("getnewaddress", [])), bitcoinffi.Network.REGTEST)
+            receiver_address = json.loads(self.receiver.call("getnewaddress", []))
             init_tracing()
             services = TestServices.initialize()
 
@@ -148,7 +147,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             # Inside the Receiver:
             recv_persister = InMemoryReceiverSessionEventLog(1)
             sender_persister = InMemorySenderPersister(1)
-            session = self.create_receiver_context(receiver_address, directory, ohttp_keys, recv_persister)
+            session = self.create_receiver_context(str(receiver_address), directory, ohttp_keys, recv_persister)
             process_response = await self.process_receiver_proposal(ReceiveSession.INITIALIZED(session), recv_persister, ohttp_relay)
             self.assertIsNone(process_response)
 
@@ -194,19 +193,26 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
                 headers={"Content-Type": request.request.content_type},
                 content=request.request.body
             )
-            checked_payjoin_proposal_psbt = send_ctx.process_response(response.content, request.ohttp_ctx).save(sender_persister).inner
+            poll_outcome = send_ctx.process_response(response.content, request.ohttp_ctx).save(sender_persister)
+            if poll_outcome.is_PROGRESS():
+                checked_payjoin_proposal_psbt = poll_outcome.psbt_base64
+            else:
+                self.fail("Unexpected stasis while polling for proposal")
             print(f"checked_payjoin_proposal_psbt: {checked_payjoin_proposal_psbt}")
             self.assertIsNotNone(checked_payjoin_proposal_psbt)
-            payjoin_psbt = json.loads(self.sender.call("walletprocesspsbt", [checked_payjoin_proposal_psbt.serialize_base64()]))["psbt"]
-            final_psbt = json.loads(self.sender.call("finalizepsbt", [payjoin_psbt, json.dumps(False)]))["psbt"]
-            payjoin_tx = bitcoinffi.Psbt.deserialize_base64(final_psbt).extract_tx()
-            self.sender.call("sendrawtransaction", [json.dumps(payjoin_tx.serialize().hex())])
+            payjoin_psbt = json.loads(self.sender.call("walletprocesspsbt", [checked_payjoin_proposal_psbt]))["psbt"]
+            final_psbt_json = json.loads(self.sender.call("finalizepsbt", [payjoin_psbt, json.dumps(False)]))
+            final_psbt = final_psbt_json["psbt"]
+            extraction = json.loads(self.sender.call("finalizepsbt", [payjoin_psbt, json.dumps(True)]))
+            final_hex = extraction["hex"]
+            self.sender.call("sendrawtransaction", [json.dumps(final_hex)])
 
             # Check resulting transaction and balances
-            network_fees = bitcoinffi.Psbt.deserialize_base64(final_psbt).fee().to_btc()
+            network_fees = float(json.loads(self.sender.call("decodepsbt", [json.dumps(final_psbt)]))["fee"])
+            decoded_tx = json.loads(self.sender.call("decoderawtransaction", [json.dumps(final_hex)]))
             # Sender sent the entire value of their utxo to receiver (minus fees)
-            self.assertEqual(len(payjoin_tx.input()), 2);
-            self.assertEqual(len(payjoin_tx.output()), 1);
+            self.assertEqual(len(decoded_tx["vin"]), 2);
+            self.assertEqual(len(decoded_tx["vout"]), 1);
             self.assertEqual(float(json.loads(self.receiver.call("getbalances", []))["mine"]["untrusted_pending"]), 100 - network_fees)
             self.assertEqual(float(self.sender.call("getbalance", [])), 0)
             return
@@ -214,7 +220,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             print("Caught:", e)
             raise
 
-def build_sweep_psbt(sender: RpcClient, pj_uri: PjUri) -> bitcoinffi.Psbt:
+def build_sweep_psbt(sender: RpcClient, pj_uri: PjUri) -> str:
     outputs = {}
     outputs[pj_uri.address()] = 50
     psbt = json.loads(sender.call(
@@ -230,18 +236,18 @@ def get_inputs(rpc_connection: RpcClient) -> list[InputPair]:
     utxos = json.loads(rpc_connection.call("listunspent", []))
     inputs = []
     for utxo in utxos[:1]:
-        txin = bitcoinffi.TxIn(
-            previous_output=bitcoinffi.OutPoint(txid=utxo["txid"], vout=utxo["vout"]),
-            script_sig=bitcoinffi.Script(bytes()),
+        txin = PlainTxIn(
+            previous_output=PlainOutPoint(txid=utxo["txid"], vout=utxo["vout"]),
+            script_sig=bytes(),
             sequence=0,
-            witness=[]
+            witness=[],
         )
         raw_tx = json.loads(rpc_connection.call("gettransaction", [json.dumps(utxo["txid"]), json.dumps(True), json.dumps(True)]))
         prev_out = raw_tx["decoded"]["vout"][utxo["vout"]]
-        prev_spk = bitcoinffi.Script(bytes.fromhex(prev_out["scriptPubKey"]["hex"]))
-        prev_amount = bitcoinffi.Amount.from_btc(prev_out["value"])
-        tx_out = bitcoinffi.TxOut(value=prev_amount, script_pubkey=prev_spk)
-        psbt_in = PsbtInput(witness_utxo=tx_out, redeem_script=None, witness_script=None)
+        prev_spk = bytes.fromhex(prev_out["scriptPubKey"]["hex"])
+        prev_amount_sat = int(prev_out["value"] * 100_000_000)
+        tx_out = PlainTxOut(value_sat=prev_amount_sat, script_pubkey=prev_spk)
+        psbt_in = PlainPsbtInput(witness_utxo=tx_out, redeem_script=None, witness_script=None)
         inputs.append(InputPair(txin=txin, psbtin=psbt_in, expected_weight=None))
 
     return inputs
@@ -266,8 +272,25 @@ class IsScriptOwnedCallback(IsScriptOwned):
 
     def callback(self, script):
         try:
-            address = bitcoinffi.Address.from_script(bitcoinffi.Script(script), bitcoinffi.Network.REGTEST)
-            return json.loads(self.connection.call("getaddressinfo", [str(address)]))["ismine"]
+            script_hex = bytes(script).hex()
+            decoded_script = json.loads(self.connection.call("decodescript", [json.dumps(script_hex)]))
+            candidates = []
+            if isinstance(decoded_script.get("address"), str):
+                candidates.append(decoded_script["address"])
+            if isinstance(decoded_script.get("addresses"), list):
+                candidates.extend([addr for addr in decoded_script["addresses"] if isinstance(addr, str)])
+            segwit = decoded_script.get("segwit")
+            if isinstance(segwit, dict):
+                if isinstance(segwit.get("address"), str):
+                    candidates.append(segwit["address"])
+                if isinstance(segwit.get("addresses"), list):
+                    candidates.extend([addr for addr in segwit["addresses"] if isinstance(addr, str)])
+
+            for addr in candidates:
+                info = json.loads(self.connection.call("getaddressinfo", [json.dumps(addr)]))
+                if info.get("ismine") is True:
+                    return True
+            return False
         except Exception as e:
             print(f"An error occurred: {e}")
             return None

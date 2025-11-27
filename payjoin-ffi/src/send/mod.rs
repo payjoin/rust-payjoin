@@ -1,7 +1,6 @@
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
-use bitcoin_ffi::Psbt;
 pub use error::{BuildSenderError, CreateRequestError, EncapsulationError, ResponseError};
 
 use crate::error::ForeignError;
@@ -66,6 +65,28 @@ impl From<payjoin::send::v2::SessionOutcome> for SenderSessionOutcome {
 
 impl From<SenderSessionOutcome> for payjoin::send::v2::SessionOutcome {
     fn from(value: SenderSessionOutcome) -> Self { value.0 }
+}
+
+#[uniffi::export]
+impl SenderSessionOutcome {
+    pub fn is_success(&self) -> bool {
+        matches!(self.0, payjoin::send::v2::SessionOutcome::Success(_))
+    }
+
+    pub fn success_psbt_base64(&self) -> Option<String> {
+        match &self.0 {
+            payjoin::send::v2::SessionOutcome::Success(psbt) => Some(psbt.to_string()),
+            _ => None,
+        }
+    }
+
+    pub fn is_failure(&self) -> bool {
+        matches!(self.0, payjoin::send::v2::SessionOutcome::Failure)
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self.0, payjoin::send::v2::SessionOutcome::Cancel)
+    }
 }
 
 #[derive(Clone, uniffi::Enum)]
@@ -151,7 +172,9 @@ impl From<SenderSessionHistory> for payjoin::send::v2::SessionHistory {
 #[uniffi::export]
 impl SenderSessionHistory {
     /// Fallback transaction from the session if present
-    pub fn fallback_tx(&self) -> Arc<crate::Transaction> { Arc::new(self.0.fallback_tx().into()) }
+    pub fn fallback_tx(&self) -> Vec<u8> {
+        payjoin::bitcoin::consensus::encode::serialize(&self.0.fallback_tx())
+    }
 
     pub fn pj_param(&self) -> Arc<PjParam> { Arc::new(self.0.pj_param().to_owned().into()) }
 
@@ -403,7 +426,7 @@ impl From<payjoin::send::v2::Sender<payjoin::send::v2::PollingForProposal>> for 
 
 #[derive(uniffi::Enum)]
 pub enum PollingForProposalTransitionOutcome {
-    Progress { inner: Arc<Psbt> },
+    Progress { psbt_base64: String },
     Stasis { inner: Arc<PollingForProposal> },
 }
 
@@ -423,7 +446,7 @@ impl
     ) -> Self {
         match value {
             payjoin::persist::OptionalTransitionOutcome::Progress(psbt) =>
-                Self::Progress { inner: Arc::new(psbt.into()) },
+                Self::Progress { psbt_base64: psbt.to_string() },
             payjoin::persist::OptionalTransitionOutcome::Stasis(state) =>
                 Self::Stasis { inner: Arc::new(state.into()) },
         }

@@ -461,16 +461,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bitcoin-ffi"
-version = "0.1.2"
-source = "git+https://github.com/benalleng/bitcoin-ffi.git?rev=8e3a23b#8e3a23b0369ac85a27ae33bac60130e9dc439179"
-dependencies = [
- "bitcoin 0.32.7",
- "thiserror 1.0.63",
- "uniffi",
-]
-
-[[package]]
 name = "bitcoin-hpke"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2468,7 +2458,6 @@ version = "0.24.0"
 dependencies = [
  "base64 0.22.1",
  "bdk",
- "bitcoin-ffi",
  "bitcoin-ohttp",
  "getrandom 0.2.15",
  "hex",

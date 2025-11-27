@@ -4,8 +4,7 @@ import "dart:typed_data";
 import "package:http/http.dart" as http;
 import 'package:test/test.dart';
 import "package:convert/convert.dart";
-
-import "../lib/payjoin_ffi.dart" as payjoin;
+import "package:payjoin/payjoin.dart" as payjoin;
 
 late payjoin.BitcoindEnv env;
 late payjoin.BitcoindInstance bitcoind;
@@ -118,8 +117,8 @@ class IsScriptOwnedCallback implements payjoin.IsScriptOwned {
       }
 
       for (final addr in candidates) {
-        final info = jsonDecode(
-            connection.call("getaddressinfo", [jsonEncode(addr)]));
+        final info =
+            jsonDecode(connection.call("getaddressinfo", [jsonEncode(addr)]));
         if (info["ismine"] == true) {
           return true;
         }
@@ -155,11 +154,8 @@ class ProcessPsbtCallback implements payjoin.ProcessPsbt {
   }
 }
 
-payjoin.Initialized create_receiver_context(
-    String address,
-    String directory,
-    payjoin.OhttpKeys ohttp_keys,
-    InMemoryReceiverPersister persister) {
+payjoin.Initialized create_receiver_context(String address, String directory,
+    payjoin.OhttpKeys ohttp_keys, InMemoryReceiverPersister persister) {
   var receiver = payjoin.ReceiverBuilder(address, directory, ohttp_keys)
       .build()
       .save(persister);
@@ -438,8 +434,8 @@ void main() {
           jsonDecode(sender.call("decodepsbt", [jsonEncode(finalPsbt)]));
       final networkFees = (decodedPsbt["fee"] as num).toDouble();
 
-      final decodedTx = jsonDecode(sender.call(
-          "decoderawtransaction", [jsonEncode(finalHex)]));
+      final decodedTx = jsonDecode(
+          sender.call("decoderawtransaction", [jsonEncode(finalHex)]));
       expect((decodedTx["vin"] as List).length, 2);
       expect((decodedTx["vout"] as List).length, 1);
       expect(

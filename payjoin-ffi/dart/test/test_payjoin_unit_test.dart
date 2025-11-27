@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 import 'package:convert/convert.dart';
 import 'package:test/test.dart';
-import "package:payjoin_dart/payjoin_ffi.dart" as payjoin;
+import "package:payjoin/payjoin.dart" as payjoin;
 
 class InMemoryReceiverPersister
     implements payjoin.JsonReceiverSessionPersister {

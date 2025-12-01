@@ -126,7 +126,12 @@
                 dart
               ]
               ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [
-                cargo-llvm-cov
+                (cargo-llvm-cov.overrideAttrs (old: {
+                  # A build failure in cargo-llvm-cov prevents some tests
+                  # from running properly but does not seem to affect functionality
+                  # See https://github.com/NixOS/nixpkgs/issues/467882
+                  doCheck = false;
+                }))
               ];
           }
         ) craneLibVersions;

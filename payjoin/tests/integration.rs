@@ -482,9 +482,6 @@ mod integration {
         }
 
         #[tokio::test]
-        /// When there is a non-segwit sender, their signature before broadcasting the
-        /// Payjoin to the network changes the TXID. While monitoring, the receiver should detect
-        /// that there was a ScriptSig contribution, and still consider the session a success.
         async fn v2_to_v2_p2pkh() -> Result<(), BoxSendSyncError> {
             init_tracing();
             let mut services = TestServices::initialize().await?;
@@ -507,9 +504,6 @@ mod integration {
         }
 
         #[tokio::test]
-        /// When there is a segwit sender, their signature before the broadcasting the Payjoin to
-        /// the network does not change the TXID. While monitoring, the receiver should be able to
-        /// use the TXID it already knows to consider the session a success.
         async fn v2_to_v2_p2wpkh() -> Result<(), BoxSendSyncError> {
             init_tracing();
             let mut services = TestServices::initialize().await?;
@@ -524,6 +518,48 @@ mod integration {
             );
 
             assert!(result.is_ok(), "v2 p2wpkh send receive failed: {:#?}", result.unwrap_err());
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn v2_to_v2_nested_p2wpkh() -> Result<(), BoxSendSyncError> {
+            init_tracing();
+            let mut services = TestServices::initialize().await?;
+            let expected_weight = Weight::from_wu(
+                TX_HEADER_WEIGHT + (NESTED_P2WPKH_INPUT_WEIGHT * 2) + P2WPKH_OUTPUT_WEIGHT,
+            );
+            let result = tokio::select!(
+            err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
+            err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
+            res = do_v2_to_v2(&services, AddressType::P2shSegwit, expected_weight) => res
+            );
+
+            assert!(result.is_ok(), "v2 nested p2wpkh receive failed: {:#?}", result.unwrap_err());
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn v2_to_v2_taproot() -> Result<(), BoxSendSyncError> {
+            init_tracing();
+            let mut services = TestServices::initialize().await?;
+            let expected_weight = Weight::from_wu(
+                TX_HEADER_WEIGHT
+                    + (P2TR_INPUT_WEIGHT * 2)
+                    + P2WPKH_OUTPUT_WEIGHT,
+            )
+            // bitcoin-cli wallet overestimates taproot inputs in the original PSBT by one vbyte:
+            // https://github.com/payjoin/rust-payjoin/issues/369#issuecomment-2657539591
+            // add it here
+            + Weight::from_vb_unchecked(1);
+            let result = tokio::select!(
+            err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
+            err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
+            res = do_v2_to_v2(&services, AddressType::Bech32m, expected_weight) => res
+            );
+
+            assert!(result.is_ok(), "v2 taproot send receive failed: {:#?}", result.unwrap_err());
 
             Ok(())
         }
@@ -681,6 +717,11 @@ mod integration {
                 Amount::from_btc(0.0)?
             );
 
+            // When the sender has a non-segwit address type, then the monitor function should
+            // be able to rely on the first `transaction_exists` function to determine whether the
+            // Payjoin proposal was signed and broadcasted by the sender. Only in non-segwit sender
+            // address types should the second function to check the outpoint should be called, as
+            // a non-seqwit sender signature will change the transaction ID.
             monitoring_payment
                 .check_payment(
                     |txid| {
@@ -699,7 +740,7 @@ mod integration {
                     },
                     |outpoint| {
                         match address_type {
-                            AddressType::Legacy => {
+                            AddressType::Legacy | AddressType::P2shSegwit => {
                                 let tx_out = sender.get_tx_out(outpoint.txid, outpoint.vout.into());
                                 match tx_out {
                                     Ok(_) => panic!("outpoint should be spent"),
@@ -715,8 +756,9 @@ mod integration {
                 .save(&recv_persister)
                 .expect("receiver should successfully monitor for the payment");
 
+            // The session outcome changes based on whether the sender is segwit or not.
             let expected_session_outcome_vector = match address_type {
-                AddressType::Legacy => vec![],
+                AddressType::Legacy | AddressType::P2shSegwit => vec![],
                 _ => {
                     let sender_txin = payjoin_tx
                         .input

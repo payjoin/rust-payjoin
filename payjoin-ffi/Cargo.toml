@@ -21,10 +21,6 @@ crate-type = ["lib", "staticlib", "cdylib"]
 name = "uniffi-bindgen"
 path = "uniffi-bindgen.rs"
 
-[build-dependencies]
-uniffi-dart = { git = "https://github.com/Uniffi-Dart/uniffi-dart.git", rev = "5bdcc79", optional = true }
-uniffi = { version = "0.30.0", features = ["build", "cli"] }
-
 [dependencies]
 base64 = "0.22.1"
 bitcoin-ffi = { git = "https://github.com/bitcoindevkit/bitcoin-ffi", rev = "39cc12b" }

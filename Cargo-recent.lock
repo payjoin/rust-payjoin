@@ -4079,7 +4079,6 @@ dependencies = [
  "toml 0.9.5",
  "uniffi",
  "uniffi_bindgen",
- "uniffi_build",
  "uniffi_dart_macro",
 ]
 

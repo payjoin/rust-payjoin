@@ -138,7 +138,7 @@ jobs:
       - name: Relative diff
         run: |
           git branch -av
-          git diff origin/${{ github.base_ref }}.. | tee git.diff
+          git diff origin/${{ github.base_ref }}.. -- '*.rs' | tee git.diff
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-mutants@25.2.2

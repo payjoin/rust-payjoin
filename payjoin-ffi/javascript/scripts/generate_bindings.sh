@@ -6,7 +6,7 @@ echo "Running on $OS"
 
 npm --version
 
-if [[ "$OS" == "Darwin" ]]; then
+if [[ $OS == "Darwin" ]]; then
     # TODO: check if brew & llvm are installed
     LLVM_PREFIX=$(brew --prefix llvm)
     export AR="$LLVM_PREFIX/bin/llvm-ar"

@@ -10,7 +10,7 @@ DIRECTORIES=(
 FAILED_DIRS=()
 
 for dir in "${DIRECTORIES[@]}"; do
-    if ! curl -sf --max-time "$TIMEOUT" "${dir}/health" > /dev/null 2>&1; then
+    if ! curl -sf --max-time "$TIMEOUT" "${dir}/health" >/dev/null 2>&1; then
         FAILED_DIRS+=("$dir")
     fi
 done

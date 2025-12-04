@@ -7,3 +7,7 @@ cdylib_name = "payjoin_ffi"
 
 [bindings.swift]
 cdylib_name = "payjoin_ffi"
+
+[bindings.dart]
+cdylib_name = "payjoin_ffi"
+package_name = "payjoin"

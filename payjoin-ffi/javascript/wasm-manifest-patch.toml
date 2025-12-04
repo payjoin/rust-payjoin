@@ -7,3 +7,5 @@
 payjoin = { path = "../../../../payjoin" }
 payjoin-directory = { path = "../../../../payjoin-directory" }
 payjoin-test-utils = { path = "../../../../payjoin-test-utils" }
+# This patch is required due to the hardcoded 0.29 dependency in uniffi-bindgen-react-native's Cargo.toml. Once they publish the 0.30 package we shouldn't need this anymore.
+uniffi-runtime-javascript = { path = "../../node_modules/uniffi-bindgen-react-native/crates/uniffi-runtime-javascript" }

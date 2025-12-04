@@ -21,13 +21,9 @@ crate-type = ["lib", "staticlib", "cdylib"]
 name = "uniffi-bindgen"
 path = "uniffi-bindgen.rs"
 
-[build-dependencies]
-uniffi = { version = "0.29.4", features = ["build", "cli"] }
-uniffi-dart = { git = "https://github.com/Uniffi-Dart/uniffi-dart.git", rev = "364b117", features = ["build"], optional = true }
-
 [dependencies]
 base64 = "0.22.1"
-bitcoin-ffi = { git = "https://github.com/benalleng/bitcoin-ffi.git", rev = "8e3a23b" }
+bitcoin-ffi = { git = "https://github.com/bitcoindevkit/bitcoin-ffi", rev = "39cc12b" }
 getrandom = "0.2"
 hex = "0.4.3"
 lazy_static = "1.5.0"
@@ -38,8 +34,8 @@ serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.142"
 thiserror = "2.0.14"
 tokio = { version = "1.47.1", features = ["full"], optional = true }
-uniffi = { version = "0.29.4" }
-uniffi-dart = { git = "https://github.com/Uniffi-Dart/uniffi-dart.git", rev = "364b117", optional = true }
+uniffi-dart = { git = "https://github.com/Uniffi-Dart/uniffi-dart.git", rev = "5bdcc79", optional = true }
+uniffi = { version = "0.30.0" }
 url = "2.5.4"
 
 [dev-dependencies]

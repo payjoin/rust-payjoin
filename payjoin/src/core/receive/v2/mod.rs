@@ -1219,7 +1219,33 @@ pub struct Monitor {
     psbt_context: PsbtContext,
 }
 
+/// Typestate to monitor if the Payjoin proposal has been broadcasted by the sender.
+///
+/// After the Payjoin proposal is signed and sent back to the sender, the receiver should monitor
+/// the network and confirm that the transaction (or the fallback) has been broadcasted by the
+/// sender.
+///
+/// Call [`Receiver<Monitor>::check_payment`] to confirm the broadcast and conclude the Payjoin
+/// session.
 impl Receiver<Monitor> {
+    /// Checks if the Payjoin proposal, the fallback transaction, or a double-spend attempt
+    /// has been broadcasted by the sender. If the sender broadcasted either the Payjoin proposal
+    /// or the fallback transaction, concludes the Payjoin session with a success. If there was a
+    /// double-spend attempt, concludes with a failure.
+    ///
+    /// After the receiver has finalized the Payjoin proposal and sent it to the sender for the
+    /// final signature and broadcast, what the sender does changes how the receiver should track
+    /// the network and confirm that Payjoin session has concluded:
+    ///
+    /// 1. The sender may contribute segwit inputs, which would keep the transaction ID the same as
+    ///    what it was when the receiver sent the Payjoin proposal. In this case, the
+    ///    `transaction_exists` function will be used to confirm the broadcast.
+    /// 2. The sender may contribute non-segwit inputs, which would change the
+    ///    transaction ID. In this case, `outpoint_spent` will be used to confirm that the UTXOs
+    ///    the receiver contributed with have been spent. This function will fail if UTXOs have
+    ///    been spent but not in the Payjoin proposal, signalling a double-spend.
+    /// 3. The sender might not broadcast the Payjoin transaction and instead broadcast the original
+    ///    proposal which paid to the receiver but did not have any receiver contributions.
     pub fn check_payment(
         &self,
         transaction_exists: impl Fn(Txid) -> Result<Option<bitcoin::Transaction>, ImplementationError>,

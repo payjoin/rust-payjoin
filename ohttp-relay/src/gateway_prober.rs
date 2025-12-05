@@ -410,9 +410,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn test_known_gateways() {
-        let mut db = KnownGateways::default();
-
-        db.capacity = 1;
+        let mut db = KnownGateways { capacity: 1, ..Default::default() };
 
         let url = GatewayUri::from_static("https://payjo.in");
 

@@ -3,14 +3,13 @@ name = "ohttp-relay"
 version = "0.0.11"
 authors = ["Dan Gould <d@ngould.dev>"]
 description = "Relay Oblivious HTTP requests to protect IP metadata"
-repository = "https://github.com/payjoin/ohttp-relay"
+repository = "https://github.com/payjoin/rust-payjoin/tree/master/ohttp-relay"
 readme = "README.md"
 keywords = ["ohttp", "privacy"]
 categories = ["web-programming", "network-programming"]
 license = "MITNFA"
 edition = "2021"
 rust-version = "1.85.0"
-resolver = "2"
 exclude = ["tests"]
 
 [features]

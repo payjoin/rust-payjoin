@@ -8,7 +8,7 @@ implementations.  Use at your own risk.
 
 ## Usage
 
-Run ohttp-relay by setting `PORT` and `GATEWAY_ORIGIN` environment vaiables. For example, to relay from port 3000 to an OHTTP Gateway Resource at `https://payjo.in`, run the following.
+Run ohttp-relay by setting `PORT` and `GATEWAY_ORIGIN` environment variables. For example, to relay from port 3000 to an OHTTP Gateway Resource at `https://payjo.in`, run the following.
 
 ```console
 PORT=3000 GATEWAY_ORIGIN='https://payjo.in' cargo run

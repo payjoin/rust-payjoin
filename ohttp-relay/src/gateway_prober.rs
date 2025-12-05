@@ -254,7 +254,7 @@ impl Prober {
             .uri(base_url.probe_url())
             .body(http_body_util::combinators::BoxBody::<bytes::Bytes, hyper::Error>::new(
                 http_body_util::Empty::new().map_err(|_| {
-                    panic!("infalliable error type should never produce an actual error to map")
+                    panic!("infallible error type should never produce an actual error to map")
                 }),
             ))
             .expect("creating GET request must succeed");
@@ -430,7 +430,7 @@ mod tests {
         if let Some(Status::Known(got)) = db.get(&url) {
             assert_eq!(*got, policy, "initially inserted policy should be retrievable");
         } else {
-            panic!("initially inserted policy should be retrivable");
+            panic!("initially inserted policy should be retrievable");
         }
 
         // No overwriting
@@ -446,7 +446,7 @@ mod tests {
         if let Some(Status::Known(got)) = db.get(&url) {
             assert_eq!(*got, policy, "initially inserted policy should be retrievable");
         } else {
-            panic!("initially inserted policy should be retrivable");
+            panic!("initially inserted policy should be retrievable");
         }
 
         // Pruning
@@ -472,7 +472,7 @@ mod tests {
         assert!(db.get(&url).is_none(), "inserted expired entry should not be retrievable");
         assert!(
             db.has_capacity(),
-            "after inserting expired entry capacity should still be availble"
+            "after inserting expired entry capacity should still be available"
         );
 
         let inflight =
@@ -506,7 +506,7 @@ mod tests {
         assert!(!db.has_capacity(), "after inserting known entry set should still be at capacity");
         assert!(
             !db.no_capacity_for().is_zero(),
-            "and next capacity avaialbility should be in the future"
+            "and next capacity availability should be in the future"
         );
         db.capacity = 2;
         assert!(db.has_capacity(), "after raising limit, set should no longer be at capacity");

@@ -1,8 +1,9 @@
 [workspace]
-members = ["payjoin", "payjoin-cli", "payjoin-directory", "payjoin-test-utils", "payjoin-ffi"]
+members = ["ohttp-relay", "payjoin", "payjoin-cli", "payjoin-directory", "payjoin-test-utils", "payjoin-ffi"]
 resolver = "2"
 
 [patch.crates-io]
+ohttp-relay = { path = "ohttp-relay" }
 payjoin = { path = "payjoin" }
 payjoin-directory = { path = "payjoin-directory" }
 payjoin-test-utils = { path = "payjoin-test-utils" }

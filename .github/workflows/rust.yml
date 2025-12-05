@@ -27,6 +27,15 @@ jobs:
           # The toolchain must be specified manually, as this action ignores the rust-toolchain override
           # https://github.com/dtolnay/rust-toolchain?tab=readme-ov-file#inputs
           toolchain: ${{ matrix.rust }}
+      - name: "Install nix"
+        uses: cachix/install-nix-action@v25
+        with:
+          nix_path: nixpkgs=channel:nixos-25.11
+        # This is necessary for ohttp-relay integration tests
+      - name: "Add nginxWithStream to PATH"
+        run: |
+          nix build .#nginx-with-stream -o nginx
+          echo "$(pwd)/nginx/bin" >> $GITHUB_PATH
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
       - name: Run tests
@@ -107,6 +116,15 @@ jobs:
       - name: "Install toolchain"
         # rust-cache usage with stable Rust is most effective, as a cache is tied to the Rust version
         uses: dtolnay/rust-toolchain@stable
+      - name: "Install nix"
+        uses: cachix/install-nix-action@v25
+        with:
+          nix_path: nixpkgs=channel:nixos-25.11
+        # This is necessary for ohttp-relay integration tests
+      - name: "Add nginxWithStream to PATH"
+        run: |
+          nix build .#nginx-with-stream -o nginx
+          echo "$(pwd)/nginx/bin" >> $GITHUB_PATH
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
       - name: "Install cargo-llvm-cov"

@@ -68,10 +68,10 @@ mod integration {
                 .await;
         tokio::select! {
             _ = example_gateway_http(gateway_port) => {
-                assert!(false, "Gateway is long running");
+                panic!("Gateway is long running");
             }
             _ = relay_task => {
-                assert!(false, "Relay is long running");
+                panic!("Relay is long running");
             }
             _ = ohttp_req(n_https_port, nginx_cert_der, gateway) => {}
         }
@@ -107,10 +107,10 @@ mod integration {
                 .await?;
         tokio::select! {
             _ = example_gateway_http(gateway_port) => {
-                assert!(false, "Gateway is long running");
+                panic!("Gateway is long running");
             }
             _ = relay_task => {
-                assert!(false, "Relay is long running");
+                panic!("Relay is long running");
             }
             _ = ohttp_req(n_https_port, nginx_cert_der, gateway) => {}
         }
@@ -371,10 +371,10 @@ mod integration {
             .await;
             tokio::select! {
                 _ = example_gateway_https(gateway_port, gateway_cert) => {
-                    assert!(false, "Gateway is long running");
+                    panic!("Gateway is long running");
                 }
                 _ = relay_task => {
-                    assert!(false, "Relay is long running");
+                    panic!("Relay is long running");
                 }
                 _ = client_fn(n_http_port, &gateway, gateway_cert_der) => {}
             }
@@ -446,7 +446,7 @@ mod integration {
     impl Drop for NginxProcess {
         fn drop(&mut self) {
             // NGINX spawns child processes. Gracefully shut them all down.
-            let _ = Command::new("nginx")
+            let _ = std::process::Command::new("nginx")
                 .arg("-s")
                 .arg("stop")
                 .arg("-c")

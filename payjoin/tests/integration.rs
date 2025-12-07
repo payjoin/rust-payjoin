@@ -218,7 +218,9 @@ mod integration {
         /// sender addresses are still pending implementation: https://github.com/payjoin/rust-payjoin/issues/1214
         enum SenderFinalAction {
             SignAndBroadcastPayjoinProposal,
+            BroadcastFallbackTransaction,
         }
+
         #[tokio::test]
         async fn test_bad_ohttp_keys() -> Result<(), BoxSendSyncError> {
             let bytes = CheckedHrpstring::new::<NoChecksum>(
@@ -654,6 +656,81 @@ mod integration {
                 "The last event of the persister should be a SessionOutcome::Success with the correct sender signature",
             );
             assert_eq!(session_history.status(), SessionStatus::Completed);
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn v2_to_v2_fallback_tx_broadcast() -> Result<(), BoxSendSyncError> {
+            init_tracing();
+            let mut services = TestServices::initialize().await?;
+            let expected_weight =
+                Weight::from_wu(TX_HEADER_WEIGHT + P2WPKH_INPUT_WEIGHT + P2WPKH_OUTPUT_WEIGHT);
+            let expected_fee = expected_weight * FeeRate::BROADCAST_MIN;
+
+            let (_bitcoind, sender, receiver) =
+                init_bitcoind_sender_receiver(Some(AddressType::Bech32), Some(AddressType::Bech32))
+                    .expect("should be able to initialize the sender and the receiver");
+            let recv_persister = InMemoryTestPersister::default();
+            let send_persister = InMemoryTestPersister::default();
+
+            let result = tokio::select!(
+                err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
+                err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
+                res = do_v2_to_v2(&services, &receiver, &sender, &recv_persister, &send_persister, SenderFinalAction::BroadcastFallbackTransaction) => res
+            );
+
+            assert!(
+                result.is_ok(),
+                "v2 send receive with fallback broadcast failed: {:#?}",
+                result.unwrap_err()
+            );
+
+            let (broadcasted_transaction, monitoring_payment) = result.unwrap();
+
+            // Fallback transaction was broadcasted, so there will only be a single input.
+            assert_eq!(broadcasted_transaction.input.len(), 1);
+            assert_eq!(broadcasted_transaction.output.len(), 1);
+            assert_eq!(
+                receiver.get_balances()?.into_model()?.mine.untrusted_pending,
+                Amount::from_btc(50.0)? - expected_fee
+            );
+            assert_eq!(
+                sender.get_balances()?.into_model()?.mine.untrusted_pending,
+                Amount::from_btc(0.0)?
+            );
+
+            // Receiver should be able to validate that the sender has broadcasted the fallback transaction.
+            // The check_payment closure should be called twice: first for the Payjoin proposal, which will not be found,
+            // and then for the fallback transaction, which will be found..
+            monitoring_payment
+                .check_payment(
+                    |txid| {
+                        let get_tx_result = receiver.get_raw_transaction(txid);
+                        match get_tx_result {
+                            Ok(tx) => {
+                                Ok(Some(tx.transaction().expect("transaction should be decodable")))
+                            },
+                            Err(_) => {
+                                Ok(None)
+                            }
+                        }
+                    },
+                    |_| {
+                        panic!("should not even check outpoints for a segwit payjoin proposal or a fallback transaction")
+                    },
+                )
+                .save(&recv_persister)
+                .expect("receiver should successfully monitor for the payment");
+
+            // Receiver session should have completed with a Success and a fallback session
+            // outcome.
+            let (_session, session_history) = replay_receiver_event_log(&recv_persister)?;
+            assert_eq!(
+                recv_persister.load().unwrap().last(),
+                Some(payjoin::receive::v2::SessionEvent::Closed(payjoin::receive::v2::SessionOutcome::FallbackBroadcasted)),
+                "The last event of the persister should be a SessionOutcome::Success with the correct sender signature",
+            );
+            assert_eq!(session_history.status(), SessionStatus::FallbackBroadcasted);
             Ok(())
         }
 

@@ -8,9 +8,9 @@ dart --version
 dart pub get
 
 # Install Rust targets if on macOS
-if [[ "$OS" == "Darwin" ]]; then
+if [[ $OS == "Darwin" ]]; then
     LIBNAME=libpayjoin_ffi.dylib
-elif [[ "$OS" == "Linux" ]]; then
+elif [[ $OS == "Linux" ]]; then
     LIBNAME=libpayjoin_ffi.so
 else
     echo "Unsupported os: $OS"

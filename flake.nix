@@ -65,7 +65,10 @@
         src = nixpkgs.lib.cleanSourceWith {
           src = ./.;
           filter =
-            path: type: (builtins.match ".*.udl" path != null) || (craneLib.filterCargoSources path type);
+            path: type:
+            (builtins.match ".*.udl$" path != null)
+            || (builtins.match ".*nginx.conf.template$" path != null)
+            || (craneLib.filterCargoSources path type);
           name = "source";
         };
         commonArgs = {
@@ -169,6 +172,7 @@
               partitionType = "count";
               cargoExtraArgs = "--locked --all-features";
               BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
+              nativeBuildInputs = [ nginxWithStream ];
             }
           );
 
@@ -180,6 +184,7 @@
               partitionType = "count";
               cargoExtraArgs = "--locked --all-features";
               BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
+              nativeBuildInputs = [ nginxWithStream ];
             }
           );
 

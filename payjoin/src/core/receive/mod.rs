@@ -463,7 +463,7 @@ pub(crate) mod tests {
     use bitcoin::absolute::{LockTime, Time};
     use bitcoin::hashes::Hash;
     use bitcoin::key::{PublicKey, WPubkeyHash};
-    use bitcoin::secp256k1::Secp256k1;
+    use bitcoin::secp256k1::SECP256K1;
     use bitcoin::transaction::InputWeightPrediction;
     use bitcoin::{
         witness, Amount, PubkeyHash, ScriptBuf, ScriptHash, Txid, WScriptHash, XOnlyPublicKey,
@@ -766,6 +766,47 @@ pub(crate) mod tests {
             InputPair::new_p2tr(p2sh_txout, outpoint, Some(sequence)).err().unwrap(),
             PsbtInputError::from(InvalidScriptPubKey(AddressType::P2tr))
         )
+    }
+
+    #[test]
+    fn p2tr_expected_weight_from_witness() {
+        let outpoint = OutPoint { txid: Txid::from_byte_array(DUMMY32), vout: 31 };
+        let sequence = Sequence::ZERO;
+        let pubkey_string = "0347ff3dacd07a1f43805ec6808e801505a6e18245178609972a68afbc2777ff2b";
+        let pubkey = pubkey_string.parse::<PublicKey>().expect("valid pubkey");
+        let xonly_pubkey = XOnlyPublicKey::from(pubkey.inner);
+        let p2tr_txout = TxOut {
+            value: Amount::from_sat(12345),
+            script_pubkey: ScriptBuf::new_p2tr(SECP256K1, xonly_pubkey, None),
+        };
+        let base_txin = TxIn { previous_output: outpoint, sequence, ..Default::default() };
+        let psbtin = psbt::Input { witness_utxo: Some(p2tr_txout.clone()), ..Default::default() };
+
+        // P2tr with witness elements
+        let mut script_witness = witness::Witness::new();
+        script_witness.push(vec![0x03; 64]);
+        script_witness.push(vec![0x04; 5]);
+        script_witness.push(vec![0x05; 33]);
+        let txin = TxIn { witness: script_witness.clone(), ..base_txin.clone() };
+        let script_weight = Weight::from_non_witness_data_size(txin.base_size() as u64)
+            + Weight::from_witness_data_size(script_witness.size() as u64);
+        let pair = InputPair::new(txin, psbtin, None).expect("taproot witness provided");
+        assert_eq!(pair.expected_weight, script_weight);
+
+        // Witness stack supplied on the PSBT input instead of txin
+        let txin = TxIn { witness: witness::Witness::new(), ..base_txin.clone() };
+        let psbtin = psbt::Input {
+            witness_utxo: Some(p2tr_txout.clone()),
+            final_script_witness: Some(script_witness.clone()),
+            ..Default::default()
+        };
+        let pair = InputPair::new(txin.clone(), psbtin.clone(), None)
+            .expect("taproot witness provided via psbt input");
+        assert_eq!(pair.expected_weight, script_weight);
+
+        // Weight should not be manually provided if we can derive it from the witness stacks
+        let err = InputPair::new(txin, psbtin, Some(script_weight)).unwrap_err();
+        assert_eq!(err, PsbtInputError::from(InternalPsbtInputError::ProvidedUnnecessaryWeight));
     }
 
     #[test]

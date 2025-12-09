@@ -12,6 +12,7 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
+use bitcoin::transaction::InputWeightPrediction;
 use bitcoin::{
     psbt, AddressType, FeeRate, OutPoint, Psbt, Script, ScriptBuf, Sequence, Transaction, TxIn,
     TxOut, Weight,
@@ -27,8 +28,15 @@ use serde::{Deserialize, Serialize};
 pub use crate::psbt::PsbtInputError;
 use crate::psbt::{
     InputWeightError, InternalInputPair, InternalPsbtInputError, PrevTxOutError, PsbtExt,
+    NON_WITNESS_INPUT_WEIGHT,
 };
 use crate::{ImplementationError, Version};
+
+/// Input weight for a P2TR key-spend with default sighash (64-byte signature) and no annex.
+const DEFAULT_SIGHASH_KEY_SPEND_INPUT_WEIGHT: Weight = Weight::from_wu(
+    InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH.weight().to_wu()
+        + NON_WITNESS_INPUT_WEIGHT.to_wu(),
+);
 
 pub(crate) mod common;
 mod error;
@@ -195,8 +203,10 @@ impl InputPair {
         Self::new_segwit_input_pair(txout, outpoint, sequence, Some(expected_weight))
     }
 
-    /// Constructs a new [`InputPair`] for spending a native SegWit P2TR output.
-    pub fn new_p2tr(
+    /// Constructs a new [`InputPair`] for spending a native SegWit P2TR output
+    /// via the key spend path using the default taproot sighash (64-byte
+    /// signature) and no annex.
+    pub fn new_p2tr_keyspend(
         txout: TxOut,
         outpoint: OutPoint,
         sequence: Option<Sequence>,
@@ -205,7 +215,29 @@ impl InputPair {
             return Err(InternalPsbtInputError::InvalidScriptPubKey(AddressType::P2tr).into());
         }
 
-        Self::new_segwit_input_pair(txout, outpoint, sequence, None)
+        Self::new_segwit_input_pair(
+            txout,
+            outpoint,
+            sequence,
+            Some(DEFAULT_SIGHASH_KEY_SPEND_INPUT_WEIGHT),
+        )
+    }
+
+    /// Constructs a new [`InputPair`] for spending a native SegWit P2TR output via the script path.
+    /// Callers must provide the expected input satisfiability weight. Ensure `expected_weight`
+    /// accurately reflects your script-path spend. Incorrect weight may cause fee calculation errors.
+    /// Use [`new_p2tr_keyspend`](Self::new_p2tr_keyspend) for key-path spends.
+    pub fn new_p2tr_scriptpath_spend(
+        txout: TxOut,
+        outpoint: OutPoint,
+        sequence: Option<Sequence>,
+        expected_weight: Weight,
+    ) -> Result<Self, PsbtInputError> {
+        if !txout.script_pubkey.is_p2tr() {
+            return Err(InternalPsbtInputError::InvalidScriptPubKey(AddressType::P2tr).into());
+        }
+
+        Self::new_segwit_input_pair(txout, outpoint, sequence, Some(expected_weight))
     }
 
     pub(crate) fn previous_txout(&self) -> TxOut {
@@ -472,10 +504,7 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::psbt::InternalPsbtInputError::InvalidScriptPubKey;
-
-    // TODO: this is duplicated in a couple places. In these tests, receiver, and the sender.
-    // We should pub(crate) it and moved to a common place.
-    const NON_WITNESS_DATA_WEIGHT: Weight = Weight::from_non_witness_data_size(32 + 4 + 4);
+    use crate::psbt::NON_WITNESS_INPUT_WEIGHT;
 
     pub(crate) fn original_from_test_vector() -> OriginalPayload {
         let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
@@ -536,7 +565,7 @@ pub(crate) mod tests {
         assert_eq!(p2pkh_pair.psbtin.non_witness_utxo.unwrap(), utxo);
         assert_eq!(
             p2pkh_pair.expected_weight,
-            InputWeightPrediction::P2PKH_COMPRESSED_MAX.weight() + NON_WITNESS_DATA_WEIGHT
+            InputWeightPrediction::P2PKH_COMPRESSED_MAX.weight() + NON_WITNESS_INPUT_WEIGHT
         );
 
         // Failures
@@ -652,7 +681,7 @@ pub(crate) mod tests {
         assert_eq!(p2wpkh_pair.psbtin.witness_utxo.unwrap(), p2wpkh_txout);
         assert_eq!(
             p2wpkh_pair.expected_weight,
-            InputWeightPrediction::P2WPKH_MAX.weight() + NON_WITNESS_DATA_WEIGHT
+            InputWeightPrediction::P2WPKH_MAX.weight() + NON_WITNESS_INPUT_WEIGHT
         );
 
         let p2sh_txout = TxOut {
@@ -747,23 +776,50 @@ pub(crate) mod tests {
         let xonly_pubkey = XOnlyPublicKey::from(pubkey.inner);
         let p2tr_txout = TxOut {
             value: Amount::from_sat(12345),
-            script_pubkey: ScriptBuf::new_p2tr(&Secp256k1::new(), xonly_pubkey, None),
+            script_pubkey: ScriptBuf::new_p2tr(SECP256K1, xonly_pubkey, None),
         };
-        let p2tr_pair = InputPair::new_p2tr(p2tr_txout.clone(), outpoint, Some(sequence)).unwrap();
-        assert_eq!(p2tr_pair.txin.previous_output, outpoint);
-        assert_eq!(p2tr_pair.txin.sequence, sequence);
-        assert_eq!(p2tr_pair.psbtin.witness_utxo.unwrap(), p2tr_txout);
+
+        // Expected weight for p2tr keyspend
         assert_eq!(
-            p2tr_pair.expected_weight,
-            InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH.weight() + NON_WITNESS_DATA_WEIGHT
+            DEFAULT_SIGHASH_KEY_SPEND_INPUT_WEIGHT,
+            InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH.weight() + NON_WITNESS_INPUT_WEIGHT
+        );
+        let expected_key_weight = DEFAULT_SIGHASH_KEY_SPEND_INPUT_WEIGHT;
+        let keyspend_pair =
+            InputPair::new_p2tr_keyspend(p2tr_txout.clone(), outpoint, Some(sequence)).unwrap();
+        assert_eq!(keyspend_pair.txin.previous_output, outpoint);
+        assert_eq!(keyspend_pair.txin.sequence, sequence);
+        let witness_utxo = keyspend_pair.psbtin.witness_utxo.clone().unwrap();
+        assert_eq!(witness_utxo, p2tr_txout);
+        assert_eq!(keyspend_pair.expected_weight, expected_key_weight);
+
+        // Manual expected weight for p2tr scriptpath
+        let script_expected_weight = Weight::from_wu(2048);
+        let script_pair = InputPair::new_p2tr_scriptpath_spend(
+            p2tr_txout.clone(),
+            outpoint,
+            Some(sequence),
+            script_expected_weight,
+        )
+        .unwrap();
+        assert_eq!(script_pair.expected_weight, script_expected_weight);
+
+        // P2TR without witness requires explicit weight (cannot auto-detect spend type)
+        let txin = TxIn { previous_output: outpoint, sequence, ..Default::default() };
+        let psbtin = psbt::Input { witness_utxo: Some(witness_utxo.clone()), ..Default::default() };
+        let p2tr_pair = InputPair::new(txin.clone(), psbtin.clone(), None);
+        assert_eq!(
+            p2tr_pair.err().unwrap(),
+            PsbtInputError::from(InternalPsbtInputError::from(InputWeightError::NotSupported))
         );
 
+        // If UTXO is non-P2TR
         let p2sh_txout = TxOut {
             value: Default::default(),
             script_pubkey: ScriptBuf::new_p2sh(&ScriptHash::all_zeros()),
         };
         assert_eq!(
-            InputPair::new_p2tr(p2sh_txout, outpoint, Some(sequence)).err().unwrap(),
+            InputPair::new_p2tr_keyspend(p2sh_txout, outpoint, Some(sequence)).err().unwrap(),
             PsbtInputError::from(InvalidScriptPubKey(AddressType::P2tr))
         )
     }

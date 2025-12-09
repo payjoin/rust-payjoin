@@ -1270,7 +1270,7 @@ impl Receiver<Monitor> {
                         tx.input.get(i).expect("sender_input_indexes should return valid indices");
                     sender_witnesses.push((input.script_sig.clone(), input.witness.clone()));
                 }
-                // Payjoin transaction with segwit inputs was detected. Log the signatures and complete the session
+                // Payjoin transaction with SegWit inputs was detected. Log the signatures and complete the session.
                 return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
                     SessionOutcome::Success(sender_witnesses),
                 ));
@@ -1461,9 +1461,15 @@ pub mod test {
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
         assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
         assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 1);
-        // TODO: check for exact events
+        assert_eq!(
+            persister.inner.read().expect("Shouldn't be poisoned").events.last(),
+            Some(&SessionEvent::Closed(SessionOutcome::Success(vec![(
+                ScriptBuf::default(),
+                Witness::default()
+            )])))
+        );
 
-        // fallback was broadcasted, should progress to success
+        // Fallback was broadcasted, should progress to success
         let persister = InMemoryTestPersister::default();
         let res = monitor
             .check_payment(

@@ -1,0 +1,23 @@
+error_log {{error_log_path}} debug;
+pid {{pid_path}};
+
+events {
+    worker_connections 1024;
+}
+
+stream {
+    server {
+        listen {{http_port}};
+
+        proxy_pass {{proxy_pass}};
+    }
+
+    server {
+        listen {{https_port}} ssl;
+
+        ssl_certificate {{cert_path}};
+        ssl_certificate_key {{key_path}};
+
+        proxy_pass {{proxy_pass}};
+    }
+}

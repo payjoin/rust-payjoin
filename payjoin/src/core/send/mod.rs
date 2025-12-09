@@ -23,7 +23,7 @@ pub(crate) use error::{InternalBuildSenderError, InternalProposalError, Internal
 use url::Url;
 
 use crate::output_substitution::OutputSubstitution;
-use crate::psbt::PsbtExt;
+use crate::psbt::{PsbtExt, NON_WITNESS_INPUT_WEIGHT};
 use crate::Version;
 
 // See usize casts
@@ -57,11 +57,6 @@ pub(crate) struct PsbtContextBuilder {
     pub(crate) clamp_fee_contribution: bool,
     pub(crate) min_fee_rate: FeeRate,
 }
-
-/// We only need to add the weight of the txid: 32, index: 4 and sequence: 4 as rust_bitcoin
-/// already accounts for the scriptsig length when calculating InputWeightPrediction
-/// <https://docs.rs/bitcoin/latest/src/bitcoin/blockdata/transaction.rs.html#1621>
-const NON_WITNESS_INPUT_WEIGHT: bitcoin::Weight = Weight::from_non_witness_data_size(32 + 4 + 4);
 
 impl PsbtContextBuilder {
     /// Prepare the context from which to make Sender requests

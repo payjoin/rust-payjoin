@@ -119,7 +119,8 @@ impl SessionHistory {
         }
         match self.events.last() {
             Some(SessionEvent::Closed(outcome)) => match outcome {
-                SessionOutcome::Success(_) => SessionStatus::Completed,
+                SessionOutcome::Success(_) | SessionOutcome::PayjoinProposalSent =>
+                    SessionStatus::Completed,
                 SessionOutcome::Failure | SessionOutcome::Cancel => SessionStatus::Failed,
                 SessionOutcome::FallbackBroadcasted => SessionStatus::FallbackBroadcasted,
             },
@@ -169,6 +170,10 @@ pub enum SessionOutcome {
     Cancel,
     /// Fallback transaction was broadcasted
     FallbackBroadcasted,
+    /// Payjoin proposal was sent, but its broadcast status cannot be tracked because
+    /// the sender is using non-SegWit inputs which will change the transaction ID
+    /// of the proposal
+    PayjoinProposalSent,
 }
 
 #[cfg(test)]

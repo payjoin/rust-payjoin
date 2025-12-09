@@ -1136,24 +1136,13 @@ fn try_deserialize_tx(
 
 #[uniffi::export]
 impl Monitor {
-    pub fn monitor(
-        &self,
-        transaction_exists: Arc<dyn TransactionExists>,
-        outpoint_spent: Arc<dyn OutpointSpent>,
-    ) -> MonitorTransition {
-        MonitorTransition(Arc::new(RwLock::new(Some(self.0.clone().check_payment(
-            |txid| {
-                transaction_exists
-                    .callback(txid.to_string())
-                    .and_then(|buf| buf.map(try_deserialize_tx).transpose())
-                    .map_err(|e| ImplementationError::new(e).into())
-            },
-            |outpoint| {
-                outpoint_spent
-                    .callback(outpoint.into())
-                    .map_err(|e| ImplementationError::new(e).into())
-            },
-        )))))
+    pub fn monitor(&self, transaction_exists: Arc<dyn TransactionExists>) -> MonitorTransition {
+        MonitorTransition(Arc::new(RwLock::new(Some(self.0.clone().check_payment(|txid| {
+            transaction_exists
+                .callback(txid.to_string())
+                .and_then(|buf| buf.map(try_deserialize_tx).transpose())
+                .map_err(|e| ImplementationError::new(e).into())
+        })))))
     }
 }
 

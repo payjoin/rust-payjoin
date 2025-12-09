@@ -1228,32 +1228,41 @@ pub struct Monitor {
 /// Call [`Receiver<Monitor>::check_payment`] to confirm the broadcast and conclude the Payjoin
 /// session.
 impl Receiver<Monitor> {
-    /// Checks if the Payjoin proposal, the fallback transaction, or a double-spend attempt
-    /// has been broadcasted by the sender. If the sender broadcasted either the Payjoin proposal
-    /// or the fallback transaction, concludes the Payjoin session with a success. If there was a
-    /// double-spend attempt, concludes with a failure.
+    /// Checks if the Payjoin proposal or the fallback transaction, has been broadcasted by the sender.
+    /// If the sender broadcasted either the Payjoin proposal or the fallback transaction, concludes
+    /// the Payjoin session with a success.
     ///
-    /// After the receiver has finalized the Payjoin proposal and sent it to the sender for the
-    /// final signature and broadcast, what the sender does changes how the receiver should track
-    /// the network and confirm that Payjoin session has concluded:
-    ///
-    /// 1. The sender may contribute segwit inputs, which would keep the transaction ID the same as
-    ///    what it was when the receiver sent the Payjoin proposal. In this case, the
-    ///    `transaction_exists` function will be used to confirm the broadcast.
-    /// 2. The sender may contribute non-segwit inputs, which would change the
-    ///    transaction ID. In this case, `outpoint_spent` will be used to confirm that the UTXOs
-    ///    the receiver contributed with have been spent. This function will fail if UTXOs have
-    ///    been spent but not in the Payjoin proposal, signalling a double-spend.
-    /// 3. The sender might not broadcast the Payjoin transaction and instead broadcast the original
-    ///    proposal which paid to the receiver but did not have any receiver contributions.
+    /// If the receiver input address type in the fallback transaction is non-SegWit, then this
+    /// function will directly conclude the Payjoin session with a Success without running the
+    /// provided `transaction_exists` closure. `transaction_exists` uses the transaction ID to
+    /// search for the transaction in the network. Since a non-SegWit input signature is going to
+    /// change the TXID of the Payjoin proposal, it cannot be monitored.
     pub fn check_payment(
         &self,
         transaction_exists: impl Fn(Txid) -> Result<Option<bitcoin::Transaction>, ImplementationError>,
-        outpoint_spent: impl Fn(OutPoint) -> Result<bool, ImplementationError>,
     ) -> MaybeFatalOrSuccessTransition<SessionEvent, Self, Error> {
+        let fallback_tx = self
+            .state
+            .psbt_context
+            .original_psbt
+            .clone()
+            .extract_tx_fee_rate_limit()
+            .expect("fallback transaction should be in the receiver context");
+
+        // If the fallback transaction included any non-SegWit inputs, then the transaction ID of
+        // the Payjoin proposal is going to change when the sender signs their non-SegWit address
+        // one more time. The receiver cannot monitor the broadcast, and should conclude the session.
+        if fallback_tx.input.iter().any(|txin| txin.witness.is_empty()) {
+            return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+                SessionOutcome::PayjoinProposalSent,
+            ));
+        }
+
         let payjoin_proposal = &self.state.psbt_context.payjoin_psbt;
         let payjoin_txid = payjoin_proposal.unsigned_tx.compute_txid();
-        // If we have a payjoin transaction with segwit inputs, we can check for the txid
+        // If the sender is spending SegWit-only inputs, then the transaction ID of the Payjoin proposal
+        // is not going to change when the sender signs it. So we can use the TXID to determine if
+        // the Payjoin proposal has been broadcasted.
         match transaction_exists(payjoin_txid) {
             Ok(Some(tx)) => {
                 let tx_id = tx.compute_txid();
@@ -1279,14 +1288,8 @@ impl Receiver<Monitor> {
             Err(e) => return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e)),
         }
 
-        // Check for fallback being broadcasted
-        let fallback_tx = self
-            .state
-            .psbt_context
-            .original_psbt
-            .clone()
-            .extract_tx_fee_rate_limit()
-            .expect("Checked in earlier typestates");
+        // If the Payjoin proposal was not found, check the fallback transaction, at it is
+        // the second of two transactions whose IDs the receiver is aware of.
         match transaction_exists(fallback_tx.compute_txid()) {
             Ok(Some(_)) =>
                 return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
@@ -1294,29 +1297,6 @@ impl Receiver<Monitor> {
                 )),
             Ok(None) => {}
             Err(e) => return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e)),
-        }
-
-        let mut outpoints_spend = 0;
-        for ot in payjoin_proposal.unsigned_tx.input.iter() {
-            match outpoint_spent(ot.previous_output) {
-                Ok(false) => {}
-                Ok(true) => outpoints_spend += 1,
-                Err(e) =>
-                    return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e)),
-            }
-        }
-
-        if outpoints_spend == payjoin_proposal.unsigned_tx.input.len() {
-            // All the payjoin proposal outpoints were spent. This means our payjoin proposal has non-segwit inputs and is broadcasted.
-            return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
-                // TODO: there seems to be not great way to get the tx of the tx that spent these outpoints.
-                SessionOutcome::Success(vec![]),
-            ));
-        } else if outpoints_spend > 0 {
-            // Some outpoints were spent but not in the payjoin proposal. This is a double spend.
-            return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
-                SessionOutcome::Failure,
-            ));
         }
 
         MaybeFatalOrSuccessTransition::no_results(self.clone())
@@ -1359,7 +1339,7 @@ pub(crate) fn pj_uri<'a>(
 pub mod test {
     use std::str::FromStr;
 
-    use bitcoin::FeeRate;
+    use bitcoin::{FeeRate, ScriptBuf, Witness};
     use once_cell::sync::Lazy;
     use payjoin_test_utils::{
         BoxError, EXAMPLE_URL, KEM, KEY_ID, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT,
@@ -1444,7 +1424,7 @@ pub mod test {
         // Nothing was spent, should be in the same state
         let persister = InMemoryTestPersister::default();
         let res = monitor
-            .check_payment(|_| Ok(None), |_| Ok(false))
+            .check_payment(|_| Ok(None))
             .save(&persister)
             .expect("InMemoryTestPersister shouldn't fail");
         assert!(matches!(res, OptionalTransitionOutcome::Stasis(_)));
@@ -1454,7 +1434,7 @@ pub mod test {
         // Payjoin was broadcasted, should progress to success
         let persister = InMemoryTestPersister::default();
         let res = monitor
-            .check_payment(|_| Ok(Some(payjoin_tx.clone())), |_| Ok(false))
+            .check_payment(|_| Ok(Some(payjoin_tx.clone())))
             .save(&persister)
             .expect("InMemoryTestPersister shouldn't fail");
 
@@ -1472,69 +1452,54 @@ pub mod test {
         // Fallback was broadcasted, should progress to success
         let persister = InMemoryTestPersister::default();
         let res = monitor
-            .check_payment(
-                |txid| {
-                    // Emulate if one of the fallback outpoints was double spent
-                    if txid == original_tx.compute_txid() {
-                        Ok(Some(original_tx.clone()))
-                    } else {
-                        Ok(None)
-                    }
-                },
-                |_| Ok(false),
-            )
+            .check_payment(|txid| {
+                // Emulate if one of the fallback outpoints was double spent
+                if txid == original_tx.compute_txid() {
+                    Ok(Some(original_tx.clone()))
+                } else {
+                    Ok(None)
+                }
+            })
             .save(&persister)
             .expect("InMemoryTestPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
         assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
+        assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 1);
         assert_eq!(
             persister.inner.read().expect("Shouldn't be poisoned").events.last(),
             Some(&SessionEvent::Closed(SessionOutcome::FallbackBroadcasted))
         );
 
+        // Fallback transaction is non-SegWit address type, should end the session without checking
+        // the network for broadcasts.
+        // Not using the test-utils vectors here as they are SegWit.
+        let parsed_original_psbt_p2pkh = Psbt::from_str("cHNidP8BAFICAAAAAd5tU7sqAGa46oUVdEfV1HTeVVPYqvSvxy8/dvF3dwpZAQAAAAD9////AUTxBSoBAAAAFgAUhV1NWa6seBB5g6VZC2lnduxfEaUAAAAAAAEA/QoBAgAAAAIT2eO393FPqJ4fw6NH0rXALebtTCderecX0y6DumtjNgAAAAAA/f///5hrwcRiTXqXScbvk3APDdzy162Yj+6JD/iSEO9KYQl+AQAAAGpHMEQCIGcFm57xH5tQvJMipWfzxS7OGRi7+JfTT6WA27kOt8fVAiAp2I3WGdLk3/dVhoVxN6Jl9Wp/xeCIZZ1OTukSs8jszgEhAjjEq9kNnhvQbdVlWsE9QTIe4h39UPQ8flvU5Ivq6DFm/f///wIo3gUqAQAAABl2qRTWng6zTFWPZX1k12UqqBI6kLz8z4isAPIFKgEAAAAZdqkUIz2wzl605b3cg3j72nXReQuXXaWIrGcAAAABB2pHMEQCIEP33+9X/ecNmaiydM54HS+HoHfZygAQ/vMlc5r1IWkeAiA9oKjOVmp+RnrDF4zzHHGtoG1yy1+UWXBNaDiwd0LokgEhAmfCwbIv1mi5psiB3HFqXN1bFAo+goNUPWIso60J1matAAA=").expect("known psbt should parse");
+        let parsed_payjoin_proposal_p2pkh: Psbt =
+            Psbt::from_str("cHNidP8BAHsCAAAAAphrwcRiTXqXScbvk3APDdzy162Yj+6JD/iSEO9KYQl+AAAAAAD9////3m1TuyoAZrjqhRV0R9XUdN5VU9iq9K/HLz928Xd3ClkBAAAAAP3///8BsOILVAIAAAAWABSFXU1Zrqx4EHmDpVkLaWd27F8RpQAAAAAAAQCgAgAAAAJgEjBIihNzFXar4wIYepzXJwQVpbqZep9GCY8pQCqh3wAAAAAA/f///x8caN/onT7AOPRWJz7vnT6yiNxcsAIs/U3RcgU4kiq4AAAAAAD9////AgDyBSoBAAAAGXapFDGh2kOIa5aNVHT2bHSoFfcawEMiiKyk6QUqAQAAABl2qRQY8AsQvx+jg9NdGUwCuShS3qk2KYisZwAAAAEBIgDyBSoBAAAAGXapFDGh2kOIa5aNVHT2bHSoFfcawEMiiKwBB2pHMEQCICQEE2dMDzlyH3ojsc0l98Da0yd2ARuy5AcWQjlgHHjkAiA70WPB+yQhW5zhsOBTg6qLsi0KzoofRAj1BZFpKT2QwAEhA68L99Q+xdIIp0rinuVDs+4qmqMZwg4E+aqbTQ8RClXLAAEA/QoBAgAAAAIT2eO393FPqJ4fw6NH0rXALebtTCderecX0y6DumtjNgAAAAAA/f///5hrwcRiTXqXScbvk3APDdzy162Yj+6JD/iSEO9KYQl+AQAAAGpHMEQCIGcFm57xH5tQvJMipWfzxS7OGRi7+JfTT6WA27kOt8fVAiAp2I3WGdLk3/dVhoVxN6Jl9Wp/xeCIZZ1OTukSs8jszgEhAjjEq9kNnhvQbdVlWsE9QTIe4h39UPQ8flvU5Ivq6DFm/f///wIo3gUqAQAAABl2qRTWng6zTFWPZX1k12UqqBI6kLz8z4isAPIFKgEAAAAZdqkUIz2wzl605b3cg3j72nXReQuXXaWIrGcAAAAAAA==").expect("known psbt should parse");
+
+        let psbt_ctx_p2pkh = PsbtContext {
+            original_psbt: parsed_original_psbt_p2pkh.clone(),
+            payjoin_psbt: parsed_payjoin_proposal_p2pkh.clone(),
+        };
+        let monitor = Receiver {
+            state: Monitor { psbt_context: psbt_ctx_p2pkh },
+            session_context: SHARED_CONTEXT.clone(),
+        };
+
         let persister = InMemoryTestPersister::default();
         let res = monitor
-            .check_payment(|_| Ok(None), |_| Ok(true))
+            .check_payment(|_| panic!("check_payment should return before this closure is called"))
             .save(&persister)
             .expect("InMemoryTestPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
         assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
         assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 1);
-
-        let persister = InMemoryTestPersister::default();
-        monitor
-            .check_payment(
-                |_| Ok(None),
-                |outpoint| {
-                    if outpoint == payjoin_tx.input[0].previous_output {
-                        Ok(true)
-                    } else {
-                        Ok(false)
-                    }
-                },
-            )
-            .save(&persister)
-            .expect("InMemoryTestPersister shouldn't fail");
-
-        assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
-        assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 1);
         assert_eq!(
             persister.inner.read().expect("Shouldn't be poisoned").events.last(),
-            Some(&SessionEvent::Closed(SessionOutcome::Failure))
+            Some(&SessionEvent::Closed(SessionOutcome::PayjoinProposalSent))
         );
-
-        // assert_eq!(
-        //     err.to_string(),
-        //     Error::Protocol(ProtocolError::V2(
-        //         InternalSessionError::FallbackOutpointsSpent(vec![
-        //             payjoin_tx.input[0].previous_output
-        //         ],)
-        //         .into()
-        //     ))
-        //     .to_string()
-        // );
 
         Ok(())
     }

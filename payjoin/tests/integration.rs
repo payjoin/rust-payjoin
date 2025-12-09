@@ -492,6 +492,66 @@ mod integration {
         }
 
         #[tokio::test]
+        async fn v2_to_v2_p2pkh() -> Result<(), BoxSendSyncError> {
+            init_tracing();
+            let mut services = TestServices::initialize().await?;
+            let expected_weight = Weight::from_wu(
+                TX_HEADER_LEGACY_WEIGHT + (P2PKH_INPUT_WEIGHT * 2) + P2WPKH_OUTPUT_WEIGHT,
+            )
+            // bitcoin-cli wallet uses signature grinding to save one vbyte on the original PSBT.
+            // subtract it here
+            - Weight::from_vb_unchecked(1);
+            let expected_fee = expected_weight * FeeRate::BROADCAST_MIN;
+
+            let (_bitcoind, sender, receiver) =
+                init_bitcoind_sender_receiver(Some(AddressType::Legacy), Some(AddressType::Legacy))
+                    .expect("should be able to initialize the sender and the receiver");
+            let recv_persister = InMemoryTestPersister::default();
+            let send_persister = InMemoryTestPersister::default();
+
+            let result = tokio::select!(
+                err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
+                err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
+                res = do_v2_to_v2(&services, &receiver, &sender, &recv_persister, &send_persister, SenderFinalAction::SignAndBroadcastPayjoinProposal) => res
+            );
+
+            assert!(result.is_ok(), "v2 p2pkh send receive failed: {:#?}", result.unwrap_err());
+
+            let (broadcasted_transaction, monitoring_payment) = result.unwrap();
+
+            // Sender should have sent the entire value of their UTXO to receiver (minus fees).
+            assert_eq!(broadcasted_transaction.input.len(), 2);
+            assert_eq!(broadcasted_transaction.output.len(), 1);
+            assert_eq!(
+                receiver.get_balances()?.into_model()?.mine.untrusted_pending,
+                Amount::from_btc(100.0)? - expected_fee
+            );
+            assert_eq!(
+                sender.get_balances()?.into_model()?.mine.untrusted_pending,
+                Amount::from_btc(0.0)?
+            );
+
+            // Receiver cannot validate that the sender has broadcasted the Payjoin proposal or the fallback transaction.
+            // The sender is using a non-SegWit address, so their signature is going to change the TXID. So we test whether the
+            // function exists early and does not call the closure.
+            monitoring_payment
+                .check_payment(|_| {
+                    panic!("when the sender is using a non-SegWit address type, the check_payment function should skip the check and return success")
+                })
+                .save(&recv_persister)
+                .expect("receiver should successfully monitor for the payment");
+
+            let (_session, session_history) = replay_receiver_event_log(&recv_persister)?;
+            assert_eq!(
+                recv_persister.load().unwrap().last(),
+                Some(payjoin::receive::v2::SessionEvent::Closed(payjoin::receive::v2::SessionOutcome::PayjoinProposalSent)),
+                "The last event of the persister should be a SessionOutcome::PayjoinProposalSent since the sender is going to change the TXID when they sign the Payjoin proposal",
+            );
+            assert_eq!(session_history.status(), SessionStatus::Completed);
+            Ok(())
+        }
+
+        #[tokio::test]
         async fn v2_to_v2_p2wpkh() -> Result<(), BoxSendSyncError> {
             init_tracing();
             let mut services = TestServices::initialize().await?;
@@ -530,22 +590,16 @@ mod integration {
 
             // Receiver should be able to validate that the sender has broadcasted the Payjoin proposal.
             monitoring_payment
-                .check_payment(
-                    |txid| {
-                        let get_tx_result = receiver.get_raw_transaction(txid);
-                        match get_tx_result {
-                            Ok(tx) => {
-                                Ok(Some(tx.transaction().expect("transaction should be decodable")))
-                            },
-                            Err(_) => {
-                                panic!("should be able to find the payjoin proposal broadcasted")
-                            }
+                .check_payment(|txid| {
+                    let get_tx_result = receiver.get_raw_transaction(txid);
+                    match get_tx_result {
+                        Ok(tx) =>
+                            Ok(Some(tx.transaction().expect("transaction should be decodable"))),
+                        Err(_) => {
+                            panic!("should be able to find the payjoin proposal broadcasted")
                         }
-                    },
-                    |_| {
-                        panic!("should not even check outpoints for a segwit payjoin proposal or a fallback transaction")
-                    },
-                )
+                    }
+                })
                 .save(&recv_persister)
                 .expect("receiver should successfully monitor for the payment");
 
@@ -618,22 +672,16 @@ mod integration {
 
             // Receiver should be able to validate that the sender has broadcasted the Payjoin proposal.
             monitoring_payment
-                .check_payment(
-                    |txid| {
-                        let get_tx_result = receiver.get_raw_transaction(txid);
-                        match get_tx_result {
-                            Ok(tx) => {
-                                Ok(Some(tx.transaction().expect("transaction should be decodable")))
-                            },
-                            Err(_) => {
-                                panic!("should be able to find the payjoin proposal broadcasted")
-                            }
+                .check_payment(|txid| {
+                    let get_tx_result = receiver.get_raw_transaction(txid);
+                    match get_tx_result {
+                        Ok(tx) =>
+                            Ok(Some(tx.transaction().expect("transaction should be decodable"))),
+                        Err(_) => {
+                            panic!("should be able to find the payjoin proposal broadcasted")
                         }
-                    },
-                    |_| {
-                        panic!("should not even check outpoints for a segwit payjoin proposal or a fallback transaction")
-                    },
-                )
+                    }
+                })
                 .save(&recv_persister)
                 .expect("receiver should successfully monitor for the payment");
 
@@ -703,22 +751,14 @@ mod integration {
             // The check_payment closure should be called twice: first for the Payjoin proposal, which will not be found,
             // and then for the fallback transaction, which will be found..
             monitoring_payment
-                .check_payment(
-                    |txid| {
-                        let get_tx_result = receiver.get_raw_transaction(txid);
-                        match get_tx_result {
-                            Ok(tx) => {
-                                Ok(Some(tx.transaction().expect("transaction should be decodable")))
-                            },
-                            Err(_) => {
-                                Ok(None)
-                            }
-                        }
-                    },
-                    |_| {
-                        panic!("should not even check outpoints for a segwit payjoin proposal or a fallback transaction")
-                    },
-                )
+                .check_payment(|txid| {
+                    let get_tx_result = receiver.get_raw_transaction(txid);
+                    match get_tx_result {
+                        Ok(tx) =>
+                            Ok(Some(tx.transaction().expect("transaction should be decodable"))),
+                        Err(_) => Ok(None),
+                    }
+                })
                 .save(&recv_persister)
                 .expect("receiver should successfully monitor for the payment");
 

@@ -79,9 +79,11 @@ impl StatusText for ReceiveSession {
             ReceiveSession::Monitor(_) => "Monitoring payjoin proposal",
             ReceiveSession::Closed(session_outcome) => match session_outcome {
                 ReceiverSessionOutcome::Failure => "Session failure",
-                ReceiverSessionOutcome::Success(_) => "Session success",
+                ReceiverSessionOutcome::Success(_) => "Session success, Payjoin proposal was broadcasted",
                 ReceiverSessionOutcome::Cancel => "Session cancelled",
                 ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
+                ReceiverSessionOutcome::PayjoinProposalSent =>
+                    "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs",
             },
         }
     }
@@ -778,18 +780,11 @@ impl App {
             loop {
                 interval.tick().await;
                 let check_result = proposal
-                    .check_payment(
-                        |txid| {
-                            self.wallet()
-                                .get_raw_transaction(&txid)
-                                .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-                        },
-                        |outpoint| {
-                            self.wallet()
-                                .is_outpoint_spent(&outpoint)
-                                .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-                        },
-                    )
+                    .check_payment(|txid| {
+                        self.wallet()
+                            .get_raw_transaction(&txid)
+                            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+                    })
                     .save(persister);
 
                 match check_result {

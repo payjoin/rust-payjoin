@@ -28,6 +28,14 @@
         };
 
         msrv = "1.85.0";
+
+        nginxWithStream = pkgs.nginxMainline.overrideAttrs (oldAttrs: {
+          configureFlags = oldAttrs.configureFlags ++ [
+            "--with-stream"
+            "--with-stream_ssl_module"
+            "--error-log-path=/dev/null"
+          ];
+        });
         rustVersions =
           with pkgs.rust-bin;
           builtins.mapAttrs
@@ -111,6 +119,7 @@
               "payjoin" = "--features v2";
               "payjoin-cli" = "--features v1,v2";
               "payjoin-directory" = "";
+              "ohttp-relay" = "";
             };
 
         devShells = builtins.mapAttrs (
@@ -124,6 +133,7 @@
                 cargo-watch
                 rust-analyzer
                 dart
+                nginxWithStream
               ]
               ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [
                 cargo-llvm-cov
@@ -143,7 +153,9 @@
           );
       in
       {
-        packages = packages;
+        packages = packages // {
+          nginx-with-stream = nginxWithStream;
+        };
         devShells = devShells // {
           default = devShells.nightly;
         };

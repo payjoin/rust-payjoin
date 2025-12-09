@@ -24,7 +24,7 @@ if [ -f "$LOCKFILE" ]; then
 fi
 
 DEPS="recent minimal"
-CRATES="payjoin payjoin-cli payjoin-directory payjoin-ffi"
+CRATES="ohttp-relay payjoin payjoin-cli payjoin-directory payjoin-ffi"
 
 for dep in $DEPS; do
     cargo --version

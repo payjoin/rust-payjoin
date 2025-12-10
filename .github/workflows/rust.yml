@@ -53,7 +53,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: "Run formatting check"
         run: cargo fmt --all -- --check
-  
+
   Format-FFI:
     runs-on: ubuntu-latest
     steps:
@@ -67,7 +67,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: "Run formatting check"
         run: cd payjoin-ffi && cargo fmt --all -- --check
-  
+
   Lint-FFI:
     runs-on: ubuntu-latest
     steps:

@@ -1,0 +1,27 @@
+[workspace]
+
+[package]
+name = "payjoin-service"
+version = "0.0.1"
+description = "Unified Payjoin Directory and OHTTP Relay service"
+repository = "https://github.com/payjoin/rust-payjoin/tree/master/payjoin-service"
+keywords = ["bip77", "bitcoin", "ohttp", "payjoin", "privacy"]
+categories = [
+  "cryptography::cryptocurrencies",
+  "network-programming",
+  "web-programming",
+]
+license = "MITNFA"
+edition = "2021"
+rust-version = "1.85.0"
+
+[features]
+default = []
+
+[dependencies]
+anyhow = "1.0"
+ohttp-relay = { path = "../ohttp-relay" }
+payjoin-directory = { path = "../payjoin-directory" }
+tokio = { version = "1.47", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

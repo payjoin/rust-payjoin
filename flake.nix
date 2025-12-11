@@ -61,13 +61,22 @@
         craneLibVersions = builtins.mapAttrs (
           name: rust-bin: (crane.mkLib pkgs).overrideToolchain (_: rust-bin)
         ) rustVersions;
-        craneLib = craneLibVersions.nightly;
+
         src = nixpkgs.lib.cleanSourceWith {
           src = ./.;
           filter =
             path: type:
-            (builtins.match ".*nginx.conf.template$" path != null) || (craneLib.filterCargoSources path type);
+            (builtins.match ".*nginx.conf.template$" path != null)
+            || (craneLibVersions.msrv.filterCargoSources path type);
           name = "source";
+        };
+        cargoLock = rec {
+          default = recent; # see also #454
+          recent = ./Cargo-recent.lock;
+          minimal = ./Cargo-minimal.lock;
+          msrv = minimal;
+          stable = default;
+          nightly = recent;
         };
         commonArgs = {
           inherit src;
@@ -79,19 +88,20 @@
           pname = "workspace";
           version = "no-version";
 
-          # default to recent dependency versions
-          # TODO add overrides for minimal lockfile, once #454 is resolved
-          cargoLock = ./Cargo-recent.lock;
-
           # tell bitcoind crate not to try to download during build
           BITCOIND_SKIP_DOWNLOAD = 1;
         };
 
-        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-        individualCrateArgs = commonArgs // {
-          inherit cargoArtifacts;
-          doCheck = false; # skip testing, since that's done in flake check
-        };
+        cargoArtifacts = builtins.mapAttrs (
+          name: craneLib:
+          craneLib.buildDepsOnly (
+            commonArgs
+            // {
+              name = "workspace-deps-${name}";
+              cargoLock = cargoLock.${name};
+            }
+          )
+        ) craneLibVersions;
 
         fileSetForCrate =
           subdir:
@@ -99,7 +109,7 @@
             root = ./.;
             fileset = pkgs.lib.fileset.unions [
               ./Cargo.toml
-              (craneLib.fileset.commonCargoSources subdir)
+              (craneLibVersions.msrv.fileset.commonCargoSources subdir)
             ];
           };
 
@@ -107,10 +117,17 @@
           builtins.mapAttrs
             (
               name: extraArgs:
-              craneLib.buildPackage (
-                individualCrateArgs
-                // craneLib.crateNameFromCargoToml { cargoToml = builtins.toPath "${./.}/${name}/Cargo.toml"; }
+              # build packages with MSRV toolchain by default, since the builds are
+              # mostly for testing purposes
+              craneLibVersions.msrv.buildPackage (
+                commonArgs
+                // craneLibVersions.msrv.crateNameFromCargoToml {
+                  cargoToml = builtins.toPath "${./.}/${name}/Cargo.toml";
+                }
                 // {
+                  cargoLock = cargoLock.msrv;
+                  cargoArtifacts = cargoArtifacts.msrv;
+                  doCheck = false; # skip testing, since that's done in a separate flake check
                   cargoExtraArgs = "--locked -p ${name} ${extraArgs}";
                   inherit src;
                 }
@@ -161,95 +178,98 @@
           default = devShells.nightly;
         };
         formatter = pkgs.nixfmt-tree;
-        checks = packages // {
-          payjoin-workspace-nextest-nightly = craneLib.cargoNextest (
-            commonArgs
-            // {
-              inherit cargoArtifacts;
-              partitions = 1;
-              partitionType = "count";
-              cargoExtraArgs = "--locked --all-features";
-              BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
-              nativeBuildInputs = [ nginxWithStream ];
-            }
-          );
+        checks =
+          packages
+          // (pkgs.lib.mapAttrs' (
+            name: craneLib:
+            (pkgs.lib.nameValuePair "payjoin-workspace-nextest-${name}" (
+              craneLib.cargoNextest (
+                commonArgs
+                // {
+                  name = "payjoin-workspace-nextest-${name}";
+                  cargoLock = cargoLock.${name};
+                  cargoArtifacts = cargoArtifacts.${name};
+                  partitions = 1;
+                  partitionType = "count";
+                  cargoExtraArgs = "--locked --all-features";
+                  BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
+                  nativeBuildInputs = [ nginxWithStream ];
+                }
 
-          payjoin-workspace-nextest-msrv = craneLibVersions.msrv.cargoNextest (
-            commonArgs
-            // {
-              cargoArtifacts = craneLibVersions.msrv.buildDepsOnly commonArgs;
-              partitions = 1;
-              partitionType = "count";
-              cargoExtraArgs = "--locked --all-features";
-              BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
-              nativeBuildInputs = [ nginxWithStream ];
-            }
-          );
+              )
+            ))
+          ) craneLibVersions
 
-          payjoin-workspace-machete = craneLib.mkCargoDerivation (
-            commonArgs
-            // {
-              pname = "payjoin-workspace-machete";
-              inherit cargoArtifacts;
-              nativeBuildInputs = [ pkgs.cargo-machete ];
-              buildPhaseCargoCommand = "";
-              checkPhaseCargoCommand = "cargo machete";
-              doCheck = true;
-            }
-          );
+          )
+          // {
+            payjoin-workspace-machete = craneLibVersions.nightly.mkCargoDerivation (
+              commonArgs
+              // {
+                pname = "payjoin-workspace-machete";
+                cargoLock = cargoLock.nightly;
+                cargoArtifacts = cargoArtifacts.nightly;
+                nativeBuildInputs = [ pkgs.cargo-machete ];
+                buildPhaseCargoCommand = "";
+                checkPhaseCargoCommand = "cargo machete";
+                doCheck = true;
+              }
+            );
 
-          payjoin-workspace-clippy = craneLib.cargoClippy (
-            commonArgs
-            // {
-              inherit cargoArtifacts;
-              cargoClippyExtraArgs = "--all-targets --all-features --keep-going -- --deny warnings";
-            }
-          );
+            payjoin-workspace-clippy = craneLibVersions.nightly.cargoClippy (
+              commonArgs
+              // {
+                cargoLock = cargoLock.nightly;
+                cargoArtifacts = cargoArtifacts.nightly;
+                cargoClippyExtraArgs = "--all-targets --all-features --keep-going -- --deny warnings";
+              }
+            );
 
-          payjoin-workspace-doc = craneLib.cargoDoc (
-            commonArgs
-            // {
-              inherit cargoArtifacts;
-            }
-          );
+            payjoin-workspace-doc = craneLibVersions.nightly.cargoDoc (
+              commonArgs
+              // {
+                cargoLock = cargoLock.nightly;
+                cargoArtifacts = cargoArtifacts.nightly;
+              }
+            );
 
-          payjoin-workspace-fmt = craneLib.cargoFmt (
-            commonArgs
-            // {
-              inherit src;
-            }
-          );
+            payjoin-workspace-fmt = craneLibVersions.nightly.cargoFmt (
+              commonArgs
+              // {
+                inherit src;
+                # cargoLock = cargoLock.nightly;
+              }
+            );
 
-          nix-fmt-check = simpleCheck {
-            name = "nix-fmt-check";
-            src = pkgs.lib.sources.sourceFilesBySuffices ./. [ ".nix" ];
-            nativeBuildInputs = [ pkgs.nixfmt-tree ];
-            checkPhase = ''
-              treefmt --ci --tree-root .
-            '';
+            nix-fmt-check = simpleCheck {
+              name = "nix-fmt-check";
+              src = pkgs.lib.sources.sourceFilesBySuffices ./. [ ".nix" ];
+              nativeBuildInputs = [ pkgs.nixfmt-tree ];
+              checkPhase = ''
+                treefmt --ci --tree-root .
+              '';
+            };
+
+            shfmt = simpleCheck rec {
+              name = "shfmt";
+              src = pkgs.lib.sources.sourceFilesBySuffices ./. [ ".sh" ];
+              nativeBuildInputs = [ pkgs.shfmt ];
+              checkPhase = ''
+                shfmt -d -s -i 4 -ci ${src}
+              '';
+            };
+
+            shellcheck = simpleCheck rec {
+              name = "shellcheck";
+              src = pkgs.lib.sources.sourceFilesBySuffices ./. [ ".sh" ];
+              nativeBuildInputs = [
+                pkgs.shellcheck
+                pkgs.findutils
+              ];
+              checkPhase = ''
+                find "${src}" -name '*.sh' -print0 | xargs -0 shellcheck -x
+              '';
+            };
           };
-
-          shfmt = simpleCheck rec {
-            name = "shfmt";
-            src = pkgs.lib.sources.sourceFilesBySuffices ./. [ ".sh" ];
-            nativeBuildInputs = [ pkgs.shfmt ];
-            checkPhase = ''
-              shfmt -d -s -i 4 -ci ${src}
-            '';
-          };
-
-          shellcheck = simpleCheck rec {
-            name = "shellcheck";
-            src = pkgs.lib.sources.sourceFilesBySuffices ./. [ ".sh" ];
-            nativeBuildInputs = [
-              pkgs.shellcheck
-              pkgs.findutils
-            ];
-            checkPhase = ''
-              find "${src}" -name '*.sh' -print0 | xargs -0 shellcheck -x
-            '';
-          };
-        };
       }
     );
 }

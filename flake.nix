@@ -278,6 +278,46 @@
                 find "${src}" -name '*.sh' -print0 | xargs -0 shellcheck -x
               '';
             };
+
+            quick = checkSuite "quick" (
+              with self.outputs.checks.${system};
+              [
+                shfmt
+                shellcheck
+                nix-fmt-check
+              ]
+            );
+
+            slow = checkSuite "slow" (
+              with self.outputs.checks.${system};
+              [
+                nightly
+                stable
+                msrv
+              ]
+            );
+
+            nightly = checkSuite "nightly" (
+              with self.outputs.checks.${system};
+              [
+                payjoin-workspace-nextest-nightly
+              ]
+            );
+
+            stable = checkSuite "stable" (
+              with self.outputs.checks.${system};
+              [
+                payjoin-workspace-nextest-stable
+              ]
+            );
+
+            msrv = checkSuite "msrv" (
+              with self.outputs.checks.${system};
+              [
+                payjoin-workspace-nextest-msrv
+              ]
+              ++ pkgs.lib.attrValues packages
+            );
           };
       }
     );

@@ -162,7 +162,7 @@
         };
         formatter = pkgs.nixfmt-tree;
         checks = packages // {
-          payjoin-workspace-nextest = craneLib.cargoNextest (
+          payjoin-workspace-nextest-nightly = craneLib.cargoNextest (
             commonArgs
             // {
               inherit cargoArtifacts;

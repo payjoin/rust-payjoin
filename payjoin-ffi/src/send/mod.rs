@@ -32,7 +32,7 @@ macro_rules! impl_save_for_transition {
     };
 }
 
-#[derive(uniffi::Object, Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(uniffi::Object, Debug, Clone)]
 pub struct SenderSessionEvent(payjoin::send::v2::SessionEvent);
 
 impl From<SenderSessionEvent> for payjoin::send::v2::SessionEvent {

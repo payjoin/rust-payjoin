@@ -77,7 +77,8 @@ pub enum ProtocolError {
 ///     "message": "Human readable error message"
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct JsonReply {
     /// The error code
     error_code: ErrorCode,

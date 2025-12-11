@@ -103,7 +103,8 @@ pub enum SessionStatus {
     Completed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SessionEvent {
     /// Sender was created with session data
     Created(Box<SessionContext>),
@@ -114,7 +115,8 @@ pub enum SessionEvent {
 }
 
 /// Represents all possible outcomes for a closed Payjoin session
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SessionOutcome {
     /// Successful payjoin
     Success(bitcoin::Psbt),

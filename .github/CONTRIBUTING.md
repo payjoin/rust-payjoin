@@ -51,9 +51,9 @@ Every commit should be [hygenic](https://github.com/bitcoin/bitcoin/blob/master/
 #!/usr/bin/env bash
 set -euo pipefail
 
-# -------- 1. Rustfmt (nightly toolchain) --------
-echo "▶  cargo +nightly fmt --check"
-cargo +nightly fmt --all -- --check
+# -------- 1. Rustfmt --------
+echo "▶  cargo fmt --check"
+cargo fmt --all -- --check
 
 # -------- 2.1 Project-specific linter --------
 echo "▶  ./contrib/lint.sh"

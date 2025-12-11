@@ -1,6 +1,8 @@
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 pub(crate) use gateway_prober::Prober;
 pub use gateway_uri::GatewayUri;
@@ -13,13 +15,13 @@ use hyper::header::{
     ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_LENGTH, CONTENT_TYPE,
 };
 use hyper::server::conn::http1;
-use hyper::service::service_fn;
 use hyper::{Method, Request, Response};
 use hyper_rustls::builderstates::WantsSchemes;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::service::TowerToHyperService;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, UnixListener};
 use tokio_util::net::Listener;
@@ -39,6 +41,7 @@ pub mod bootstrap;
 pub const DEFAULT_PORT: u16 = 3000;
 pub const OHTTP_RELAY_HOST: HeaderValue = HeaderValue::from_static("0.0.0.0");
 pub const EXPECTED_MEDIA_TYPE: HeaderValue = HeaderValue::from_static("message/ohttp-req");
+pub const DEFAULT_GATEWAY: &str = "https://payjo.in";
 
 #[instrument]
 pub async fn listen_tcp(
@@ -93,6 +96,50 @@ impl RelayConfig {
     }
 }
 
+#[derive(Clone)]
+pub struct Service {
+    config: Arc<RelayConfig>,
+}
+
+impl Service {
+    fn from_config(config: Arc<RelayConfig>) -> Self { Self { config } }
+
+    pub async fn new() -> Self {
+        // The default gateway is hardcoded because it is obsolete and required only for backwards
+        // compatibility.
+        // The new mechanism for specifying a custom gateway is via RFC 9540 using
+        // `/.well-known/ohttp-gateway` request paths.
+        let gateway_origin = GatewayUri::from_str(DEFAULT_GATEWAY).expect("valid gateway uri");
+        let config = RelayConfig::new_with_default_client(gateway_origin);
+        config.prober.assert_opt_in(&config.default_gateway).await;
+        Self { config: Arc::new(config) }
+    }
+
+    #[cfg(feature = "_test-util")]
+    pub async fn new_with_roots(root_store: rustls::RootCertStore) -> Self {
+        let gateway_origin = GatewayUri::from_str(DEFAULT_GATEWAY).expect("valid gateway uri");
+        let config = RelayConfig::new(gateway_origin, root_store);
+        config.prober.assert_opt_in(&config.default_gateway).await;
+        Self { config: Arc::new(config) }
+    }
+}
+
+impl tower::Service<Request<Incoming>> for Service {
+    type Response = Response<BoxBody<Bytes, hyper::Error>>;
+    type Error = hyper::Error;
+    type Future =
+        Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Request<Incoming>) -> Self::Future {
+        let config = self.config.clone();
+        Box::pin(async move { serve_ohttp_relay(req, &config).await })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct HttpClient(
     hyper_util::client::legacy::Client<HttpsConnector<HttpConnector>, BoxBody<Bytes, hyper::Error>>,
@@ -144,13 +191,12 @@ where
 
     let handle = tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
-            let config = config.clone();
+            let service = Service::from_config(config.clone());
             let io = TokioIo::new(stream);
             tokio::spawn(async move {
-                if let Err(err) = http1::Builder::new()
-                    .serve_connection(io, service_fn(|req| serve_ohttp_relay(req, &config)))
-                    .with_upgrades()
-                    .await
+                let hyper_service = TowerToHyperService::new(service);
+                if let Err(err) =
+                    http1::Builder::new().serve_connection(io, hyper_service).with_upgrades().await
                 {
                     error!("Error serving connection: {:?}", err);
                 }

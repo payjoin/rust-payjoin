@@ -1,0 +1,24 @@
+name: Continuous integration
+
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - "flake.lock"
+
+jobs:
+  flake-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Enable magic Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Run full flake check
+        run: nix flake check -L

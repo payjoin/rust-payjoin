@@ -210,7 +210,7 @@
             src = pkgs.lib.sources.sourceFilesBySuffices ./. [ ".nix" ];
             nativeBuildInputs = [ pkgs.nixfmt-tree ];
             checkPhase = ''
-              treefmt --ci
+              treefmt --ci --tree-root .
             '';
           };
 

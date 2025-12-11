@@ -1,3 +1,5 @@
+use clap::Parser;
+use payjoin_service::{cli, config};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
@@ -5,7 +7,11 @@ use tracing_subscriber::EnvFilter;
 async fn main() -> anyhow::Result<()> {
     init_tracing();
 
-    todo!("Everything")
+    let args = cli::Args::parse();
+    let config_path = args.config.unwrap_or_else(|| "config.toml".into());
+    let config = config::Config::from_file(&config_path)?;
+
+    payjoin_service::serve(config).await
 }
 
 fn init_tracing() {

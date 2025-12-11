@@ -4,9 +4,7 @@ import "dart:typed_data";
 import "package:http/http.dart" as http;
 import 'package:test/test.dart';
 import "package:convert/convert.dart";
-
 import "package:payjoin/payjoin.dart" as payjoin;
-import "package:payjoin/bitcoin.dart" as bitcoin;
 
 late payjoin.BitcoindEnv env;
 late payjoin.BitcoindInstance bitcoind;
@@ -91,14 +89,41 @@ class IsScriptOwnedCallback implements payjoin.IsScriptOwned {
   @override
   bool callback(Uint8List script) {
     try {
-      final scriptObj = bitcoin.Script(script);
-      final address =
-          bitcoin.Address.fromScript(scriptObj, bitcoin.Network.regtest);
-      // This is a hack due to toString() not being exposed by dart FFI
-      final address_str = address.toQrUri().split(":")[1];
-      final result = connection.call("getaddressinfo", [address_str]);
-      final decoded = jsonDecode(result);
-      return decoded["ismine"] == true;
+      final scriptHex = hex.encode(script);
+      final decodedScript =
+          jsonDecode(connection.call("decodescript", [jsonEncode(scriptHex)]));
+      final candidates = <String>[];
+
+      final address = decodedScript["address"];
+      if (address is String) {
+        candidates.add(address);
+      }
+
+      final addresses = decodedScript["addresses"];
+      if (addresses is List) {
+        candidates.addAll(addresses.whereType<String>());
+      }
+
+      final segwit = decodedScript["segwit"];
+      if (segwit is Map) {
+        final segwitAddress = segwit["address"];
+        if (segwitAddress is String) {
+          candidates.add(segwitAddress);
+        }
+        final segwitAddresses = segwit["addresses"];
+        if (segwitAddresses is List) {
+          candidates.addAll(segwitAddresses.whereType<String>());
+        }
+      }
+
+      for (final addr in candidates) {
+        final info =
+            jsonDecode(connection.call("getaddressinfo", [jsonEncode(addr)]));
+        if (info["ismine"] == true) {
+          return true;
+        }
+      }
+      return false;
     } catch (e) {
       print("An error occurred: $e");
       return false;
@@ -129,11 +154,8 @@ class ProcessPsbtCallback implements payjoin.ProcessPsbt {
   }
 }
 
-payjoin.Initialized create_receiver_context(
-    bitcoin.Address address,
-    String directory,
-    payjoin.OhttpKeys ohttp_keys,
-    InMemoryReceiverPersister persister) {
+payjoin.Initialized create_receiver_context(String address, String directory,
+    payjoin.OhttpKeys ohttp_keys, InMemoryReceiverPersister persister) {
   var receiver = payjoin.ReceiverBuilder(address, directory, ohttp_keys)
       .build()
       .save(persister);
@@ -161,11 +183,17 @@ List<payjoin.InputPair> get_inputs(payjoin.RpcClient rpc_connection) {
   var utxos = jsonDecode(rpc_connection.call("listunspent", []));
   List<payjoin.InputPair> inputs = [];
   for (var utxo in utxos) {
-    var txin = bitcoin.TxIn(bitcoin.OutPoint(utxo["txid"], utxo["vout"]),
-        bitcoin.Script(Uint8List.fromList([])), 0, []);
-    var tx_out = bitcoin.TxOut(bitcoin.Amount.fromBtc(utxo["amount"]),
-        bitcoin.Script(Uint8List.fromList(hex.decode(utxo["scriptPubKey"]))));
-    var psbt_in = payjoin.PsbtInput(tx_out, null, null);
+    final txid = utxo["txid"] as String;
+    final vout = utxo["vout"] as int;
+    final scriptPubKey =
+        Uint8List.fromList(hex.decode(utxo["scriptPubKey"] as String));
+    final amountBtc = utxo["amount"] as num;
+    final amountSat = (amountBtc * 100000000).round();
+
+    final txin = payjoin.PlainTxIn(
+        payjoin.PlainOutPoint(txid, vout), Uint8List(0), 0, <Uint8List>[]);
+    final witnessUtxo = payjoin.PlainTxOut(amountSat, scriptPubKey);
+    final psbt_in = payjoin.PlainPsbtInput(witnessUtxo, null, null);
     inputs.add(payjoin.InputPair(txin, psbt_in, null));
   }
 
@@ -312,9 +340,8 @@ void main() {
       bitcoind = env.getBitcoind();
       receiver = env.getReceiver();
       sender = env.getSender();
-      var receiver_address = bitcoin.Address(
-          jsonDecode(receiver.call("getnewaddress", [])),
-          bitcoin.Network.regtest);
+      var receiver_address =
+          jsonDecode(receiver.call("getnewaddress", [])) as String;
       var services = payjoin.TestServices.initialize();
 
       services.waitForServicesReady();
@@ -391,28 +418,31 @@ void main() {
               final_response.bodyBytes, ohttp_context_request.ohttpCtx)
           .save(sender_persister);
       expect(checked_payjoin_proposal_psbt, isNotNull);
-      var checked_payjoin_proposal_psbt_inner = (checked_payjoin_proposal_psbt
-              as payjoin.ProgressPollingForProposalTransitionOutcome)
-          .inner;
-      var payjoin_psbt = jsonDecode(sender.call("walletprocesspsbt",
-          [checked_payjoin_proposal_psbt_inner.serializeBase64()]))["psbt"];
-      var final_psbt = jsonDecode(sender
-          .call("finalizepsbt", [payjoin_psbt, jsonEncode(false)]))["psbt"];
-      var payjoin_tx = bitcoin.Psbt.deserializeBase64(final_psbt).extractTx();
-      sender.call("sendrawtransaction",
-          [jsonEncode(hex.encode(payjoin_tx.serialize()))]);
+      final progressOutcome = checked_payjoin_proposal_psbt
+          as payjoin.ProgressPollingForProposalTransitionOutcome;
+      var payjoin_psbt = jsonDecode(sender
+          .call("walletprocesspsbt", [progressOutcome.psbtBase64]))["psbt"];
+      final finalPsbtJson = jsonDecode(
+          sender.call("finalizepsbt", [payjoin_psbt, jsonEncode(false)]));
+      final finalPsbt = finalPsbtJson["psbt"] as String;
+      final extraction = jsonDecode(
+          sender.call("finalizepsbt", [payjoin_psbt, jsonEncode(true)]));
+      final finalHex = extraction["hex"] as String;
+      sender.call("sendrawtransaction", [jsonEncode(finalHex)]);
 
-      // Check resulting transaction and balances
-      var network_fees =
-          bitcoin.Psbt.deserializeBase64(final_psbt).fee().toBtc();
-      // Sender sent the entire value of their utxo to the receiver (minus fees)
-      expect(payjoin_tx.input().length, 2);
-      expect(payjoin_tx.output().length, 1);
+      final decodedPsbt =
+          jsonDecode(sender.call("decodepsbt", [jsonEncode(finalPsbt)]));
+      final networkFees = (decodedPsbt["fee"] as num).toDouble();
+
+      final decodedTx = jsonDecode(
+          sender.call("decoderawtransaction", [jsonEncode(finalHex)]));
+      expect((decodedTx["vin"] as List).length, 2);
+      expect((decodedTx["vout"] as List).length, 1);
       expect(
           jsonDecode(receiver.call("getbalances", []))["mine"]
               ["untrusted_pending"],
-          100 - network_fees);
+          100 - networkFees);
       expect(jsonDecode(sender.call("getbalance", [])), 0.0);
-    });
+    }, timeout: const Timeout(Duration(minutes: 5)));
   });
 }

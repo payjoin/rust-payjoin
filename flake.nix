@@ -66,9 +66,7 @@
           src = ./.;
           filter =
             path: type:
-            (builtins.match ".*.udl$" path != null)
-            || (builtins.match ".*nginx.conf.template$" path != null)
-            || (craneLib.filterCargoSources path type);
+            (builtins.match ".*nginx.conf.template$" path != null) || (craneLib.filterCargoSources path type);
           name = "source";
         };
         commonArgs = {

@@ -2254,6 +2254,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-tungstenite",
  "tokio-util",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -2443,6 +2444,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-rustls-acme",
  "tokio-stream",
+ "tower",
  "tracing",
  "tracing-subscriber",
 ]

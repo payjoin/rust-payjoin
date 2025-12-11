@@ -1,6 +1,7 @@
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use anyhow::Result;
 use futures::StreamExt;
@@ -11,6 +12,7 @@ use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
 use hyper::server::conn::http1;
 use hyper::{Method, Request, Response, StatusCode, Uri};
 use hyper_util::rt::TokioIo;
+use hyper_util::service::TowerToHyperService;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tokio::net::TcpListener;
 #[cfg(feature = "acme")]
@@ -68,13 +70,17 @@ pub struct Service<D: Db> {
     metrics: Metrics,
 }
 
-impl<D: Db> hyper::service::Service<Request<Incoming>> for Service<D> {
+impl<D: Db> tower::Service<Request<Incoming>> for Service<D> {
     type Response = Response<BoxBody<Bytes, hyper::Error>>;
     type Error = anyhow::Error;
     type Future =
         Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    fn call(&self, req: Request<Incoming>) -> Self::Future {
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Request<Incoming>) -> Self::Future {
         let this = self.clone();
         Box::pin(async move { this.serve_request(req).await })
     }
@@ -106,8 +112,9 @@ impl<D: Db> Service<D> {
                         return;
                     }
                 };
+                let hyper_service = TowerToHyperService::new(service);
                 if let Err(err) = http1::Builder::new()
-                    .serve_connection(TokioIo::new(tls_stream), service)
+                    .serve_connection(TokioIo::new(tls_stream), hyper_service)
                     .with_upgrades()
                     .await
                 {
@@ -154,14 +161,14 @@ impl<D: Db> Service<D> {
         }
     }
 
-    // TODO https://docs.rs/tower/0.4.13/tower/make/trait.MakeService.html
     async fn serve_connection<I>(&self, stream: I)
     where
         I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
     {
         self.metrics.record_connection();
+        let hyper_service = TowerToHyperService::new(self.clone());
         if let Err(err) =
-            http1::Builder::new().serve_connection(TokioIo::new(stream), self).with_upgrades().await
+            http1::Builder::new().serve_connection(TokioIo::new(stream), hyper_service).with_upgrades().await
         {
             error!("Error serving connection: {:?}", err);
         }

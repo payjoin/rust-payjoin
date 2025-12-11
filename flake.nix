@@ -52,7 +52,7 @@
             {
               msrv = stable.${msrv}.default;
               stable = stable.latest.default;
-              nightly = nightly.latest.default;
+              nightly = fromRustupToolchainFile ./rust-toolchain.toml;
             };
 
         # Use crane to define nix packages for the workspace crate

@@ -169,6 +169,15 @@
             }
             // args
           );
+
+        dummySrc = pkgs.runCommand "dummy src" { } "mkdir $out";
+        checkSuite =
+          name: buildInputs:
+          simpleCheck {
+            inherit name;
+            inherit buildInputs;
+            src = dummySrc;
+          };
       in
       {
         packages = packages // {

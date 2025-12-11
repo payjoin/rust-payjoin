@@ -27,7 +27,7 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        msrv = "1.85.0";
+        msrv-version = "1.85.0";
 
         nginxWithStream = pkgs.nginxMainline.overrideAttrs (oldAttrs: {
           configureFlags = oldAttrs.configureFlags ++ [
@@ -50,7 +50,7 @@
               }
             )
             {
-              msrv = stable.${msrv}.default;
+              msrv = stable.${msrv-version}.default;
               stable = stable.latest.default;
               nightly = fromRustupToolchainFile ./rust-toolchain.toml;
             };

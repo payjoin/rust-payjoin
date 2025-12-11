@@ -21,7 +21,7 @@ path = "src/main.rs"
 [features]
 default = ["v2"]
 native-certs = ["reqwest/rustls-tls-native-roots"]
-_manual-tls = ["rcgen", "reqwest/rustls-tls", "hyper-rustls", "payjoin/_manual-tls", "tokio-rustls"]
+_manual-tls = ["reqwest/rustls-tls", "payjoin/_manual-tls", "tokio-rustls"]
 v1 = ["payjoin/v1","hyper", "hyper-util", "http-body-util"]
 v2 = ["payjoin/v2", "payjoin/io"]
 
@@ -31,20 +31,16 @@ async-trait = "0.1.89"
 bitcoind-async-client = {git = "https://github.com/arminsabouri/bitcoind-async-client", rev = "956ca693e4263c003eaa4fa938d909d24acac5fa"}
 clap = { version = "4.5.45", features = ["derive"] }
 config = "0.15.14"
-futures = "0.3.31"
 http-body-util = { version = "0.1.3", optional = true }
 hyper = { version = "1.6.0", features = ["http1", "server"], optional = true }
-hyper-rustls = { version = "0.27.7", default-features=false, features = ["ring"], optional = true }
 hyper-util = { version = "0.1.16", optional = true }
 payjoin = { version = "1.0.0-rc.1", default-features = false }
 r2d2 = "0.8.10"
 r2d2_sqlite = "0.22.0"
-rcgen = { version = "0.14.3", optional = true }
 reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
 rusqlite = { version = "0.29.0", features = ["bundled"] }
 serde_json = "1.0.142"
 serde = { version = "1.0.219", features = ["derive"] }
-sled = "0.34.7"
 tokio = { version = "1.47.1", features = ["full"] }
 tokio-rustls = { version = "0.26.2", features = ["ring"], default-features = false, optional = true }
 url = { version = "2.5.4", features = ["serde"] }

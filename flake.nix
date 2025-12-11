@@ -66,9 +66,7 @@
           src = ./.;
           filter =
             path: type:
-            (builtins.match ".*.udl$" path != null)
-            || (builtins.match ".*nginx.conf.template$" path != null)
-            || (craneLib.filterCargoSources path type);
+            (builtins.match ".*nginx.conf.template$" path != null) || (craneLib.filterCargoSources path type);
           name = "source";
         };
         commonArgs = {
@@ -185,6 +183,18 @@
               cargoExtraArgs = "--locked --all-features";
               BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
               nativeBuildInputs = [ nginxWithStream ];
+            }
+          );
+
+          payjoin-workspace-machete = craneLib.mkCargoDerivation (
+            commonArgs
+            // {
+              pname = "payjoin-workspace-machete";
+              inherit cargoArtifacts;
+              nativeBuildInputs = [ pkgs.cargo-machete ];
+              buildPhaseCargoCommand = "";
+              checkPhaseCargoCommand = "cargo machete";
+              doCheck = true;
             }
           );
 

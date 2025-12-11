@@ -15,7 +15,7 @@ resolver = "2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-_manual-tls = ["hyper-rustls", "tokio-rustls"]
+_manual-tls = ["tokio-rustls"]
 acme = ["tokio-rustls-acme"]
 
 [dependencies]
@@ -25,7 +25,6 @@ bhttp = { version = "0.6.1", features = ["http"] }
 futures = "0.3.31"
 http-body-util = "0.1.3"
 hyper = { version = "1.6.0", features = ["http1", "server"] }
-hyper-rustls = { version = "0.27.7", default-features=false, features = ["webpki-roots", "http1", "ring"], optional=true }
 hyper-util = { version = "0.1.16", features = ["tokio"] }
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0"}
 payjoin = { version = "1.0.0-rc.1", features = ["directory"], default-features = false }

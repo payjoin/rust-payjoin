@@ -186,6 +186,18 @@
             }
           );
 
+          payjoin-workspace-machete = craneLib.mkCargoDerivation (
+            commonArgs
+            // {
+              pname = "payjoin-workspace-machete";
+              inherit cargoArtifacts;
+              nativeBuildInputs = [ pkgs.cargo-machete ];
+              buildPhaseCargoCommand = "";
+              checkPhaseCargoCommand = "cargo machete";
+              doCheck = true;
+            }
+          );
+
           payjoin-workspace-clippy = craneLib.cargoClippy (
             commonArgs
             // {

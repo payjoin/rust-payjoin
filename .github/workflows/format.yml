@@ -1,0 +1,22 @@
+name: Continuous integration
+
+on: [push, pull_request]
+
+jobs:
+  Format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repo"
+        uses: actions/checkout@v4
+      - name: "Install nix"
+        uses: DeterminateSystems/determinate-nix-action@main
+      - name: "Use nix cache"
+        uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Run treefmt
+        run: |
+          set -eo pipefail
+          nix fmt -- --ci || {
+            echo "❌ Code is not formatted. Showing diff:"
+            git --no-pager diff
+            exit 1
+          }

@@ -1,4 +1,4 @@
-name : Payjoin directory health check
+name: Payjoin directory health check
 on:
   schedule:
     - cron: "*/15 * * * *" # Every 15 minutes

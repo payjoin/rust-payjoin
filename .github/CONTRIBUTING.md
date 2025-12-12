@@ -85,13 +85,14 @@ As a small exception, trivial tab-completion doesn't need to be disclosed,
 so long as it is limited to single keywords or short phrases.
 
 An example disclosure:
+
 > This PR was written primarily by Claude Code.
-Or a more detailed disclosure:
+> Or a more detailed disclosure:
 > I consulted ChatGPT to understand the codebase but the solution
 > was fully authored manually by myself.
-Failure to disclose this is impolite to the human operators
-on the other end of the pull request, and it also makes it difficult to
-determine how much scrutiny to apply to the contribution.
+> Failure to disclose this is impolite to the human operators
+> on the other end of the pull request, and it also makes it difficult to
+> determine how much scrutiny to apply to the contribution.
 
 Please be respectful to maintainers and disclose AI assistance so that
 they may help you effectively contribute.

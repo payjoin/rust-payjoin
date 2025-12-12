@@ -92,12 +92,10 @@ Selected Improvements:
 - Sender session history fallback (#805)
 - 0.24 name audit (#803, #810)
 
-
 ### Better ergonomics
 
 - Introduce constructors for SegWit input pairs (#712)
 - Introduce constructors for legacy input pairs (#753)
-
 
 ### Organize for readability
 
@@ -109,29 +107,27 @@ Selected Improvements:
 - Dedupe ImplementationError (#669)
 - Clean up re-exports (#746)
 
-
 ### Various Operational improvements
 
 - Randomly pad OHTTP requests (#715)
 - Limit response sizes for v1 (#586)
 
-
 ## 0.23.0
 
-- Make features additive [#430](https://github.com/payjoin/rust-payjoin/pull/430) [#466](https://github.com/payjoin/rust-payjoin/pull/466) [#501](https://github.com/payjoin/rust-payjoin/pull/501) [#518](https://github.com/payjoin/rust-payjoin/pull/518) 
-- Make receiver errors replyable to the sender [#474](https://github.com/payjoin/rust-payjoin/pull/474) [#506](https://github.com/payjoin/rust-payjoin/pull/506) [#526](https://github.com/payjoin/rust-payjoin/pull/526) [#606](https://github.com/payjoin/rust-payjoin/pull/606) 
-- Separate error modules [#482](https://github.com/payjoin/rust-payjoin/pull/482) 
-- Introduce "directory" feature module [#502](https://github.com/payjoin/rust-payjoin/pull/502) 
-- Expose test helpers via payjoin-test-utils crate [#484](https://github.com/payjoin/rust-payjoin/pull/484) 
-- Accommodate updated BIP78 spec [#505](https://github.com/payjoin/rust-payjoin/pull/505) 
-- Fallback to first candidate if avoid_uih fails [#533](https://github.com/payjoin/rust-payjoin/pull/533) 
-- Use IntoUrl trait instead of Url in function signatures [#520](https://github.com/payjoin/rust-payjoin/pull/520) 
-- Don't accept invalid certs even in tests [#550](https://github.com/payjoin/rust-payjoin/pull/550) 
-- Introduce experimental multiparty sender behind the "_multiparty" feature flag [#434](https://github.com/payjoin/rust-payjoin/pull/434) 
-- Add support for RFC 9540 ohttp-keys fetching and decentralized BIP 77 directory opt-in [#549](https://github.com/payjoin/rust-payjoin/pull/549) [#570](https://github.com/payjoin/rust-payjoin/pull/570) [#587](https://github.com/payjoin/rust-payjoin/pull/587) 
-- Fix the `pjos` BIP21 parameter to match the BIP78 spec [#546](https://github.com/payjoin/rust-payjoin/pull/546) 
-- Introduce mutation testing [#573](https://github.com/payjoin/rust-payjoin/pull/573) 
-- Add first-class persistence abstraction [#552](https://github.com/payjoin/rust-payjoin/pull/552) 
+- Make features additive [#430](https://github.com/payjoin/rust-payjoin/pull/430) [#466](https://github.com/payjoin/rust-payjoin/pull/466) [#501](https://github.com/payjoin/rust-payjoin/pull/501) [#518](https://github.com/payjoin/rust-payjoin/pull/518)
+- Make receiver errors replyable to the sender [#474](https://github.com/payjoin/rust-payjoin/pull/474) [#506](https://github.com/payjoin/rust-payjoin/pull/506) [#526](https://github.com/payjoin/rust-payjoin/pull/526) [#606](https://github.com/payjoin/rust-payjoin/pull/606)
+- Separate error modules [#482](https://github.com/payjoin/rust-payjoin/pull/482)
+- Introduce "directory" feature module [#502](https://github.com/payjoin/rust-payjoin/pull/502)
+- Expose test helpers via payjoin-test-utils crate [#484](https://github.com/payjoin/rust-payjoin/pull/484)
+- Accommodate updated BIP78 spec [#505](https://github.com/payjoin/rust-payjoin/pull/505)
+- Fallback to first candidate if avoid_uih fails [#533](https://github.com/payjoin/rust-payjoin/pull/533)
+- Use IntoUrl trait instead of Url in function signatures [#520](https://github.com/payjoin/rust-payjoin/pull/520)
+- Don't accept invalid certs even in tests [#550](https://github.com/payjoin/rust-payjoin/pull/550)
+- Introduce experimental multiparty sender behind the "\_multiparty" feature flag [#434](https://github.com/payjoin/rust-payjoin/pull/434)
+- Add support for RFC 9540 ohttp-keys fetching and decentralized BIP 77 directory opt-in [#549](https://github.com/payjoin/rust-payjoin/pull/549) [#570](https://github.com/payjoin/rust-payjoin/pull/570) [#587](https://github.com/payjoin/rust-payjoin/pull/587)
+- Fix the `pjos` BIP21 parameter to match the BIP78 spec [#546](https://github.com/payjoin/rust-payjoin/pull/546)
+- Introduce mutation testing [#573](https://github.com/payjoin/rust-payjoin/pull/573)
+- Add first-class persistence abstraction [#552](https://github.com/payjoin/rust-payjoin/pull/552)
 - Add many more tests, reaching [82%](https://coveralls.io/builds/73029930) coverage - up from 60% when coverage reports were introduced.
 
 ## 0.22.0
@@ -148,7 +144,7 @@ Selected Improvements:
 - Make `InputPair` public to facilitate working with inputs in coin selection and input contributions
 - Enable receiver fee contributions in `apply_fee`, which now requires a max_feerate parameter
 - Fix weight estimations for nested segwit inputs
-- Fix mixed input scripts receiver check in Payjoin V1 to only error if the receiver would *introduce* mixed types
+- Fix mixed input scripts receiver check in Payjoin V1 to only error if the receiver would _introduce_ mixed types
 - Allow mixed input scripts in Payjoin V2
 - Implement client end-to-end encryption using HPKE using [bitcoin-hpke](https://docs.rs/bitcoin-hpke/latest/bitcoin_hpke/)
 - Make session initialization implicit
@@ -160,7 +156,6 @@ Selected Improvements:
 - Upgrade to bitcoin v0.32.5
 - Work around '#' escaping bug in bip21 crate [#373](https://github.com/payjoin/rust-payjoin/pull/373)
 - Hide `_danger-local-https` feature behind `_` prefix so it doesn't show up in docs [#423](https://github.com/payjoin/rust-payjoin/pull/423)
-
 
 ## 0.20.0
 
@@ -186,13 +181,13 @@ This release attempts to stabilize the Payjoin V2 Bitcoin URI format. That inclu
 
 - Handle OHTTP encapsulated response status ([#284](https://github.com/payjoin/rust-payjoin/pull/284))
 - Upgrade `receive::v2` Typestate machine to resume multiple payjoins simultaneously ([#283](https://github.com/payjoin/rust-payjoin/pull/283))
-    - `Enroller` became `SessionInitializer`
-    - `Enrolled` became `ActiveSession`
-        - `fallback_target()` became `pj_url()`
-        - `pj_url_builder()` was introduced
-    - `ContextV2` became `SessionContext`
-        - Include a bitcoin address in `SessionContext`
-    - Document it all ([#308](https://github.com/payjoin/rust-payjoin/pull/308))
+  - `Enroller` became `SessionInitializer`
+  - `Enrolled` became `ActiveSession`
+    - `fallback_target()` became `pj_url()`
+    - `pj_url_builder()` was introduced
+  - `ContextV2` became `SessionContext`
+    - Include a bitcoin address in `SessionContext`
+  - Document it all ([#308](https://github.com/payjoin/rust-payjoin/pull/308))
 - `send::ResponseError` variants fields got explicit names ([#304](https://github.com/payjoin/rust-payjoin/pull/304))
 - Refactor output substitution with new fallable `try_substitute_outputs` ([#277](https://github.com/payjoin/rust-payjoin/pull/277))
 
@@ -239,7 +234,7 @@ This release attempts to stabilize the Payjoin V2 Bitcoin URI format. That inclu
 - Handle `supported` versions in `ResponseError`
 - Make `RequestContext`, `RequestBuilder` `Clone`
 - Expose v2 mod internally to `pub(crate)` only
-- Use typesafe KeyConfig for ohttp d/encapsulation 
+- Use typesafe KeyConfig for ohttp d/encapsulation
 - Use spec OHTTP media types
 - Build PjUri with PjUriBuilder (#185)
 - Parse and pass urls as `Url` instead of `String`

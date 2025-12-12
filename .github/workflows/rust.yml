@@ -40,34 +40,6 @@ jobs:
       - name: Run tests
         run: RUST_LOG=debug bash contrib/test.sh
 
-  Format:
-    runs-on: ubuntu-latest
-    steps:
-      - name: "Checkout repo"
-        uses: actions/checkout@v4
-      - name: "Install nightly toolchain"
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt
-      - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
-      - name: "Run formatting check"
-        run: cargo fmt --all -- --check
-  
-  Format-FFI:
-    runs-on: ubuntu-latest
-    steps:
-      - name: "Checkout repo"
-        uses: actions/checkout@v4
-      - name: "Install nightly toolchain"
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt
-      - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
-      - name: "Run formatting check"
-        run: cd payjoin-ffi && cargo fmt --all -- --check
-  
   Lint-FFI:
     runs-on: ubuntu-latest
     steps:
@@ -131,15 +103,15 @@ jobs:
         run: bash contrib/coverage.sh
       - name: "Upload report to coveralls"
         uses: coverallsapp/github-action@v2
-  
-  CodeSpell: 
+
+  CodeSpell:
     name: Code spell check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: codespell-project/actions-codespell@v2
 
-  DiffMutants: 
+  DiffMutants:
     name: Diff cargo-mutants
     runs-on: ubuntu-latest
     env:
@@ -172,4 +144,3 @@ jobs:
         with:
           name: mutants-incremental-cargo.out
           path: mutants.out
-

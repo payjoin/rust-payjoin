@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -5,54 +6,111 @@ use std::task::{Context, Poll};
 
 use futures::{Sink, SinkExt, StreamExt};
 use http_body_util::combinators::BoxBody;
-use http_body_util::BodyExt;
-use hyper::body::{Bytes, Incoming};
-use hyper::{Request, Response};
-use hyper_tungstenite::HyperWebsocket;
+use hyper::body::Bytes;
+use hyper::header::{CONNECTION, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, UPGRADE};
+use hyper::{Request, Response, StatusCode};
+use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::{tungstenite, WebSocketStream};
 use tracing::{error, instrument};
 
+use crate::empty;
 use crate::error::Error;
 use crate::gateway_uri::GatewayUri;
 
-pub(crate) fn is_websocket_request(req: &Request<Incoming>) -> bool {
-    hyper_tungstenite::is_upgrade_request(req)
+/// Check if the request is a WebSocket upgrade request.
+///
+/// This is done manually to support generic body types.
+/// When bootstrapping moves to axum, this can be replaced with
+/// `axum::extract::ws::WebSocketUpgrade`.
+pub(crate) fn is_websocket_request<B>(req: &Request<B>) -> bool {
+    let dominated_by_upgrade = req
+        .headers()
+        .get(CONNECTION)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.to_ascii_lowercase().contains("upgrade"))
+        .unwrap_or(false);
+
+    let upgrade_to_websocket = req
+        .headers()
+        .get(UPGRADE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.eq_ignore_ascii_case("websocket"))
+        .unwrap_or(false);
+
+    dominated_by_upgrade && upgrade_to_websocket && req.headers().contains_key(SEC_WEBSOCKET_KEY)
 }
 
+/// Upgrade the request to a WebSocket connection and proxy to the gateway.
+///
+/// This performs the WebSocket handshake to support generic body types.
+/// When bootstrapping moves to axum, this can be replaced with
+/// `axum::extract::ws::WebSocketUpgrade`.
 #[instrument]
-pub(crate) async fn try_upgrade(
-    req: &mut Request<Incoming>,
+pub(crate) async fn try_upgrade<B>(
+    req: Request<B>,
     gateway_origin: GatewayUri,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error> {
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error>
+where
+    B: Send + Debug + 'static,
+{
     let gateway_addr = gateway_origin
         .to_socket_addr()
         .await
         .map_err(|e| Error::InternalServerError(Box::new(e)))?
         .ok_or_else(|| Error::NotFound)?;
 
-    let (res, websocket) = hyper_tungstenite::upgrade(req, None)
-        .map_err(|e| Error::BadRequest(format!("Error upgrading to websocket: {}", e)))?;
+    let key = req
+        .headers()
+        .get(SEC_WEBSOCKET_KEY)
+        .ok_or_else(|| Error::BadRequest("Missing Sec-WebSocket-Key header".to_string()))?
+        .to_str()
+        .map_err(|_| Error::BadRequest("Invalid Sec-WebSocket-Key header".to_string()))?
+        .to_string();
+
+    let accept_key = derive_accept_key(key.as_bytes());
 
     tokio::spawn(async move {
-        if let Err(e) = serve_websocket(websocket, gateway_addr).await {
-            error!("Error in websocket connection: {e}");
+        match hyper::upgrade::on(req).await {
+            Ok(upgraded) => {
+                let ws_stream = WebSocketStream::from_raw_socket(
+                    TokioIo::new(upgraded),
+                    tungstenite::protocol::Role::Server,
+                    None,
+                )
+                .await;
+                if let Err(e) = serve_websocket(ws_stream, gateway_addr).await {
+                    error!("Error in websocket connection: {e}");
+                }
+            }
+            Err(e) => error!("WebSocket upgrade error: {}", e),
         }
     });
-    let (parts, body) = res.into_parts();
-    let boxbody = body.map_err(|never| match never {}).boxed();
-    Ok(Response::from_parts(parts, boxbody))
+
+    let res = Response::builder()
+        .status(StatusCode::SWITCHING_PROTOCOLS)
+        .header(UPGRADE, "websocket")
+        .header(CONNECTION, "Upgrade")
+        .header(SEC_WEBSOCKET_ACCEPT, accept_key)
+        .body(empty())
+        .map_err(|e| Error::InternalServerError(Box::new(e)))?;
+
+    Ok(res)
 }
 
 /// Stream WebSocket frames from the client to the gateway server's TCP socket and vice versa.
-#[instrument]
-async fn serve_websocket(
-    websocket: HyperWebsocket,
+#[instrument(skip(ws_stream))]
+async fn serve_websocket<S>(
+    ws_stream: WebSocketStream<S>,
     gateway_addr: SocketAddr,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let mut tcp_stream = tokio::net::TcpStream::connect(gateway_addr).await?;
-    let mut ws_io = WsIo::new(websocket.await?);
+    let mut ws_io = WsIo::new(ws_stream);
     let (_, _) = tokio::io::copy_bidirectional(&mut ws_io, &mut tcp_stream).await?;
     Ok(())
 }

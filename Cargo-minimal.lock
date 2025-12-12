@@ -1713,21 +1713,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hyper-tungstenite"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87ec0b60f8f6371eb04e4b19361b39fa9a1a88bf344d50c31347824599ca150e"
-dependencies = [
- "http-body-util",
- "hyper",
- "hyper-util",
- "pin-project-lite",
- "tokio",
- "tokio-tungstenite",
- "tungstenite",
-]
-
-[[package]]
 name = "hyper-util"
 version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2243,7 +2228,6 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-rustls",
- "hyper-tungstenite",
  "hyper-util",
  "mockito",
  "rcgen 0.12.1",

@@ -16,7 +16,7 @@ exclude = ["tests"]
 default = ["bootstrap"]
 bootstrap = ["connect-bootstrap", "ws-bootstrap"]
 connect-bootstrap = []
-ws-bootstrap = ["futures", "hyper-tungstenite", "rustls", "tokio-tungstenite"]
+ws-bootstrap = ["futures", "rustls", "tokio-tungstenite"]
 _test-util = []
 
 [dependencies]
@@ -31,7 +31,6 @@ hyper-rustls = { version = "0.27.7", default-features = false, features = [
   "http1",
   "ring",
 ] }
-hyper-tungstenite = { version = "0.18.0", optional = true }
 hyper-util = { version = "0.1.16", features = ["client-legacy", "service"] }
 rustls = { version = "0.23.31", optional = true, default-features = false, features = [
   "ring",

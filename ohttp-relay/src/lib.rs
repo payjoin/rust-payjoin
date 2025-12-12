@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -124,7 +125,11 @@ impl Service {
     }
 }
 
-impl tower::Service<Request<Incoming>> for Service {
+impl<B> tower::Service<Request<B>> for Service
+where
+    B: hyper::body::Body<Data = Bytes> + Send + Debug + 'static,
+    B::Error: Into<BoxError>,
+{
     type Response = Response<BoxBody<Bytes, hyper::Error>>;
     type Error = hyper::Error;
     type Future =
@@ -134,7 +139,7 @@ impl tower::Service<Request<Incoming>> for Service {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Request<Incoming>) -> Self::Future {
+    fn call(&mut self, req: Request<B>) -> Self::Future {
         let config = self.config.clone();
         Box::pin(async move { serve_ohttp_relay(req, &config).await })
     }
@@ -209,22 +214,32 @@ where
 }
 
 #[instrument]
-async fn serve_ohttp_relay(
-    req: Request<Incoming>,
+async fn serve_ohttp_relay<B>(
+    req: Request<B>,
     config: &RelayConfig,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
-    let mut res = match (req.method(), req.uri().path()) {
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error>
+where
+    B: hyper::body::Body<Data = Bytes> + Send + Debug + 'static,
+    B::Error: Into<BoxError>,
+{
+    let method = req.method().clone();
+    let path = req.uri().path();
+    let authority = req.uri().authority().cloned();
+
+    let mut res = match (&method, path) {
         (&Method::OPTIONS, _) => Ok(handle_preflight()),
         (&Method::GET, "/health") => Ok(health_check().await),
-        (&Method::POST, _) => match parse_gateway_uri(&req, config).await {
+        (&Method::POST, _) => match parse_gateway_uri(&method, path, authority, config).await {
             Ok(gateway_uri) => handle_ohttp_relay(req, config, gateway_uri).await,
             Err(e) => Err(e),
         },
         #[cfg(any(feature = "connect-bootstrap", feature = "ws-bootstrap"))]
-        (&Method::GET, _) | (&Method::CONNECT, _) => match parse_gateway_uri(&req, config).await {
-            Ok(gateway_uri) => crate::bootstrap::handle_ohttp_keys(req, gateway_uri).await,
-            Err(e) => Err(e),
-        },
+        (&Method::GET, _) | (&Method::CONNECT, _) => {
+            match parse_gateway_uri(&method, path, authority, config).await {
+                Ok(gateway_uri) => crate::bootstrap::handle_ohttp_keys(req, gateway_uri).await,
+                Err(e) => Err(e),
+            }
+        }
         _ => Err(Error::NotFound),
     }
     .unwrap_or_else(|e| e.to_response());
@@ -233,14 +248,16 @@ async fn serve_ohttp_relay(
 }
 
 async fn parse_gateway_uri(
-    req: &Request<Incoming>,
+    method: &Method,
+    path: &str,
+    authority: Option<Authority>,
     config: &RelayConfig,
 ) -> Result<GatewayUri, Error> {
     // for POST and GET (websockets), the gateway URI is provided in the path
     // for CONNECT requests, just an authority is provided, and we assume HTTPS
-    let gateway_uri = match req.method() {
-        &Method::CONNECT => req.uri().authority().cloned().map(GatewayUri::from),
-        _ => parse_gateway_uri_from_path(req.uri().path(), &config.default_gateway).ok(),
+    let gateway_uri = match method {
+        &Method::CONNECT => authority.map(GatewayUri::from),
+        _ => parse_gateway_uri_from_path(path, &config.default_gateway).ok(),
     }
     .ok_or_else(|| Error::BadRequest("Invalid gateway".to_string()))?;
 
@@ -293,12 +310,16 @@ fn handle_preflight() -> Response<BoxBody<Bytes, hyper::Error>> {
 async fn health_check() -> Response<BoxBody<Bytes, hyper::Error>> { Response::new(empty()) }
 
 #[instrument]
-async fn handle_ohttp_relay(
-    req: Request<Incoming>,
+async fn handle_ohttp_relay<B>(
+    req: Request<B>,
     config: &RelayConfig,
     gateway: GatewayUri,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error> {
-    let fwd_req = into_forward_req(req, gateway)?;
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error>
+where
+    B: hyper::body::Body<Data = Bytes> + Send + Debug + 'static,
+    B::Error: Into<BoxError>,
+{
+    let fwd_req = into_forward_req(req, gateway).await?;
     forward_request(fwd_req, config).await.map(|res| {
         let (parts, body) = res.into_parts();
         let boxed_body = BoxBody::new(body);
@@ -308,10 +329,14 @@ async fn handle_ohttp_relay(
 
 /// Convert an incoming request into a request to forward to the target gateway server.
 #[instrument]
-fn into_forward_req(
-    req: Request<Incoming>,
+async fn into_forward_req<B>(
+    req: Request<B>,
     gateway_origin: GatewayUri,
-) -> Result<Request<BoxBody<Bytes, hyper::Error>>, Error> {
+) -> Result<Request<BoxBody<Bytes, hyper::Error>>, Error>
+where
+    B: hyper::body::Body<Data = Bytes> + Send + Debug + 'static,
+    B::Error: Into<BoxError>,
+{
     let (head, body) = req.into_parts();
 
     if head.method != hyper::Method::POST {
@@ -331,7 +356,10 @@ fn into_forward_req(
         builder = builder.header(CONTENT_LENGTH, content_length);
     }
 
-    builder.body(BoxBody::new(body)).map_err(|e| Error::InternalServerError(Box::new(e)))
+    let bytes =
+        body.collect().await.map_err(|e| Error::BadRequest(e.into().to_string()))?.to_bytes();
+
+    builder.body(full(bytes)).map_err(|e| Error::InternalServerError(Box::new(e)))
 }
 
 #[instrument]

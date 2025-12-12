@@ -135,26 +135,6 @@ impl BitcoindWallet {
     }
 
     #[cfg(feature = "v2")]
-    pub fn is_outpoint_spent(&self, outpoint: &OutPoint) -> Result<bool> {
-        let _ = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                // Note: explicitly ignore txouts in the mempool. Those should be considered spent for our purposes
-                .block_on(async {
-                    match self.rpc.get_tx_out(&outpoint.txid, outpoint.vout, false).await {
-                        Ok(_) => Ok(true),
-                        Err(e) =>
-                            if e.is_missing_or_invalid_input() {
-                                Ok(false)
-                            } else {
-                                Err(e)
-                            },
-                    }
-                })
-        })?;
-        Ok(true)
-    }
-
-    #[cfg(feature = "v2")]
     pub fn get_raw_transaction(
         &self,
         txid: &Txid,

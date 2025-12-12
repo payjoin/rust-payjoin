@@ -33,7 +33,6 @@ use bitcoin::Address;
 pub use error::{CreateRequestError, EncapsulationError};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
-use serde::{Deserialize, Serialize};
 pub use session::{replay_event_log, SessionEvent, SessionHistory, SessionOutcome, SessionStatus};
 use url::Url;
 
@@ -190,13 +189,14 @@ mod sealed {
 /// can implement this trait, ensuring type safety and protocol integrity.
 pub trait State: sealed::State {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sender<State> {
     pub(crate) state: State,
     pub(crate) session_context: SessionContext,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SessionContext {
     /// The endpoint in the Payjoin URI
     pub(crate) pj_param: PjParam,
@@ -278,7 +278,7 @@ impl SendSession {
 
 /// A payjoin V2 sender, allowing the construction of a payjoin V2 request
 /// and the resulting [`ClientResponse`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WithReplyKey;
 
 impl Sender<WithReplyKey> {
@@ -412,7 +412,7 @@ pub(crate) fn serialize_v2_body(
 ///
 /// This type is used to make a BIP77 GET request and process the response.
 /// Call [`Sender<PollingForProposal>::process_response`] on it to continue the BIP77 flow.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PollingForProposal;
 
 impl ResponseError {

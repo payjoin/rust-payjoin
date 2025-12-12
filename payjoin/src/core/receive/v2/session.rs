@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 use super::{ReceiveSession, SessionContext};
 use crate::error::{InternalReplayError, ReplayError};
 use crate::output_substitution::OutputSubstitution;
@@ -142,7 +140,8 @@ pub enum SessionStatus {
 
 /// Represents a piece of information that the receiver has obtained from the session
 /// Each event can be used to transition the receiver state machine to a new state
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SessionEvent {
     Created(SessionContext),
     RetrievedOriginalPayload { original: OriginalPayload, reply_key: Option<crate::HpkePublicKey> },
@@ -160,7 +159,8 @@ pub enum SessionEvent {
 }
 
 /// Represents all possible outcomes for a closed Payjoin session
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SessionOutcome {
     /// Payjoin completed successfully
     Success(Vec<(bitcoin::ScriptBuf, bitcoin::Witness)>),

@@ -206,7 +206,6 @@ impl V1Context {
     ///
     /// Call this method with response from receiver to continue BIP78 flow. If the response is
     /// valid you will get appropriate PSBT that you should sign and broadcast.
-    #[inline]
     pub fn process_response(self, response: &[u8]) -> Result<Psbt, ResponseError> {
         if response.len() > MAX_CONTENT_LENGTH {
             return Err(ResponseError::from(InternalValidationError::ContentTooLarge));

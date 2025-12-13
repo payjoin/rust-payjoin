@@ -9,7 +9,6 @@ use rusqlite::{params, Connection};
 pub(crate) mod error;
 use error::*;
 
-#[inline]
 pub(crate) fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64
 }

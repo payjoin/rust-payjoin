@@ -96,6 +96,10 @@
           inherit src;
           strictDeps = true;
 
+          # avoid release builds throughout for faster feedback from checks
+          # note that this also affects the built packages
+          CARGO_PROFILE = "dev";
+
           # provide fallback name & version for workspace related derivations
           # this is mainly to silence warnings from crane about providing a stub
           # value overridden in per-crate packages with info from Cargo.toml

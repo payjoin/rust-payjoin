@@ -171,9 +171,7 @@ mod e2e {
                         .write_all(format!("{line}\n").as_bytes())
                         .await
                         .expect("Failed to write to stdout");
-                    if line.contains("Payjoin sent")
-                        || line.contains("Fallback transaction broadcasted")
-                    {
+                    if line.contains("Payjoin sent") {
                         let _ = tx.send(true).await;
                         break;
                     }

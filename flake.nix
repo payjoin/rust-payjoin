@@ -224,6 +224,7 @@
                   BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
                   NGINX_EXE = nixpkgs.lib.getExe' nginxWithStream "nginx";
                   nativeBuildInputs = [ nginxWithStream ];
+                  doInstallCargoArtifacts = false;
                 }
               )
             ))

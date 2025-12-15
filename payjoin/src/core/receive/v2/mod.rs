@@ -1219,18 +1219,23 @@ pub struct Monitor {
     psbt_context: PsbtContext,
 }
 
-/// Typestate to monitor if the Payjoin proposal has been broadcasted by the sender.
+/// Typestate to monitor the network for the Payjoin proposal or fallback transaction.
 ///
 /// After the Payjoin proposal is signed and sent back to the sender, the receiver should monitor
-/// the network and confirm that the transaction (or the fallback) has been broadcasted by the
-/// sender.
+/// the network and confirm the status of transaction (or the fallback). In this case, the status
+/// can refer to whether the transaction has been broadcast, has some number of confirmations, etc.
+/// The caller should decide the condition that must be satisfied for the Payjoin to be considered
+/// successful.
 ///
-/// Call [`Receiver<Monitor>::check_payment`] to confirm the broadcast and conclude the Payjoin
-/// session.
+/// Call [`Receiver<Monitor>::check_payment`] to confirm the status of the transaction in the
+/// network and conclude the Payjoin session.
 impl Receiver<Monitor> {
-    /// Checks if the Payjoin proposal or the fallback transaction, has been broadcasted by the sender.
-    /// If the sender broadcasted either the Payjoin proposal or the fallback transaction, concludes
-    /// the Payjoin session with a success.
+    /// Checks the network for the Payjoin proposal or the fallback transaction using the passed
+    /// `transaction_exists` closure. Concludes the Payjoin session with a Success if the
+    /// transaction satisfies the condition.
+    ///
+    /// For example, the condition can be if the transaction has been broadcast to the
+    /// network, or if it has some number of confirmations on the blockchain.
     ///
     /// If the receiver input address type in the fallback transaction is non-SegWit, then this
     /// function will directly conclude the Payjoin session with a Success without running the
@@ -1251,7 +1256,7 @@ impl Receiver<Monitor> {
 
         // If the fallback transaction included any non-SegWit inputs, then the transaction ID of
         // the Payjoin proposal is going to change when the sender signs their non-SegWit address
-        // one more time. The receiver cannot monitor the broadcast, and should conclude the session.
+        // one more time. The receiver cannot monitor the transaction, and should conclude the session.
         if fallback_tx.input.iter().any(|txin| txin.witness.is_empty()) {
             return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
                 SessionOutcome::PayjoinProposalSent,
@@ -1261,8 +1266,8 @@ impl Receiver<Monitor> {
         let payjoin_proposal = &self.state.psbt_context.payjoin_psbt;
         let payjoin_txid = payjoin_proposal.unsigned_tx.compute_txid();
         // If the sender is spending SegWit-only inputs, then the transaction ID of the Payjoin proposal
-        // is not going to change when the sender signs it. So we can use the TXID to determine if
-        // the Payjoin proposal has been broadcasted.
+        // is not going to change when the sender signs it. So we can use the TXID to check the
+        // network for the Payjoin proposal.
         match transaction_exists(payjoin_txid) {
             Ok(Some(tx)) => {
                 let tx_id = tx.compute_txid();
@@ -1288,7 +1293,7 @@ impl Receiver<Monitor> {
             Err(e) => return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e)),
         }
 
-        // If the Payjoin proposal was not found, check the fallback transaction, at it is
+        // If the Payjoin proposal was not found, check the fallback transaction, as it is
         // the second of two transactions whose IDs the receiver is aware of.
         match transaction_exists(fallback_tx.compute_txid()) {
             Ok(Some(_)) =>

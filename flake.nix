@@ -220,6 +220,7 @@
                   NEXTEST_SHOW_PROGRESS = "none";
                   BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
                   nativeBuildInputs = [ nginxWithStream ];
+                  doInstallCargoArtifacts = false;
                 }
 
               )

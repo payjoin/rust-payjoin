@@ -220,6 +220,7 @@
                   partitions = 1;
                   partitionType = "count";
                   cargoExtraArgs = "--locked --all-features";
+                  NEXTEST_SHOW_PROGRESS = "none";
                   BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
                   NGINX_EXE = nixpkgs.lib.getExe' nginxWithStream "nginx";
                   nativeBuildInputs = [ nginxWithStream ];

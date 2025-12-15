@@ -98,7 +98,7 @@
 
           # avoid release builds throughout for faster feedback from checks
           # note that this also affects the built packages
-          CARGO_PROFILE = "dev";
+          CARGO_PROFILE = "crane";
 
           # provide fallback name & version for workspace related derivations
           # this is mainly to silence warnings from crane about providing a stub
@@ -226,7 +226,6 @@
                   nativeBuildInputs = [ nginxWithStream ];
                   doInstallCargoArtifacts = false;
                 }
-
               )
             ))
           ) craneLibVersions

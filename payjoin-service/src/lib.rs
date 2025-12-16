@@ -32,6 +32,48 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Serves payjoin-service with manual TLS configuration.
+///
+/// Binds to `config.port` (use 0 to let the OS assign a free port) and returns
+/// the actual bound port along with a task handle.
+///
+/// If `tls_config` is provided, the server will use TLS for incoming connections.
+/// The `root_store` is used for outgoing relay connections to the gateway.
+#[cfg(feature = "_manual-tls")]
+pub async fn serve_manual_tls(
+    config: Config,
+    tls_config: Option<axum_server::tls_rustls::RustlsConfig>,
+    root_store: rustls::RootCertStore,
+) -> anyhow::Result<(u16, tokio::task::JoinHandle<anyhow::Result<()>>)> {
+    let services = Services {
+        directory: init_directory(&config).await?,
+        relay: ohttp_relay::Service::new_with_roots(root_store).await,
+    };
+    let app = Router::new().fallback(route_request).with_state(services);
+
+    let addr = SocketAddr::from((Ipv6Addr::UNSPECIFIED, config.port));
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let port = listener.local_addr()?.port();
+
+    let handle = match tls_config {
+        Some(tls) => {
+            info!("Payjoin service listening on port {} with TLS", port);
+            tokio::spawn(async move {
+                axum_server::from_tcp_rustls(listener.into_std()?, tls)
+                    .serve(app.into_make_service())
+                    .await
+                    .map_err(Into::into)
+            })
+        }
+        None => {
+            info!("Payjoin service listening on port {} without TLS", port);
+            tokio::spawn(async move { axum::serve(listener, app).await.map_err(Into::into) })
+        }
+    };
+
+    Ok((port, handle))
+}
+
 async fn init_directory(
     config: &Config,
 ) -> anyhow::Result<payjoin_directory::Service<payjoin_directory::FilesDb>> {

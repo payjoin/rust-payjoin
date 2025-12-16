@@ -3,20 +3,20 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 pub use error::{
-    InputContributionError, JsonReply, OutputSubstitutionError, ProtocolError, PsbtInputError,
-    ReceiverError, SelectionError, SessionError,
+    AddressParseError, InputContributionError, InputPairError, JsonReply, OutputSubstitutionError,
+    ProtocolError, PsbtInputError, ReceiverBuilderError, ReceiverError, SelectionError,
+    SessionError,
 };
 use payjoin::bitcoin::consensus::Decodable;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::{MaybeFatalTransition, NextStateTransition};
 
-use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 use crate::error::ForeignError;
 pub use crate::error::{ImplementationError, SerdeJsonError};
 use crate::ohttp::OhttpKeys;
 use crate::receive::error::{ReceiverPersistedError, ReceiverReplayError};
-use crate::uri::error::{FeeRateError, IntoUrlError};
+use crate::uri::error::FeeRateError;
 use crate::{ClientResponse, OutputSubstitution, Request};
 
 pub mod error;
@@ -178,8 +178,8 @@ impl ReceiverSessionHistory {
     pub fn pj_uri(&self) -> Arc<crate::PjUri> { Arc::new(self.0.pj_uri().into()) }
 
     /// Fallback transaction from the session if present
-    pub fn fallback_tx(&self) -> Option<Arc<crate::Transaction>> {
-        self.0.fallback_tx().map(|tx| Arc::new(tx.into()))
+    pub fn fallback_tx(&self) -> Option<Vec<u8>> {
+        self.0.fallback_tx().map(|tx| payjoin::bitcoin::consensus::encode::serialize(&tx))
     }
 
     /// Helper method to query the current status of the session.
@@ -220,6 +220,110 @@ impl InitialReceiveTransition {
 #[derive(Clone, Debug, uniffi::Object)]
 pub struct ReceiverBuilder(payjoin::receive::v2::ReceiverBuilder);
 
+/// Primitive representation of a transaction output for the FFI boundary.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct PlainTxOut {
+    /// Amount in satoshis.
+    pub value_sat: u64,
+    /// Raw scriptPubKey bytes.
+    pub script_pubkey: Vec<u8>,
+}
+
+impl From<PlainTxOut> for payjoin::bitcoin::TxOut {
+    fn from(value: PlainTxOut) -> Self {
+        payjoin::bitcoin::TxOut {
+            value: Amount::from_sat(value.value_sat),
+            script_pubkey: payjoin::bitcoin::ScriptBuf::from_bytes(value.script_pubkey),
+        }
+    }
+}
+
+impl From<payjoin::bitcoin::TxOut> for PlainTxOut {
+    fn from(value: payjoin::bitcoin::TxOut) -> Self {
+        PlainTxOut {
+            value_sat: value.value.to_sat(),
+            script_pubkey: value.script_pubkey.into_bytes(),
+        }
+    }
+}
+
+/// Primitive representation of a transaction input for the FFI boundary.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct PlainTxIn {
+    pub previous_output: PlainOutPoint,
+    pub script_sig: Vec<u8>,
+    pub sequence: u32,
+    pub witness: Vec<Vec<u8>>,
+}
+
+impl PlainTxIn {
+    fn into_core(self) -> Result<payjoin::bitcoin::TxIn, InputPairError> {
+        let previous_output = self.previous_output.into_core()?;
+        Ok(payjoin::bitcoin::TxIn {
+            previous_output,
+            script_sig: payjoin::bitcoin::ScriptBuf::from_bytes(self.script_sig),
+            sequence: payjoin::bitcoin::Sequence(self.sequence),
+            witness: self.witness.into(),
+        })
+    }
+}
+
+/// Primitive representation of an outpoint for the FFI boundary.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct PlainOutPoint {
+    /// Hex-encoded txid (big-endian).
+    pub txid: String,
+    /// Output index.
+    pub vout: u32,
+}
+
+impl From<payjoin::bitcoin::OutPoint> for PlainOutPoint {
+    fn from(value: payjoin::bitcoin::OutPoint) -> Self {
+        PlainOutPoint { txid: value.txid.to_string(), vout: value.vout }
+    }
+}
+
+impl PlainOutPoint {
+    fn into_core(self) -> Result<payjoin::bitcoin::OutPoint, InputPairError> {
+        let txid = payjoin::bitcoin::Txid::from_str(&self.txid)
+            .map_err(|_| InputPairError::invalid_outpoint(self.txid, self.vout))?;
+        Ok(payjoin::bitcoin::OutPoint { txid, vout: self.vout })
+    }
+}
+
+/// Primitive representation of a PSBT input for the FFI boundary.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct PlainPsbtInput {
+    pub witness_utxo: Option<PlainTxOut>,
+    pub redeem_script: Option<Vec<u8>>,
+    pub witness_script: Option<Vec<u8>>,
+}
+
+impl PlainPsbtInput {
+    fn into_core(self) -> payjoin::bitcoin::psbt::Input {
+        payjoin::bitcoin::psbt::Input {
+            witness_utxo: self.witness_utxo.map(Into::into),
+            redeem_script: self.redeem_script.map(payjoin::bitcoin::ScriptBuf::from_bytes),
+            witness_script: self.witness_script.map(payjoin::bitcoin::ScriptBuf::from_bytes),
+            ..Default::default()
+        }
+    }
+}
+
+/// Primitive representation of a weight measurement.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct PlainWeight {
+    pub weight_units: u64,
+}
+
+impl From<PlainWeight> for payjoin::bitcoin::Weight {
+    fn from(value: PlainWeight) -> Self { payjoin::bitcoin::Weight::from_wu(value.weight_units) }
+}
+
+impl From<payjoin::bitcoin::Weight> for PlainWeight {
+    fn from(value: payjoin::bitcoin::Weight) -> Self { PlainWeight { weight_units: value.to_wu() } }
+}
+
 #[uniffi::export]
 impl ReceiverBuilder {
     /// Creates a new [`Initialized`] with the provided parameters.
@@ -233,17 +337,20 @@ impl ReceiverBuilder {
     /// - [BIP 77: Payjoin Version 2: Serverless Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md)
     #[uniffi::constructor]
     pub fn new(
-        address: Arc<Address>,
+        address: String,
         directory: String,
         ohttp_keys: Arc<OhttpKeys>,
-    ) -> Result<Self, IntoUrlError> {
+    ) -> Result<Self, ReceiverBuilderError> {
+        let parsed_address = payjoin::bitcoin::Address::from_str(address.as_str())
+            .map_err(ReceiverBuilderError::from)?
+            .assume_checked();
         Ok(Self(
             payjoin::receive::v2::ReceiverBuilder::new(
-                Arc::unwrap_or_clone(address).into(),
+                parsed_address,
                 directory,
                 Arc::unwrap_or_clone(ohttp_keys).into(),
             )
-            .map_err(IntoUrlError::from)?,
+            .map_err(ReceiverBuilderError::from)?,
         ))
     }
 
@@ -260,9 +367,9 @@ impl ReceiverBuilder {
         &self,
         max_effective_fee_rate_sat_per_vb: u64,
     ) -> Result<Self, FeeRateError> {
-        let fee_rate = bitcoin_ffi::FeeRate::from_sat_per_vb(max_effective_fee_rate_sat_per_vb)
-            .map_err(FeeRateError::from)?;
-        Ok(Self(self.0.clone().with_max_fee_rate(fee_rate.into())))
+        let fee_rate = FeeRate::from_sat_per_vb(max_effective_fee_rate_sat_per_vb)
+            .ok_or_else(|| FeeRateError::overflow(max_effective_fee_rate_sat_per_vb))?;
+        Ok(Self(self.0.clone().with_max_fee_rate(fee_rate)))
     }
 
     pub fn build(&self) -> InitialReceiveTransition {
@@ -572,7 +679,7 @@ impl_save_for_transition!(MaybeInputsSeenTransition, OutputsUnknown);
 
 #[uniffi::export(with_foreign)]
 pub trait IsOutputKnown: Send + Sync {
-    fn callback(&self, outpoint: OutPoint) -> Result<bool, ForeignError>;
+    fn callback(&self, outpoint: PlainOutPoint) -> Result<bool, ForeignError>;
 }
 
 #[uniffi::export]
@@ -584,7 +691,7 @@ impl MaybeInputsSeen {
         MaybeInputsSeenTransition(Arc::new(RwLock::new(Some(
             self.0.clone().check_no_inputs_seen_before(&mut |outpoint| {
                 is_known
-                    .callback((*outpoint).into())
+                    .callback(PlainOutPoint::from(*outpoint))
                     .map_err(|e| ImplementationError::new(e).into())
             }),
         ))))
@@ -672,25 +779,27 @@ impl WantsOutputs {
 
     pub fn replace_receiver_outputs(
         &self,
-        replacement_outputs: Vec<TxOut>,
-        drain_script: &Script,
+        replacement_outputs: Vec<PlainTxOut>,
+        drain_script_pubkey: Vec<u8>,
     ) -> Result<WantsOutputs, OutputSubstitutionError> {
         let replacement_outputs: Vec<payjoin::bitcoin::TxOut> =
-            replacement_outputs.iter().map(|o| o.clone().into()).collect();
+            replacement_outputs.into_iter().map(Into::into).collect();
+        let drain_script = payjoin::bitcoin::ScriptBuf::from_bytes(drain_script_pubkey);
         self.0
             .clone()
-            .replace_receiver_outputs(replacement_outputs, &drain_script.0)
+            .replace_receiver_outputs(replacement_outputs, &drain_script)
             .map(Into::into)
             .map_err(Into::into)
     }
 
     pub fn substitute_receiver_script(
         &self,
-        output_script: &Script,
+        output_script_pubkey: Vec<u8>,
     ) -> Result<WantsOutputs, OutputSubstitutionError> {
+        let output_script = payjoin::bitcoin::ScriptBuf::from_bytes(output_script_pubkey);
         self.0
             .clone()
-            .substitute_receiver_script(&output_script.0)
+            .substitute_receiver_script(&output_script)
             .map(Into::into)
             .map_err(Into::into)
     }
@@ -776,15 +885,16 @@ pub struct InputPair(payjoin::receive::InputPair);
 impl InputPair {
     #[uniffi::constructor]
     pub fn new(
-        txin: bitcoin_ffi::TxIn,
-        psbtin: crate::bitcoin_ffi::PsbtInput,
-        expected_weight: Option<crate::bitcoin_ffi::Weight>,
-    ) -> Result<Self, PsbtInputError> {
-        Ok(Self(payjoin::receive::InputPair::new(
-            txin.into(),
-            psbtin.into(),
-            expected_weight.map(|w| w.into()),
-        )?))
+        txin: PlainTxIn,
+        psbtin: PlainPsbtInput,
+        expected_weight: Option<PlainWeight>,
+    ) -> Result<Self, InputPairError> {
+        let txin = txin.into_core()?;
+        let psbtin = psbtin.into_core();
+        let expected_weight = expected_weight.map(Into::into);
+        payjoin::receive::InputPair::new(txin, psbtin, expected_weight)
+            .map(Self)
+            .map_err(|err| InputPairError::InvalidPsbtInput(Arc::new(err.into())))
     }
 }
 
@@ -911,7 +1021,7 @@ impl ProvisionalProposal {
         ))))
     }
 
-    pub fn psbt_to_sign(&self) -> bitcoin_ffi::Psbt { self.0.clone().psbt_to_sign().into() }
+    pub fn psbt_to_sign(&self) -> String { self.0.clone().psbt_to_sign().to_string() }
 }
 
 #[derive(Clone, uniffi::Object)]
@@ -953,14 +1063,14 @@ impl_save_for_transition!(PayjoinProposalTransition, Monitor);
 
 #[uniffi::export]
 impl PayjoinProposal {
-    pub fn utxos_to_be_locked(&self) -> Vec<OutPoint> {
-        let mut outpoints: Vec<OutPoint> = Vec::new();
+    pub fn utxos_to_be_locked(&self) -> Vec<PlainOutPoint> {
+        let mut outpoints: Vec<PlainOutPoint> = Vec::new();
         for o in <PayjoinProposal as Into<
             payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>,
         >>::into(self.clone())
         .utxos_to_be_locked()
         {
-            outpoints.push((*o).into());
+            outpoints.push(PlainOutPoint::from(*o));
         }
         outpoints
     }
@@ -1079,11 +1189,6 @@ pub trait TransactionExists: Send + Sync {
     // TODO: Is there an ffi exported txid type that we can use here?
     // TODO: Is there a ffi type for the serialized tx?
     fn callback(&self, txid: String) -> Result<Option<Vec<u8>>, ForeignError>;
-}
-
-#[uniffi::export(with_foreign)]
-pub trait OutpointSpent: Send + Sync {
-    fn callback(&self, outpoint: OutPoint) -> Result<bool, ForeignError>;
 }
 
 #[allow(clippy::type_complexity)]

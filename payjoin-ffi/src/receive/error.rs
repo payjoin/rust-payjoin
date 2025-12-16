@@ -89,6 +89,43 @@ impl_persisted_error_from!(payjoin::IntoUrlError, |api_err: payjoin::IntoUrlErro
     ReceiverError::IntoUrl(Arc::new(api_err.into()))
 });
 
+/// Error that may occur when building a receiver session.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+#[non_exhaustive]
+pub enum ReceiverBuilderError {
+    /// The provided Bitcoin address is invalid.
+    #[error("Invalid Bitcoin address: {0}")]
+    InvalidAddress(Arc<AddressParseError>),
+    /// Error that may occur when converting a value into a URL.
+    #[error("Invalid directory URL: {0}")]
+    IntoUrl(Arc<IntoUrlError>),
+}
+
+impl From<payjoin::IntoUrlError> for ReceiverBuilderError {
+    fn from(value: payjoin::IntoUrlError) -> Self {
+        ReceiverBuilderError::IntoUrl(Arc::new(value.into()))
+    }
+}
+
+impl From<payjoin::bitcoin::address::ParseError> for ReceiverBuilderError {
+    fn from(value: payjoin::bitcoin::address::ParseError) -> Self {
+        ReceiverBuilderError::InvalidAddress(Arc::new(value.into()))
+    }
+}
+
+/// Error parsing a Bitcoin address.
+#[derive(Debug, thiserror::Error, uniffi::Object)]
+#[error("Invalid Bitcoin address: {msg}")]
+pub struct AddressParseError {
+    msg: String,
+}
+
+impl From<payjoin::bitcoin::address::ParseError> for AddressParseError {
+    fn from(value: payjoin::bitcoin::address::ParseError) -> Self {
+        AddressParseError { msg: value.to_string() }
+    }
+}
+
 /// The replyable error type for the payjoin receiver, representing failures need to be
 /// returned to the sender.
 ///
@@ -150,6 +187,23 @@ pub struct InputContributionError(#[from] receive::InputContributionError);
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
 pub struct PsbtInputError(#[from] receive::PsbtInputError);
+
+/// Error constructing an [`InputPair`](crate::InputPair).
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum InputPairError {
+    /// Provided outpoint could not be parsed.
+    #[error("Invalid outpoint (txid={txid}, vout={vout})")]
+    InvalidOutPoint { txid: String, vout: u32 },
+    /// PSBT input failed validation in the core library.
+    #[error("Invalid PSBT input: {0}")]
+    InvalidPsbtInput(Arc<PsbtInputError>),
+}
+
+impl InputPairError {
+    pub fn invalid_outpoint(txid: String, vout: u32) -> Self {
+        InputPairError::InvalidOutPoint { txid, vout }
+    }
+}
 
 /// Error that may occur when a receiver event log is replayed
 #[derive(Debug, thiserror::Error, uniffi::Object)]

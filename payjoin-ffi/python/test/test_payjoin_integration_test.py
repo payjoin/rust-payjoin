@@ -5,7 +5,13 @@ import json
 
 from payjoin import *
 from typing import Optional
-import payjoin.bitcoin as bitcoinffi
+import unittest
+
+try:
+    import payjoin.bitcoin as bitcoinffi
+except ImportError:
+    bitcoinffi = None
+    raise unittest.SkipTest("bitcoin_ffi helpers are not available in this binding")
 
 # The below sys path setting is required to use the 'payjoin' module in the 'src' directory
 # This script is in the 'tests' directory and the 'payjoin' module is in the 'src' directory
@@ -13,7 +19,6 @@ sys.path.insert(
     0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 )
 
-import unittest
 from pprint import *
 
 

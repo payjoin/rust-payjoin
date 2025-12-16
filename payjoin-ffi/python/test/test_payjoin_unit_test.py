@@ -1,6 +1,5 @@
 import unittest
 import payjoin
-import payjoin.bitcoin
 
 
 class TestURIs(unittest.TestCase):
@@ -52,11 +51,8 @@ class InMemoryReceiverPersister(payjoin.JsonReceiverSessionPersister):
 class TestReceiverPersistence(unittest.TestCase):
     def test_receiver_persistence(self):
         persister = InMemoryReceiverPersister(1)
-        address = payjoin.bitcoin.Address(
-            "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4", payjoin.bitcoin.Network.SIGNET
-        )
         payjoin.ReceiverBuilder(
-            address,
+            "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
             "https://example.com",
             payjoin.OhttpKeys.decode(
                 bytes.fromhex(
@@ -88,12 +84,9 @@ class TestSenderPersistence(unittest.TestCase):
     def test_sender_persistence(self):
         # Create a receiver to just get the pj uri
         persister = InMemoryReceiverPersister(1)
-        address = payjoin.bitcoin.Address(
-            "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK", payjoin.bitcoin.Network.TESTNET
-        )
         receiver = (
             payjoin.ReceiverBuilder(
-                address,
+                "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
                 "https://example.com",
                 payjoin.OhttpKeys.decode(
                     bytes.fromhex(

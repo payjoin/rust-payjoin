@@ -1,7 +1,6 @@
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
-use bitcoin_ffi::Psbt;
 pub use error::{BuildSenderError, CreateRequestError, EncapsulationError, ResponseError};
 
 use crate::error::ForeignError;
@@ -173,7 +172,9 @@ impl From<SenderSessionHistory> for payjoin::send::v2::SessionHistory {
 #[uniffi::export]
 impl SenderSessionHistory {
     /// Fallback transaction from the session if present
-    pub fn fallback_tx(&self) -> Arc<crate::Transaction> { Arc::new(self.0.fallback_tx().into()) }
+    pub fn fallback_tx(&self) -> Vec<u8> {
+        payjoin::bitcoin::consensus::encode::serialize(&self.0.fallback_tx())
+    }
 
     pub fn pj_param(&self) -> Arc<PjParam> { Arc::new(self.0.pj_param().to_owned().into()) }
 
@@ -425,7 +426,7 @@ impl From<payjoin::send::v2::Sender<payjoin::send::v2::PollingForProposal>> for 
 
 #[derive(uniffi::Enum)]
 pub enum PollingForProposalTransitionOutcome {
-    Progress { inner: Arc<Psbt> },
+    Progress { psbt_base64: String },
     Stasis { inner: Arc<PollingForProposal> },
 }
 
@@ -445,7 +446,7 @@ impl
     ) -> Self {
         match value {
             payjoin::persist::OptionalTransitionOutcome::Progress(psbt) =>
-                Self::Progress { inner: Arc::new(psbt.into()) },
+                Self::Progress { psbt_base64: psbt.to_string() },
             payjoin::persist::OptionalTransitionOutcome::Stasis(state) =>
                 Self::Stasis { inner: Arc::new(state.into()) },
         }

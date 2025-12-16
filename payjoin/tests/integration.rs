@@ -1603,6 +1603,7 @@ mod integration {
 
     fn input_pair_from_list_unspent(utxo: ListUnspentItem) -> InputPair {
         let utxo = utxo.into_model().expect("listunspent utxo should be convertible to model type");
+        let script_pubkey = utxo.script_pubkey.clone();
         let psbtin = PsbtInput {
             // NOTE: non_witness_utxo is not necessary because bitcoin-cli always supplies
             // witness_utxo, even for non-witness inputs
@@ -1619,7 +1620,10 @@ mod integration {
             previous_output: OutPoint { txid: utxo.txid, vout: utxo.vout },
             ..Default::default()
         };
-        InputPair::new(txin, psbtin, None).expect("Input pair should be valid")
+        // P2TR without witness requires explicit weight (spend type unknown until signing)
+        let expected_weight =
+            if script_pubkey.is_p2tr() { Some(Weight::from_wu(P2TR_INPUT_WEIGHT)) } else { None };
+        InputPair::new(txin, psbtin, expected_weight).expect("Input pair should be valid")
     }
 
     struct HeaderMock(HashMap<String, String>);

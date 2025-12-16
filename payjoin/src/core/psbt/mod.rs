@@ -7,6 +7,11 @@ use bitcoin::address::FromScriptError;
 use bitcoin::psbt::Psbt;
 use bitcoin::transaction::InputWeightPrediction;
 use bitcoin::{bip32, psbt, Address, AddressType, Network, TxIn, TxOut, Weight};
+/// Shared non-witness weight for txid (32), index (4), and sequence (4) fields.
+/// We only need to add the weight of the txid: 32, index: 4 and sequence: 4 as rust_bitcoin
+/// already accounts for the scriptsig length when calculating InputWeightPrediction
+/// <https://docs.rs/bitcoin/latest/src/bitcoin/blockdata/transaction.rs.html#1621>
+pub(crate) const NON_WITNESS_INPUT_WEIGHT: Weight = Weight::from_non_witness_data_size(32 + 4 + 4);
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InconsistentPsbt {
@@ -227,12 +232,24 @@ impl InternalInputPair<'_> {
                         .ok_or(InputWeightError::NotSupported)?;
                     Ok(iwp)
                 },
-            P2tr => Ok(InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH),
+            P2tr => {
+                let witness = if !self.txin.witness.is_empty() {
+                    Some(&self.txin.witness)
+                } else {
+                    self.psbtin.final_script_witness.as_ref().filter(|w| !w.is_empty())
+                };
+                match witness {
+                    Some(w) => Ok(InputWeightPrediction::new(
+                        0,
+                        w.iter().map(|el| el.len()).collect::<Vec<_>>(),
+                    )),
+                    None => Err(InputWeightError::NotSupported),
+                }
+            }
             _ => Err(AddressTypeError::UnknownAddressType.into()),
         }?;
-
         // Lengths of txid, index and sequence: (32, 4, 4).
-        let input_weight = iwp.weight() + Weight::from_non_witness_data_size(32 + 4 + 4);
+        let input_weight = iwp.weight() + NON_WITNESS_INPUT_WEIGHT;
         Ok(input_weight)
     }
 }

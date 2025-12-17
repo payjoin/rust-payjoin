@@ -832,6 +832,53 @@ pub mod test_utils {
             Ok(())
         }
     }
+
+    #[cfg(test)]
+    #[derive(Clone)]
+    /// Async in-memory session persister for testing async session replays and introspecting session events
+    pub struct InMemoryAsyncTestPersister<V> {
+        pub(crate) inner: Arc<tokio::sync::RwLock<InnerStorage<V>>>,
+    }
+
+    #[cfg(test)]
+    impl<V> Default for InMemoryAsyncTestPersister<V> {
+        fn default() -> Self {
+            Self { inner: Arc::new(tokio::sync::RwLock::new(InnerStorage::default())) }
+        }
+    }
+
+    #[cfg(test)]
+    impl<V> crate::persist::AsyncSessionPersister for InMemoryAsyncTestPersister<V>
+    where
+        V: Clone + Send + Sync + 'static,
+    {
+        type InternalStorageError = std::convert::Infallible;
+        type SessionEvent = V;
+
+        async fn save_event(
+            &self,
+            event: Self::SessionEvent,
+        ) -> Result<(), Self::InternalStorageError> {
+            let mut inner = self.inner.write().await;
+            Arc::make_mut(&mut inner.events).push(event);
+            Ok(())
+        }
+
+        async fn load(
+            &self,
+        ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent> + Send>, Self::InternalStorageError>
+        {
+            let inner = self.inner.read().await;
+            let events = Arc::clone(&inner.events);
+            Ok(Box::new(Arc::try_unwrap(events).unwrap_or_else(|arc| (*arc).clone()).into_iter()))
+        }
+
+        async fn close(&self) -> Result<(), Self::InternalStorageError> {
+            let mut inner = self.inner.write().await;
+            inner.is_closed = true;
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -839,7 +886,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::*;
-    use crate::persist::test_utils::InMemoryTestPersister;
+    use crate::persist::test_utils::{InMemoryAsyncTestPersister, InMemoryTestPersister};
 
     type InMemoryTestState = String;
 
@@ -902,18 +949,52 @@ mod tests {
             _ => panic!("Unexpected result state"),
         }
     }
+
+    async fn verify_async<
+        SuccessState: std::fmt::Debug + PartialEq + Send,
+        ErrorState: std::error::Error + Send,
+    >(
+        persister: &InMemoryAsyncTestPersister<InMemoryTestEvent>,
+        result: Result<SuccessState, ErrorState>,
+        expected_result: &ExpectedResult<SuccessState, ErrorState>,
+    ) {
+        let events = persister.load().await.expect("Persister should not fail").collect::<Vec<_>>();
+        assert_eq!(events.len(), expected_result.events.len());
+        for (event, expected_event) in events.iter().zip(expected_result.events.iter()) {
+            assert_eq!(event.0, expected_event.0);
+        }
+
+        assert_eq!(persister.inner.read().await.is_closed, expected_result.is_closed);
+
+        match (&result, &expected_result.error) {
+            (Ok(actual), None) => {
+                assert_eq!(Some(actual), expected_result.success.as_ref());
+            }
+            (Err(actual), Some(exp)) => {
+                // TODO: replace .to_string() with .eq(). This would introduce a trait bound on the internal API error type
+                // And not all internal API errors implement PartialEq
+                assert_eq!(actual.to_string(), exp.to_string());
+            }
+            _ => panic!("Unexpected result state"),
+        }
+    }
+
     macro_rules! run_test_cases {
         ($test_cases:expr) => {
             for test in &$test_cases {
                 let persister = InMemoryTestPersister::default();
                 let result = (test.make_transition)().save(&persister);
                 verify_sync(&persister, result, &test.expected_result);
+
+                let persister = InMemoryAsyncTestPersister::default();
+                let result = (test.make_transition)().save_async(&persister).await;
+                verify_async(&persister, result, &test.expected_result).await;
             }
         };
     }
 
-    #[test]
-    fn test_initial_transition() {
+    #[tokio::test]
+    async fn test_initial_transition() {
         let event = InMemoryTestEvent("foo".to_string());
         let next_state = "Next state".to_string();
 
@@ -934,8 +1015,8 @@ mod tests {
         run_test_cases!(test_cases);
     }
 
-    #[test]
-    fn test_maybe_transient_transition() {
+    #[tokio::test]
+    async fn test_maybe_transient_transition() {
         let event = InMemoryTestEvent("foo".to_string());
         let next_state = "Next state".to_string();
 
@@ -972,8 +1053,8 @@ mod tests {
         run_test_cases!(test_cases);
     }
 
-    #[test]
-    fn test_next_state_transition() {
+    #[tokio::test]
+    async fn test_next_state_transition() {
         let event = InMemoryTestEvent("foo".to_string());
         let next_state = "Next state".to_string();
 
@@ -994,8 +1075,8 @@ mod tests {
         run_test_cases!(test_cases);
     }
 
-    #[test]
-    fn test_maybe_success_transition() {
+    #[tokio::test]
+    async fn test_maybe_success_transition() {
         let event = InMemoryTestEvent("foo".to_string());
         let error_event = InMemoryTestEvent("error event".to_string());
 
@@ -1045,8 +1126,8 @@ mod tests {
         run_test_cases!(test_cases);
     }
 
-    #[test]
-    fn test_maybe_fatal_transition() {
+    #[tokio::test]
+    async fn test_maybe_fatal_transition() {
         let event = InMemoryTestEvent("foo".to_string());
         let error_event = InMemoryTestEvent("error event".to_string());
         let next_state = "Next state".to_string();
@@ -1099,8 +1180,8 @@ mod tests {
         run_test_cases!(test_cases);
     }
 
-    #[test]
-    fn test_maybe_success_transition_with_no_results() {
+    #[tokio::test]
+    async fn test_maybe_success_transition_with_no_results() {
         let event = InMemoryTestEvent("foo".to_string());
         let error_event = InMemoryTestEvent("error event".to_string());
         let current_state = "Current state".to_string();
@@ -1178,8 +1259,8 @@ mod tests {
         run_test_cases!(test_cases);
     }
 
-    #[test]
-    fn test_maybe_fatal_transition_with_no_results() {
+    #[tokio::test]
+    async fn test_maybe_fatal_transition_with_no_results() {
         let event = InMemoryTestEvent("foo".to_string());
         let error_event = InMemoryTestEvent("error event".to_string());
         let current_state = "Current state".to_string();
@@ -1243,8 +1324,8 @@ mod tests {
         run_test_cases!(test_cases);
     }
 
-    #[test]
-    fn test_maybe_fatal_or_success_transition() {
+    #[tokio::test]
+    async fn test_maybe_fatal_or_success_transition() {
         let event = InMemoryTestEvent("foo".to_string());
         let error_event = InMemoryTestEvent("error event".to_string());
         let current_state = "Current state".to_string();

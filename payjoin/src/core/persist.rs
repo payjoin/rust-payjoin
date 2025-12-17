@@ -25,6 +25,22 @@ impl<Event> PersistActions<Event> {
         }
         Ok(())
     }
+
+    pub async fn execute_async<P>(self, persister: &P) -> Result<(), P::InternalStorageError>
+    where
+        P: AsyncSessionPersister<SessionEvent = Event>,
+        Event: Send,
+    {
+        match self {
+            Self::NoOp => {}
+            Self::Save(event) => persister.save_event(event).await?,
+            Self::SaveAndClose(event) => {
+                persister.save_event(event).await?;
+                persister.close().await?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Handles cases where the transition either succeeds with a final result that ends the session, or hits a static condition and stays in the same state.
@@ -93,7 +109,27 @@ impl<Event, SuccessValue, CurrentState, Err>
         actions.execute(persister).map_err(InternalPersistedError::Storage)?;
         Ok(outcome.map_err(InternalPersistedError::Api)?)
     }
+
+    pub async fn save_async<P>(
+        self,
+        persister: &P,
+    ) -> Result<
+        OptionalTransitionOutcome<SuccessValue, CurrentState>,
+        PersistedError<Err, P::InternalStorageError>,
+    >
+    where
+        P: AsyncSessionPersister<SessionEvent = Event>,
+        Err: std::error::Error + Send,
+        SuccessValue: Send,
+        CurrentState: Send,
+        Event: Send,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute_async(persister).await.map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
 }
+
 /// A transition that can result in a state transition, fatal error, or successfully have no results.
 pub struct MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err>(
     Result<AcceptOptionalTransition<Event, NextState, CurrentState>, Rejection<Event, Err>>,
@@ -156,6 +192,25 @@ impl<Event, NextState, CurrentState, Err>
         actions.execute(persister).map_err(InternalPersistedError::Storage)?;
         Ok(outcome.map_err(InternalPersistedError::Api)?)
     }
+
+    pub async fn save_async<P>(
+        self,
+        persister: &P,
+    ) -> Result<
+        OptionalTransitionOutcome<NextState, CurrentState>,
+        PersistedError<Err, P::InternalStorageError>,
+    >
+    where
+        P: AsyncSessionPersister<SessionEvent = Event>,
+        Err: std::error::Error + Send,
+        NextState: Send,
+        CurrentState: Send,
+        Event: Send,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute_async(persister).await.map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
 }
 
 /// A transition that can be either fatal, transient, or a state transition.
@@ -209,6 +264,22 @@ where
         actions.execute(persister).map_err(InternalPersistedError::Storage)?;
         Ok(outcome.map_err(InternalPersistedError::Api)?)
     }
+
+    pub async fn save_async<P>(
+        self,
+        persister: &P,
+    ) -> Result<NextState, PersistedError<Err, P::InternalStorageError, ErrorState>>
+    where
+        P: AsyncSessionPersister<SessionEvent = Event>,
+        Err: std::error::Error + Send,
+        ErrorState: Send,
+        NextState: Send,
+        Event: Send,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute_async(persister).await.map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
 }
 
 /// A transition that can result in a state transition or a transient error.
@@ -243,6 +314,21 @@ impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err> {
     {
         let (actions, outcome) = self.deconstruct();
         actions.execute(persister).map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
+
+    pub async fn save_async<P>(
+        self,
+        persister: &P,
+    ) -> Result<NextState, PersistedError<Err, P::InternalStorageError>>
+    where
+        P: AsyncSessionPersister<SessionEvent = Event>,
+        Err: std::error::Error + Send,
+        NextState: Send,
+        Event: Send,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute_async(persister).await.map_err(InternalPersistedError::Storage)?;
         Ok(outcome.map_err(InternalPersistedError::Api)?)
     }
 }
@@ -295,6 +381,21 @@ where
         actions.execute(persister).map_err(InternalPersistedError::Storage)?;
         Ok(outcome.map_err(InternalPersistedError::Api)?)
     }
+
+    pub async fn save_async<P>(
+        self,
+        persister: &P,
+    ) -> Result<SuccessValue, PersistedError<Err, P::InternalStorageError>>
+    where
+        P: AsyncSessionPersister<SessionEvent = Event>,
+        Err: Send,
+        SuccessValue: Send,
+        Event: Send,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute_async(persister).await.map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
 }
 
 /// A transition that always results in a state transition.
@@ -316,6 +417,17 @@ impl<Event, NextState> NextStateTransition<Event, NextState> {
     {
         let (actions, next_state) = self.deconstruct();
         actions.execute(persister)?;
+        Ok(next_state)
+    }
+
+    pub async fn save_async<P>(self, persister: &P) -> Result<NextState, P::InternalStorageError>
+    where
+        P: AsyncSessionPersister<SessionEvent = Event>,
+        NextState: Send,
+        Event: Send,
+    {
+        let (actions, next_state) = self.deconstruct();
+        actions.execute_async(persister).await?;
         Ok(next_state)
     }
 }
@@ -378,6 +490,24 @@ where
     {
         let (actions, outcome) = self.deconstruct();
         actions.execute(persister).map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
+
+    pub async fn save_async<P>(
+        self,
+        persister: &P,
+    ) -> Result<
+        OptionalTransitionOutcome<(), CurrentState>,
+        PersistedError<Err, P::InternalStorageError>,
+    >
+    where
+        P: AsyncSessionPersister<SessionEvent = Event>,
+        Err: std::error::Error + Send,
+        CurrentState: Send,
+        Event: Send,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute_async(persister).await.map_err(InternalPersistedError::Storage)?;
         Ok(outcome.map_err(InternalPersistedError::Api)?)
     }
 }
@@ -580,6 +710,41 @@ pub trait SessionPersister {
     /// This is invoked when the session is terminated due to a fatal error
     /// or when the session is closed due to a success state
     fn close(&self) -> Result<(), Self::InternalStorageError>;
+}
+
+/// Async version of [`SessionPersister`] for use in async contexts.
+//
+// Methods use `impl Future<...> + Send` instead of `async fn` because `async fn` in traits
+// doesn't guarantee the returned future is `Send`. This triggers the `async_fn_in_trait` lint.
+// https://doc.rust-lang.org/stable/nightly-rustc/rustc_lint/async_fn_in_trait/static.ASYNC_FN_IN_TRAIT.html
+pub trait AsyncSessionPersister: Send + Sync {
+    /// Errors that may arise from implementers storage layer
+    type InternalStorageError: std::error::Error + Send + Sync + 'static;
+    /// Session events types that we are persisting
+    type SessionEvent: Send;
+
+    /// Appends to list of session updates, Receives generic events
+    fn save_event(
+        &self,
+        event: Self::SessionEvent,
+    ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send;
+
+    /// Loads all the events from the session in the same order they were saved
+    fn load(
+        &self,
+    ) -> impl std::future::Future<
+        Output = Result<
+            Box<dyn Iterator<Item = Self::SessionEvent> + Send>,
+            Self::InternalStorageError,
+        >,
+    > + Send;
+
+    /// Marks the session as closed, no more events will be appended.
+    /// This is invoked when the session is terminated due to a fatal error
+    /// or when the session is closed due to a success state
+    fn close(
+        &self,
+    ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send;
 }
 
 /// A persister that does nothing

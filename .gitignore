@@ -6,4 +6,5 @@ Cargo.lock
 .vscode
 mutants.out*
 *.ikm
+*.dat
 *payjoin.sqlite

@@ -1,6 +1,7 @@
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use anyhow::Result;
 use futures::StreamExt;
@@ -11,6 +12,7 @@ use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
 use hyper::server::conn::http1;
 use hyper::{Method, Request, Response, StatusCode, Uri};
 use hyper_util::rt::TokioIo;
+use hyper_util::service::TowerToHyperService;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tokio::net::TcpListener;
 #[cfg(feature = "acme")]
@@ -68,13 +70,21 @@ pub struct Service<D: Db> {
     metrics: Metrics,
 }
 
-impl<D: Db> hyper::service::Service<Request<Incoming>> for Service<D> {
+impl<D: Db, B> tower::Service<Request<B>> for Service<D>
+where
+    B: Body<Data = Bytes> + Send + 'static,
+    B::Error: Into<BoxError>,
+{
     type Response = Response<BoxBody<Bytes, hyper::Error>>;
     type Error = anyhow::Error;
     type Future =
         Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    fn call(&self, req: Request<Incoming>) -> Self::Future {
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Request<B>) -> Self::Future {
         let this = self.clone();
         Box::pin(async move { this.serve_request(req).await })
     }
@@ -106,8 +116,9 @@ impl<D: Db> Service<D> {
                         return;
                     }
                 };
+                let hyper_service = TowerToHyperService::new(service);
                 if let Err(err) = http1::Builder::new()
-                    .serve_connection(TokioIo::new(tls_stream), service)
+                    .serve_connection(TokioIo::new(tls_stream), hyper_service)
                     .with_upgrades()
                     .await
                 {
@@ -154,23 +165,29 @@ impl<D: Db> Service<D> {
         }
     }
 
-    // TODO https://docs.rs/tower/0.4.13/tower/make/trait.MakeService.html
     async fn serve_connection<I>(&self, stream: I)
     where
         I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
     {
         self.metrics.record_connection();
-        if let Err(err) =
-            http1::Builder::new().serve_connection(TokioIo::new(stream), self).with_upgrades().await
+        let hyper_service = TowerToHyperService::new(self.clone());
+        if let Err(err) = http1::Builder::new()
+            .serve_connection(TokioIo::new(stream), hyper_service)
+            .with_upgrades()
+            .await
         {
             error!("Error serving connection: {:?}", err);
         }
     }
 
-    async fn serve_request(
+    async fn serve_request<B>(
         &self,
-        req: Request<Incoming>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
+        req: Request<B>,
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>>
+    where
+        B: Body<Data = Bytes> + Send + 'static,
+        B::Error: Into<BoxError>,
+    {
         let path = req.uri().path().to_string();
         let query = req.uri().query().unwrap_or_default().to_string();
         let (parts, body) = req.into_parts();
@@ -197,13 +214,20 @@ impl<D: Db> Service<D> {
         Ok(response)
     }
 
-    async fn handle_ohttp_gateway(
+    async fn handle_ohttp_gateway<B>(
         &self,
-        body: Incoming,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
+        body: B,
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError>
+    where
+        B: Body<Data = Bytes> + Send + 'static,
+        B::Error: Into<BoxError>,
+    {
         // decapsulate
-        let ohttp_body =
-            body.collect().await.map_err(|e| HandlerError::BadRequest(e.into()))?.to_bytes();
+        let ohttp_body = body
+            .collect()
+            .await
+            .map_err(|e| HandlerError::BadRequest(anyhow::anyhow!(e.into())))?
+            .to_bytes();
         let (bhttp_req, res_ctx) = self
             .ohttp
             .decapsulate(&ohttp_body)
@@ -327,12 +351,16 @@ impl<D: Db> Service<D> {
         }
     }
 
-    async fn post_fallback_v1(
+    async fn post_fallback_v1<B>(
         &self,
         id: &str,
         query: String,
-        body: impl Body,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
+        body: B,
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError>
+    where
+        B: Body<Data = Bytes> + Send + 'static,
+        B::Error: Into<BoxError>,
+    {
         trace!("Post fallback v1");
         let none_response = Response::builder()
             .status(StatusCode::SERVICE_UNAVAILABLE)

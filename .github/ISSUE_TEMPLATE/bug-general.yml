@@ -30,6 +30,7 @@ body:
         - payjoin-directory
         - payjoin-test-utils
         - payjoin-ffi
+        - ohttp-relay
   - type: dropdown
     attributes:
       label: How did you obtain this crate?

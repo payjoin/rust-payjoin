@@ -11,6 +11,7 @@ body:
         - payjoin-directory
         - payjoin-test-utils
         - payjoin-ffi
+        - ohttp-relay
   - type: textarea
     id: question
     attributes:

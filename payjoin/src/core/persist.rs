@@ -1,4 +1,32 @@
 use std::fmt;
+
+/// Representation of the actions that the persister should take, if any.
+pub(crate) enum PersistActions<Event> {
+    /// Do nothing.
+    NoOp,
+    /// Save an event.
+    Save(Event),
+    /// Save an event and close the session.
+    SaveAndClose(Event),
+}
+
+impl<Event> PersistActions<Event> {
+    pub fn execute<P>(self, persister: &P) -> Result<(), P::InternalStorageError>
+    where
+        P: SessionPersister<SessionEvent = Event>,
+    {
+        match self {
+            Self::NoOp => {}
+            Self::Save(event) => persister.save_event(event)?,
+            Self::SaveAndClose(event) => {
+                persister.save_event(event)?;
+                persister.close()?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Handles cases where the transition either succeeds with a final result that ends the session, or hits a static condition and stays in the same state.
 /// State transition may also be a fatal error or transient error.
 pub struct MaybeSuccessTransitionWithNoResults<Event, SuccessValue, CurrentState, Err>(
@@ -27,6 +55,29 @@ impl<Event, SuccessValue, CurrentState, Err>
         ))))
     }
 
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn deconstruct(
+        self,
+    ) -> (
+        PersistActions<Event>,
+        Result<OptionalTransitionOutcome<SuccessValue, CurrentState>, ApiError<Err>>,
+    ) {
+        match self.0 {
+            Ok(AcceptOptionalTransition::Success(AcceptNextState(event, success_value))) => (
+                PersistActions::SaveAndClose(event),
+                Ok(OptionalTransitionOutcome::Progress(success_value)),
+            ),
+            Ok(AcceptOptionalTransition::NoResults(current_state)) =>
+                (PersistActions::NoOp, Ok(OptionalTransitionOutcome::Stasis(current_state))),
+            Err(Rejection::Fatal(RejectFatal(event, error))) =>
+                (PersistActions::SaveAndClose(event), Err(ApiError::Fatal(error))),
+            Err(Rejection::Transient(RejectTransient(error))) =>
+                (PersistActions::NoOp, Err(ApiError::Transient(error))),
+            Err(Rejection::ReplyableError(RejectReplyableError(event, _, error))) =>
+                (PersistActions::Save(event), Err(ApiError::Fatal(error))),
+        }
+    }
+
     pub fn save<P>(
         self,
         persister: &P,
@@ -38,7 +89,9 @@ impl<Event, SuccessValue, CurrentState, Err>
         P: SessionPersister<SessionEvent = Event>,
         Err: std::error::Error,
     {
-        persister.save_maybe_no_results_success_transition(self)
+        let (actions, outcome) = self.deconstruct();
+        actions.execute(persister).map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
     }
 }
 /// A transition that can result in a state transition, fatal error, or successfully have no results.
@@ -67,6 +120,27 @@ impl<Event, NextState, CurrentState, Err>
         ))))
     }
 
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn deconstruct(
+        self,
+    ) -> (
+        PersistActions<Event>,
+        Result<OptionalTransitionOutcome<NextState, CurrentState>, ApiError<Err>>,
+    ) {
+        match self.0 {
+            Ok(AcceptOptionalTransition::Success(AcceptNextState(event, next_state))) =>
+                (PersistActions::Save(event), Ok(OptionalTransitionOutcome::Progress(next_state))),
+            Ok(AcceptOptionalTransition::NoResults(current_state)) =>
+                (PersistActions::NoOp, Ok(OptionalTransitionOutcome::Stasis(current_state))),
+            Err(Rejection::Fatal(RejectFatal(event, error))) =>
+                (PersistActions::SaveAndClose(event), Err(ApiError::Fatal(error))),
+            Err(Rejection::Transient(RejectTransient(error))) =>
+                (PersistActions::NoOp, Err(ApiError::Transient(error))),
+            Err(Rejection::ReplyableError(RejectReplyableError(event, _, error))) =>
+                (PersistActions::Save(event), Err(ApiError::Fatal(error))),
+        }
+    }
+
     pub fn save<P>(
         self,
         persister: &P,
@@ -78,7 +152,9 @@ impl<Event, NextState, CurrentState, Err>
         P: SessionPersister<SessionEvent = Event>,
         Err: std::error::Error,
     {
-        persister.save_maybe_no_results_transition(self)
+        let (actions, outcome) = self.deconstruct();
+        actions.execute(persister).map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
     }
 }
 
@@ -107,6 +183,20 @@ where
         MaybeFatalTransition(Err(Rejection::replyable_error(event, error_state, error)))
     }
 
+    pub(crate) fn deconstruct(
+        self,
+    ) -> (PersistActions<Event>, Result<NextState, ApiError<Err, ErrorState>>) {
+        match self.0 {
+            Ok(AcceptNextState(event, next_state)) => (PersistActions::Save(event), Ok(next_state)),
+            Err(Rejection::Fatal(RejectFatal(event, error))) =>
+                (PersistActions::SaveAndClose(event), Err(ApiError::Fatal(error))),
+            Err(Rejection::Transient(RejectTransient(error))) =>
+                (PersistActions::NoOp, Err(ApiError::Transient(error))),
+            Err(Rejection::ReplyableError(RejectReplyableError(event, error_state, error))) =>
+                (PersistActions::Save(event), Err(ApiError::FatalWithState(error, error_state))),
+        }
+    }
+
     pub fn save<P>(
         self,
         persister: &P,
@@ -115,7 +205,9 @@ where
         P: SessionPersister<SessionEvent = Event>,
         Err: std::error::Error,
     {
-        persister.save_maybe_fatal_error_transition(self)
+        let (actions, outcome) = self.deconstruct();
+        actions.execute(persister).map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
     }
 }
 
@@ -134,6 +226,13 @@ impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err> {
         MaybeTransientTransition(Err(RejectTransient(error)))
     }
 
+    pub(crate) fn deconstruct(self) -> (PersistActions<Event>, Result<NextState, ApiError<Err>>) {
+        match self.0 {
+            Ok(AcceptNextState(event, next_state)) => (PersistActions::Save(event), Ok(next_state)),
+            Err(RejectTransient(error)) => (PersistActions::NoOp, Err(ApiError::Transient(error))),
+        }
+    }
+
     pub fn save<P>(
         self,
         persister: &P,
@@ -142,7 +241,9 @@ impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err> {
         P: SessionPersister<SessionEvent = Event>,
         Err: std::error::Error,
     {
-        persister.save_maybe_transient_error_transition(self)
+        let (actions, outcome) = self.deconstruct();
+        actions.execute(persister).map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
     }
 }
 
@@ -168,6 +269,21 @@ where
         MaybeSuccessTransition(Err(Rejection::fatal(event, error)))
     }
 
+    pub(crate) fn deconstruct(
+        self,
+    ) -> (PersistActions<Event>, Result<SuccessValue, ApiError<Err>>) {
+        match self.0 {
+            Ok(AcceptNextState(event, success_value)) =>
+                (PersistActions::SaveAndClose(event), Ok(success_value)),
+            Err(Rejection::Transient(RejectTransient(error))) =>
+                (PersistActions::NoOp, Err(ApiError::Transient(error))),
+            Err(Rejection::Fatal(RejectFatal(event, error))) =>
+                (PersistActions::SaveAndClose(event), Err(ApiError::Fatal(error))),
+            Err(Rejection::ReplyableError(RejectReplyableError(event, _, error))) =>
+                (PersistActions::Save(event), Err(ApiError::Fatal(error))),
+        }
+    }
+
     pub fn save<P>(
         self,
         persister: &P,
@@ -175,7 +291,9 @@ where
     where
         P: SessionPersister<SessionEvent = Event>,
     {
-        persister.save_maybe_success_transition(self)
+        let (actions, outcome) = self.deconstruct();
+        actions.execute(persister).map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
     }
 }
 
@@ -187,11 +305,18 @@ impl<Event, NextState> NextStateTransition<Event, NextState> {
         NextStateTransition(AcceptNextState(event, next_state))
     }
 
+    pub(crate) fn deconstruct(self) -> (PersistActions<Event>, NextState) {
+        let AcceptNextState(event, next_state) = self.0;
+        (PersistActions::Save(event), next_state)
+    }
+
     pub fn save<P>(self, persister: &P) -> Result<NextState, P::InternalStorageError>
     where
         P: SessionPersister<SessionEvent = Event>,
     {
-        persister.save_progression_transition(self)
+        let (actions, next_state) = self.deconstruct();
+        actions.execute(persister)?;
+        Ok(next_state)
     }
 }
 
@@ -223,6 +348,23 @@ where
         MaybeFatalOrSuccessTransition::NoResults(current_state)
     }
 
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn deconstruct(
+        self,
+    ) -> (PersistActions<Event>, Result<OptionalTransitionOutcome<(), CurrentState>, ApiError<Err>>)
+    {
+        match self {
+            MaybeFatalOrSuccessTransition::Success(event) =>
+                (PersistActions::SaveAndClose(event), Ok(OptionalTransitionOutcome::Progress(()))),
+            MaybeFatalOrSuccessTransition::NoResults(current_state) =>
+                (PersistActions::NoOp, Ok(OptionalTransitionOutcome::Stasis(current_state))),
+            MaybeFatalOrSuccessTransition::Transient(RejectTransient(error)) =>
+                (PersistActions::NoOp, Err(ApiError::Transient(error))),
+            MaybeFatalOrSuccessTransition::Fatal(RejectFatal(event, error)) =>
+                (PersistActions::SaveAndClose(event), Err(ApiError::Fatal(error))),
+        }
+    }
+
     pub fn save<P>(
         self,
         persister: &P,
@@ -234,7 +376,9 @@ where
         P: SessionPersister<SessionEvent = Event>,
         Err: std::error::Error,
     {
-        persister.save_maybe_fatal_or_success_transition(self)
+        let (actions, outcome) = self.deconstruct();
+        actions.execute(persister).map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
     }
 }
 
@@ -437,226 +581,6 @@ pub trait SessionPersister {
     /// or when the session is closed due to a success state
     fn close(&self) -> Result<(), Self::InternalStorageError>;
 }
-
-/// Internal logic for processing specific state transitions. Each method is strongly typed to the state transition type.
-/// Methods are not meant to be called directly, but are invoked through a state transition object's `save` method.
-trait InternalSessionPersister: SessionPersister {
-    fn save_maybe_fatal_or_success_transition<CurrentState, Err>(
-        &self,
-        state_transition: MaybeFatalOrSuccessTransition<Self::SessionEvent, CurrentState, Err>,
-    ) -> Result<
-        OptionalTransitionOutcome<(), CurrentState>,
-        PersistedError<Err, Self::InternalStorageError>,
-    >
-    where
-        Err: std::error::Error,
-    {
-        match state_transition {
-            MaybeFatalOrSuccessTransition::Success(event) => {
-                // Success value here would be the something to save
-                self.save_event(event).map_err(InternalPersistedError::Storage)?;
-                self.close().map_err(InternalPersistedError::Storage)?;
-                Ok(OptionalTransitionOutcome::Progress(()))
-            }
-            MaybeFatalOrSuccessTransition::NoResults(current_state) =>
-                Ok(OptionalTransitionOutcome::Stasis(current_state)),
-            MaybeFatalOrSuccessTransition::Fatal(reject_fatal) =>
-                Err(self.handle_fatal_reject(reject_fatal).into()),
-            MaybeFatalOrSuccessTransition::Transient(RejectTransient(err)) =>
-                Err(InternalPersistedError::Api(ApiError::Transient(err)).into()),
-        }
-    }
-
-    /// Save state transition where state transition does not return an error
-    /// Only returns an error if the storage fails
-    fn save_progression_transition<NextState>(
-        &self,
-        state_transition: NextStateTransition<Self::SessionEvent, NextState>,
-    ) -> Result<NextState, Self::InternalStorageError> {
-        self.save_event(state_transition.0 .0)?;
-        Ok(state_transition.0 .1)
-    }
-
-    /// Save a transition that can be a state transition or a transient error
-    fn save_maybe_success_transition<SuccessValue, Err>(
-        &self,
-        state_transition: MaybeSuccessTransition<Self::SessionEvent, SuccessValue, Err>,
-    ) -> Result<SuccessValue, PersistedError<Err, Self::InternalStorageError>>
-    where
-        Err: std::error::Error,
-    {
-        match state_transition.0 {
-            Ok(AcceptNextState(event, success_value)) => {
-                self.save_event(event).map_err(InternalPersistedError::Storage)?;
-                self.close().map_err(InternalPersistedError::Storage)?;
-                Ok(success_value)
-            }
-            Err(Rejection::Transient(RejectTransient(err))) =>
-                Err(InternalPersistedError::Api(ApiError::Transient(err)).into()),
-            Err(Rejection::Fatal(reject_fatal)) =>
-                Err(self.handle_fatal_reject(reject_fatal).into()),
-            Err(Rejection::ReplyableError(reject_replyable_error)) =>
-                Err(self.handle_replyable_error_reject(reject_replyable_error).into()),
-        }
-    }
-
-    /// Persists the outcome of a state transition that may result in one of the following:
-    /// - A successful state transition, in which case the success value is returned and the session is closed.
-    /// - No state change (stasis), where the current state is retained and nothing is persisted.
-    /// - A transient error, which does not affect persistent storage and is returned to the caller.
-    /// - A fatal error, which is persisted and returned to the caller.
-    fn save_maybe_no_results_success_transition<SuccessValue, CurrentState, Err>(
-        &self,
-        state_transition: MaybeSuccessTransitionWithNoResults<
-            Self::SessionEvent,
-            SuccessValue,
-            CurrentState,
-            Err,
-        >,
-    ) -> Result<
-        OptionalTransitionOutcome<SuccessValue, CurrentState>,
-        PersistedError<Err, Self::InternalStorageError>,
-    >
-    where
-        Err: std::error::Error,
-    {
-        match state_transition.0 {
-            Ok(AcceptOptionalTransition::Success(AcceptNextState(event, success_value))) => {
-                self.save_event(event).map_err(InternalPersistedError::Storage)?;
-                self.close().map_err(InternalPersistedError::Storage)?;
-                Ok(OptionalTransitionOutcome::Progress(success_value))
-            }
-            Ok(AcceptOptionalTransition::NoResults(current_state)) =>
-                Ok(OptionalTransitionOutcome::Stasis(current_state)),
-            Err(Rejection::Fatal(reject_fatal)) =>
-                Err(self.handle_fatal_reject(reject_fatal).into()),
-            Err(Rejection::Transient(RejectTransient(err))) =>
-                Err(InternalPersistedError::Api(ApiError::Transient(err)).into()),
-            Err(Rejection::ReplyableError(reject_replyable_error)) =>
-                Err(self.handle_replyable_error_reject(reject_replyable_error).into()),
-        }
-    }
-    /// Save a transition that can result in:
-    /// - A successful state transition
-    /// - No state change (no results)
-    /// - A transient error
-    /// - A fatal error
-    fn save_maybe_no_results_transition<NextState, CurrentState, Err>(
-        &self,
-        state_transition: MaybeFatalTransitionWithNoResults<
-            Self::SessionEvent,
-            NextState,
-            CurrentState,
-            Err,
-        >,
-    ) -> Result<
-        OptionalTransitionOutcome<NextState, CurrentState>,
-        PersistedError<Err, Self::InternalStorageError>,
-    >
-    where
-        Err: std::error::Error,
-    {
-        match state_transition.0 {
-            Ok(AcceptOptionalTransition::Success(AcceptNextState(event, next_state))) => {
-                self.save_event(event).map_err(InternalPersistedError::Storage)?;
-                Ok(OptionalTransitionOutcome::Progress(next_state))
-            }
-            Ok(AcceptOptionalTransition::NoResults(current_state)) =>
-                Ok(OptionalTransitionOutcome::Stasis(current_state)),
-            Err(Rejection::Fatal(reject_fatal)) =>
-                Err(self.handle_fatal_reject(reject_fatal).into()),
-            Err(Rejection::Transient(RejectTransient(err))) =>
-                Err(InternalPersistedError::Api(ApiError::Transient(err)).into()),
-            Err(Rejection::ReplyableError(reject_replyable_error)) =>
-                Err(self.handle_replyable_error_reject(reject_replyable_error).into()),
-        }
-    }
-
-    /// Save a transition that can be a transient error or a state transition
-    fn save_maybe_transient_error_transition<NextState, Err>(
-        &self,
-        state_transition: MaybeTransientTransition<Self::SessionEvent, NextState, Err>,
-    ) -> Result<NextState, PersistedError<Err, Self::InternalStorageError>>
-    where
-        Err: std::error::Error,
-    {
-        match state_transition.0 {
-            Ok(AcceptNextState(event, next_state)) => {
-                self.save_event(event).map_err(InternalPersistedError::Storage)?;
-                Ok(next_state)
-            }
-            Err(RejectTransient(err)) =>
-                Err(InternalPersistedError::Api(ApiError::Transient(err)).into()),
-        }
-    }
-
-    /// Save a transition that can be a fatal error, transient error or a state transition
-    fn save_maybe_fatal_error_transition<NextState, Err, ErrorState>(
-        &self,
-        state_transition: MaybeFatalTransition<Self::SessionEvent, NextState, Err, ErrorState>,
-    ) -> Result<NextState, PersistedError<Err, Self::InternalStorageError, ErrorState>>
-    where
-        Err: std::error::Error,
-        ErrorState: fmt::Debug,
-    {
-        match state_transition.0 {
-            Ok(AcceptNextState(event, next_state)) => {
-                self.save_event(event).map_err(InternalPersistedError::Storage)?;
-                Ok(next_state)
-            }
-            Err(e) => {
-                match e {
-                    Rejection::Fatal(reject_fatal) =>
-                        Err(self.handle_fatal_reject(reject_fatal).into()),
-                    Rejection::Transient(RejectTransient(err)) => {
-                        // No event to store for transient errors
-                        Err(InternalPersistedError::Api(ApiError::Transient(err)).into())
-                    }
-                    Rejection::ReplyableError(reject_replyable_error) =>
-                        Err(self.handle_replyable_error_reject(reject_replyable_error).into()),
-                }
-            }
-        }
-    }
-
-    fn handle_fatal_reject<Err, ErrorState>(
-        &self,
-        reject_fatal: RejectFatal<Self::SessionEvent, Err>,
-    ) -> InternalPersistedError<Err, Self::InternalStorageError, ErrorState>
-    where
-        Err: std::error::Error,
-        ErrorState: fmt::Debug,
-    {
-        let RejectFatal(event, error) = reject_fatal;
-        if let Err(e) = self.save_event(event) {
-            return InternalPersistedError::Storage(e);
-        }
-        // Session is in a terminal state, close it
-        if let Err(e) = self.close() {
-            return InternalPersistedError::Storage(e);
-        }
-
-        InternalPersistedError::Api(ApiError::Fatal(error))
-    }
-
-    fn handle_replyable_error_reject<Err, ErrorState>(
-        &self,
-        reject_replyable_error: RejectReplyableError<Self::SessionEvent, ErrorState, Err>,
-    ) -> InternalPersistedError<Err, Self::InternalStorageError, ErrorState>
-    where
-        Err: std::error::Error,
-        ErrorState: fmt::Debug,
-    {
-        let RejectReplyableError(event, error_state, error) = reject_replyable_error;
-        if let Err(e) = self.save_event(event) {
-            return InternalPersistedError::Storage(e);
-        }
-        // For replyable errors, don't close the session - keep it open for error response
-        InternalPersistedError::Api(ApiError::FatalWithState(error, error_state))
-    }
-}
-
-impl<T: SessionPersister> InternalSessionPersister for T {}
 
 /// A persister that does nothing
 /// This persister cannot be used to replay a session

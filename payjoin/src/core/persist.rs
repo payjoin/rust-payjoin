@@ -313,9 +313,9 @@ where
 
     pub fn api_error(self) -> Option<ApiErr> {
         match self.0 {
-            InternalPersistedError::Fatal(e)
-            | InternalPersistedError::Transient(e)
-            | InternalPersistedError::FatalWithState(e, _) => Some(e),
+            InternalPersistedError::Api(
+                ApiError::Fatal(e) | ApiError::Transient(e) | ApiError::FatalWithState(e, _),
+            ) => Some(e),
             _ => None,
         }
     }
@@ -329,16 +329,16 @@ where
 
     pub fn api_error_ref(&self) -> Option<&ApiErr> {
         match &self.0 {
-            InternalPersistedError::Fatal(e)
-            | InternalPersistedError::Transient(e)
-            | InternalPersistedError::FatalWithState(e, _) => Some(e),
+            InternalPersistedError::Api(
+                ApiError::Fatal(e) | ApiError::Transient(e) | ApiError::FatalWithState(e, _),
+            ) => Some(e),
             _ => None,
         }
     }
 
     pub fn error_state(self) -> Option<ErrorState> {
         match self.0 {
-            InternalPersistedError::FatalWithState(_, state) => Some(state),
+            InternalPersistedError::Api(ApiError::FatalWithState(_, state)) => Some(state),
             _ => None,
         }
     }
@@ -358,35 +358,52 @@ impl<ApiError: std::error::Error, StorageError: std::error::Error, ErrorState: f
 {
 }
 
-impl<ApiError: std::error::Error, StorageError: std::error::Error, ErrorState: fmt::Debug>
-    fmt::Display for PersistedError<ApiError, StorageError, ErrorState>
+impl<ApiErr: std::error::Error, StorageError: std::error::Error, ErrorState: fmt::Debug>
+    fmt::Display for PersistedError<ApiErr, StorageError, ErrorState>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.0 {
-            InternalPersistedError::Transient(err) => write!(f, "Transient error: {err}"),
-            InternalPersistedError::Fatal(err) | InternalPersistedError::FatalWithState(err, _) =>
-                write!(f, "Fatal error: {err}"),
+            InternalPersistedError::Api(ApiError::Transient(err)) =>
+                write!(f, "Transient error: {err}"),
+            InternalPersistedError::Api(
+                ApiError::Fatal(err) | ApiError::FatalWithState(err, _),
+            ) => write!(f, "Fatal error: {err}"),
             InternalPersistedError::Storage(err) => write!(f, "Storage error: {err}"),
         }
     }
 }
 
 #[derive(Debug)]
-pub(crate) enum InternalPersistedError<InternalApiError, StorageErr, ErrorState = ()>
+pub(crate) enum ApiError<Err, ErrorState = ()> {
+    /// Error indicating that the session should be retried from the same state
+    Transient(Err),
+    /// Error indicating that the session is terminally closed
+    Fatal(Err),
+    /// Fatal error that results in a state transition to ErrorState
+    FatalWithState(Err, ErrorState),
+}
+
+#[derive(Debug)]
+pub(crate) enum InternalPersistedError<ApiErr, StorageErr, ErrorState = ()>
 where
-    InternalApiError: std::error::Error,
+    ApiErr: std::error::Error,
     StorageErr: std::error::Error,
     ErrorState: fmt::Debug,
 {
-    /// Error indicating that the session should be retried from the same state
-    Transient(InternalApiError),
-    /// Error indicating that the session is terminally closed
-    Fatal(InternalApiError),
-    /// Fatal error that results in a state transition to ErrorState
-    FatalWithState(InternalApiError, ErrorState),
-    /// Error indicating that application failed to save the session event. This should be treated as a transient error
-    /// but is represented as a separate error because this error is propagated from the application's storage layer
+    /// Error indicating that the session failed to progress to the next success state.
+    Api(ApiError<ApiErr, ErrorState>),
+    /// Error indicating that application failed to save the session event.
     Storage(StorageErr),
+}
+
+impl<Err, StorageErr, ErrorState> From<ApiError<Err, ErrorState>>
+    for InternalPersistedError<Err, StorageErr, ErrorState>
+where
+    Err: std::error::Error,
+    StorageErr: std::error::Error,
+    ErrorState: fmt::Debug,
+{
+    fn from(api: ApiError<Err, ErrorState>) -> Self { InternalPersistedError::Api(api) }
 }
 
 /// Represents a state transition that either progresses to a new state or maintains the current state
@@ -446,7 +463,7 @@ trait InternalSessionPersister: SessionPersister {
             MaybeFatalOrSuccessTransition::Fatal(reject_fatal) =>
                 Err(self.handle_fatal_reject(reject_fatal).into()),
             MaybeFatalOrSuccessTransition::Transient(RejectTransient(err)) =>
-                Err(InternalPersistedError::Transient(err).into()),
+                Err(InternalPersistedError::Api(ApiError::Transient(err)).into()),
         }
     }
 
@@ -475,7 +492,7 @@ trait InternalSessionPersister: SessionPersister {
                 Ok(success_value)
             }
             Err(Rejection::Transient(RejectTransient(err))) =>
-                Err(InternalPersistedError::Transient(err).into()),
+                Err(InternalPersistedError::Api(ApiError::Transient(err)).into()),
             Err(Rejection::Fatal(reject_fatal)) =>
                 Err(self.handle_fatal_reject(reject_fatal).into()),
             Err(Rejection::ReplyableError(reject_replyable_error)) =>
@@ -514,7 +531,7 @@ trait InternalSessionPersister: SessionPersister {
             Err(Rejection::Fatal(reject_fatal)) =>
                 Err(self.handle_fatal_reject(reject_fatal).into()),
             Err(Rejection::Transient(RejectTransient(err))) =>
-                Err(InternalPersistedError::Transient(err).into()),
+                Err(InternalPersistedError::Api(ApiError::Transient(err)).into()),
             Err(Rejection::ReplyableError(reject_replyable_error)) =>
                 Err(self.handle_replyable_error_reject(reject_replyable_error).into()),
         }
@@ -549,7 +566,7 @@ trait InternalSessionPersister: SessionPersister {
             Err(Rejection::Fatal(reject_fatal)) =>
                 Err(self.handle_fatal_reject(reject_fatal).into()),
             Err(Rejection::Transient(RejectTransient(err))) =>
-                Err(InternalPersistedError::Transient(err).into()),
+                Err(InternalPersistedError::Api(ApiError::Transient(err)).into()),
             Err(Rejection::ReplyableError(reject_replyable_error)) =>
                 Err(self.handle_replyable_error_reject(reject_replyable_error).into()),
         }
@@ -568,7 +585,8 @@ trait InternalSessionPersister: SessionPersister {
                 self.save_event(event).map_err(InternalPersistedError::Storage)?;
                 Ok(next_state)
             }
-            Err(RejectTransient(err)) => Err(InternalPersistedError::Transient(err).into()),
+            Err(RejectTransient(err)) =>
+                Err(InternalPersistedError::Api(ApiError::Transient(err)).into()),
         }
     }
 
@@ -592,7 +610,7 @@ trait InternalSessionPersister: SessionPersister {
                         Err(self.handle_fatal_reject(reject_fatal).into()),
                     Rejection::Transient(RejectTransient(err)) => {
                         // No event to store for transient errors
-                        Err(InternalPersistedError::Transient(err).into())
+                        Err(InternalPersistedError::Api(ApiError::Transient(err)).into())
                     }
                     Rejection::ReplyableError(reject_replyable_error) =>
                         Err(self.handle_replyable_error_reject(reject_replyable_error).into()),
@@ -618,7 +636,7 @@ trait InternalSessionPersister: SessionPersister {
             return InternalPersistedError::Storage(e);
         }
 
-        InternalPersistedError::Fatal(error)
+        InternalPersistedError::Api(ApiError::Fatal(error))
     }
 
     fn handle_replyable_error_reject<Err, ErrorState>(
@@ -634,7 +652,7 @@ trait InternalSessionPersister: SessionPersister {
             return InternalPersistedError::Storage(e);
         }
         // For replyable errors, don't close the session - keep it open for error response
-        InternalPersistedError::FatalWithState(error, error_state)
+        InternalPersistedError::Api(ApiError::FatalWithState(error, error_state))
     }
 }
 
@@ -854,7 +872,10 @@ mod tests {
                 expected_result: ExpectedResult {
                     events: vec![],
                     is_closed: false,
-                    error: Some(InternalPersistedError::Transient(InMemoryTestError {}).into()),
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Transient(InMemoryTestError {}))
+                            .into(),
+                    ),
                     success: None,
                 },
                 test: Box::new(move |persister| {
@@ -917,7 +938,10 @@ mod tests {
                 expected_result: ExpectedResult {
                     events: vec![],
                     is_closed: false,
-                    error: Some(InternalPersistedError::Transient(InMemoryTestError {}).into()),
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Transient(InMemoryTestError {}))
+                            .into(),
+                    ),
                     success: None,
                 },
                 test: Box::new(move |persister| {
@@ -929,7 +953,9 @@ mod tests {
                 expected_result: ExpectedResult {
                     events: vec![InMemoryTestEvent("error event".to_string())],
                     is_closed: true,
-                    error: Some(InternalPersistedError::Fatal(InMemoryTestError {}).into()),
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})).into(),
+                    ),
                     success: None,
                 },
                 test: Box::new(move |persister| {
@@ -976,7 +1002,10 @@ mod tests {
                 expected_result: ExpectedResult {
                     events: vec![],
                     is_closed: false,
-                    error: Some(InternalPersistedError::Transient(InMemoryTestError {}).into()),
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Transient(InMemoryTestError {}))
+                            .into(),
+                    ),
                     success: None,
                 },
                 test: Box::new(move |persister| {
@@ -988,7 +1017,9 @@ mod tests {
                 expected_result: ExpectedResult {
                     events: vec![error_event.clone()],
                     is_closed: true,
-                    error: Some(InternalPersistedError::Fatal(InMemoryTestError {}).into()),
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})).into(),
+                    ),
                     success: None,
                 },
                 test: Box::new(move |persister| {
@@ -1050,7 +1081,10 @@ mod tests {
                 expected_result: ExpectedResult {
                     events: vec![],
                     is_closed: false,
-                    error: Some(InternalPersistedError::Transient(InMemoryTestError {}).into()),
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Transient(InMemoryTestError {}))
+                            .into(),
+                    ),
                     success: None,
                 },
                 test: Box::new(move |persister| {
@@ -1063,7 +1097,9 @@ mod tests {
                 expected_result: ExpectedResult {
                     events: vec![error_event.clone()],
                     is_closed: true,
-                    error: Some(InternalPersistedError::Fatal(InMemoryTestError {}).into()),
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})).into(),
+                    ),
                     success: None,
                 },
                 test: Box::new(move |persister| {
@@ -1125,7 +1161,9 @@ mod tests {
                 expected_result: ExpectedResult {
                     events: vec![error_event.clone()],
                     is_closed: true,
-                    error: Some(InternalPersistedError::Fatal(InMemoryTestError {}).into()),
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})).into(),
+                    ),
                     success: None,
                 },
                 test: Box::new(move |persister| {
@@ -1184,7 +1222,9 @@ mod tests {
                 expected_result: ExpectedResult {
                     events: vec![error_event.clone()],
                     is_closed: true,
-                    error: Some(InternalPersistedError::Fatal(InMemoryTestError {}).into()),
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})).into(),
+                    ),
                     success: None,
                 },
                 test: Box::new(move |persister| {
@@ -1197,7 +1237,10 @@ mod tests {
                 expected_result: ExpectedResult {
                     events: vec![],
                     is_closed: false,
-                    error: Some(InternalPersistedError::Transient(InMemoryTestError {}).into()),
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Transient(InMemoryTestError {}))
+                            .into(),
+                    ),
                     success: None,
                 },
                 test: Box::new(move |persister| {
@@ -1225,13 +1268,13 @@ mod tests {
 
         // Test Internal API error cases
         let fatal_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
-            InternalPersistedError::Fatal(api_err.clone()),
+            InternalPersistedError::Api(ApiError::Fatal(api_err.clone())),
         );
         assert!(fatal_error.storage_error_ref().is_none());
         assert!(fatal_error.api_error_ref().is_some());
 
         let transient_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
-            InternalPersistedError::Transient(api_err.clone()),
+            InternalPersistedError::Api(ApiError::Transient(api_err.clone())),
         );
         assert!(transient_error.storage_error_ref().is_none());
         assert!(transient_error.api_error_ref().is_some());

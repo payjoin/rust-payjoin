@@ -858,12 +858,8 @@ mod tests {
         }
     }
 
-    struct TestCase<SuccessState, ErrorState> {
-        // Allow type complexity for the test closure
-        #[allow(clippy::type_complexity)]
-        test: Box<
-            dyn Fn(&InMemoryTestPersister<InMemoryTestEvent>) -> Result<SuccessState, ErrorState>,
-        >,
+    struct TestCase<Transition, SuccessState, ErrorState> {
+        make_transition: Box<dyn Fn() -> Transition>,
         expected_result: ExpectedResult<SuccessState, ErrorState>,
     }
 
@@ -878,12 +874,11 @@ mod tests {
         success: Option<SuccessState>,
     }
 
-    fn do_test<SuccessState: std::fmt::Debug + PartialEq, ErrorState: std::error::Error>(
+    fn verify_sync<SuccessState: std::fmt::Debug + PartialEq, ErrorState: std::error::Error>(
         persister: &InMemoryTestPersister<InMemoryTestEvent>,
-        test_case: &TestCase<SuccessState, ErrorState>,
+        result: Result<SuccessState, ErrorState>,
+        expected_result: &ExpectedResult<SuccessState, ErrorState>,
     ) {
-        let expected_result = &test_case.expected_result;
-        let res = (test_case.test)(persister);
         let events = persister.load().expect("Persister should not fail").collect::<Vec<_>>();
         assert_eq!(events.len(), expected_result.events.len());
         for (event, expected_event) in events.iter().zip(expected_result.events.iter()) {
@@ -895,7 +890,7 @@ mod tests {
             expected_result.is_closed
         );
 
-        match (&res, &expected_result.error) {
+        match (&result, &expected_result.error) {
             (Ok(actual), None) => {
                 assert_eq!(Some(actual), expected_result.success.as_ref());
             }
@@ -907,57 +902,61 @@ mod tests {
             _ => panic!("Unexpected result state"),
         }
     }
+    macro_rules! run_test_cases {
+        ($test_cases:expr) => {
+            for test in &$test_cases {
+                let persister = InMemoryTestPersister::default();
+                let result = (test.make_transition)().save(&persister);
+                verify_sync(&persister, result, &test.expected_result);
+            }
+        };
+    }
 
     #[test]
     fn test_initial_transition() {
         let event = InMemoryTestEvent("foo".to_string());
         let next_state = "Next state".to_string();
-        let test_cases: Vec<TestCase<InMemoryTestState, std::convert::Infallible>> = vec![
-            // Success
-            TestCase {
-                expected_result: ExpectedResult {
-                    events: vec![event.clone()],
-                    is_closed: false,
-                    error: None,
-                    success: Some(next_state.clone()),
-                },
-                test: Box::new(move |persister| {
-                    NextStateTransition::success(event.clone(), next_state.clone()).save(persister)
-                }),
-            },
-        ];
 
-        for test in test_cases {
-            let persister = InMemoryTestPersister::default();
-            do_test(&persister, &test);
-        }
+        let test_cases = vec![TestCase {
+            make_transition: Box::new({
+                let event = event.clone();
+                let next_state = next_state.clone();
+                move || NextStateTransition::success(event.clone(), next_state.clone())
+            }),
+            expected_result: ExpectedResult {
+                events: vec![event.clone()],
+                is_closed: false,
+                error: None,
+                success: Some(next_state.clone()),
+            },
+        }];
+
+        run_test_cases!(test_cases);
     }
 
     #[test]
     fn test_maybe_transient_transition() {
         let event = InMemoryTestEvent("foo".to_string());
         let next_state = "Next state".to_string();
-        let test_cases: Vec<
-            TestCase<
-                InMemoryTestState,
-                PersistedError<InMemoryTestError, std::convert::Infallible>,
-            >,
-        > = vec![
-            // Success
+
+        let test_cases = vec![
             TestCase {
+                make_transition: Box::new({
+                    let event = event.clone();
+                    let next_state = next_state.clone();
+                    move || MaybeTransientTransition::success(event.clone(), next_state.clone())
+                }),
                 expected_result: ExpectedResult {
                     events: vec![event.clone()],
                     is_closed: false,
                     error: None,
                     success: Some(next_state.clone()),
                 },
-                test: Box::new(move |persister| {
-                    MaybeTransientTransition::success(event.clone(), next_state.clone())
-                        .save(persister)
-                }),
             },
-            // Transient error
             TestCase {
+                make_transition: Box::new(|| {
+                    MaybeTransientTransition::transient(InMemoryTestError {})
+                }),
                 expected_result: ExpectedResult {
                     events: vec![],
                     is_closed: false,
@@ -967,63 +966,56 @@ mod tests {
                     ),
                     success: None,
                 },
-                test: Box::new(move |persister| {
-                    MaybeTransientTransition::transient(InMemoryTestError {}).save(persister)
-                }),
             },
         ];
 
-        for test in test_cases {
-            let persister = InMemoryTestPersister::default();
-            do_test(&persister, &test);
-        }
+        run_test_cases!(test_cases);
     }
 
     #[test]
     fn test_next_state_transition() {
         let event = InMemoryTestEvent("foo".to_string());
         let next_state = "Next state".to_string();
-        let test_cases: Vec<TestCase<InMemoryTestState, std::convert::Infallible>> = vec![
-            // Success
-            TestCase {
-                expected_result: ExpectedResult {
-                    events: vec![event.clone()],
-                    is_closed: false,
-                    error: None,
-                    success: Some(next_state.clone()),
-                },
-                test: Box::new(move |persister| {
-                    NextStateTransition::success(event.clone(), next_state.clone()).save(persister)
-                }),
-            },
-        ];
 
-        for test in test_cases {
-            let persister = InMemoryTestPersister::default();
-            do_test(&persister, &test);
-        }
+        let test_cases = vec![TestCase {
+            make_transition: Box::new({
+                let event = event.clone();
+                let next_state = next_state.clone();
+                move || NextStateTransition::success(event.clone(), next_state.clone())
+            }),
+            expected_result: ExpectedResult {
+                events: vec![event.clone()],
+                is_closed: false,
+                error: None,
+                success: Some(next_state.clone()),
+            },
+        }];
+
+        run_test_cases!(test_cases);
     }
 
     #[test]
     fn test_maybe_success_transition() {
         let event = InMemoryTestEvent("foo".to_string());
-        let test_cases: Vec<
-            TestCase<(), PersistedError<InMemoryTestError, std::convert::Infallible>>,
-        > = vec![
-            // Success
+        let error_event = InMemoryTestEvent("error event".to_string());
+
+        let test_cases = vec![
             TestCase {
+                make_transition: Box::new({
+                    let event = event.clone();
+                    move || MaybeSuccessTransition::success(event.clone(), ())
+                }),
                 expected_result: ExpectedResult {
                     events: vec![event.clone()],
                     is_closed: true,
                     error: None,
                     success: Some(()),
                 },
-                test: Box::new(move |persister| {
-                    MaybeSuccessTransition::success(event.clone(), ()).save(persister)
-                }),
             },
-            // Transient error
             TestCase {
+                make_transition: Box::new(|| {
+                    MaybeSuccessTransition::transient(InMemoryTestError {})
+                }),
                 expected_result: ExpectedResult {
                     events: vec![],
                     is_closed: false,
@@ -1033,34 +1025,24 @@ mod tests {
                     ),
                     success: None,
                 },
-                test: Box::new(move |persister| {
-                    MaybeSuccessTransition::transient(InMemoryTestError {}).save(persister)
-                }),
             },
-            // Fatal error
             TestCase {
+                make_transition: Box::new({
+                    let error_event = error_event.clone();
+                    move || MaybeSuccessTransition::fatal(error_event.clone(), InMemoryTestError {})
+                }),
                 expected_result: ExpectedResult {
-                    events: vec![InMemoryTestEvent("error event".to_string())],
+                    events: vec![error_event.clone()],
                     is_closed: true,
                     error: Some(
                         InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})).into(),
                     ),
                     success: None,
                 },
-                test: Box::new(move |persister| {
-                    MaybeSuccessTransition::fatal(
-                        InMemoryTestEvent("error event".to_string()),
-                        InMemoryTestError {},
-                    )
-                    .save(persister)
-                }),
             },
         ];
 
-        for test in test_cases {
-            let persister = InMemoryTestPersister::default();
-            do_test(&persister, &test);
-        }
+        run_test_cases!(test_cases);
     }
 
     #[test]
@@ -1069,26 +1051,26 @@ mod tests {
         let error_event = InMemoryTestEvent("error event".to_string());
         let next_state = "Next state".to_string();
 
-        let test_cases: Vec<
-            TestCase<
-                InMemoryTestState,
-                PersistedError<InMemoryTestError, std::convert::Infallible>,
-            >,
-        > = vec![
+        let test_cases = vec![
             TestCase {
+                make_transition: Box::new({
+                    let event = event.clone();
+                    let next_state = next_state.clone();
+                    move || MaybeFatalTransition::success(event.clone(), next_state.clone())
+                }),
                 expected_result: ExpectedResult {
                     events: vec![event.clone()],
                     is_closed: false,
                     error: None,
                     success: Some(next_state.clone()),
                 },
-                test: Box::new(move |persister| {
-                    MaybeFatalTransition::success(event.clone(), next_state.clone()).save(persister)
-                }),
             },
-            // Transient error
             TestCase {
-                expected_result: ExpectedResult {
+                make_transition: Box::new(|| MaybeFatalTransition::transient(InMemoryTestError {})),
+                expected_result: ExpectedResult::<
+                    _,
+                    PersistedError<InMemoryTestError, std::convert::Infallible>,
+                > {
                     events: vec![],
                     is_closed: false,
                     error: Some(
@@ -1097,12 +1079,12 @@ mod tests {
                     ),
                     success: None,
                 },
-                test: Box::new(move |persister| {
-                    MaybeFatalTransition::transient(InMemoryTestError {}).save(persister)
-                }),
             },
-            // Fatal error
             TestCase {
+                make_transition: Box::new({
+                    let error_event = error_event.clone();
+                    move || MaybeFatalTransition::fatal(error_event.clone(), InMemoryTestError {})
+                }),
                 expected_result: ExpectedResult {
                     events: vec![error_event.clone()],
                     is_closed: true,
@@ -1111,17 +1093,10 @@ mod tests {
                     ),
                     success: None,
                 },
-                test: Box::new(move |persister| {
-                    MaybeFatalTransition::fatal(error_event.clone(), InMemoryTestError {})
-                        .save(persister)
-                }),
             },
         ];
 
-        for test in test_cases {
-            let persister = InMemoryTestPersister::default();
-            do_test(&persister, &test);
-        }
+        run_test_cases!(test_cases);
     }
 
     #[test]
@@ -1130,43 +1105,45 @@ mod tests {
         let error_event = InMemoryTestEvent("error event".to_string());
         let current_state = "Current state".to_string();
         let success_value = "Success value".to_string();
-        let test_cases: Vec<
-            TestCase<
-                OptionalTransitionOutcome<InMemoryTestState, InMemoryTestState>,
-                PersistedError<InMemoryTestError, std::convert::Infallible>,
-            >,
-        > = vec![
-            // Success
+
+        let test_cases = vec![
             TestCase {
+                make_transition: Box::new({
+                    let event = event.clone();
+                    let success_value = success_value.clone();
+                    move || {
+                        MaybeSuccessTransitionWithNoResults::success(
+                            success_value.clone(),
+                            event.clone(),
+                        )
+                    }
+                }),
                 expected_result: ExpectedResult {
                     events: vec![event.clone()],
                     is_closed: true,
                     error: None,
                     success: Some(OptionalTransitionOutcome::Progress(success_value.clone())),
                 },
-                test: Box::new(move |persister| {
-                    MaybeSuccessTransitionWithNoResults::success(
-                        success_value.clone(),
-                        event.clone(),
-                    )
-                    .save(persister)
-                }),
             },
-            // No results
             TestCase {
-                expected_result: ExpectedResult {
+                make_transition: Box::new({
+                    let current_state = current_state.clone();
+                    move || MaybeSuccessTransitionWithNoResults::no_results(current_state.clone())
+                }),
+                expected_result: ExpectedResult::<
+                    OptionalTransitionOutcome<InMemoryTestState, InMemoryTestState>,
+                    PersistedError<InMemoryTestError, std::convert::Infallible>,
+                > {
                     events: vec![],
                     is_closed: false,
                     error: None,
                     success: Some(OptionalTransitionOutcome::Stasis(current_state.clone())),
                 },
-                test: Box::new(move |persister| {
-                    MaybeSuccessTransitionWithNoResults::no_results(current_state.clone())
-                        .save(persister)
-                }),
             },
-            // Transient error
             TestCase {
+                make_transition: Box::new(|| {
+                    MaybeSuccessTransitionWithNoResults::transient(InMemoryTestError {})
+                }),
                 expected_result: ExpectedResult {
                     events: vec![],
                     is_closed: false,
@@ -1176,13 +1153,17 @@ mod tests {
                     ),
                     success: None,
                 },
-                test: Box::new(move |persister| {
-                    MaybeSuccessTransitionWithNoResults::transient(InMemoryTestError {})
-                        .save(persister)
-                }),
             },
-            // Fatal error
             TestCase {
+                make_transition: Box::new({
+                    let error_event = error_event.clone();
+                    move || {
+                        MaybeSuccessTransitionWithNoResults::fatal(
+                            error_event.clone(),
+                            InMemoryTestError {},
+                        )
+                    }
+                }),
                 expected_result: ExpectedResult {
                     events: vec![error_event.clone()],
                     is_closed: true,
@@ -1191,20 +1172,10 @@ mod tests {
                     ),
                     success: None,
                 },
-                test: Box::new(move |persister| {
-                    MaybeSuccessTransitionWithNoResults::fatal(
-                        error_event.clone(),
-                        InMemoryTestError {},
-                    )
-                    .save(persister)
-                }),
             },
         ];
 
-        for test in test_cases {
-            let persister = InMemoryTestPersister::default();
-            do_test(&persister, &test);
-        }
+        run_test_cases!(test_cases);
     }
 
     #[test]
@@ -1213,40 +1184,51 @@ mod tests {
         let error_event = InMemoryTestEvent("error event".to_string());
         let current_state = "Current state".to_string();
         let next_state = "Next state".to_string();
-        let test_cases: Vec<
-            TestCase<
-                OptionalTransitionOutcome<InMemoryTestState, InMemoryTestState>,
-                PersistedError<InMemoryTestError, std::convert::Infallible>,
-            >,
-        > = vec![
-            // Success
+
+        let test_cases = vec![
             TestCase {
+                make_transition: Box::new({
+                    let event = event.clone();
+                    let next_state = next_state.clone();
+                    move || {
+                        MaybeFatalTransitionWithNoResults::success(
+                            event.clone(),
+                            next_state.clone(),
+                        )
+                    }
+                }),
                 expected_result: ExpectedResult {
                     events: vec![event.clone()],
                     is_closed: false,
                     error: None,
                     success: Some(OptionalTransitionOutcome::Progress(next_state.clone())),
                 },
-                test: Box::new(move |persister| {
-                    MaybeFatalTransitionWithNoResults::success(event.clone(), next_state.clone())
-                        .save(persister)
-                }),
             },
-            // No results
             TestCase {
-                expected_result: ExpectedResult {
+                make_transition: Box::new({
+                    let current_state = current_state.clone();
+                    move || MaybeFatalTransitionWithNoResults::no_results(current_state.clone())
+                }),
+                expected_result: ExpectedResult::<
+                    OptionalTransitionOutcome<InMemoryTestState, InMemoryTestState>,
+                    PersistedError<InMemoryTestError, std::convert::Infallible>,
+                > {
                     events: vec![],
                     is_closed: false,
                     error: None,
                     success: Some(OptionalTransitionOutcome::Stasis(current_state.clone())),
                 },
-                test: Box::new(move |persister| {
-                    MaybeFatalTransitionWithNoResults::no_results(current_state.clone())
-                        .save(persister)
-                }),
             },
-            // Fatal error
             TestCase {
+                make_transition: Box::new({
+                    let error_event = error_event.clone();
+                    move || {
+                        MaybeFatalTransitionWithNoResults::fatal(
+                            error_event.clone(),
+                            InMemoryTestError {},
+                        )
+                    }
+                }),
                 expected_result: ExpectedResult {
                     events: vec![error_event.clone()],
                     is_closed: true,
@@ -1255,20 +1237,10 @@ mod tests {
                     ),
                     success: None,
                 },
-                test: Box::new(move |persister| {
-                    MaybeFatalTransitionWithNoResults::fatal(
-                        error_event.clone(),
-                        InMemoryTestError {},
-                    )
-                    .save(persister)
-                }),
             },
         ];
 
-        for test in test_cases {
-            let persister = InMemoryTestPersister::default();
-            do_test(&persister, &test);
-        }
+        run_test_cases!(test_cases);
     }
 
     #[test]
@@ -1276,38 +1248,45 @@ mod tests {
         let event = InMemoryTestEvent("foo".to_string());
         let error_event = InMemoryTestEvent("error event".to_string());
         let current_state = "Current state".to_string();
-        let test_cases: Vec<
-            TestCase<
-                OptionalTransitionOutcome<(), InMemoryTestState>,
-                PersistedError<InMemoryTestError, std::convert::Infallible>,
-            >,
-        > = vec![
-            // Success
+
+        let test_cases = vec![
             TestCase {
+                make_transition: Box::new({
+                    let event = event.clone();
+                    move || MaybeFatalOrSuccessTransition::Success(event.clone())
+                }),
                 expected_result: ExpectedResult {
                     events: vec![event.clone()],
                     is_closed: true,
                     error: None,
                     success: Some(OptionalTransitionOutcome::Progress(())),
                 },
-                test: Box::new(move |persister| {
-                    MaybeFatalOrSuccessTransition::Success(event.clone()).save(persister)
-                }),
             },
-            // No results
             TestCase {
-                expected_result: ExpectedResult {
+                make_transition: Box::new({
+                    let current_state = current_state.clone();
+                    move || MaybeFatalOrSuccessTransition::NoResults(current_state.clone())
+                }),
+                expected_result: ExpectedResult::<
+                    OptionalTransitionOutcome<(), InMemoryTestState>,
+                    PersistedError<InMemoryTestError, std::convert::Infallible>,
+                > {
                     events: vec![],
                     is_closed: false,
                     error: None,
                     success: Some(OptionalTransitionOutcome::Stasis(current_state.clone())),
                 },
-                test: Box::new(move |persister| {
-                    MaybeFatalOrSuccessTransition::NoResults(current_state.clone()).save(persister)
-                }),
             },
-            // Fatal error
             TestCase {
+                make_transition: Box::new({
+                    let error_event = error_event.clone();
+                    move || {
+                        MaybeFatalOrSuccessTransition::fatal(
+                            error_event.clone(),
+                            InMemoryTestError {},
+                        )
+                    }
+                }),
                 expected_result: ExpectedResult {
                     events: vec![error_event.clone()],
                     is_closed: true,
@@ -1316,13 +1295,11 @@ mod tests {
                     ),
                     success: None,
                 },
-                test: Box::new(move |persister| {
-                    MaybeFatalOrSuccessTransition::fatal(error_event.clone(), InMemoryTestError {})
-                        .save(persister)
-                }),
             },
-            // Transient error
             TestCase {
+                make_transition: Box::new(|| {
+                    MaybeFatalOrSuccessTransition::transient(InMemoryTestError {})
+                }),
                 expected_result: ExpectedResult {
                     events: vec![],
                     is_closed: false,
@@ -1332,16 +1309,10 @@ mod tests {
                     ),
                     success: None,
                 },
-                test: Box::new(move |persister| {
-                    MaybeFatalOrSuccessTransition::transient(InMemoryTestError {}).save(persister)
-                }),
             },
         ];
 
-        for test in test_cases {
-            let persister = InMemoryTestPersister::default();
-            do_test(&persister, &test);
-        }
+        run_test_cases!(test_cases);
     }
 
     #[test]

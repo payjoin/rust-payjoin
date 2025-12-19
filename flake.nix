@@ -167,7 +167,6 @@
                 cargo-watch
                 rust-analyzer
                 dart
-                nginxWithStream
               ]
               ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [
                 cargo-llvm-cov
@@ -218,6 +217,7 @@
                   partitionType = "count";
                   cargoExtraArgs = "--locked --all-features";
                   BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
+                  NGINX_EXE = nixpkgs.lib.getExe' nginxWithStream "nginx";
                   nativeBuildInputs = [ nginxWithStream ];
                 }
 

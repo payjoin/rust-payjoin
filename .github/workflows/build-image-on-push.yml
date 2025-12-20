@@ -3,12 +3,12 @@ name: "Test build of image when Dockerfile is changed"
 on:
   push:
     paths:
-    - 'Dockerfile'
+      - "Dockerfile"
     branches-ignore:
-    - main
+      - main
   pull_request:
     paths:
-    - 'Dockerfile'
+      - "Dockerfile"
   workflow_dispatch:
 
 env:
@@ -35,14 +35,11 @@ jobs:
         run: |
           echo "PLATFORM=linux/amd64" >> $GITHUB_ENV
           echo "DIGEST_NAME=amd64" >> $GITHUB_ENV
-      -
-        name: Set up Docker Buildx
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3.9.0
-      -
-        name: Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
-      -
-        name: Test build of image
+      - name: Test build of image
         id: build
         uses: docker/build-push-action@v6.13.0
         with:
@@ -51,8 +48,7 @@ jobs:
           platforms: ${{ env.PLATFORM }}
           tags: ohttp-relay:testing
           cache-from: type=registry,ref=${{ env.GHCR_REPO }}:latest
-      - 
-        name: Test-run image
+      - name: Test-run image
         run: |
           docker run --rm -e GATEWAY_ORIGIN=https://payjo.in ohttp-relay:testing &
           PID=$!

@@ -43,7 +43,7 @@ macro_rules! impl_save_for_transition {
     };
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Object)]
+#[derive(Debug, Clone, uniffi::Object)]
 pub struct ReceiverSessionEvent(payjoin::receive::v2::SessionEvent);
 
 impl From<payjoin::receive::v2::SessionEvent> for ReceiverSessionEvent {
@@ -385,7 +385,7 @@ impl From<ReceiverBuilder> for payjoin::receive::v2::ReceiverBuilder {
     fn from(value: ReceiverBuilder) -> Self { value.0 }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Object)]
+#[derive(Clone, Debug, uniffi::Object)]
 pub struct Initialized(payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized>);
 
 impl From<Initialized> for payjoin::receive::v2::Receiver<payjoin::receive::v2::Initialized> {

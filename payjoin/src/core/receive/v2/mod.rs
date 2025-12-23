@@ -346,7 +346,15 @@ impl ReceiverBuilder {
 pub struct Initialized {}
 
 impl Receiver<Initialized> {
-    /// construct an OHTTP Encapsulated HTTP GET request for the Original PSBT
+    /// Create an OHTTP encapsulated HTTP GET request to poll for the original proposal
+    /// from the Payjoin directory.
+    ///
+    /// After the receiver extracts the PJ URI with [`Receiver<Initialized>::pj_uri`] and sends it
+    /// to the sender, they should poll the Payjoin directory in the PJ URI for the sender's
+    /// original proposal.
+    ///
+    /// Requests created with this function are OHTTP encapsulated for the relay passed in the
+    /// `ohttp_relay` parameter.
     pub fn create_poll_request(
         &self,
         ohttp_relay: impl IntoUrl,
@@ -360,8 +368,14 @@ impl Receiver<Initialized> {
         Ok((req, ohttp_ctx))
     }
 
+    /// Processes the response to the original proposal poll from the Payjoin directory.
+    ///
     /// The response can either be an UncheckedOriginalPayload or an ACCEPTED message
     /// indicating no UncheckedOriginalPayload is available yet.
+    ///
+    /// If the response contains the original proposal from the sender, transitions to the next
+    /// typestate. If the response is an ACCEPTED message from the directory which indicates that
+    /// no payload is available yet,
     pub fn process_response(
         self,
         body: &[u8],

@@ -1,29 +1,35 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
-
-//! # Payjoin implementation in Rust
+#![cfg_attr(
+    docsrs,
+    doc(
+        html_logo_url = "https://raw.githubusercontent.com/payjoin/rust-payjoin/master/static/monad.svg"
+    )
+)]
+//! # Rust Payjoin Library
 //!
-//! Supercharge payment batching to save you fees and preserve your privacy.
+//! The main Payjoin Dev Kit (PDK) library which implements Async Payjoin. The library implements
+//! Payjoin session persistence support and IO utilities for interacting with OHTTP relays to make
+//! integration plug-and-play.
 //!
-//! This library implements both [BIP 78 Payjoin V1](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) and [BIP 77 Payjoin V2](https://github.com/bitcoin/bips/blob/master/bip-0077.md).
+//! Both sender and receiver construct design follow [The Typestate Pattern in Rust](https://cliffle.com/blog/rust-typestate/),
+//! where higher-level [`Sender`] and [`Receiver`] structs are transitioned through
+//! consecutive states which represent a specific step they can be on over the course of a Payjoin
+//! session. See the documentation of state implementations for more information.
 //!
-//! Only the latest BIP 77 Payjoin V2 is enabled by default. To use BIP 78 Payjoin V1, enable the `v1` feature.
+//! ## Cargo Features
+//! - `v2`: all constructs for [BIP 77: Async Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md)
+//!   send and receive operations. Note that IO for fetching OHTTP keys from the Payjoin directory is not enabled here,
+//!   and requires you to bring your own implementation and HTTP client unless you choose to use ours
+//!   with the `io` feature.
+//! - `v1`: all constructs for [BIP 78: Simple Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki)
+//!   send and receive operations.
+//! - `io`: helper functions for fetching and parsing OHTTP keys.
+//! - `directory`: type for identifying Payjoin Directory entries as defined in BIP 77.
 //!
-//! The library API is organized by protocol version and operation type:
-//! - Sending Payjoins: [`send::v1`] and [`send::v2`] modules
-//! - Receiving Payjoins: [`receive::v1`] and [`receive::v2`] modules
+//! Only the `v2` feature is enabled by default.
 //!
-//! The library is perfectly IO-agnostic — in fact, it does no IO by default without the `io` feature.
-//!
-//! Types relevant to a Payjoin Directory as defined in BIP 77 are available in the [`directory`] module enabled by
-//!  the `directory` feature.
-//!
-//! ## Example Usage
-//!
-//! See [payjoin-cli](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli) for a complete example of sending and receiving payjoins using both protocol versions.
-//!
-//! ## Disclaimer ⚠️ WIP
-//!
-//! **Use at your own risk. This crate has not yet been reviewed by independent Rust and Bitcoin security professionals.**
+//! [`Sender`]: crate::send::v2::Sender
+//! [`Receiver`]: crate::receive::v2::Receiver
 
 #[cfg(not(any(feature = "directory", feature = "v1", feature = "v2")))]
 compile_error!("At least one of the features ['directory', 'v1', 'v2'] must be enabled");

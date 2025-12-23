@@ -22,90 +22,51 @@
 
 ## About
 
-### `payjoin`
+`payjoin/rust-payjoin` contains multiple crates implementing Payjoin as defined in [BIP 77: Async Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.mediawiki) and [BIP 78: Simple Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0078.md), and associated OHTTP Relay and Payjoin Directory infrastructure.
 
-The Payjoin Dev Kit `payjoin` library implements both [BIP 78 Payjoin V1](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) and [BIP 77 Payjoin V2](https://github.com/bitcoin/bips/blob/master/bip-0077.md).
+Find the description of each crate below.
 
-### `payjoin-cli`
+### [`payjoin`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin)
 
-The [`payjoin-cli`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli) crate performs no-frills Payjoin as a reference implementation using Bitcoin Core wallet.
+The main Payjoin Dev Kit library which provides tools for implementing both Async and Simple Payjoin. `payjoin` implements Payjoin session persistence support and IO utilities for interacting with OHTTP relays in Async Payjoin integrations.
 
-### `payjoin-directory`
+**Disclaimer: This crate has not been reviewed by independent Rust and Bitcoin security professionals (yet). Use at your own risk.**
 
-The [`payjoin-directory`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-directory) crate implements the Payjoin Directory store-and-forward server required for Payjoin V2's asynchronous operation.
+### [`payjoin-cli`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli)
 
-### `payjoin-test-utils`
+A CLI tool which performs no-frills Payjoin. It is a reference implementation of the Payjoin Dev Kit which uses a Bitcoin Core wallet.
 
-The [`payjoin-test-utils`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-test-utils) crate provides commonly used testing fixtures such as a local OHTTP relay and payjoin directory, bitcoind node and wallets, and official test vectors.
+### [`ohttp-relay`](https://github.com/payjoin/rust-payjoin/tree/master/ohttp-relay)
 
-### `payjoin-ffi`
+A Rust implementation of an Oblivious HTTP (OHTTP) relay resource.
 
-The [`payjoin-ffi`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-ffi) crate provides language bindings that expose the Rust-based Payjoin implementation to various programming languages.
+**Disclaimer: Both this crate and the [IETF paper](https://ietf-wg-ohai.github.io/oblivious-http/draft-ietf-ohai-ohttp.html) are undergoing active revision. Use at your own risk.**
 
-### Disclaimer ⚠️ WIP
+### [`payjoin-directory`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-directory)
 
-**Use at your own risk. This crate has not yet been reviewed by independent Rust and Bitcoin security professionals.**
+A reference implementation for a Payjoin Directory which stores and forwards HTTP client messages between the sender and the receiver to allow for Async Payjoin transactions. Async Payjoin clients make requests to the directory using [Oblivious HTTP (OHTTP)](https://www.ietf.org/rfc/rfc9458.html) which prevents the directory from being able to link payjoins to specific client IP addresses.
 
-While I don't think there is a _huge_ risk running it, be careful relying on its security for now!
+### [`payjoin-test-utils`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-test-utils)
 
-Seeking review of the code that verifies there is no overpayment. Contributions are welcome!
+The test utilities library which provides commonly used testing fixtures such as a local OHTTP relay and Payjoin directory, bitcoind node and wallets, and official test vectors.
 
-### Development status
+### [`payjoin-ffi`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-ffi)
 
-#### Sender (V1 beta, V2 alpha)
+The language bindings which expose the Rust-based Payjoin implementation to various programming languages.
 
-- [x] Basic logic
-- [x] Most checks implemented
-- [x] Documentation
-- [x] Unit test with official test vectors passes
-- [x] Many unit tests
-- [x] Fee contribution support
-- [x] Example client using bitcoind
-- [x] Tested and works with BTCPayServer
-- [x] Tested and works with JoinMarket
-- [x] Minimum fee rate enforcement
-- [ ] Independent review
-- [x] Independent testing
+Currently supported languages:
 
-#### Receiver (V1 beta, V2 alpha)
-
-- [x] Basic logic
-- [x] Most checks implemented
-- [x] Documentation
-- [x] Unit test with official test vectors passes
-- [x] Many unit tests
-- [x] Fee contribution support
-- [x] Example server using bitcoind
-- [x] Tested and works with BTCPayServer
-- [x] Tested and works with WasabiWallet
-- [x] Tested and works with Blue Wallet
-- [x] Tested and works with Sparrow
-- [x] Tested and works with JoinMarket
-- [x] Minimum fee rate enforcement
-- [ ] Discount support
-- [ ] Independent review
-- [ ] Independent testing
-
-#### Code quality
-
-- [x] Idiomatic Rust code
-- [x] Newtypes
-- [x] Panic-free error handling
-- [x] No `unsafe` code or well-tested/analyzed/proven/... `unsafe` code
-- [x] Warning-free
-- [x] CI
-- [x] Integration tests
-- [ ] Fuzzing
-- [x] Coverage measurement
-- [x] Mutation testing
+- Dart
+- Javascript
+- Python
 
 ## Minimum Supported Rust Version (MSRV)
 
-The `payjoin` library and `payjoin-cli` should always compile with any combination of features on Rust **1.85.0**.
+All crates in this repository should always compile with any combination of features on Rust **1.85.0**.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](.github/CONTRIBUTING.md)
+See [`CONTRIBUTING.md`](.github/CONTRIBUTING.md).
 
 ## License
 

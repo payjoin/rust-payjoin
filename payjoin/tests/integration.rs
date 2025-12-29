@@ -424,9 +424,10 @@ mod integration {
                 let proposal = proposal.assume_interactive_receiver().save(&persister)?;
 
                 // Generate replyable error
-                let check_inputs_not_owned =
-                    || proposal.clone().check_inputs_not_owned(&mut |_| Ok(true)).save(&persister);
-                let server_error = check_inputs_not_owned()
+                let server_error = proposal
+                    .clone()
+                    .check_inputs_not_owned(&mut |_| Ok(true))
+                    .save(&persister)
                     .expect_err("should fail")
                     .api_error()
                     .expect("expected api error");

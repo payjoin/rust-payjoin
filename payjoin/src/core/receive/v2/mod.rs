@@ -1400,14 +1400,11 @@ pub mod test {
             state: unchecked_proposal_v2_from_test_vector(),
             session_context: SHARED_CONTEXT.clone(),
         };
-        let server_error = || {
-            receiver
-                .clone()
-                .check_broadcast_suitability(None, |_| Err("mock error".into()))
-                .save(&noop_persister)
-        };
-
-        let error = server_error().expect_err("Server error should be populated with mock error");
+        let error = receiver
+            .clone()
+            .check_broadcast_suitability(None, |_| Err("mock error".into()))
+            .save(&noop_persister)
+            .expect_err("Server error should be populated with mock error");
         let res = error.api_error().expect("check_broadcast error should propagate to api error");
         JsonReply::from(&res)
     }

@@ -63,9 +63,21 @@ mod integration {
 
         let n_http_port = find_free_port();
         let n_https_port = find_free_port();
-        let _nginx =
-            start_nginx(n_http_port, n_https_port, format!("0.0.0.0:{}", relay_port), nginx_cert)
-                .await;
+        let _nginx = match start_nginx(
+            n_http_port,
+            n_https_port,
+            format!("0.0.0.0:{}", relay_port),
+            nginx_cert,
+        )
+        .await
+        {
+            Ok(nginx) => nginx,
+            Err(NginxInitError::NginxNotAvailable) => {
+                eprintln!("Skipping test: NGINX_EXE environment variable not set");
+                return;
+            }
+            Err(e) => panic!("Failed to start nginx: {}", e),
+        };
         tokio::select! {
             _ = example_gateway_http(gateway_port) => {
                 panic!("Gateway is long running");
@@ -102,9 +114,21 @@ mod integration {
         });
         let n_http_port = find_free_port();
         let n_https_port = find_free_port();
-        let _nginx =
-            start_nginx(n_http_port, n_https_port, format!("unix:{}", socket_path_str), nginx_cert)
-                .await?;
+        let _nginx = match start_nginx(
+            n_http_port,
+            n_https_port,
+            format!("unix:{}", socket_path_str),
+            nginx_cert,
+        )
+        .await
+        {
+            Ok(nginx) => nginx,
+            Err(NginxInitError::NginxNotAvailable) => {
+                eprintln!("Skipping test: NGINX_EXE environment variable not set");
+                return Ok(());
+            }
+            Err(e) => return Err(Box::new(e) as Box<dyn std::error::Error>),
+        };
         tokio::select! {
             _ = example_gateway_http(gateway_port) => {
                 panic!("Gateway is long running");
@@ -362,13 +386,21 @@ mod integration {
             });
             let n_http_port = find_free_port();
             let n_https_port = find_free_port();
-            let _nginx = start_nginx(
+            let _nginx = match start_nginx(
                 n_http_port,
                 n_https_port,
                 format!("0.0.0.0:{}", relay_port),
                 nginx_cert,
             )
-            .await;
+            .await
+            {
+                Ok(nginx) => nginx,
+                Err(NginxInitError::NginxNotAvailable) => {
+                    eprintln!("Skipping test: NGINX_EXE environment variable not set");
+                    return;
+                }
+                Err(e) => panic!("Failed to start nginx: {}", e),
+            };
             tokio::select! {
                 _ = example_gateway_https(gateway_port, gateway_cert) => {
                     panic!("Gateway is long running");
@@ -441,12 +473,13 @@ mod integration {
     struct NginxProcess {
         _child: tokio::process::Child,
         config_path: PathBuf,
+        nginx_exe: PathBuf,
     }
 
     impl Drop for NginxProcess {
         fn drop(&mut self) {
             // NGINX spawns child processes. Gracefully shut them all down.
-            let _ = std::process::Command::new("nginx")
+            let _ = std::process::Command::new(&self.nginx_exe)
                 .arg("-s")
                 .arg("stop")
                 .arg("-c")
@@ -455,13 +488,36 @@ mod integration {
         }
     }
 
+    #[derive(Debug)]
+    enum NginxInitError {
+        NginxNotAvailable,
+        UnknownError(Box<dyn std::error::Error>),
+    }
+
+    impl std::fmt::Display for NginxInitError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                NginxInitError::NginxNotAvailable =>
+                    write!(f, "NGINX_EXE environment variable not set - skipping nginx tests"),
+                NginxInitError::UnknownError(e) => write!(f, "Unknown error: {}", e),
+            }
+        }
+    }
+
+    impl std::error::Error for NginxInitError {}
+
     async fn start_nginx(
         n_http_port: u16,
         n_https_port: u16,
         proxy_pass: String,
         cert: Certificate,
-    ) -> Result<NginxProcess, Box<dyn std::error::Error>> {
+    ) -> Result<NginxProcess, NginxInitError> {
         use std::io::Write;
+
+        // Check for NGINX_EXE environment variable
+        let nginx_exe = std::env::var("NGINX_EXE")
+            .map(PathBuf::from)
+            .map_err(|_| NginxInitError::NginxNotAvailable)?;
 
         let temp_dir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into()); // Use Nix's TMPDIR
         let unique_suffix = uuid::Uuid::new_v4().to_string(); // Ensures uniqueness
@@ -498,7 +554,7 @@ mod integration {
             NamedTempFile::new().expect("Failed to create temp file for nginx config");
         writeln!(config_file, "{}", nginx_conf).expect("Failed to write nginx config");
         let config_path = config_file.path().to_path_buf();
-        let _child = Command::new("nginx")
+        let _child = Command::new(&nginx_exe)
             .arg("-c")
             .arg(config_path.as_os_str())
             .spawn()
@@ -512,14 +568,14 @@ mod integration {
                 Err(_) if start_time.elapsed() < timeout => {
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 }
-                Err(e) => return Err(Box::new(e)),
+                Err(e) => return Err(NginxInitError::UnknownError(Box::new(e))),
             }
         }
 
         // Keep the config file open as long as NGINX is using it
         std::mem::forget(config_file);
 
-        Ok(NginxProcess { _child, config_path })
+        Ok(NginxProcess { _child, config_path, nginx_exe })
     }
 
     fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {

@@ -68,13 +68,15 @@ fn http_agent(config: &Config) -> Result<reqwest::Client> {
 }
 
 #[cfg(not(feature = "_manual-tls"))]
-fn http_agent(_config: &Config) -> Result<reqwest::Client> { Ok(reqwest::Client::new()) }
+fn http_agent(_config: &Config) -> Result<reqwest::Client> {
+    Ok(reqwest::Client::builder().http1_only().build()?)
+}
 
 #[cfg(feature = "_manual-tls")]
 fn http_agent_builder(
     root_cert_path: Option<&std::path::PathBuf>,
 ) -> Result<reqwest::ClientBuilder> {
-    let mut builder = reqwest::ClientBuilder::new().use_rustls_tls();
+    let mut builder = reqwest::ClientBuilder::new().use_rustls_tls().http1_only();
 
     if let Some(root_cert_path) = root_cert_path {
         let cert_der = std::fs::read(root_cert_path)?;

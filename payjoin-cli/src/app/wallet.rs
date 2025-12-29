@@ -2,14 +2,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
+use bitcoind_async_client::corepc_types::model::ListUnspentItem;
 use bitcoind_async_client::traits::{Broadcaster, Reader, Signer, Wallet};
-use bitcoind_async_client::types::{
-    CreateRawTransactionOutput, ListUnspent, WalletCreateFundedPsbtOptions,
-};
+use bitcoind_async_client::types::{CreateRawTransactionOutput, WalletCreateFundedPsbtOptions};
 use bitcoind_async_client::{Auth, Client as AsyncBitcoinRpc};
 use payjoin::bitcoin::psbt::{Input, Psbt};
 use payjoin::bitcoin::{
-    Address, Amount, FeeRate, Network, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut, Txid,
+    Address, Amount, FeeRate, Network, OutPoint, Script, Transaction, TxIn, TxOut, Txid,
 };
 use payjoin::receive::InputPair;
 
@@ -30,7 +29,7 @@ impl BitcoindWallet {
             None => Auth::UserPass(config.rpcuser.clone(), config.rpcpassword.clone()),
         };
 
-        let rpc = AsyncBitcoinRpc::new(config.rpchost.to_string(), auth, None, None)?;
+        let rpc = AsyncBitcoinRpc::new(config.rpchost.to_string(), auth, None, None, None)?;
 
         Ok(Self { rpc: Arc::new(rpc) })
     }
@@ -80,8 +79,7 @@ impl BitcoindWallet {
                 self.rpc.wallet_process_psbt(&result.psbt.to_string(), None, None, None).await
             })
         })?
-        .psbt
-        .expect("should have processed valid PSBT");
+        .psbt;
 
         Ok(processed)
     }
@@ -96,7 +94,7 @@ impl BitcoindWallet {
                 self.rpc.wallet_process_psbt(&psbt_str, Some(true), None, None).await
             })
         })?;
-        processed.psbt.ok_or_else(|| anyhow!("Insane PSBT"))
+        Ok(processed.psbt)
     }
 
     pub fn can_broadcast(&self, tx: &Transaction) -> Result<bool> {
@@ -106,6 +104,7 @@ impl BitcoindWallet {
         })?;
 
         mempool_results
+            .results
             .first()
             .map(|result| result.reject_reason.is_none())
             .ok_or_else(|| anyhow!("No mempool results returned on broadcast check"))
@@ -128,7 +127,7 @@ impl BitcoindWallet {
                     .block_on(async { self.rpc.get_address_info(&address).await })
             })
             .context("Failed to get address info")?;
-            Ok(info.is_mine.unwrap_or(false))
+            Ok(info.is_mine)
         } else {
             Ok(false)
         }
@@ -142,7 +141,7 @@ impl BitcoindWallet {
         let raw_tx = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 match self.rpc.get_transaction(txid).await {
-                    Ok(tx) => Ok(Some(tx.hex)),
+                    Ok(rpc_res) => Ok(Some(rpc_res.tx)),
                     Err(e) =>
                         if e.is_tx_not_found() {
                             Ok(None)
@@ -171,7 +170,7 @@ impl BitcoindWallet {
                 .block_on(async { self.rpc.list_unspent(None, None, None, None, None).await })
         })
         .context("Failed to list unspent")?;
-        Ok(unspent.into_iter().map(input_pair_from_corepc).collect())
+        Ok(unspent.0.into_iter().map(input_pair_from_corepc).collect())
     }
 
     /// Check if wallet has any spendable UTXOs
@@ -189,13 +188,13 @@ impl BitcoindWallet {
     }
 }
 
-pub fn input_pair_from_corepc(utxo: ListUnspent) -> InputPair {
+pub fn input_pair_from_corepc(utxo: ListUnspentItem) -> InputPair {
     let psbtin = Input {
         // NOTE: non_witness_utxo is not necessary because bitcoin-cli always supplies
         // witness_utxo, even for non-witness inputs
         witness_utxo: Some(TxOut {
-            value: utxo.amount,
-            script_pubkey: ScriptBuf::from_hex(&utxo.script_pubkey).expect("Valid script"),
+            value: Amount::from_btc(utxo.amount.to_btc()).expect("Valid amount"),
+            script_pubkey: utxo.script_pubkey,
         }),
         redeem_script: None,
         witness_script: None, // Not available in this version

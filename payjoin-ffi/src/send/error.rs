@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use payjoin::bitcoin::psbt::PsbtParseError;
+use payjoin::bitcoin::psbt::PsbtParseError as CorePsbtParseError;
 use payjoin::send;
 
 use crate::error::ImplementationError;
@@ -20,6 +20,27 @@ impl From<PsbtParseError> for BuildSenderError {
 
 impl From<send::BuildSenderError> for BuildSenderError {
     fn from(value: send::BuildSenderError) -> Self { BuildSenderError { msg: value.to_string() } }
+}
+
+/// FFI-visible PSBT parsing error surfaced at the sender boundary.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum PsbtParseError {
+    /// The provided PSBT string could not be parsed.
+    #[error("Invalid PSBT: {0}")]
+    InvalidPsbt(String),
+}
+
+impl From<CorePsbtParseError> for PsbtParseError {
+    fn from(value: CorePsbtParseError) -> Self { PsbtParseError::InvalidPsbt(value.to_string()) }
+}
+
+/// Raised when inputs provided to the sender are malformed or sender build fails.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum SenderInputError {
+    #[error(transparent)]
+    Psbt(PsbtParseError),
+    #[error(transparent)]
+    Build(Arc<BuildSenderError>),
 }
 
 /// Error returned when request could not be created.

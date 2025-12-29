@@ -1,7 +1,10 @@
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
-pub use error::{BuildSenderError, CreateRequestError, EncapsulationError, ResponseError};
+pub use error::{
+    BuildSenderError, CreateRequestError, EncapsulationError, PsbtParseError, ResponseError,
+    SenderInputError,
+};
 
 use crate::error::ForeignError;
 pub use crate::error::{ImplementationError, SerdeJsonError};
@@ -229,9 +232,12 @@ impl SenderBuilder {
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
     /// to create a [`WithReplyKey`]
     #[uniffi::constructor]
-    pub fn new(psbt: String, uri: Arc<PjUri>) -> Result<Self, BuildSenderError> {
-        let psbt = payjoin::bitcoin::psbt::Psbt::from_str(psbt.as_str())?;
-        Ok(payjoin::send::v2::SenderBuilder::new(psbt, Arc::unwrap_or_clone(uri).into()).into())
+    pub fn new(psbt: String, uri: Arc<PjUri>) -> Result<Self, SenderInputError> {
+        let psbt = payjoin::bitcoin::psbt::Psbt::from_str(psbt.as_str())
+            .map_err(PsbtParseError::from)
+            .map_err(SenderInputError::Psbt)?;
+        let builder = payjoin::send::v2::SenderBuilder::new(psbt, Arc::unwrap_or_clone(uri).into());
+        Ok(builder.into())
     }
 
     /// Disable output substitution even if the receiver didn't.
@@ -252,12 +258,14 @@ impl SenderBuilder {
     pub fn build_recommended(
         &self,
         min_fee_rate: u64,
-    ) -> Result<InitialSendTransition, BuildSenderError> {
+    ) -> Result<InitialSendTransition, SenderInputError> {
         self.0
             .clone()
             .build_recommended(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate))
             .map(|transition| InitialSendTransition(Arc::new(RwLock::new(Some(transition)))))
-            .map_err(BuildSenderError::from)
+            .map_err(|e: payjoin::send::BuildSenderError| {
+                SenderInputError::Build(Arc::new(e.into()))
+            })
     }
     /// Offer the receiver contribution to pay for his input.
     ///
@@ -278,7 +286,7 @@ impl SenderBuilder {
         change_index: Option<u8>,
         min_fee_rate: u64,
         clamp_fee_contribution: bool,
-    ) -> Result<InitialSendTransition, BuildSenderError> {
+    ) -> Result<InitialSendTransition, SenderInputError> {
         self.0
             .clone()
             .build_with_additional_fee(
@@ -288,7 +296,9 @@ impl SenderBuilder {
                 clamp_fee_contribution,
             )
             .map(|transition| InitialSendTransition(Arc::new(RwLock::new(Some(transition)))))
-            .map_err(BuildSenderError::from)
+            .map_err(|e: payjoin::send::BuildSenderError| {
+                SenderInputError::Build(Arc::new(e.into()))
+            })
     }
     /// Perform Payjoin without incentivizing the payee to cooperate.
     ///
@@ -297,12 +307,14 @@ impl SenderBuilder {
     pub fn build_non_incentivizing(
         &self,
         min_fee_rate: u64,
-    ) -> Result<InitialSendTransition, BuildSenderError> {
+    ) -> Result<InitialSendTransition, SenderInputError> {
         self.0
             .clone()
             .build_non_incentivizing(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate))
             .map(|transition| InitialSendTransition(Arc::new(RwLock::new(Some(transition)))))
-            .map_err(BuildSenderError::from)
+            .map_err(|e: payjoin::send::BuildSenderError| {
+                SenderInputError::Build(Arc::new(e.into()))
+            })
     }
 }
 

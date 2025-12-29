@@ -213,6 +213,9 @@ pub enum InputPairError {
     /// Provided outpoint could not be parsed.
     #[error("Invalid outpoint (txid={txid}, vout={vout})")]
     InvalidOutPoint { txid: String, vout: u32 },
+    /// Amount exceeds allowed maximum.
+    #[error("Amount out of range: {amount_sat} sats (max {max_sat})")]
+    AmountOutOfRange { amount_sat: u64, max_sat: u64 },
     /// PSBT input failed validation in the core library.
     #[error("Invalid PSBT input: {0}")]
     InvalidPsbtInput(Arc<PsbtInputError>),
@@ -228,7 +231,13 @@ impl InputPairError {
 }
 
 impl From<PrimitiveError> for InputPairError {
-    fn from(value: PrimitiveError) -> Self { InputPairError::InvalidPrimitive(value) }
+    fn from(value: PrimitiveError) -> Self {
+        match value {
+            PrimitiveError::AmountOutOfRange { amount_sat, max_sat } =>
+                InputPairError::AmountOutOfRange { amount_sat, max_sat },
+            other => InputPairError::InvalidPrimitive(other),
+        }
+    }
 }
 
 /// Error that may occur when a receiver event log is replayed

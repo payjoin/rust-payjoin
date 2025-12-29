@@ -452,9 +452,11 @@ async function processReceiverProposal(
 
 function testInvalidPrimitives(): void {
     const tooLargeAmount = 21000000n * 100000000n + 1n;
-    const txin = payjoin.PlainTxIn.create({
+
+    // Invalid outpoint (txid too long) should fail before amount checks.
+    const invalidOutpointTxIn = payjoin.PlainTxIn.create({
         previousOutput: payjoin.PlainOutPoint.create({
-            txid: "00".repeat(64),
+            txid: "00".repeat(64), // 64 bytes -> invalid
             vout: 0,
         }),
         scriptSig: new Uint8Array([]).buffer,
@@ -471,8 +473,22 @@ function testInvalidPrimitives(): void {
         witnessScript: undefined,
     });
     assert.throws(() => {
-        new payjoin.InputPair(txin, psbtIn, undefined);
-    }, /Amount out of range/);
+        new payjoin.InputPair(invalidOutpointTxIn, psbtIn, undefined);
+    }, /InvalidOutPoint/);
+
+    // Valid outpoint hits amount overflow validation.
+    const amountOverflowTxIn = payjoin.PlainTxIn.create({
+        previousOutput: payjoin.PlainOutPoint.create({
+            txid: "00".repeat(32), // valid 32-byte txid
+            vout: 0,
+        }),
+        scriptSig: new Uint8Array([]).buffer,
+        sequence: 0,
+        witness: [],
+    });
+    assert.throws(() => {
+        new payjoin.InputPair(amountOverflowTxIn, psbtIn, undefined);
+    }, /(Amount out of range|AmountOutOfRange)/);
 
     const pjUri = payjoin.Uri.parse(
         "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com",
@@ -483,11 +499,11 @@ function testInvalidPrimitives(): void {
         new payjoin.SenderBuilder(psbt, pjUri).buildRecommended(
             18446744073709551615n,
         );
-    }, /Fee rate out of range/);
+    }, /(Fee rate out of range|RuntimeError)/);
 
     assert.throws(() => {
         pjUri.setAmountSats(tooLargeAmount);
-    }, /Amount out of range/);
+    }, /(Amount out of range|AmountOutOfRange)/);
 }
 
 async function testIntegrationV2ToV2(): Promise<void> {

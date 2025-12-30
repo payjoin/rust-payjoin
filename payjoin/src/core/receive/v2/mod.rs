@@ -24,6 +24,7 @@
 //! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
 //! but request reuse makes correlation trivial for the relay.
 
+use std::str::FromStr;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
@@ -32,6 +33,8 @@ use bitcoin::psbt::Psbt;
 use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut, Txid};
 pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
+use serde::de::Deserializer;
+use serde::{Deserialize, Serialize};
 pub use session::{replay_event_log, SessionEvent, SessionHistory, SessionOutcome, SessionStatus};
 use url::Url;
 #[cfg(target_arch = "wasm32")]
@@ -63,10 +66,9 @@ const SUPPORTED_VERSIONS: &[Version] = &[Version::One, Version::Two];
 
 static TWENTY_FOUR_HOURS_DEFAULT_EXPIRATION: Duration = Duration::from_secs(60 * 60 * 24);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionContext {
-    #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_address_assume_checked"))]
+    #[serde(deserialize_with = "deserialize_address_assume_checked")]
     address: Address,
     directory: url::Url,
     ohttp_keys: OhttpKeys,
@@ -108,14 +110,10 @@ impl SessionContext {
     }
 }
 
-#[cfg(feature = "serde")]
 fn deserialize_address_assume_checked<'de, D>(deserializer: D) -> Result<Address, D::Error>
 where
-    D: serde::de::Deserializer<'de>,
+    D: Deserializer<'de>,
 {
-    use std::str::FromStr;
-
-    use serde::Deserialize;
     let s = String::deserialize(deserializer)?;
     let address = Address::from_str(&s).map_err(serde::de::Error::custom)?;
     Ok(address.assume_checked())
@@ -267,7 +265,7 @@ pub trait State: sealed::State {}
 /// various functions to accomplish the goals of the typestate, and one or more functions which
 /// will commit the changes/checks in the current typestate and move to the next one. For more
 /// information on the typestate pattern, see [The Typestate Pattern in Rust](https://cliffle.com/blog/rust-typestate/).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receiver<State> {
     /// Data associated with the current state of the receiver.
     pub(crate) state: State,
@@ -344,7 +342,7 @@ impl ReceiverBuilder {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Initialized {}
 
 impl Receiver<Initialized> {
@@ -1216,7 +1214,7 @@ impl Receiver<HasReplyableError> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Monitor {
     psbt_context: PsbtContext,
 }

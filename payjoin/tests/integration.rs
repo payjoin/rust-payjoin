@@ -1273,11 +1273,11 @@ mod integration {
             let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
             // Generate more UTXOs for the receiver
             let receiver_address = receiver.new_address_with_type(AddressType::Bech32)?;
-            bitcoind.client.generate_to_address(199, &receiver_address)?;
+            bitcoind.client.generate_to_address(102, &receiver_address)?;
             let receiver_utxos = receiver.list_unspent()?.0;
-            assert_eq!(100, receiver_utxos.len(), "receiver doesn't have enough UTXOs");
+            assert_eq!(3, receiver_utxos.len(), "receiver doesn't have enough UTXOs");
             assert_eq!(
-                Amount::from_btc(3650.0)?, // 50 (starting receiver balance) + 46*50.0 + 52*25.0 (halving occurs every 150 blocks)
+                Amount::from_btc(150.0)?, // 50 (starting receiver balance) + 2*50.0
                 receiver.get_balances()?.into_model()?.mine.trusted,
                 "receiver doesn't have enough bitcoin"
             );
@@ -1298,7 +1298,7 @@ mod integration {
                 .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &uri)?;
             tracing::debug!("Original psbt: {psbt:#?}");
-            let max_additional_fee = Amount::from_sat(1000);
+            let max_additional_fee = Amount::from_sat(100);
             let (req, ctx) = SenderBuilder::new(psbt.clone(), uri)
                 .build_with_additional_fee(max_additional_fee, None, FeeRate::ZERO, false)?
                 .create_v1_post_request();
@@ -1308,7 +1308,7 @@ mod integration {
             // Inside the Receiver:
             // this data would transit from one party to another over the network in production
             let outputs = vec![TxOut {
-                value: Amount::from_btc(3650.0)?,
+                value: Amount::from_btc(150.0)?,
                 script_pubkey: receiver.new_address()?.script_pubkey(),
             }];
             let drain_script = outputs[0].script_pubkey.clone();
@@ -1329,7 +1329,7 @@ mod integration {
             let checked_payjoin_proposal_psbt = ctx.process_response(response.as_bytes())?;
             let network_fees = checked_payjoin_proposal_psbt.fee()?;
             let expected_weight = Weight::from_wu(
-                TX_HEADER_WEIGHT + (P2WPKH_INPUT_WEIGHT * 101) + (P2WPKH_OUTPUT_WEIGHT * 2),
+                TX_HEADER_WEIGHT + (P2WPKH_INPUT_WEIGHT * 4) + (P2WPKH_OUTPUT_WEIGHT * 2),
             );
             let expected_fee = expected_weight * FeeRate::BROADCAST_MIN;
             assert_eq!(network_fees, expected_fee);
@@ -1342,11 +1342,11 @@ mod integration {
             let sender_fee = original_tx_fee + max_additional_fee;
             // The receiver pays the difference
             let receiver_fee = network_fees - sender_fee;
-            assert_eq!(payjoin_tx.input.len(), 101);
+            assert_eq!(payjoin_tx.input.len(), 4);
             assert_eq!(payjoin_tx.output.len(), 2);
             assert_eq!(
                 receiver.get_balances()?.into_model()?.mine.untrusted_pending,
-                Amount::from_btc(3651.0)? - receiver_fee
+                Amount::from_btc(151.0)? - receiver_fee
             );
             assert_eq!(
                 sender.get_balances()?.into_model()?.mine.untrusted_pending,

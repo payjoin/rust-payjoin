@@ -28,7 +28,7 @@ v2 = ["payjoin/v2", "payjoin/io"]
 [dependencies]
 anyhow = "1.0.99"
 async-trait = "0.1.89"
-bitcoind-async-client = { git = "https://github.com/arminsabouri/bitcoind-async-client", rev = "956ca693e4263c003eaa4fa938d909d24acac5fa" }
+bitcoind-async-client = "0.8.1"
 clap = { version = "4.5.45", features = ["derive"] }
 config = "0.15.14"
 dirs = "6.0.0"

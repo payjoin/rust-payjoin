@@ -221,7 +221,7 @@ pub fn init_bitcoind_multi_sender_single_reciever(
 }
 
 fn http_agent_builder(cert_der: Vec<u8>) -> ClientBuilder {
-    ClientBuilder::new().use_rustls_tls().add_root_certificate(
+    ClientBuilder::new().http1_only().use_rustls_tls().add_root_certificate(
         reqwest::tls::Certificate::from_der(cert_der.as_slice())
             .expect("cert_der should be a valid DER-encoded certificate"),
     )

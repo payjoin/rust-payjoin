@@ -21,7 +21,7 @@ pub async fn fetch_ohttp_keys(
 ) -> Result<OhttpKeys, Error> {
     let ohttp_keys_url = payjoin_directory.into_url()?.join("/.well-known/ohttp-gateway")?;
     let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
-    let client = Client::builder().proxy(proxy).build()?;
+    let client = Client::builder().proxy(proxy).http1_only().build()?;
     let res = client
         .get(ohttp_keys_url)
         .timeout(Duration::from_secs(10))
@@ -53,6 +53,7 @@ pub async fn fetch_ohttp_keys_with_cert(
         .use_rustls_tls()
         .add_root_certificate(reqwest::tls::Certificate::from_der(&cert_der)?)
         .proxy(proxy)
+        .http1_only()
         .build()?;
     let res = client
         .get(ohttp_keys_url)

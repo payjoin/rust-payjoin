@@ -20,6 +20,8 @@ exclude = ["tests"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
+# The crate will build with no features enabled, but will provide no functionality.
+# Enable at least one of: 'v1', 'v2', or 'directory' to use the library.
 default = ["v2"]
 #[doc = "Core features for payjoin state machines"]
 _core = [

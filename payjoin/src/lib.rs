@@ -26,7 +26,11 @@
 //! **Use at your own risk. This crate has not yet been reviewed by independent Rust and Bitcoin security professionals.**
 
 #[cfg(not(any(feature = "directory", feature = "v1", feature = "v2")))]
-compile_error!("At least one of the features ['directory', 'v1', 'v2'] must be enabled");
+#[doc(hidden)]
+pub mod no_features_enabled {
+    //! This crate was built with no features enabled. No functionality is available.
+    //! Enable at least one of the features: `directory`, `v1`, or `v2`.
+}
 
 #[cfg(any(feature = "v2", feature = "directory"))]
 pub(crate) mod bech32;

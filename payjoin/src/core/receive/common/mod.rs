@@ -3,6 +3,7 @@
 //! APIs to expose as relevant typestates.
 
 use std::cmp::{max, min};
+use std::collections::HashSet;
 
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::rand::seq::SliceRandom;
@@ -290,7 +291,13 @@ impl WantsInputs {
             .map(|input| input.sequence)
             .unwrap_or_default();
 
-        let inputs = inputs.into_iter().collect::<Vec<_>>();
+        // Collect existing PSBT outpoints so duplicate inputs are filtered out.
+        let mut seen_outpoints: HashSet<_> =
+            self.payjoin_psbt.unsigned_tx.input.iter().map(|txin| txin.previous_output).collect();
+        let inputs: Vec<_> = inputs
+            .into_iter()
+            .filter(|input| seen_outpoints.insert(input.txin.previous_output))
+            .collect();
 
         // Insert contributions at random indices for privacy
         let mut rng = rand::thread_rng();
@@ -652,15 +659,14 @@ mod tests {
         let wants_inputs = wants_inputs.contribute_inputs(vec![input_pair_1.clone()]).unwrap();
         assert_eq!(wants_inputs.receiver_inputs.len(), 1);
         assert_eq!(wants_inputs.receiver_inputs[0], input_pair_1);
-        // Contribute the same input again, and a new input.
-        // TODO: if we ever decide to fix contribute duplicate inputs, we need to update this test.
+        // Contribute the same input again (should be filtered out) and a new input.
         let wants_inputs = wants_inputs
             .contribute_inputs(vec![input_pair_2.clone(), input_pair_1.clone()])
             .unwrap();
-        assert_eq!(wants_inputs.receiver_inputs.len(), 3);
+        // Only input_pair_2 should be added input_pair_1 is a duplicate and should be filtered out hence the length is 2.
+        assert_eq!(wants_inputs.receiver_inputs.len(), 2);
         assert_eq!(wants_inputs.receiver_inputs[0], input_pair_1);
         assert_eq!(wants_inputs.receiver_inputs[1], input_pair_2);
-        assert_eq!(wants_inputs.receiver_inputs[2], input_pair_1);
     }
 
     #[test]

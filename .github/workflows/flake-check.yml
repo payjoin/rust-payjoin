@@ -1,0 +1,31 @@
+name: Flake Check
+
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - "flake.lock"
+
+jobs:
+  flake-check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        checks:
+          - msrv
+          - stable
+          - nightly
+          - maintenance
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Enable magic Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Run full flake check
+        run: nix build .#checks.x86_64-linux.${{ matrix.checks }}

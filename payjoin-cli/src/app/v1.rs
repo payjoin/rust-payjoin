@@ -152,6 +152,10 @@ impl App {
             "Listening at {}. Configured to accept payjoin at BIP 21 Payjoin Uri:",
             listener.local_addr()?
         );
+
+        #[cfg(not(feature = "_manual-tls"))]
+        println!("You should run a reverse proxy for the listener to terminate TLS!");
+
         println!("{pj_uri_string}");
 
         let app = self.clone();

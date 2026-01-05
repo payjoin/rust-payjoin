@@ -24,7 +24,12 @@
       crane,
       treefmt-nix,
     }:
-    flake-utils.lib.eachDefaultSystem (
+    {
+      nixosModules = {
+        ohttp-relay = import ./nix/modules/ohttp-relay.nix;
+      };
+    }
+    // flake-utils.lib.eachDefaultSystem (
       system:
       let
         pkgs = import nixpkgs {

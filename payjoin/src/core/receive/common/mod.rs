@@ -291,13 +291,18 @@ impl WantsInputs {
             .map(|input| input.sequence)
             .unwrap_or_default();
 
-        // Collect existing PSBT outpoints so duplicate inputs are filtered out.
+        // Collect existing PSBT outpoints to detect duplicate inputs.
         let mut seen_outpoints: HashSet<_> =
             self.payjoin_psbt.unsigned_tx.input.iter().map(|txin| txin.previous_output).collect();
-        let inputs: Vec<_> = inputs
-            .into_iter()
-            .filter(|input| seen_outpoints.insert(input.txin.previous_output))
-            .collect();
+        let inputs: Vec<_> = inputs.into_iter().collect();
+        for input in &inputs {
+            if !seen_outpoints.insert(input.txin.previous_output) {
+                return Err(InternalInputContributionError::DuplicateInput(
+                    input.txin.previous_output,
+                )
+                .into());
+            }
+        }
 
         // Insert contributions at random indices for privacy
         let mut rng = rand::thread_rng();
@@ -659,11 +664,17 @@ mod tests {
         let wants_inputs = wants_inputs.contribute_inputs(vec![input_pair_1.clone()]).unwrap();
         assert_eq!(wants_inputs.receiver_inputs.len(), 1);
         assert_eq!(wants_inputs.receiver_inputs[0], input_pair_1);
-        // Contribute the same input again (should be filtered out) and a new input.
-        let wants_inputs = wants_inputs
+        // Contribute the same input again (should error) and a new input.
+        let duplicate_input = wants_inputs
+            .clone()
             .contribute_inputs(vec![input_pair_2.clone(), input_pair_1.clone()])
-            .unwrap();
-        // Only input_pair_2 should be added input_pair_1 is a duplicate and should be filtered out hence the length is 2.
+            .unwrap_err();
+        assert_eq!(
+            duplicate_input,
+            InputContributionError::from(InternalInputContributionError::DuplicateInput(ot1))
+        );
+        // Contribute only the new input
+        let wants_inputs = wants_inputs.contribute_inputs(vec![input_pair_2.clone()]).unwrap();
         assert_eq!(wants_inputs.receiver_inputs.len(), 2);
         assert_eq!(wants_inputs.receiver_inputs[0], input_pair_1);
         assert_eq!(wants_inputs.receiver_inputs[1], input_pair_2);

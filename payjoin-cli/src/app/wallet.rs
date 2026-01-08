@@ -184,7 +184,7 @@ impl BitcoindWallet {
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async { self.rpc.network().await })
         })
-        .map_err(|_| anyhow!("Failed to get blockchain info"))
+        .map_err(|e| anyhow!("Bitcoin RPC error: {}", e))
     }
 }
 

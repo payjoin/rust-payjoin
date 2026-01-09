@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use payjoin::receive;
 
-use crate::error::ImplementationError;
+use crate::error::{ImplementationError, PrimitiveError};
 use crate::uri::error::IntoUrlError;
 
 /// The top-level error type for the payjoin receiver
@@ -169,9 +169,23 @@ impl From<ProtocolError> for JsonReply {
 pub struct SessionError(#[from] receive::v2::SessionError);
 
 /// Error that may occur when output substitution fails.
-#[derive(Debug, thiserror::Error, uniffi::Object)]
-#[error(transparent)]
-pub struct OutputSubstitutionError(#[from] receive::OutputSubstitutionError);
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum OutputSubstitutionError {
+    #[error(transparent)]
+    Protocol(Arc<receive::OutputSubstitutionError>),
+    #[error(transparent)]
+    Primitive(Arc<PrimitiveError>),
+}
+
+impl From<receive::OutputSubstitutionError> for OutputSubstitutionError {
+    fn from(value: receive::OutputSubstitutionError) -> Self {
+        OutputSubstitutionError::Protocol(Arc::new(value))
+    }
+}
+
+impl From<PrimitiveError> for OutputSubstitutionError {
+    fn from(value: PrimitiveError) -> Self { OutputSubstitutionError::Primitive(Arc::new(value)) }
+}
 
 /// Error that may occur when coin selection fails.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
@@ -197,11 +211,20 @@ pub enum InputPairError {
     /// PSBT input failed validation in the core library.
     #[error("Invalid PSBT input: {0}")]
     InvalidPsbtInput(Arc<PsbtInputError>),
+    /// Primitive input failed validation in the FFI layer.
+    #[error("Invalid primitive input: {0}")]
+    InvalidPrimitive(Arc<PrimitiveError>),
 }
 
 impl InputPairError {
     pub fn invalid_outpoint(txid: String, vout: u32) -> Self {
         InputPairError::InvalidOutPoint { txid, vout }
+    }
+}
+
+impl From<PrimitiveError> for InputPairError {
+    fn from(value: PrimitiveError) -> Self {
+        InputPairError::InvalidPrimitive(Arc::new(value))
     }
 }
 

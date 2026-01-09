@@ -28,13 +28,13 @@ pub enum PrimitiveError {
     #[error("{field} script is empty")]
     ScriptEmpty { field: String },
     #[error("{field} script too large: {len} bytes (max {max})")]
-    ScriptTooLarge { field: String, len: usize, max: usize },
+    ScriptTooLarge { field: String, len: u64, max: u64 },
     #[error("Witness stack has {count} items (max {max})")]
-    WitnessItemsTooMany { count: usize, max: usize },
+    WitnessItemsTooMany { count: u64, max: u64 },
     #[error("Witness item {index} too large: {len} bytes (max {max})")]
-    WitnessItemTooLarge { index: usize, len: usize, max: usize },
+    WitnessItemTooLarge { index: u64, len: u64, max: u64 },
     #[error("Witness stack too large: {len} bytes (max {max})")]
-    WitnessTooLarge { len: usize, max: usize },
+    WitnessTooLarge { len: u64, max: u64 },
     #[error("Weight out of range: {weight_units} wu (max {max_wu})")]
     WeightOutOfRange { weight_units: u64, max_wu: u64 },
     #[error("Fee rate out of range: {value} {unit}")]

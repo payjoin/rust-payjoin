@@ -168,23 +168,28 @@ impl From<ProtocolError> for JsonReply {
 #[error(transparent)]
 pub struct SessionError(#[from] receive::v2::SessionError);
 
+/// Protocol error raised during output substitution.
+#[derive(Debug, thiserror::Error, uniffi::Object)]
+#[error(transparent)]
+pub struct OutputSubstitutionProtocolError(#[from] receive::OutputSubstitutionError);
+
 /// Error that may occur when output substitution fails.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum OutputSubstitutionError {
     #[error(transparent)]
-    Protocol(Arc<receive::OutputSubstitutionError>),
+    Protocol(Arc<OutputSubstitutionProtocolError>),
     #[error(transparent)]
-    Primitive(Arc<PrimitiveError>),
+    Primitive(PrimitiveError),
 }
 
 impl From<receive::OutputSubstitutionError> for OutputSubstitutionError {
     fn from(value: receive::OutputSubstitutionError) -> Self {
-        OutputSubstitutionError::Protocol(Arc::new(value))
+        OutputSubstitutionError::Protocol(Arc::new(value.into()))
     }
 }
 
 impl From<PrimitiveError> for OutputSubstitutionError {
-    fn from(value: PrimitiveError) -> Self { OutputSubstitutionError::Primitive(Arc::new(value)) }
+    fn from(value: PrimitiveError) -> Self { OutputSubstitutionError::Primitive(value) }
 }
 
 /// Error that may occur when coin selection fails.
@@ -213,7 +218,7 @@ pub enum InputPairError {
     InvalidPsbtInput(Arc<PsbtInputError>),
     /// Primitive input failed validation in the FFI layer.
     #[error("Invalid primitive input: {0}")]
-    InvalidPrimitive(Arc<PrimitiveError>),
+    InvalidPrimitive(PrimitiveError),
 }
 
 impl InputPairError {
@@ -223,9 +228,7 @@ impl InputPairError {
 }
 
 impl From<PrimitiveError> for InputPairError {
-    fn from(value: PrimitiveError) -> Self {
-        InputPairError::InvalidPrimitive(Arc::new(value))
-    }
+    fn from(value: PrimitiveError) -> Self { InputPairError::InvalidPrimitive(value) }
 }
 
 /// Error that may occur when a receiver event log is replayed

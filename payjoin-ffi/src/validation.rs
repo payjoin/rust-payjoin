@@ -46,8 +46,8 @@ pub(crate) fn validate_script_bytes(
     if bytes.len() > MAX_SCRIPT_BYTES {
         return Err(PrimitiveError::ScriptTooLarge {
             field: field.to_string(),
-            len: bytes.len(),
-            max: MAX_SCRIPT_BYTES,
+            len: bytes.len() as u64,
+            max: MAX_SCRIPT_BYTES as u64,
         });
     }
     Ok(())
@@ -56,8 +56,8 @@ pub(crate) fn validate_script_bytes(
 pub(crate) fn validate_witness_stack(witness: &[Vec<u8>]) -> Result<(), PrimitiveError> {
     if witness.len() > MAX_WITNESS_ITEMS {
         return Err(PrimitiveError::WitnessItemsTooMany {
-            count: witness.len(),
-            max: MAX_WITNESS_ITEMS,
+            count: witness.len() as u64,
+            max: MAX_WITNESS_ITEMS as u64,
         });
     }
 
@@ -65,16 +65,19 @@ pub(crate) fn validate_witness_stack(witness: &[Vec<u8>]) -> Result<(), Primitiv
     for (index, item) in witness.iter().enumerate() {
         if item.len() > MAX_SCRIPT_BYTES {
             return Err(PrimitiveError::WitnessItemTooLarge {
-                index,
-                len: item.len(),
-                max: MAX_SCRIPT_BYTES,
+                index: index as u64,
+                len: item.len() as u64,
+                max: MAX_SCRIPT_BYTES as u64,
             });
         }
         total = total.saturating_add(item.len());
     }
 
     if total > MAX_WITNESS_BYTES {
-        return Err(PrimitiveError::WitnessTooLarge { len: total, max: MAX_WITNESS_BYTES });
+        return Err(PrimitiveError::WitnessTooLarge {
+            len: total as u64,
+            max: MAX_WITNESS_BYTES as u64,
+        });
     }
 
     Ok(())

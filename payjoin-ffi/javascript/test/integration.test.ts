@@ -450,6 +450,46 @@ async function processReceiverProposal(
     throw new Error(`Unknown receiver state`);
 }
 
+function testInvalidPrimitives(): void {
+    const tooLargeAmount = 21000000n * 100000000n + 1n;
+    const txin = payjoin.PlainTxIn.create({
+        previousOutput: payjoin.PlainOutPoint.create({
+            txid: "00".repeat(64),
+            vout: 0,
+        }),
+        scriptSig: new Uint8Array([]).buffer,
+        sequence: 0,
+        witness: [],
+    });
+    const txout = payjoin.PlainTxOut.create({
+        valueSat: tooLargeAmount,
+        scriptPubkey: new Uint8Array([0x6a]).buffer,
+    });
+    const psbtIn = payjoin.PlainPsbtInput.create({
+        witnessUtxo: txout,
+        redeemScript: undefined,
+        witnessScript: undefined,
+    });
+    assert.throws(() => {
+        new payjoin.InputPair(txin, psbtIn, undefined);
+    }, /Amount out of range/);
+
+    const pjUri = payjoin.Uri.parse(
+        "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com",
+    ).checkPjSupported();
+    const psbt =
+        "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+    assert.throws(() => {
+        new payjoin.SenderBuilder(psbt, pjUri).buildRecommended(
+            18446744073709551615n,
+        );
+    }, /Fee rate out of range/);
+
+    assert.throws(() => {
+        pjUri.setAmountSats(tooLargeAmount);
+    }, /Amount out of range/);
+}
+
 async function testIntegrationV2ToV2(): Promise<void> {
     const env = testUtils.initBitcoindSenderReceiver();
     const bitcoind = env.getBitcoind();
@@ -589,6 +629,7 @@ async function testIntegrationV2ToV2(): Promise<void> {
 
 async function runTests(): Promise<void> {
     await uniffiInitAsync();
+    testInvalidPrimitives();
     await testIntegrationV2ToV2();
 }
 

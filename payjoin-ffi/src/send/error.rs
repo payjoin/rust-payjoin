@@ -42,11 +42,11 @@ pub enum SenderInputError {
     #[error(transparent)]
     Build(Arc<BuildSenderError>),
     #[error(transparent)]
-    Primitive(Arc<PrimitiveError>),
+    Primitive(PrimitiveError),
 }
 
 impl From<PrimitiveError> for SenderInputError {
-    fn from(value: PrimitiveError) -> Self { SenderInputError::Primitive(Arc::new(value)) }
+    fn from(value: PrimitiveError) -> Self { SenderInputError::Primitive(value) }
 }
 
 /// Error returned when request could not be created.

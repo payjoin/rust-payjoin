@@ -12,6 +12,7 @@ use crate::ohttp::ClientResponse;
 use crate::request::Request;
 use crate::send::error::{SenderPersistedError, SenderReplayError};
 use crate::uri::PjUri;
+use crate::validation::{validate_amount_sat, validate_fee_rate_sat_per_kwu};
 
 pub mod error;
 
@@ -259,9 +260,10 @@ impl SenderBuilder {
         &self,
         min_fee_rate: u64,
     ) -> Result<InitialSendTransition, SenderInputError> {
+        let fee_rate = validate_fee_rate_sat_per_kwu(min_fee_rate)?;
         self.0
             .clone()
-            .build_recommended(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate))
+            .build_recommended(fee_rate)
             .map(|transition| InitialSendTransition(Arc::new(RwLock::new(Some(transition)))))
             .map_err(|e: payjoin::send::BuildSenderError| {
                 SenderInputError::Build(Arc::new(e.into()))
@@ -287,12 +289,14 @@ impl SenderBuilder {
         min_fee_rate: u64,
         clamp_fee_contribution: bool,
     ) -> Result<InitialSendTransition, SenderInputError> {
+        let max_fee_contribution = validate_amount_sat(max_fee_contribution)?;
+        let fee_rate = validate_fee_rate_sat_per_kwu(min_fee_rate)?;
         self.0
             .clone()
             .build_with_additional_fee(
-                payjoin::bitcoin::Amount::from_sat(max_fee_contribution),
+                max_fee_contribution,
                 change_index.map(|x| x as usize),
-                payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate),
+                fee_rate,
                 clamp_fee_contribution,
             )
             .map(|transition| InitialSendTransition(Arc::new(RwLock::new(Some(transition)))))
@@ -308,9 +312,10 @@ impl SenderBuilder {
         &self,
         min_fee_rate: u64,
     ) -> Result<InitialSendTransition, SenderInputError> {
+        let fee_rate = validate_fee_rate_sat_per_kwu(min_fee_rate)?;
         self.0
             .clone()
-            .build_non_incentivizing(payjoin::bitcoin::FeeRate::from_sat_per_kwu(min_fee_rate))
+            .build_non_incentivizing(fee_rate)
             .map(|transition| InitialSendTransition(Arc::new(RwLock::new(Some(transition)))))
             .map_err(|e: payjoin::send::BuildSenderError| {
                 SenderInputError::Build(Arc::new(e.into()))

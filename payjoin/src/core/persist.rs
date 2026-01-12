@@ -51,6 +51,8 @@ pub struct MaybeSuccessTransitionWithNoResults<Event, SuccessValue, CurrentState
 
 impl<Event, SuccessValue, CurrentState, Err>
     MaybeSuccessTransitionWithNoResults<Event, SuccessValue, CurrentState, Err>
+where
+    Err: std::error::Error,
 {
     pub(crate) fn fatal(event: Event, error: Err) -> Self {
         MaybeSuccessTransitionWithNoResults(Err(Rejection::fatal(event, error)))
@@ -103,7 +105,6 @@ impl<Event, SuccessValue, CurrentState, Err>
     >
     where
         P: SessionPersister<SessionEvent = Event>,
-        Err: std::error::Error,
     {
         let (actions, outcome) = self.deconstruct();
         actions.execute(persister).map_err(InternalPersistedError::Storage)?;
@@ -119,7 +120,7 @@ impl<Event, SuccessValue, CurrentState, Err>
     >
     where
         P: AsyncSessionPersister<SessionEvent = Event>,
-        Err: std::error::Error + Send,
+        Err: Send,
         SuccessValue: Send,
         CurrentState: Send,
         Event: Send,
@@ -137,6 +138,8 @@ pub struct MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err
 
 impl<Event, NextState, CurrentState, Err>
     MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err>
+where
+    Err: std::error::Error,
 {
     pub(crate) fn fatal(event: Event, error: Err) -> Self {
         MaybeFatalTransitionWithNoResults(Err(Rejection::fatal(event, error)))
@@ -186,7 +189,6 @@ impl<Event, NextState, CurrentState, Err>
     >
     where
         P: SessionPersister<SessionEvent = Event>,
-        Err: std::error::Error,
     {
         let (actions, outcome) = self.deconstruct();
         actions.execute(persister).map_err(InternalPersistedError::Storage)?;
@@ -202,7 +204,7 @@ impl<Event, NextState, CurrentState, Err>
     >
     where
         P: AsyncSessionPersister<SessionEvent = Event>,
-        Err: std::error::Error + Send,
+        Err: Send,
         NextState: Send,
         CurrentState: Send,
         Event: Send,
@@ -220,6 +222,7 @@ pub struct MaybeFatalTransition<Event, NextState, Err, ErrorState = ()>(
 
 impl<Event, NextState, Err, ErrorState> MaybeFatalTransition<Event, NextState, Err, ErrorState>
 where
+    Err: std::error::Error,
     ErrorState: fmt::Debug,
 {
     pub(crate) fn fatal(event: Event, error: Err) -> Self {
@@ -258,7 +261,6 @@ where
     ) -> Result<NextState, PersistedError<Err, P::InternalStorageError, ErrorState>>
     where
         P: SessionPersister<SessionEvent = Event>,
-        Err: std::error::Error,
     {
         let (actions, outcome) = self.deconstruct();
         actions.execute(persister).map_err(InternalPersistedError::Storage)?;
@@ -271,7 +273,7 @@ where
     ) -> Result<NextState, PersistedError<Err, P::InternalStorageError, ErrorState>>
     where
         P: AsyncSessionPersister<SessionEvent = Event>,
-        Err: std::error::Error + Send,
+        Err: Send,
         ErrorState: Send,
         NextState: Send,
         Event: Send,
@@ -288,7 +290,10 @@ pub struct MaybeTransientTransition<Event, NextState, Err>(
     Result<AcceptNextState<Event, NextState>, RejectTransient<Err>>,
 );
 
-impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err> {
+impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err>
+where
+    Err: std::error::Error,
+{
     pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         MaybeTransientTransition(Ok(AcceptNextState(event, next_state)))
     }
@@ -310,7 +315,6 @@ impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err> {
     ) -> Result<NextState, PersistedError<Err, P::InternalStorageError>>
     where
         P: SessionPersister<SessionEvent = Event>,
-        Err: std::error::Error,
     {
         let (actions, outcome) = self.deconstruct();
         actions.execute(persister).map_err(InternalPersistedError::Storage)?;
@@ -323,7 +327,7 @@ impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err> {
     ) -> Result<NextState, PersistedError<Err, P::InternalStorageError>>
     where
         P: AsyncSessionPersister<SessionEvent = Event>,
-        Err: std::error::Error + Send,
+        Err: Send,
         NextState: Send,
         Event: Send,
     {
@@ -486,7 +490,6 @@ where
     >
     where
         P: SessionPersister<SessionEvent = Event>,
-        Err: std::error::Error,
     {
         let (actions, outcome) = self.deconstruct();
         actions.execute(persister).map_err(InternalPersistedError::Storage)?;
@@ -502,7 +505,7 @@ where
     >
     where
         P: AsyncSessionPersister<SessionEvent = Event>,
-        Err: std::error::Error + Send,
+        Err: Send,
         CurrentState: Send,
         Event: Send,
     {

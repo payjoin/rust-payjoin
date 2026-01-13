@@ -1,0 +1,52 @@
+name: Flake maintenance
+
+on:
+  schedule:
+    - cron: "0 11 * * 1" # weekly at 14:00 UTC
+  workflow_dispatch:
+
+jobs:
+  validate-lock-file:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        checks:
+          - msrv
+          - stable
+          - nightly
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Enable magic Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Validate recreated lockfile
+        run: nix build .#checks.x86_64-linux.${{ matrix.checks }} -L --recreate-lock-file --no-write-lock-file
+
+  update-lock-file:
+    needs: validate-lock-file
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Enable magic Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Update flake.lock
+        uses: DeterminateSystems/update-flake-lock@main
+        with:
+          pr-title: "chore: update flake.lock"
+          commit-msg: "chore: update flake.lock"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          nix-options: --offline

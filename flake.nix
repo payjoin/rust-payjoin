@@ -309,6 +309,16 @@
               ]
               ++ pkgs.lib.attrValues packages
             );
+
+            maintenance = checkSuite "maintenance" (
+              with self.outputs.checks.${system};
+              [
+                payjoin-workspace-machete
+                payjoin-workspace-clippy
+                payjoin-workspace-doc
+                formatting
+              ]
+            );
           };
       }
     );

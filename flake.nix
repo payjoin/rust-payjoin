@@ -96,6 +96,10 @@
           inherit src;
           strictDeps = true;
 
+          # avoid release builds throughout for faster feedback from checks
+          # note that this also affects the built packages
+          CARGO_PROFILE = "crane";
+
           # provide fallback name & version for workspace related derivations
           # this is mainly to silence warnings from crane about providing a stub
           # value overridden in per-crate packages with info from Cargo.toml
@@ -216,11 +220,12 @@
                   partitions = 1;
                   partitionType = "count";
                   cargoExtraArgs = "--locked --all-features";
+                  NEXTEST_SHOW_PROGRESS = "none";
                   BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
                   NGINX_EXE = nixpkgs.lib.getExe' nginxWithStream "nginx";
                   nativeBuildInputs = [ nginxWithStream ];
+                  doInstallCargoArtifacts = false;
                 }
-
               )
             ))
           ) craneLibVersions

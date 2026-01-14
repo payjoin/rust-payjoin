@@ -28,6 +28,11 @@
       treefmt-nix,
       nix2container,
     }:
+    let
+      overlayAll = nixpkgs.lib.composeManyExtensions [
+        (import ./nix/overlays/cargo-honggfuzz.nix)
+      ];
+    in
     flake-utils.lib.eachDefaultSystem (
       system:
       let
@@ -42,6 +47,7 @@
                 nightly = prev.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
               };
             })
+            (import ./nix/overlays/cargo-honggfuzz.nix)
           ];
         };
 
@@ -204,6 +210,10 @@
                 cargo-edit
                 cargo-nextest
                 cargo-watch
+                cargo-fuzz
+                cargo-honggfuzz
+                aflplusplus
+                honggfuzz
                 rust-analyzer
                 dart
               ]

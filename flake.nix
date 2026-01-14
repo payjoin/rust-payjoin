@@ -206,6 +206,7 @@
                 cargo-watch
                 rust-analyzer
                 dart
+                cargo-fuzz
               ]
               ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [
                 cargo-llvm-cov

@@ -8,12 +8,14 @@ events {
 stream {
     server {
         listen {{http_port}};
+        listen [::]:{{http_port}};
 
         proxy_pass {{proxy_pass}};
     }
 
     server {
         listen {{https_port}} ssl;
+        listen [::]:{{https_port}} ssl;
 
         ssl_certificate {{cert_path}};
         ssl_certificate_key {{key_path}};
@@ -21,3 +23,4 @@ stream {
         proxy_pass {{proxy_pass}};
     }
 }
+

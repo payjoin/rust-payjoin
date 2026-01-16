@@ -39,7 +39,9 @@ if [[ $ENGINE == "hfuzz" ]]; then
         else
             HFUZZ_INPUT_ARGS=""
         fi
-        HFUZZ_RUN_ARGS="--run_time 30 --exit_upon_crash -v $HFUZZ_INPUT_ARGS" cargo hfuzz run "$targetName"
+        export HFUZZ_RUN_ARGS="--run_time 30 --exit_upon_crash -v $HFUZZ_INPUT_ARGS"
+        env -u RUSTC_WRAPPER CC=clang RUSTFLAGS="--cfg tokio_unstable" \
+            cargo hfuzz run "$targetName"
 
         checkhfuzzReport "$targetName"
     done

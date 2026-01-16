@@ -396,6 +396,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_replaying_session_with_missing_created_event() {
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        persister.save_event(SessionEvent::CheckedBroadcastSuitability());
+        assert!(!persister.inner.read().expect("session read should succeed").is_closed);
+        let err = replay_event_log(&persister).expect_err("session replay should be fail");
+        let expected_err: ReplayError<ReceiveSession, SessionEvent> =
+            InternalReplayError::InvalidEvent(
+                Box::new(SessionEvent::CheckedBroadcastSuitability()),
+                None,
+            )
+            .into();
+        assert_eq!(err.to_string(), expected_err.to_string());
+        assert!(persister.inner.read().expect("lock should not be poisoned").is_closed);
+
+        let persister = InMemoryAsyncTestPersister::<SessionEvent>::default();
+        persister.save_event(SessionEvent::CheckedBroadcastSuitability()).await;
+        assert!(!persister.inner.read().await.is_closed);
+        let err =
+            replay_event_log_async(&persister).await.expect_err("session replay should be fail");
+        let expected_err: ReplayError<ReceiveSession, SessionEvent> =
+            InternalReplayError::InvalidEvent(
+                Box::new(SessionEvent::CheckedBroadcastSuitability()),
+                None,
+            )
+            .into();
+        assert_eq!(err.to_string(), expected_err.to_string());
+        assert!(persister.inner.read().await.is_closed);
+    }
+
+    #[tokio::test]
     async fn test_replaying_unchecked_proposal() {
         let session_context = SHARED_CONTEXT.clone();
         let original = original_from_test_vector();

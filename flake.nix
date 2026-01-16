@@ -212,10 +212,27 @@
                 cargo-watch
                 rust-analyzer
                 dart
+                cargo-fuzz
+                cargo-honggfuzz
+                aflplusplus
+                lldb
+                clang
               ]
               ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [
                 cargo-llvm-cov
               ];
+
+            buildInputs = with pkgs; [
+              libbfd_2_38
+              libunwind.dev
+              libopcodes_2_38
+              pkgsStatic.libblocksruntime
+            ];
+
+            shellHook = ''
+              export UNSCREW_WERROR_ORIG=$(which clang)
+              export PATH="$(pwd)/scripts/dev/unscrew-werror/:$PATH"
+            '';
           }
         ) craneLibVersions;
 
@@ -248,35 +265,6 @@
           };
         devShells = devShells // {
           default = devShells.nightly;
-
-          fuzz = pkgs.mkShell {
-            nativeBuildInputs =
-              with pkgs;
-              [
-                cargo-edit
-                cargo-nextest
-                cargo-watch
-                rust-analyzer
-                dart
-                cargo-honggfuzz
-                lldb
-                clang
-              ]
-              ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [ cargo-llvm-cov ];
-
-            buildInputs = with pkgs; [
-              libbfd_2_38
-              libunwind.dev
-              libopcodes_2_38
-              pkgsStatic.libblocksruntime
-            ];
-
-            shellHook = ''
-              export UNSCREW_WERROR_ORIG=$(which clang)
-              export PATH="$(pwd)/scripts/dev/unscrew-werror/:$PATH"
-            '';
-          };
-
         };
         formatter = treefmtEval.config.build.wrapper;
         checks =

@@ -43,23 +43,10 @@ elif [[ $ENGINE == "afl" ]]; then
         for targetFile in $(listTargetFiles); do
             targetName=$(targetFileToName "$targetFile")
             echo "Fuzzing target $targetName ($targetFile)"
-            cargo afl config --build --force
-            cargo afl build --bin "$targetName" --features afl_fuzz
             # fuzz for one hour
-            cargo afl fuzz -i corpus -o afl_target -V 30 target/debug/"$targetName" --features afl_fuzz
+            afl-fuzz -i corpus/"$targetName"/ -o afl_target -V 30 target/debug/"$targetName" --features afl_fuzz
             # minimize the corpus
-            find afl_target/default/crashes -type f -name 'id:*' | while read -r CRASH; do
-                BASE=$(basename "$CRASH")
-                MIN_FILE="afl_target/default/minimized_input/$BASE.min"
-
-                # skip if already minimized
-                [ -f "$MIN_FILE" ] && continue
-
-                cargo afl tmin \
-                    -i "$CRASH" \
-                    -o "$MIN_FILE" \
-                    -- target/debug/"$targetName" --features afl_fuzz
-            done
+            afl-cmin -i corpus/"$targetName"/ -o corpus/minimized/ -- target/debug/"$targetName" --features afl_fuzz
         done
     done
 else

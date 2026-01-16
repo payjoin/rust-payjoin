@@ -52,9 +52,7 @@ elif [[ $ENGINE == "afl" ]]; then
     for targetFile in $targetFiles; do
         targetName=$(targetFileToName "$targetFile")
         echo "Fuzzing target $targetName ($targetFile)"
-        cargo afl config --build --force
-        cargo afl build --bin "$targetName" --features afl_fuzz
-        cargo afl fuzz -i corpus -o afl_target -V 30 target/debug/"$targetName" --features afl_fuzz
+        afl-fuzz -i corpus/"$targetName"/ -o afl_target -V 30 target/debug/"$targetName" --features afl_fuzz
     done
 else
     for targetFile in $targetFiles; do

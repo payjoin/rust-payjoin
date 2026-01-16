@@ -34,6 +34,9 @@ mod gateway_prober;
 #[cfg(feature = "_test-util")]
 pub mod gateway_prober;
 mod gateway_uri;
+pub mod sentinel;
+pub use sentinel::SentinelTag;
+
 use crate::error::{BoxError, Error};
 
 #[cfg(any(feature = "connect-bootstrap", feature = "ws-bootstrap"))]
@@ -52,7 +55,8 @@ pub async fn listen_tcp(
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await?;
     println!("OHTTP relay listening on tcp://{}", addr);
-    ohttp_relay(listener, RelayConfig::new_with_default_client(gateway_origin)).await
+    let sentinel_tag = SentinelTag::new([0u8; 32]);
+    ohttp_relay(listener, RelayConfig::new_with_default_client(gateway_origin, sentinel_tag)).await
 }
 
 #[instrument]
@@ -62,7 +66,8 @@ pub async fn listen_socket(
 ) -> Result<tokio::task::JoinHandle<Result<(), BoxError>>, BoxError> {
     let listener = UnixListener::bind(socket_path)?;
     info!("OHTTP relay listening on socket: {}", socket_path);
-    ohttp_relay(listener, RelayConfig::new_with_default_client(gateway_origin)).await
+    let sentinel_tag = SentinelTag::new([0u8; 32]);
+    ohttp_relay(listener, RelayConfig::new_with_default_client(gateway_origin, sentinel_tag)).await
 }
 
 #[cfg(feature = "_test-util")]
@@ -73,7 +78,8 @@ pub async fn listen_tcp_on_free_port(
     let listener = tokio::net::TcpListener::bind("[::]:0").await?;
     let port = listener.local_addr()?.port();
     println!("OHTTP relay binding to port {}", listener.local_addr()?);
-    let config = RelayConfig::new(default_gateway, root_store);
+    let sentinel_tag = SentinelTag::new([0u8; 32]);
+    let config = RelayConfig::new(default_gateway, root_store, sentinel_tag);
     let handle = ohttp_relay(listener, config).await?;
     Ok((port, handle))
 }
@@ -83,17 +89,22 @@ struct RelayConfig {
     default_gateway: GatewayUri,
     client: HttpClient,
     prober: Prober,
+    sentinel_tag: SentinelTag,
 }
 
 impl RelayConfig {
-    fn new_with_default_client(default_gateway: GatewayUri) -> Self {
-        Self::new(default_gateway, HttpClient::default())
+    fn new_with_default_client(default_gateway: GatewayUri, sentinel_tag: SentinelTag) -> Self {
+        Self::new(default_gateway, HttpClient::default(), sentinel_tag)
     }
 
-    fn new(default_gateway: GatewayUri, into_client: impl Into<HttpClient>) -> Self {
+    fn new(
+        default_gateway: GatewayUri,
+        into_client: impl Into<HttpClient>,
+        sentinel_tag: SentinelTag,
+    ) -> Self {
         let client = into_client.into();
         let prober = Prober::new_with_client(client.clone());
-        RelayConfig { default_gateway, client, prober }
+        RelayConfig { default_gateway, client, prober, sentinel_tag }
     }
 }
 
@@ -105,21 +116,24 @@ pub struct Service {
 impl Service {
     fn from_config(config: Arc<RelayConfig>) -> Self { Self { config } }
 
-    pub async fn new() -> Self {
+    pub async fn new(sentinel_tag: SentinelTag) -> Self {
         // The default gateway is hardcoded because it is obsolete and required only for backwards
         // compatibility.
         // The new mechanism for specifying a custom gateway is via RFC 9540 using
         // `/.well-known/ohttp-gateway` request paths.
         let gateway_origin = GatewayUri::from_str(DEFAULT_GATEWAY).expect("valid gateway uri");
-        let config = RelayConfig::new_with_default_client(gateway_origin);
+        let config = RelayConfig::new_with_default_client(gateway_origin, sentinel_tag);
         config.prober.assert_opt_in(&config.default_gateway).await;
         Self { config: Arc::new(config) }
     }
 
     #[cfg(feature = "_test-util")]
-    pub async fn new_with_roots(root_store: rustls::RootCertStore) -> Self {
+    pub async fn new_with_roots(
+        root_store: rustls::RootCertStore,
+        sentinel_tag: SentinelTag,
+    ) -> Self {
         let gateway_origin = GatewayUri::from_str(DEFAULT_GATEWAY).expect("valid gateway uri");
-        let config = RelayConfig::new(gateway_origin, root_store);
+        let config = RelayConfig::new(gateway_origin, root_store, sentinel_tag);
         config.prober.assert_opt_in(&config.default_gateway).await;
         Self { config: Arc::new(config) }
     }
@@ -319,7 +333,8 @@ where
     B: hyper::body::Body<Data = Bytes> + Send + Debug + 'static,
     B::Error: Into<BoxError>,
 {
-    let fwd_req = into_forward_req(req, gateway).await?;
+    let fwd_req = into_forward_req(req, gateway, &config.sentinel_tag).await?;
+
     forward_request(fwd_req, config).await.map(|res| {
         let (parts, body) = res.into_parts();
         let boxed_body = BoxBody::new(body);
@@ -332,6 +347,7 @@ where
 async fn into_forward_req<B>(
     req: Request<B>,
     gateway_origin: GatewayUri,
+    sentinel_tag: &SentinelTag,
 ) -> Result<Request<BoxBody<Bytes, hyper::Error>>, Error>
 where
     B: hyper::body::Body<Data = Bytes> + Send + Debug + 'static,
@@ -358,6 +374,8 @@ where
 
     let bytes =
         body.collect().await.map_err(|e| Error::BadRequest(e.into().to_string()))?.to_bytes();
+
+    builder = builder.header(sentinel::HEADER_NAME, sentinel_tag.to_header_value());
 
     builder.body(full(bytes)).map_err(|e| Error::InternalServerError(Box::new(e)))
 }

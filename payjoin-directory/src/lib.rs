@@ -24,6 +24,8 @@ use tracing::{debug, error, trace, warn};
 pub use crate::db::files::Db as FilesDb;
 use crate::db::Db;
 pub mod key_config;
+use ohttp_relay::SentinelTag;
+
 pub use crate::key_config::*;
 use crate::metrics::Metrics;
 
@@ -68,6 +70,7 @@ pub struct Service<D: Db> {
     db: D,
     ohttp: ohttp::Server,
     metrics: Metrics,
+    sentinel_tag: SentinelTag,
 }
 
 impl<D: Db, B> tower::Service<Request<B>> for Service<D>
@@ -91,8 +94,8 @@ where
 }
 
 impl<D: Db> Service<D> {
-    pub fn new(db: D, ohttp: ohttp::Server, metrics: Metrics) -> Self {
-        Self { db, ohttp, metrics }
+    pub fn new(db: D, ohttp: ohttp::Server, metrics: Metrics, sentinel_tag: SentinelTag) -> Self {
+        Self { db, ohttp, metrics, sentinel_tag }
     }
 
     #[cfg(feature = "_manual-tls")]
@@ -194,6 +197,21 @@ impl<D: Db> Service<D> {
 
         let path_segments: Vec<&str> = path.split('/').collect();
         debug!("Service::serve_request: {:?}", &path_segments);
+
+        // Best-effort validation that the relay and gateway aren't on the same
+        // payjoin-service instance
+        if let Some(header_value) =
+            parts.headers.get(ohttp_relay::sentinel::HEADER_NAME).and_then(|v| v.to_str().ok())
+        {
+            if ohttp_relay::sentinel::is_self_loop(&self.sentinel_tag, header_value) {
+                warn!("Rejected OHTTP request from same-instance relay");
+                return Ok(HandlerError::Forbidden(anyhow::anyhow!(
+                    "Relay and gateway must be operated by different entities"
+                ))
+                .to_response());
+            }
+        }
+
         let mut response = match (parts.method, path_segments.as_slice()) {
             (Method::POST, ["", ".well-known", "ohttp-gateway"]) =>
                 self.handle_ohttp_gateway(body).await,
@@ -222,12 +240,12 @@ impl<D: Db> Service<D> {
         B: Body<Data = Bytes> + Send + 'static,
         B::Error: Into<BoxError>,
     {
-        // decapsulate
         let ohttp_body = body
             .collect()
             .await
             .map_err(|e| HandlerError::BadRequest(anyhow::anyhow!(e.into())))?
             .to_bytes();
+
         let (bhttp_req, res_ctx) = self
             .ohttp
             .decapsulate(&ohttp_body)
@@ -577,6 +595,7 @@ enum HandlerError {
     SenderGone(anyhow::Error),
     OhttpKeyRejection(anyhow::Error),
     BadRequest(anyhow::Error),
+    Forbidden(anyhow::Error),
 }
 
 impl HandlerError {
@@ -608,6 +627,10 @@ impl HandlerError {
             HandlerError::BadRequest(e) => {
                 warn!("Bad request: {}", e);
                 *res.status_mut() = StatusCode::BAD_REQUEST
+            }
+            HandlerError::Forbidden(e) => {
+                warn!("Forbidden: {}", e);
+                *res.status_mut() = StatusCode::FORBIDDEN
             }
         };
 

@@ -34,7 +34,10 @@ pub use error::{CreateRequestError, EncapsulationError};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
 use serde::{Deserialize, Serialize};
-pub use session::{replay_event_log, SessionEvent, SessionHistory, SessionOutcome, SessionStatus};
+pub use session::{
+    replay_event_log, replay_event_log_async, SessionEvent, SessionHistory, SessionOutcome,
+    SessionStatus,
+};
 use url::Url;
 
 use super::error::BuildSenderError;

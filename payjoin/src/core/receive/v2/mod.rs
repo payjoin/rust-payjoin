@@ -35,7 +35,10 @@ pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
-pub use session::{replay_event_log, SessionEvent, SessionHistory, SessionOutcome, SessionStatus};
+pub use session::{
+    replay_event_log, replay_event_log_async, SessionEvent, SessionHistory, SessionOutcome,
+    SessionStatus,
+};
 use url::Url;
 #[cfg(target_arch = "wasm32")]
 use web_time::Duration;

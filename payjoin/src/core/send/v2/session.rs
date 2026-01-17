@@ -1,46 +1,90 @@
 use crate::error::{InternalReplayError, ReplayError};
-use crate::persist::SessionPersister;
+use crate::persist::{AsyncSessionPersister, SessionPersister};
 use crate::send::v2::{SendSession, SessionContext};
 use crate::uri::v2::PjParam;
 use crate::ImplementationError;
 
-pub fn replay_event_log<P>(
-    persister: &P,
-) -> Result<(SendSession, SessionHistory), ReplayError<SendSession, SessionEvent>>
-where
-    P: SessionPersister + Clone,
-    P::SessionEvent: Into<SessionEvent> + Clone,
-    P::SessionEvent: From<SessionEvent>,
-{
-    let mut logs = persister
-        .load()
-        .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
-    let first_event = logs.next().ok_or(InternalReplayError::NoEvents)?.into();
+fn replay_events(
+    mut logs: impl Iterator<Item = SessionEvent>,
+) -> Result<(SendSession, Vec<SessionEvent>), ReplayError<SendSession, SessionEvent>> {
+    let first_event = logs.next().ok_or(InternalReplayError::NoEvents)?;
     let mut session_events = vec![first_event.clone()];
     let mut sender = match first_event {
         SessionEvent::Created(session_context) => SendSession::new(*session_context),
         _ => return Err(InternalReplayError::InvalidEvent(Box::new(first_event), None).into()),
     };
 
-    for log in logs {
-        let session_event = log.into();
+    for session_event in logs {
         session_events.push(session_event.clone());
-        match sender.clone().process_event(session_event) {
-            Ok(next_sender) => sender = next_sender,
-            Err(_e) => {
-                persister.close().map_err(|e| {
-                    InternalReplayError::PersistenceFailure(ImplementationError::new(e))
-                })?;
-                break;
-            }
-        }
+        sender = sender.clone().process_event(session_event)?;
     }
+    Ok((sender, session_events))
+}
 
-    let history = SessionHistory::new(session_events.clone());
+fn construct_history(
+    session_events: Vec<SessionEvent>,
+) -> Result<SessionHistory, ReplayError<SendSession, SessionEvent>> {
+    let history = SessionHistory::new(session_events);
     let pj_param = history.pj_param();
     if pj_param.expiration().elapsed() {
         return Err(InternalReplayError::Expired(pj_param.expiration()).into());
     }
+    Ok(history)
+}
+
+/// Replay a sender event log to get the sender in its current state [SendSession]
+/// and a session history [SessionHistory]
+pub fn replay_event_log<P>(
+    persister: &P,
+) -> Result<(SendSession, SessionHistory), ReplayError<SendSession, SessionEvent>>
+where
+    P: SessionPersister,
+    P::SessionEvent: Into<SessionEvent> + Clone,
+    P::SessionEvent: From<SessionEvent>,
+{
+    let logs = persister
+        .load()
+        .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
+
+    let (sender, session_events) = match replay_events(logs.map(|e| e.into())) {
+        Ok(r) => r,
+        Err(e) => {
+            persister.close().map_err(|ce| {
+                InternalReplayError::PersistenceFailure(ImplementationError::new(ce))
+            })?;
+            return Err(e);
+        }
+    };
+
+    let history = construct_history(session_events)?;
+    Ok((sender, history))
+}
+
+/// Async version of [replay_event_log]
+pub async fn replay_event_log_async<P>(
+    persister: &P,
+) -> Result<(SendSession, SessionHistory), ReplayError<SendSession, SessionEvent>>
+where
+    P: AsyncSessionPersister,
+    P::SessionEvent: Into<SessionEvent> + Clone,
+    P::SessionEvent: From<SessionEvent>,
+{
+    let logs = persister
+        .load()
+        .await
+        .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
+
+    let (sender, session_events) = match replay_events(logs.map(|e| e.into())) {
+        Ok(r) => r,
+        Err(e) => {
+            persister.close().await.map_err(|ce| {
+                InternalReplayError::PersistenceFailure(ImplementationError::new(ce))
+            })?;
+            return Err(e);
+        }
+    };
+
+    let history = construct_history(session_events)?;
     Ok((sender, history))
 }
 
@@ -132,7 +176,7 @@ mod tests {
 
     use super::*;
     use crate::output_substitution::OutputSubstitution;
-    use crate::persist::test_utils::InMemoryTestPersister;
+    use crate::persist::test_utils::{InMemoryAsyncTestPersister, InMemoryTestPersister};
     use crate::persist::NoopSessionPersister;
     use crate::send::v2::{Sender, SenderBuilder, SessionContext, WithReplyKey};
     use crate::send::PsbtContext;
@@ -189,12 +233,14 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
     struct SessionHistoryExpectedOutcome {
         fallback_tx: bitcoin::Transaction,
         pj_param: PjParam,
         expected_status: SessionStatus,
     }
 
+    #[derive(Clone)]
     struct SessionHistoryTest {
         events: Vec<SessionEvent>,
         expected_session_history: SessionHistoryExpectedOutcome,
@@ -202,14 +248,13 @@ mod tests {
         expected_error: Option<String>,
     }
 
-    fn run_session_history_test(test: SessionHistoryTest) {
-        let persister = InMemoryTestPersister::<SessionEvent>::default();
-        for event in test.events {
-            persister.save_event(event).expect("In memory persister shouldn't fail");
-        }
-
-        let session_result = replay_event_log(&persister);
-
+    fn verify_session_result(
+        session_result: Result<
+            (SendSession, SessionHistory),
+            crate::error::ReplayError<SendSession, SessionEvent>,
+        >,
+        test: &SessionHistoryTest,
+    ) {
         match session_result {
             Ok((sender_state, session_history)) => {
                 assert!(test.expected_error.is_none(), "Expected an error but got Ok");
@@ -237,11 +282,27 @@ mod tests {
                 );
                 assert_eq!(test.expected_session_history.expected_status, SessionStatus::Expired);
             }
-        };
+        }
     }
 
-    #[test]
-    fn test_sender_session_history_with_expired_session() {
+    fn run_session_history_test(test: &SessionHistoryTest) {
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        for event in test.events.clone() {
+            persister.save_event(event).expect("In memory persister shouldn't fail");
+        }
+        verify_session_result(replay_event_log(&persister), test);
+    }
+
+    async fn run_session_history_test_async(test: &SessionHistoryTest) {
+        let persister = InMemoryAsyncTestPersister::<SessionEvent>::default();
+        for event in test.events.clone() {
+            persister.save_event(event).await.expect("In memory persister shouldn't fail");
+        }
+        verify_session_result(replay_event_log_async(&persister).await, test);
+    }
+
+    #[tokio::test]
+    async fn test_sender_session_history_with_expired_session() {
         let psbt = PARSED_ORIGINAL_PSBT.clone();
         let sender = SenderBuilder::new(
             psbt.clone(),
@@ -270,11 +331,12 @@ mod tests {
             expected_sender_state: SendSession::Closed(SessionOutcome::Failure),
             expected_error: Some("Session expired at".to_string()),
         };
-        run_session_history_test(test);
+        run_session_history_test(&test);
+        run_session_history_test_async(&test).await;
     }
 
-    #[test]
-    fn test_sender_session_history_with_reply_key_event() {
+    #[tokio::test]
+    async fn test_sender_session_history_with_reply_key_event() {
         let psbt = PARSED_ORIGINAL_PSBT.clone();
         let mut sender = SenderBuilder::new(
             psbt.clone(),
@@ -305,7 +367,8 @@ mod tests {
             expected_sender_state: SendSession::WithReplyKey(sender),
             expected_error: None,
         };
-        run_session_history_test(test);
+        run_session_history_test(&test);
+        run_session_history_test_async(&test).await;
     }
 
     #[test]
@@ -355,5 +418,29 @@ mod tests {
 
         let session = SessionHistory { events };
         assert_eq!(session.status(), SessionStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn test_replaying_session_with_missing_created_event() {
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        persister.save_event(SessionEvent::PostedOriginalPsbt());
+        assert!(!persister.inner.read().expect("session read should succeed").is_closed);
+        let err = replay_event_log(&persister).expect_err("session replay should be fail");
+        let expected_err: ReplayError<SendSession, SessionEvent> =
+            InternalReplayError::InvalidEvent(Box::new(SessionEvent::PostedOriginalPsbt()), None)
+                .into();
+        assert_eq!(err.to_string(), expected_err.to_string());
+        assert!(persister.inner.read().expect("lock should not be poisoned").is_closed);
+
+        let persister = InMemoryAsyncTestPersister::<SessionEvent>::default();
+        persister.save_event(SessionEvent::PostedOriginalPsbt()).await;
+        assert!(!persister.inner.read().await.is_closed);
+        let err =
+            replay_event_log_async(&persister).await.expect_err("session replay should be fail");
+        let expected_err: ReplayError<SendSession, SessionEvent> =
+            InternalReplayError::InvalidEvent(Box::new(SessionEvent::PostedOriginalPsbt()), None)
+                .into();
+        assert_eq!(err.to_string(), expected_err.to_string());
+        assert!(persister.inner.read().await.is_closed);
     }
 }

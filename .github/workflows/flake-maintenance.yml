@@ -21,9 +21,6 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Enable magic Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
-
       - name: Validate recreated lockfile
         run: nix build .#checks.x86_64-linux.${{ matrix.checks }} -L --recreate-lock-file --no-write-lock-file
 
@@ -39,9 +36,6 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
-
-      - name: Enable magic Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: Update flake.lock
         uses: DeterminateSystems/update-flake-lock@main

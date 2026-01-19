@@ -5,15 +5,16 @@ use anyhow::Result;
 use config::builder::DefaultState;
 use config::{ConfigError, File, FileFormat};
 use serde::Deserialize;
+use tokio_listener::ListenerAddress;
 
 type Builder = config::builder::ConfigBuilder<DefaultState>;
 
 use crate::cli::Cli;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Config {
-    pub listen_addr: String, // TODO tokio_listener::ListenerAddressLFlag
-    pub metrics_listen_addr: Option<String>, // TODO tokio_listener::ListenerAddressLFlag
+    pub listen_addr: ListenerAddress,
+    pub metrics_listen_addr: Option<ListenerAddress>,
     pub timeout: Duration,
     pub storage_dir: PathBuf,
     pub ohttp_keys: PathBuf, // TODO OhttpConfig struct with rotation params, etc
@@ -51,8 +52,17 @@ impl Config {
         let built_config = config.build()?;
 
         Ok(Config {
-            listen_addr: built_config.get("listen_addr")?,
-            metrics_listen_addr: built_config.get("metrics_listen_addr").ok(),
+            listen_addr: cli
+                .listen
+                .listen_address
+                .clone()
+                .ok_or_else(|| ConfigError::Message("listen_addr is required".to_string()))?,
+            metrics_listen_addr: match &cli.metrics_listen_addr {
+                Some(s) => Some(s.parse().map_err(|e| {
+                    ConfigError::Message(format!("invalid metrics listen addr: {e}"))
+                })?),
+                None => None,
+            },
             timeout: Duration::from_secs(built_config.get("timeout")?),
             storage_dir: built_config.get("storage_dir")?,
             ohttp_keys: built_config.get("ohttp_keys")?,
@@ -73,13 +83,6 @@ impl Config {
 
 fn add_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
     let config = config
-        .set_default("listen_addr", "[::]:8080")?
-        .set_override_option("listen_addr", cli.port.map(|port| format!("[::]:{}", port)))?
-        .set_default("metrics_listen_addr", Option::<String>::None)?
-        .set_override_option(
-            "metrics_listen_addr",
-            cli.metrics_port.map(|port| format!("localhost:{}", port)),
-        )?
         .set_default("timeout", Some(30))?
         .set_override_option("timeout", cli.timeout)?
         .set_default("ohttp_keys", "ohttp_keys")?

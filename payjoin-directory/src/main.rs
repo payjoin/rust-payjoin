@@ -1,7 +1,7 @@
 use clap::Parser;
 use payjoin_directory::metrics::Metrics;
 use payjoin_directory::*;
-use tokio::net::TcpListener;
+use tokio_listener::{SystemOptions, UserOptions};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
@@ -33,19 +33,29 @@ async fn main() -> Result<(), BoxError> {
     let service = Service::new(db, ohttp.into(), metrics);
 
     // Start metrics server in the background
-    if let Some(addr) = config.metrics_listen_addr {
-        let metrics_listener = TcpListener::bind(addr.clone()).await?;
+    if let Some(metrics_addr) = config.metrics_listen_addr.clone() {
+        let metrics_listener = tokio_listener::Listener::bind(
+            &metrics_addr,
+            &SystemOptions::default(),
+            &UserOptions::default(),
+        )
+        .await?;
         let service_clone = service.clone();
 
         tokio::spawn(async move {
             if let Err(e) = service_clone.serve_metrics_tcp(metrics_listener).await {
                 eprintln!("Metrics server error: {e}");
             }
-            println!("Metrics server started on {}", addr);
+            println!("Metrics server started on {}", metrics_addr);
         });
     }
 
-    let listener = TcpListener::bind(config.listen_addr).await?;
+    let listener = tokio_listener::Listener::bind(
+        &config.listen_addr,
+        &SystemOptions::default(),
+        &UserOptions::default(),
+    )
+    .await?;
 
     #[cfg(feature = "acme")]
     if let Some(acme_config) = config.acme {

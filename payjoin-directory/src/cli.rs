@@ -2,6 +2,7 @@ use std::env;
 use std::path::PathBuf;
 
 use clap::Parser;
+use tokio_listener::ListenerAddressLFlag;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -10,11 +11,11 @@ use clap::Parser;
     long_about = None,
 )]
 pub struct Cli {
-    #[arg(long, short = 'p', env = "PJ_DIR_PORT", help = "The port to bind [default: 8080]")]
-    pub port: Option<u16>, // TODO tokio_listener::ListenerAddressLFlag
+    #[clap(flatten)]
+    pub listen: ListenerAddressLFlag,
 
-    #[arg(long, env = "PJ_METRIC_PORT", help = "The port to bind for prometheus metrics export")]
-    pub metrics_port: Option<u16>, // TODO tokio_listener::ListenerAddressLFlag
+    #[arg(long = "metrics-listen-addr")]
+    pub metrics_listen_addr: Option<String>,
 
     #[cfg(feature = "acme")]
     #[clap(flatten)]

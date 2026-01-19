@@ -13,6 +13,7 @@ use hyper::{Method, Request, Response, StatusCode, Uri};
 use hyper_util::rt::TokioIo;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tokio::net::TcpListener;
+use tokio_listener::Listener;
 #[cfg(feature = "acme")]
 use tokio_rustls_acme::AcmeConfig;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -131,10 +132,7 @@ impl<D: Db> Service<D> {
         self.serve_connections(tls_incoming).await;
     }
 
-    pub async fn serve_tcp(self, listener: TcpListener) {
-        let tcp_incoming = TcpListenerStream::new(listener);
-        self.serve_connections(tcp_incoming).await;
-    }
+    pub async fn serve_tcp(self, listener: Listener) { self.serve_connections(listener).await; }
 
     async fn serve_connections<S, I>(self, mut incoming_connections: S)
     where
@@ -414,24 +412,30 @@ impl<D: Db> Service<D> {
         }
     }
 
-    pub async fn serve_metrics_tcp(
-        &self,
-        listener: tokio::net::TcpListener,
-    ) -> Result<(), BoxError> {
-        while let Ok((stream, _)) = listener.accept().await {
-            let io = TokioIo::new(stream);
-            let service = self.clone();
-            tokio::spawn(async move {
-                let service = hyper::service::service_fn(move |req| {
-                    let this = service.clone();
-                    async move { this.serve_metrics_request(req).await }
-                });
-                if let Err(err) =
-                    http1::Builder::new().serve_connection(io, service).with_upgrades().await
-                {
-                    error!("Error serving connection: {:?}", err);
+    pub async fn serve_metrics_tcp(&self, mut listener: Listener) -> Result<(), BoxError> {
+        while let Some(conn_result) = listener.next().await {
+            match conn_result {
+                Ok(stream) => {
+                    let io = TokioIo::new(stream);
+                    let service = self.clone();
+                    tokio::spawn(async move {
+                        let service = hyper::service::service_fn(move |req| {
+                            let this = service.clone();
+                            async move { this.serve_metrics_request(req).await }
+                        });
+                        if let Err(err) = http1::Builder::new()
+                            .serve_connection(io, service)
+                            .with_upgrades()
+                            .await
+                        {
+                            error!("Error serving connection: {:?}", err);
+                        }
+                    });
                 }
-            });
+                Err(e) => {
+                    error!("Error accepting connection: {:?}", e);
+                }
+            }
         }
 
         Ok(())

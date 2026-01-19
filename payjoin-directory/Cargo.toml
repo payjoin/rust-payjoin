@@ -36,6 +36,7 @@ prometheus = "0.13.4"
 rand = "0.8"
 serde = { version = "1.0.219", features = ["derive"] }
 tokio = { version = "1.47.1", features = ["full"] }
+tokio-listener = { version = "0.5", features = ["clap"] }
 tokio-rustls = { version = "0.26.2", features = [
   "ring",
 ], default-features = false, optional = true }

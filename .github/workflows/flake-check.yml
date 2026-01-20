@@ -24,8 +24,5 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Enable magic Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
-
       - name: Run full flake check
         run: nix build .#checks.x86_64-linux.${{ matrix.checks }}

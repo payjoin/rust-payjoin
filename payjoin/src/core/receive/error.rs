@@ -403,6 +403,8 @@ pub struct InputContributionError(InternalInputContributionError);
 pub(crate) enum InternalInputContributionError {
     /// Total input value is not enough to cover additional output value
     ValueTooLow,
+    /// Duplicate input detected. The same outpoint is already present in the transaction
+    DuplicateInput(bitcoin::OutPoint),
 }
 
 impl fmt::Display for InputContributionError {
@@ -410,6 +412,8 @@ impl fmt::Display for InputContributionError {
         match &self.0 {
             InternalInputContributionError::ValueTooLow =>
                 write!(f, "Total input value is not enough to cover additional output value"),
+            InternalInputContributionError::DuplicateInput(outpoint) =>
+                write!(f, "Duplicate input detected: {outpoint}"),
         }
     }
 }
@@ -418,6 +422,7 @@ impl error::Error for InputContributionError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self.0 {
             InternalInputContributionError::ValueTooLow => None,
+            InternalInputContributionError::DuplicateInput(_) => None,
         }
     }
 }

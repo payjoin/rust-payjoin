@@ -207,6 +207,7 @@
                 rust-analyzer
                 dart
                 cargo-fuzz
+                bzip2 # needed for some machines to have access to libzip at runtime
               ]
               ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [
                 cargo-llvm-cov

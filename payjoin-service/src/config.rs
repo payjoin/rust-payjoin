@@ -3,11 +3,12 @@ use std::time::Duration;
 
 use config::{ConfigError, File};
 use serde::Deserialize;
+use tokio_listener::ListenerAddress;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    pub port: u16,
+    pub listener: ListenerAddress,
     pub storage_dir: PathBuf,
     #[serde(deserialize_with = "deserialize_duration_secs")]
     pub timeout: Duration,
@@ -15,7 +16,11 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { port: 8080, storage_dir: PathBuf::from("./data"), timeout: Duration::from_secs(30) }
+        Self {
+            listener: "[::]:8080".parse().expect("valid default listener address"),
+            storage_dir: PathBuf::from("./data"),
+            timeout: Duration::from_secs(30),
+        }
     }
 }
 

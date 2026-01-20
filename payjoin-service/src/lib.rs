@@ -1,5 +1,3 @@
-use std::net::{Ipv6Addr, SocketAddr};
-
 use axum::extract::State;
 use axum::http::Method;
 use axum::response::{IntoResponse, Response};
@@ -7,6 +5,7 @@ use axum::Router;
 use config::Config;
 use ohttp_relay::SentinelTag;
 use rand::Rng;
+use tokio_listener::{Listener, SystemOptions, UserOptions};
 use tower::Service;
 use tracing::info;
 
@@ -28,9 +27,10 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     };
     let app = Router::new().fallback(route_request).with_state(services);
 
-    let addr = SocketAddr::from((Ipv6Addr::UNSPECIFIED, config.port));
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    info!("Payjoin service listening on {}", addr);
+    let listener =
+        Listener::bind(&config.listener, &SystemOptions::default(), &UserOptions::default())
+            .await?;
+    info!("Payjoin service listening on {:?}", listener.local_addr());
     axum::serve(listener, app).await?;
 
     Ok(())
@@ -38,7 +38,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
 
 /// Serves payjoin-service with manual TLS configuration.
 ///
-/// Binds to `config.port` (use 0 to let the OS assign a free port) and returns
+/// Binds to `config.listener` (use port 0 to let the OS assign a free port) and returns
 /// the actual bound port along with a task handle.
 ///
 /// If `tls_config` is provided, the server will use TLS for incoming connections.
@@ -49,6 +49,8 @@ pub async fn serve_manual_tls(
     tls_config: Option<axum_server::tls_rustls::RustlsConfig>,
     root_store: rustls::RootCertStore,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<anyhow::Result<()>>)> {
+    use std::net::SocketAddr;
+
     let sentinel_tag = generate_sentinel_tag();
 
     let services = Services {
@@ -57,7 +59,11 @@ pub async fn serve_manual_tls(
     };
     let app = Router::new().fallback(route_request).with_state(services);
 
-    let addr = SocketAddr::from((Ipv6Addr::UNSPECIFIED, config.port));
+    let addr: SocketAddr = config
+        .listener
+        .to_string()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("TLS mode requires a TCP address (e.g., '[::]:8080')"))?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let port = listener.local_addr()?.port();
 
@@ -172,7 +178,7 @@ mod tests {
     ) -> (u16, tokio::task::JoinHandle<anyhow::Result<()>>, tempfile::TempDir) {
         let tempdir = tempdir().unwrap();
         let config = Config {
-            port: 0,
+            listener: "[::]:0".parse().expect("valid listener address"),
             storage_dir: tempdir.path().to_path_buf(),
             timeout: Duration::from_secs(2),
         };

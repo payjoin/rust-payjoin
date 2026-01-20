@@ -118,7 +118,7 @@ pub async fn init_directory(
 > {
     let tempdir = tempdir()?;
     let config = payjoin_service::config::Config {
-        port: 0, // let OS assign a free port
+        listener: "[::]:0".parse().expect("valid listener address"), // let OS assign a free port
         storage_dir: tempdir.path().to_path_buf(),
         timeout: Duration::from_secs(2),
     };
@@ -145,7 +145,7 @@ async fn init_ohttp_relay(
 > {
     let tempdir = tempdir()?;
     let config = payjoin_service::config::Config {
-        port: 0, // let OS assign a free port
+        listener: "[::]:0".parse().expect("valid listener address"), // let OS assign a free port
         storage_dir: tempdir.path().to_path_buf(),
         timeout: Duration::from_secs(2),
     };
